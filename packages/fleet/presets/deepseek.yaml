@@ -1,25 +1,37 @@
-# Claude Code on DeepSeek, through its Anthropic-compatible endpoint.
+# DeepSeek for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: DeepSeek
-harness: claude
-summary: Claude Code on DeepSeek models with a DeepSeek platform key.
+summary: Claude Code and Codex on DeepSeek models with one DeepSeek platform key.
 docs: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 verified: '2026-10-16'
-env:
-  ANTHROPIC_BASE_URL:
-    value: https://api.deepseek.com/anthropic
-  ANTHROPIC_AUTH_TOKEN:
-    secretName: DEEPSEEK_API_KEY
-  ANTHROPIC_MODEL:
-    value: deepseek-flash[1m]
-  ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: deepseek-flash[1m]
-  ANTHROPIC_DEFAULT_SONNET_MODEL:
-    value: deepseek-flash[1m]
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: deepseek-flash
-  CLAUDE_CODE_SUBAGENT_MODEL:
-    value: deepseek-flash
-models: [deepseek-flash, deepseek-v4-pro]
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://api.deepseek.com/anthropic
+    ANTHROPIC_AUTH_TOKEN:
+      secretName: DEEPSEEK_API_KEY
+    ANTHROPIC_MODEL:
+      value: deepseek-flash[1m]
+    ANTHROPIC_DEFAULT_OPUS_MODEL:
+      value: deepseek-flash[1m]
+    ANTHROPIC_DEFAULT_SONNET_MODEL:
+      value: deepseek-flash[1m]
+    ANTHROPIC_DEFAULT_HAIKU_MODEL:
+      value: deepseek-flash
+    CLAUDE_CODE_SUBAGENT_MODEL:
+      value: deepseek-flash
+  models: [deepseek-flash, deepseek-v4-pro]
+codex:
+  docs: https://api-docs.deepseek.com/quick_start/agent_integrations/codex
+  env:
+    DEEPSEEK_API_KEY:
+      secretName: DEEPSEEK_API_KEY
+  codexProvider:
+    id: deepseek
+    name: DeepSeek
+    baseUrl: https://api.deepseek.com/
+    keyVariable: DEEPSEEK_API_KEY
+    model: deepseek-flash
+  models: [deepseek-flash, deepseek-v4-pro]
 test:
   kind: request
   url: https://api.deepseek.com/models
@@ -29,3 +41,6 @@ quota:
   source: deepseek-balance
   note: Your DeepSeek balance, in the currency you topped up in.
 pricing: deepseek
+detect:
+  hosts: [api.deepseek.com]
+  variables: [DEEPSEEK_*]

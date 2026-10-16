@@ -17,7 +17,7 @@ wire).
 | `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                      |
 | `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                      |
 | `warden.yaml`                   | the Warden: on, rules-only triage and its caps — see [The Warden](#the-warden); the rest default                   |
-| `learning.yaml`                 | lesson mining                                                                                                      |
+| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                         |
 | `voice.yaml`                    | who cleans up dictated text — transcription is chosen per device ([voice.md](voice.md)) and is not configured here |
 | `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))  |
 

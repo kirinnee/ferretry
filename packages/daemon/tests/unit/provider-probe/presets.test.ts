@@ -41,7 +41,47 @@ describe('presetView', () => {
       kinds: ['aws-profile'],
       suggested: 'aws-profile:default',
     });
-    should(presetView(preset('zai-glm-codex')).offered).containDeep({ available: false });
+    const hidden = {
+      ...preset('ollama-codex'),
+      unavailable: 'Not here.',
+    };
+    should(presetView(hidden).offered).deepEqual({ available: false, reason: 'Not here.' });
+    should(presetView(hidden).halves).deepEqual([
+      { harness: 'codex', offered: { available: false, reason: 'Not here.' }, models: ['gpt-oss:20b', 'gpt-oss:120b'] },
+    ]);
+  });
+
+  it('should offer each half of a two-CLI preset, and tag each variable with the halves that set it', () => {
+    // Act
+    const actual = presetView(preset('deepseek'));
+
+    // Assert
+    should(actual.harness).equal('claude');
+    should(actual.halves?.map(half => [half.harness, half.offered.available, half.docs ?? null])).deepEqual([
+      ['claude', true, null],
+      ['codex', true, 'https://api-docs.deepseek.com/quick_start/agent_integrations/codex'],
+    ]);
+    should(actual.variables).containDeep([
+      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['claude'] },
+      { name: 'DEEPSEEK_API_KEY', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['codex'] },
+    ]);
+    should(actual.detect).deepEqual({ hosts: ['api.deepseek.com'], variables: ['DEEPSEEK_*'], keyPrefixes: [] });
+  });
+
+  it('should say why a half is not offered, and tag no variable of a one-CLI login', () => {
+    // Act
+    const actual = presetView(preset('zai-glm'));
+
+    // Assert
+    should(actual.offered).deepEqual({ available: true });
+    should(actual.halves?.[1]?.offered.available).be.false();
+    should(JSON.stringify(actual.halves?.[1]?.offered)).match(/model catalogue file/u);
+    should(actual.variables.some(variable => variable.harnesses !== undefined)).be.false();
+    should(actual.variables.some(variable => variable.name === 'ZAI_API_KEY')).be.false();
+  });
+
+  it('should carry no detection clues for a preset that declares none', () => {
+    should(presetView(preset('custom-gateway')).detect).be.undefined();
   });
 
   it('should give a variable its description when the preset has one', () => {

@@ -15,7 +15,13 @@
  *
  * Pure.
  */
-import { type Credential, isCredentialSafeUrl, type ProviderPreset } from '@ferretry/fleet';
+import {
+  type Credential,
+  credentialCodexProvider,
+  credentialVariables,
+  isCredentialSafeUrl,
+  type ProviderPreset,
+} from '@ferretry/fleet';
 import { type ProviderQuotaSource, SECRET_REFERENCE_SOURCE, type SecretName } from '@ferretry/protocol';
 import { loginHosts } from '../../provider-probe/plan.ts';
 import type { CredentialPlacement, OutboundHttpRequest } from '../../speedups/ports.ts';
@@ -173,10 +179,26 @@ const WHOLE_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
 function keyVariableOf(login: ProviderQuotaLogin): string | undefined {
   const tested = presetKeyVariable(login.preset);
   if (tested !== undefined) return tested;
-  const codex = login.credential.codexProvider?.keyVariable;
+  const codex = credentialCodexProvider(login.credential)?.keyVariable;
   if (codex !== undefined) return codex;
-  const whole = Object.entries(login.credential.env ?? {}).filter(([, value]) => WHOLE_REFERENCE.test(value));
+  const whole = Object.entries(credentialVariables(login.credential)).filter(([, value]) =>
+    WHOLE_REFERENCE.test(value),
+  );
   return whole.length === 1 ? (whole[0] as [string, string])[0] : undefined;
+}
+
+/**
+ * The key a one-CLI login of a two-CLI preset carries under its own half's variable: the preset names
+ * the key by one half's variable (`ANTHROPIC_AUTH_TOKEN`), a Codex-only login holds the same SECRET as
+ * `DEEPSEEK_API_KEY`. Only that exact `${secret:NAME}` counts.
+ */
+function sameSecretElsewhere(
+  login: ProviderQuotaLogin,
+  env: Readonly<Record<string, string>>,
+  keyVariable: string,
+): string | undefined {
+  const name = login.preset?.env[keyVariable]?.secretName;
+  return name === undefined ? undefined : Object.values(env).find(value => value === `\${secret:${name}}`);
 }
 
 /** `api.minimax.io` → `minimax.io`; a host of two labels or fewer is its own parent. */
@@ -187,8 +209,8 @@ const parentDomain = (host: string): string => {
 
 /** The hosts this login sends its key to on its own: its plain URLs and its Codex provider. */
 function ownHosts(login: ProviderQuotaLogin): ReadonlySet<string> {
-  const hosts = new Set(loginHosts(login.credential.env ?? {}));
-  const codexBase = login.credential.codexProvider?.baseUrl;
+  const hosts = new Set(loginHosts(credentialVariables(login.credential)));
+  const codexBase = credentialCodexProvider(login.credential)?.baseUrl;
   if (codexBase !== undefined && !codexBase.includes('{') && isCredentialSafeUrl(codexBase)) {
     hosts.add(new URL(codexBase).host.toLowerCase());
   }
@@ -200,9 +222,11 @@ export function planProviderQuota(login: ProviderQuotaLogin): ProviderQuotaPlan 
   const source = presetQuotaSource(login.preset);
   if (!hasQuotaEndpoint(source)) return { reason: 'This provider has no quota endpoint.' };
   const endpoint = PROVIDER_QUOTA_ENDPOINTS[source];
-  const env = login.credential.env ?? {};
+  // Every half's variables: a login that drives both CLIs carries its one key in either half.
+  const env = credentialVariables(login.credential);
   const keyVariable = keyVariableOf(login);
-  const reference = keyVariable === undefined ? undefined : env[keyVariable];
+  const reference =
+    keyVariable === undefined ? undefined : (env[keyVariable] ?? sameSecretElsewhere(login, env, keyVariable));
   const whole = reference === undefined ? null : WHOLE_REFERENCE.exec(reference);
   if (whole === null) {
     return {

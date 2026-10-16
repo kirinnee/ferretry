@@ -12,6 +12,9 @@ import {
   type Credential,
   cloudCredentialSentence,
   cloudCredentialVariable,
+  credentialCodexProvider,
+  credentialVariables,
+  type HarnessKind,
   looksLikeRawSecret,
   looksSecret,
   type ProviderPreset,
@@ -22,13 +25,25 @@ import { planProviderProbe } from './plan.ts';
 import { presetTestAct } from './presets.ts';
 
 /** One variable as it may travel. */
-function variableView(name: string, value: string, held: ReadonlySet<string> | undefined): FleetEnvironmentVariable {
+function variableView(
+  name: string,
+  value: string,
+  held: ReadonlySet<string> | undefined,
+  harness?: HarnessKind,
+): FleetEnvironmentVariable {
+  const half = harness === undefined ? {} : { harness };
   const secrets = secretReferencesIn(value);
   if (secrets.length > 0) {
-    return { name, kind: 'secret', secrets: [...secrets], set: held !== undefined && secrets.every(s => held.has(s)) };
+    return {
+      name,
+      kind: 'secret',
+      secrets: [...secrets],
+      set: held !== undefined && secrets.every(s => held.has(s)),
+      ...half,
+    };
   }
-  if (looksSecret(name, value) || looksLikeRawSecret(name, value)) return { name, kind: 'hidden' };
-  return { name, kind: 'plain', value };
+  if (looksSecret(name, value) || looksLikeRawSecret(name, value)) return { name, kind: 'hidden', ...half };
+  return { name, kind: 'plain', value, ...half };
 }
 
 /**
@@ -41,12 +56,11 @@ export function credentialEnvironmentView(
   presets: readonly ProviderPreset[],
   held: ReadonlySet<string> | undefined,
 ): FleetCredentialEnvironment {
-  const env = credential.env ?? {};
+  const env = credentialVariables(credential);
   const preset = credential.preset === undefined ? undefined : presets.find(entry => entry.id === credential.preset);
-  const variables = Object.entries(env)
-    .toSorted(([left], [right]) => (left < right ? -1 : 1))
-    .map(([name, value]) => variableView(name, value, held));
+  const variables = variablesView(credential, held);
   const named = [...new Set(Object.values(env).flatMap(value => secretReferencesIn(value)))];
+  const codexProvider = credentialCodexProvider(credential);
   const reference =
     credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
   const variable = reference === undefined ? undefined : cloudCredentialVariable(reference);
@@ -64,13 +78,13 @@ export function credentialEnvironmentView(
             ...(variable === undefined ? {} : { variable }),
           },
         }),
-    ...(credential.codexProvider === undefined
+    ...(codexProvider === undefined
       ? {}
       : {
           codexProvider: {
-            id: credential.codexProvider.id,
-            name: credential.codexProvider.name ?? credential.codexProvider.id,
-            ...(credential.codexProvider.baseUrl === undefined ? {} : { baseUrl: credential.codexProvider.baseUrl }),
+            id: codexProvider.id,
+            name: codexProvider.name ?? codexProvider.id,
+            ...(codexProvider.baseUrl === undefined ? {} : { baseUrl: codexProvider.baseUrl }),
           },
         }),
     quotaSource: preset?.quota.source ?? 'transcript-pricing',
@@ -94,4 +108,23 @@ function testAct(credential: Credential, preset: ProviderPreset | undefined): Fl
   if (!act.available) return act;
   const plan = planProviderProbe(preset, credential);
   return 'reason' in plan ? { available: false, reason: plan.reason } : act;
+}
+
+const byName = ([left]: readonly [string, string], [right]: readonly [string, string]): number =>
+  left < right ? -1 : 1;
+
+/**
+ * Every variable, each group sorted by name: the shared ones untagged, then — for a login that drives
+ * both CLIs — each half's own, tagged with its half, Claude Code's first.
+ */
+function variablesView(credential: Credential, held: ReadonlySet<string> | undefined): FleetEnvironmentVariable[] {
+  const shared = Object.entries(credential.env ?? {})
+    .toSorted(byName)
+    .map(([name, value]) => variableView(name, value, held));
+  const own = (['claude', 'codex'] as const).flatMap(harness =>
+    Object.entries(credential[harness]?.env ?? {})
+      .toSorted(byName)
+      .map(([name, value]) => variableView(name, value, held, harness)),
+  );
+  return [...shared, ...own];
 }

@@ -12,8 +12,20 @@ import {
   presetCatalog,
   presetFileText,
 } from '../../src/lib/presets/catalog.ts';
-import { credentialFromPreset, presetDefaultEnv, presetLoginRefusal } from '../../src/lib/presets/login.ts';
-import { PresetVariableSchema, type ProviderPreset, ProviderPresetFileSchema } from '../../src/lib/presets/schema.ts';
+import {
+  credentialFromPreset,
+  presetDefaultEnv,
+  presetLoginRefusal,
+  presetSecrets,
+} from '../../src/lib/presets/login.ts';
+import {
+  PresetVariableSchema,
+  type ProviderPreset,
+  type ProviderPresetFile,
+  ProviderPresetFileSchema,
+  presetFromFile,
+  presetHarnesses,
+} from '../../src/lib/presets/schema.ts';
 
 const PRESETS = builtInPresets();
 const preset = (id: string): ProviderPreset => PRESETS.find(entry => entry.id === id) as ProviderPreset;
@@ -70,13 +82,17 @@ describe('the built-in preset catalogue', () => {
     },
   );
 
-  it('should hide a Codex preset that cannot run, with the reason', () => {
+  it('should hide a preset whose Codex half cannot run, with the reason, while Claude Code stays usable', () => {
     // Act
-    const glm = preset('zai-glm-codex');
+    const glm = preset('zai-glm');
 
     // Assert
-    should(glm.unavailable).match(/model catalogue file/u);
-    should(presetLoginRefusal(glm, { env: presetDefaultEnv(glm) })).match(/is not offered here/u);
+    should(glm.unavailable).be.undefined();
+    should(glm.halves.codex?.unavailable).match(/model catalogue file/u);
+    should(presetHarnesses(glm)).deepEqual(['claude']);
+    should(presetLoginRefusal(glm, { env: presetDefaultEnv(glm), harness: 'codex' })).match(
+      /does not drive Codex: Z\.ai serves the Responses API/u,
+    );
   });
 
   it('should keep every secret a NAME and every test key a secret', () => {
@@ -152,7 +168,8 @@ describe('ProviderPresetFileSchema', () => {
   });
 
   it('should refuse a Codex provider on a Claude Code preset', () => {
-    const read = readConfigText(BUILT_IN_PRESET_TEXTS.kimi as string);
+    // amazon-bedrock is a legacy, single-harness (claude) preset: no halves to route it through.
+    const read = readConfigText(BUILT_IN_PRESET_TEXTS['amazon-bedrock'] as string);
     const value = { ...(read.ok ? (read.read.value as object) : {}), codexProvider: { id: 'ollama' } };
     should(ProviderPresetFileSchema.safeParse(value).error?.issues[0]?.message).match(/only to a Codex preset/u);
   });
@@ -184,10 +201,14 @@ describe('a login from a preset', () => {
   });
 
   it('should keep an empty value a preset means to be empty', () => {
+    // openrouter now drives both CLIs, so a one-CLI login made from its claude half only is what
+    // carries the deliberately empty ANTHROPIC_API_KEY.
     const openrouter = preset('openrouter');
     const env = presetDefaultEnv(openrouter);
-    should(presetLoginRefusal(openrouter, { env })).be.undefined();
-    should(credentialFromPreset(openrouter, { env }).env).containDeep({ ANTHROPIC_API_KEY: '' });
+    should(presetLoginRefusal(openrouter, { env, halves: ['claude'] })).be.undefined();
+    should(credentialFromPreset(openrouter, { env, halves: ['claude'] }).env).containDeep({
+      ANTHROPIC_API_KEY: '',
+    });
   });
 
   it('should leave out an optional variable left empty', () => {
@@ -222,16 +243,302 @@ describe('a login from a preset', () => {
     );
   });
 
-  it('should give a Codex login its preset’s model provider', () => {
-    const openrouter = preset('openrouter-codex');
-    should(credentialFromPreset(openrouter, { env: presetDefaultEnv(openrouter) }).codexProvider).containDeep({
-      id: 'openrouter',
-      keyVariable: 'OPENROUTER_API_KEY',
-    });
+  it('should give a Codex login its preset’s model provider, on its codex half', () => {
+    const openrouter = preset('openrouter');
+    const credential = credentialFromPreset(openrouter, { env: presetDefaultEnv(openrouter) });
+    should(credential.codex?.codexProvider).containDeep({ id: 'openrouter', keyVariable: 'OPENROUTER_API_KEY' });
+    should(CredentialSchema.safeParse(credential).error?.issues ?? []).deepEqual([]);
+  });
+
+  it('should give a one-CLI Codex login from a dual preset its model provider at the top level', () => {
+    const openrouter = preset('openrouter');
+    const env = { OPENROUTER_API_KEY: secretReference('OPENROUTER_API_KEY') };
+    const credential = credentialFromPreset(openrouter, { env, halves: ['codex'], harness: 'codex' });
+    should(credential).containDeep({ harness: 'codex' });
+    should(credential.codexProvider).containDeep({ id: 'openrouter', keyVariable: 'OPENROUTER_API_KEY' });
+    should(credential).not.have.property('claude');
+    should(credential).not.have.property('codex');
+    should(CredentialSchema.safeParse(credential).error?.issues ?? []).deepEqual([]);
   });
 
   it('should make a login with no variables at all from a preset that has none', () => {
     const ollama = preset('ollama-codex');
     should(credentialFromPreset(ollama, { env: {} })).not.have.property('env');
+  });
+
+  it('should drive both CLIs with one secret from a dual preset, the shared env and an unknown extra variable going to the shared env', () => {
+    // Arrange — minimax has a shared MINIMAX... no: it is a dual preset with separate keys per half,
+    // so use deepseek, whose claude and codex halves both read DEEPSEEK_API_KEY.
+    const deepseek = preset('deepseek');
+    const env = { ...presetDefaultEnv(deepseek), FUTURE_VARIABLE: 'kept' };
+
+    // Act
+    should(presetLoginRefusal(deepseek, { env })).be.undefined();
+    const credential = credentialFromPreset(deepseek, { env });
+
+    // Assert — one login, both halves, the secret present in each half that declares it
+    should(credential.harness).equal('claude');
+    should(credential.claude?.env).containDeep({ ANTHROPIC_AUTH_TOKEN: secretReference('DEEPSEEK_API_KEY') });
+    should(credential.codex?.env).containDeep({ DEEPSEEK_API_KEY: secretReference('DEEPSEEK_API_KEY') });
+    should(credential.env).deepEqual({ FUTURE_VARIABLE: 'kept' });
+    should(CredentialSchema.safeParse(credential).error?.issues ?? []).deepEqual([]);
+  });
+});
+
+describe('presetSecrets', () => {
+  it('should name each secret once, by every variable that carries it, required when any of them is', () => {
+    // Arrange — deepseek's one secret authenticates two variables, one per half
+    const deepseek = preset('deepseek');
+
+    // Act
+    const actual = presetSecrets(deepseek);
+
+    // Assert
+    should(actual).deepEqual([
+      { name: 'DEEPSEEK_API_KEY', variables: ['DEEPSEEK_API_KEY', 'ANTHROPIC_AUTH_TOKEN'], required: true },
+    ]);
+  });
+
+  it('should name nothing for a preset with no secret variable', () => {
+    should(presetSecrets(preset('ollama-codex'))).deepEqual([]);
+  });
+});
+
+describe('presetLoginRefusal — halves (docs/provider-presets.md § One login, both CLIs)', () => {
+  it('should refuse a half the preset does not offer at all, without a reason', () => {
+    // anthropic-api-key is single-harness (claude only): it has no codex half whatsoever.
+    const anthropic = preset('anthropic-api-key');
+    should(presetLoginRefusal(anthropic, { env: presetDefaultEnv(anthropic), harness: 'codex' })).equal(
+      'Anthropic API key does not drive Codex',
+    );
+  });
+
+  it("should refuse a half that exists but is marked unavailable, with that half's reason", () => {
+    const glm = preset('zai-glm');
+    should(presetLoginRefusal(glm, { env: presetDefaultEnv(glm), harness: 'codex' })).match(
+      /does not drive Codex: Z\.ai serves the Responses API/u,
+    );
+    should(presetLoginRefusal(glm, { env: presetDefaultEnv(glm), halves: ['codex'] })).match(
+      /does not drive Codex: Z\.ai serves the Responses API/u,
+    );
+  });
+
+  it('should refuse the whole preset when it has no usable half at all', () => {
+    // Arrange — every half unavailable rolls up into the preset's own `unavailable` (presetFromFile).
+    const file: ProviderPresetFile = {
+      label: 'Both down',
+      summary: 'Summary.',
+      docs: 'https://example.test/docs',
+      verified: '2026-10-16',
+      unverified: [],
+      claude: { env: {}, models: [], unavailable: 'Claude is down.' },
+      codex: { env: {}, models: [], unavailable: 'Codex is down.' },
+      test: { kind: 'none', reason: 'no test' } as const,
+      quota: { source: 'none', note: 'none' } as const,
+    };
+    const both = presetFromFile('both-down', file, 'file');
+
+    // Act / Assert
+    should(presetHarnesses(both)).deepEqual([]);
+    should(presetLoginRefusal(both, { env: {} })).equal(
+      'Both down is not offered here: Claude is down. Codex is down.',
+    );
+  });
+
+  it('should narrow a dual login to the one CLI asked for through "halves"', () => {
+    const openrouter = preset('openrouter');
+    const env = presetDefaultEnv(openrouter);
+    should(presetLoginRefusal(openrouter, { env, halves: ['claude'] })).be.undefined();
+  });
+});
+
+describe('presetFromFile', () => {
+  const base = {
+    label: 'Test provider',
+    summary: 'A provider for the test.',
+    docs: 'https://example.test/docs',
+    verified: '2026-10-16',
+    unverified: [] as string[],
+    test: { kind: 'none', reason: 'no test' } as const,
+    quota: { source: 'none', note: 'none' } as const,
+  };
+
+  /** A plain preset variable with every default field filled in, so a fixture types cleanly. */
+  const value = (text: string) => ({ value: text, required: true, allowEmpty: false });
+
+  it('should read the legacy, single-CLI shape to one usable half named "harness"', () => {
+    const file: ProviderPresetFile = {
+      ...base,
+      harness: 'codex',
+      env: {},
+      codexProvider: { id: 'ollama' },
+      models: ['m'],
+    };
+
+    const actual = presetFromFile('legacy', file, 'built-in');
+
+    should(actual.harness).equal('codex');
+    should(actual.halves).deepEqual({ codex: { env: {}, codexProvider: { id: 'ollama' }, models: ['m'] } });
+    should(actual.codexProvider).deepEqual({ id: 'ollama' });
+    should(actual.models).deepEqual(['m']);
+    should(presetHarnesses(actual)).deepEqual(['codex']);
+    should(actual.detect).deepEqual({ hosts: [], variables: [], keyPrefixes: [] });
+  });
+
+  it('should pick Claude Code as the primary harness and union both halves’ variables and models', () => {
+    const file: ProviderPresetFile = {
+      ...base,
+      claude: { env: { SHARED: value('claude-wins'), ONLY_CLAUDE: value('c') }, models: ['m1'] },
+      codex: { env: { SHARED: value('codex'), ONLY_CODEX: value('x') }, models: ['m2'] },
+    };
+
+    const actual = presetFromFile('dual', file, 'file');
+
+    should(actual.harness).equal('claude');
+    // The Claude half wins a name both halves set.
+    should(actual.env).deepEqual({
+      SHARED: value('claude-wins'),
+      ONLY_CLAUDE: value('c'),
+      ONLY_CODEX: value('x'),
+    });
+    should(actual.models).deepEqual(['m1', 'm2']);
+    should(presetHarnesses(actual)).deepEqual(['claude', 'codex']);
+  });
+
+  it('should leave the primary harness Codex-only, and its codexProvider empty, when the Codex half is the only one', () => {
+    const file: ProviderPresetFile = {
+      ...base,
+      claude: { env: {}, models: [], unavailable: 'no claude' },
+      codex: { env: {}, models: [], codexProvider: { id: 'ollama' } },
+    };
+
+    const actual = presetFromFile('codex-only-half', file, 'file');
+
+    should(actual.harness).equal('codex');
+    should(actual.codexProvider).deepEqual({ id: 'ollama' });
+    should(presetHarnesses(actual)).deepEqual(['codex']);
+  });
+
+  it('should leave codexProvider undefined when Codex is present but not among the usable halves', () => {
+    const file: ProviderPresetFile = {
+      ...base,
+      claude: { env: {}, models: [] },
+      codex: { env: {}, models: [], codexProvider: { id: 'ollama' }, unavailable: 'nope' },
+    };
+
+    should(presetFromFile('claude-only', file, 'file').codexProvider).be.undefined();
+  });
+
+  it('should roll up every half’s reason into "unavailable" when every half is unavailable', () => {
+    const file: ProviderPresetFile = {
+      ...base,
+      claude: { env: {}, models: [], unavailable: 'Claude is down.' },
+      codex: { env: {}, models: [], unavailable: 'Codex is down.' },
+    };
+
+    const actual = presetFromFile('both-down', file, 'file');
+
+    should(actual.unavailable).equal('Claude is down. Codex is down.');
+    should(actual.harness).equal('claude');
+    should(presetHarnesses(actual)).deepEqual([]);
+  });
+
+  it('should keep an explicit top-level "unavailable" rather than compute one', () => {
+    const file: ProviderPresetFile = { ...base, harness: 'claude', env: {}, models: [], unavailable: 'Retired.' };
+
+    should(presetFromFile('retired', file, 'file').unavailable).equal('Retired.');
+  });
+});
+
+describe('presetHarnesses', () => {
+  it('should be empty for a preset marked unavailable even with a usable-looking half', () => {
+    should(presetHarnesses({ halves: { claude: { env: {}, models: [] } }, unavailable: 'retired' })).deepEqual([]);
+  });
+});
+
+describe('ProviderPresetFileSchema — halves checks (docs/provider-presets.md)', () => {
+  const base = {
+    label: 'Test',
+    summary: 'A test preset.',
+    docs: 'https://example.test/docs',
+    verified: '2026-10-16',
+    test: { kind: 'none', reason: 'no test' },
+    quota: { source: 'none', note: 'none' },
+  } as const;
+
+  it('should refuse a preset naming neither "harness" nor any half', () => {
+    const actual = ProviderPresetFileSchema.safeParse({ ...base, env: {} });
+    should(actual.error?.issues[0]?.message).match(/say which CLI the preset is for/u);
+  });
+
+  it.each(['harness', 'env', 'codexProvider', 'models'] as const)(
+    'should refuse top-level "%s" on a preset that has halves',
+    field => {
+      const extra =
+        field === 'harness' ? 'claude' : field === 'codexProvider' ? { id: 'ollama' } : field === 'models' ? ['m'] : {};
+      const actual = ProviderPresetFileSchema.safeParse({
+        ...base,
+        claude: { env: {}, models: [] },
+        [field]: extra,
+      });
+      should(actual.error?.issues[0]?.message).match(
+        /belongs inside "claude:" or "codex:" when the preset has halves/u,
+      );
+    },
+  );
+
+  it('should refuse a Codex model provider placed in the "claude:" half', () => {
+    const actual = ProviderPresetFileSchema.safeParse({
+      ...base,
+      claude: { env: {}, models: [], codexProvider: { id: 'ollama' } },
+      codex: { env: {}, models: [] },
+    });
+    should(actual.error?.issues[0]?.message).match(/belongs in "codex:", not "claude:"/u);
+  });
+
+  it('should refuse a name that is a secret in one half and a plain value in the other', () => {
+    const actual = ProviderPresetFileSchema.safeParse({
+      ...base,
+      claude: { env: { SHARED: { secretName: 'S' } }, models: [] },
+      codex: { env: { SHARED: { value: 'v' } }, models: [] },
+    });
+    should(actual.error?.issues[0]?.message).match(/SHARED is a secret in one half and a plain value in the other/u);
+  });
+
+  it('should refuse a test whose key is not a secret in any half, on a halved preset', () => {
+    const actual = ProviderPresetFileSchema.safeParse({
+      ...base,
+      claude: { env: { ANTHROPIC_BASE_URL: { value: 'https://x.test' } }, models: [] },
+      test: { kind: 'request', url: 'https://x.test', keyVariable: 'ANTHROPIC_BASE_URL', note: 'n' },
+    });
+    should(actual.error?.issues[0]?.message).match(/so "env" must make ANTHROPIC_BASE_URL a secret/u);
+  });
+
+  it('should accept a halved preset whose test key is a secret in the codex half', () => {
+    const actual = ProviderPresetFileSchema.safeParse({
+      ...base,
+      claude: { env: {}, models: [] },
+      codex: { env: { KEY: { secretName: 'S' } }, models: [], codexProvider: { id: 'ollama' } },
+      test: { kind: 'request', url: 'https://x.test', keyVariable: 'KEY', note: 'n' },
+    });
+    should(actual.success).be.true();
+  });
+
+  it('should refuse a detect host, variable and key prefix that are not written as the grammar expects', () => {
+    const bad = (detect: Record<string, unknown>) =>
+      ProviderPresetFileSchema.safeParse({ ...base, harness: 'claude', env: {}, detect });
+    should(bad({ hosts: ['https://not-a-host'] }).error?.issues[0]?.message).match(/write a host name/u);
+    should(bad({ variables: ['not a name!'] }).error?.issues[0]?.message).match(/write a variable name/u);
+    should(bad({ keyPrefixes: ['x'] }).success).be.false();
+  });
+
+  it('should accept a detect block with a host, a variable family and a key prefix', () => {
+    const actual = ProviderPresetFileSchema.safeParse({
+      ...base,
+      harness: 'claude',
+      env: {},
+      detect: { hosts: ['api.example.com'], variables: ['EXAMPLE_*'], keyPrefixes: ['sk-ex-'] },
+    });
+    should(actual.success).be.true();
   });
 });

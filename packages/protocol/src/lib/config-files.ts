@@ -266,6 +266,7 @@ export const DEFAULT_LEARNING_CONFIG: LearningConfig = {
   maxMinersPerRun: 2,
   maxSessionsPerRun: 40,
   minSpawnGapMinutes: 30,
+  passiveDefault: true,
 };
 
 /** `learning.yaml` as written: every setting optional, an unknown key refused. */

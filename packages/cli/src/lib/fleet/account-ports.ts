@@ -43,6 +43,13 @@ export interface IAccountGateway {
   test(credentialId: string, allowInference: boolean): Promise<FleetCredentialTestResult>;
   /** The provider presets an environment login is made from. */
   presets(): Promise<FleetProviderPresetCatalog>;
+  /**
+   * Every secret NAME this daemon's store already holds — never a value — so a one-click add
+   * (docs/provider-presets.md) can tell "already set ✓" from one it still has to fill.
+   */
+  secretNames(): Promise<ReadonlySet<string>>;
+  /** Stores a secret VALUE for a one-click login. Never logged, never echoed, never read back. */
+  putSecret(name: string, value: string): Promise<void>;
   stage(change: FleetAccountChange): Promise<FleetAccountChangeView>;
   apply(changeId: string): Promise<FleetAccountChangeOutcome>;
   scan(): Promise<FleetSetupScan>;
@@ -73,6 +80,8 @@ interface IAccountOutput {
 /** Asking a person something. Never used off a terminal. */
 interface IAccountPrompt {
   ask(message: string): Promise<string>;
+  /** Like {@link ask}, but never echoed: for a secret value a one-click add still has to collect. */
+  askHidden(message: string): Promise<string>;
 }
 
 /** Everything an account-model command needs, built once in the composition root. */
@@ -89,6 +98,16 @@ export interface AccountCommandDeps {
   readonly sleep: (milliseconds: number) => Promise<void>;
   /** Milliseconds since the epoch. */
   readonly now: () => number;
+  /**
+   * The process environment, read-only: how `fy login add --from-env` sees what is already in this
+   * shell (docs/provider-presets.md). A value may be `undefined` exactly as Node reports it.
+   */
+  readonly env: Readonly<Record<string, string | undefined>>;
+  /**
+   * A secret VALUE piped in on stdin, off a terminal, for a one-click add with exactly one secret
+   * still missing (the same path `fy secret set` uses). Never argv, never echoed.
+   */
+  readonly readSecretValue: () => Promise<string>;
 }
 
 /** The flags every write shares. */

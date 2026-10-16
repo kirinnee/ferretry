@@ -193,6 +193,28 @@ describe('CredentialsTab · the list', () => {
     await view.unmount();
   });
 
+  it('lists a login that drives both CLIs once, in its own group, with its Claude + Codex chip and page', async () => {
+    const dual = credential({ id: 'deepseek', store: 'environment', harnesses: ['claude', 'codex'] });
+    delete dual.email;
+    const { view } = await open({ [LIST]: listOf([credential({ id: 'claude' }), dual]) }, { hash: '' });
+    const c = view.container;
+    expect(
+      Array.from(c.querySelectorAll('[data-credentials-group]')).map(group =>
+        group.getAttribute('data-credentials-group'),
+      ),
+    ).toEqual(['claude', 'both']);
+    const both = must(c.querySelector('[data-credentials-group="both"]'), 'the both group');
+    expect(both.querySelector('h4')?.textContent).toBe('Claude Code + Codex');
+    expect(c.querySelectorAll('[data-credential-row="deepseek"]')).toHaveLength(1);
+    expect(both.querySelector('[data-login-scope]')?.getAttribute('data-login-scope')).toBe('both');
+    expect(both.querySelector('[data-credential-badges]')?.textContent).toBe('Claude + Codex');
+    await view.unmount();
+
+    const page = await open({ [LIST]: listOf([dual]) }, { hash: `${HASH}/deepseek` });
+    expect(text(page.view.container, 'h3')).toBe('Claude Code + Codex login');
+    await page.view.unmount();
+  });
+
   it('explains the labels when a login says it needs one, even before two share an email', async () => {
     const { view } = await open({
       [LIST]: listOf([credential({ id: 'claude-a', email: 'a@example.com', needsLabel: true })]),

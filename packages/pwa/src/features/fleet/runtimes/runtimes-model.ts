@@ -100,15 +100,35 @@ export const profileFit = (profile: FleetLayeredProfileView, harness: HarnessKin
 };
 
 /**
- * Add runtime's profile choices: every profile with its fit, the ones this login can use first, each
- * group keeping the catalogue's order — so a Codex-only profile sits below, disabled with its reason.
+ * Add runtime's profile choices: every profile with its fit against the CLI it would run for this login
+ * (`runsHarness`), the ones this login can use first, each group keeping the catalogue's order — so a
+ * Codex-only profile sits below a Claude Code login's choices, disabled with its reason.
  */
 export const profilesFitFirst = (
   profiles: readonly FleetLayeredProfileView[],
-  harness: HarnessKind,
+  harnesses: readonly HarnessKind[],
+  chosen: HarnessKind | null = null,
 ): readonly { readonly profile: FleetLayeredProfileView; readonly fit: ProfileFit }[] => {
-  const all = profiles.map(profile => ({ profile, fit: profileFit(profile, harness) }));
+  const all = profiles.map(profile => ({ profile, fit: profileFit(profile, runsHarness(harnesses, chosen, profile)) }));
   return [...all.filter(entry => entry.fit.fits), ...all.filter(entry => !entry.fit.fits)];
+};
+
+/**
+ * The CLI a profile runs for a login, for Add a runtime (docs/provider-presets.md). A login that drives
+ * one CLI runs it. One that drives both runs the CLI the person chose under **Runs**; when they have not
+ * chosen, the one the profile is scoped to, else the login's first — so a Codex-only profile fits a
+ * Claude + Codex login by running Codex.
+ */
+export const runsHarness = (
+  harnesses: readonly HarnessKind[],
+  chosen: HarnessKind | null,
+  profile?: FleetLayeredProfileView,
+): HarnessKind => {
+  const first = harnesses[0] ?? 'claude';
+  if (harnesses.length < 2) return first;
+  if (chosen !== null) return chosen;
+  const scope = profile?.scope.kind === 'scoped' ? profile.scope.scope : 'generic';
+  return scope === 'generic' ? first : scope;
 };
 
 /** "9 parts" for a profile row; its scope is the badge beside it. */

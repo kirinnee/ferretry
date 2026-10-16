@@ -22,3 +22,7 @@ quota:
   source: transcript-pricing
   note: OpenAI reports usage only to an admin key, so cost is counted from the transcript at OpenAI's prices.
 pricing: openai
+detect:
+  hosts: [api.openai.com]
+  variables: [OPENAI_API_KEY]
+  keyPrefixes: [sk-proj-, sk-svcacct-]

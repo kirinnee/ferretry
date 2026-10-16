@@ -69,7 +69,21 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
 
     // Assert
     should(actual.code).equal(0);
-    for (const verb of ['ls', 'show', 'accept', 'reject', 'edit', 'patch', 'run', 'status', 'config']) {
+    for (const verb of [
+      'ls',
+      'show',
+      'accept',
+      'reject',
+      'edit',
+      'categorize',
+      'reopen',
+      'apply',
+      'scan',
+      'patch',
+      'run',
+      'status',
+      'config',
+    ]) {
       should(actual.out).containEql(verb);
     }
   });
@@ -80,7 +94,7 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
 
     // Assert
     should(actual.code).not.equal(0);
-    should(actual.err).containEql('--state must be one of pending, accepted, rejected');
+    should(actual.err).containEql('--state must be one of pending, accepted, applied, rejected');
   });
 
   it('refuses --all together with --state', async () => {

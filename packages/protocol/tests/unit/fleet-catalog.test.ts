@@ -346,6 +346,31 @@ describe('the account-model catalogue wire contract', () => {
     should(parsed).deepEqual(changes.map(() => true));
   });
 
+  it('should accept a runtime.put naming which half of a dual login it runs, and leave it optional', () => {
+    // Act
+    const named = catalog.FleetAccountChangeSchema.safeParse({
+      kind: 'runtime.put',
+      name: 'Codex Review',
+      credential: 'glm',
+      profile: 'default',
+      harness: 'codex',
+      agent: false,
+      create: true,
+    });
+    const unnamed = catalog.FleetAccountChangeSchema.safeParse({
+      kind: 'runtime.put',
+      name: 'Default',
+      credential: 'claude-you',
+      profile: 'default',
+      agent: false,
+      create: false,
+    });
+
+    // Assert
+    should(named.success && named.data.kind === 'runtime.put' && named.data.harness).equal('codex');
+    should(unnamed.success && unnamed.data.kind === 'runtime.put' && 'harness' in unnamed.data).be.false();
+  });
+
   it('should require ferretrySettings in what a machine reports, and leave it optional in what a client sends', () => {
     // Arrange
     const sent = { kind: 'machine.settings', agentPermissions: 'auto', defaultRuntime: null };

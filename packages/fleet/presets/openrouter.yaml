@@ -1,22 +1,34 @@
-# Claude Code through OpenRouter's Anthropic-compatible endpoint.
+# OpenRouter for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: OpenRouter
-harness: claude
-summary: Claude Code through OpenRouter, on Anthropic models or any other it routes to.
+summary: Claude Code and Codex through OpenRouter with one key, on Anthropic and OpenAI models or any other it routes to.
 docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
 verified: '2026-10-16'
-env:
-  ANTHROPIC_BASE_URL:
-    value: https://openrouter.ai/api
-  ANTHROPIC_AUTH_TOKEN:
-    secretName: OPENROUTER_API_KEY
-  ANTHROPIC_API_KEY:
-    value: ''
-    allowEmpty: true
-    description: deliberately empty, so the OpenRouter key is the one sent
-  ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: ~anthropic/claude-opus-latest[1m]
-    required: false
-models: [~anthropic/claude-opus-latest, ~anthropic/claude-sonnet-latest]
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://openrouter.ai/api
+    ANTHROPIC_AUTH_TOKEN:
+      secretName: OPENROUTER_API_KEY
+    ANTHROPIC_API_KEY:
+      value: ''
+      allowEmpty: true
+      description: deliberately empty, so the OpenRouter key is the one sent
+    ANTHROPIC_DEFAULT_OPUS_MODEL:
+      value: ~anthropic/claude-opus-latest[1m]
+      required: false
+  models: [~anthropic/claude-opus-latest, ~anthropic/claude-sonnet-latest]
+codex:
+  docs: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
+  env:
+    OPENROUTER_API_KEY:
+      secretName: OPENROUTER_API_KEY
+  codexProvider:
+    id: openrouter
+    name: OpenRouter
+    baseUrl: https://openrouter.ai/api/v1
+    keyVariable: OPENROUTER_API_KEY
+    model: ~openai/gpt-sol-latest
+  models: [~openai/gpt-sol-latest]
 test:
   kind: request
   url: https://openrouter.ai/api/v1/key
@@ -26,3 +38,7 @@ quota:
   source: openrouter-key
   note: The key's credit limit and what it has used.
 pricing: openrouter
+detect:
+  hosts: [openrouter.ai]
+  variables: [OPENROUTER_*]
+  keyPrefixes: [sk-or-]

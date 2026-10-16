@@ -91,6 +91,16 @@ describe('SessionsBar as a column', () => {
     expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
   });
 
+  test('chips a ferret instructed to learn, unless it needs the reader', async () => {
+    const { element } = bar({ learningPassive: new Set(['hadi-1', 'maryah-1']) });
+    view = await mount(element);
+    const chip = (id: string) => view?.container.querySelector(`[data-sbar-session="${id}"] [data-learning-passive]`);
+    expect(chip('hadi-1')?.textContent).toBe('Learning: passive');
+    // "needs you" is the more urgent fact, and the row has one slot for it.
+    expect(chip('maryah-1')).toBeNull();
+    expect(chip('nameless')).toBeNull();
+  });
+
   test('narrows the list with the filters and says when nothing matches', async () => {
     const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number]] });
     view = await mount(element);

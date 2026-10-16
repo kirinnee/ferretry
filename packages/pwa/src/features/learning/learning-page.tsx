@@ -1,568 +1,403 @@
-import type { LearningActionRequest, LearningStatus, ProposalView } from '@ferretry/protocol';
-import { Check, Copy, FileDown, GraduationCap, Pencil, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+/**
+ * THE LEARNING HUB (Insights › Learning): every lesson the fleet's ferrets filed or a scan found, and the
+ * owner's verdict on each.
+ *
+ * Ferrets instructed to learn file lessons with `fy lesson suggest "…" --scope global|repo`; a scan reads
+ * older transcripts. Nothing reaches an instruction file until the owner APPLIES a lesson, after seeing
+ * the exact diff — accepting one writes nothing.
+ *
+ * One machine per mount: the page is keyed on the daemon, so a switch starts from nothing rather than
+ * painting one machine's lessons under another's name while the new read is in flight.
+ */
 
-import { displayCallsign } from '../../lib/callsign.ts';
+import type {
+  LearningActionRequest,
+  LearningApplyPreview,
+  LearningScanScope,
+  ProposalState,
+  ProposalView,
+  SessionView,
+} from '@ferretry/protocol';
+import { Lightbulb, ScanSearch, X } from 'lucide-react';
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import type { FleetProject } from '../../lib/fleet-grouping.ts';
 import {
   actOnLearningProposal,
-  fetchLearningPatch,
+  applyLearningProposal,
+  fetchApplyPreview,
+  fetchLearningConfig,
   fetchLearningProposals,
-  fetchLearningStatus,
-  runLearningScan,
+  learningErrorMessage,
 } from '../../lib/learning-api.ts';
+import type { DaemonFetch } from '../../lib/runtime-models.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
-import { LearningHeader } from './learning-header.tsx';
-import { useTouchAffected } from './use-touch-affected.ts';
-
-export type LearningStrength = 'weak' | 'normal' | 'strong';
-export const learningStrength = (occurrences: number): LearningStrength =>
-  occurrences >= 5 ? 'strong' : occurrences <= 1 ? 'weak' : 'normal';
-export const learningErrorMessage = (reason: unknown): string =>
-  reason instanceof Error ? reason.message : 'Learning is unavailable on this daemon.';
-
-const ABSOLUTE_FIELDS = ['year', 'month', 'day', 'hour', 'minute', 'second'] as const;
-
-/**
- * `yyyy-MM-dd HH:mm:ss` in the reader's own zone, matching the source page's
- * `fmtAbsolute`. Evidence is an audit trail — "when exactly" is the question a
- * quote raises, and a relative age cannot answer it.
- *
- * It stays local to this feature rather than joining `relativeTime` in
- * `session-screens.ts`: that module is the session surfaces' vocabulary, and
- * learning is the only caller that needs a second, absolute form.
- *
- * `timeZone` is a parameter because a formatter that silently reads an ambient
- * zone cannot be asserted; production passes nothing and gets the local zone.
- */
-export const absoluteTime = (at: string | undefined, timeZone?: string): string => {
-  if (at === undefined || at === '') return '—';
-  const timestamp = Date.parse(at);
-  if (!Number.isFinite(timestamp)) return at;
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    ...(timeZone === undefined ? {} : { timeZone }),
-  }).formatToParts(new Date(timestamp));
-  const [year, month, day, hour, minute, second] = ABSOLUTE_FIELDS.map(
-    field => parts.find(part => part.type === field)?.value ?? '',
-  );
-  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-};
+import {
+  emptyTabSentence,
+  LESSON_TABS,
+  lessonCount,
+  lessonsIn,
+  SOURCE_FILTERS,
+  type SourceFilter,
+  scanPercent,
+  scanReadingSentence,
+} from './learning-model.ts';
+import { LessonRow } from './lesson-row.tsx';
+import { usePassiveLearning } from './passive-learning.tsx';
+import { ScanDialog, ScanProgressBar } from './scan-dialog.tsx';
+import { useLearningScan } from './use-learning-scan.ts';
 
 export interface LearningPageProps {
   readonly connection: DaemonConnection;
-  readonly now?: number;
+  /** This machine's ferrets: names for evidence and source chips, and the scan's "Specific ferrets". */
+  readonly sessions?: readonly SessionView[] | null;
+  /** Registered projects, for the scan's "Projects". */
+  readonly projects?: readonly FleetProject[];
+  /** The logins a scan can run on; `null` while unread. */
+  readonly accounts?: readonly PickerAccount[] | null;
+  readonly onNavigate?: (to: string) => void;
+  /** Test and harness seam; production reads through the carrier router. */
+  readonly fetcher?: DaemonFetch;
+  readonly scanPollMs?: number;
+  readonly estimateDelayMs?: number;
+  readonly now?: () => number;
+  readonly timeZone?: string;
 }
 
-/** First-class learning route; all work is scoped to the supplied paired daemon. */
-export function LearningPage({ connection, now = Date.now() }: LearningPageProps) {
-  // Every read and write here goes through the carrier router: a paired device has no bearer value.
-  const fetcher = useDaemonFetch();
-  const [status, setStatus] = useState<LearningStatus | null>(null);
-  const [proposals, setProposals] = useState<readonly ProposalView[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  // `busy` is a count of in-flight same-scope operations, not a boolean: two
-  // overlapping accepts/scans on one daemon keep the controls disabled until
-  // both finish, and a scope change resets it to zero.
-  const [busy, setBusy] = useState(0);
+const NO_PROJECTS: readonly FleetProject[] = [];
 
-  // A daemon switch starts a fresh load, but everything the old daemon started —
-  // the `Promise.all`, an in-flight accept, a running scan — is still on the
-  // network. Left unfenced, its late settle would paint the old daemon over the
-  // new one, or stamp the old daemon's error (or finalizer) across it.
-  //
-  // `scopeRef` is a monotonic epoch that advances on every daemonId change and
-  // is never reused, so even an A→B→A round trip gives the second A a fresh
-  // epoch and the first A's stale settle — whose daemonId would match again —
-  // is still dropped. Each async op captures the epoch at launch and publishes
-  // only while that epoch is still current.
-  //
-  // The epoch advances and the view clears *during render*, in the same pass
-  // that sees the new daemonId (React's adjust-state-when-a-prop-changes
-  // pattern), so the new daemon's render never briefly paints the old daemon's
-  // data: the clear is committed before paint, not deferred to an effect.
-  const scopeRef = useRef(0);
-  // Loads can also overlap without a daemon switch: a slow initial read may
-  // still be pending when an accept or scan finishes and asks for a refresh.
-  // This serial is never reset, so the newest load within the current scope is
-  // the only one allowed to publish data or an error.
-  const loadSerialRef = useRef(0);
-  const [scopedDaemonId, setScopedDaemonId] = useState(connection.daemonId);
-  if (scopedDaemonId !== connection.daemonId) {
-    setScopedDaemonId(connection.daemonId);
-    scopeRef.current += 1;
-    setStatus(null);
-    setProposals([]);
-    setError(null);
-    setBusy(0);
-  }
-  // Frozen for this render so each `load`/`act`/`run` callback OWNS the epoch it
-  // was created under. The fence compares this immutable copy to the live
-  // `scopeRef.current`; capturing at render (not at invocation) is what stops a
-  // stale callback that is re-entered later — e.g. an old `act` calling its own
-  // old `load` after an A→B→A round trip — from re-reading the current epoch and
-  // publishing as though it were still current.
-  const scope = scopeRef.current;
+export function LearningPage(props: LearningPageProps) {
+  return <LearningHub key={props.connection.daemonId} {...props} />;
+}
+
+function LearningHub({
+  connection,
+  sessions = null,
+  projects = NO_PROJECTS,
+  accounts = null,
+  onNavigate,
+  fetcher,
+  scanPollMs,
+  estimateDelayMs,
+  now,
+  timeZone,
+}: LearningPageProps) {
+  const ambient = useDaemonFetch();
+  const daemonFetch = fetcher ?? ambient;
+  const [proposals, setProposals] = useState<readonly ProposalView[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [defaultAgent, setDefaultAgent] = useState<string | undefined>(undefined);
+  const [tab, setTab] = useState<ProposalState>('pending');
+  const [source, setSource] = useState<SourceFilter>('all');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [scanScope, setScanScope] = useState<LearningScanScope | null>(null);
+  const scanControl = useLearningScan(connection, daemonFetch, scanPollMs);
+  const learning = usePassiveLearning(connection, daemonFetch);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const byId = useMemo(() => new Map((sessions ?? []).map(view => [view.config.id, view])), [sessions]);
 
   const load = useCallback(async () => {
-    // A stale callback still makes its request so its operation can complete
-    // normally, but it must not advance the current scope's load generation.
-    const loadSerial = scopeRef.current === scope ? ++loadSerialRef.current : undefined;
-    const canPublish = () =>
-      scopeRef.current === scope && loadSerial !== undefined && loadSerialRef.current === loadSerial;
     try {
-      const [nextStatus, nextProposals] = await Promise.all([
-        fetchLearningStatus(connection, fetcher),
-        fetchLearningProposals(connection, undefined, fetcher),
-      ]);
-      if (!canPublish()) return;
-      setStatus(nextStatus);
-      setProposals(nextProposals);
+      const next = await fetchLearningProposals(connection, daemonFetch);
+      if (!alive.current) return;
+      setProposals(next);
       setError(null);
     } catch (reason) {
-      if (!canPublish()) return;
-      setError(learningErrorMessage(reason));
+      if (alive.current) setError(learningErrorMessage(reason));
     }
-  }, [connection, fetcher, scope]);
+  }, [connection, daemonFetch]);
+
   useEffect(() => {
     void load();
-  }, [load]);
-  const act = useCallback(
-    async (id: string, action: LearningActionRequest) => {
-      setBusy(count => count + 1);
-      try {
-        await actOnLearningProposal(connection, id, action, fetcher);
-        await load();
-      } catch (reason) {
-        if (scopeRef.current === scope) setError(learningErrorMessage(reason));
-      } finally {
-        if (scopeRef.current === scope) setBusy(count => Math.max(0, count - 1));
-      }
-    },
-    [connection, fetcher, load, scope],
-  );
-  const run = useCallback(async () => {
-    setBusy(count => count + 1);
-    try {
-      await runLearningScan(connection, true, fetcher);
-      await load();
-    } catch (reason) {
-      if (scopeRef.current === scope) setError(learningErrorMessage(reason));
-    } finally {
-      if (scopeRef.current === scope) setBusy(count => Math.max(0, count - 1));
-    }
-  }, [connection, fetcher, load, scope]);
-  return (
-    <LearningReview
-      connection={connection}
-      status={status}
-      proposals={proposals}
-      error={error}
-      busy={busy > 0}
-      now={now}
-      onRun={run}
-      onAction={act}
-    />
-  );
-}
+    fetchLearningConfig(connection, daemonFetch).then(
+      config => {
+        if (alive.current) setDefaultAgent(config.agent);
+      },
+      () => undefined,
+    );
+  }, [load, connection, daemonFetch]);
 
-export interface LearningReviewProps {
-  readonly connection: DaemonConnection;
-  readonly status: LearningStatus | null;
-  readonly proposals: readonly ProposalView[];
-  readonly error: string | null;
-  readonly busy: boolean;
-  readonly now: number;
-  readonly onRun: () => void;
-  readonly onAction: (id: string, action: LearningActionRequest) => void;
-}
+  // A scan that ends while the hub is open has added lessons: read them.
+  const scan = scanControl.scan;
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    const running = scan?.state === 'running';
+    if (wasRunning.current && !running) void load();
+    wasRunning.current = running;
+  }, [scan, load]);
 
-/** Split from transport so it can be mounted for deterministic visual and render tests. */
-export function LearningReview({
-  connection,
-  status,
-  proposals,
-  error,
-  busy,
-  now,
-  onRun,
-  onAction,
-}: LearningReviewProps) {
-  const pending = proposals.filter(proposal => proposal.state === 'pending');
-  const accepted = proposals.filter(proposal => proposal.state === 'accepted');
-  const rejected = proposals.filter(proposal => proposal.state === 'rejected');
-  const group = (strength: LearningStrength) =>
-    pending.filter(proposal => learningStrength(proposal.occurrences) === strength);
+  const replace = (next: ProposalView) =>
+    setProposals(current => (current ?? []).map(proposal => (proposal.id === next.id ? next : proposal)));
+
+  const act = async (id: string, action: LearningActionRequest) => {
+    const next = await actOnLearningProposal(connection, id, action, daemonFetch);
+    replace(next);
+    const said: Partial<Record<LearningActionRequest['action'], string>> = {
+      accept: 'Accepted — apply it from the Accepted tab.',
+      reject: 'Rejected.',
+      reopen: 'Back in To review.',
+      edit: 'Rule updated.',
+    };
+    const sentence = said[action.action];
+    if (sentence !== undefined) setNotice(sentence);
+    if (next.state !== tab) setOpenId(null);
+  };
+
+  const preview = (id: string): Promise<LearningApplyPreview> => fetchApplyPreview(connection, id, daemonFetch);
+
+  const apply = async (id: string, shown: LearningApplyPreview) => {
+    const next = await applyLearningProposal(connection, id, shown.etag, daemonFetch);
+    replace(next);
+    setOpenId(null);
+    setNotice(`Wrote the lesson to ${next.applied?.path ?? shown.path}.`);
+  };
+
+  const list = proposals ?? [];
+  const rows = lessonsIn(list, tab, source);
+
   return (
-    <main
-      className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-4"
-      aria-label="Learning proposals"
-      data-daemon={connection.daemonId}
-    >
-      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 py-2">
-        <header>
-          <h1 className="m-0 flex items-center gap-sm font-display text-display font-bold tracking-display">
-            <GraduationCap size={20} className="text-accent" aria-hidden="true" />
-            Learning
-          </h1>
-          <p className="mt-0.5 text-ui text-muted">
-            Recurring corrections mined from finished sessions, surfaced as global rule proposals. Every quote is
-            verified against its transcript.
-          </p>
+    <main className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-6" aria-labelledby="learning-hub-title">
+      <div className="flex w-full max-w-[1080px] flex-col gap-3 py-3" data-daemon={connection.daemonId}>
+        <header className="flex flex-wrap items-center gap-3">
+          <h2
+            id="learning-hub-title"
+            className="m-0 flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap font-display text-display font-bold tracking-display"
+          >
+            <Lightbulb size={20} aria-hidden="true" className="shrink-0 text-accent" />
+            Learning hub
+          </h2>
+          <Button
+            variant="primary"
+            className="min-h-[44px] items-center gap-1.5"
+            onClick={() => setScanScope({ kind: 'not-passive' })}
+          >
+            <ScanSearch size={15} aria-hidden="true" />
+            Scan for lessons…
+          </Button>
         </header>
-        <LearningHeader
-          status={status}
-          failed={error !== null}
-          busy={busy}
-          // ALWAYS true, and the reason is structural rather than lax. The
-          // source page gated these controls on a module-global `HAS_TOKEN`
-          // because the bundle was served by the daemon it talked to and might
-          // have been handed no token at all. Here a page cannot render without
-          // a `DaemonConnection`, and `daemonConnection` refuses an empty
-          // `deviceId` — so a rendered learning page is a paired one
-          // by construction, and there is no reachable read-only mode to model.
-          // A per-device capability grant would change that; nothing issues one
-          // today, and inventing a permanently-`true` flag to carry would be a
-          // lie about a check that is not happening.
-          canRun
-          now={now}
-          onRunNow={onRun}
-        />
-        {status === null && error === null && (
-          <p role="status" className="text-ui text-muted">
-            Reading learning proposals…
-          </p>
+        <p className="m-0 text-ui text-muted">
+          Ferrets that are instructed to learn file lessons with{' '}
+          <span className="mono text-fg-soft">fy lesson suggest "…" --scope global|repo</span>. A scan reads older
+          transcripts. Nothing reaches an instruction file until you apply it.
+        </p>
+        {scan?.state === 'running' && (
+          <section aria-label="Running scan" className="kt-panel flex flex-col gap-2 p-3" data-learning-scan-inline="">
+            <div className="flex flex-wrap items-center gap-2">
+              <b className="min-w-0 flex-1 text-ui">{scanReadingSentence(scan)}</b>
+              <Button size="sm" className="min-h-[44px]" onClick={() => setScanScope({ kind: 'not-passive' })}>
+                Details
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                className="min-h-[44px]"
+                onClick={() =>
+                  void scanControl.cancel().then(
+                    () => setNotice('Scan cancelled.'),
+                    (reason: unknown) => setNotice(learningErrorMessage(reason)),
+                  )
+                }
+              >
+                Cancel
+              </Button>
+            </div>
+            <ScanProgressBar percent={scanPercent(scan)} />
+          </section>
+        )}
+        {notice !== null && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-control border border-accent-border bg-accent-soft px-3 py-1 text-ui text-fg"
+          >
+            <span className="min-w-0 flex-1">{notice}</span>
+            <button
+              type="button"
+              className="kt-btn h-11 w-11 shrink-0 p-0"
+              aria-label="Dismiss"
+              onClick={() => setNotice(null)}
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
         )}
         {error !== null && (
-          <p role="alert" className="rounded-control border border-warn/30 bg-warn-soft px-3 py-2 text-ui text-warn">
+          <p
+            role="alert"
+            className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui text-warn"
+          >
             {error}
           </p>
         )}
-        {pending.length === 0 && accepted.length === 0 && status !== null && (
-          <p className="kt-panel p-3 text-ui text-muted">
-            No proposals yet. Recurring corrections appear here for review.
-          </p>
-        )}
-        <ProposalGroup
-          label="Strong signals — seen across 5+ sessions"
-          proposals={group('strong')}
-          busy={busy}
-          onAction={onAction}
-          connection={connection}
+        <SourceFilterControl value={source} onChange={setSource} />
+        <LessonTabs
+          current={tab}
+          counts={LESSON_TABS.map(entry => lessonCount(list, entry.state, source))}
+          onSelect={next => {
+            setTab(next);
+            setOpenId(null);
+          }}
         />
-        <ProposalGroup
-          label="Proposals"
-          proposals={group('normal')}
-          busy={busy}
-          onAction={onAction}
-          connection={connection}
-        />
-        {group('weak').length > 0 && (
-          <details className="kt-panel p-3">
-            <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-muted">
-              Weak signals (single occurrence) · {group('weak').length}
-            </summary>
-            <ProposalGroup
-              label=""
-              proposals={group('weak')}
-              busy={busy}
-              onAction={onAction}
-              connection={connection}
-              muted
-            />
-          </details>
-        )}
-        <ProposalGroup
-          label="Accepted — apply by hand"
-          proposals={accepted}
-          busy={busy}
-          onAction={onAction}
-          connection={connection}
-          accepted
-        />
-        {rejected.length > 0 && (
-          <details className="kt-panel p-3">
-            <summary className="min-h-[44px] cursor-pointer text-ui text-muted">
-              Rejected (permanent) · {rejected.length}
-            </summary>
-            <ul className="m-0 list-none p-0 text-ui text-muted">
-              {rejected.map(proposal => (
-                <li key={proposal.id} className="line-through">
-                  {proposal.title}
-                </li>
+        <div role="tabpanel" id="learning-lessons" aria-labelledby={`learning-tab-${tab}`}>
+          {proposals === null && error === null ? (
+            <p role="status" className="m-0 py-4 text-ui text-muted">
+              Reading lessons…
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="kt-panel m-0 p-4 text-ui text-muted">{emptyTabSentence(tab, source)}</p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {rows.map(proposal => (
+                <LessonRow
+                  key={proposal.id}
+                  proposal={proposal}
+                  open={openId === proposal.id}
+                  onToggle={() => setOpenId(current => (current === proposal.id ? null : proposal.id))}
+                  sessions={byId}
+                  daemonId={connection.daemonId}
+                  act={act}
+                  preview={preview}
+                  apply={apply}
+                  {...(onNavigate === undefined ? {} : { onNavigate })}
+                  {...(timeZone === undefined ? {} : { timeZone })}
+                />
               ))}
             </ul>
-          </details>
-        )}
+          )}
+        </div>
       </div>
+      {scanScope !== null && (
+        <ScanDialog
+          connection={connection}
+          fetcher={daemonFetch}
+          control={scanControl}
+          initialScope={scanScope}
+          onClose={() => setScanScope(null)}
+          onView={() => {
+            setScanScope(null);
+            setTab('pending');
+            setSource('scan');
+            setOpenId(null);
+          }}
+          sessions={sessions}
+          projects={projects}
+          accounts={accounts}
+          passive={learning.passive}
+          {...(defaultAgent === undefined ? {} : { defaultAgent })}
+          {...(now === undefined ? {} : { now })}
+          {...(estimateDelayMs === undefined ? {} : { estimateDelayMs })}
+        />
+      )}
     </main>
   );
 }
 
-function ProposalGroup({
-  label,
-  proposals,
-  busy,
-  onAction,
-  connection,
-  accepted = false,
-  muted = false,
+function SourceFilterControl({
+  value,
+  onChange,
 }: {
-  readonly label: string;
-  readonly proposals: readonly ProposalView[];
-  readonly busy: boolean;
-  readonly onAction: LearningReviewProps['onAction'];
-  readonly connection: DaemonConnection;
-  readonly accepted?: boolean;
-  readonly muted?: boolean;
+  readonly value: SourceFilter;
+  readonly onChange: (next: SourceFilter) => void;
 }) {
-  if (proposals.length === 0) return null;
   return (
-    <section className="flex flex-col gap-3">
-      {label !== '' && <h2 className="kt-label m-0">{label}</h2>}
-      {proposals.map(proposal => (
-        <ProposalCard
-          key={proposal.id}
-          proposal={proposal}
-          busy={busy}
-          onAction={onAction}
-          connection={connection}
-          accepted={accepted}
-          muted={muted}
-        />
+    <div role="radiogroup" aria-label="Source" className="flex w-fit max-w-full flex-wrap gap-1">
+      {SOURCE_FILTERS.map(option => (
+        <label
+          key={option.id}
+          className={cn(
+            'flex min-h-[44px] cursor-pointer items-center rounded-control border px-3 text-ui has-[:focus-visible]:outline has-[:focus-visible]:outline-2',
+            value === option.id ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted',
+          )}
+        >
+          <input
+            type="radio"
+            name="learning-source"
+            value={option.id}
+            className="sr-only"
+            checked={value === option.id}
+            onChange={() => onChange(option.id)}
+          />
+          {option.label}
+        </label>
       ))}
-    </section>
+    </div>
   );
 }
 
-export function ProposalCard({
-  proposal,
-  busy,
-  onAction,
-  connection,
-  accepted,
-  muted = false,
+function LessonTabs({
+  current,
+  counts,
+  onSelect,
 }: {
-  readonly proposal: ProposalView;
-  readonly busy: boolean;
-  readonly onAction: LearningReviewProps['onAction'];
-  readonly connection: DaemonConnection;
-  readonly accepted: boolean;
-  readonly muted?: boolean;
+  readonly current: ProposalState;
+  readonly counts: readonly number[];
+  readonly onSelect: (state: ProposalState) => void;
 }) {
-  const touchAffected = useTouchAffected();
-  const [editing, setEditing] = useState(false);
-  const fetcher = useDaemonFetch();
-  const [draft, setDraft] = useState(proposal.ruleText);
-  const [copied, setCopied] = useState<'rule' | 'patch' | null>(null);
-  const [patchError, setPatchError] = useState<string | null>(null);
-  const editFieldRef = useRef<HTMLTextAreaElement | null>(null);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const strength = learningStrength(proposal.occurrences);
-
-  useEffect(
-    () => () => {
-      if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current);
-    },
-    [],
-  );
-
-  // Preserve the source page's desktop editing flow without the page-load
-  // autofocus attribute. Touch devices intentionally keep focus put so opening
-  // Edit does not cover the proposal with a software keyboard.
-  useEffect(() => {
-    if (editing && !touchAffected) editFieldRef.current?.focus();
-  }, [editing, touchAffected]);
-
-  const markCopied = (kind: 'rule' | 'patch') => {
-    if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current);
-    setCopied(kind);
-    copiedTimer.current = setTimeout(() => setCopied(null), 1_500);
-  };
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard?.writeText(proposal.ruleText);
-      markCopied('rule');
-    } catch {
-      // The rule remains visible and selectable when the browser denies
-      // clipboard access, so the control need not pretend the copy succeeded.
-      setCopied(null);
-    }
-  };
-  const savePatch = async () => {
-    try {
-      const patch = await fetchLearningPatch(connection, proposal.id, fetcher);
-      const url = URL.createObjectURL(new Blob([patch.contents], { type: 'text/markdown' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${proposal.identity}.md`;
-      link.click();
-      URL.revokeObjectURL(url);
-      setPatchError(null);
-      markCopied('patch');
-    } catch (reason) {
-      setPatchError(learningErrorMessage(reason));
-    }
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = LESSON_TABS.length - 1;
+    const target =
+      event.key === 'ArrowRight'
+        ? index === last
+          ? 0
+          : index + 1
+        : event.key === 'ArrowLeft'
+          ? index === 0
+            ? last
+            : index - 1
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? last
+              : undefined;
+    const next = target === undefined ? undefined : LESSON_TABS[target];
+    if (target === undefined || next === undefined) return;
+    event.preventDefault();
+    onSelect(next.state);
+    refs.current[target]?.focus();
   };
   return (
-    <article
-      className={cn('kt-panel flex flex-col gap-2 p-3', muted && 'opacity-80')}
-      aria-label={`Learning proposal ${proposal.title}`}
+    <div
+      role="tablist"
+      aria-label="Lesson status"
+      className="flex max-w-full gap-1 overflow-x-auto border-b border-border-soft"
     >
-      <div className="flex flex-wrap items-start gap-2">
-        <span
-          // The count IS the argument for the rule, so a strong one is set in
-          // heavier type as well as a different tone — colour alone would carry
-          // the whole distinction for a reader who cannot separate the two.
-          className={cn('kt-badge shrink-0', strength === 'strong' && 'font-semibold')}
-          data-tone={strength === 'strong' ? 'accent' : strength === 'weak' ? 'pend' : 'ok'}
-          title={`${proposal.occurrences} distinct session${proposal.occurrences === 1 ? '' : 's'}`}
-        >
-          {proposal.occurrences}×
-        </span>
-        <span className="mono text-meta text-faint" title="distinct repos this was seen in">
-          {proposal.crossRepoCount} repo{proposal.crossRepoCount === 1 ? '' : 's'}
-        </span>
-        <h3 className="m-0 min-w-0 flex-1 text-ui font-semibold">{proposal.title}</h3>
-      </div>
-      <div className="mono text-meta text-faint">
-        → {proposal.target.path}
-        {proposal.target.anchor ? ` (${proposal.target.anchor})` : ''}
-      </div>
-      {editing ? (
-        <textarea
-          ref={editFieldRef}
-          className="kt-input resize-y"
-          rows={3}
-          aria-label={`Edit rule text for ${proposal.title}`}
-          value={draft}
-          onChange={event => setDraft(event.target.value)}
-        />
-      ) : (
-        <p className="m-0 whitespace-pre-wrap text-ui text-fg-soft">{proposal.ruleText}</p>
-      )}
-      <details className="rounded border border-border-soft bg-surface-1">
-        <summary className="flex min-h-[44px] cursor-pointer list-none items-center px-2 text-meta font-medium text-muted">
-          Evidence · {proposal.evidence.length} verified quote{proposal.evidence.length === 1 ? '' : 's'}
-        </summary>
-        <ul className="m-0 flex list-none flex-col gap-1 p-2 pt-0">
-          {proposal.evidence.map(evidence => (
-            <li key={evidence.observationId}>
-              <a
-                className="flex min-h-[44px] flex-col justify-center gap-0.5 rounded px-2 py-1 hover:bg-surface-2"
-                href={`/d/${encodeURIComponent(connection.daemonId)}/session/${encodeURIComponent(evidence.sessionId)}`}
-              >
-                <span className="text-ui text-fg-soft">“{evidence.quote}”</span>
-                <span className="mono text-meta text-faint">
-                  {evidence.source === 'teammate' ? 'agent steer' : 'human'}
-                  {evidence.teammate ? ` · ${displayCallsign(evidence.teammate)}` : ''} · {evidence.repo} ·{' '}
-                  {absoluteTime(evidence.at)}
-                </span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      </details>
-      <div className="flex flex-wrap gap-sm">
-        {!accepted && !editing && (
-          <>
-            <Button
-              size="sm"
-              variant="primary"
-              className="min-h-[44px] items-center gap-xs"
-              disabled={busy}
-              onClick={() => onAction(proposal.id, { action: 'accept' })}
-              aria-label={`Accept ${proposal.title}`}
-            >
-              <Check size={14} aria-hidden="true" />
-              Accept
-            </Button>
-            <Button
-              size="sm"
-              className="min-h-[44px] items-center gap-xs"
-              onClick={() => setEditing(true)}
-              aria-label={`Edit ${proposal.title}`}
-            >
-              <Pencil size={14} aria-hidden="true" />
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              className="min-h-[44px] items-center gap-xs"
-              disabled={busy}
-              onClick={() => onAction(proposal.id, { action: 'reject' })}
-              aria-label={`Reject ${proposal.title} permanently`}
-            >
-              <X size={14} aria-hidden="true" />
-              Reject
-            </Button>
-          </>
-        )}
-        {editing && (
-          <>
-            <Button
-              size="sm"
-              variant="primary"
-              className="min-h-[44px] items-center gap-xs"
-              disabled={busy || draft.trim() === ''}
-              onClick={() => {
-                onAction(proposal.id, { action: 'edit', ruleText: draft });
-                setEditing(false);
-              }}
-              aria-label={`Save rule text for ${proposal.title}`}
-            >
-              <Check size={14} aria-hidden="true" />
-              Save
-            </Button>
-            <Button
-              size="sm"
-              className="min-h-[44px]"
-              onClick={() => {
-                setDraft(proposal.ruleText);
-                setEditing(false);
-              }}
-              aria-label={`Cancel editing ${proposal.title}`}
-            >
-              Cancel
-            </Button>
-          </>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="min-h-[44px] items-center gap-xs"
-          onClick={() => void copy()}
-          aria-label={`Copy rule text for ${proposal.title}`}
-        >
-          <Copy size={14} aria-hidden="true" />
-          {copied === 'rule' ? 'Copied' : 'Copy rule'}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="min-h-[44px] items-center gap-xs"
-          onClick={() => void savePatch()}
-          aria-label={`Save a patch file for ${proposal.title}`}
-        >
-          <FileDown size={14} aria-hidden="true" />
-          {copied === 'patch' ? 'Saved' : 'Save patch'}
-        </Button>
-      </div>
-      {patchError !== null && (
-        <p role="alert" className="m-0 text-meta text-warn">
-          {patchError}
-        </p>
-      )}
-    </article>
+      {LESSON_TABS.map((entry, index) => {
+        const selected = entry.state === current;
+        return (
+          <button
+            key={entry.state}
+            ref={element => {
+              refs.current[index] = element;
+            }}
+            type="button"
+            role="tab"
+            id={`learning-tab-${entry.state}`}
+            aria-selected={selected}
+            aria-controls="learning-lessons"
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onSelect(entry.state)}
+            onKeyDown={event => onKeyDown(event, index)}
+            className={cn(
+              '-mb-px flex min-h-[44px] shrink-0 items-center gap-1.5 border-b-2 px-3 text-ui',
+              selected ? 'border-accent font-semibold text-fg' : 'border-transparent text-muted hover:text-fg',
+            )}
+          >
+            {entry.label}
+            <span className="mono rounded-badge bg-surface-2 px-1.5 text-meta text-muted">{counts[index]}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }

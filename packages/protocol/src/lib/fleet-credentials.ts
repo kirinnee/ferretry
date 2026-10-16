@@ -213,10 +213,16 @@ export const CLOUD_CREDENTIAL_KINDS = ['aws-profile', 'gcloud-adc', 'azure-cli']
 export const CloudCredentialKindSchema = z.enum(CLOUD_CREDENTIAL_KINDS);
 export type CloudCredentialKind = z.infer<typeof CloudCredentialKindSchema>;
 
+/**
+ * Which half of a login that drives both CLIs a variable belongs to (docs/provider-presets.md). Absent:
+ * every CLI the login drives is given it.
+ */
+const HALF_SHAPE = { harness: HarnessKindSchema.optional() };
+
 /** One variable of an environment login, as it may travel: a value, or a secret's NAME and whether it is set. */
 export const FleetEnvironmentVariableSchema = z.discriminatedUnion('kind', [
   /** A plain value — a base URL, a region, a model id. Shown as it is. */
-  z.strictObject({ name: NonEmptyStringSchema, kind: z.literal('plain'), value: z.string() }),
+  z.strictObject({ name: NonEmptyStringSchema, kind: z.literal('plain'), value: z.string(), ...HALF_SHAPE }),
   /**
    * A value made from the secret store: `${secret:NAME}`, possibly inside a template. The value is
    * never read; `set` says whether the store holds every secret it names.
@@ -226,9 +232,10 @@ export const FleetEnvironmentVariableSchema = z.discriminatedUnion('kind', [
     kind: z.literal('secret'),
     secrets: z.array(NonEmptyStringSchema).min(1).readonly(),
     set: z.boolean(),
+    ...HALF_SHAPE,
   }),
   /** A value that looks like a credential and is not a reference. Never shown. */
-  z.strictObject({ name: NonEmptyStringSchema, kind: z.literal('hidden') }),
+  z.strictObject({ name: NonEmptyStringSchema, kind: z.literal('hidden'), ...HALF_SHAPE }),
 ]);
 export type FleetEnvironmentVariable = z.infer<typeof FleetEnvironmentVariableSchema>;
 
@@ -319,6 +326,12 @@ export type FleetCredentialTestResult = z.infer<typeof FleetCredentialTestResult
 export const FleetCredentialViewSchema = z.strictObject({
   id: FleetCredentialIdSchema,
   harness: HarnessKindSchema,
+  /**
+   * Every CLI it drives, Claude Code first: one for a sign-in, both for an environment login with a
+   * `claude:` and a `codex:` half (docs/provider-presets.md). Absent from a daemon that predates halves,
+   * which means `[harness]`. A surface that picks a login for one CLI filters on this.
+   */
+  harnesses: z.array(HarnessKindSchema).min(1).readonly().optional(),
   store: FleetCredentialStoreSchema,
   /** The login's email, when the harness recorded one. Display only. */
   email: NonEmptyStringSchema.optional(),
@@ -383,8 +396,21 @@ export const FleetPresetVariableSchema = z.strictObject({
   allowEmpty: z.boolean(),
   /** What it is for, in a few words. */
   description: NonEmptyStringSchema.optional(),
+  /** The halves that set it, for a preset that drives both CLIs. Absent: the preset's one CLI. */
+  harnesses: z.array(HarnessKindSchema).min(1).readonly().optional(),
 });
 export type FleetPresetVariable = z.infer<typeof FleetPresetVariableSchema>;
+
+/**
+ * A preset's detection clues: hosts a base URL goes to, variable names (`PREFIX_*` for a family) only
+ * it uses, and the documented start of its keys. Facts about the provider, never anybody's values.
+ */
+export const FleetPresetDetectSchema = z.strictObject({
+  hosts: z.array(NonEmptyStringSchema).readonly(),
+  variables: z.array(NonEmptyStringSchema).readonly(),
+  keyPrefixes: z.array(NonEmptyStringSchema).readonly(),
+});
+export type FleetPresetDetect = z.infer<typeof FleetPresetDetectSchema>;
 
 /** A preset, as the Add a login flow offers it. */
 export const FleetProviderPresetViewSchema = z.strictObject({
@@ -410,6 +436,26 @@ export const FleetProviderPresetViewSchema = z.strictObject({
   verified: NonEmptyStringSchema,
   /** Whether it can be used to add a login here, and why not when it cannot. */
   offered: FleetCredentialActSchema,
+  /**
+   * Each CLI it has a half for, and whether that half is offered: a login from it drives every offered
+   * one with one secret (docs/provider-presets.md). Absent from a daemon that predates halves, which
+   * means `harness` alone.
+   */
+  halves: z
+    .array(
+      z.strictObject({
+        harness: HarnessKindSchema,
+        offered: FleetCredentialActSchema,
+        /** This CLI's own guide at the provider, when it has one apart from `docs`. */
+        docs: NonEmptyStringSchema.optional(),
+        models: z.array(NonEmptyStringSchema).readonly(),
+      }),
+    )
+    .min(1)
+    .readonly()
+    .optional(),
+  /** How a pasted set of variables is recognised as this provider's (`@ferretry/fleet/detect`). */
+  detect: FleetPresetDetectSchema.optional(),
 });
 export type FleetProviderPresetView = z.infer<typeof FleetProviderPresetViewSchema>;
 

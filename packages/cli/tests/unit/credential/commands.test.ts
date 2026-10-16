@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { FleetPresetVariable } from '@ferretry/protocol';
+import type { FleetPresetVariable, FleetProviderPresetView } from '@ferretry/protocol';
 import should from 'should';
 import { registerCredentialCommands, suggestCredentialId } from '../../../src/lib/credential/commands.ts';
 import { renderCredentialList } from '../../../src/lib/credential/render.ts';
@@ -23,6 +23,119 @@ const needsSignIn = credential({
   usage: { fiveHour: {}, weekly: { usedPercent: 50 } },
   usedBy: [],
 });
+
+/** A preset variable for one-click fixtures: `required`/`allowEmpty` default to the common case. */
+const clickVar = (overrides: Record<string, unknown>): FleetPresetVariable =>
+  ({ required: true, allowEmpty: false, ...overrides }) as FleetPresetVariable;
+
+const GLM_CLICK: FleetProviderPresetView = {
+  id: 'zai-glm',
+  label: 'GLM / Z.ai',
+  harness: 'claude',
+  summary: 'Claude Code on GLM.',
+  docs: 'https://docs.z.ai/devpack/tool/claude',
+  origin: 'built-in',
+  variables: [
+    clickVar({ name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic' }),
+    clickVar({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'ZAI_API_KEY' }),
+  ],
+  models: ['glm-5.3'],
+  test: { available: true, spends: 'nothing', note: 'Reads your quota.' },
+  quota: { source: 'zai-coding-plan', note: 'Coding Plan quota.' },
+  unverified: [],
+  verified: '2026-10-16',
+  offered: { available: true },
+};
+
+const AMAZON_BEDROCK_CLICK: FleetProviderPresetView = {
+  ...GLM_CLICK,
+  id: 'amazon-bedrock',
+  label: 'Amazon Bedrock (AWS profile)',
+  variables: [clickVar({ name: 'CLAUDE_CODE_USE_BEDROCK', kind: 'plain', value: '1' })],
+};
+
+const BEDROCK_MANTLE_CLICK: FleetProviderPresetView = {
+  ...GLM_CLICK,
+  id: 'bedrock-mantle',
+  label: 'Bedrock Mantle (AWS profile)',
+  variables: [clickVar({ name: 'CLAUDE_CODE_USE_BEDROCK_MANTLE', kind: 'plain', value: '1' })],
+};
+
+const NOT_OFFERED_CLICK: FleetProviderPresetView = {
+  ...GLM_CLICK,
+  id: 'nope-provider',
+  label: 'Nope Provider',
+  offered: { available: false, reason: 'Needs a model catalogue file.' },
+};
+
+const TWO_SECRETS_CLICK: FleetProviderPresetView = {
+  ...GLM_CLICK,
+  id: 'two-secrets',
+  label: 'Two Secrets',
+  variables: [
+    clickVar({ name: 'FIRST_TOKEN', kind: 'secret', secret: 'FIRST_KEY' }),
+    clickVar({ name: 'SECOND_TOKEN', kind: 'secret', secret: 'SECOND_KEY' }),
+  ],
+};
+
+const AZURE_CLICK: FleetProviderPresetView = {
+  id: 'azure-openai',
+  label: 'Azure OpenAI',
+  harness: 'codex',
+  summary: 'Codex on your Azure OpenAI resource.',
+  docs: 'https://learn.microsoft.com/azure',
+  origin: 'built-in',
+  variables: [
+    clickVar({ name: 'AZURE_OPENAI_RESOURCE', kind: 'plain', value: '', description: 'the resource name' }),
+    clickVar({ name: 'AZURE_OPENAI_API_KEY', kind: 'secret', secret: 'AZURE_OPENAI_API_KEY' }),
+  ],
+  models: [],
+  test: { available: true, spends: 'nothing', note: 'Lists the models on your resource.' },
+  quota: { source: 'transcript-pricing', note: 'Azure reports quota in the portal only.' },
+  unverified: [],
+  verified: '2026-10-16',
+  offered: { available: true },
+};
+
+const DEEPSEEK_CLICK: FleetProviderPresetView = {
+  id: 'deepseek',
+  label: 'DeepSeek',
+  harness: 'claude',
+  summary: 'Claude Code and Codex on DeepSeek models with one DeepSeek platform key.',
+  docs: 'https://api-docs.deepseek.com/quick_start',
+  origin: 'built-in',
+  variables: [
+    clickVar({
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      value: 'https://api.deepseek.com/anthropic',
+      harnesses: ['claude'],
+    }),
+    clickVar({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['claude'] }),
+    clickVar({ name: 'DEEPSEEK_API_KEY', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['codex'] }),
+  ],
+  models: ['deepseek-flash'],
+  test: { available: true, spends: 'nothing', note: 'Lists the models the key can use.' },
+  quota: { source: 'deepseek-balance', note: 'Your DeepSeek balance.' },
+  unverified: [],
+  verified: '2026-10-16',
+  offered: { available: true },
+  halves: [
+    { harness: 'claude', offered: { available: true }, models: ['deepseek-flash'] },
+    { harness: 'codex', offered: { available: true }, models: ['deepseek-flash'] },
+  ],
+  detect: { hosts: ['api.deepseek.com'], variables: ['DEEPSEEK_*'], keyPrefixes: [] },
+};
+
+const DEEPSEEK_CODEX_GAP_CLICK: FleetProviderPresetView = {
+  ...DEEPSEEK_CLICK,
+  id: 'deepseek-half-gap',
+  label: 'DeepSeek (gap)',
+  halves: [
+    { harness: 'claude', offered: { available: true }, models: ['deepseek-flash'] },
+    { harness: 'codex', offered: { available: false, reason: 'Needs a model catalogue file.' }, models: [] },
+  ],
+};
 
 describe('suggestCredentialId', () => {
   it('should make an id from the tool and label, and add a number until it is free', () => {
@@ -136,10 +249,10 @@ describe('registerCredentialCommands', () => {
     should(dry.gateway.called('startSignIn')).be.empty();
   });
 
-  it('should refuse a tool it does not know', async () => {
+  it('should treat a word that is neither claude nor codex as a provider, and refuse an unknown one', async () => {
     const world = fakeWorld();
     await should(runCommand(registerCredentialCommands, world, ['credential', 'add', 'gemini'])).be.rejectedWith(
-      /use claude or codex/,
+      'There is no provider "gemini": see `fz login presets`',
     );
   });
 
@@ -413,13 +526,21 @@ describe('environment logins (docs/provider-presets.md)', () => {
 
     // Assert
     should(text.out.text('report'))
-      .match(/Claude Code:\n {2}zai-glm {2}GLM \/ Z\.ai {2}— test: free, quota: zai-coding-plan/)
-      .and.match(/amazon-bedrock {2}Amazon Bedrock {2}— no test/)
-      .and.match(/Codex:\n {2}zai-glm-codex {2}GLM \/ Z\.ai {2}— test: one token/)
+      .match(/Claude Code:\n {2}zai-glm {2}GLM \/ Z\.ai {2}\(Claude only\) {2}— test: free, quota: zai-coding-plan/)
+      .and.match(/amazon-bedrock {2}Amazon Bedrock {2}\(Claude only\) {2}— no test/)
+      .and.match(/Codex:\n {2}zai-glm-codex {2}GLM \/ Z\.ai {2}\(not offered\) {2}— test: one token/)
       .and.match(/Not offered: Needs a model catalogue file\./)
       .and.match(/Add one: fz login add claude --preset <id>/);
     should(JSON.parse(json.out.text('report')).presets).have.length(3);
     should(claudeOnly.out.text('report')).not.match(/Codex:/);
+  });
+
+  it('should chip a dual preset "Claude + Codex" from its offered halves', async () => {
+    const world = fakeWorld({ gateway: { presets: () => ({ presets: [DEEPSEEK_CLICK] }) } });
+    await runCommand(registerCredentialCommands, world, ['login', 'presets']);
+    should(world.out.text('report')).match(
+      /deepseek {2}DeepSeek {2}\(Claude \+ Codex\) {2}— test: free, quota: deepseek-balance/,
+    );
   });
 
   it('should show an environment login’s variables, never a hidden value, and what it needs', () => {
@@ -472,5 +593,295 @@ describe('environment logins (docs/provider-presets.md)', () => {
       .and.match(/LEAKED=\(hidden\)/)
       .and.match(/Uses your AWS profile acme/)
       .and.match(/Needs: A, B/);
+  });
+});
+
+describe('one-click providers (docs/provider-presets.md)', () => {
+  it('should add a login from a provider word, asking for its secret hidden, never printing it', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: { presets: () => ({ presets: [GLM_CLICK] }) },
+      hiddenAnswers: ['sk-secret-value'],
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, world, ['login', 'add', 'glm']);
+
+    // Assert
+    should(world.prompt.hiddenQuestions).eql(['ZAI_API_KEY: ']);
+    should(world.gateway.called('putSecret')[0]?.args).eql(['ZAI_API_KEY', 'sk-secret-value']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'credential.add',
+      id: 'claude-zai-glm',
+      harness: 'claude',
+      store: 'environment',
+      preset: 'zai-glm',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+        ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}',
+      },
+    });
+    should(world.out.text('success')).match(/claude-zai-glm added — drives Claude Code\./);
+    should(world.out.text('report')).match(/Test it: fz login test claude-zai-glm/);
+    should(`${world.out.text()}\n${world.prompt.hiddenQuestions.join('\n')}`).not.match(/sk-secret-value/);
+  });
+
+  it('should resolve a word by an id segment or a label word, case-insensitively', async () => {
+    const foundry = fakeWorld({
+      gateway: { presets: () => ({ presets: [AZURE_CLICK] }) },
+      hiddenAnswers: ['azure-secret-value'],
+    });
+    await runCommand(registerCredentialCommands, foundry, [
+      'login',
+      'add',
+      'AZURE',
+      '--env',
+      'AZURE_OPENAI_RESOURCE=acme',
+    ]);
+    should(foundry.gateway.called('stage')[0]?.args[0]).containDeep({ id: 'codex-azure-openai', harness: 'codex' });
+  });
+
+  it('should pick the first catalogue match for an ambiguous word, and say which else matched', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: { presets: () => ({ presets: [AMAZON_BEDROCK_CLICK, BEDROCK_MANTLE_CLICK] }) },
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, world, ['login', 'add', 'bedrock']);
+
+    // Assert
+    should(world.out.text('warn')).match(
+      /"bedrock" could also mean bedrock-mantle — using Amazon Bedrock \(AWS profile\)\./,
+    );
+    should(world.gateway.called('stage')[0]?.args[0]).containDeep({
+      id: 'claude-amazon-bedrock',
+      preset: 'amazon-bedrock',
+    });
+    should(world.out.text('success')).match(/drives Claude Code\./);
+  });
+
+  it('should refuse an unknown provider word, and a provider that is not offered here', async () => {
+    const unknown = fakeWorld({ gateway: { presets: () => ({ presets: [GLM_CLICK] }) } });
+    await should(runCommand(registerCredentialCommands, unknown, ['login', 'add', 'zorp'])).be.rejectedWith(
+      'There is no provider "zorp": see `fz login presets`',
+    );
+
+    const notOffered = fakeWorld({ gateway: { presets: () => ({ presets: [NOT_OFFERED_CLICK] }) } });
+    await should(runCommand(registerCredentialCommands, notOffered, ['login', 'add', 'nope-provider'])).be.rejectedWith(
+      'Nope Provider is not offered here: Needs a model catalogue file.',
+    );
+  });
+
+  it('should reuse a secret the store already holds, without asking or storing it again', async () => {
+    const world = fakeWorld({
+      gateway: {
+        presets: () => ({ presets: [GLM_CLICK] }),
+        secretNames: () => new Set(['ZAI_API_KEY']),
+      },
+    });
+    await runCommand(registerCredentialCommands, world, ['login', 'add', 'glm']);
+    should(world.out.text('report')).match(/ZAI_API_KEY: already set ✓/);
+    should(world.prompt.hiddenQuestions).be.empty();
+    should(world.gateway.called('putSecret')).be.empty();
+  });
+
+  it('should read exactly one missing secret from stdin off a terminal, and refuse two by name', async () => {
+    // Arrange
+    const one = fakeWorld({
+      gateway: { presets: () => ({ presets: [GLM_CLICK] }) },
+      interactive: false,
+      secretValue: 'from-stdin',
+    });
+    const two = fakeWorld({ gateway: { presets: () => ({ presets: [TWO_SECRETS_CLICK] }) }, interactive: false });
+
+    // Act
+    await runCommand(registerCredentialCommands, one, ['login', 'add', 'zai-glm']);
+    const refused = runCommand(registerCredentialCommands, two, ['login', 'add', 'two-secrets']);
+
+    // Assert
+    should(one.gateway.called('putSecret')[0]?.args).eql(['ZAI_API_KEY', 'from-stdin']);
+    await should(refused).be.rejectedWith(
+      'FIRST_KEY, SECOND_KEY are needed for Two Secrets — pipe each in: printf %s "$FIRST_KEY" | fz secret set FIRST_KEY; printf %s "$SECOND_KEY" | fz secret set SECOND_KEY',
+    );
+    should(two.gateway.called('putSecret')).be.empty();
+  });
+
+  it('should ask a required, empty plain variable interactively, or refuse it off a terminal', async () => {
+    // Arrange
+    const asked = fakeWorld({
+      gateway: { presets: () => ({ presets: [AZURE_CLICK] }) },
+      answers: ['my-resource'],
+      hiddenAnswers: ['azure-secret-value'],
+    });
+    const refused = fakeWorld({ gateway: { presets: () => ({ presets: [AZURE_CLICK] }) }, interactive: false });
+    const given = fakeWorld({
+      gateway: { presets: () => ({ presets: [AZURE_CLICK] }) },
+      interactive: false,
+      secretValue: 'azure-secret-value',
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, asked, ['login', 'add', 'azure-openai']);
+    const rejected = runCommand(registerCredentialCommands, refused, ['login', 'add', 'azure-openai']);
+    await runCommand(registerCredentialCommands, given, [
+      'login',
+      'add',
+      'azure-openai',
+      '--env',
+      'AZURE_OPENAI_RESOURCE=given-resource',
+    ]);
+
+    // Assert
+    should(asked.prompt.questions).eql(['AZURE_OPENAI_RESOURCE (the resource name): ']);
+    should(asked.gateway.called('stage')[0]?.args[0]).containDeep({ env: { AZURE_OPENAI_RESOURCE: 'my-resource' } });
+    await should(rejected).be.rejectedWith(
+      'AZURE_OPENAI_RESOURCE is needed for Azure OpenAI — pass --env AZURE_OPENAI_RESOURCE=VALUE',
+    );
+    should(given.gateway.called('stage')[0]?.args[0]).containDeep({ env: { AZURE_OPENAI_RESOURCE: 'given-resource' } });
+  });
+
+  it('should drive every offered half with one secret, and list the half --for names first', async () => {
+    // Arrange
+    const first = fakeWorld({
+      gateway: { presets: () => ({ presets: [DEEPSEEK_CLICK] }) },
+      hiddenAnswers: ['sk-deepseek'],
+    });
+    const forCodex = fakeWorld({
+      gateway: { presets: () => ({ presets: [DEEPSEEK_CLICK] }) },
+      hiddenAnswers: ['sk-deepseek'],
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, first, ['login', 'add', 'deepseek']);
+    await runCommand(registerCredentialCommands, forCodex, ['login', 'add', 'deepseek', '--for', 'codex']);
+
+    // Assert
+    should(first.gateway.called('stage')[0]?.args[0]).containDeep({ id: 'claude-deepseek', harness: 'claude' });
+    should(forCodex.gateway.called('stage')[0]?.args[0]).containDeep({ id: 'codex-deepseek', harness: 'codex' });
+    for (const world of [first, forCodex]) {
+      should(world.gateway.called('stage')[0]?.args[0]).containDeep({
+        env: {
+          ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+          ANTHROPIC_AUTH_TOKEN: '${secret:DEEPSEEK_API_KEY}',
+          DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}',
+        },
+      });
+      should(world.gateway.called('putSecret')).have.length(1);
+      should(world.out.text('success')).match(/drives Claude Code \+ Codex\./);
+    }
+  });
+
+  it('should refuse --for naming a CLI the preset has no half for, or no OFFERED half for', async () => {
+    const noHalf = fakeWorld({ gateway: { presets: () => ({ presets: [GLM_CLICK] }) } });
+    await should(
+      runCommand(registerCredentialCommands, noHalf, ['login', 'add', 'glm', '--for', 'codex']),
+    ).be.rejectedWith('GLM / Z.ai has no half for Codex');
+
+    const gap = fakeWorld({ gateway: { presets: () => ({ presets: [DEEPSEEK_CODEX_GAP_CLICK] }) } });
+    await should(
+      runCommand(registerCredentialCommands, gap, ['login', 'add', 'deepseek-half-gap', '--for', 'codex']),
+    ).be.rejectedWith('DeepSeek (gap) does not drive Codex: Needs a model catalogue file.');
+  });
+
+  it('should test a one-click login right after adding it, and fail its exit code when it fails', async () => {
+    // Arrange
+    const passed = fakeWorld({
+      gateway: { presets: () => ({ presets: [GLM_CLICK] }), secretNames: () => new Set(['ZAI_API_KEY']) },
+    });
+    const failed = fakeWorld({
+      gateway: {
+        presets: () => ({ presets: [GLM_CLICK] }),
+        secretNames: () => new Set(['ZAI_API_KEY']),
+        test: () => ({
+          credentialId: 'claude-zai-glm',
+          ok: false,
+          code: 'rejected',
+          message: 'The provider rejected this login.',
+          spent: 'nothing',
+          at: '2026-10-16T09:00:00.000Z',
+        }),
+      },
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, passed, ['login', 'add', 'glm', '--test']);
+    await runCommand(registerCredentialCommands, failed, ['login', 'add', 'glm', '--test']);
+
+    // Assert
+    should(passed.out.text('report')).match(/claude-zai-glm: The provider accepted this login\./);
+    should(passed.out.exitCode).be.undefined();
+    should(failed.out.text('report')).match(/claude-zai-glm: The provider rejected this login\./);
+    should(failed.out.exitCode).equal(1);
+  });
+
+  it('should import from the current shell with --from-env, detecting the provider and sourcing its values', async () => {
+    // Arrange
+    const world = fakeWorld({
+      gateway: { presets: () => ({ presets: [DEEPSEEK_CLICK] }) },
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/v2/anthropic',
+        DEEPSEEK_API_KEY: 'sk-live-shell-value',
+        UNRELATED: undefined,
+      },
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, world, ['login', 'add', '--from-env']);
+
+    // Assert
+    should(world.out.text('report')).match(
+      /Detected DeepSeek from ANTHROPIC_BASE_URL \(api\.deepseek\.com\), DEEPSEEK_API_KEY\./,
+    );
+    should(world.prompt.hiddenQuestions).be.empty();
+    should(world.gateway.called('putSecret')[0]?.args).eql(['DEEPSEEK_API_KEY', 'sk-live-shell-value']);
+    should(world.gateway.called('stage')[0]?.args[0]).containDeep({
+      env: { ANTHROPIC_BASE_URL: 'https://api.deepseek.com/v2/anthropic' },
+    });
+    should(world.out.text()).not.match(/sk-live-shell-value/);
+  });
+
+  it('should still read values from the shell with --from-env when a provider is named explicitly', async () => {
+    // Arrange — naming the provider skips detection, but the shell still fills its secret.
+    const world = fakeWorld({
+      gateway: { presets: () => ({ presets: [GLM_CLICK] }) },
+      env: { ANTHROPIC_AUTH_TOKEN: 'sk-explicit-word-secret' },
+    });
+
+    // Act
+    await runCommand(registerCredentialCommands, world, ['login', 'add', 'glm', '--from-env']);
+
+    // Assert
+    should(world.out.text('report')).not.match(/Detected/);
+    should(world.prompt.hiddenQuestions).be.empty();
+    should(world.gateway.called('putSecret')[0]?.args).eql(['ZAI_API_KEY', 'sk-explicit-word-secret']);
+  });
+
+  it('should refuse detection that finds no provider, naming what it recognised', async () => {
+    const world = fakeWorld({
+      gateway: { presets: () => ({ presets: [DEEPSEEK_CLICK] }) },
+      env: { MY_SERVICE_API_KEY: 'v' },
+    });
+    await should(runCommand(registerCredentialCommands, world, ['login', 'add', '--from-env'])).be.rejectedWith(
+      'Name a tool or provider: fz login add claude|codex|<provider>',
+    );
+    should(world.out.text('report')).match(/Detected a custom gateway: MY_SERVICE_API_KEY\./);
+  });
+
+  it('should detect the provider from a bare --env, and build the login the same way', async () => {
+    const world = fakeWorld({
+      gateway: { presets: () => ({ presets: [DEEPSEEK_CLICK] }) },
+      hiddenAnswers: ['sk-bare-env'],
+    });
+    await runCommand(registerCredentialCommands, world, [
+      'login',
+      'add',
+      '--env',
+      'ANTHROPIC_BASE_URL=https://api.deepseek.com/v3/anthropic',
+    ]);
+    should(world.out.text('report')).match(/Detected DeepSeek from ANTHROPIC_BASE_URL \(api\.deepseek\.com\)\./);
+    should(world.gateway.called('stage')[0]?.args[0]).containDeep({
+      env: { ANTHROPIC_BASE_URL: 'https://api.deepseek.com/v3/anthropic' },
+    });
   });
 });

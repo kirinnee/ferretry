@@ -80,7 +80,7 @@ describe('credentialEnvironmentView', () => {
     const kimi = credentialEnvironmentView(
       login({
         harness: 'codex',
-        preset: 'kimi-codex',
+        preset: 'kimi',
         env: { KIMI_API_KEY: '${secret:MOONSHOT_API_KEY}' },
         codexProvider: { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.ai/v1', keyVariable: 'KIMI_API_KEY' },
       }),
@@ -123,5 +123,69 @@ describe('credentialEnvironmentView', () => {
     should(gone.missingPreset).equal('vanished');
     should(gone.test).match({ available: false, reason: /Preset vanished is not on this machine/u });
     should(unfilled.test).deepEqual({ available: false, reason: 'Fill in ANTHROPIC_BASE_URL first, then Test.' });
+  });
+});
+
+describe('credentialEnvironmentView of a login that drives both CLIs', () => {
+  it('should list shared variables untagged and each half’s own under its half, with its Codex provider and Test', () => {
+    // Act
+    const actual = FleetCredentialEnvironmentSchema.parse(
+      credentialEnvironmentView(
+        login({
+          harness: 'claude',
+          preset: 'deepseek',
+          env: { API_TIMEOUT_MS: '600000' },
+          claude: {
+            env: {
+              ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+              ANTHROPIC_AUTH_TOKEN: '${secret:DEEPSEEK_API_KEY}',
+            },
+          },
+          codex: {
+            env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' },
+            codexProvider: {
+              id: 'deepseek',
+              name: 'DeepSeek',
+              baseUrl: 'https://api.deepseek.com/',
+              keyVariable: 'DEEPSEEK_API_KEY',
+            },
+          },
+        }),
+        PRESETS,
+        new Set(),
+      ),
+    );
+
+    // Assert
+    should(actual.variables).deepEqual([
+      { name: 'API_TIMEOUT_MS', kind: 'plain', value: '600000' },
+      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: false, harness: 'claude' },
+      { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.deepseek.com/anthropic', harness: 'claude' },
+      { name: 'DEEPSEEK_API_KEY', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: false, harness: 'codex' },
+    ]);
+    should(actual.missingSecrets).deepEqual(['DEEPSEEK_API_KEY']);
+    should(actual.codexProvider).deepEqual({ id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/' });
+    should(actual.test).deepEqual({
+      available: true,
+      spends: 'nothing',
+      note: 'Lists the models the key can use. Spends nothing.',
+    });
+  });
+
+  it('should hide a raw-looking value in a half, tagged with its half', () => {
+    // Act
+    const actual = credentialEnvironmentView(
+      {
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-ant-api03-abcdefghijklmnopqrstu' } },
+        codex: { codexProvider: { id: 'ollama' } },
+      },
+      PRESETS,
+      new Set(),
+    );
+
+    // Assert
+    should(actual.variables).deepEqual([{ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'hidden', harness: 'claude' }]);
   });
 });

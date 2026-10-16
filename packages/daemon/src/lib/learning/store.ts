@@ -1,5 +1,5 @@
 import type { ClockPort } from '../ports.ts';
-import type { LearningState, Observation, Proposal, RunManifest, Tombstone } from './types.ts';
+import type { LearningState, Observation, Proposal, RunManifest, StoredSessionLearning, Tombstone } from './types.ts';
 
 /** Persistence boundary for the learning subsystem. Implemented only by adapters. */
 export interface LearningStorePort {
@@ -17,6 +17,9 @@ export interface LearningStorePort {
   readRunManifest(runId: string): Promise<RunManifest | undefined>;
   latestRunManifest(): Promise<RunManifest | undefined>;
   writePatch(id: string, contents: string): Promise<string>;
+  /** Which ferrets are instructed to learn, one record per session. */
+  loadSessionLearning(): Promise<readonly StoredSessionLearning[]>;
+  saveSessionLearning(records: readonly StoredSessionLearning[]): Promise<void>;
 }
 
 export interface LearningStoreDependencies {

@@ -57,7 +57,6 @@ unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session
 
 # Verb disagreements — finding #5's shape, where the path exists and the method does not.
 verb-unproven GET /v1/sessions/:sessionId/browser/stream # WebSocket() dials use the platform-default GET, which the static transport constructor does not expose as an init method.
-unserved POST /v1/learning/proposals/*/patch # DEFECT: the PWA POSTs; mounts/learning.ts serves GET
 unserved PATCH /v1/sessions/*/terminals/* # DEFECT: the PWA renames a terminal with PATCH; mounts/terminals.ts serves GET, POST and DELETE
 
 # `FyTaskBoardGateway` now dials each of its twelve switch arms directly with a literal path and method.
@@ -104,7 +103,6 @@ verb-unproven GET /v1/sessions/:sessionId/fs/diff # ANALYSIS: cli filesystem/gat
 # A trailing argument this pass cannot tell from an init: a transport (`fetcher: DaemonFetch`) or a
 # timeout constant. Excluding them would mean trusting a parameter's name or its type NAME, which is the
 # guessing this gate refuses — `/schema/i` is already one such concession and it does not want a second.
-verb-unproven GET /v1/learning/proposals # ANALYSIS: pwa learning-api.ts:54 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
