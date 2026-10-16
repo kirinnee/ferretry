@@ -97,7 +97,7 @@ describe('composer attachments', () => {
     expect(strip()?.props.entries[0]?.objectUrl).toMatch(/^blob:/u);
     expect(submit().props.disabled).toBe(false);
     await runAsync(async () => form().props.onSubmit({ preventDefault() {} }));
-    expect(sent).toEqual([{ message: 'See the attached files.', attachmentIds: ['att_1'], now: true }]);
+    expect(sent).toEqual([{ message: 'See the attached files.', attachmentIds: ['att_1'], now: false }]);
     expect(composer.root.findAllByType(PendingAttachmentStrip)).toHaveLength(0);
     run(() => composer.unmount());
   });

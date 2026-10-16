@@ -114,7 +114,8 @@ export interface RichTextEditorProps {
   readonly onChange: (markdown: string) => void;
   /** The composer's own Enter policy: answers true when this key press should send the message. */
   readonly sendsOnEnter: (event: { readonly shiftKey: boolean; readonly metaKey: boolean; readonly ctrlKey: boolean }) => boolean;
-  readonly onSubmit: () => void;
+  /** `true` only for ⌘/Ctrl+⇧+↵, the explicit "send now" that interrupts the running turn. */
+  readonly onSubmit: (interrupt: boolean) => void;
   readonly onPasteFiles: (files: readonly File[]) => void;
   readonly disabled?: boolean;
   readonly placeholder?: string;
@@ -171,7 +172,7 @@ export function RichTextEditor({
     if (!modified && element?.closest('li, pre') && !event.shiftKey) return;
     if (!sendsOnEnter(event)) return;
     event.preventDefault();
-    onSubmit();
+    onSubmit(modified && event.shiftKey);
   };
 
   const onPaste = (event: ClipboardEvent<HTMLDivElement>): void => {

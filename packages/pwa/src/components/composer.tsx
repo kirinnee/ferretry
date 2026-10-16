@@ -492,7 +492,14 @@ export function Composer({
   const canSubmit =
     !attachments.uploading &&
     (canSubmitComposer(draft, disabled, sending) || (attachmentIds.length > 0 && !disabled && !sending));
-  const submit = async () => {
+  /**
+   * `interrupt` is the ONLY way a send asks the daemon for `now`, and only the explicit ⌘/Ctrl+⇧+↵
+   * reaches it. `now` makes the daemon press Escape on the agent's pane, which stops a turn — so it
+   * is never derived from what this page THINKS the agent is doing: a stale idle reading would
+   * otherwise interrupt real work. Every ordinary send (Enter, the ↑ button, any send-key mode) is
+   * queued behind a running turn instead.
+   */
+  const submit = async (interrupt = false) => {
     if (!canSubmit || submitLock.current) return;
     submitLock.current = true;
     setSending(true);
@@ -502,7 +509,7 @@ export function Composer({
       const sent = (await api.send(sessionId, {
         message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
-        now: !busy,
+        now: interrupt,
       })) as { readonly disposition?: unknown } | undefined;
       // Remembered only while it waits in the agent's queue: ↑ in an empty box brings it back.
       lastQueued.current = isQueuedDisposition(sent?.disposition) ? { key: scopeKey, text: message } : null;
@@ -703,7 +710,7 @@ export function Composer({
             id={`${hintId}-input`}
             onChange={setDraft}
             onPasteFiles={files => attachments.add(files)}
-            onSubmit={() => void submit()}
+            onSubmit={interrupt => void submit(interrupt)}
             placeholder={placeholder}
             sendsOnEnter={sendsOnEnter}
             value={draft}
@@ -796,10 +803,11 @@ export function Composer({
                 return;
               }
               if (event.key !== 'Enter') return;
-              // ⌘/Ctrl+Enter sends in every mode, on every device.
+              // ⌘/Ctrl+Enter sends in every mode, on every device; with Shift it is the one explicit
+              // "send now", which interrupts the running turn.
               if (modified) {
                 event.preventDefault();
-                void submit();
+                void submit(event.shiftKey);
                 return;
               }
               if (highlighted && !event.shiftKey) {
@@ -863,7 +871,7 @@ export function Composer({
         <ComposerQuota quota={quota} />
         <p id={hintId}>
           {busy ? 'Queue for the next turn' : composerEnterHint(bareEnterAction, inputModality.touchAffected)}
-          {inputModality.touchAffected ? null : ' · drop files here'}
+          {inputModality.touchAffected ? null : ' · ⌘⇧↵ sends now and interrupts · drop files here'}
         </p>
         {vimMode ? (
           <>

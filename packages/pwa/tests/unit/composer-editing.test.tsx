@@ -134,6 +134,65 @@ describe('the Notion-style composer keys', () => {
     expect(view.textarea().props.value).toBe('see  now');
   });
 
+  test('a plain send never asks for now, whatever the send key or the agent’s state', async () => {
+    const sent: unknown[] = [];
+    for (const [busyKey, mode] of [
+      ['Enter', 'send'],
+      ['Enter+meta', 'newline'],
+      ['button', 'send'],
+    ] as const) {
+      const view = render(
+        <Composer
+          api={{
+            send: async (_id: string, request: unknown) => {
+              sent.push(request);
+              return {} as never;
+            },
+          }}
+          busy={false}
+          daemon={daemon}
+          draftStore={new DaemonDraftStore(new MemoryStorage())}
+          enterKeyPreference={mode}
+          phoneEnterKeyPreference={mode}
+          sessionId={`plain-${busyKey}`}
+        />,
+      );
+      const textarea = view.root.findByType('textarea');
+      run(() => textarea.props.onChange({ currentTarget: { value: 'hello', selectionStart: 5, selectionEnd: 5 } }));
+      await runAsync(async () => {
+        if (busyKey === 'button') view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+        else
+          view.root.findByType('textarea').props.onKeyDown({
+            key: 'Enter',
+            shiftKey: false,
+            metaKey: busyKey === 'Enter+meta',
+            ctrlKey: false,
+            altKey: false,
+            nativeEvent: { isComposing: false },
+            preventDefault() {},
+          });
+      });
+    }
+    expect(sent).toEqual([
+      { message: 'hello', now: false },
+      { message: 'hello', now: false },
+      { message: 'hello', now: false },
+    ]);
+    const view = mountComposer('idle agent');
+    await runAsync(async () => {
+      view.key({ key: 'Enter' });
+    });
+    expect(view.sent).toEqual([{ message: 'idle agent', now: false }]);
+  });
+
+  test('only ⌘/Ctrl+⇧+↵ sends now, which interrupts the turn', async () => {
+    const view = mountComposer('stop and do this');
+    await runAsync(async () => {
+      view.key({ key: 'Enter', ctrlKey: true, shiftKey: true });
+    });
+    expect(view.sent).toEqual([{ message: 'stop and do this', now: true }]);
+  });
+
   test('↑ in an empty box brings back a copy of the last queued message, and says the original still runs', async () => {
     const view = mountComposer('fix it later', 'queued');
     expect(view.key({ key: 'ArrowUp' })).toBe(false);
