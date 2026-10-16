@@ -4,6 +4,7 @@ import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
+import { continueList, type DraftEdit, insideCodeBlock, toggleWrap, wrapMarkerFor } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import {
   type ComposerEnterKeyPreference,
@@ -11,7 +12,6 @@ import {
   composerEnterHint,
   shiftedComposerEnterAction,
 } from '../lib/composer-keybinding.ts';
-import { continueList, type DraftEdit, insideCodeBlock, toggleWrap, wrapMarkerFor } from '../lib/composer-editing.ts';
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
@@ -41,6 +41,7 @@ import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
+import { RichTextEditor } from './rich-text-editor.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
 export interface ComposerProps {
@@ -273,7 +274,9 @@ export function Composer({
   const hintId = useId();
   // A reader preference, not daemon data: it changes only how this browser
   // paints a textarea, so a daemon switch must not change the editor chrome.
-  const highlighted = useMdComposePref() === 'on';
+  const editorStyle = useMdComposePref();
+  const highlighted = editorStyle === 'on';
+  const rich = editorStyle === 'rich';
   const references = useReferenceSurface();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -561,6 +564,14 @@ export function Composer({
     [setDraft],
   );
 
+  /** Does this Enter send? ⌘/Ctrl always does; otherwise this device's send key, reversed by Shift. */
+  const sendsOnEnter = (event: { readonly shiftKey: boolean; readonly metaKey: boolean; readonly ctrlKey: boolean }) => {
+    if (event.metaKey || event.ctrlKey) return true;
+    const enterSends = readInputModality().enterSends;
+    const action = composerEnterAction(enterSends ? enterKeyPreference : phoneEnterKeyPreference, enterSends);
+    return event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
+  };
+
   /** An editing rule's result, written through the controlled draft with its caret placed after render. */
   const applyEdit = (edit: DraftEdit): void => {
     pendingVimSelection.current = { value: edit.value, start: edit.caret, end: edit.caret };
@@ -659,6 +670,19 @@ export function Composer({
           tabIndex={-1}
           type="file"
         />
+        {rich ? (
+          <RichTextEditor
+            describedBy={hintId}
+            disabled={disabled || sending}
+            id={`${hintId}-input`}
+            onChange={setDraft}
+            onPasteFiles={files => attachments.add(files)}
+            onSubmit={() => void submit()}
+            placeholder={placeholder}
+            sendsOnEnter={sendsOnEnter}
+            value={draft}
+          />
+        ) : (
         <div className="fy-composer-input-layer" data-highlighted={String(highlighted)}>
           <ComposerHighlight enabled={highlighted} overlayRef={overlayRef} text={draft} />
           <textarea
@@ -757,10 +781,7 @@ export function Composer({
                   return;
                 }
               }
-              const enterSends = readInputModality().enterSends;
-              const action = composerEnterAction(enterSends ? enterKeyPreference : phoneEnterKeyPreference, enterSends);
-              const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
-              if (!send) return;
+              if (!sendsOnEnter(event)) return;
               event.preventDefault();
               void submit();
             }}
@@ -780,6 +801,7 @@ export function Composer({
             under the on-screen keyboard. */}
           <ComposerAutocompletePopover surface={autocomplete} />
         </div>
+        )}
         {dictationSettings ? (
           <DictationControl
             {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
