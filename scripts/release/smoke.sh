@@ -94,7 +94,18 @@ cleanup() {
   fi
   "${name}" daemon stop >/dev/null 2>&1 || true
   "${tmux_bin}" -S "${fy_home}/tmux.sock" kill-server >/dev/null 2>&1 || true
-  rm -rf "${root}"
+  # `browser stop` answers once the daemon has released the browser, not once Chrome has exited: a macOS
+  # Chrome and its helpers go on writing into the profile under this root for a few seconds, and an
+  # `rm -rf` racing them fails with "Permission denied" after the smoke already passed. Wait for every
+  # process still rooted here to go, then remove the tree.
+  pkill -TERM -f "${root}" >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do
+    pgrep -f "${root}" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  pkill -KILL -f "${root}" >/dev/null 2>&1 || true
+  chmod -R u+rwx "${root}" >/dev/null 2>&1 || true
+  rm -rf "${root}" || echo "⚠️  could not remove ${root}; the smoke result stands" >&2
   exit "${code}"
 }
 trap cleanup EXIT

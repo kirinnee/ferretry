@@ -778,10 +778,36 @@ const assertTerminalGeometry = async (page: Page, rootUrl: string, family: strin
   if (!(await row.first().isVisible())) await page.getByRole('tab', { name: /^dev/u }).first().click();
   await row.first().waitFor({ state: 'visible' });
   // Settled before measuring: the face finishes loading and xterm redraws its rows once more after it
-  // re-measures, and a row caught mid-redraw has text but no layout yet.
-  await page.evaluate(async () => {
+  // re-measures. Fonts being ready is not enough. xterm sets `.xterm-rows` letter-spacing to its cell
+  // width minus the width of a "W", so rows drawn before it has measured a cell carry a letter-spacing
+  // of minus one glyph and collapse every character onto the first. That transient frame failed CI as
+  // "spans 0.015625px", in a random family each time. So wait until the cell xterm drew with — that "W"
+  // plus the rows' letter-spacing — is a real width, unchanged for three frames. This reads xterm's own
+  // cell and never the text's spread, so a row that IS spread, or stays collapsed, is still measured
+  // below and still fails.
+  await row.first().evaluate(async element => {
     await document.fonts.ready;
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const rows = element.parentElement as HTMLElement;
+    const cell = (): number => {
+      const style = getComputedStyle(rows);
+      const span = document.createElement('span');
+      span.style.cssText = `font-family:${style.fontFamily};font-size:${style.fontSize};letter-spacing:0;white-space:pre;position:absolute;visibility:hidden`;
+      span.textContent = 'W';
+      rows.append(span);
+      const glyph = span.getBoundingClientRect().width;
+      span.remove();
+      return glyph + (Number.parseFloat(style.letterSpacing) || 0);
+    };
+    const deadline = performance.now() + 5000;
+    let last = Number.NaN;
+    let still = 0;
+    while (performance.now() < deadline) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const now = cell();
+      still = now > 0.5 && now === last ? still + 1 : 0;
+      last = now;
+      if (still >= 3) return;
+    }
   });
   const measured = await row.first().evaluate(element => {
     const rows = element.parentElement as HTMLElement;

@@ -382,23 +382,32 @@ describe('AddMcpForm — the preview', () => {
   });
 
   it('shows "Reading…" again once the request changes, even while the stale preview is still marked ready', async () => {
-    const { root } = await openForm({ previewImpl: async () => loginPreview() });
+    // The second answer is HELD. With no debounce and an instant fake, it could land inside the same
+    // turn as the keystroke on a slow runner, and the "Reading…" this test is about would never be on
+    // screen to see — so it failed CI having waited 2s for a state that had already come and gone.
+    let releaseSecond: (() => void) | undefined;
+    let calls = 0;
+    const { root } = await openForm({
+      previewImpl: async () => {
+        calls += 1;
+        if (calls === 1) return loginPreview();
+        return new Promise(resolve => {
+          releaseSecond = () => resolve(loginPreview());
+        });
+      },
+    });
     await click(scopeRadio(root, 'login'));
     await fillCommandServer(root, 'sentry', 'npx one');
     await waitForPreview(root);
     await type(commandInput(root), 'npx two');
-    await settleUntil(
-      () => root.textContent?.includes('Reading what this would change…') === true,
-      () => `the preview to go stale again; saw "${root.textContent}"`,
-      interact,
-    );
-    // Drain the still-pending debounced call for "npx two" before the test ends, rather than leaving
-    // a real timer to resolve its state update after the test (and before unmount) has moved on.
-    await settleUntil(
-      () => root.textContent?.includes('Reading what this would change…') === false,
-      'the second preview round-trip to finish',
-      interact,
-    );
+    expect(root.textContent).toContain('Reading what this would change…');
+    expect(root.querySelector('[data-add-mcp-preview]')).toBeNull();
+    // Drain the held call for "npx two" before the test ends, rather than leaving its state update to
+    // land after the test (and before unmount) has moved on.
+    await settleUntil(() => releaseSecond !== undefined, 'the second preview call to start', interact);
+    await interact(() => releaseSecond?.());
+    await waitForPreview(root);
+    expect(root.textContent).not.toContain('Reading what this would change…');
   });
 });
 

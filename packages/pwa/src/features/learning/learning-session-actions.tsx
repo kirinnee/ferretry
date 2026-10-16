@@ -36,6 +36,8 @@ export interface LearningSessionActionsOptions {
   readonly accounts?: readonly PickerAccount[] | null;
   /** "View in Learning" after a scan: the host takes the reader to the hub. */
   readonly onViewLearning?: () => void;
+  /** Test seam: how often an open scan dialog re-reads a running scan. */
+  readonly scanPollMs?: number;
 }
 
 export interface LearningSessionActions {
@@ -55,6 +57,7 @@ export function useLearningSessionActions({
   projects = NO_PROJECTS,
   accounts = null,
   onViewLearning,
+  scanPollMs,
 }: LearningSessionActionsOptions): LearningSessionActions {
   const learning = usePassiveLearning(connection, fetcher);
   const [note, setNote] = useState<string | null>(null);
@@ -140,6 +143,7 @@ export function useLearningSessionActions({
           projects={projects}
           accounts={accounts}
           passive={passive}
+          pollMs={scanPollMs}
         />
       )}
     </>
@@ -164,6 +168,7 @@ function SessionScanHost({
   projects,
   accounts,
   passive,
+  pollMs,
 }: {
   readonly connection: DaemonConnection;
   readonly fetcher: DaemonFetch;
@@ -174,8 +179,9 @@ function SessionScanHost({
   readonly projects: readonly FleetProject[];
   readonly accounts: readonly PickerAccount[] | null;
   readonly passive: ReadonlySet<string>;
+  readonly pollMs: number | undefined;
 }) {
-  const control = useLearningScan(connection, fetcher);
+  const control = useLearningScan(connection, fetcher, pollMs);
   return (
     <ScanDialog
       connection={connection}

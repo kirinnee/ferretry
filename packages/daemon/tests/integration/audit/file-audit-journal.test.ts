@@ -477,9 +477,12 @@ describe('the security log on disk', () => {
       argv: secrets.commandLine,
     });
     const log = new AuditLog({
-      // Live plus rotated must hold one record per audited route — rotation drops the oldest file, so a
-      // size that only just fit the table loses records the moment a route is audited.
-      journal: new FileAuditJournal(state, 4_000),
+      // Live plus rotated must hold one record per audited route — rotation drops the oldest file. So the
+      // size grows WITH the table: a fixed byte count (2,400, then 3,600, then 4,000) failed CI for the
+      // next pull request that audited a route, as "23 records, not 36". A record is ~180 bytes and live
+      // plus rotated keep at least 2 × 128 per route, while the ~140 per route actually written still
+      // rotates once, so the rotated file is read too.
+      journal: new FileAuditJournal(state, AUDITED_ROUTES.length * 128),
       clock: { now: () => AT },
       failures: { auditWriteFailed: () => undefined },
     });
