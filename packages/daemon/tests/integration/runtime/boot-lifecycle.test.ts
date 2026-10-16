@@ -84,11 +84,11 @@ import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
 import {
+  es256Authenticator,
   CREDENTIAL_ID as PASSKEY_CREDENTIAL_ID,
   ORIGIN as PASSKEY_ORIGIN,
   assertion as passkeyAssertion,
   clientData as passkeyClientData,
-  es256Authenticator,
   registration as passkeyRegistration,
 } from '../../support/passkey-authenticator.ts';
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
@@ -5492,10 +5492,10 @@ describe('daemon boot lifecycle', () => {
       });
       const collectorUrl = `http://127.0.0.1:${String(boundPort(collector))}/usage`;
 
-      await mkdir(join(home, 'fleet'), { recursive: true });
+      await mkdir(join(home, 'config'), { recursive: true });
       await writeFile(
-        join(home, 'fleet', 'config.yaml'),
-        Bun.YAML.stringify({ version: 2, advanced: { usage: { enabled: false, interval: TICK_SECONDS } } }),
+        join(home, 'config', 'machine.yaml'),
+        Bun.YAML.stringify({ advanced: { usage: { enabled: false, interval: TICK_SECONDS } } }),
         { mode: 0o600 },
       );
       await writeFile(

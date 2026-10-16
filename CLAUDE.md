@@ -194,6 +194,15 @@ What this machine records about who reached it — pairings, revocations, grant 
 terminals opened, secrets used — is [docs/audit.md](docs/audit.md): a bounded `0600` append-only log of
 **names and ids only**, read through `GET /v1/audit`, `fy daemon audit` and Settings › ‹machine› › Machine › Security log.
 
+A machine's configuration is **one human-editable YAML file per building block** under
+`$FY_HOME/config/` (`machine.yaml`, `logins/`, `components/<kind>/`, `profiles/`, `runtimes/`, `warden.yaml`,
+`learning.yaml`, `voice.yaml`), and **the files are the source of truth** — the app, `fy` and agents are
+editors of them. A broken file keeps its **last good version** in effect, an edit that **loosens** spend or
+authority is **held until the owner confirms it** (the tighter version stays in effect), a **raw secret in a
+file is refused**, and every write edits only the changed keys so comments survive. The old
+`fleet/config.yaml` is refused by sentence, never converted. The contract is
+[docs/config-files.md](docs/config-files.md).
+
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code
 redeemed inside a session, which registers a **non-extractable device key** the browser generated; the
 daemon keeps only the public half, and the grant ends on revocation or after its idle period unused (30 days unless the owner changed it). **There is no

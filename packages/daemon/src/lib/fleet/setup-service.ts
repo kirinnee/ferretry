@@ -14,7 +14,7 @@
  *
  * ## One apply boundary
  *
- * An import or a clone writes `config.yaml`, every component document it brings, and the plan the
+ * An import or a clone writes the configuration files, every component document it brings, and the plan the
  * fleet library materialises from the new model, inside the provisioner's single rollback boundary —
  * the same boundary every other change uses. Secret values an import found go into the secret store
  * first: a reference with no value only refuses a launch, while a value with no reference is harmless.
@@ -37,14 +37,17 @@
  */
 import {
   type AccountModel,
+  buildCloneBundle,
   type ClonePlan,
   CloneRefusal,
   cloneSources,
   describeClone,
+  EMPTY_RUNTIME_IDS,
   expandAssetPath,
   FleetApplyFailureError,
   type FleetDocumentWrite,
   type FleetModelApplyPlan,
+  freeName,
   HARNESS_DISPLAY_NAMES,
   type HarnessKind,
   type HostHarnessScan,
@@ -59,14 +62,10 @@ import {
   parseCloneBundle,
   parseSettings,
   planClone,
-  renderConfig,
   planImport,
-  EMPTY_RUNTIME_IDS,
   type SettingsObject,
   skillFrontmatterKeys,
   skillSourceReference,
-  buildCloneBundle,
-  freeName,
 } from '@ferretry/fleet';
 import type {
   FleetAccountChange,
@@ -79,7 +78,12 @@ import type {
   FleetToolInstallResult,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
-import { type AccountChangeExecutor, FleetCatalogRefusal, type FleetCatalogServiceDeps } from './catalog-service.ts';
+import {
+  type AccountChangeExecutor,
+  type AccountDocumentReading,
+  FleetCatalogRefusal,
+  type FleetCatalogServiceDeps,
+} from './catalog-service.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
@@ -156,7 +160,7 @@ export interface FleetSetupServiceDeps {
 
 // ── Constants ────────────────────────────────────────────────────────────────────────────────────
 
-/** Where the import record lives, beside `config.yaml`: what each import made and from what. */
+/** Where the import record lives, in the fleet directory: what each import made and from what. */
 export const IMPORT_RECORD_FILE = 'setup/import.json';
 
 /**
@@ -501,7 +505,7 @@ export class FleetSetupService {
       plan,
       updates.map(update => update.reference),
     );
-    const documents = await this.#documents(reading.revision, model, assets, [
+    const documents = await this.#documents(reading, model, assets, [
       { path: this.#recordPath(), content: `${JSON.stringify(record, null, 2)}\n` },
     ]);
     const secrets = [...plan.secrets, ...updates.flatMap(update => update.secrets)].map(secret => ({
@@ -603,7 +607,7 @@ export class FleetSetupService {
       if (error instanceof CloneRefusal) throw new FleetCatalogRefusal('fleet_change_refused', error.message);
       throw error;
     }
-    const documents = await this.#documents(reading.revision, plan.model, plan.files, []);
+    const documents = await this.#documents(reading, plan.model, plan.files, []);
     const busiest = plan.slots.toSorted((left, right) => right.runtimes.length - left.runtimes.length)[0];
     return {
       model: plan.model,
@@ -633,22 +637,15 @@ export class FleetSetupService {
     return record === undefined ? {} : { record };
   }
 
-  /** `config.yaml`, then the asset documents, then any document by absolute path — each with what it expects. */
+  /** The configuration files, then the asset documents, then any document by absolute path — each with what it expects. */
   async #documents(
-    revision: string,
+    reading: AccountDocumentReading,
     model: AccountModel,
     assets: readonly FleetCloneFile[],
     absolute: readonly { readonly path: string; readonly content: string }[],
   ): Promise<FleetDocumentWrite[]> {
     const { catalog } = this.deps;
-    const documents: FleetDocumentWrite[] = [
-      {
-        path: `${catalog.layout.fleetDirectory}/config.yaml`,
-        content: renderConfig(model),
-        mode: DOCUMENT_MODE,
-        expect: revision,
-      },
-    ];
+    const documents: FleetDocumentWrite[] = [...reading.documents(model)];
     const targets = [
       ...assets.map(file => ({
         path: expandAssetPath(file.path, catalog.layout.userHome, catalog.layout.assetsDirectory),

@@ -14,7 +14,7 @@ const CHANGE = {
   kind: 'machine.settings',
   agentPermissions: 'skip',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
 } as const;
 const ROUTES = { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME };
 

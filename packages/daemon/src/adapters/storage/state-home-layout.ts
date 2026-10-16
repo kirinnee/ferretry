@@ -173,7 +173,9 @@ export class StateHomeLayout {
     const decision = await this.inspect(paths, fileSystem);
 
     for (const directory of requiredLayoutDirectories(paths)) await fileSystem.ensureDirectory(directory, 0o700);
-    if (decision.kind === 'initialize') {
+    if (decision.kind === 'initialize' || decision.kind === 'upgrade') {
+      // An upgrade rewrites only the marker: version 2 moved the configuration into `config/*.yaml`, and
+      // the old `fleet/config.yaml` is refused by sentence where it is read, never converted here.
       await fileSystem.writeTextAtomic(paths.layoutVersion, layoutVersionContent());
     } else {
       await fileSystem.setMode(paths.layoutVersion, LAYOUT_VERSION_MODE);

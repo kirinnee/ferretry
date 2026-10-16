@@ -10,13 +10,13 @@ import { afterEach, describe, it } from 'bun:test';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseAccountModel } from '@ferretry/fleet';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
 import should from 'should';
-import { fileFleetCatalogDeps } from '../../../src/adapters/fleet/account-model-files.ts';
+import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
 import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
+import { type ConfigHome, configHome } from './config-files-fixture.ts';
 
 const directories: string[] = [];
 
@@ -43,6 +43,7 @@ const FAKE_LOGIN = JSON.stringify({
 const FAKE_SECRET = 'ghp_placeholderplaceholderplaceholder0000';
 
 interface Machine {
+  readonly home: ConfigHome;
   readonly fleet: string;
   readonly userHome: string;
   readonly setup: FleetSetupService;
@@ -52,10 +53,9 @@ interface Machine {
 
 async function machine(name: string, options: { readonly claude: boolean }): Promise<Machine> {
   const root = await temporary();
-  const home = path.join(root, 'state');
-  const fleet = path.join(home, 'fleet');
+  const home = await configHome(path.join(root, 'state'));
+  const fleet = home.paths.fleet;
   const userHome = path.join(root, 'person');
-  await mkdir(fleet, { recursive: true });
   await mkdir(userHome, { recursive: true });
   if (options.claude) {
     const claude = path.join(userHome, '.claude');
@@ -73,8 +73,10 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
     },
   };
   const catalogDeps = fileFleetCatalogDeps({
-    paths: { home: home as never, fleet, fleetManifest: path.join(fleet, 'manifest.json') },
+    paths: home.paths,
     userHome,
+    config: home.service,
+    configDirectory: home.paths.config,
     sessionStates: async () => [],
     credentials,
     locate: harness => (harness === 'claude' && options.claude ? '/bin/sh' : undefined),
@@ -98,13 +100,23 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
     }),
   );
   const catalog = new FleetCatalogService({ ...catalogDeps, executors: setup.executors });
-  return { fleet, userHome, setup, catalog, secrets };
+  return { home, fleet, userHome, setup, catalog, secrets };
 }
 
 /** The import a person chooses, staged and applied through the catalogue the way the app and `fy daemon import` do it. */
 async function importHost(on: Awaited<ReturnType<typeof machine>>): Promise<unknown> {
   const staged = await on.catalog.propose({ kind: 'setup.import' });
   return await on.catalog.apply(staged.id, { governed: false } as never);
+}
+
+/** The model the machine's configuration files declare now. */
+async function declared(on: Machine) {
+  const model = await readDeclaredAccountModel(on.home.service, {
+    configDirectory: on.home.paths.config,
+    fleetDirectory: on.fleet,
+  });
+  should(model).not.be.undefined();
+  return model as NonNullable<typeof model>;
 }
 
 /** Every file under a directory, relative to it. */
@@ -132,7 +144,7 @@ describe('the first run and Clone over real files', () => {
       executor: 'setup',
       summary: 'studio is ready · 1 runtime created: claude-default.',
     });
-    const model = parseAccountModel(Bun.YAML.parse(await readFile(path.join(studio.fleet, 'config.yaml'), 'utf8')));
+    const model = await declared(studio);
     should(model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'host' });
     should(model.runtimes['claude-default']).deepEqual({
       credential: 'claude-you',
@@ -144,10 +156,16 @@ describe('the first run and Clone over real files', () => {
 
     // The secret went to the store and nowhere else; no credential file was copied into the fleet.
     should(studio.secrets.get('GITHUB_TOKEN')).equal(FAKE_SECRET);
-    for (const file of await filesUnder(studio.fleet)) {
-      should(path.basename(file)).not.equal('.credentials.json');
-      should(await readFile(path.join(studio.fleet, file), 'utf8')).not.containEql(FAKE_SECRET);
+    for (const root of [studio.fleet, studio.home.paths.config]) {
+      for (const file of await filesUnder(root)) {
+        should(path.basename(file)).not.equal('.credentials.json');
+        should(await readFile(path.join(root, file), 'utf8')).not.containEql(FAKE_SECRET);
+      }
     }
+    // Every fact lives in its own file under config/, and nothing in the retired single file.
+    should(await filesUnder(studio.home.paths.config)).containEql('logins/claude-you.yaml');
+    should(await filesUnder(studio.fleet)).not.containEql('config.yaml');
+    should(studio.home.logged.pending).deepEqual([]);
 
     // The catalogue reads back exactly what the import wrote.
     const runtimes = await studio.catalog.runtimes();
@@ -172,7 +190,7 @@ describe('the first run and Clone over real files', () => {
       executor: 'clone',
       summary: 'Copied 1 runtime from studio. Sign in once for 1 runtime: claude-you.',
     });
-    const model = parseAccountModel(Bun.YAML.parse(await readFile(path.join(target.fleet, 'config.yaml'), 'utf8')));
+    const model = await declared(target);
     should(model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'ferretry', clonedFrom: 'studio' });
     should(Object.keys(model.runtimes)).deepEqual(['claude-default']);
     should(await readFile(path.join(target.fleet, 'assets', 'skills', 'review', 'SKILL.md'), 'utf8')).containEql(

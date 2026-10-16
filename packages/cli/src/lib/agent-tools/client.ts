@@ -1,6 +1,9 @@
 import {
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
   AGENT_TOOL_MAX_WAIT_MS,
+  type AgentConfigToolCall,
+  type AgentConfigToolResult,
+  AgentConfigToolResultSchema,
   type AgentToolCall,
   type AgentToolResult,
   AgentToolResultSchema,
@@ -105,6 +108,19 @@ export class AgentToolsClient {
           { method: 'POST', body, headers: this.personHeaders() },
           TOOL_REQUEST_TIMEOUT_MS,
         );
+  }
+
+  /**
+   * One `config.*` call (docs/config-files.md), always as the agent: there is no person's route for
+   * these, because a person edits the files directly or through the app.
+   */
+  async config(call: AgentConfigToolCall): Promise<AgentConfigToolResult> {
+    return await this.gateways.agent.request(
+      '/v1/agent/config',
+      AgentConfigToolResultSchema,
+      { method: 'POST', body: JSON.stringify(call), headers: this.agentHeaders() },
+      TOOL_REQUEST_TIMEOUT_MS,
+    );
   }
 
   /**

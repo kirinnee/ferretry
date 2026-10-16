@@ -17,16 +17,16 @@ import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
-import { fixedClock, request } from '../../api/support.ts';
 import { agentToolWorld } from '../../agent-tools/support.ts';
+import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   analyticsSubsystem,
   attachSubsystem,
   attentionService,
-  consoleSubsystem,
   CREDENTIALS,
+  consoleSubsystem,
   emptyFeed,
   FakeBrowserLogin,
   FakeSessionControl,
@@ -231,6 +231,28 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     updateConfig: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+  },
+  configFiles: {
+    service: {
+      status: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      file: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      write: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      validate: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      confirm: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+    agentControl: { allows: async () => false },
+    identities: { resolve: async () => undefined },
+    arm: async () => () => undefined,
   },
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
@@ -554,12 +576,13 @@ describe('the mounted daemon surface', () => {
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // an agent's rename: a new first name or task title
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
-      2; // the speed-up keys: their status read and one provider's Test
+      2 + // the speed-up keys: their status read and one provider's Test
+      4; // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 6, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
-    ).deepEqual(['POST /v1/agent/tools', 'GET /v1/sessions/:sessionId/attach']);
+    ).deepEqual(['POST /v1/agent/config', 'POST /v1/agent/tools', 'GET /v1/sessions/:sessionId/attach']);
   });
 
   it('should serve the base feeds and every mounted subsystem from one table', () => {
@@ -657,6 +680,14 @@ describe('the mounted daemon surface', () => {
       // destroys a slice, because the units are transient and belong to the launches that made them.
       'GET /v1/cgroups/config',
       'PATCH /v1/cgroups/config',
+      // The configuration files (docs/config-files.md): what is in effect, one file, an edit and the owner's
+      // confirmation of one that loosens. NOTE WHAT IS ABSENT: no route deletes a file or edits the accepted
+      // record, and an agent's own door is the privileged `POST /v1/agent/config` below.
+      'GET /v1/config/status',
+      'GET /v1/config/file',
+      'PUT /v1/config/file',
+      'POST /v1/config/confirm',
+      'POST /v1/agent/config',
       // Imported harness history is deliberately not a session route: it can be read but has no
       // daemon journal, lifecycle, pane, or resume/send control.
       'GET /v1/imports/history',

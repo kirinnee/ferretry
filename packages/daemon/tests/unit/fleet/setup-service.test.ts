@@ -16,6 +16,7 @@ import {
   type FleetLayout,
   type HostHarnessScan,
   parseAccountModel,
+  RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
 } from '@ferretry/fleet';
 import {
@@ -43,6 +44,7 @@ import {
   type ToolInstallPreview,
   ToolInstallRefusal,
 } from '../../../src/lib/fleet/tool-install.ts';
+import { configReading, configTextOf, modelOfWrites } from '../../support/config-reading.ts';
 
 const LAYOUT: FleetLayout = {
   stateHome: '/state',
@@ -90,11 +92,7 @@ const codexScan = (overrides: Partial<HostHarnessScan> = {}): HostHarnessScan =>
   ...overrides,
 });
 
-const EMPTY_READING = (): AccountDocumentReading => ({
-  format: 'none',
-  model: parseAccountModel({ version: 2 }),
-  revision: 'absent',
-});
+const EMPTY_READING = (): AccountDocumentReading => configReading(parseAccountModel({ version: 2 }), 'absent', 'none');
 
 /** A machine that is already set up, for the export and the clone. */
 const SET_UP_MODEL = (): AccountModel =>
@@ -289,9 +287,6 @@ async function importOnce(
   return { description, summary };
 }
 
-const configOf = (documents: readonly FleetDocumentWrite[]): string =>
-  documents.find(document => document.path === '/state/fleet/config.yaml')?.content ?? '';
-
 // ── Scan ─────────────────────────────────────────────────────────────────────────────────────────
 
 describe('scan', () => {
@@ -355,7 +350,7 @@ describe('scan', () => {
     const { service, state } = world();
     state.documentError = new RetiredFleetConfigError('/state/fleet/config.yaml');
     const refusal = await setupRefusal(service.scan(), 'fleet_setup_unreadable');
-    should(refusal.message).containEql('/state/fleet/config.yaml uses the old account format');
+    should(refusal.message).containEql(RETIRED_FLEET_CONFIG_SENTENCE('/state/fleet/config.yaml'));
   });
 
   it('should offer Import again the components whose source changed, and name an existing twin runtime', async () => {
@@ -364,11 +359,7 @@ describe('scan', () => {
     await importOnce(service);
     const written = applied[0]?.documents ?? [];
     for (const document of written) state.assets[document.path] = document.content;
-    state.reading = {
-      format: 'version-2',
-      model: parseAccountModel(Bun.YAML.parse(configOf(written))),
-      revision: 'rev-2',
-    };
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
     state.scans = [
       claudeScan({
         instructions: { kind: 'text', source: '/person/.claude/CLAUDE.md', text: 'Be kinder.\n', bytes: 11 },
@@ -460,7 +451,7 @@ describe('exportBundle', () => {
   it('should carry the documents, folders and login descriptors, and say what it could not carry', async () => {
     // Arrange
     const { service, state } = world();
-    state.reading = { format: 'version-2', model: SET_UP_MODEL(), revision: 'r' };
+    state.reading = configReading(SET_UP_MODEL(), 'r');
     state.assets['/state/fleet/assets/components/instructions/main.md'] = 'Main.\n';
     state.folders['/state/fleet/assets/skills/review'] = {
       files: [{ path: 'SKILL.md', content: 'skill\n' }],
@@ -489,7 +480,7 @@ describe('exportBundle', () => {
 
   it('should leave out documents past the size a bundle may carry, and the emails when the list fails', async () => {
     const { service, state } = world();
-    state.reading = { format: 'version-2', model: SET_UP_MODEL(), revision: 'r' };
+    state.reading = configReading(SET_UP_MODEL(), 'r');
     state.assets['/state/fleet/assets/components/instructions/main.md'] = 'x'.repeat(CLONE_BUNDLE_MAX_BYTES + 1);
     state.emails = async () => {
       throw new Error('down');
@@ -518,13 +509,13 @@ describe('the setup.import executor', () => {
     should(description).not.containEql(SECRET_VALUE);
     should(summary).equal('studio is ready · 1 runtime created: claude-default.');
     const paths = (applied[0]?.documents ?? []).map(document => document.path);
-    should(paths).containEql('/state/fleet/config.yaml');
+    should(paths).containEql('/state/config/runtimes/claude-default.yaml');
     should(paths).containEql('/state/fleet/assets/skills/review/SKILL.md');
     should(paths).containEql(RECORD_PATH);
     should(paths.some(path => path.startsWith('/state/fleet/assets/components/instructions/'))).be.true();
     should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
     for (const document of applied[0]?.documents ?? []) should(document.content).not.containEql(SECRET_VALUE);
-    should(configOf(applied[0]?.documents ?? [])).containEql('agent: true');
+    should(configTextOf(applied[0]?.documents ?? [])).containEql('agent: true');
   });
 
   it('should refuse to apply anything that was not described first, or changed since', async () => {
@@ -539,11 +530,11 @@ describe('the setup.import executor', () => {
   it('should use the names the person gave, and refuse an invalid or taken one with a suggestion', async () => {
     const named = world();
     await importOnce(named.service, IMPORT({ names: { claude: 'my-claude', codex: 'unused' } }));
-    should(configOf(named.applied[0]?.documents ?? [])).containEql('my-claude');
+    should(configTextOf(named.applied[0]?.documents ?? [])).containEql('my-claude');
 
     const same = world();
     await importOnce(same.service, IMPORT({ names: { claude: 'claude-default' } }));
-    should(configOf(same.applied[0]?.documents ?? [])).containEql('claude-default');
+    should(configTextOf(same.applied[0]?.documents ?? [])).containEql('claude-default');
 
     const invalid = await catalogRefusal(
       world().service.executors.setup.describe(IMPORT({ names: { claude: 'no spaces' } })),
@@ -552,17 +543,16 @@ describe('the setup.import executor', () => {
     should(invalid.message).equal('Use only letters, digits and dashes. Use claude-default?');
 
     const taken = world();
-    taken.state.reading = {
-      format: 'version-2',
-      model: parseAccountModel({
+    taken.state.reading = configReading(
+      parseAccountModel({
         version: 2,
         credentials: { other: { harness: 'claude', store: 'ferretry' } },
         components: { modelSets: { m: { models: ['a'], default: 'a' } } },
         profiles: { p: { layers: ['modelSets/m'] } },
         runtimes: { mine: { credential: 'other', profile: 'p' } },
       }),
-      revision: 'r',
-    };
+      'r',
+    );
     const clash = await catalogRefusal(
       taken.service.executors.setup.describe(IMPORT({ names: { claude: 'mine' } })),
       'fleet_change_refused',
@@ -585,11 +575,7 @@ describe('the setup.import executor', () => {
     await importOnce(service);
     const written = applied[0]?.documents ?? [];
     for (const document of written) state.assets[document.path] = document.content;
-    state.reading = {
-      format: 'version-2',
-      model: parseAccountModel(Bun.YAML.parse(configOf(written))),
-      revision: 'rev-2',
-    };
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
 
     // Act / Assert: the same host has nothing new.
     should(
@@ -616,7 +602,7 @@ describe('the setup.import executor', () => {
     should(description).containEql('Updates instructions/main from its changed source.');
     const second = applied[1]?.documents ?? [];
     should(second.some(document => document.content === 'Be kinder.\n')).be.true();
-    should(configOf(second)).containEql('claude-default-2');
+    should(configTextOf(second)).containEql('claude-default-2');
   });
 
   it('should describe a login that needs sign-in when the host one cannot be shared', async () => {
@@ -655,9 +641,8 @@ describe('the setup.import executor', () => {
 
   it('should refuse an import that would leave a configuration this machine cannot read', async () => {
     const { service, state } = world();
-    state.reading = {
-      format: 'version-2',
-      model: parseAccountModel({
+    state.reading = configReading(
+      parseAccountModel({
         version: 2,
         credentials: { other: { harness: 'codex', store: 'ferretry' } },
         components: { modelSets: { m: { models: ['a'], default: 'a' } } },
@@ -665,8 +650,8 @@ describe('the setup.import executor', () => {
         runtimes: { x: { credential: 'other', profile: 'p' } },
         advanced: { commands: [{ wrapper: 'claude-default', runtime: 'x' }] },
       }),
-      revision: 'r',
-    };
+      'r',
+    );
     const refusal = await catalogRefusal(service.executors.setup.describe(IMPORT()), 'fleet_change_refused');
     should(refusal.message).startWith('importing would leave studio with a setup it cannot read');
   });
@@ -711,7 +696,7 @@ describe('the setup.import executor', () => {
       profiles: { p: { layers: ['instructions/main', 'skills/s', 'settings/good', 'hooks/h'] } },
       runtimes: { 'claude-p': { credential: 'c', profile: 'p' } },
     });
-    state.reading = { format: 'version-2', model, revision: 'rev' };
+    state.reading = configReading(model, 'rev');
     await importOnce(service);
     should(applied).have.length(1);
   });
@@ -726,7 +711,7 @@ describe('the setup.import executor', () => {
       profiles: { p: { layers: ['settings/bad'] } },
       runtimes: { 'claude-p': { credential: 'c', profile: 'p' } },
     });
-    state.reading = { format: 'version-2', model: broken, revision: 'rev' };
+    state.reading = configReading(broken, 'rev');
     const change = IMPORT();
     await service.executors.setup.describe(change);
     const refusal = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_refused');
@@ -762,7 +747,7 @@ describe('the clone.import executor', () => {
     // Assert
     should(description).containEql('from work-mac');
     should(summary).equal('Copied 1 runtime from work-mac. Sign in once for 1 runtime: you@example.com.');
-    const config = configOf(applied[0]?.documents ?? []);
+    const config = configTextOf(applied[0]?.documents ?? []);
     should(config).containEql('clonedFrom: work-mac');
     should(config).containEql('store: ferretry');
     should((applied[0]?.documents ?? []).map(document => document.path)).containEql(
@@ -791,7 +776,7 @@ describe('the clone.import executor', () => {
 
     // Assert
     should(description).containEql('Leaves out mcp/notes: you chose not to copy it.');
-    const config = configOf(applied[0]?.documents ?? []);
+    const config = configTextOf(applied[0]?.documents ?? []);
     should(config).not.containEql('notes');
     should(config).containEql('clonedFromDaemon: sha256:work-mac');
   });

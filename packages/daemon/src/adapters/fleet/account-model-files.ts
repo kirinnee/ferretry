@@ -1,25 +1,33 @@
 /**
- * The files the account model's catalogue reads (docs/design/account-model.md §5.3): `config.yaml`
- * with the digest it was read at, the component documents it names, and what a document is now.
+ * The files the account model's catalogue reads (docs/design/account-model.md §5.3,
+ * docs/config-files.md): the configuration files in effect with the revision they were read at, the
+ * component documents they name, and what a document is now.
  *
  * Reads only. Every write a reviewed change makes goes through the provisioner, inside its rollback
- * boundary, so nothing here can leave a machine half-changed.
+ * boundary, so nothing here can leave a machine half-changed — and every configuration file that write
+ * carries is acknowledged first, so the daemon never mistakes the owner's own reviewed change for an
+ * unconfirmed loosening.
  */
+
+import { lstat, readFile, stat } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import {
   ABSENT_DOCUMENT_REVISION,
+  type AccountModel,
   claudeStatuslineCommand,
+  type FleetDocumentWrite,
   type FleetLayout,
-  parseAccountConfigText,
-  parseAccountModel,
+  fleetFileEdits,
   parseRuntimeIds,
+  RETIRED_FLEET_CONFIG_FILE,
+  RetiredFleetConfigError,
   type RuntimeIds,
   runtimeIdsPath,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
 import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fleet/adapters';
 import { SessionStateSchema } from '@ferretry/protocol';
-import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
 
@@ -30,23 +38,64 @@ const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException | u
 
 const digest = (bytes: Uint8Array): string => new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
 
-/**
- * The machine's configuration, and no document as an empty model. Throws when the file exists and
- * cannot be read or parsed — and `RetiredFleetConfigError` when it is still in the old account format,
- * which is refused rather than converted, and left exactly as it is.
- */
-export async function readAccountDocument(path: string): Promise<AccountDocumentReading> {
-  let raw: Uint8Array;
+/** Configuration and component documents are private: they name everything a runtime runs with. */
+const DOCUMENT_MODE = 0o600;
+
+/** Where the configuration lives, and where the retired single file would be. */
+export interface ConfigAccountLocations {
+  /** `<FY_HOME>/config`. */
+  readonly configDirectory: string;
+  /** `<FY_HOME>/fleet`, where a retired `config.yaml` would still be. */
+  readonly fleetDirectory: string;
+}
+
+/** Whether a path exists at all, a link included — a retired file is refused even as a link. */
+async function present(path: string): Promise<boolean> {
   try {
-    raw = await readFile(path);
+    await lstat(path);
+    return true;
   } catch (error) {
-    if (missing(error)) {
-      return { format: 'none', model: parseAccountModel({ version: 2 }), revision: ABSENT_DOCUMENT_REVISION };
-    }
+    if (missing(error)) return false;
     throw error;
   }
-  const model = parseAccountConfigText(new TextDecoder().decode(raw), path);
-  return { format: 'version-2', model, revision: digest(raw) };
+}
+
+/**
+ * The configuration in effect, as the catalogue reads it: the account model the files hold — each at
+ * its last good version — and the writes that would move them to another model. Throws
+ * `RetiredFleetConfigError` while a retired `fleet/config.yaml` is still there: it is refused rather
+ * than converted, and left exactly as it is.
+ */
+export async function readConfigAccountDocument(
+  config: Pick<ConfigFilesService, 'load'>,
+  locations: ConfigAccountLocations,
+): Promise<AccountDocumentReading> {
+  const retired = join(locations.fleetDirectory, RETIRED_FLEET_CONFIG_FILE);
+  if (await present(retired)) throw new RetiredFleetConfigError(retired);
+  const { evaluation, files } = await config.load();
+  const model = evaluation.effective.model;
+  return {
+    format: evaluation.fleetFiles === 0 ? 'none' : 'version-2',
+    model,
+    revision: evaluation.fleetRevision,
+    documents: (next: AccountModel): readonly FleetDocumentWrite[] =>
+      fleetFileEdits(model, next, files).map(edit => ({
+        path: join(locations.configDirectory, edit.path),
+        content: edit.content ?? '',
+        mode: DOCUMENT_MODE,
+        expect: edit.expect,
+        ...(edit.content === undefined ? { remove: true as const } : {}),
+      })),
+  };
+}
+
+/** The account model this machine declares, or `undefined` for a machine with no fleet files yet. */
+export async function readDeclaredAccountModel(
+  config: Pick<ConfigFilesService, 'load'>,
+  locations: ConfigAccountLocations,
+): Promise<AccountModel | undefined> {
+  const reading = await readConfigAccountDocument(config, locations);
+  return reading.format === 'none' ? undefined : reading.model;
 }
 
 /** One component document's text, or `undefined` when it is absent, not a file, too large or unreadable. */
@@ -82,6 +131,33 @@ export interface FileFleetCatalogOptions {
   readonly machineName: () => string;
   /** What a person types to run this binary: the wrapper's history claim and statusLine run it. */
   readonly clientName: string;
+  /** The configuration files: read for the model in effect, and told about every file a change writes. */
+  readonly config: Pick<ConfigFilesService, 'load' | 'acknowledge'>;
+  /** `<FY_HOME>/config`. */
+  readonly configDirectory: string;
+}
+
+/**
+ * The provisioner, with every configuration file an apply writes acknowledged first: the owner
+ * reviewed exactly that text, so it is in effect as soon as it lands rather than held as an edit
+ * nobody confirmed. Acknowledging a text that a refused apply then never writes is harmless — it is
+ * accepted only if those exact bytes appear.
+ */
+function acknowledgingProvisioner(
+  inner: FleetCatalogServiceDeps['provisioner'],
+  config: Pick<ConfigFilesService, 'acknowledge'>,
+  configDirectory: string,
+): FleetCatalogServiceDeps['provisioner'] {
+  return {
+    preview: async plan => await inner.preview(plan),
+    apply: async (plan, documents = []) => {
+      for (const document of documents) {
+        const path = relative(configDirectory, document.path);
+        if (document.remove !== true && !path.startsWith('..')) config.acknowledge(path, document.content);
+      }
+      return await inner.apply(plan, documents);
+    },
+  };
 }
 
 /**
@@ -116,7 +192,11 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     return parseRuntimeIds(JSON.parse(text));
   };
   return {
-    document: async () => await readAccountDocument(join(paths.fleet, 'config.yaml')),
+    document: async () =>
+      await readConfigAccountDocument(options.config, {
+        configDirectory: options.configDirectory,
+        fleetDirectory: paths.fleet,
+      }),
     readAsset: readComponentText,
     documentRevision,
     ids,
@@ -129,9 +209,10 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
       }),
     machineName: options.machineName,
     credentials: options.credentials,
-    provisioner: new FileFleetProvisioner(
-      allowedRoots,
-      new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots)),
+    provisioner: acknowledgingProvisioner(
+      new FileFleetProvisioner(allowedRoots, new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots))),
+      options.config,
+      options.configDirectory,
     ),
     layout,
     mint: () => crypto.randomUUID(),

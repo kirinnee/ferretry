@@ -237,6 +237,11 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   },
   { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },
   { method: 'PATCH', path: '/v1/warden/config', event: 'warden.configured' },
+  // The configuration files (docs/config-files.md). Nothing from the body — no path, no text — is
+  // recorded: which file changed is the file's own business, and its text may be what was wrong.
+  { method: 'PUT', path: '/v1/config/file', event: 'fleet.configured', detail: { action: 'config-write' } },
+  { method: 'POST', path: '/v1/config/confirm', event: 'fleet.configured', detail: { action: 'config-confirm' } },
+  { method: 'POST', path: '/v1/agent/config', event: 'fleet.configured', detail: { action: 'agent-config' } },
 ];
 
 /** What the decorator needs: where to write, and how to name a device id. */

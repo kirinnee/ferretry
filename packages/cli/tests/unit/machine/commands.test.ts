@@ -33,7 +33,7 @@ describe('renderMachine', () => {
     should(text)
       .match(/Agent permissions: auto/)
       .and.match(/Default runtime for new agents: claude-default/)
-      .and.match(/What agents may control: terminals on, browsers on, files on/)
+      .and.match(/What agents may control: terminals on, browsers on, files on, settings off/)
       .and.match(/Claude Code: installed \(\/usr\/bin\/claude\)/)
       .and.match(/Codex: not installed/);
     should(text).not.match(/fz daemon setup/);
@@ -41,7 +41,10 @@ describe('renderMachine', () => {
 
   it('should say when no default runtime resolves', () => {
     const text = renderMachine(
-      machine({ defaultRuntime: null, agentControl: { terminals: false, browsers: true, files: false } }),
+      machine({
+        defaultRuntime: null,
+        agentControl: { terminals: false, browsers: true, files: false, ferretrySettings: false },
+      }),
       'fz',
     );
     should(text)
@@ -190,7 +193,7 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'skip',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
     });
     should(world.gateway.called('apply')).have.length(1);
     await should(runCommand(registerMachineCommands, world, ['machine', 'set', 'colour', 'blue'])).be.rejectedWith(
@@ -208,14 +211,14 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-review',
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
     });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', 'automatic']);
     should(world.gateway.called('stage')[1]?.args[0]).eql({
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
     });
     await should(runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', ''])).be.rejectedWith(
       /Name a runtime/,
@@ -229,14 +232,38 @@ describe('registerMachineCommands', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: false, browsers: true, files: true },
+      agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false },
     });
     await should(
       runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'network', 'off']),
-    ).be.rejectedWith(/terminals, browsers, files/);
+    ).be.rejectedWith(/terminals, browsers, files, settings/);
+    await should(
+      runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'toString', 'on']),
+    ).be.rejectedWith(/terminals, browsers, files, settings/);
     await should(
       runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'terminals', 'maybe']),
     ).be.rejectedWith(/on or off/);
+  });
+
+  it('should switch agents’ control of Ferretry settings, which the setting word `settings` names', async () => {
+    const world = fakeWorld({ answers: ['y', 'y'] });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'settings', 'on']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'claude-default',
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true },
+    });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'settings', 'off']);
+    should(world.gateway.called('stage')[1]?.args[0]).match({ agentControl: { ferretrySettings: false } });
+  });
+
+  it('should list settings in what agents may control, on or off', () => {
+    const on = renderMachine(
+      machine({ agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true } }),
+      'fz',
+    );
+    should(on).match(/What agents may control: terminals on, browsers on, files on, settings on/);
   });
 
   it('should install the named tools once each', async () => {

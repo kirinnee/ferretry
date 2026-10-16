@@ -196,6 +196,12 @@ export interface FleetDocumentWrite {
    * overwritten by text composed against the older version.
    */
   readonly expect?: string;
+  /**
+   * Remove the document instead of writing it (`content` is then ignored): a configuration file for a
+   * login, component, profile or runtime the change deletes. Removed inside the same boundary, so a
+   * failed apply puts it back with everything else.
+   */
+  readonly remove?: true;
 }
 
 /** The expected-digest value meaning "nothing should be here yet". */

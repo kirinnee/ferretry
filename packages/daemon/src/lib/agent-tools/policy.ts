@@ -76,12 +76,15 @@ const CONTROL_SETTING: Readonly<Record<AgentControlKind, string>> = {
   terminal: 'Terminals',
   browser: 'Browsers',
   files: 'Files',
+  settings: 'Ferretry settings',
 };
 
 /** The plain sentence an agent is told when the machine's settings switch a kind of control off. */
 export function controlRefusal(kind: AgentControlKind): string {
   const setting = CONTROL_SETTING[kind];
-  return `This machine does not let agents control ${setting.toLowerCase()}: "What agents may control › ${setting}" is off in this machine's settings. Ask the person to turn it on if you need it.`;
+  // Lower-cased as a phrase, except a name that is a name: Ferretry settings.
+  const phrase = setting.startsWith('Ferretry') ? setting : setting.toLowerCase();
+  return `This machine does not let agents control ${phrase}: "What agents may control › ${setting}" is off in this machine's settings. Ask the person to turn it on if you need it.`;
 }
 
 /** A session as the identity resolver needs it — the task-board directory's projection satisfies it. */

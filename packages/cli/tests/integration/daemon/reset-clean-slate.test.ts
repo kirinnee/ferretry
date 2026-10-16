@@ -227,7 +227,7 @@ describe('resetting an installation and starting again on the clean slate', () =
     // declared, would throw StateHomeLayoutError right here instead of in front of the owner.
     should(afterTheClient).deepEqual(['layout-version', 'logs']);
     should(opened.created).be.false();
-    should(await readFile(join(layout.stateHome, 'layout-version'), 'utf8')).equal('1\n');
+    should(await readFile(join(layout.stateHome, 'layout-version'), 'utf8')).equal('2\n');
     should(await entriesOf(layout.stateHome)).deepEqual([
       'config',
       'daemon.lock',

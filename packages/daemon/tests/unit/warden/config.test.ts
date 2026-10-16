@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
+import { DEFAULT_WARDEN_ACCOUNT } from '@ferretry/protocol';
 import should from 'should';
 import {
   applyWardenConfigPatch,
   assignedCooldownMs,
-  DEFAULT_WARDEN_ACCOUNT,
   defaultWardenConfig,
   MINIMUM_SUS_SECONDS,
   MINIMUM_SWEEP_INTERVAL_MS,
@@ -13,10 +13,10 @@ import {
   spawnGapMs,
   sweepIntervalMs,
   unattendedWindowMs,
+  type WardenConfig,
   wardenAccountsOf,
   wardenConfigWarnings,
   wardenDetectOptions,
-  type WardenConfig,
 } from '../../../src/lib/warden/index.ts';
 
 const config = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({ ...defaultWardenConfig, ...overrides });
