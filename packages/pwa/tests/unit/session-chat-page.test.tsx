@@ -34,7 +34,11 @@ import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { WorkspaceLayoutStore } from '../../src/lib/workspace-layout-store.ts';
 import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
+import { createSurfaceEventHub } from '../../src/lib/surface-control.ts';
+import { DaemonClientProvider } from '../../src/lib/store.tsx';
+import type { FyApiClient } from '@ferretry/protocol/client';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
+import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -1363,6 +1367,118 @@ describe('SessionChatPage', () => {
 
       run(() => surface().onTaskOpen?.('F1'));
       expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
+      await runAsync(async () => await Promise.resolve());
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('proves and opens %terminal: and %browser: chips by name, and moves the marker on the live feed', async () => {
+    // Arrange — a daemon client answering the browser status and both control views, and a deck whose
+    // `dev` shell is named.
+    const layouts = new WorkspaceLayoutStore(NO_STORAGE);
+    const scope = daemonSessionScope(alpha, 'shared');
+    const pages = [
+      { id: 'PAGE1', name: 'app', url: 'http://localhost:5173/login', title: 'Sign in' },
+      { id: 'PAGE3', url: 'https://example.test/pr', title: 'The PR' },
+    ];
+    const answers: Record<string, unknown> = {
+      '/v1/sessions/shared/browser': {
+        sessionId: 'shared',
+        state: 'running',
+        pages,
+        activePageId: 'PAGE1',
+        url: pages[0]?.url,
+        title: 'Sign in',
+        pageState: 'ready',
+        canGoBack: false,
+        canGoForward: false,
+        viewport: { width: 1280, height: 800 },
+        viewers: 0,
+        persistentProfile: true,
+        idleTimeoutSeconds: 900,
+        capacity: { running: 2, maximum: 60 },
+      },
+      '/v1/sessions/shared/surfaces/terminals/control': { sessionId: 'shared', driving: [], takeovers: [], handed: [] },
+      '/v1/sessions/shared/surfaces/browser/control': { sessionId: 'shared', driving: [], takeovers: [], handed: [] },
+    };
+    const daemonClient = async () =>
+      ({
+        request: async (path: string, schema: { parse: (value: unknown) => unknown }) => schema.parse(answers[path]),
+      }) as unknown as FyApiClient;
+    const deck = fakeDeck(async () => terminalListing([terminalView('a1b2c3d4e5f6', { name: 'dev' })]));
+    const hub = createSurfaceEventHub();
+    const page = render(
+      <DaemonClientProvider client={daemonClient}>
+        {withSessionSearch(
+          <SessionChatPage
+            client={client([], sessionView('shared'))}
+            connection={alpha}
+            deck={deck.dependencies}
+            entries={[]}
+            formFactor="desktop"
+            onSessionChange={() => undefined}
+            presentation="pane"
+            session={sessionView('shared')}
+            surfaceEvents={hub}
+            workspaceLayouts={layouts}
+            workspaceRails={new WorkspaceRailPreferenceStore(NO_STORAGE)}
+          />,
+        )}
+      </DaemonClientProvider>,
+    );
+    try {
+      const surface = () => page.root.findByType(ReferenceSurfaceProvider).props.surface;
+      const resolve = (kind: 'terminal' | 'browser', key: string) =>
+        surface().surfaceReferenceResolver?.({ kind: 'surface', surface: kind, key });
+      await settleUntil(
+        () => resolve('browser', 'app')?.state === 'open' && resolve('terminal', 'dev')?.state === 'open',
+        'the page list and the terminal listing to prove their chips',
+        runAsync,
+      );
+      expect(resolve('browser', 'gone')).toEqual({ state: 'closed' });
+      const open = (kind: 'terminal' | 'browser', key: string) =>
+        run(() =>
+          surface().onSurfaceOpen?.({
+            kind: 'surface',
+            surface: kind,
+            key,
+            daemonId: alpha.daemonId,
+            sessionId: 'shared',
+          }),
+        );
+
+      // Act + Assert — a named shell opens its tab by id, labelled with its name.
+      open('terminal', 'dev');
+      expect(layouts.snapshot(scope).tabs['terminal:a1b2c3d4e5f6']?.label).toBe('dev');
+      open('terminal', 'a1b2c3d4e5f6');
+      expect(layouts.snapshot(scope).focused).toBeDefined();
+      // A named page opens by name; an unnamed one by id, labelled by its title; an unknown key as itself.
+      open('browser', 'app');
+      expect(layouts.snapshot(scope).tabs['browser:app']?.label).toBe('app');
+      open('browser', 'PAGE3');
+      expect(layouts.snapshot(scope).tabs['browser:PAGE3']?.label).toBe('The PR');
+      open('browser', 'gone');
+      expect(layouts.snapshot(scope).tabs['browser:gone']).toBeDefined();
+
+      // The live feed reaches the driving seam: a takeover shows at once.
+      run(() =>
+        hub.publish({
+          sequence: 4,
+          time: '2026-10-16T10:00:00.000Z',
+          sessionId: 'shared',
+          type: 'surface.takeover',
+          source: 'daemon',
+          data: {
+            surface: 'browser',
+            id: 'PAGE1',
+            name: 'app',
+            by: { by: 'local' },
+            since: '2026-10-16T10:00:00.000Z',
+          },
+        }),
+      );
+      expect(page.root.findByType(SessionWorkspace).props.driving.takenOver('browser:app')).toBe(true);
       await runAsync(async () => await Promise.resolve());
     } finally {
       run(() => page.unmount());

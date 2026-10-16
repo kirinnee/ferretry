@@ -114,6 +114,8 @@ export interface UnifiedBrowserSurfaceProps {
    */
   readonly onOpenLoginWindow?: () => Promise<BrowserLoginSnapshot>;
   readonly dependencies?: UnifiedBrowserDependencies;
+  /** False when the host lists the session's pages itself: the real engine then draws no tab strip. */
+  readonly showPageTabs?: boolean;
 }
 
 /** The `open` action that resumes Chrome, carrying a link only when one is due. */
@@ -153,6 +155,7 @@ export function UnifiedBrowserSurface({
   isActive = true,
   onOpenLoginWindow,
   dependencies = DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
+  showPageTabs = true,
 }: UnifiedBrowserSurfaceProps) {
   // Fail here rather than deep inside a request: a mismatched pair would drive
   // one daemon's Chrome under another daemon's name, which is the exact bug the
@@ -664,6 +667,7 @@ export function UnifiedBrowserSurface({
           streamTicket={streamTicket}
           isActive={isActive}
           showNavigation={false}
+          showPageTabs={showPageTabs}
           onStateChange={remoteStateChanged}
         />
       ) : previewEntry !== null ? (
