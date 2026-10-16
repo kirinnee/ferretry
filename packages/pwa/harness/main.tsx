@@ -195,7 +195,7 @@ import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/
 import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
 import { DaemonAttentionClient } from '../src/lib/attention-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
-import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
+import { type ChatWidthPreference, type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
@@ -2479,6 +2479,157 @@ const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   },
 };
 
+/**
+ * THE SESSION WORKSPACE'S AGENT TOOLS, kept in the page. Hadi drives the `dev` terminal and the `app`
+ * page (markers good until 2099, so a capture never races their lapse); `docs` is an incognito page and
+ * the third page was opened by the person and has no name. Take over / Hand back change the held set
+ * here, so the controls are walkable; `?held` starts with the `app` page taken over.
+ */
+const HARNESS_WORKSPACE_SESSION = 'harness-workspace';
+const HARNESS_DRIVING_UNTIL = '2099-01-01T00:00:00.000Z';
+const HARNESS_WORKSPACE_PAGES: {
+  id: string;
+  name?: string;
+  url: string;
+  title: string;
+  incognito?: true;
+  ownerSessionId: string;
+  ownerName: string;
+}[] = [
+  {
+    id: 'C0FFEE0001',
+    name: 'app',
+    url: 'http://localhost:5173/login',
+    title: 'Sign in — Ferretry',
+    ownerSessionId: HARNESS_WORKSPACE_SESSION,
+    ownerName: 'Hadi',
+  },
+  {
+    id: 'C0FFEE0002',
+    name: 'docs',
+    url: 'https://docs.example.test/getting-started',
+    title: 'Getting started — Docs',
+    incognito: true,
+    ownerSessionId: HARNESS_WORKSPACE_SESSION,
+    ownerName: 'Hadi',
+  },
+  {
+    id: 'C0FFEE0003',
+    url: 'https://github.com/kirinnee/ferretry/pull/500',
+    title: 'feat(daemon): drive terminals and browser pages by name',
+    ownerSessionId: HARNESS_WORKSPACE_SESSION,
+    ownerName: 'Hadi',
+  },
+];
+const harnessWorkspaceSurfaces = (kind: 'terminal' | 'browser'): readonly { id: string; name?: string }[] =>
+  kind === 'terminal'
+    ? [{ id: 'a1b2c3d4e5f6', name: 'dev' }]
+    : HARNESS_WORKSPACE_PAGES.map(page => ({ id: page.id, ...(page.name === undefined ? {} : { name: page.name }) }));
+let harnessPageCount = HARNESS_WORKSPACE_PAGES.length;
+const harnessHeld = new Set<string>(window.location.search.includes('held') ? ['browser:C0FFEE0001'] : []);
+let harnessViewedPage = 'C0FFEE0001';
+const harnessControlView = (kind: 'terminal' | 'browser') => {
+  const driven = harnessWorkspaceSurfaces(kind)[0];
+  return {
+    sessionId: HARNESS_WORKSPACE_SESSION,
+    driving:
+      driven === undefined || harnessHeld.has(`${kind}:${driven.id}`)
+        ? []
+        : [
+            {
+              surface: kind,
+              id: driven.id,
+              ...(driven.name === undefined ? {} : { name: driven.name }),
+              agentSessionId: HARNESS_WORKSPACE_SESSION,
+              agentName: 'Hadi',
+              since: '2026-10-16T09:00:00.000Z',
+              until: HARNESS_DRIVING_UNTIL,
+            },
+          ],
+    takeovers: harnessWorkspaceSurfaces(kind)
+      .filter(surface => harnessHeld.has(`${kind}:${surface.id}`))
+      .map(surface => ({
+        surface: kind,
+        id: surface.id,
+        ...(surface.name === undefined ? {} : { name: surface.name }),
+        by: { by: 'human', deviceId: 'harness-device' },
+        since: '2026-10-16T09:01:00.000Z',
+      })),
+    handed: [],
+  };
+};
+const harnessWorkspaceBrowser = () => {
+  const active = HARNESS_WORKSPACE_PAGES.find(page => page.id === harnessViewedPage) ?? HARNESS_WORKSPACE_PAGES[0];
+  return {
+    sessionId: HARNESS_WORKSPACE_SESSION,
+    state: 'running',
+    pages: HARNESS_WORKSPACE_PAGES,
+    activePageId: active?.id,
+    url: active?.url,
+    title: active?.title,
+    canGoBack: false,
+    canGoForward: false,
+    pageState: 'ready',
+    viewport: { width: 1280, height: 800 },
+    viewers: 1,
+    persistentProfile: true,
+    profileKind: 'shared',
+    idleTimeoutSeconds: 900,
+    capacity: { running: 3, maximum: 60 },
+  };
+};
+/** A person's toolbar action on the workspace's browser, answered as the daemon would. */
+const harnessWorkspaceAct = (action: { action: string; pageId?: string }) => {
+  if (action.action === 'activate-page' && action.pageId !== undefined) harnessViewedPage = action.pageId;
+  if (action.action === 'close-page') {
+    const at = HARNESS_WORKSPACE_PAGES.findIndex(page => page.id === action.pageId);
+    if (at >= 0) HARNESS_WORKSPACE_PAGES.splice(at, 1);
+  }
+  if (action.action === 'new-page') {
+    harnessPageCount += 1;
+    harnessViewedPage = `C0FFEE${String(harnessPageCount).padStart(4, '0')}`;
+    HARNESS_WORKSPACE_PAGES.push({
+      id: harnessViewedPage,
+      url: 'https://example.test/',
+      title: 'New page',
+      ownerSessionId: HARNESS_WORKSPACE_SESSION,
+      ownerName: 'Hadi',
+    });
+  }
+  return { status: harnessWorkspaceBrowser() };
+};
+/**
+ * The workspace's real engine over the same page state as its page strip, so a capture shows ONE
+ * browser: the pages the strip lists are the pages the engine shows.
+ */
+const HARNESS_WORKSPACE_BROWSER_TRANSPORT: RemoteBrowserTransport = {
+  readStatus: async () => harnessWorkspaceBrowser() as BrowserStatus,
+  runAction: async (_daemon, _scope, action) => harnessWorkspaceAct(action) as never,
+};
+
+/** The workspace's control and browser routes, answered from the state above; null for any other. */
+const harnessWorkspaceTools = (method: string, rest: string, body: string): Response | null => {
+  const control = /^surfaces\/(terminals|browser)\/control$/.exec(rest);
+  if (control !== null) {
+    const kind = control[1] === 'terminals' ? 'terminal' : 'browser';
+    if (method === 'POST') {
+      const request = JSON.parse(body) as { action: string; key: string };
+      const target = harnessWorkspaceSurfaces(kind).find(
+        surface => surface.id === request.key || surface.name === request.key,
+      );
+      if (target !== undefined && request.action === 'takeover') harnessHeld.add(`${kind}:${target.id}`);
+      if (target !== undefined && request.action === 'handback') harnessHeld.delete(`${kind}:${target.id}`);
+    }
+    return harnessJson(harnessControlView(kind));
+  }
+  if (rest !== 'browser') return null;
+  if (method === 'POST') {
+    const action = JSON.parse(body) as { action: string; pageId?: string };
+    return harnessJson(harnessWorkspaceAct(action));
+  }
+  return harnessJson(harnessWorkspaceBrowser());
+};
+
 /** Which pairing a request is addressed to, taken from the fixtures themselves. */
 const HARNESS_DAEMON_HOSTS = {
   answering: new URL(daemon.baseUrl).hostname,
@@ -2567,6 +2718,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   harnessRequests.push(`${method} ${url.pathname}${url.search}`);
   const sessionRoute = harnessSessionRoute(url.pathname);
   // The live pane the activity line reads: Claude's own spinner line, as a running turn paints it.
+  if (sessionRoute?.sessionId === HARNESS_WORKSPACE_SESSION) {
+    const answered = harnessWorkspaceTools(method, sessionRoute.rest, String(init?.body ?? '{}'));
+    if (answered !== null) return answered;
+  }
   if (method === 'GET' && sessionRoute?.rest === 'snapshot')
     return new Response(
       sessionRoute.sessionId === NEW_SESSION_ID ? HARNESS_IDLE_PANES[NEW_SESSION_HARNESS] : HARNESS_LIVE_PANE,
@@ -3431,6 +3586,21 @@ const HarnessRemotePane = (props: RemoteBrowserPaneProps) => (
 const HARNESS_UNIFIED_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
   ...DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
   RemotePane: HarnessRemotePane,
+};
+
+/** The session workspace's engine: the same offline seams, over the workspace's own pages. */
+const HARNESS_WORKSPACE_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
+  ...DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
+  RemotePane: (props: RemoteBrowserPaneProps) => (
+    <RemoteBrowserPane
+      {...props}
+      transport={HARNESS_WORKSPACE_BROWSER_TRANSPORT}
+      schedule={HARNESS_BROWSER_SCHEDULE}
+      socketFactory={HARNESS_BROWSER_SOCKET_FACTORY}
+      createObjectUrl={HARNESS_BROWSER_CREATE_OBJECT_URL}
+      revokeObjectUrl={HARNESS_BROWSER_REVOKE_OBJECT_URL}
+    />
+  ),
 };
 
 /**
@@ -6775,7 +6945,7 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
   {
     id: 'workspace-assistant-0',
     kind: 'assistant',
-    text: 'Started `bun dev` in %terminal:a1b2c3d4e5f6 and read @CLAUDE.md — tap either to open it beside the chat.',
+    text: 'Started `bun dev` in %terminal:dev, opened %browser:app at /login and read @CLAUDE.md — tap any of them to open it beside the chat.',
     label: 'hadi',
   },
   {
@@ -6971,7 +7141,12 @@ const WORKSPACE_MACHINES = [
 const WORKSPACE_TERMINAL_LISTING: TerminalListView = {
   ...HARNESS_TERMINAL_LISTING,
   sessionId: 'harness-workspace',
-  terminals: HARNESS_TERMINAL_LISTING.terminals.map(terminal => ({ ...terminal, sessionId: 'harness-workspace' })),
+  terminals: HARNESS_TERMINAL_LISTING.terminals.map(terminal => ({
+    ...terminal,
+    sessionId: 'harness-workspace',
+    // The agent's dev server is a NAMED terminal — `%terminal:dev` — the way the agent tools open one.
+    ...(terminal.id === 'a1b2c3d4e5f6' ? { name: 'dev' } : {}),
+  })),
 };
 const WORKSPACE_TERMINAL_OUTPUT = [
   '$ bun dev',
@@ -7013,7 +7188,7 @@ const WORKSPACE_LAYOUTS = (() => {
       activateWorkspaceTab(
         [
           workspaceTab('terminal', 'a1b2c3d4e5f6', { label: 'dev' }),
-          workspaceTab('browser', 'b1', { label: 'app' }),
+          workspaceTab('browser', 'app', { label: 'app' }),
           workspaceTab('file', 'CLAUDE.md'),
           workspaceTab('terminal', '0f0e0d0c0b0a', { label: 'shell' }),
         ].reduce((next, tab) => openWorkspaceTab(next, tab), layout),
@@ -7023,6 +7198,11 @@ const WORKSPACE_LAYOUTS = (() => {
   return store;
 })();
 const WORKSPACE_ATTENTION = new DaemonAttentionClient();
+/** `?chat-width=readable|balanced|full` picks the conversation measure, as Settings › Appearance does. */
+const WORKSPACE_CHAT_WIDTH: ChatWidthPreference = (() => {
+  const asked = new URLSearchParams(window.location.search).get('chat-width');
+  return asked === 'balanced' || asked === 'full' ? asked : 'readable';
+})();
 
 /**
  * The account usage the composer reads, from the same passive feed the app polls: the session
@@ -7080,10 +7260,10 @@ function SessionWorkspaceHarness() {
       className={`kt-shell flex overflow-hidden ${layout === 'drawer' ? 'flex-col' : 'flex-row'}`}
       id="harness-session-workspace-page"
     >
-      {layout === 'drawer' ? null : bar(layout === 'rail' ? 'rail' : 'column')}
+      {layout === 'drawer' ? null : bar('column')}
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
-          chatWidth="readable"
+          chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_CLIENT}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
@@ -7098,7 +7278,7 @@ function SessionWorkspaceHarness() {
           session={session}
           usage={WORKSPACE_USAGE}
           deck={WORKSPACE_TERMINAL_DECK}
-          browser={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}
+          browser={HARNESS_WORKSPACE_BROWSER_DEPENDENCIES}
           workspaceLayouts={WORKSPACE_LAYOUTS}
           context={{
             attention: WORKSPACE_ATTENTION,

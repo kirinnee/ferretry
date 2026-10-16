@@ -133,6 +133,7 @@ import {
   setupPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
+import { createSurfaceEventHub } from './lib/surface-control.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
@@ -710,7 +711,7 @@ function ShellSessionsBar({
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
-  // A desktop column the reader may fold to a rail; a rail the viewport forces is not theirs to unfold.
+  // The desktop column, folded to its icon rail only when the reader folded it.
   const shape: SessionsBarPresentation = presentation === 'column' && collapsed ? 'rail' : presentation;
   return (
     <SessionsBar
@@ -865,6 +866,14 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   }>({ owner: null, status: 'connecting' });
   const streamControl = useRef<SessionEventStreamControl | null>(null);
   /**
+   * The live feed's share for the session page: every event this route receives is handed on, so the
+   * AGENT marker and Take over / Hand back move the moment the daemon journals a change — on the same
+   * one subscription, never a second socket. A new hub per session: one session's events are never
+   * another's.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the session id is the hub's identity
+  const surfaceEvents = useMemo(() => createSurfaceEventHub(), [daemonId, sessionId]);
+  /**
    * The carrier this daemon's traffic is MEASURED on, subscribed rather than read once.
    *
    * `useActiveCarrier` re-renders when the router publishes a new answer, which is what makes the
@@ -986,6 +995,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       onEvent: event => {
         liveCursorRef.current = Math.max(liveCursorRef.current, event.sequence);
         setLiveCursor(current => Math.max(current, event.sequence));
+        surfaceEvents.publish(event);
         void refreshControl.current?.refresh(true);
       },
       // Stamped with the owner, so a report can never be read by a later one. The model publishes
@@ -999,7 +1009,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       stream.stop();
       if (streamControl.current === stream) streamControl.current = null;
     };
-  }, [streamOwner]);
+  }, [streamOwner, surfaceEvents]);
 
   /**
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
@@ -1128,6 +1138,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           pins={store.pins}
           refreshError={sessionIssue}
           session={session}
+          surfaceEvents={surfaceEvents}
           usage={store.usage}
         />
       ) : (
@@ -1799,7 +1810,7 @@ export function AppShell() {
    * WHERE THIS SESSION'S SEARCH IS MOUNTED: in the sessions bar's full column, on a session page. A rail
    * and a phone have no room for it, so there Cmd/Ctrl+K opens the finder instead of focusing nothing.
    */
-  const barSessionSearch = currentSessionScope !== null && layout === 'full' && !sidebarCollapsed;
+  const barSessionSearch = currentSessionScope !== null && layout !== 'drawer' && !sidebarCollapsed;
   const pageKey = routePageKey(effectiveRoute);
   const routeAnnouncer = useRef<HTMLParagraphElement>(null);
   // Seed the previous key during render instead of latching the first effect.
@@ -1900,7 +1911,9 @@ export function AppShell() {
       <SessionSearchProvider connection={connection} focusSignal={sessionSearchFocusSignal} scope={currentSessionScope}>
         <SessionsDrawerContext.Provider value={phone ? openSessionsDrawer : null}>
           <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`}>
-            {phone ? null : sessionsBar(layout === 'rail' ? 'rail' : 'column')}
+            {/* EXPANDED BY DEFAULT at every width above a phone: the column folds to its icon rail only
+                when the reader folds it (remembered per device), never because the window is narrow. */}
+            {phone ? null : sessionsBar('column')}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* A phone keeps its top bar off the session page only: there the session's own bar
                   carries ☰, and every other page still needs a way to the drawer and the finder. */}

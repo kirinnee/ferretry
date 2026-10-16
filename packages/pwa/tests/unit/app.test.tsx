@@ -2527,11 +2527,11 @@ describe('the command palette shortcut', () => {
       'the current-session search input',
     );
 
-    // The REAL COMPOSER textarea, not an unrelated element appended by the
-    // test: session search deliberately claims this editable context and no
-    // other one.
+    // The REAL COMPOSER field (the live editor, in the default editor style),
+    // not an unrelated element appended by the test: session search
+    // deliberately claims this editable context and no other one.
     const composer = must(
-      view.container.querySelector<HTMLTextAreaElement>('form.fy-composer textarea'),
+      view.container.querySelector<HTMLElement>('form.fy-composer [data-live-editor]'),
       'the session composer',
     );
     composer.focus();
@@ -3890,7 +3890,7 @@ describe('the sessions bar', () => {
     }
   });
 
-  it('carries this session’s own search on a session page, and the finder under a forced rail', async () => {
+  it('carries this session’s own search on a session page at every desktop width, and the finder once folded', async () => {
     const wide = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], { sessions: ['shared'] });
     try {
       await settle();
@@ -3906,8 +3906,12 @@ describe('the sessions bar', () => {
       const narrow = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], { sessions: ['shared'] });
       try {
         await settle();
-        const rail = must(narrow.view.container.querySelector('[data-sessions-bar="rail"]'), 'the forced rail');
-        expect(rail.querySelector('[data-sbar-expand]')).toBeNull();
+        // A narrow window keeps the column EXPANDED — it folds only when the reader folds it.
+        const column = must(narrow.view.container.querySelector('[data-sessions-bar="column"]'), 'the column');
+        expect(column.querySelector('[data-current-session-search]')).not.toBeNull();
+        await interact(() => (must(column.querySelector('[data-sbar-collapse]'), 'Collapse') as HTMLElement).click());
+        const rail = must(narrow.view.container.querySelector('[data-sessions-bar="rail"]'), 'the folded rail');
+        expect(rail.querySelector('[data-sbar-expand]')).not.toBeNull();
         expect(narrow.view.container.querySelector('[data-current-session-search]')).toBeNull();
         // With nowhere to focus this session's search, the chord opens the finder instead.
         await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));

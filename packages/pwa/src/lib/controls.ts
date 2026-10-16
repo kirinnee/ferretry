@@ -13,7 +13,7 @@
  *   - `density` and `dashboardView` absent means `null`, not a written default,
  *     so the first-load pointer policy stays free to choose compact on a phone
  *     and full on a desktop.
- *   - `chatWidth` absent means `'readable'` (Comfortable), the session redesign's
+ *   - `chatWidth` absent means `'readable'` (Compact, 720px), the session redesign's
  *     default; a stored choice is kept. Every later field follows the same rule:
  *     absent reads as the shipped default, so none of them needs a version bump.
  *   - An empty `projectScope` is NO scope, not a folder named nothing.

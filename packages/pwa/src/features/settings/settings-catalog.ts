@@ -60,7 +60,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'chat-width',
     label: 'Conversation width',
     description:
-      'Comfortable (about 75 characters a line) is the default. On a wide screen choose Wide (900px) or Full (the whole pane); at 768px and below all three look the same.',
+      'How wide messages and the composer run: Compact (a 720px column) is the default, 1200px leaves room for code and tables, Full uses the whole pane. A narrower pane looks the same in all three.',
     keywords: [
       'chat',
       'conversation',
@@ -68,6 +68,9 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'measure',
       'readable',
       'comfortable',
+      'compact',
+      '720',
+      '1200',
       'wide',
       'balanced',
       'middle',
@@ -86,7 +89,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'composer-markdown',
     label: 'Editor style',
     description:
-      'Markdown, Notion-style (the default) shapes the line as you type — headings, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text shows headings at their real size and hides the markers; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
+      'Markdown, Notion-style (the default) formats as you type — headings at their real size, bold, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text hides the markers and adds a toolbar; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
     keywords: [
       'composer',
       'markdown',

@@ -33,17 +33,7 @@
  *   straight through to the host until ArrowDown or a pointer chooses a row.
  */
 
-import {
-  type KeyboardEvent,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { type RefObject, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_SUGGESTION_KEYS, type SuggestionKeys } from '../lib/controls.ts';
 import {
   acceptsDirectReferenceQuery,
@@ -266,12 +256,29 @@ export interface ComposerAutocompleteSnapshot {
   readonly error?: string;
 }
 
+/**
+ * The text field the controller drives: the composer's textarea, or the live markdown editor's
+ * textarea-shaped handle. Only this slice is read, so both are one code path.
+ */
+export interface ComposerField {
+  readonly value: string;
+  setSelectionRange(start: number, end: number): void;
+  contains(node: Node | null): boolean;
+}
+
+/** The slice of a key event the controller reads. */
+export interface ComposerFieldKeyEvent {
+  readonly key: string;
+  readonly nativeEvent: { readonly isComposing?: boolean };
+  preventDefault(): void;
+}
+
 export interface ComposerAutocompleteController extends ComposerAutocompleteSnapshot {
   readonly listboxId: string;
   /** An open list vetoes any host re-focus recovery. */
   readonly blocksRefocus: boolean;
   syncSelection(selection: ComposerSelection): void;
-  handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
+  handleKeyDown(event: ComposerFieldKeyEvent): boolean;
   /**
    * The IME seam, in two halves, because a composition is a state and not a key.
    *
@@ -620,7 +627,7 @@ export function useComposerAutocomplete({
 }: {
   readonly value: string;
   readonly onValueChange: (value: string) => void;
-  readonly inputRef: RefObject<HTMLTextAreaElement | null>;
+  readonly inputRef: RefObject<ComposerField | null>;
   readonly providers: readonly ComposerAutocompleteProvider[];
   readonly disabled?: boolean;
   readonly listboxId?: string;
@@ -770,7 +777,7 @@ export function useComposerAutocomplete({
     [candidates, commit, match, value],
   );
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    (event: ComposerFieldKeyEvent): boolean => {
       if (event.nativeEvent.isComposing) return false;
       if (!open) return false;
       if (event.key === 'Escape') {

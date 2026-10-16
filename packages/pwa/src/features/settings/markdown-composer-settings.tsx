@@ -19,21 +19,21 @@ import { cn } from '../../lib/class-names.ts';
 import { type MdComposePref, useMdComposePref, writeMdComposePref } from '../../lib/md-compose.ts';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
-  'Whichever style, what you send is markdown. Rich text shows headings at their real size and hides the markers; the @ / : suggestions and Vim keys need Markdown or Plain. In Markdown style the line shapes itself as you type: # headings, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold**, *italic*, `code` and ~~strike~~ coloured and their markers kept faintly visible. ⌘B, ⌘I and ⌘E wrap the selection.';
+  'Whichever style, what you send is markdown, and the @ / : suggestions and Vim keys work in all three. In Markdown style the text formats as you type — # headings at their real size, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold** bold and *italic* slanted — and the markers kept faintly visible. Rich text formats the same way, hides the markers except on the line you are editing, and adds a formatting toolbar. ⌘B, ⌘I and ⌘E wrap the selection; ⌘⇧8 and ⌘⇧7 make lists.';
 
-/** The two editor styles this build offers, and what each is called on screen. */
+/** The editor styles this build offers, and what each is called on screen. */
 const EDITOR_STYLES: readonly { readonly pref: MdComposePref; readonly label: string; readonly detail: string }[] = [
-  { pref: 'on', label: 'Markdown, Notion-style', detail: '# headings and lists shape themselves as you type' },
+  { pref: 'on', label: 'Markdown, Notion-style', detail: 'Formats as you type, markers kept faintly visible' },
   {
     pref: 'rich',
     label: 'Rich text',
-    detail: 'Headings at their real size, lists and marks rendered; still sends markdown',
+    detail: 'Formats as you type, markers hidden, with a toolbar; still sends markdown',
   },
-  { pref: 'off', label: 'Plain text box', detail: 'No colouring and no list continuation' },
+  { pref: 'off', label: 'Plain text box', detail: 'No formatting and no list continuation' },
 ];
 
 export const VIM_COMPOSER_EXPLANATION =
-  'Modal Vim keys — normal and insert — inside the same message textarea. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard.';
+  'Modal Vim keys — normal and insert — in every editor style, with the mode shown under the message box. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard (the mode indicator also switches modes).';
 
 function ComposerSwitch({
   checked,
@@ -123,7 +123,7 @@ export function MarkdownComposerSettings({
         <ComposerSwitch
           checked={vimEnabled}
           label="Vim-style editing"
-          detail="Physical keyboard · native textarea keeps input"
+          detail="Physical keyboard · NORMAL and INSERT shown under the box"
           onChange={onChangeVim}
         />
         <p className="m-0 text-cell leading-base text-muted">{VIM_COMPOSER_EXPLANATION}</p>

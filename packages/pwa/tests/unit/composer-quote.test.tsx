@@ -1,10 +1,16 @@
-import { describe, it } from 'bun:test';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import should from 'should';
 import { Composer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { composerQuoteTarget, quoteSelectionIntoComposer } from '../../src/lib/quote.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 /**
  * The composer's half of transcript quoting, mounted in a real DOM.

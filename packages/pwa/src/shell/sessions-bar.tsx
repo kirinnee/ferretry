@@ -7,12 +7,13 @@
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
  *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
  *   - All · Needs you · Running, each with the count choosing it would show;
- *   - the sessions, grouped by project, each a status dot, the agent's name, a "needs you" badge and
- *     one line of what it is doing — the open one is a soft filled pill, never a side bar;
+ *   - EVERY session, grouped by project, each a status dot, the agent's name, a "needs you" badge, a
+ *     line of what it is doing and the directory it runs in — the open one is a soft filled pill;
  *   - Projects, Insights (Analytics, Warden, Learning) and Settings, at the bottom.
  *
- * THREE PRESENTATIONS, ONE CONTENT. A desktop column the reader may collapse to an icon rail, a rail the
- * viewport forces below 1100px, and on a phone a drawer behind the session bar's ☰ — modal, with a scrim,
+ * THREE PRESENTATIONS, ONE CONTENT. A desktop column — expanded by default at every width above a phone,
+ * collapsible to an icon rail by the reader's own choice (remembered per device) and drag-resizable —
+ * and on a phone a drawer behind the session bar's ☰ — modal, with a scrim,
  * Escape and focus handled by the app's one dialog hook. The drawer closes itself on every navigation it
  * starts, because the page it opened is underneath it.
  */
@@ -22,6 +23,7 @@ import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, Search, Set
 import { type ReactNode, useRef, useState, useSyncExternalStore } from 'react';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
+import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { FleetProject } from '../lib/fleet-grouping.ts';
@@ -33,13 +35,18 @@ import {
   daemonSessionsPath,
   daemonSettingsPath,
 } from '../lib/pages/routes.ts';
+import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
-import { needsYou, type SessionsBarFilter, sessionsBarSubline, sessionsBarView } from './sessions-bar-model.ts';
+import {
+  needsYou,
+  type SessionsBarFilter,
+  sessionsBarDirectory,
+  sessionsBarSubline,
+  sessionsBarView,
+} from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
-import { displayCallsign } from '../lib/callsign.ts';
-import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 
 /** The places at the foot of the bar. Insights is Analytics, Warden and Learning together. */
 export type SessionsBarPlace = 'sessions' | 'projects' | 'insights' | 'settings';
@@ -101,8 +108,6 @@ export interface SessionsBarProps {
   /** Drawer only: closes it. */
   readonly onClose?: () => void;
   readonly onAddMachine: () => void;
-  /** Injected clock, so "finished in the last day" is testable. */
-  readonly now?: () => number;
   /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
   readonly rails?: WorkspaceRailPreferenceStore;
 }
@@ -120,6 +125,8 @@ function SessionRow({
 }) {
   const name = displayCallsign(view.config.teammate) || view.config.label || view.config.id;
   const waiting = needsYou(view);
+  const task = sessionsBarSubline(view);
+  const directory = sessionsBarDirectory(view);
   return (
     <li>
       <RouteLink
@@ -127,7 +134,7 @@ function SessionRow({
         className="fy-sbar__session"
         data-sbar-session={view.config.id}
         onNavigate={onNavigate}
-        title={`${name} — ${sessionsBarSubline(view)}`}
+        title={`${name} — ${task}\n${view.config.cwd}`}
         to={daemonSessionPath(daemonId, view.config.id)}
       >
         <StatusMark view={view} />
@@ -137,7 +144,12 @@ function SessionRow({
             needs you
           </span>
         ) : null}
-        <span className="fy-sbar__sub">{sessionsBarSubline(view)}</span>
+        {task === view.config.cwd ? null : <span className="fy-sbar__sub">{task}</span>}
+        {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
+            the path's slashes reading left to right inside it. */}
+        <span className="fy-sbar__dir" data-sbar-dir="">
+          <bdi>{directory}</bdi>
+        </span>
       </RouteLink>
     </li>
   );
@@ -227,9 +239,9 @@ function FindButton({
 
 /** The column's and the drawer's content: everything but the frame. */
 function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: string) => void }) {
-  const { daemonId, sessions, projects, activeSessionId, active, navigate, now = Date.now } = props;
+  const { daemonId, sessions, projects, activeSessionId, active, navigate } = props;
   const [filter, setFilter] = useState<SessionsBarFilter>('all');
-  const view = sessionsBarView(sessions ?? [], projects, filter, now(), activeSessionId);
+  const view = sessionsBarView(sessions ?? [], projects, filter);
   return (
     <>
       {props.update === undefined ? null : (
@@ -361,8 +373,8 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
 
 /** The collapsed form: the same places and sessions, as icons and status dots. */
 function SessionsRail(props: SessionsBarProps) {
-  const { daemonId, sessions, projects, activeSessionId, active, onNavigate, now = Date.now } = props;
-  const view = sessionsBarView(sessions ?? [], projects, 'all', now(), activeSessionId);
+  const { daemonId, sessions, projects, activeSessionId, active, onNavigate } = props;
+  const view = sessionsBarView(sessions ?? [], projects, 'all');
   return (
     <nav aria-label="Sessions" className="fy-sbar fy-sbar--rail" data-sessions-bar="rail">
       {props.onExpand === undefined ? null : (
