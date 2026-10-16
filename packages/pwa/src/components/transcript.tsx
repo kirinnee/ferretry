@@ -3,9 +3,9 @@ import { useInputModality } from '../hooks/use-input-modality.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
+import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import type { PaneActivity } from '../lib/pane-activity.ts';
 import {
   detailsLabel,
   type TranscriptEntry,

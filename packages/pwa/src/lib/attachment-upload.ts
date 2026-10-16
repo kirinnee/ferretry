@@ -11,6 +11,7 @@
  */
 
 import { type AttachmentView, AttachmentViewSchema } from '@ferretry/protocol';
+import { normalizeAttachmentMime } from './attachments.ts';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -36,7 +37,7 @@ export const uploadAttachment = async (
   if (daemon.daemonId !== scope.daemonId) throw new Error('attachment scope must belong to the requested daemon');
   const body = JSON.stringify({
     filename: file.name,
-    mime: file.type || 'application/octet-stream',
+    mime: normalizeAttachmentMime(file.type) || 'application/octet-stream',
     base64: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
   });
   const target = daemonRequest(daemon, `/v1/sessions/${encodeURIComponent(scope.sessionId)}/attachments`, {

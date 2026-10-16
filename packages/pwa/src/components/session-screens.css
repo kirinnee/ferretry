@@ -699,16 +699,90 @@
   padding: 8px 12px;
   pointer-events: auto;
 }
+/* THE COMPACT COMPOSER: one rounded row — ＋, the growing line, 🎙, send — and one small status line
+ * under it. Focus is the row's border stepping up to the strong border, never a heavy accent ring. */
 .fy-composer {
-  background: var(--fy-surface);
-  border: 1px solid var(--fy-border);
-  border-radius: 12px;
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   position: relative;
 }
-.fy-composer:focus-within {
+.fy-composer-row {
+  align-items: flex-end;
+  background: var(--bg, var(--fy-surface));
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+.fy-composer-row:focus-within {
+  border-color: var(--border-strong, var(--fy-accent));
+}
+.fy-composer[data-composer-dropping] .fy-composer-row {
+  border-color: var(--fy-accent);
+  border-style: dashed;
+}
+.fy-composer-icon {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--fy-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0;
+  width: 36px;
+}
+.fy-composer-icon:hover {
+  background: var(--fy-surface-2);
+  color: var(--fy-fg);
+}
+.fy-composer-icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.fy-composer-send {
+  align-items: center;
+  background: var(--fy-accent);
+  border: 0;
+  border-radius: 9px;
+  color: var(--accent-fg, #fff);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+.fy-composer-send:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.fy-composer-icon:focus-visible,
+.fy-composer-send:focus-visible,
+.fy-composer-chip:focus-visible {
   outline: 2px solid var(--fy-accent);
   outline-offset: 2px;
+}
+.fy-composer-context {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.fy-composer-chip {
+  background: transparent;
+  border: 1px solid var(--fy-border);
+  border-radius: 8px;
+  color: var(--fy-muted);
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 8px;
 }
 /* `resize: none`, because the height is owned in JS now. The composer measures
  * its content before paint and writes `style.height` on every draft change
@@ -722,7 +796,8 @@
   box-sizing: border-box;
   color: inherit;
   font: inherit;
-  min-height: 44px;
+  line-height: 22px;
+  min-height: 22px;
   resize: none;
   width: 100%;
 }
@@ -735,7 +810,11 @@
  * The wrapper follows the textarea's real, measured height; the overlay is
  * absolute and therefore cannot contribute a pixel to composer growth. */
 .fy-composer-input-layer {
+  align-self: center;
+  flex: 1 1 auto;
+  line-height: 22px;
   min-width: 0;
+  padding: 7px 4px;
   position: relative;
   width: 100%;
 }
@@ -765,8 +844,9 @@
   position: relative;
   z-index: 1;
 }
+/* Inset by the layer's own padding, so the paint sits exactly over the textarea's glyphs. */
 .fy-composer-highlight {
-  inset: 0;
+  inset: 7px 4px;
   overflow-y: hidden;
   pointer-events: none;
   position: absolute;
@@ -816,14 +896,21 @@
 .fy-composer-highlight [data-md-token='reference'] {
   color: var(--fy-accent);
 }
+/* The status line under the row: model, effort, context, quota and the key hint, small and quiet. */
 .fy-composer-actions {
-  justify-content: space-between;
+  color: var(--faint, var(--fy-muted));
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px 10px;
+  min-height: 20px;
+  padding: 0 4px;
 }
 .fy-composer-actions p {
-  color: var(--fy-muted);
-  flex: 1;
+  color: var(--faint, var(--fy-muted));
+  flex: 1 1 auto;
   font-size: 12px;
   margin: 0;
+  min-width: 0;
 }
 .fy-composer-quota {
   align-items: center;
@@ -833,18 +920,6 @@
   font-size: 12px;
   gap: 5px;
   white-space: nowrap;
-}
-.fy-composer-actions button {
-  background: var(--fy-accent);
-  border: 0;
-  border-radius: 8px;
-  color: #fff;
-  min-height: 36px;
-  padding: 0 14px;
-}
-.fy-composer-actions button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
 }
 .fy-composer-error {
   color: var(--err, #b42318);
