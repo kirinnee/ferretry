@@ -155,7 +155,7 @@ spends them itself, on the operator's account, through ONE holder:
 - It puts the ONE named secret on ONE outbound request as a header (`authorization: Bearer …` unless a
   provider says otherwise) and answers only what came back: a status, a parsed reply, or a refusal.
   No branch returns the request it built.
-- The URL must be `https:` and its host must be one the caller listed for that secret, compared exactly,
+- The URL must be `https:` (or `http:` to this machine) and its host must be one the caller listed for that secret, compared exactly,
   or **nothing is sent** — a Groq key can only ever reach `api.groq.com`. Each provider's hosts are
   written in `lib/speedups/catalog.ts`, so a new destination is a reviewed edit, not a URL in a config file.
 - A request that already carries the credential header is refused, so the only credential on the wire
@@ -164,8 +164,11 @@ spends them itself, on the operator's account, through ONE holder:
   than handed to a caller that may render it.
 - A damaged vault is reported as damaged, never as "no key".
 
-The dictation clean-up (`POST /v1/stt/enhance`), the Jev guard and the Speed-ups **Test**
-(`POST /v1/speedups/:provider/test`) all go through it; none of them is handed a value. The status read,
+The dictation clean-up (`POST /v1/stt/enhance`), the Jev guard, the Speed-ups **Test**
+(`POST /v1/speedups/:provider/test`) and an environment login's **Test**
+(`POST /v1/fleet/credentials/:id/test`, [provider-presets.md](provider-presets.md)) all go through it;
+none of them is handed a value. A login Test may reach only a host the login itself sends that key to,
+or one a built-in preset names, and plain `http:` only to this machine (a LiteLLM proxy on localhost). The status read,
 `GET /v1/speedups`, says whether each key is **set** from the store's listing of names — it never opens
 the vault. Both routes are governed as `secrets.use`, and a Test is in the security log as
 `secrets.used` with the secret's name.

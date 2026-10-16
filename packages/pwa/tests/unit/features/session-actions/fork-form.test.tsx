@@ -46,7 +46,12 @@ const open = async (
 ): Promise<Harness> => {
   const closes: number[] = [];
   const forked: ForkSessionOutcome[] = [];
-  const host: SessionActionFormHost = { close: () => closes.push(1), open: () => undefined, compact: false };
+  const host: SessionActionFormHost = {
+    close: () => closes.push(1),
+    open: () => undefined,
+    notify: () => undefined,
+    compact: false,
+  };
   mounted = await mount(<ForkForm fork={fork} host={host} onForked={outcome => forked.push(outcome)} view={view} />);
   const root = mounted.container;
   return {

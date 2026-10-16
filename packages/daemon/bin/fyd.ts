@@ -13,6 +13,7 @@ import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   CredentialStatusService,
+  configJsonSchemaFiles,
   FleetIdentityService,
   FleetTokenRefreshService,
   HARNESS_BINARIES,
@@ -23,7 +24,6 @@ import {
   resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
-  configJsonSchemaFiles,
   PASSIVE_LEARNING_ENV,
 } from '@ferretry/fleet';
 import {
@@ -44,6 +44,7 @@ import {
 } from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
+  CONFIG_ACCEPTED_FILE,
   type DaemonCarrier,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
@@ -63,7 +64,6 @@ import {
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
-  CONFIG_ACCEPTED_FILE,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
@@ -108,6 +108,7 @@ import {
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import {
+  AuthorizedProviderProbe,
   BrowserLoginWindowService,
   BrowserProfileStore,
   BrowserWorkerClient,
@@ -247,7 +248,6 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
-import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
@@ -288,6 +288,7 @@ import {
   sessionMessageTokenKeyFile,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
+import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   FileTaskBoardRepository,
@@ -478,11 +479,11 @@ import {
   isTaskBoardError,
   JevTriageGuard,
   jsonObject,
-  launchReasoningEffort,
   type LearningSubsystem,
   LessonsService,
   LiveDeviceConnections,
   type LogLevel,
+  launchReasoningEffort,
   locateHarnessCommand,
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
@@ -514,6 +515,8 @@ import {
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  ProviderPresetService,
+  ProviderProbeService,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -605,7 +608,6 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
-  SessionTurnWatcher,
   SessionPlanner,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
@@ -629,6 +631,7 @@ import {
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
+  SessionTurnWatcher,
   SignalRefused,
   type SocketRoute,
   SpeedupsService,
@@ -6627,6 +6630,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return credentialUsageIntervalMs;
         },
       });
+      // Environment logins (docs/provider-presets.md): the built-in provider presets with this machine's
+      // own preset files laid over them, and a Test that spends a login's key once through the outbound
+      // holder above — never handed a value, and only to where the login itself sends that key.
+      const providerPresets = new ProviderPresetService({
+        presets: async () => (await configFiles.load()).evaluation.effective.presets,
+      });
+      const providerProbe = new ProviderProbeService({
+        probe: new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport()),
+        clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
+      });
       const fleetCredentials = createFleetCredentialsSubsystem({
         catalog: fleetCredentialCatalog,
         status: credentialStatus,
@@ -6635,6 +6648,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         locate: locateHarness,
         run: async spec => await runCredentialHarness(spec),
         baseEnvironment: () => sanitizeHarnessEnv(process.env),
+        environment: {
+          catalog: async () => await providerPresets.catalog(),
+          presets: async () => await providerPresets.presets(),
+          // Names only, from the store's listing. A store that cannot be listed is not an empty one.
+          secretNames: async () =>
+            await secrets.directory.list().then(
+              listed => new Set(listed.map(secret => secret.name)),
+              () => undefined,
+            ),
+          test: async (subject, consent) => await providerProbe.test(subject, consent),
+        },
       });
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
@@ -6843,7 +6867,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         mcpOAuth,
         fleetCredentials,
         // The catalogue runs the setup service's import and clone as two of its reviewed changes.
-        fleetCatalog: createFleetCatalogSubsystem({ ...fleetCatalogDeps, executors: fleetSetup.executors }),
+        fleetCatalog: createFleetCatalogSubsystem({
+          ...fleetCatalogDeps,
+          executors: fleetSetup.executors,
+          presets: async () => await providerPresets.presets(),
+        }),
         // Unit M's rebase target: the same single reader every other in-process consumer of this
         // document shares, so this never disagrees with what the catalogue or a start just read.
         agentControl,

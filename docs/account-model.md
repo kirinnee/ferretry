@@ -19,6 +19,13 @@ A credential's status is one of **Ready**, **Refresh due**, **Needs sign-in** or
 never refreshes a login on a timer and never spends a model turn to learn a status. History is one pool
 per harness, shared by every runtime of that harness.
 
+An `environment` credential is no sign-in at all: a named set of variables put into the CLI at launch,
+each a plain value, a `${secret:NAME}` reference or — for a cloud — a reference to a credential this
+machine already has (`aws-profile:<name>`, `gcloud-adc`, `azure-cli`). It is usually made from a
+**provider preset** (GLM, DeepSeek, Bedrock, OpenRouter…), has a **Test** instead of Check now, and is
+copied by Clone as plain values and secret NAMES with what the target still needs. Its scope chip
+(Claude-only, Codex-only) comes from the CLI it drives. See [provider-presets.md](provider-presets.md).
+
 ## Where state lives
 
 The configuration is **one human-editable YAML file per building block** under `<FY_HOME>/config/` —
@@ -69,33 +76,34 @@ Settings. The link is `#machines/<name>/<tab>`.
 
 **Terminal** (`fy`; the name is derived from `packages/cli/package.json`):
 
-| Verb                                                                                       | Does                                                            |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked   |
-| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex       |
-| `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (logins arrive as empty slots)  |
-| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                        |
-| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too) |
-| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                   |
-| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                      |
-| `fy start --agent <runtime>`                                                               | launch an agent runtime                                         |
-| `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)       |
+| Verb                                                                                       | Does                                                                 |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked        |
+| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex            |
+| `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (a sign-in arrives as an empty slot) |
+| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                             |
+| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too)      |
+| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                        |
+| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                           |
+| `fy start --agent <runtime>`                                                               | launch an agent runtime                                              |
+| `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)            |
 
 ## Routes
 
 All under `/v1/fleet`. Reads need `fleet.use`; every write is `fleet.configure`, and a caller that is
 not on the host also needs a passkey step-up ([grants.md](grants.md)); nothing is typed.
 
-| Route                                                                                | Does                                                              |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `GET /machine`                                                                       | settings, tools, setup state, and the caller's authority to apply |
-| `POST /machine/tools/install`                                                        | install a named tool (the command is shown first)                 |
-| `GET /setup/scan`                                                                    | what a first run would import (key names only, never a value)     |
-| `GET /credentials`, `POST /credentials/:credentialId/check`                          | logins with status and usage; Check now                           |
-| `POST /login`, `GET\|POST\|DELETE /login/:flowId`                                    | sign a credential in, through the harness's own flow              |
-| `GET /components`, `GET /profiles`, `POST /profiles/preview`, `GET /runtimes`        | read the catalogue; preview a profile's stack before saving       |
-| `GET /export`                                                                        | the clone bundle: no login, no history                            |
-| `POST /proposals`, `GET /proposals/:proposalId`, `POST /proposals/:proposalId/apply` | stage, read and apply any change                                  |
+| Route                                                                                | Does                                                                    |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `GET /machine`                                                                       | settings, tools, setup state, and the caller's authority to apply       |
+| `POST /machine/tools/install`                                                        | install a named tool (the command is shown first)                       |
+| `GET /setup/scan`                                                                    | what a first run would import (key names only, never a value)           |
+| `GET /credentials`, `POST /credentials/:credentialId/check`                          | logins with status and usage; Check now                                 |
+| `POST /credentials/:credentialId/test`, `GET /presets`                               | an environment login's Test; the provider presets (provider-presets.md) |
+| `POST /login`, `GET\|POST\|DELETE /login/:flowId`                                    | sign a credential in, through the harness's own flow                    |
+| `GET /components`, `GET /profiles`, `POST /profiles/preview`, `GET /runtimes`        | read the catalogue; preview a profile's stack before saving             |
+| `GET /export`                                                                        | the clone bundle: no login, no history                                  |
+| `POST /proposals`, `GET /proposals/:proposalId`, `POST /proposals/:proposalId/apply` | stage, read and apply any change                                        |
 
 ## The single file is retired
 

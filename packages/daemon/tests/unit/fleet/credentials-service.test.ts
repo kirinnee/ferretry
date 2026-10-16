@@ -14,6 +14,7 @@
 import { describe, it } from 'bun:test';
 import {
   type AccountModel,
+  builtInPresets,
   type Credential,
   type CredentialStatus,
   type CredentialStatusView,
@@ -30,6 +31,7 @@ import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import {
   attributedTranscripts,
   type CredentialEmailSource,
+  type CredentialEnvironmentDeps,
   type CredentialHarnessRun,
   type CredentialSessionRecord,
   type CredentialStatusReader,
@@ -41,6 +43,7 @@ import {
   type FleetCredentialsService,
   signOutSentence,
 } from '../../../src/lib/fleet/credentials-service.ts';
+import type { ProviderProbeSubject } from '../../../src/lib/provider-probe/service.ts';
 
 const PATHS = { fleetRoot: '/fy/fleet', userHome: '/home/person', hostCodexHome: '/home/person/.codex' } as const;
 const NO_CODEX_HOME = { fleetRoot: '/fy/fleet', userHome: '/home/person' } as const;
@@ -784,5 +787,128 @@ describe('passive usage', () => {
     should(codex).deepEqual(record);
     should(idle).be.undefined();
     should(asked).deepEqual([['/pool/a.jsonl', '/pool/b.jsonl']]);
+  });
+});
+
+describe('FleetCredentialsService — environment logins (docs/provider-presets.md)', () => {
+  const PRESETS = builtInPresets();
+  const glm: Credential = {
+    harness: 'claude',
+    store: 'environment',
+    preset: 'zai-glm',
+    env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
+  };
+  const tested: { subject: ProviderProbeSubject; consent: { allowInference: boolean } }[] = [];
+  const environment = (held: ReadonlySet<string> | undefined): CredentialEnvironmentDeps => ({
+    catalog: async () => ({ presets: [] }),
+    presets: async () => PRESETS,
+    secretNames: async () => held,
+    test: async (subject, consent) => {
+      tested.push({ subject, consent });
+      return {
+        credentialId: subject.id,
+        ok: true,
+        code: 'ok',
+        message: 'The provider accepted this login.',
+        spent: 'nothing',
+        at: '2026-10-16T09:00:00.000Z',
+      };
+    },
+  });
+  const serviceWith = (model: AccountModel, held: ReadonlySet<string> | undefined = new Set()) =>
+    createFleetCredentialsSubsystem({
+      catalog: catalogOf(model),
+      status: new FakeStatus(),
+      email: async () => undefined,
+      machineName: () => 'studio',
+      locate: () => undefined,
+      run: async () => 0,
+      baseEnvironment: () => ({}),
+      environment: environment(held),
+    });
+
+  it('should list an environment login with its variables and its Test, and a sign-in without them', async () => {
+    // Act
+    const list = await serviceWith(v2({ glm, signed: claudeFerretry }), new Set(['ZAI_API_KEY'])).list();
+
+    // Assert
+    const row = list.credentials.find(entry => entry.id === 'glm');
+    should(row?.environment?.preset?.label).equal('GLM / Z.ai');
+    should(row?.environment?.variables).containDeep([{ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', set: true }]);
+    should(row?.environment?.test).containDeep({ available: true });
+    should(list.credentials.find(entry => entry.id === 'signed')).not.have.property('environment');
+  });
+
+  it('should list a machine with no environment login without reading presets or secrets', async () => {
+    // Arrange
+    let read = 0;
+    const service = createFleetCredentialsSubsystem({
+      catalog: catalogOf(v2({ signed: claudeFerretry })),
+      status: new FakeStatus(),
+      email: async () => undefined,
+      machineName: () => 'studio',
+      locate: () => undefined,
+      run: async () => 0,
+      baseEnvironment: () => ({}),
+      environment: {
+        ...environment(new Set()),
+        presets: async () => {
+          read += 1;
+          return PRESETS;
+        },
+      },
+    });
+
+    // Act
+    await service.list();
+
+    // Assert
+    should(read).equal(0);
+  });
+
+  it('should hand a Test the login and its preset, with the consent as given', async () => {
+    // Arrange
+    tested.length = 0;
+
+    // Act
+    const actual = await serviceWith(v2({ glm })).test('glm', { allowInference: true }, governed);
+
+    // Assert
+    should(actual.ok).be.true();
+    should(tested[0]?.subject.preset?.id).equal('zai-glm');
+    should(tested[0]?.consent).deepEqual({ allowInference: true });
+  });
+
+  it('should hand a Test no preset when the login names one this machine does not have', async () => {
+    // Arrange
+    tested.length = 0;
+
+    // Act
+    await serviceWith(v2({ odd: { ...glm, preset: 'gone' } })).test('odd', { allowInference: false }, governed);
+    await serviceWith(v2({ bare: claudeEnvironment })).test('bare', { allowInference: false }, governed);
+
+    // Assert
+    should(tested.map(call => call.subject.preset)).deepEqual([undefined, undefined]);
+  });
+
+  it('should refuse a Test of a sign-in, an unknown login, or by a caller nobody can judge', async () => {
+    const service = serviceWith(v2({ glm, signed: claudeFerretry }));
+    should((await refusalOf(() => service.test('signed', { allowInference: false }, governed))).code).equal(
+      'fleet_credential_unavailable',
+    );
+    should((await refusalOf(() => service.test('nobody', { allowInference: false }, governed))).code).equal(
+      'fleet_credential_unknown',
+    );
+    should((await refusalOf(() => service.test('glm', { allowInference: false }, undefined))).code).equal(
+      'fleet_credential_unauthorized',
+    );
+  });
+
+  it('should offer the preset catalogue, and none on a daemon without presets', async () => {
+    should(await serviceWith(v2({})).presets()).deepEqual({ presets: [] });
+    should(await serviceOf(catalogOf(v2({})), new FakeStatus()).presets()).deepEqual({ presets: [] });
+    should((await serviceOf(catalogOf(v2({ glm })), new FakeStatus()).list()).credentials[0]).not.have.property(
+      'environment',
+    );
   });
 });

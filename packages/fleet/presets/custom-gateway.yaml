@@ -1,0 +1,28 @@
+# Claude Code through any Anthropic-compatible gateway.
+label: Custom gateway
+harness: claude
+summary: Claude Code through any gateway that speaks the Anthropic Messages API. Fill in its address and the model it serves.
+docs: https://code.claude.com/docs/en/llm-gateway
+verified: '2026-10-16'
+env:
+  ANTHROPIC_BASE_URL:
+    value: ''
+    description: the gateway's address, https://…
+  ANTHROPIC_AUTH_TOKEN:
+    secretName: GATEWAY_API_KEY
+  ANTHROPIC_API_KEY:
+    value: ''
+    allowEmpty: true
+    description: deliberately empty, so the gateway key is the one sent
+  ANTHROPIC_MODEL:
+    value: ''
+    required: false
+models: []
+test:
+  kind: request
+  url: '{ANTHROPIC_BASE_URL}/v1/models'
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Asks the gateway for its model list. Spends nothing; a gateway that lists no models answers with an error.
+quota:
+  source: transcript-pricing
+  note: A gateway has no standard usage endpoint, so cost is counted from the transcript where the model's price is known.

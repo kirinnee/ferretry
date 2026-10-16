@@ -1,0 +1,25 @@
+# Codex on MiniMax's Token Plan, through its Responses endpoint.
+label: MiniMax (Token Plan)
+harness: codex
+summary: Codex on MiniMax models with a Token Plan subscription key. Codex 0.146.0 or newer is recommended.
+docs: https://platform.minimax.io/docs/token-plan/codex.md
+verified: '2026-10-16'
+env:
+  MINIMAX_API_KEY:
+    secretName: MINIMAX_API_KEY
+codexProvider:
+  id: minimax
+  name: MiniMax
+  baseUrl: https://api.minimax.io/v1
+  keyVariable: MINIMAX_API_KEY
+  model: MiniMax-M3.1-Flash-Preview
+models: [MiniMax-M3.1-Flash-Preview, MiniMax-M3]
+test:
+  kind: request
+  url: https://www.minimax.io/v1/token_plan/remains
+  keyVariable: MINIMAX_API_KEY
+  note: Reads what is left of your Token Plan. Spends nothing.
+quota:
+  source: minimax-token-plan
+  note: The Token Plan's 5-hour and weekly windows. MiniMax reports what REMAINS, and Ferretry turns it into what is used.
+pricing: minimax

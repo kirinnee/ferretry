@@ -49,6 +49,8 @@ export interface ActionsMenuProps {
   readonly onFormChange: (actionId: string | null) => void;
   /** A failed action, said by the page's one alert line. */
   readonly onFailure?: (sentence: string) => void;
+  /** What a form settled, said by the page's toast. */
+  readonly onNotice?: (sentence: string) => void;
 }
 
 /** Where the dropdown and the popover hang: under the button, right edges aligned, never off screen. */
@@ -68,7 +70,7 @@ const placementUnder = (button: HTMLElement | null): Placement => {
 
 const failureSentence = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
-export function ActionsMenu({ sections, compact, name, form, onFormChange, onFailure }: ActionsMenuProps) {
+export function ActionsMenu({ sections, compact, name, form, onFormChange, onFailure, onNotice }: ActionsMenuProps) {
   const menuId = useId();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -201,6 +203,7 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
   const formHost: SessionActionFormHost = {
     close: () => onFormChange(null),
     open: id => onFormChange(id),
+    notify: sentence => onNotice?.(sentence),
     compact,
   };
 

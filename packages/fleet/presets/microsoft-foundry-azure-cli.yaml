@@ -1,0 +1,32 @@
+# Claude Code on Microsoft Foundry, signed in with whoever `az login` signed in on this machine.
+label: Microsoft Foundry (Azure CLI)
+harness: claude
+summary: Claude Code through your Microsoft Foundry resource, signed in with the Azure CLI on this machine (Entra ID). Nothing is copied.
+docs: https://code.claude.com/docs/en/microsoft-foundry
+verified: '2026-10-16'
+env:
+  CLAUDE_CODE_USE_FOUNDRY:
+    value: '1'
+  ANTHROPIC_FOUNDRY_RESOURCE:
+    value: ''
+    description: the resource name only, not a URL
+  ANTHROPIC_DEFAULT_OPUS_MODEL:
+    value: claude-opus-4-8
+    description: your Opus deployment name
+  ANTHROPIC_DEFAULT_SONNET_MODEL:
+    value: claude-sonnet-5
+    description: your Sonnet deployment name
+  ANTHROPIC_DEFAULT_HAIKU_MODEL:
+    value: claude-haiku-4-5
+    description: your Haiku deployment name
+cloudCredential:
+  kinds: [azure-cli]
+  suggested: azure-cli
+models: [claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5]
+test:
+  kind: none
+  reason: An Entra sign-in needs a token from the Azure CLI, which Ferretry does not mint. Check it with `az account get-access-token`.
+quota:
+  source: transcript-pricing
+  note: Foundry documents no usage endpoint, so cost is counted from the transcript.
+pricing: anthropic

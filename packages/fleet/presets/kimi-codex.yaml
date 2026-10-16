@@ -1,0 +1,25 @@
+# Codex on Kimi (Moonshot AI), through its Responses endpoint.
+label: Kimi / Moonshot
+harness: codex
+summary: Codex on Kimi models with a Moonshot platform key.
+docs: https://platform.kimi.ai/docs/guide/codex-kimi
+verified: '2026-10-16'
+env:
+  KIMI_API_KEY:
+    secretName: MOONSHOT_API_KEY
+codexProvider:
+  id: kimi
+  name: Kimi
+  baseUrl: https://api.moonshot.ai/v1
+  keyVariable: KIMI_API_KEY
+  model: kimi-k3
+models: [kimi-k3]
+test:
+  kind: request
+  url: https://api.moonshot.ai/v1/models
+  keyVariable: KIMI_API_KEY
+  note: Lists the models the key can use. Spends nothing.
+quota:
+  source: moonshot-balance
+  note: Your Moonshot account balance, in US dollars.
+pricing: moonshot

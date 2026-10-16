@@ -87,6 +87,7 @@ import { settingsPaletteEntries } from './features/settings/settings-catalog.ts'
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
+import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
@@ -806,6 +807,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const { navigate } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
+  // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
+  const wardenActions = useAskWardenActions(connection);
   // The "This folder" rail reads through the app's own clients: the ONE attention client, a fleet
   // client per machine, and the machine's display name for the MCP sign-in sheet.
   const sessionContext = useMemo(
@@ -851,6 +854,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     accounts: useAccountPickerSlice(store.accountPicker, connection).catalog?.accounts ?? null,
     onViewLearning: () => navigate(daemonLearningPath(daemonId)),
   });
+  // Every feature's Actions-menu entries for this ferret: Warden, then Learning.
+  const sessionActions = useMemo(
+    () => [...wardenActions, ...learningActions.contributions],
+    [wardenActions, learningActions.contributions],
+  );
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
@@ -1122,6 +1130,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
+          actionContributions={sessionActions}
           browserLogin={store.browserLogin}
           attention={attention}
           chatWidth={controls.chatWidth}
@@ -1166,7 +1175,6 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           session={session}
           surfaceEvents={surfaceEvents}
           usage={store.usage}
-          actionContributions={learningActions.contributions}
         />
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">

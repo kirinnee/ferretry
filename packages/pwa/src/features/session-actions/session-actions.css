@@ -344,3 +344,49 @@
   background: var(--err-bg);
   color: var(--syn-deletion, var(--err));
 }
+
+/* The toast an Actions form leaves behind: centred above the composer, clear of a phone's home bar. */
+.fy-action-toast {
+  position: fixed;
+  z-index: 40;
+  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 8px 8px 12px;
+  border: var(--stroke-panel, 1px) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  transform: translateX(-50%);
+}
+.fy-action-toast__text {
+  margin: 0;
+}
+.fy-action-toast__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+}
+.fy-action-toast__close:hover {
+  color: var(--fg);
+}
+@media (pointer: coarse) {
+  .fy-action-toast__close {
+    width: 44px;
+    height: 44px;
+  }
+}

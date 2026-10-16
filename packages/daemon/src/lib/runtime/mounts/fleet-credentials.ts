@@ -25,18 +25,21 @@
 import {
   FleetCredentialCheckRequestSchema,
   FleetCredentialListSchema,
+  FleetCredentialTestRequestSchema,
+  FleetCredentialTestResultSchema,
   FleetCredentialViewSchema,
+  FleetProviderPresetCatalogSchema,
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter } from '../../api/http.ts';
 import type { ApiResponse } from '../../api/http.ts';
+import { decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { FleetCredentialRefusal, type FleetCredentialsService } from '../../fleet/credentials-service.ts';
 
-/** Credentials: status, usage, Check now. Narrowed to the two calls the routes make. */
-export type FleetCredentialsSubsystem = Pick<FleetCredentialsService, 'list' | 'check'>;
+/** Credentials: status, usage, Check now, Test. Narrowed to the calls the routes make. */
+export type FleetCredentialsSubsystem = Pick<FleetCredentialsService, 'list' | 'check' | 'test' | 'presets'>;
 
 /** `404` for a login that does not exist, `409` for every other refusal, as the fleet's own answer. */
 function refusal(error: FleetCredentialRefusal): ApiError {
@@ -88,6 +91,36 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
           },
           value => FleetCredentialViewSchema.parse(value),
         ),
+    },
+    {
+      // Test is Check now's twin for an environment login: it spends the operator's key once, so it is
+      // governed the same way — `fleet.configure`, and a passkey step-up off this machine.
+      method: 'POST',
+      path: '/v1/fleet/credentials/:credentialId/test',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'configure' },
+      noStore: true,
+      handle: async context =>
+        await answer(
+          async () => {
+            const body = await parseBody(context.request, FleetCredentialTestRequestSchema);
+            return await subsystem.test(
+              credentialId(context),
+              { allowInference: body.allowInference === true },
+              context.governance,
+            );
+          },
+          value => FleetCredentialTestResultSchema.parse(value),
+        ),
+    },
+    {
+      // The provider presets an environment login is made from (docs/provider-presets.md). A preset
+      // names secrets only by the name they are suggested to be kept under, so it is a `fleet.use` read.
+      method: 'GET',
+      path: '/v1/fleet/presets',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'use' },
+      handle: async () => jsonResponse(FleetProviderPresetCatalogSchema.parse(await subsystem.presets())),
     },
   ];
 }

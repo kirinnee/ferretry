@@ -66,6 +66,7 @@ export const CONFIG_KIND_WORDS: Readonly<Record<ConfigFileKind, string>> = {
   warden: 'Warden',
   learning: 'Learning',
   voice: 'Voice',
+  preset: 'Provider presets',
 };
 
 const STATE_CHIPS: Readonly<Record<ConfigFileState, { readonly label: string; readonly tone: BadgeTone }>> = {

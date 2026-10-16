@@ -4,6 +4,7 @@ import {
   CLAUDE_SECURE_STORAGE_VARIABLE,
   claudeStorageDirectory,
   codexCredentialLink,
+  credentialLaunchArguments,
   credentialLaunchEnvironment,
   ferretryCredentialDirectory,
   HOST_CLAUDE_SECURE_STORAGE,
@@ -182,5 +183,73 @@ describe('claudeStorageDirectory and ferretryCredentialDirectory', () => {
 
   it('should drop a trailing separator from the fleet root', () => {
     should(ferretryCredentialDirectory('/fy/fleet/', 'c')).equal('/fy/fleet/credentials/c');
+  });
+});
+
+describe('resolveCredentialStore — environment extras', () => {
+  it('should hand a cloud credential over as its variable, beside the login’s own', () => {
+    // Act
+    const actual = resolveCredentialStore(
+      'bedrock',
+      credential({
+        harness: 'claude',
+        store: 'environment',
+        env: { CLAUDE_CODE_USE_BEDROCK: '1' },
+        cloudCredential: 'aws-profile:acme',
+      }),
+      PATHS,
+    );
+
+    // Assert
+    should(credentialLaunchEnvironment(actual)).deepEqual({ CLAUDE_CODE_USE_BEDROCK: '1', AWS_PROFILE: 'acme' });
+    should(credentialLaunchArguments(actual)).deepEqual([]);
+  });
+
+  it('should give a Codex login its model provider as launch flags', () => {
+    // Act
+    const actual = resolveCredentialStore(
+      'kimi',
+      credential({
+        harness: 'codex',
+        store: 'environment',
+        env: { KIMI_API_KEY: '${secret:MOONSHOT_API_KEY}' },
+        codexProvider: { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.ai/v1', keyVariable: 'KIMI_API_KEY' },
+      }),
+      PATHS,
+    );
+
+    // Assert
+    should(credentialLaunchArguments(actual)).containEql('model_provider="kimi"');
+    should(actual).not.have.property('problem');
+  });
+
+  it('should say why a Codex provider cannot be put together, and launch with no flags', () => {
+    // Act
+    const actual = resolveCredentialStore(
+      'azure',
+      credential({
+        harness: 'codex',
+        store: 'environment',
+        env: { RESOURCE: 'not a host', AZURE_OPENAI_API_KEY: '${secret:AZURE_OPENAI_API_KEY}' },
+        codexProvider: {
+          id: 'azure-openai',
+          name: 'Azure',
+          baseUrl: 'https://{RESOURCE}.openai.azure.com/openai/v1',
+          keyVariable: 'AZURE_OPENAI_API_KEY',
+        },
+      }),
+      PATHS,
+    );
+
+    // Assert
+    should(actual)
+      .have.property('problem')
+      .match(/RESOURCE/u);
+    should(credentialLaunchArguments(actual)).deepEqual([]);
+  });
+
+  it('should give a login that is not an environment no launch flags', () => {
+    const actual = resolveCredentialStore('claude-work', credential({ harness: 'claude', store: 'ferretry' }), PATHS);
+    should(credentialLaunchArguments(actual)).deepEqual([]);
   });
 });

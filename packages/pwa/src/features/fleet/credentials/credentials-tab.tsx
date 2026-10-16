@@ -23,6 +23,7 @@ import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { type StepperState, startStepper } from '../shell/stepper-model.ts';
 import { AddLoginStep, addLoginFlowInput } from './add-login.tsx';
+import { CredentialEnvironment, environmentChip } from './credential-environment.tsx';
 import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
   credentialEmail,
@@ -40,6 +41,7 @@ import {
   usageBars,
   usageBarText,
 } from './credentials-model.ts';
+import { LoginScopeChip } from './login-scope-chip.tsx';
 
 export function UsageBars({ credential, now }: { readonly credential: FleetCredentialView; readonly now: number }) {
   const bars = usageBars(credential, now);
@@ -74,13 +76,21 @@ export function UsageBars({ credential, now }: { readonly credential: FleetCrede
   );
 }
 
-/** The badges a login carries: its label, a copied slot, and the terminal it shares a login with. */
+/**
+ * The badges a login carries: its scope (which CLI it drives), an environment login's preset, its
+ * label, a copied slot, and the terminal it shares a login with.
+ */
 export function CredentialBadges({ credential }: { readonly credential: FleetCredentialView }) {
   const terminal = terminalBadge(credential);
   const slot = slotBadge(credential);
-  if (credential.label === undefined && terminal === null && slot === null) return null;
   return (
     <span className="flex min-w-0 flex-wrap gap-1" data-credential-badges="">
+      <LoginScopeChip harness={credential.harness} />
+      {credential.environment === undefined ? null : (
+        <Badge tone="accent" className="max-w-full !whitespace-normal" data-credential-environment-chip="">
+          {environmentChip(credential.environment)}
+        </Badge>
+      )}
       {credential.label === undefined ? null : <Badge tone="accent">{credential.label}</Badge>}
       {slot === null ? null : <Badge className="max-w-full !whitespace-normal">{slot}</Badge>}
       {terminal === null ? null : <Badge className="max-w-full !whitespace-normal">{terminal}</Badge>}
@@ -198,6 +208,16 @@ function CredentialPage({
         </p>
         {credential.status.word === 'ready' ? <UsageBars credential={credential} now={now} /> : null}
       </div>
+
+      {credential.environment === undefined ? null : (
+        <CredentialEnvironment
+          credentialId={credential.id}
+          environment={credential.environment}
+          connection={connection}
+          createClient={createClient}
+          online={online}
+        />
+      )}
 
       {notice === null ? null : (
         <p role="status" className="m-0 text-cell leading-base text-fg" data-credential-notice="">
@@ -378,7 +398,9 @@ function CredentialRow({
     >
       <AccountStatus word={credential.status.word} className="mt-1" />
       <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="truncate font-mono text-row text-fg">{credentialEmail(credential)}</span>
+        <span className="truncate font-mono text-row text-fg">
+          {credential.store === 'environment' ? credential.id : credentialEmail(credential)}
+        </span>
         <CredentialBadges credential={credential} />
         <span className="text-cell text-muted">
           {credential.status.label} · {credentialUse(credential)}

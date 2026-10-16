@@ -6,6 +6,8 @@ import {
   checkFleetCredential,
   FLEET_CREDENTIALS_PATH,
   readFleetCredentials,
+  readFleetPresets,
+  testFleetCredential,
 } from '../../../../src/features/fleet/credentials-api.ts';
 import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
 
@@ -76,5 +78,38 @@ describe('the credentials wire client', () => {
     const { client } = clientFor({ ...VIEW, accessToken: 'fake' });
 
     await expect(checkFleetCredential(client, 'codex-work')).rejects.toThrow();
+  });
+});
+
+describe('the environment-login wire client', () => {
+  it('reads the provider presets from their own path', async () => {
+    const { client, calls } = clientFor({ presets: [] });
+
+    const catalog = await readFleetPresets(client);
+
+    expect(catalog.presets).toEqual([]);
+    expect(calls[0]?.path).toBe('/v1/fleet/presets');
+    expect(calls[0]?.init).toBeUndefined();
+  });
+
+  it('tests a login with POST on the encoded id, sending consent only when it is given', async () => {
+    const answer = {
+      credentialId: 'zai-glm',
+      ok: true,
+      code: 'ok',
+      message: 'The provider accepted this login.',
+      spent: 'nothing',
+      at: '2026-10-16T08:00:00.000Z',
+    };
+    const { client, calls } = clientFor(answer);
+
+    const plain = await testFleetCredential(client, 'zai/glm');
+    await testFleetCredential(client, 'zai-glm', { allowInference: true });
+
+    expect(plain.ok).toBe(true);
+    expect(calls[0]?.path).toBe(`${FLEET_CREDENTIALS_PATH}/zai%2Fglm/test`);
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({});
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ allowInference: true });
   });
 });

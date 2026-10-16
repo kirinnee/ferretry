@@ -1,0 +1,29 @@
+# Claude Code on MiniMax's Token Plan, through its Anthropic-compatible endpoint.
+label: MiniMax (Token Plan)
+harness: claude
+summary: Claude Code on MiniMax models with a Token Plan subscription key (a pay-as-you-go key is a different key).
+docs: https://platform.minimax.io/docs/api-reference/text-anthropic-api.md
+verified: '2026-10-16'
+unverified:
+  - MiniMax publishes no mapping of its models onto Claude Code's opus, sonnet and haiku; the ones filled in are a suggestion.
+env:
+  ANTHROPIC_BASE_URL:
+    value: https://api.minimax.io/anthropic
+  ANTHROPIC_API_KEY:
+    secretName: MINIMAX_API_KEY
+    description: the Token Plan key, sent as x-api-key as MiniMax documents
+  ANTHROPIC_MODEL:
+    value: MiniMax-M3
+  ANTHROPIC_DEFAULT_HAIKU_MODEL:
+    value: MiniMax-M3.1-Flash-Preview
+    required: false
+models: [MiniMax-M3, MiniMax-M3.1-Flash-Preview, MiniMax-M2.7]
+test:
+  kind: request
+  url: https://www.minimax.io/v1/token_plan/remains
+  keyVariable: ANTHROPIC_API_KEY
+  note: Reads what is left of your Token Plan. Spends nothing.
+quota:
+  source: minimax-token-plan
+  note: The Token Plan's 5-hour and weekly windows. MiniMax reports what REMAINS, and Ferretry turns it into what is used.
+pricing: minimax

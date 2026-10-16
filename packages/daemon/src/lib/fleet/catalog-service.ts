@@ -44,6 +44,7 @@ import {
   type HarnessKind,
   type MaterialiseBodies,
   materialiseFleet,
+  type ProviderPreset,
   parseSettings,
   type RuntimeIds,
   type SettingsObject,
@@ -201,6 +202,8 @@ export interface FleetCatalogServiceDeps {
   readonly hostCodexHome?: string;
   /** Whether the installed Claude accepts `--permission-mode auto` (O4), measured on the pinned version. */
   readonly acceptsAutoPermissionMode: boolean;
+  /** The provider presets this machine offers, for a login made from one (docs/provider-presets.md). */
+  presets?(): Promise<readonly ProviderPreset[]>;
   /** The first-run import and clone executors. Absent means "not available on this machine yet". */
   readonly executors?: {
     readonly setup?: AccountChangeExecutor<SetupChange>;
@@ -560,6 +563,9 @@ export class FleetCatalogService {
         machineName: this.deps.machineName(),
         runningSessions: await this.#runningSessions(),
         settingsBodies: (await this.#bodies(reading.model)).settings ?? {},
+        ...(change.kind === 'credential.add' || change.kind === 'credential.env'
+          ? { presets: (await this.deps.presets?.()) ?? [] }
+          : {}),
       });
     } catch (error) {
       throw error instanceof FleetMutationRefusal
