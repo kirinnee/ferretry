@@ -825,6 +825,11 @@
   padding: 7px 4px;
   white-space: pre-wrap;
 }
+.fy-rich-editor:focus,
+.fy-rich-editor:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
 .fy-rich-editor:empty::before,
 .fy-rich-editor > p:only-child:has(> br:only-child)::before {
   color: var(--faint, var(--fy-muted));

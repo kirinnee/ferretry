@@ -93,7 +93,7 @@ describe('MarkdownComposerSettings', () => {
       const renderer = render(surface());
       const tree = JSON.stringify(renderer.toJSON());
 
-      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('exactly the markdown you typed');
+      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('what you send is markdown');
       expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('markers kept faintly visible');
       expect(tree).toContain('Editor style');
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);

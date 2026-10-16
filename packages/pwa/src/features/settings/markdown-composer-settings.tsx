@@ -19,7 +19,7 @@ import { cn } from '../../lib/class-names.ts';
 import { type MdComposePref, useMdComposePref, writeMdComposePref } from '../../lib/md-compose.ts';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
-  'Either way, what you send is exactly the markdown you typed. In Markdown style the line shapes itself as you type: # headings, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold**, *italic*, `code` and ~~strike~~ coloured and their markers kept faintly visible. ⌘B, ⌘I and ⌘E wrap the selection.';
+  'Whichever style, what you send is markdown. Rich text shows headings at their real size and hides the markers; the @ / : suggestions and Vim keys need Markdown or Plain. In Markdown style the line shapes itself as you type: # headings, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold**, *italic*, `code` and ~~strike~~ coloured and their markers kept faintly visible. ⌘B, ⌘I and ⌘E wrap the selection.';
 
 /** The two editor styles this build offers, and what each is called on screen. */
 const EDITOR_STYLES: readonly { readonly pref: MdComposePref; readonly label: string; readonly detail: string }[] = [

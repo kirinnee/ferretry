@@ -174,9 +174,15 @@ export function RichTextEditor({
     const at = doc.getSelection()?.anchorNode ?? null;
     const element = at === null ? null : at.nodeType === 1 ? (at as Element) : at.parentElement;
     if (!modified && element?.closest('li, pre') && !event.shiftKey) return;
-    if (!sendsOnEnter(event)) return;
     event.preventDefault();
-    onSubmit(modified && event.shiftKey);
+    if (sendsOnEnter(event)) {
+      onSubmit(modified && event.shiftKey);
+      return;
+    }
+    // A new line is a new block — never a <br> inside a heading — so `- ` or `# ` typed on it still
+    // becomes a list or a heading.
+    exec(doc, 'insertParagraph');
+    publish();
   };
 
   const onPaste = (event: ClipboardEvent<HTMLDivElement>): void => {

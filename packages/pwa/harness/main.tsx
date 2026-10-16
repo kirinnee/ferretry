@@ -1124,7 +1124,7 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
  * is painted by the textarea, not by the overlay). Toggle it live from the
  * "Composer settings" card when serving the harness by hand.
  */
-writeMdComposePref('on');
+writeMdComposePref(new URLSearchParams(window.location.search).get('editor') === 'rich' ? 'rich' : 'on');
 
 /** A draft that exercises every paint token the overlay knows. */
 const MARKDOWN_DRAFT = [

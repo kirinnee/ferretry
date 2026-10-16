@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Composer } from '../../src/components/composer.tsx';
+import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { applyBlockShortcut, RichTextEditor, renderRichDocument } from '../../src/components/rich-text-editor.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
@@ -250,6 +251,28 @@ class MemoryStorage implements DraftStorage {
 }
 
 const daemon = daemonConnection({ daemonId: 'rich', baseUrl: 'https://rich.example.test', deviceId: 'device' });
+
+describe('reference chips in the composer', () => {
+  test('a proven chip is a link that opens its destination; an unproven one stays text', async () => {
+    writeMdComposePref('on');
+    const opened: string[] = [];
+    const store = new DaemonDraftStore(new MemoryStorage());
+    store.save({ daemonId: daemon.daemonId, sessionId: 'chips' } as never, 'answer !A3 and !A9', 1);
+    const view = await mount(
+      <ReferenceSurfaceProvider
+        surface={{ attentionReferenceResolver: id => id === 'A3', onAttentionOpen: id => opened.push(id) }}
+      >
+        <Composer api={{ send: async () => ({}) as never }} daemon={daemon} draftStore={store} sessionId="chips" />
+      </ReferenceSurfaceProvider>,
+    );
+    const strip = must(view.container.querySelector('[data-composer-reference-strip]'), 'the chip strip');
+    const links = Array.from(strip.querySelectorAll('a'));
+    expect(links.map(link => link.textContent)).toEqual(['!A3']);
+    await interact(() => links[0]?.click());
+    expect(opened).toEqual(['A3']);
+    await view.unmount();
+  });
+});
 
 describe('the composer in rich text style', () => {
   test('swaps the textarea for the rich editor and sends its markdown', async () => {
