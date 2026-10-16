@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView, TerminalListView } from '@ferretry/protocol';
-import type {
-  ComposerProviderContext,
-  ComposerTrigger,
-  ComposerTriggerMatch,
+import {
+  type ComposerProviderContext,
+  type ComposerTrigger,
+  type ComposerTriggerMatch,
+  composerSuggestionSwitches,
 } from '../../src/components/composer-autocomplete.ts';
 import {
   type ComposerAttentionItem,
   type ComposerSkillsCatalog,
-  type ComposerTaskSummary,
   createComposerAutocompleteProviders,
   createDirectReferenceProviders,
   createFilesProvider,
@@ -601,7 +601,6 @@ describe('composer reference families', () => {
     },
     state: { status: 'tool_running', observedModel: 'gpt-5.6-sol' },
   });
-  const tasks: readonly ComposerTaskSummary[] = [{ id: 'F12', title: 'Composer autocomplete', status: 'in_progress' }];
   const attention: readonly ComposerAttentionItem[] = [
     { id: 'A3', subject: 'Choose the rollout window', source: 'question' },
   ];
@@ -618,10 +617,6 @@ describe('composer reference families', () => {
         expect(received).toEqual(scope);
         return [agent];
       },
-      getTasks: received => {
-        expect(received).toEqual(scope);
-        return tasks;
-      },
       getAttentionItems: received => {
         expect(received).toEqual(scope);
         return attention;
@@ -629,11 +624,10 @@ describe('composer reference families', () => {
     });
   };
 
-  it('projects daemon-scoped agents, tasks, and attention into canonical authored text', () => {
+  it('projects daemon-scoped agents and attention into canonical authored text', () => {
     const provider = providerFor('a');
     const agents = provider.initialCandidates?.(referenceContext(2, 'ott'));
-    const taskRows = provider.initialCandidates?.(referenceContext(3, 'F12'));
-    const attentionRows = provider.initialCandidates?.(referenceContext(4, 'A3'));
+    const attentionRows = provider.initialCandidates?.(referenceContext(3, 'A3'));
 
     expect(agents?.candidates[0]).toMatchObject({
       kind: 'agent',
@@ -641,20 +635,16 @@ describe('composer reference families', () => {
       badge: 'tool running',
       replacement: ':ottis',
     });
+    expect(agents?.contextLabel).toBe('Agents');
     expect(agents?.candidates[0]?.detail).toContain('composer-work · Build the reference picker');
-    expect(taskRows?.candidates[0]).toMatchObject({
-      kind: 'task',
-      label: '&F12',
-      badge: 'In progress',
-      replacement: '&F12',
-    });
     expect(attentionRows?.candidates[0]).toMatchObject({
       kind: 'attention',
       label: '!A3',
       detail: 'Choose the rollout window',
       replacement: '!A3',
     });
-    for (const result of [agents, taskRows, attentionRows]) {
+    expect(attentionRows?.contextLabel).toBe('Attention');
+    for (const result of [agents, attentionRows]) {
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('daemon-a'))).toBe(true);
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('same/session'))).toBe(
         true,
@@ -669,49 +659,42 @@ describe('composer reference families', () => {
     expect(providerA.initialCandidates?.(referenceContext(2, 'ott'))?.candidates[0]?.id).not.toBe(
       providerB.initialCandidates?.(referenceContext(2, 'ott'))?.candidates[0]?.id,
     );
-    expect(providerA.initialCandidates?.(referenceContext(4, 'A3'))?.candidates[0]?.id).not.toBe(
-      providerB.initialCandidates?.(referenceContext(4, 'A3'))?.candidates[0]?.id,
+    expect(providerA.initialCandidates?.(referenceContext(3, 'A3'))?.candidates[0]?.id).not.toBe(
+      providerB.initialCandidates?.(referenceContext(3, 'A3'))?.candidates[0]?.id,
     );
 
-    let liveTasks: readonly ComposerTaskSummary[] = tasks;
+    let liveAttention: readonly ComposerAttentionItem[] = attention;
     const live = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getTasks: () => liveTasks,
+      getAttentionItems: () => liveAttention,
     });
     const before = live.snapshotKey;
-    liveTasks = [{ id: 'F13', title: 'Updated snapshot', status: 'blocked' }];
+    liveAttention = [{ id: 'A4', subject: 'Updated snapshot', source: 'question' }];
     expect(live.snapshotKey).not.toBe(before);
-    expect(live.initialCandidates?.(referenceContext(3, 'F13'))?.candidates[0]).toMatchObject({
-      label: '&F13',
-      badge: 'Blocked',
-    });
+    expect(live.initialCandidates?.(referenceContext(3, 'A4'))?.candidates[0]).toMatchObject({ label: '!A4' });
   });
 
-  it('warms only the requested store and teaches unsupported tiers', async () => {
+  it('warms only the attention store and teaches unsupported tiers', async () => {
     const warmed: string[] = [];
     const provider = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      waitForTasks: async (daemon, scope, signal) => {
+      waitForAttentionItems: async (daemon, scope, signal) => {
         expect({ daemon, scope, signal }).toMatchObject({ daemon: daemonA, scope: scopeA });
-        warmed.push('tasks');
-      },
-      waitForAttentionItems: async () => {
         warmed.push('attention');
       },
     });
 
+    await provider.candidates(referenceContext(2, ''));
     await provider.candidates(referenceContext(3, ''));
-    await provider.candidates(referenceContext(4, ''));
-    expect(warmed).toEqual(['tasks', 'attention']);
-    const unsupported = await provider.candidates(referenceContext(5, ''));
+    expect(warmed).toEqual(['attention']);
+    const unsupported = await provider.candidates(referenceContext(4, ''));
     expect(unsupported.candidates).toEqual([]);
-    expect(unsupported.notice).toContain('one to four @ signs');
-    expect(provider.legend).toHaveLength(4);
-    // The fifth tier is gone rather than empty: no pins family, and nothing
-    // that could quietly become a template library either.
-    expect(provider.legend?.some(item => /pin|template/iu.test(item.label))).toBe(false);
+    expect(unsupported.notice).toContain('one to three @ signs');
+    expect(provider.legend?.map(item => item.label)).toEqual(['Files', 'Agents', 'Attention']);
+    // No task tier, no pins family, and nothing that could quietly become a template library.
+    expect(provider.legend?.some(item => /task|pin|template/iu.test(item.label))).toBe(false);
   });
 
   it('reports a still-warming ladder family as unknown rather than as an empty fact', async () => {
@@ -719,40 +702,35 @@ describe('composer reference families', () => {
     const read = new Promise<void>(resolve => {
       deliver = resolve;
     });
-    let liveTasks: readonly ComposerTaskSummary[] = [];
+    let liveAttention: readonly ComposerAttentionItem[] = [];
     const provider = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getTasks: () => liveTasks,
-      waitForTasks: () => read,
+      getAttentionItems: () => liveAttention,
+      waitForAttentionItems: () => read,
     });
 
     // THE WINDOW. The host's one read is still in flight, so the getter holds
-    // nothing yet. Answering from it would publish "this session has no tasks"
-    // as a ready fact in the first menu of every session; reporting nothing
-    // leaves the engine loading, which is the honest state.
+    // nothing yet; reporting nothing leaves the engine loading, the honest state.
     expect(provider.initialCandidates?.(referenceContext(3, ''))).toBeUndefined();
 
-    // Tier 2 reads a prop the page already holds and tier 5 is a teaching
+    // Tier 2 reads a prop the page already holds and tier 4 is a teaching
     // notice, so neither waits on anything.
     expect(provider.initialCandidates?.(referenceContext(2, ''))).toBeDefined();
-    expect(provider.initialCandidates?.(referenceContext(5, ''))?.notice).toContain('one to four @ signs');
+    expect(provider.initialCandidates?.(referenceContext(4, ''))?.notice).toContain('one to three @ signs');
 
     const settled = provider.candidates(referenceContext(3, ''));
-    liveTasks = tasks;
+    liveAttention = attention;
     deliver();
-    expect((await settled).candidates[0]?.replacement).toBe('&F12');
+    expect((await settled).candidates[0]?.replacement).toBe('!A3');
 
-    // Once the read has settled the host reports nothing in flight, and an
-    // already-proved family answers immediately again — a loaded store must
-    // never show a spinner.
     const loaded = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getTasks: () => tasks,
-      waitForTasks: () => undefined,
+      getAttentionItems: () => attention,
+      waitForAttentionItems: () => undefined,
     });
-    expect(loaded.initialCandidates?.(referenceContext(3, ''))?.candidates[0]?.replacement).toBe('&F12');
+    expect(loaded.initialCandidates?.(referenceContext(3, ''))?.candidates[0]?.replacement).toBe('!A3');
   });
 
   it('shares ONE warm-up between a ladder family’s initial and awaited paths', async () => {
@@ -764,16 +742,13 @@ describe('composer reference families', () => {
     const provider = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getTasks: () => tasks,
-      waitForTasks: () => {
+      getAttentionItems: () => attention,
+      waitForAttentionItems: () => {
         started += 1;
         return read;
       },
     });
 
-    // The initial path has to ASK whether a read is in flight and the awaited
-    // path then joins that same read. Asking twice would be two waits for one
-    // fact — and two commit waits where only one is owed.
     provider.initialCandidates?.(referenceContext(3, ''));
     const settled = provider.candidates(referenceContext(3, ''));
     deliver();
@@ -790,67 +765,47 @@ describe('composer reference families', () => {
         reads.push('sessions');
         return [agent];
       },
-      getTasks: () => {
-        reads.push('tasks');
-        return tasks;
-      },
       getAttentionItems: () => {
         reads.push('attention');
         return attention;
       },
     };
     const ladder = createReferencesProvider(options);
-    const [agents, taskProvider, attentionProvider] = createDirectReferenceProviders(options);
+    const [agents, attentionProvider] = createDirectReferenceProviders(options);
 
-    expect([agents?.trigger, taskProvider?.trigger, attentionProvider?.trigger]).toEqual([':', '&', '!']);
+    expect([agents?.trigger, attentionProvider?.trigger]).toEqual([':', '!']);
     expect(agents?.candidates(context(':', 'ott'))).toMatchObject({
       contextLabel: ': fleet agents',
       candidates: [{ replacement: ':ottis' }],
-    });
-    expect(taskProvider?.initialCandidates?.(context('&', 'F12'))).toMatchObject({
-      contextLabel: '& fleet tasks',
-      candidates: [{ replacement: '&F12' }],
     });
     expect(attentionProvider?.initialCandidates?.(context('!', 'A3'))).toMatchObject({
       contextLabel: '! unresolved attention',
       candidates: [{ replacement: '!A3' }],
     });
     // The same rows the ladder offers, from the same read — one fact, two doors.
-    expect(ladder.initialCandidates?.(referenceContext(3, 'F12'))?.candidates[0]?.replacement).toBe(
-      taskProvider?.initialCandidates?.(context('&', 'F12'))?.candidates[0]?.replacement,
+    expect(ladder.initialCandidates?.(referenceContext(3, 'A3'))?.candidates[0]?.replacement).toBe(
+      attentionProvider?.initialCandidates?.(context('!', 'A3'))?.candidates[0]?.replacement,
     );
-    expect(new Set(reads)).toEqual(new Set(['sessions', 'tasks', 'attention']));
+    expect(new Set(reads)).toEqual(new Set(['sessions', 'attention']));
   });
 
-  it('warms a direct family exactly like its tier does, and republishes a moved store', async () => {
+  it('warms a direct family exactly like its tier does', async () => {
     const warmed: string[] = [];
-    let liveTasks: readonly ComposerTaskSummary[] = tasks;
-    const [, taskProvider, attentionProvider] = createDirectReferenceProviders({
+    const [, attentionProvider] = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
-      getTasks: () => liveTasks,
-      waitForTasks: async () => {
-        warmed.push('tasks');
-      },
       waitForAttentionItems: async () => {
         warmed.push('attention');
       },
     });
-
-    const before = taskProvider?.snapshotKey;
-    expect(await taskProvider?.candidates(context('&', 'F12'))).toMatchObject({ candidates: [{ label: '&F12' }] });
     expect(await attentionProvider?.candidates(context('!', 'A3'))).toMatchObject({ candidates: [] });
-    expect(warmed).toEqual(['tasks', 'attention']);
-    expect(taskProvider?.snapshotKey).toBe(before);
-
-    liveTasks = [{ id: 'F13', title: 'Updated snapshot', status: 'blocked' }];
-    expect(taskProvider?.snapshotKey).not.toBe(before);
+    expect(warmed).toEqual(['attention']);
   });
 
   it('publishes a stable snapshot per family, and a new one only when that family moves', () => {
     let liveSessions: readonly SessionView[] = [agent];
     let liveAttention: readonly ComposerAttentionItem[] = attention;
-    const [agents, , attentionProvider] = createDirectReferenceProviders({
+    const [agents, attentionProvider] = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
       getSessions: () => liveSessions,
@@ -862,8 +817,6 @@ describe('composer reference families', () => {
     expect(agents?.snapshotKey).toBe(agentsBefore);
     expect(attentionProvider?.snapshotKey).toBe(attentionBefore);
 
-    // A fleet slice that moved republishes agents and leaves Attention alone:
-    // re-asking every family because one store moved is how a menu flickers.
     liveSessions = [agent, sessionView('second-session', { config: { teammate: 'zelda' } })];
     expect(agents?.snapshotKey).not.toBe(agentsBefore);
     expect(attentionProvider?.snapshotKey).toBe(attentionBefore);
@@ -874,22 +827,27 @@ describe('composer reference families', () => {
 
   it('abandons a warmed direct family whose request was already aborted', async () => {
     const aborted = new AbortController();
-    const [, taskProvider] = createDirectReferenceProviders({
+    const [, attentionProvider] = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
-      waitForTasks: async () => {
+      waitForAttentionItems: async () => {
         aborted.abort();
       },
     });
 
-    await expect(taskProvider?.candidates(context('&', 'F12', aborted.signal))).rejects.toThrow();
+    await expect(attentionProvider?.candidates(context('!', 'A3', aborted.signal))).rejects.toThrow();
   });
 
   it('answers shouldOpen from the switches, per family, without disabling the rest', () => {
     const off = {
       daemon: daemonA,
       scope: scopeA,
-      suggestions: { mentionSuggestions: false, directReferenceSuggestions: false, skillSuggestions: false },
+      suggestions: {
+        mentionSuggestions: false,
+        ladderSuggestions: false,
+        directReferenceSuggestions: false,
+        skillSuggestions: false,
+      },
     };
     const ladder = createReferencesProvider(off);
     const direct = createDirectReferenceProviders(off);
@@ -897,10 +855,20 @@ describe('composer reference families', () => {
     expect(ladder.shouldOpen?.(match('@', 'src', 1))).toBe(false);
     expect(ladder.shouldOpen?.(match('@', 'ott', 2))).toBe(false);
     expect(direct.every(provider => provider.shouldOpen?.(match(provider.trigger, 'x')) === false)).toBe(true);
-    // The same providers with the switches on open everywhere.
-    expect(createReferencesProvider({ daemon: daemonA, scope: scopeA }).shouldOpen?.(match('@', 'ott', 2))).toBe(true);
+    // The shipped default is the @ ladder: every tier opens, the direct symbols do not.
+    const shipped = createReferencesProvider({ daemon: daemonA, scope: scopeA });
+    expect(shipped.shouldOpen?.(match('@', 'ott', 2))).toBe(true);
     expect(
       createDirectReferenceProviders({ daemon: daemonA, scope: scopeA }).every(
+        provider => provider.shouldOpen?.(match(provider.trigger, 'x')) === false,
+      ),
+    ).toBe(true);
+    // Symbols: bare @ files still open, the ladder tiers do not, the sigils do.
+    const symbols = { daemon: daemonA, scope: scopeA, suggestions: composerSuggestionSwitches('symbols', true) };
+    expect(createReferencesProvider(symbols).shouldOpen?.(match('@', 'src', 1))).toBe(true);
+    expect(createReferencesProvider(symbols).shouldOpen?.(match('@', 'ott', 2))).toBe(false);
+    expect(
+      createDirectReferenceProviders(symbols).every(
         provider => provider.shouldOpen?.(match(provider.trigger, 'x')) === true,
       ),
     ).toBe(true);
@@ -909,7 +877,7 @@ describe('composer reference families', () => {
   it('builds one provider per trigger, refusing crossed scopes at the boundary', () => {
     expect(
       createComposerAutocompleteProviders({ daemon: daemonA, scope: scopeA }).map(provider => provider.trigger),
-    ).toEqual(['/', '$', '@', ':', '&', '!', '%']);
+    ).toEqual(['/', '$', '@', ':', '!', '%']);
     expect(() => createSkillsProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createSkillSigilProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createFilesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
-import { accessSync, existsSync, constants as fsConstants, statSync, writeSync } from 'node:fs';
+import { accessSync, chmodSync, existsSync, constants as fsConstants, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -118,6 +118,7 @@ import {
   daemonSecretSourceProgram,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
+  FileAuditJournal,
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
@@ -135,7 +136,6 @@ import {
   HttpUsageSource,
   hostCgroupFacts,
   JournalGrantAudit,
-  FileAuditJournal,
   KeyedSerialExecutor,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
@@ -160,16 +160,16 @@ import {
   StateHomeLayout,
   StateHomeLockedError,
   StatePairingRepository,
-  StatePushRepository,
   StatePasskeyStore,
+  StatePushRepository,
   StateSecuritySettingsDocument,
-  WebCryptoPasskeyCrypto,
   StateVapidKeys,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
   TmuxPaneSnapshot,
   type ViewerSocket,
+  WebCryptoPasskeyCrypto,
   WebCryptoRelayIdentityKeys,
   WebCryptoSecretCipher,
   WebPushFetchTransport,
@@ -348,8 +348,8 @@ import {
   type AssigneeObservation,
   type AttentionActor,
   AttentionService,
-  AuditedPairingService,
   AUDIT_FOLD_WINDOW_MS,
+  AuditedPairingService,
   AuditLog,
   advertisesForeignAddress,
   answerArguments,
@@ -366,8 +366,8 @@ import {
   type CatalogSubsystem,
   CgroupLaunchPlanner,
   CgroupService,
+  ChallengeLedger,
   type ChildGrantRequester,
-  DeviceGrantService,
   ClaudeTranscriptParser,
   type ClockPort,
   CodexPickerCleanup,
@@ -389,6 +389,8 @@ import {
   type DaemonHealthSubsystem,
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
+  type DeliveredAttachment,
+  DeviceGrantService,
   DONE_MARKER_FILENAME,
   decodeInitialAttachments,
   defaultManagedWorktreeRoot,
@@ -397,6 +399,7 @@ import {
   defaultSessionResumeSettings,
   defaultSessionSendSettings,
   defaultStartWaitPolicy,
+  deliveredFilename,
   describeAbsentRelayCarrier,
   describeConfiguration,
   describeDaemonTimings,
@@ -450,6 +453,7 @@ import {
   type MillisecondClockPort,
   type MountedSubsystems,
   mayTrustDirectLoopback,
+  messageWithAttachments,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
   type NameAllocationResult,
@@ -466,22 +470,18 @@ import {
   overriddenBy,
   PairedPushDevices,
   PairingDeviceRegistry,
-  PairingService,
-  PushNewDeviceAlert,
+  type PairingService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  PushNewDeviceAlert,
   PushService,
-  ChallengeLedger,
-  passkeyVerifier,
-  SecuritySettingsService,
-  StepUpRegistry,
-  StepUpService,
   packageRole,
   paneShowsActiveWork,
   parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
+  passkeyVerifier,
   planInitialAttachments,
   portCandidates,
   projectObservedRuntime,
@@ -500,7 +500,6 @@ import {
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
   type RelayPairingRedeemer,
-  transcriptKey,
   type RelayStreamDispatch,
   type ResumeAnswerAttention,
   ResumeCancelled,
@@ -536,6 +535,7 @@ import {
   type SecretSubsystem,
   SecretUseService,
   SecretVault,
+  SecuritySettingsService,
   SelfRestartCoordinator,
   SendPending,
   SendRefused,
@@ -585,6 +585,8 @@ import {
   SignalRefused,
   type SocketRoute,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  StepUpRegistry,
+  StepUpService,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
   StructuredQuestionRefused,
@@ -602,6 +604,7 @@ import {
   type TaskBoardTaskActionAuthorizer,
   TaskError,
   type TaskSubsystem,
+  TEST_TIMINGS_VARIABLE,
   TeamAdvisor,
   TerminalMountError,
   TerminalReapService,
@@ -617,7 +620,7 @@ import {
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
-  TEST_TIMINGS_VARIABLE,
+  transcriptKey,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -2160,6 +2163,11 @@ function createSessionSendSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   service: SessionSendService,
+  /** Copies each named attachment out where the agent can open it by path; see `lib/attachments/delivery.ts`. */
+  deliverAttachments: (
+    sessionId: SessionId,
+    attachmentIds: readonly string[],
+  ) => Promise<readonly DeliveredAttachment[]>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -2177,11 +2185,22 @@ function createSessionSendSubsystem(
   return {
     send: async (reference, request) => {
       const id = require(reference);
+      // A named attachment that is not this session's refuses the send rather than dropping the file:
+      // a message that says "see the screenshot" with no screenshot is the worse outcome.
+      const delivered =
+        request.attachmentIds === undefined || request.attachmentIds.length === 0
+          ? []
+          : await deliverAttachments(id, request.attachmentIds).catch((error: unknown) => {
+              throw new SessionSendError(
+                'invalid',
+                `an attached file could not be handed to the agent: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            });
       const outcome = await service
         .send({
           id,
           sendId: request.sendId,
-          message: request.message,
+          message: messageWithAttachments(request.message, delivered),
           ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           ...(request.now === undefined ? {} : { now: request.now }),
           ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
@@ -6260,7 +6279,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             snapshot: async () => await spawnAncestry(storage, sessions),
           }),
         ),
-        sessionSend: createSessionSendSubsystem(storage, sessions, sends),
+        sessionSend: createSessionSendSubsystem(storage, sessions, sends, async (sessionId, attachmentIds) => {
+          // Each copy sits beside its stored original, under the file's own name, written once: the
+          // store's download re-verifies the bytes against the manifest digest before they are copied.
+          const delivered: DeliveredAttachment[] = [];
+          for (const attachmentId of attachmentIds) {
+            const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+            const path = join(attachmentOriginals(sessionId), attachmentId, deliveredFilename(attachment.filename));
+            if (!existsSync(path)) {
+              await Bun.write(path, bytes);
+              chmodSync(path, 0o600);
+            }
+            delivered.push({ path, mime: attachment.mime });
+          }
+          return delivered;
+        }),
         sessionAnswer: createSessionAnswerSubsystem(
           storage,
           sessions,

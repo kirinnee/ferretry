@@ -112,9 +112,9 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
   {
     id: 'composer-suggestions',
-    label: 'Reference suggestions',
+    label: 'Open suggestions with',
     description:
-      'Choose which reference families the composer offers while you type: the @ ladder for files, agents, tasks and attention; the direct :agent, &task and !attention sigils; and $ skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / command menu is never suppressed.',
+      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ attention), the direct symbols (@ files, :agent, !attention), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
     keywords: [
       'composer',
       'suggestion',

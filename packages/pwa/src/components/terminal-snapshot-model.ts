@@ -37,9 +37,11 @@ export const readPaneSnapshot = async (
   scope: DaemonSessionScope,
   signal?: AbortSignal,
   fetcher: DaemonFetch = browserFetch,
+  /** Capture the pane now rather than answer with the stored final frame — the activity line's read. */
+  live = false,
 ): Promise<string> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
-  const target = daemonRequest(daemon, snapshotUrl(scope), { signal });
+  const target = daemonRequest(daemon, snapshotUrl(scope, live), { signal });
   const response = await fetcher(target.url, target.init);
   if (!response.ok) throw await failure(response);
   return await response.text();
