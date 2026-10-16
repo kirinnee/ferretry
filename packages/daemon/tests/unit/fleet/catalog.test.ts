@@ -1650,7 +1650,21 @@ describe('profileDraftView', () => {
     const saved = profileNamed(profileCatalog(model, facts), 'agent');
 
     // Assert
-    should(draft).deepEqual({ harnesses: saved.harnesses, scope: saved.scope });
+    should({ harnesses: draft.harnesses, scope: draft.scope }).deepEqual({
+      harnesses: saved.harnesses,
+      scope: saved.scope,
+    });
+    should(draft.resolved?.map(entry => `${entry.harness} ${entry.field} ${entry.key} ${entry.from}`)).deepEqual([
+      'claude instructions main profile/base',
+      'claude settings theme settings/claude',
+      'claude settings permissions.defaultMode settings/claude',
+      'claude settings permissions.allow settings/claude',
+      'claude settings env.API_TOKEN settings/claude',
+      'claude settings env.NOTES settings/claude',
+      'claude settings empty settings/claude',
+      'claude settings verbose settings/claude',
+      'codex instructions main profile/base',
+    ]);
     FleetProfileDraftViewSchema.parse(draft);
   });
 
