@@ -33,6 +33,13 @@ import {
   parseCloudCredential,
   templatePlaceholders,
 } from './environment.ts';
+import {
+  credentialCodexProvider,
+  credentialHalves,
+  credentialHarnesses,
+  credentialVariables,
+  hasHalves,
+} from './halves.ts';
 
 /** A URL a bearer token may be sent to: HTTPS, or plain HTTP only to this machine. */
 const secureMcpUrl = (url: string): boolean => {
@@ -172,14 +179,28 @@ const CLONE_ORIGIN_SHAPE = {
 };
 
 /**
- * One login to one harness on this machine (C1, C2). Stored exactly once; every runtime that names it
- * reads that one store.
+ * One CLI's half of an environment login with halves (`./halves.ts`): the variables that CLI is given
+ * beyond the login's shared `env`, and — Codex only — the model provider it is pointed at.
+ */
+export const CredentialHalfSchema = z.strictObject({
+  env: EnvSchema.optional(),
+  codexProvider: CodexProviderSchema.optional(),
+});
+export type CredentialHalfFile = z.infer<typeof CredentialHalfSchema>;
+
+/**
+ * One login to one harness on this machine (C1, C2) — or, for an environment login with halves, to
+ * both. Stored exactly once; every runtime that names it reads that one store.
  *
  * An ENVIRONMENT login (`store: environment`) is no sign-in at all: its `env` is injected into every
  * runtime on it at launch, a secret as a `${secret:NAME}` reference and never a value
  * (docs/provider-presets.md). It may also name the preset it was made from, a cloud credential this
  * machine already has (`cloudCredential`, kept as a reference) and — Codex only — the model provider
  * Codex is pointed at (`codexProvider`).
+ *
+ * A provider that serves both CLIs makes ONE login with `claude:` and `codex:` halves (`./halves.ts`):
+ * the top-level `env` is then shared by both, each half adds its own, and `codexProvider` lives in
+ * `codex:`. `harness` names the half a runtime on it runs when nothing else says.
  */
 export const CredentialSchema = z
   .strictObject({
@@ -194,16 +215,20 @@ export const CredentialSchema = z
     preset: SafeNameSchema.optional(),
     /** `store: environment` only: a cloud credential this machine has, by reference (`./environment.ts`). */
     cloudCredential: CloudCredentialSchema.optional(),
-    /** `store: environment`, Codex only: the model provider the runtime is pointed at (`./environment.ts`). */
+    /** `store: environment`, Codex only, no halves: the model provider the runtime is pointed at. */
     codexProvider: CodexProviderSchema.optional(),
+    /** `store: environment` only: what Claude Code is given (`./halves.ts`). */
+    claude: CredentialHalfSchema.optional(),
+    /** `store: environment` only: what Codex is given (`./halves.ts`). */
+    codex: CredentialHalfSchema.optional(),
   })
   .check(ctx => {
     const credential = ctx.value;
-    const push = (message: string, path: string, input: unknown): void => {
-      ctx.issues.push({ code: 'custom', message, input, path: [path] });
+    const push = (message: string, path: string | readonly PropertyKey[], input: unknown): void => {
+      ctx.issues.push({ code: 'custom', message, input, path: typeof path === 'string' ? [path] : [...path] });
     };
     if (credential.store !== 'environment') {
-      for (const field of ['env', 'preset', 'cloudCredential', 'codexProvider'] as const) {
+      for (const field of ['env', 'preset', 'cloudCredential', 'codexProvider', 'claude', 'codex'] as const) {
         if (credential[field] === undefined) continue;
         push(
           `"${field}" belongs only to a credential with store: environment — this one is store: ${credential.store}`,
@@ -213,10 +238,40 @@ export const CredentialSchema = z
       }
       return;
     }
-    const env = credential.env ?? {};
+    const halved = hasHalves(credential);
+    if (halved) {
+      if (credential[credential.harness] === undefined) {
+        push(
+          `"harness: ${credential.harness}" must name one of this login's halves (${credentialHarnesses(credential).join(', ')})`,
+          'harness',
+          credential.harness,
+        );
+      }
+      if (credential.codexProvider !== undefined) {
+        push(
+          '"codexProvider" goes inside "codex:" when the login has halves',
+          'codexProvider',
+          credential.codexProvider,
+        );
+      }
+      if (credential.claude?.codexProvider !== undefined) {
+        push(
+          '"codexProvider" points Codex at a model provider — it goes in "codex:", not "claude:"',
+          ['claude', 'codexProvider'],
+          credential.claude.codexProvider,
+        );
+      }
+    } else if (credential.codexProvider !== undefined && credential.harness !== 'codex') {
+      push(
+        '"codexProvider" points Codex at a model provider — this login is for Claude Code',
+        'codexProvider',
+        credential.codexProvider,
+      );
+    }
+    const all = credentialVariables(credential);
     if (
-      Object.keys(env).length === 0 &&
-      credential.codexProvider === undefined &&
+      Object.keys(all).length === 0 &&
+      credentialCodexProvider(credential) === undefined &&
       credential.cloudCredential === undefined
     ) {
       push(
@@ -225,33 +280,28 @@ export const CredentialSchema = z
         credential.env,
       );
     }
-    if (credential.codexProvider !== undefined) {
-      if (credential.harness !== 'codex') {
+    const codex = credentialHalves(credential).codex;
+    const provider = codex?.codexProvider;
+    if (codex !== undefined && provider !== undefined) {
+      const where = halved ? ['codex', 'codexProvider'] : ['codexProvider'];
+      const env = codex.env;
+      if (provider.keyVariable !== undefined && env[provider.keyVariable] === undefined) {
         push(
-          '"codexProvider" points Codex at a model provider — this login is for Claude Code',
-          'codexProvider',
-          credential.codexProvider,
+          `the Codex provider sends its key from ${provider.keyVariable}, so "env" must set ${provider.keyVariable} (as \${secret:NAME})`,
+          where,
+          provider.keyVariable,
         );
-      } else {
-        const { keyVariable, baseUrl } = credential.codexProvider;
-        if (keyVariable !== undefined && env[keyVariable] === undefined) {
-          push(
-            `the Codex provider sends its key from ${keyVariable}, so "env" must set ${keyVariable} (as \${secret:NAME})`,
-            'codexProvider',
-            keyVariable,
-          );
-        }
-        for (const name of templatePlaceholders(baseUrl ?? '')) {
-          if (env[name] === undefined) {
-            push(`the Codex provider's base URL names {${name}}, so "env" must set ${name}`, 'codexProvider', name);
-          }
+      }
+      for (const name of templatePlaceholders(provider.baseUrl ?? '')) {
+        if (env[name] === undefined) {
+          push(`the Codex provider's base URL names {${name}}, so "env" must set ${name}`, where, name);
         }
       }
     }
     const reference =
       credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
     const variable = reference === undefined ? undefined : cloudCredentialVariable(reference);
-    if (variable !== undefined && env[variable] !== undefined) {
+    if (variable !== undefined && all[variable] !== undefined) {
       push(
         `${variable} comes from "cloudCredential" (${credential.cloudCredential}) — leave it out of "env"`,
         'env',
@@ -534,10 +584,17 @@ export type LayeredProfile = z.infer<typeof LayeredProfileSchema>;
 
 // ── Runtime ──────────────────────────────────────────────────────────────────────────────────────
 
-/** A runtime (R1): one credential and one profile, launched under its name. */
+/**
+ * A runtime (R1): one credential and one profile, launched under its name.
+ *
+ * `harness` is for a login that drives both CLIs (`./halves.ts`): which of them this runtime runs. Left
+ * out, it is the one its profile is scoped to, else the login's own `harness` (`./scope.ts`
+ * `runtimeHarness`).
+ */
 export const RuntimeSchema = z.strictObject({
   credential: CredentialIdSchema,
   profile: ComponentNameSchema,
+  harness: HarnessKindSchema.optional(),
   /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
   agent: z.boolean().default(false),
 });
@@ -704,12 +761,20 @@ export const AccountModelSchema = z
     }
 
     for (const [name, runtime] of Object.entries(model.runtimes)) {
-      if (model.credentials[runtime.credential] === undefined) {
+      const credential = model.credentials[runtime.credential];
+      if (credential === undefined) {
         push({
           code: 'custom',
           message: `runtime "${name}" uses unknown credential "${runtime.credential}" (credentials: ${listOf(Object.keys(model.credentials))})`,
           input: runtime.credential,
           path: ['runtimes', name, 'credential'],
+        });
+      } else if (runtime.harness !== undefined && !credentialHarnesses(credential).includes(runtime.harness)) {
+        push({
+          code: 'custom',
+          message: `runtime "${name}" runs ${runtime.harness}, but login "${runtime.credential}" drives only ${listOf([...credentialHarnesses(credential)])}`,
+          input: runtime.harness,
+          path: ['runtimes', name, 'harness'],
         });
       }
       if (model.profiles[runtime.profile] === undefined) {

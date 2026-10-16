@@ -17,3 +17,5 @@ test:
 quota:
   source: none
   note: A local model has no quota and no bill.
+detect:
+  variables: [OLLAMA_*]

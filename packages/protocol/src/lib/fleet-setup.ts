@@ -176,6 +176,9 @@ export const FleetCloneCredentialSchema = z.strictObject({
   preset: NonEmptyStringSchema.optional(),
   cloudCredential: NonEmptyStringSchema.optional(),
   codexProvider: z.record(z.string(), z.unknown()).optional(),
+  /** An environment login that drives both CLIs: what each is given (docs/provider-presets.md). */
+  claude: z.record(z.string(), z.unknown()).optional(),
+  codex: z.record(z.string(), z.unknown()).optional(),
 });
 export type FleetCloneCredential = z.infer<typeof FleetCloneCredentialSchema>;
 

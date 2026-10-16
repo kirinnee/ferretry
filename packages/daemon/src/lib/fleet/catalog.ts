@@ -12,14 +12,14 @@
 import {
   type AccountModel,
   applyFixedLayer,
+  COMPONENT_KIND_WORDS,
   type ComponentKind,
   type Conflict,
-  COMPONENT_KIND_WORDS,
   componentPartialSupport,
   componentScope,
-  describeScopeConflict,
   describeConflict,
   describePartialSupport,
+  describeScopeConflict,
   type FixedEntry,
   type FlatLayer,
   fixedLayerFor,
@@ -31,13 +31,14 @@ import {
   layersScope,
   layerWords,
   looksSecret,
-  parseLayerReference,
   type PartialSupport,
   type ProfileScope,
+  parseLayerReference,
   profileScope,
-  resolveDefaultRuntime,
   type ResolvedProfile,
+  resolveDefaultRuntime,
   resolveProfile,
+  runtimeHarness,
   type SettingsObject,
   type SkippedLayer,
   wouldIncludeItself,
@@ -63,6 +64,7 @@ import type {
   FleetSettingsEntry,
   FleetStackView,
 } from '@ferretry/protocol';
+import { resolvedEntries } from './resolved-view.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -629,7 +631,8 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
         const credential = model.credentials[runtime.credential];
         // Present by construction: the schema refused a runtime on an unknown login.
         if (credential === undefined) return [];
-        const harness = credential.harness;
+        // A login that drives both CLIs runs the one this runtime is for.
+        const harness = runtimeHarness(model, runtime) as HarnessKind;
         const resolved = resolvedFor(model, runtime.profile, harness, facts, partial);
         const stack = stackView(resolved, harness);
         const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
@@ -737,8 +740,10 @@ export function profileDraftView(
   } as AccountModel;
   const partial = partialSupportOf(draft, facts);
   const refusal = layersRefusal(model, name, request.layers, request.editing !== undefined);
+  const stacks = HARNESSES.map(harness => ({ harness, resolved: resolvedFor(draft, name, harness, facts, partial) }));
   return {
-    harnesses: HARNESSES.map(harness => stackView(resolvedFor(draft, name, harness, facts, partial), harness)),
+    harnesses: stacks.map(stack => stackView(stack.resolved, stack.harness)),
+    resolved: stacks.flatMap(stack => (stack.resolved === undefined ? [] : resolvedEntries(stack.resolved))),
     scope: scopeView(layersScope(model, request.layers, name), request.editing),
     ...(refusal === undefined ? {} : { refusal }),
   };

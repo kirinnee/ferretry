@@ -116,13 +116,6 @@ export const choose = async (root: ParentNode, selector: string, value: string):
   });
 };
 
-/** Ticks a pick row by its label. */
-export const tick = async (root: ParentNode, selector: string): Promise<void> => {
-  const label = must(root.querySelector<HTMLElement>(selector), selector);
-  const input = must(label.querySelector<HTMLInputElement>('input'), `${selector} input`);
-  await settled(() => input.click());
-};
-
 export const text = (root: ParentNode, selector: string): string =>
   must(root.querySelector(selector), selector).textContent ?? '';
 

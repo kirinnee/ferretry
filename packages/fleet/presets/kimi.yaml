@@ -1,28 +1,40 @@
-# Claude Code on Kimi (Moonshot AI), through its Anthropic-compatible endpoint.
+# Kimi (Moonshot AI) for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: Kimi / Moonshot
-harness: claude
-summary: Claude Code on Kimi models with a Moonshot platform key (platform.kimi.ai; keys from platform.kimi.com are a separate system).
+summary: Claude Code and Codex on Kimi models with one Moonshot platform key (platform.kimi.ai; keys from platform.kimi.com are a separate system).
 docs: https://platform.kimi.ai/docs/guide/claude-code-kimi
 verified: '2026-10-16'
-env:
-  ANTHROPIC_BASE_URL:
-    value: https://api.moonshot.ai/anthropic
-  ANTHROPIC_AUTH_TOKEN:
-    secretName: MOONSHOT_API_KEY
-  ANTHROPIC_MODEL:
-    value: kimi-k3[1m]
-  ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: kimi-k3[1m]
-  ANTHROPIC_DEFAULT_SONNET_MODEL:
-    value: kimi-k3[1m]
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: kimi-k2.7-code
-  CLAUDE_CODE_SUBAGENT_MODEL:
-    value: kimi-k3[1m]
-  CLAUDE_CODE_AUTO_COMPACT_WINDOW:
-    value: '1000000'
-    required: false
-models: [kimi-k3, kimi-k2.7-code]
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://api.moonshot.ai/anthropic
+    ANTHROPIC_AUTH_TOKEN:
+      secretName: MOONSHOT_API_KEY
+    ANTHROPIC_MODEL:
+      value: kimi-k3[1m]
+    ANTHROPIC_DEFAULT_OPUS_MODEL:
+      value: kimi-k3[1m]
+    ANTHROPIC_DEFAULT_SONNET_MODEL:
+      value: kimi-k3[1m]
+    ANTHROPIC_DEFAULT_HAIKU_MODEL:
+      value: kimi-k2.7-code
+    CLAUDE_CODE_SUBAGENT_MODEL:
+      value: kimi-k3[1m]
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW:
+      value: '1000000'
+      required: false
+  models: [kimi-k3, kimi-k2.7-code]
+codex:
+  docs: https://platform.kimi.ai/docs/guide/codex-kimi
+  env:
+    KIMI_API_KEY:
+      secretName: MOONSHOT_API_KEY
+  codexProvider:
+    id: kimi
+    name: Kimi
+    baseUrl: https://api.moonshot.ai/v1
+    keyVariable: KIMI_API_KEY
+    model: kimi-k3
+  models: [kimi-k3]
 test:
   kind: request
   url: https://api.moonshot.ai/v1/models
@@ -32,3 +44,6 @@ quota:
   source: moonshot-balance
   note: Your Moonshot account balance, in US dollars.
 pricing: moonshot
+detect:
+  hosts: [api.moonshot.ai, api.moonshot.cn]
+  variables: [MOONSHOT_*, KIMI_*]

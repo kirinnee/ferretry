@@ -29,12 +29,40 @@ export const HARNESS_COMMANDS: Readonly<Record<HarnessKind, string>> = { claude:
 
 export const otherHarness = (harness: HarnessKind): HarnessKind => (harness === 'claude' ? 'codex' : 'claude');
 
+/**
+ * Every CLI a login drives, Claude Code first: both for an environment login with a `claude:` and a
+ * `codex:` half, else its one (docs/provider-presets.md). A daemon that predates halves sends none.
+ */
+export const credentialHarnesses = (credential: FleetCredentialView): readonly HarnessKind[] =>
+  credential.harnesses ?? [credential.harness];
+
+/** A scope as the chip says it: one CLI, or `both`. */
+export type LoginScope = HarnessKind | 'both';
+
+/** Which CLIs a list of harnesses covers, as one scope. An empty list cannot happen; it reads as Claude. */
+export const scopeOfHarnesses = (harnesses: readonly HarnessKind[]): LoginScope =>
+  harnesses.includes('claude') && harnesses.includes('codex') ? 'both' : (harnesses[0] ?? 'claude');
+
+/** The scope chip's words. */
+export const LOGIN_SCOPE_WORDS: Readonly<Record<LoginScope, string>> = {
+  claude: 'Claude only',
+  codex: 'Codex only',
+  both: 'Claude + Codex',
+};
+
+/** "Claude Code", or "Claude Code + Codex" for a login that drives both. */
+export const harnessesName = (harnesses: readonly HarnessKind[]): string =>
+  harnesses.map(harness => HARNESS_NAMES[harness]).join(' + ');
+
 export const plural = (count: number, one: string, many = `${one}s`): string =>
   `${String(count)} ${count === 1 ? one : many}`;
 
-/** "you@example.com", or "Claude Code login" when the harness has not told us the email yet. */
+/**
+ * "you@example.com", or "Claude Code login" when the harness has not told us the email yet ("Claude Code +
+ * Codex login" for one that drives both).
+ */
 export const credentialEmail = (credential: FleetCredentialView): string =>
-  credential.email ?? `${HARNESS_NAMES[credential.harness]} login`;
+  credential.email ?? `${harnessesName(credentialHarnesses(credential))} login`;
 
 /** "you@example.com (work)": how a login is named everywhere. */
 export const credentialName = (credential: FleetCredentialView): string =>
@@ -103,9 +131,32 @@ export const usageBarText = (usage: UsageBar): string =>
     ? `${usage.label}: not measured yet`
     : `${usage.label}: ${String(usage.percent)}% used${usage.resets === null ? '' : ` · ${usage.resets}`}`;
 
-/** Logins of one harness, in the order the daemon listed them. */
+/**
+ * The logins that can run one CLI, in the order the daemon listed them: a login with a half for it — so
+ * a login that drives both is offered for either.
+ */
 export const credentialsOf = (list: FleetCredentialList, harness: HarnessKind): readonly FleetCredentialView[] =>
-  list.credentials.filter(credential => credential.harness === harness);
+  list.credentials.filter(credential => credentialHarnesses(credential).includes(harness));
+
+/** One group of the Credentials tab: the logins of one CLI, or the ones that drive both. */
+export interface CredentialGroup {
+  readonly scope: LoginScope;
+  readonly title: string;
+  readonly credentials: readonly FleetCredentialView[];
+}
+
+/**
+ * The Credentials tab's groups, each login listed ONCE: Claude Code, Codex, then "Claude Code + Codex"
+ * for the logins that drive both. An empty group is left out.
+ */
+export const credentialGroups = (list: FleetCredentialList): readonly CredentialGroup[] =>
+  (['claude', 'codex', 'both'] as const)
+    .map(scope => ({
+      scope,
+      title: scope === 'both' ? harnessesName(HARNESSES) : HARNESS_NAMES[scope],
+      credentials: list.credentials.filter(credential => scopeOfHarnesses(credentialHarnesses(credential)) === scope),
+    }))
+    .filter(group => group.credentials.length > 0);
 
 /** Whether two logins of one harness share an email, so the tab explains the labels. */
 export const hasSharedEmails = (list: FleetCredentialList): boolean =>

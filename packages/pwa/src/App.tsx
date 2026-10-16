@@ -38,7 +38,7 @@ import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
-import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
+import { BuildProfileStep } from './features/fleet/profiles/profile-builder-step.tsx';
 import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';

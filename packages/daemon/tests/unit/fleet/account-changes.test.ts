@@ -1567,20 +1567,38 @@ describe('deriveAccountChange: environment logins (docs/provider-presets.md)', (
     should(edit.consequences).matchAny(/never written anywhere/u);
   });
 
-  it('should give a Codex login its preset’s model provider', () => {
+  it('should make ONE login with both halves from a preset that drives both CLIs, listed first as asked', () => {
+    // Act
     const edit = derive(
       {
         kind: 'credential.add',
         id: 'kimi',
         harness: 'codex',
         store: 'environment',
-        preset: 'kimi-codex',
-        env: { KIMI_API_KEY: secretRef('MOONSHOT_API_KEY') },
+        preset: 'kimi',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://api.moonshot.ai/anthropic',
+          ANTHROPIC_AUTH_TOKEN: secretRef('MOONSHOT_API_KEY'),
+          ANTHROPIC_MODEL: 'kimi-k3[1m]',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'kimi-k3[1m]',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k3[1m]',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'kimi-k2.7-code',
+          CLAUDE_CODE_SUBAGENT_MODEL: 'kimi-k3[1m]',
+          KIMI_API_KEY: secretRef('MOONSHOT_API_KEY'),
+        },
       },
       modelOf(),
       PRESET_FACTS,
     );
-    should(edit.model.credentials.kimi?.codexProvider?.id).equal('kimi');
+
+    // Assert
+    const kimi = edit.model.credentials.kimi;
+    should(kimi?.harness).equal('codex');
+    should(kimi?.codex?.codexProvider?.id).equal('kimi');
+    should(kimi?.codex?.env).deepEqual({ KIMI_API_KEY: secretRef('MOONSHOT_API_KEY') });
+    should(kimi?.claude?.env?.ANTHROPIC_AUTH_TOKEN).equal(secretRef('MOONSHOT_API_KEY'));
+    should(edit.summary).equal('Add a Claude Code + Codex login kimi from Kimi / Moonshot');
+    should(edit.consequences).matchAny(/One login, one secret: runtimes on it can run Claude Code or Codex/u);
   });
 
   it('should add a login from its variables alone when no preset is named', () => {
@@ -1618,8 +1636,8 @@ describe('deriveAccountChange: environment logins (docs/provider-presets.md)', (
     ).match(/ANTHROPIC_AUTH_TOKEN in login glm looks like a secret/u);
     should(refusalOf(addGlm({ preset: 'nope' }), modelOf(), PRESET_FACTS)).equal('there is no preset nope on studio');
     should(refusalOf(addGlm({ preset: 'zai-glm' }), modelOf(), FACTS)).equal('there is no preset zai-glm on studio');
-    should(refusalOf(addGlm({ harness: 'codex' }), modelOf(), PRESET_FACTS)).equal(
-      'GLM / Z.ai is a Claude Code preset, not Codex',
+    should(refusalOf(addGlm({ harness: 'codex' }), modelOf(), PRESET_FACTS)).match(
+      /^GLM \/ Z\.ai does not drive Codex: Z\.ai serves the Responses API/u,
     );
     should(
       refusalOf(addGlm({ env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic' } }), modelOf(), PRESET_FACTS),
@@ -1745,3 +1763,297 @@ const GLM_ENV_STORED = {
   ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
   ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash',
 };
+
+describe('deriveAccountChange: a login that drives both CLIs (docs/provider-presets.md)', () => {
+  const PRESET_FACTS: AccountChangeFacts = { ...FACTS, presets: builtInPresets() };
+  const DUAL = {
+    harness: 'claude',
+    store: 'environment',
+    preset: 'deepseek',
+    env: { API_TIMEOUT_MS: '600000' },
+    claude: {
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_AUTH_TOKEN: secretRef('DEEPSEEK_API_KEY'),
+        ANTHROPIC_MODEL: 'deepseek-flash[1m]',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-flash',
+        CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash',
+      },
+    },
+    codex: {
+      env: { DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY') },
+      codexProvider: {
+        id: 'deepseek',
+        name: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com/',
+        keyVariable: 'DEEPSEEK_API_KEY',
+      },
+    },
+  };
+  const dualModel = (runtimes: Record<string, unknown> = {}): AccountModel =>
+    modelOf({
+      credentials: { deepseek: DUAL, work: { harness: 'claude', store: 'ferretry' } },
+      runtimes,
+      advanced: {},
+    });
+
+  it('should put each edited variable back where it belongs: shared, its half, or the half the preset names', () => {
+    // Act
+    const edit = derive(
+      {
+        kind: 'credential.env',
+        id: 'deepseek',
+        env: {
+          API_TIMEOUT_MS: '900000',
+          ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+          ANTHROPIC_AUTH_TOKEN: { keep: true },
+          ANTHROPIC_MODEL: 'deepseek-v4-pro',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-flash',
+          CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash',
+          DEEPSEEK_API_KEY: { keep: true },
+          EXTRA_HEADER: 'x',
+        },
+      },
+      dualModel(),
+      PRESET_FACTS,
+    );
+
+    // Assert
+    const login = edit.model.credentials.deepseek;
+    should(login?.env).deepEqual({ API_TIMEOUT_MS: '900000', EXTRA_HEADER: 'x' });
+    should(login?.claude?.env).deepEqual({
+      ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+      ANTHROPIC_AUTH_TOKEN: secretRef('DEEPSEEK_API_KEY'),
+      ANTHROPIC_MODEL: 'deepseek-v4-pro',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-flash',
+      CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash',
+    });
+    should(login?.codex?.env).deepEqual({ DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY') });
+    should(login?.codex?.codexProvider?.id).equal('deepseek');
+  });
+
+  it('should put a new variable the preset declares in its half', () => {
+    // Arrange: a login whose Claude half lost a variable by hand, and that shares none
+    const model = modelOf({
+      credentials: {
+        deepseek: {
+          harness: DUAL.harness,
+          store: DUAL.store,
+          preset: DUAL.preset,
+          claude: {
+            env: Object.fromEntries(
+              Object.entries(DUAL.claude.env).filter(([name]) => name !== 'CLAUDE_CODE_SUBAGENT_MODEL'),
+            ),
+          },
+          codex: { env: { DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY') } },
+        },
+      },
+      runtimes: {},
+      advanced: {},
+    });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'credential.env',
+        id: 'deepseek',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+          ANTHROPIC_AUTH_TOKEN: { keep: true },
+          ANTHROPIC_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-flash',
+          CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash',
+          DEEPSEEK_API_KEY: { keep: true },
+        },
+      },
+      model,
+      PRESET_FACTS,
+    );
+
+    // Assert
+    const login = edit.model.credentials.deepseek;
+    should(login?.env).be.undefined();
+    should(login?.claude?.env?.CLAUDE_CODE_SUBAGENT_MODEL).equal('deepseek-flash');
+    should(login?.codex?.env).deepEqual({ DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY') });
+  });
+
+  it('should share a new variable of a login with no preset, and leave a half with no variables none', () => {
+    // Arrange: Claude Code through a gateway, Codex on its own Ollama provider
+    const model = modelOf({
+      credentials: {
+        local: {
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_BASE_URL: 'http://localhost:4000' } },
+          codex: { env: { OLLAMA_HOST: 'localhost' }, codexProvider: { id: 'ollama' } },
+        },
+      },
+      runtimes: {},
+      advanced: {},
+    });
+
+    // Act
+    const edit = derive(
+      { kind: 'credential.env', id: 'local', env: { ANTHROPIC_BASE_URL: 'http://localhost:4001', TZ: 'UTC' } },
+      model,
+      PRESET_FACTS,
+    );
+
+    // Assert
+    const login = edit.model.credentials.local;
+    should(login?.env).deepEqual({ TZ: 'UTC' });
+    should(login?.claude?.env).deepEqual({ ANTHROPIC_BASE_URL: 'http://localhost:4001' });
+    should(login?.codex).deepEqual({ codexProvider: { id: 'ollama' } });
+  });
+
+  it('should refuse an edit that drops what one of its halves needs', () => {
+    should(
+      refusalOf(
+        {
+          kind: 'credential.env',
+          id: 'deepseek',
+          env: { ...DUAL.claude.env, ANTHROPIC_AUTH_TOKEN: { keep: true } },
+        },
+        dualModel(),
+        PRESET_FACTS,
+      ),
+    ).equal('DEEPSEEK_API_KEY is needed for DeepSeek — fill it in');
+  });
+
+  it('should judge a one-CLI login only by the half it has, after its preset grew another', () => {
+    // Arrange: a Claude Code login made from deepseek before the preset had a Codex half
+    const model = modelOf({
+      credentials: { deepseek: { harness: 'claude', store: 'environment', preset: 'deepseek', env: DUAL.claude.env } },
+      runtimes: {},
+      advanced: {},
+    });
+
+    // Act
+    const edit = derive(
+      { kind: 'credential.env', id: 'deepseek', env: { ...DUAL.claude.env, ANTHROPIC_MODEL: 'deepseek-v4-pro' } },
+      model,
+      PRESET_FACTS,
+    );
+
+    // Assert
+    should(edit.model.credentials.deepseek?.env?.ANTHROPIC_MODEL).equal('deepseek-v4-pro');
+    should(edit.model.credentials.deepseek?.codex).be.undefined();
+  });
+
+  it('should run a runtime on the CLI it asks for, and keep that choice', () => {
+    // Act
+    const edit = derive(
+      {
+        kind: 'runtime.put',
+        name: 'deep-codex',
+        credential: 'deepseek',
+        profile: 'base',
+        harness: 'codex',
+        agent: true,
+        create: true,
+      },
+      dualModel(),
+      PRESET_FACTS,
+    );
+
+    // Assert
+    should(edit.model.runtimes['deep-codex']).deepEqual({
+      credential: 'deepseek',
+      profile: 'base',
+      agent: true,
+      harness: 'codex',
+    });
+  });
+
+  it('should run a Codex-only profile on the Codex half without being asked', () => {
+    // Act
+    const edit = derive(
+      { kind: 'runtime.put', name: 'deep', credential: 'deepseek', profile: 'only-codex', agent: false, create: true },
+      dualModel(),
+      PRESET_FACTS,
+    );
+
+    // Assert
+    should(edit.model.runtimes.deep).deepEqual({ credential: 'deepseek', profile: 'only-codex', agent: false });
+  });
+
+  it('should refuse a CLI the login does not drive, and a profile of the other CLI when one is pinned', () => {
+    should(
+      refusalOf(
+        {
+          kind: 'runtime.put',
+          name: 'w',
+          credential: 'work',
+          profile: 'base',
+          harness: 'codex',
+          agent: false,
+          create: true,
+        },
+        dualModel(),
+        PRESET_FACTS,
+      ),
+    ).equal('work does not drive Codex: it is a Claude Code login.');
+    should(
+      refusalOf(
+        {
+          kind: 'runtime.put',
+          name: 'deep',
+          credential: 'deepseek',
+          profile: 'only-codex',
+          harness: 'claude',
+          agent: false,
+          create: true,
+        },
+        dualModel(),
+        PRESET_FACTS,
+      ),
+    ).equal(
+      'Profile only-codex is Codex only and this runtime runs Claude Code on deepseek. Run it on the other CLI, or pick a Generic or Claude only profile.',
+    );
+  });
+});
+
+describe('deriveAccountChange: a new environment login is never made the default', () => {
+  it('should leave the machine default runtime, every runtime and every other login exactly as they were', () => {
+    // Arrange
+    const model = modelOf({ machine: { defaultRuntime: 'beta' } });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'credential.add',
+        id: 'deepseek',
+        harness: 'claude',
+        store: 'environment',
+        preset: 'deepseek',
+        env: {
+          ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+          ANTHROPIC_AUTH_TOKEN: secretRef('DEEPSEEK_API_KEY'),
+          ANTHROPIC_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_OPUS_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: 'deepseek-flash[1m]',
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: 'deepseek-flash',
+          CLAUDE_CODE_SUBAGENT_MODEL: 'deepseek-flash',
+          DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY'),
+        },
+      },
+      model,
+      { ...FACTS, presets: builtInPresets() },
+    );
+
+    // Assert
+    should(edit.model.machine).deepEqual(model.machine);
+    should(edit.model.runtimes).deepEqual(model.runtimes);
+    const { deepseek, ...others } = edit.model.credentials;
+    should(deepseek).not.be.undefined();
+    should(others).deepEqual(model.credentials);
+  });
+});
