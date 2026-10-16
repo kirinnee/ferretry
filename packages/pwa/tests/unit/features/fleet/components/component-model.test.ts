@@ -11,6 +11,7 @@ import {
   draftProblem,
   listed,
   mcpCommandLine,
+  mcpDraftIsUrl,
   profileScopeBadge,
   profileScopeWord,
   profilesWithLayer,
@@ -218,6 +219,31 @@ describe('componentChange', () => {
     expect(
       changeOf(componentChange({ ...blankDraft('mcp'), name: 'one', body: 'serve' }, true), 'component.put').component,
     ).toEqual({ kind: 'mcp', command: 'serve' });
+  });
+
+  it('sends a web-address server that signs in with auth: oauth, and a command server never', () => {
+    const remote = component({
+      reference: 'mcp/linear',
+      kind: 'mcp',
+      name: 'linear',
+      detail: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth', env: [] },
+    });
+    const draft = draftFromComponent(remote);
+    expect(draft).toMatchObject({ body: 'https://mcp.linear.example/mcp', oauth: true });
+    expect(mcpDraftIsUrl(draft)).toBe(true);
+    expect(changeOf(valid(componentChange(draft, false)), 'component.put').component).toEqual({
+      kind: 'mcp',
+      url: 'https://mcp.linear.example/mcp',
+      auth: 'oauth',
+    });
+    expect(draftFromComponent(github).oauth).toBe(false);
+    const command = { ...draft, body: 'npx serve' };
+    expect(mcpDraftIsUrl(command)).toBe(false);
+    expect(changeOf(componentChange(command, false), 'component.put').component).toEqual({
+      kind: 'mcp',
+      command: 'npx',
+      args: ['serve'],
+    });
   });
 
   it('sends skills once each', () => {

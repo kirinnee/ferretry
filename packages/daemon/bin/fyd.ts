@@ -83,6 +83,12 @@ import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-deliv
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import { systemPortHolders } from '../src/adapters/fleet-login/port-holders.ts';
 import {
+  AccountModelMcpServers,
+  FetchMcpOAuthHttp,
+  FileMcpOAuthStateStore,
+  webCryptoMcpOAuth,
+} from '../src/adapters/mcp-oauth/index.ts';
+import {
   FileSessionForkReceiptStore,
   forkOpeningTurnRefusal,
   forkReceiptFile,
@@ -403,6 +409,7 @@ import {
   FleetEventStreamService,
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
+  McpOAuthService,
   FleetManifestUnreadableError,
   FleetRefreshService,
   FleetSecretReferences,
@@ -4549,7 +4556,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * `lib/fleet/launch-environment.ts`. Both launch paths get the same one, because a revived pane
    * that came back without its credential is a working agent destroyed by its own recovery.
    */
-  const accountLaunchEnvironment = new FleetLaunchEnvironment(accounts, secretVault);
+  /**
+   * Signing in to a remote MCP server from a browser (docs/mcp-oauth.md). The daemon is the OAuth client:
+   * tokens go straight into the secret store through its WRITE half, and the vault is held only to spend
+   * a refresh token at the provider that issued it. The launch environment asks it to refresh a token a
+   * launch is about to use — that is the only refresh there is; no timer.
+   */
+  const mcpOAuth = new McpOAuthService({
+    servers: new AccountModelMcpServers(async () => await readAccountModelFile(join(paths.fleet, 'config.yaml'))),
+    http: new FetchMcpOAuthHttp(),
+    crypto: webCryptoMcpOAuth,
+    clock: millisecondClock,
+    state: new FileMcpOAuthStateStore(paths, stateFiles),
+    secrets: secrets.directory,
+    values: secretVault,
+  });
+  const accountLaunchEnvironment = new FleetLaunchEnvironment(accounts, secretVault, mcpOAuth);
   /**
    * What this host can actually run: a published wrapper by its path, a harness command by name.
    *
@@ -6105,6 +6127,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         security,
         carriers,
         harnessLogin,
+        mcpOAuth,
         fleetCredentials,
         // The catalogue runs the setup service's import and clone as two of its reviewed changes.
         fleetCatalog: createFleetCatalogSubsystem({ ...fleetCatalogDeps, executors: fleetSetup.executors }),

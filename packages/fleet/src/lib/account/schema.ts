@@ -187,6 +187,11 @@ export const McpComponentSchema = z
     args: z.array(z.string()).optional(),
     env: EnvSchema.optional(),
     url: z.url().optional(),
+    /**
+     * `oauth`: a server reached at `url` that is signed in to from Ferretry. The daemon keeps its tokens
+     * in the secret store and the runtime reads the access token by variable name (docs/mcp-oauth.md).
+     */
+    auth: z.literal('oauth').optional(),
     harness: HarnessKindSchema.optional(),
     ...CLONE_ORIGIN_SHAPE,
   })
@@ -207,6 +212,14 @@ export const McpComponentSchema = z
         message: '"args" and "env" start a command — a server reached at a "url" takes neither',
         input: server,
         path: [server.args === undefined ? 'env' : 'args'],
+      });
+    }
+    if (server.auth !== undefined && server.url === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: '"auth" signs in to a server reached at a "url" — a server Ferretry starts has nothing to sign in to',
+        input: server,
+        path: ['auth'],
       });
     }
   });

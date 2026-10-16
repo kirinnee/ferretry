@@ -1,0 +1,600 @@
+import { describe, it } from 'bun:test';
+import { MCP_OAUTH_LOOPBACK_REDIRECT, mcpOAuthSecretNames } from '@ferretry/protocol';
+import should from 'should';
+import { MCP_OAUTH_FLOW_TTL_MS, McpOAuthRefusal, type McpOAuthRefusalCode } from '../../../src/lib/mcp-oauth/index.ts';
+import { leaks, PWA_REDIRECT, world } from './support.ts';
+
+const NAMES = mcpOAuthSecretNames('linear');
+
+async function refusalOf(work: Promise<unknown>): Promise<McpOAuthRefusal> {
+  try {
+    await work;
+  } catch (error) {
+    if (error instanceof McpOAuthRefusal) return error;
+    throw error;
+  }
+  throw new Error('expected a refusal');
+}
+
+async function refusedWith(work: Promise<unknown>, code: McpOAuthRefusalCode): Promise<string> {
+  const refusal = await refusalOf(work);
+  should(refusal.code).equal(code);
+  return refusal.message;
+}
+
+/** Start, approve at the fake provider, and finish — the whole journey a person makes. */
+async function signIn(w: ReturnType<typeof world>) {
+  const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+  const callback = await w.provider.approve(flow.authorizeUrl);
+  const completion = await w.service.complete(flow.flowId, { callback });
+  return { flow, callback, completion };
+}
+
+describe('McpOAuthService', () => {
+  describe('starting a sign-in', () => {
+    it('should discover, register for the PWA address, and answer an S256 authorization URL', async () => {
+      // Arrange
+      const w = world();
+
+      // Act
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Assert
+      const url = new URL(flow.authorizeUrl);
+      should(`${url.origin}${url.pathname}`).equal(`${w.provider.origin}/auth/authorize`);
+      should(url.searchParams.get('code_challenge_method')).equal('S256');
+      should(url.searchParams.get('code_challenge')).match(/^[A-Za-z0-9_-]{43}$/u);
+      should(url.searchParams.get('state')).match(/^[A-Za-z0-9_-]{43}$/u);
+      should(url.searchParams.get('resource')).equal(w.provider.serverUrl);
+      should(url.searchParams.get('redirect_uri')).equal(PWA_REDIRECT);
+      should(url.searchParams.get('scope')).equal('mcp:tools');
+      should(url.searchParams.get('client_id')).equal(w.provider.registrations[0]?.clientId);
+      should(flow).containEql({
+        mode: 'pwa',
+        component: 'linear',
+        redirectUri: PWA_REDIRECT,
+        issuer: '127.0.0.1:4100',
+      });
+      should(Date.parse(flow.expiresAt) - w.clock.at).equal(MCP_OAUTH_FLOW_TTL_MS);
+      should(flow).not.have.property('note');
+      // The verifier never leaves the daemon: nothing answered is 43+ chars of verifier alphabet beyond the
+      // challenge and the state, which are the only such values in the URL.
+      should(JSON.stringify(flow)).not.containEql('verifier');
+    });
+
+    it('should reuse a registration it already holds for the same provider and address', async () => {
+      // Arrange
+      const w = world();
+      await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Act
+      await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Assert
+      should(w.provider.registrations).have.length(1);
+    });
+
+    it('should use the paste address when the browser asks for no redirect', async () => {
+      // Arrange
+      const w = world();
+
+      // Act
+      const flow = await w.service.start('linear', {});
+
+      // Assert
+      should(flow).containEql({ mode: 'paste', redirectUri: MCP_OAUTH_LOOPBACK_REDIRECT });
+    });
+
+    it('should fall back to the paste address, and say why, when the provider refuses the PWA address', async () => {
+      // Arrange
+      const w = world({ refuseRedirect: uri => uri.startsWith('https://') });
+
+      // Act
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+      // Assert
+      should(flow.mode).equal('paste');
+      should(flow.redirectUri).equal(MCP_OAUTH_LOOPBACK_REDIRECT);
+      should(flow.note).match(/paste an address/u);
+    });
+
+    it('should refuse a return address that is not a Ferretry callback page', async () => {
+      // Arrange
+      const w = world();
+
+      // Act / Assert
+      await refusedWith(
+        w.service.start('linear', { redirectUri: 'https://evil.example/collect' }),
+        'mcp_auth_bad_redirect',
+      );
+      should(w.http.requests).have.length(0);
+    });
+
+    it('should refuse a component that does not exist or does not sign in', async () => {
+      // Arrange
+      const w = world();
+
+      // Act / Assert
+      await refusedWith(w.service.start('nope', {}), 'mcp_auth_unknown_component');
+      await refusedWith(w.service.start('plain', {}), 'mcp_auth_not_oauth');
+      await refusedWith(w.service.start('local', {}), 'mcp_auth_not_oauth');
+    });
+
+    it('should refuse a provider that does not advertise PKCE', async () => {
+      // Arrange
+      const w = world({ noPkce: true });
+
+      // Act
+      const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_discovery');
+
+      // Assert
+      should(message).match(/PKCE/u);
+    });
+
+    it('should refuse a provider with no registration endpoint, in words', async () => {
+      // Arrange
+      const w = world({ noRegistration: true });
+
+      // Act
+      const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+      // Assert
+      should(message).match(/does not let new apps register/u);
+    });
+
+    it('should refuse when the provider will not register Ferretry at all', async () => {
+      // Arrange — the loopback address is refused too, so the fallback has nowhere to go.
+      const w = world({ refuseRedirect: () => true });
+
+      // Act / Assert
+      await refusedWith(w.service.start('linear', { redirectUri: PWA_REDIRECT }), 'mcp_auth_registration');
+    });
+
+    it('should treat an unreachable registration endpoint as a refusal', async () => {
+      // Arrange
+      const w = world();
+      w.http.failing.add(`${w.provider.origin}/auth/register`);
+
+      // Act / Assert
+      await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+    });
+
+    it('should treat a server with no resource metadata as its own authorization server', async () => {
+      // Arrange
+      const w = world({ legacy: true });
+
+      // Act
+      const flow = await w.service.start('linear', {});
+
+      // Assert
+      should(new URL(flow.authorizeUrl).pathname).equal('/authorize');
+      should(new URL(flow.authorizeUrl).searchParams.has('scope')).be.false();
+    });
+
+    it('should say the server could not be reached, quoting nothing, when the network fails', async () => {
+      // Arrange
+      const w = world();
+      w.http.failing.add(w.provider.serverUrl);
+
+      // Act
+      const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_discovery');
+
+      // Assert
+      should(message).match(/could not reach the server/u);
+    });
+
+    it('should refuse a server that describes no authorization server anywhere', async () => {
+      // Arrange — the MCP endpoint answers 401 with no challenge and every metadata address is a 404.
+      const w = world();
+      w.servers = [{ component: 'linear', url: `${w.provider.origin}/elsewhere`, auth: 'oauth' }];
+
+      // Act
+      const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_discovery');
+
+      // Assert
+      should(message).match(/does not describe how to sign in/u);
+    });
+
+    it('should keep one sign-in per component and at most sixteen in flight', async () => {
+      // Arrange
+      const w = world();
+      const first = await w.service.start('linear', {});
+      await w.service.start('linear', {});
+      w.servers = [
+        ...w.servers,
+        ...Array.from({ length: 17 }, (_, index) => ({
+          component: `extra-${String(index)}`,
+          url: w.provider.serverUrl,
+          auth: 'oauth' as const,
+        })),
+      ];
+      const extras = [];
+      for (let index = 0; index < 17; index += 1) extras.push(await w.service.start(`extra-${String(index)}`, {}));
+
+      // Act / Assert — the replaced flow and the oldest extra are gone.
+      await refusedWith(w.service.complete(first.flowId, { callback: 'x' }), 'mcp_auth_unknown_flow');
+      should(w.service.cancel((extras[0] as { flowId: string }).flowId).cancelled).be.false();
+      should(w.service.cancel((extras[16] as { flowId: string }).flowId).cancelled).be.true();
+    });
+  });
+
+  describe('finishing a sign-in', () => {
+    it('should redeem the code with the verifier and file the tokens in the store, answering none', async () => {
+      // Arrange
+      const w = world({ expiresIn: 3600 });
+
+      // Act
+      const { completion } = await signIn(w);
+
+      // Assert
+      should(completion.component).equal('linear');
+      should(completion.connection).containEql({ state: 'signed-in', renewable: true, issuer: '127.0.0.1:4100' });
+      should(completion.connection.expiresAt).equal('2026-10-16T01:00:00.000Z');
+      should(completion.connection.secrets).deepEqual([NAMES.access, NAMES.refresh]);
+      should(w.secrets.entries.get(NAMES.access)).equal(w.provider.issued[0]);
+      should(w.secrets.entries.get(NAMES.refresh)).equal(w.provider.issued[1]);
+      // NO TOKEN in the answer or the state document.
+      should(leaks(w.provider, completion, w.state.document)).deepEqual([]);
+      // The token request carried the verifier and the resource (RFC 7636, RFC 8707).
+      const form = w.provider.tokenRequests[0] as URLSearchParams;
+      should(form.get('code_verifier')).match(/^[A-Za-z0-9_-]{43}$/u);
+      should(form.get('resource')).equal(w.provider.serverUrl);
+    });
+
+    it('should refuse the same address twice: the flow is single-use', async () => {
+      // Arrange
+      const w = world();
+      const { flow, callback } = await signIn(w);
+
+      // Act
+      const message = await refusedWith(w.service.complete(flow.flowId, { callback }), 'mcp_auth_unknown_flow');
+
+      // Assert
+      should(message).not.containEql(callback);
+      should(w.provider.tokenRequests).have.length(1);
+    });
+
+    it('should refuse a mismatched address WITHOUT spending the flow, so the person can paste again', async () => {
+      // Arrange
+      const w = world();
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+      const callback = await w.provider.approve(flow.authorizeUrl);
+      const forged = callback.replace(/state=[^&]+/u, 'state=forged');
+
+      // Act
+      const message = await refusedWith(w.service.complete(flow.flowId, { callback: forged }), 'mcp_auth_callback');
+      const completion = await w.service.complete(flow.flowId, { callback });
+
+      // Assert
+      should(message).match(/different sign-in attempt/u);
+      should(message).not.containEql('code-');
+      should(completion.connection.state).equal('signed-in');
+    });
+
+    it('should drop a flow once it expires', async () => {
+      // Arrange
+      const w = world();
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+      const callback = await w.provider.approve(flow.authorizeUrl);
+      w.clock.at += MCP_OAUTH_FLOW_TTL_MS;
+
+      // Act / Assert
+      await refusedWith(w.service.complete(flow.flowId, { callback }), 'mcp_auth_unknown_flow');
+    });
+
+    it('should answer a provider refusal from a fixed table, never the provider’s own words', async () => {
+      // Arrange — the code is spent at the provider first, so redeeming it answers invalid_grant with a
+      // description that quotes the code back.
+      const w = world();
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+      const callback = await w.provider.approve(flow.authorizeUrl);
+      const code = new URL(callback).searchParams.get('code') as string;
+      await w.provider.handle(
+        new Request(`${w.provider.origin}/auth/token`, {
+          method: 'POST',
+          body: `grant_type=authorization_code&code=${code}`,
+        }),
+      );
+
+      // Act
+      const message = await refusedWith(w.service.complete(flow.flowId, { callback }), 'mcp_auth_exchange');
+
+      // Assert
+      should(message).match(/used already or expired/u);
+      should(message).not.containEql(code);
+      should(w.secrets.entries.size).equal(0);
+    });
+
+    it('should answer an unreachable token endpoint as a failed sign-in', async () => {
+      // Arrange
+      const w = world();
+      const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+      const callback = await w.provider.approve(flow.authorizeUrl);
+      w.http.failing.add(`${w.provider.origin}/auth/token`);
+
+      // Act
+      const message = await refusedWith(w.service.complete(flow.flowId, { callback }), 'mcp_auth_exchange');
+
+      // Assert
+      should(message).equal('The provider did not finish the sign-in. Start again.');
+    });
+
+    it('should drop a stale refresh token when the provider issues none', async () => {
+      // Arrange
+      const w = world({ noRefresh: true });
+      await w.secrets.put(NAMES.refresh, 'an-old-refresh-token');
+
+      // Act
+      const { completion } = await signIn(w);
+
+      // Assert
+      should(w.secrets.entries.has(NAMES.refresh)).be.false();
+      should(completion.connection).containEql({ renewable: false, state: 'signed-in' });
+      should(completion.connection).not.have.property('expiresAt');
+    });
+
+    it('should file a client secret and send it on the token request for a confidential registration', async () => {
+      // Arrange
+      const w = world({ confidential: true });
+
+      // Act
+      const { completion } = await signIn(w);
+      const filed = w.secrets.entries.get(NAMES.client);
+      await w.service.start('linear', {});
+
+      // Assert
+      should(filed).equal(w.provider.issued[0]);
+      should(w.provider.tokenRequests[0]?.get('client_secret')).equal(w.provider.issued[0]);
+      should(completion.connection.secrets).containEql(NAMES.client);
+      // The second registration replaced the secret, so the first registration was forgotten.
+      should(w.state.document.registrations.linear).have.length(1);
+      should(leaks(w.provider, completion, w.state.document)).deepEqual([]);
+    });
+  });
+
+  describe('where a sign-in stands', () => {
+    it('should list every component that signs in, and a stored sign-in whose component is gone', async () => {
+      // Arrange
+      const w = world({ expiresIn: 60 });
+      should(await w.service.connections()).deepEqual([
+        { component: 'linear', state: 'needs-sign-in', renewable: false, secrets: [] },
+      ]);
+      await signIn(w);
+      w.servers = [];
+
+      // Act
+      const signedIn = await w.service.connections();
+      w.clock.at += 61_000;
+      const expired = await w.service.connections();
+      await w.secrets.remove(NAMES.access);
+      const missing = await w.service.connections();
+
+      // Assert
+      should(signedIn[0]).containEql({ component: 'linear', state: 'signed-in', scope: 'mcp:tools' });
+      should(expired[0]).containEql({ state: 'expired', renewable: true });
+      should(missing[0]).containEql({ state: 'needs-sign-in', issuer: '127.0.0.1:4100' });
+    });
+
+    it('should say a sign-in needs renewing once its server has moved to another address', async () => {
+      // Arrange
+      const w = world();
+      await signIn(w);
+      w.servers = [{ component: 'linear', url: `${w.provider.origin}/moved`, auth: 'oauth' }];
+
+      // Act
+      const [connection] = await w.service.connections();
+
+      // Assert
+      should(connection).containEql({ component: 'linear', state: 'needs-sign-in' });
+    });
+  });
+
+  describe('refreshing on use', () => {
+    it('should refresh a token about to expire, rotating both, and leave a fresh one alone', async () => {
+      // Arrange
+      const w = world({ expiresIn: 3600 });
+      await signIn(w);
+      const before = w.secrets.entries.get(NAMES.access);
+
+      // Act — fresh: nothing happens.
+      await w.service.refreshForLaunch([NAMES.access]);
+      should(w.provider.tokenRequests).have.length(1);
+      w.clock.at += 3600_000 - 30_000;
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Assert
+      should(w.provider.tokenRequests).have.length(2);
+      should(w.provider.tokenRequests[1]?.get('grant_type')).equal('refresh_token');
+      should(w.secrets.entries.get(NAMES.access)).not.equal(before);
+      should(w.secrets.entries.get(NAMES.access)).equal(w.provider.issued[2]);
+      should(w.secrets.entries.get(NAMES.refresh)).equal(w.provider.issued[3]);
+      should(w.state.document.connections.linear?.expiresAt).equal('2026-10-16T01:59:30.000Z');
+      should(leaks(w.provider, w.state.document)).deepEqual([]);
+    });
+
+    it('should touch nothing a launch does not name, nor a token without an expiry', async () => {
+      // Arrange
+      const w = world();
+      await signIn(w);
+
+      // Act
+      await w.service.refreshForLaunch(['SOMETHING_ELSE']);
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Assert
+      should(w.provider.tokenRequests).have.length(1);
+    });
+
+    it('should mark a rejected refresh as needing a new sign-in, and leave the launch alone', async () => {
+      // Arrange
+      const w = world({ expiresIn: 10 });
+      await signIn(w);
+      w.provider.refreshError = 'invalid_grant';
+      w.clock.at += 20_000;
+
+      // Act
+      await w.service.refreshForLaunch([NAMES.access]);
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Assert — marked once, then never asked again.
+      should(w.state.document.connections.linear).containEql({ needsSignIn: true, renewable: false });
+      should(w.provider.tokenRequests).have.length(2);
+      should((await w.service.connections())[0]?.state).equal('needs-sign-in');
+    });
+
+    it('should keep the old token when a refresh fails for any other reason', async () => {
+      // Arrange
+      const w = world({ expiresIn: 10 });
+      await signIn(w);
+      w.provider.refreshError = 'temporarily_unavailable';
+      w.clock.at += 20_000;
+
+      // Act
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Assert
+      should(w.state.document.connections.linear?.needsSignIn).be.undefined();
+      should(w.secrets.entries.get(NAMES.access)).equal(w.provider.issued[0]);
+    });
+
+    it('should mark a sign-in whose refresh token is gone as needing a new one', async () => {
+      // Arrange
+      const w = world({ expiresIn: 10 });
+      await signIn(w);
+      await w.secrets.remove(NAMES.refresh);
+      w.clock.at += 20_000;
+
+      // Act
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Assert
+      should(w.state.document.connections.linear?.needsSignIn).be.true();
+    });
+
+    it('should never throw, even over a state document it cannot read', async () => {
+      // Arrange
+      const w = world();
+      w.state.failure = new Error('damaged');
+
+      // Act / Assert
+      await w.service.refreshForLaunch([NAMES.access]);
+    });
+
+    it('should keep the previous expiry when a refresh answer gives none, and survive a sign-out mid-refresh', async () => {
+      // Arrange
+      const w = world({ expiresIn: 10 });
+      await signIn(w);
+      w.clock.at += 20_000;
+      const original = w.provider.handle;
+      // The refresh answers with no expiry this time.
+      (w.http as unknown as { handler: (request: Request) => Promise<Response> }).handler = async request => {
+        if (new URL(request.url).pathname === '/auth/token')
+          return new Response(JSON.stringify({ access_token: 'access-without-expiry' }), { status: 200 });
+        return await original(request);
+      };
+
+      // Act
+      await w.service.refreshForLaunch([NAMES.access]);
+
+      // Assert
+      should(w.secrets.entries.get(NAMES.access)).equal('access-without-expiry');
+      should(w.state.document.connections.linear).not.have.property('expiresAt');
+    });
+  });
+
+  describe('signing out', () => {
+    it('should revoke the refresh token and delete every secret and record', async () => {
+      // Arrange
+      const w = world({ confidential: true });
+      await signIn(w);
+
+      // Act
+      const answer = await w.service.signOut('linear');
+
+      // Assert
+      should(answer).deepEqual({ component: 'linear', removed: true, revoked: true });
+      should(w.provider.revoked).deepEqual([w.provider.issued[2]]);
+      should(w.secrets.entries.size).equal(0);
+      should(w.state.document).deepEqual({ v: 1, registrations: {}, connections: {} });
+    });
+
+    it('should revoke the access token when there is no refresh token, and still delete when revocation fails', async () => {
+      // Arrange
+      const w = world({ noRefresh: true });
+      await signIn(w);
+      const access = w.provider.issued[0];
+
+      // Act
+      const answer = await w.service.signOut('linear');
+
+      // Assert
+      should(answer.revoked).be.true();
+      should(w.provider.revoked).deepEqual([access]);
+
+      // Arrange — and with the provider unreachable.
+      const again = world();
+      await signIn(again);
+      again.http.failing.add(`${again.provider.origin}/auth/revoke`);
+      should(await again.service.signOut('linear')).deepEqual({ component: 'linear', removed: true, revoked: false });
+      should(again.secrets.entries.size).equal(0);
+    });
+
+    it('should answer honestly for a component that was never signed in', async () => {
+      // Arrange
+      const w = world();
+
+      // Act / Assert
+      should(await w.service.signOut('linear')).deepEqual({ component: 'linear', removed: false, revoked: false });
+    });
+
+    it('should not claim a revocation when the record has no endpoint or the store holds no token', async () => {
+      // Arrange
+      const w = world();
+      await signIn(w);
+      const record = w.state.document.connections.linear;
+      if (record === undefined) throw new Error('signed in');
+      const { revocationEndpoint: _gone, ...withoutEndpoint } = record;
+      w.state.document = { ...w.state.document, connections: { linear: withoutEndpoint } };
+
+      // Act / Assert
+      should((await w.service.signOut('linear')).revoked).be.false();
+
+      // Arrange — the record is there, the tokens are not.
+      const empty = world();
+      await signIn(empty);
+      empty.secrets.entries.clear();
+      should(await empty.service.signOut('linear')).deepEqual({ component: 'linear', removed: true, revoked: false });
+    });
+  });
+
+  it('should cancel a flow and say whether there was one', async () => {
+    // Arrange
+    const w = world();
+    const flow = await w.service.start('linear', {});
+
+    // Act / Assert
+    should(w.service.cancel(flow.flowId)).deepEqual({ flowId: flow.flowId, cancelled: true });
+    should(w.service.cancel(flow.flowId)).deepEqual({ flowId: flow.flowId, cancelled: false });
+  });
+
+  it('should let a failed exclusive step leave later ones working', async () => {
+    // Arrange — the state write fails once while filing a registration.
+    const w = world();
+    const original = w.state.write.bind(w.state);
+    let failures = 1;
+    w.state.write = async document => {
+      if (failures > 0) {
+        failures -= 1;
+        throw new Error('disk full');
+      }
+      await original(document);
+    };
+
+    // Act
+    await should(w.service.start('linear', {})).be.rejectedWith('disk full');
+    const flow = await w.service.start('linear', {});
+
+    // Assert
+    should(flow.mode).equal('paste');
+  });
+});

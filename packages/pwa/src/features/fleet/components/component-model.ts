@@ -175,6 +175,8 @@ export interface ComponentDraft {
   readonly redacted: boolean;
   /** Hooks read from a folder rather than one file: edited in that folder. */
   readonly directory: boolean;
+  /** An MCP server at a web address that signs in with OAuth (docs/mcp-oauth.md). Kept by an edit. */
+  readonly oauth: boolean;
 }
 
 export const blankDraft = (kind: FleetComponentKind): ComponentDraft => ({
@@ -188,6 +190,7 @@ export const blankDraft = (kind: FleetComponentKind): ComponentDraft => ({
   flags: [],
   redacted: false,
   directory: false,
+  oauth: false,
 });
 
 const QUOTE_NEEDED = /[\s"'\\]/u;
@@ -258,7 +261,12 @@ export function draftFromComponent(component: FleetComponentView): ComponentDraf
         directory: detail.kind === 'hooks' && detail.directory !== undefined,
       };
     case 'mcp':
-      return { ...base, body: mcpCommandLine(detail), keptEnv: detail.env.map(entry => entry.name) };
+      return {
+        ...base,
+        body: mcpCommandLine(detail),
+        keptEnv: detail.env.map(entry => entry.name),
+        oauth: detail.auth === 'oauth',
+      };
     case 'skills':
       return { ...base, body: detail.items.join('\n') };
     case 'settings': {
@@ -345,6 +353,9 @@ const withHarness = (harness: CatalogHarness | undefined) => (harness === undefi
 
 const URL_LINE = /^https?:\/\//iu;
 
+/** Whether an MCP draft names a server by its web address rather than a command: only those sign in. */
+export const mcpDraftIsUrl = (draft: Pick<ComponentDraft, 'body'>): boolean => URL_LINE.test(draft.body.trim());
+
 /** The ONE change a saved form asks for. Call only when {@link draftProblem} says nothing. */
 export function componentChange(draft: ComponentDraft, create: boolean): FleetAccountChange {
   const name = draft.name.trim();
@@ -365,7 +376,7 @@ export function componentChange(draft: ComponentDraft, create: boolean): FleetAc
       const line = draft.body.trim();
       const env = keepAll(draft.keptEnv);
       const target = URL_LINE.test(line)
-        ? { url: line }
+        ? { url: line, ...(draft.oauth ? { auth: 'oauth' as const } : {}) }
         : (([command, ...args]) => ({ command: command as string, ...(args.length === 0 ? {} : { args }) }))(
             splitCommandLine(line),
           );

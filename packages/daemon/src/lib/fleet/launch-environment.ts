@@ -34,7 +34,7 @@
  */
 
 import { type FleetManifestAccount, resolveSecretEnvironment, wrapperNameOf } from '@ferretry/fleet';
-import type { SecretName } from '@ferretry/protocol';
+import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
 
 /**
  * The extra environment one account's launch is entitled to, keyed by the executable it runs.
@@ -59,6 +59,14 @@ export interface LaunchSecretValues {
 }
 
 /**
+ * A chance to make the secrets a launch is about to resolve current first — an MCP sign-in whose access
+ * token is about to expire (`docs/mcp-oauth.md`). It must never throw: a launch is not refused for it.
+ */
+export interface LaunchSecretRenewal {
+  refreshForLaunch(names: readonly SecretName[]): Promise<void>;
+}
+
+/**
  * Resolves one account's profile-bound environment for a launch.
  *
  * An account this daemon does not publish answers `{}` rather than refusing. A session may legally
@@ -79,6 +87,7 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
   constructor(
     private readonly inventory: LaunchAccountInventory,
     private readonly secrets: LaunchSecretValues,
+    private readonly renewal?: LaunchSecretRenewal,
   ) {}
 
   async forWrapper(wrapper: string): Promise<Readonly<Record<string, string>>> {
@@ -89,6 +98,8 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
     if (account === undefined || Object.keys(account.secretEnv).length === 0) return {};
     // Opened only now, and only for an account that declared it needs something. A fleet nobody
     // gave a profile to never touches the store at all.
+    // Renewal on USE: the only moment an MCP token is refreshed is the moment a launch needs it.
+    await this.renewal?.refreshForLaunch([...new Set(Object.values(account.secretEnv).flatMap(secretReferencesIn))]);
     return resolveSecretEnvironment({ id: account.id, env: account.secretEnv }, await this.secrets.values());
   }
 }

@@ -37,9 +37,10 @@ comes back, scrubbed. There is nothing in the agent's own process to echo into i
 
 **There is no route, command or API that returns a secret value.** Not to an agent, not to `fy`, not
 to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
-route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only three
-things hold a `SecretVault` — the redactor, the use executor, and the fleet launch environment that
-resolves a runtime's credential and profile into the pane being started — and none of them returns what it read. A
+route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only four
+things hold a `SecretVault` — the redactor, the use executor, the fleet launch environment that
+resolves a runtime's credential and profile into the pane being started, and the [MCP sign-in](mcp-oauth.md)
+service, which opens a refresh token only to send it to the provider that issued it — and none of them returns what it read. A
 getter added "just for testing" would delete the whole property.
 
 ## Redaction
@@ -140,3 +141,9 @@ still there.
   token, which is every agent it runs. Scoping _which_ session may use _which_ secret is a design in
   its own right: it needs a durable grant per session, a way to issue one at start, and a surface to
   review them. Named here so its absence is a decision rather than an oversight.
+
+## Secrets the daemon files itself
+
+A [remote MCP server signed in to from the PWA](mcp-oauth.md) leaves its tokens here, under names
+derived from the component (`MCP_<NAME>_<HASH>_ACCESS`, `_REFRESH`, `_CLIENT`). They are ordinary
+secrets — listed by name, redacted, never returned — and **Sign out** deletes them.

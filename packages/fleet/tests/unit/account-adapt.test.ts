@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { mcpOAuthSecretNames } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AdaptedRuntime,
@@ -249,6 +250,32 @@ describe('adaptProfile — MCP servers on Claude', () => {
         plain: { type: 'stdio', command: 'uvx', args: [] },
       },
     });
+  });
+
+  it('should give a server signed in to from Ferretry a Bearer header naming a launch variable, never a value', () => {
+    // Arrange (docs/mcp-oauth.md)
+    const names = mcpOAuthSecretNames('linear');
+    const components = { mcp: { linear: { url: 'https://mcp.linear.app/mcp', auth: 'oauth' as const } } };
+
+    // Act
+    const claude = adapt('claude', components, ['mcp/linear']);
+    const codex = adapt('codex', components, ['mcp/linear']);
+
+    // Assert
+    should(claude.claudeJson).deepEqual({
+      mcpServers: {
+        linear: {
+          type: 'http',
+          url: 'https://mcp.linear.app/mcp',
+          headers: { Authorization: `Bearer \${${names.variable}}` },
+        },
+      },
+    });
+    should(codex.settings.value.mcp_servers).deepEqual({
+      linear: { url: 'https://mcp.linear.app/mcp', bearer_token_env_var: names.variable },
+    });
+    for (const runtime of [claude, codex])
+      should(runtime.launchEnv).deepEqual({ [names.variable]: `\${secret:${names.access}}` });
   });
 
   it('should always write mcpServers, so a removed server leaves the file', () => {

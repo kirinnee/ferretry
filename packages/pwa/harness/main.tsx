@@ -260,6 +260,7 @@ import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
+import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -6966,12 +6967,15 @@ if (host) {
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   const machineSetupHarness = new URLSearchParams(window.location.search).get('machine-setup');
   const appChromeHarness = new URLSearchParams(window.location.search).get('app-chrome');
+  const mcpFrame = mcpSignInFrame(window.location.search);
   createRoot(host).render(
     // The harness answers its daemon inside the page, on the plain network, so every surface is handed
     // a client over it; the app itself only ever has the store's session-routed pool.
     <DaemonClientProvider client={harnessDaemonClient}>
       <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
-        {appChromeHarness !== null ? (
+        {mcpFrame !== undefined ? (
+          <McpSignInFrameHarness frame={mcpFrame} />
+        ) : appChromeHarness !== null ? (
           <AppChromeHarness active={appChromeHarness} />
         ) : machineSetupHarness !== null ? (
           <StandaloneMachineSetupHarness daemonId={machineSetupHarness} />

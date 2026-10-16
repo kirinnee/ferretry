@@ -44,7 +44,7 @@
  *
  * Pure and total: bodies are parsed by the caller, every failure is a {@link AdaptProblem}.
  */
-import { secretReferencesIn } from '@ferretry/protocol';
+import { mcpOAuthSecretNames, secretReference, secretReferencesIn } from '@ferretry/protocol';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
@@ -308,9 +308,18 @@ const splitEnvironment = (env: Readonly<Record<string, string>>): ServerEnvironm
   return { literal, forwarded };
 };
 
-/** One server as Claude's `mcpServers` entry. */
-function claudeServer(server: McpComponent, env: ServerEnvironment): SettingsObject {
-  if (server.url !== undefined) return { type: isSseUrl(server.url) ? 'sse' : 'http', url: server.url };
+/**
+ * One server as Claude's `mcpServers` entry. A server signed in to from Ferretry carries its token as an
+ * `Authorization` header that names a launch variable — Claude expands `${VAR}` in a server's headers
+ * (INFERRED, docs/mcp-oauth.md) — so the document holds a variable name, never a value.
+ */
+function claudeServer(server: McpComponent, env: ServerEnvironment, bearer: string | undefined): SettingsObject {
+  if (server.url !== undefined)
+    return {
+      type: isSseUrl(server.url) ? 'sse' : 'http',
+      url: server.url,
+      ...(bearer === undefined ? {} : { headers: { Authorization: `Bearer \${${bearer}}` } }),
+    };
   const variables = { ...env.literal, ...Object.fromEntries(env.forwarded.map(name => [name, `\${${name}}`])) };
   return {
     type: 'stdio',
@@ -320,9 +329,10 @@ function claudeServer(server: McpComponent, env: ServerEnvironment): SettingsObj
   };
 }
 
-/** One server as Codex's `[mcp_servers.<name>]` table. */
-function codexServer(server: McpComponent, env: ServerEnvironment): SettingsObject {
-  if (server.url !== undefined) return { url: server.url };
+/** One server as Codex's `[mcp_servers.<name>]` table; a signed-in one names its token's variable. */
+function codexServer(server: McpComponent, env: ServerEnvironment, bearer: string | undefined): SettingsObject {
+  if (server.url !== undefined)
+    return { url: server.url, ...(bearer === undefined ? {} : { bearer_token_env_var: bearer }) };
   return {
     command: server.command,
     ...(server.args !== undefined && server.args.length > 0 ? { args: server.args } : {}),
@@ -360,7 +370,16 @@ function adaptMcp(
       owners.set(variable, layer.reference);
       launchEnv[variable] = value;
     }
-    rendered[layer.name] = harness === 'claude' ? claudeServer(component, env) : codexServer(component, env);
+    // A server signed in to from Ferretry reads its access token from a launch variable bound to the
+    // secret the daemon stored it under. The names have one owner, shared with the daemon.
+    let bearer: string | undefined;
+    if (component.auth === 'oauth') {
+      const names = mcpOAuthSecretNames(layer.name);
+      bearer = names.variable;
+      launchEnv[bearer] = secretReference(names.access);
+    }
+    rendered[layer.name] =
+      harness === 'claude' ? claudeServer(component, env, bearer) : codexServer(component, env, bearer);
   }
   return rendered;
 }
