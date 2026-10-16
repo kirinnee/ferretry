@@ -1,26 +1,39 @@
-# Claude Code on Z.ai's GLM Coding Plan, through its Anthropic-compatible endpoint.
+# Z.ai's GLM Coding Plan for Claude Code, through its Anthropic-compatible endpoint. Its Codex half is documented by Z.ai but not offered here (see `codex.unavailable`).
 label: GLM / Z.ai
-harness: claude
 summary: Claude Code on GLM models with a Z.ai Coding Plan key.
 docs: https://docs.z.ai/devpack/tool/claude
 verified: '2026-10-16'
 unverified:
   - The quota endpoint the Test and usage read is described by community tools, not by Z.ai's own documentation.
-env:
-  ANTHROPIC_BASE_URL:
-    value: https://api.z.ai/api/anthropic
-  ANTHROPIC_AUTH_TOKEN:
-    secretName: ZAI_API_KEY
-  API_TIMEOUT_MS:
-    value: '3000000'
-    required: false
-  ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: glm-5.3
-  ANTHROPIC_DEFAULT_SONNET_MODEL:
-    value: glm-5.3
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: glm-5.3-flash
-models: [glm-5.3, glm-5.3-flash]
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://api.z.ai/api/anthropic
+    ANTHROPIC_AUTH_TOKEN:
+      secretName: ZAI_API_KEY
+    API_TIMEOUT_MS:
+      value: '3000000'
+      required: false
+    ANTHROPIC_DEFAULT_OPUS_MODEL:
+      value: glm-5.3
+    ANTHROPIC_DEFAULT_SONNET_MODEL:
+      value: glm-5.3
+    ANTHROPIC_DEFAULT_HAIKU_MODEL:
+      value: glm-5.3-flash
+  models: [glm-5.3, glm-5.3-flash]
+codex:
+  docs: https://docs.z.ai/devpack/tool/codex
+  env:
+    ZAI_API_KEY:
+      secretName: ZAI_API_KEY
+  codexProvider:
+    id: zai
+    name: Z.ai
+    baseUrl: https://api.z.ai/api/v1
+    keyVariable: ZAI_API_KEY
+    model: glm-5.3
+  models: [glm-5.3]
+  unavailable: Z.ai serves the Responses API, but Codex only runs GLM with a model catalogue file (model_catalog_json) that Ferretry would have to write into a Codex home. Use this login with Claude Code instead.
 test:
   kind: request
   url: https://api.z.ai/api/monitor/usage/quota/limit
@@ -30,3 +43,6 @@ quota:
   source: zai-coding-plan
   note: Z.ai's Coding Plan quota — a 5-hour and a weekly window.
 pricing: zai
+detect:
+  hosts: [api.z.ai, open.bigmodel.cn]
+  variables: [ZAI_*, ZHIPUAI_*]

@@ -346,10 +346,58 @@ export const FleetProfileDraftRequestSchema = z.strictObject({
 });
 export type FleetProfileDraftRequest = z.infer<typeof FleetProfileDraftRequestSchema>;
 
+/**
+ * Which part of the merge a resolved value is in (§3.4): an MCP server or a skill by its name, a
+ * settings key, an environment variable, a launch flag, an instructions or hooks component, the model.
+ */
+export const FleetResolvedFieldSchema = z.enum([
+  'instructions',
+  'mcp',
+  'skills',
+  'settings',
+  'env',
+  'flags',
+  'hooks',
+  'model',
+]);
+export type FleetResolvedField = z.infer<typeof FleetResolvedFieldSchema>;
+
+/**
+ * One value as a content item set it. `from` is the profile's OWN content item that brought it in —
+ * the component itself, or the `profile/<name>` it arrived through — so a list can mark that item.
+ * `hidden` says a secret-looking value was replaced by `‹hidden›` before it left the daemon.
+ */
+export const FleetResolvedSetterSchema = z.strictObject({
+  value: z.string(),
+  hidden: z.literal(true).optional(),
+  from: NonEmptyStringSchema,
+});
+export type FleetResolvedSetter = z.infer<typeof FleetResolvedSetterSchema>;
+
+/**
+ * One FINAL value of a profile for one harness (R5 "Resolved"): what the runtime gets for `key`, the
+ * item it came from, and every earlier value it overrode, oldest first.
+ */
+export const FleetResolvedEntrySchema = z.strictObject({
+  harness: HarnessKindSchema,
+  field: FleetResolvedFieldSchema,
+  key: NonEmptyStringSchema,
+  value: z.string(),
+  hidden: z.literal(true).optional(),
+  from: NonEmptyStringSchema,
+  overridden: z.array(FleetResolvedSetterSchema).readonly(),
+});
+export type FleetResolvedEntry = z.infer<typeof FleetResolvedEntrySchema>;
+
 /** The draft resolved per harness exactly as a saved profile is, or why it cannot be. */
 export const FleetProfileDraftViewSchema = z.strictObject({
   /** Claude Code, then Codex. */
   harnesses: z.array(FleetStackViewSchema).readonly(),
+  /**
+   * Every final value per harness, Claude Code then Codex, in merge order (R5). Absent from a daemon
+   * older than the Resolved view; empty for a draft that cannot be resolved.
+   */
+  resolved: z.array(FleetResolvedEntrySchema).readonly().optional(),
   /** What the draft's layers make it (P7). A mixed draft also carries the same sentence as `refusal`. */
   scope: FleetProfileScopeSchema,
   /** A layer that does not exist, or one that would include the profile itself. */
@@ -495,6 +543,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     name: TypedNameSchema,
     credential: NonEmptyStringSchema,
     profile: FleetComponentNameSchema,
+    /**
+     * Which CLI it runs, for a login that drives both (docs/provider-presets.md). Absent: the one its
+     * profile is scoped to, else the login's own.
+     */
+    harness: HarnessKindSchema.optional(),
     agent: z.boolean(),
     create: z.boolean(),
     /** E15: the person saw "already uses this login and profile" and chose to add another anyway. */
@@ -534,6 +587,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('credential.add'),
     id: TypedNameSchema,
+    /**
+     * The CLI. For a preset with a `claude:` and a `codex:` half, the one listed first: the login gets
+     * every half the preset offers, so it drives both with one secret, and `env` holds the variables
+     * of every half (docs/provider-presets.md).
+     */
     harness: HarnessKindSchema,
     label: NonEmptyStringSchema.optional(),
     /**

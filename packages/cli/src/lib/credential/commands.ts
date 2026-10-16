@@ -1,3 +1,5 @@
+import { detectProvider } from '@ferretry/fleet';
+import type { FleetProviderPresetView } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import { requireMayApply } from '../fleet/account-authority.ts';
 import { runChange } from '../fleet/account-change.ts';
@@ -5,6 +7,21 @@ import { parseHarness, readOptions, writeFlags, writeOptions } from '../fleet/ac
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
 import { HARNESS_LABEL } from '../fleet/account-render.ts';
 import { runSignIn } from '../fleet/sign-in.ts';
+import { definedEnv, detectionSentence, detectionTable } from './detect-env.ts';
+import {
+  presetDefaultEnv,
+  presetRequiredPlainGaps,
+  presetSecretsNeeded,
+  secretFromShell,
+  withShellPlainValues,
+} from './provider-env.ts';
+import {
+  matchPresetWord,
+  offeredHarnesses,
+  presetDriveSentence,
+  presetOfferedRefusal,
+  resolveAddHarness,
+} from './provider-match.ts';
 import { renderCredentialList, renderCredentialRow, renderPresetList } from './render.ts';
 
 const CREDENTIAL_ID_LIMIT = 64;
@@ -56,8 +73,8 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
   writeOptions(
     credential
       .command('add')
-      .description('add a login and sign it in')
-      .argument('<tool>', 'claude or codex')
+      .description('add a login: sign claude or codex in, or build one from a provider preset')
+      .argument('[tool-or-provider]', 'claude, codex, or a provider — e.g. glm, deepseek, bedrock')
       .option('--label <label>', 'a name to tell this login apart from another with the same email')
       .option('--id <id>', 'the id to give it (default: made from the tool and the label)')
       .option('--no-sign-in', 'add the login without signing in now')
@@ -68,10 +85,13 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
         collectEnv,
         {},
       )
-      .option('--cloud-credential <reference>', 'aws-profile:<name>, gcloud-adc[:<path>] or azure-cli'),
+      .option('--cloud-credential <reference>', 'aws-profile:<name>, gcloud-adc[:<path>] or azure-cli')
+      .option('--for <tool>', 'which CLI a provider that drives both is listed under first (claude or codex)')
+      .option('--from-env', 'import from the variables already set in this shell, instead of typing one')
+      .option('--test', 'test the login once it is added, the same as `login test`'),
   ).action(
     async (
-      tool: string,
+      tool: string | undefined,
       options: {
         label?: string;
         id?: string;
@@ -79,34 +99,17 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
         preset?: string;
         env?: Record<string, string>;
         cloudCredential?: string;
+        for?: string;
+        fromEnv?: boolean;
+        test?: boolean;
       } & Record<string, unknown>,
     ) => {
-      const harness = parseHarness(tool);
-      const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
-      const id = options.id ?? suggestCredentialId(harness, options.label ?? options.preset, taken);
-      const flags = writeFlags(options);
-      const environment = await environmentLogin(deps, harness, options);
-      const outcome = await runChange(deps, {
-        change: {
-          kind: 'credential.add',
-          id,
-          harness,
-          ...(options.label === undefined ? {} : { label: options.label }),
-          ...environment,
-        },
-        destructive: false,
-        options: flags,
-      });
-      if (outcome === undefined || flags.json) return;
-      if (environment.store === 'environment') {
-        deps.out.report(`Store each secret it names with \`${bin} secret set NAME\`, then: ${bin} login test ${id}`);
+      const word = tool?.trim();
+      if (options.fromEnv !== true && (word?.toLowerCase() === 'claude' || word?.toLowerCase() === 'codex')) {
+        await addToolLogin(deps, word as string, options);
         return;
       }
-      if (options.signIn === false) {
-        deps.out.report(`Sign it in when you are ready: ${bin} credential signin ${id}`);
-        return;
-      }
-      await runSignIn(deps, id);
+      await addProviderLogin(deps, word === '' ? undefined : word, options);
     },
   );
 
@@ -204,6 +207,222 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
       options: writeFlags(options),
     });
   });
+}
+
+/**
+ * `fy login add claude|codex` (docs/provider-presets.md §1): sign-in, or an environment login from an
+ * explicit `--preset`/`--env`/`--cloud-credential` — exactly as before one-click providers existed.
+ */
+async function addToolLogin(
+  deps: AccountCommandDeps,
+  tool: string,
+  options: {
+    readonly label?: string;
+    readonly id?: string;
+    readonly signIn?: boolean;
+    readonly preset?: string;
+    readonly env?: Record<string, string>;
+    readonly cloudCredential?: string;
+  } & Record<string, unknown>,
+): Promise<void> {
+  const bin = deps.binaryName;
+  const harness = parseHarness(tool);
+  const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
+  const id = options.id ?? suggestCredentialId(harness, options.label ?? options.preset, taken);
+  const flags = writeFlags(options);
+  const environment = await environmentLogin(deps, harness, options);
+  const outcome = await runChange(deps, {
+    change: {
+      kind: 'credential.add',
+      id,
+      harness,
+      ...(options.label === undefined ? {} : { label: options.label }),
+      ...environment,
+    },
+    destructive: false,
+    options: flags,
+  });
+  if (outcome === undefined || flags.json) return;
+  if (environment.store === 'environment') {
+    deps.out.report(`Store each secret it names with \`${bin} secret set NAME\`, then: ${bin} login test ${id}`);
+    return;
+  }
+  if (options.signIn === false) {
+    deps.out.report(`Sign it in when you are ready: ${bin} credential signin ${id}`);
+    return;
+  }
+  await runSignIn(deps, id);
+}
+
+/**
+ * The preset `fy login add <provider>` and its `--from-env`/bare-`--env` detection names
+ * (docs/provider-presets.md §2–4): the exact id or an alias when a word was typed, else the provider
+ * the given variables detect as.
+ */
+async function resolveOneClickPreset(
+  deps: AccountCommandDeps,
+  word: string | undefined,
+  sampleForDetection: Readonly<Record<string, string>>,
+): Promise<FleetProviderPresetView> {
+  const bin = deps.binaryName;
+  const catalog = await deps.gateway.presets();
+  if (word !== undefined) {
+    const match = matchPresetWord(catalog.presets, word);
+    if (match === undefined)
+      throw new AccountCommandError(`There is no provider "${word}": see \`${bin} login presets\``);
+    if (match.alsoMatched.length > 0) {
+      deps.out.warn(`"${word}" could also mean ${match.alsoMatched.join(', ')} — using ${match.preset.label}.`);
+    }
+    return match.preset;
+  }
+  const detection = detectProvider(detectionTable(catalog), sampleForDetection);
+  const preset = catalog.presets.find(entry => entry.id === detection.preset);
+  deps.out.report(detectionSentence(preset, detection));
+  if (preset === undefined) {
+    throw new AccountCommandError(`Name a tool or provider: ${bin} login add claude|codex|<provider>`);
+  }
+  return preset;
+}
+
+/**
+ * Fills in a login's secrets (docs/provider-presets.md §2–3): reuse what the store already has, else a
+ * value the shell already carries, else ask — hidden on a terminal, piped on stdin off one when
+ * exactly one is still missing, else refused by name with the command to pipe each one in.
+ */
+async function resolveProviderSecrets(
+  deps: AccountCommandDeps,
+  preset: FleetProviderPresetView,
+  harnesses: readonly AccountHarness[],
+  shellEnv: Readonly<Record<string, string>>,
+): Promise<void> {
+  const needed = presetSecretsNeeded(preset, harnesses);
+  const already = needed.length === 0 ? new Set<string>() : await deps.gateway.secretNames();
+  const pending: (typeof needed)[number][] = [];
+  for (const need of needed) {
+    if (already.has(need.name)) {
+      deps.out.report(`${need.name}: already set ✓`);
+      continue;
+    }
+    const fromShell = secretFromShell(need, shellEnv);
+    if (fromShell !== undefined) {
+      await deps.gateway.putSecret(need.name, fromShell);
+      continue;
+    }
+    pending.push(need);
+  }
+  if (pending.length === 0) return;
+  if (deps.interactive) {
+    for (const need of pending) {
+      const value = (await deps.prompt.askHidden(`${need.name}: `)).trim();
+      if (value === '') throw new AccountCommandError(`${need.name} is needed for ${preset.label} — fill it in`);
+      await deps.gateway.putSecret(need.name, value);
+    }
+    return;
+  }
+  if (pending.length === 1) {
+    const need = pending[0] as (typeof pending)[number];
+    await deps.gateway.putSecret(need.name, await deps.readSecretValue());
+    return;
+  }
+  const names = pending.map(need => need.name);
+  throw new AccountCommandError(
+    `${names.join(', ')} are needed for ${preset.label} — pipe each in: ${names
+      .map(name => `printf %s "$${name}" | ${deps.binaryName} secret set ${name}`)
+      .join('; ')}`,
+  );
+}
+
+/**
+ * Fills in a login's plain variables (docs/provider-presets.md §2–4): a shell value where `--from-env`
+ * applies, then `--env`, then a required one still empty is asked on a terminal or refused by name.
+ */
+async function resolveProviderPlainEnv(
+  deps: AccountCommandDeps,
+  preset: FleetProviderPresetView,
+  harnesses: readonly AccountHarness[],
+  given: Readonly<Record<string, string>>,
+  shellEnv: Readonly<Record<string, string>>,
+): Promise<Record<string, string>> {
+  let env = withShellPlainValues(preset, harnesses, presetDefaultEnv(preset, harnesses), shellEnv);
+  env = { ...env, ...given };
+  for (const variable of presetRequiredPlainGaps(preset, harnesses, env)) {
+    if (deps.interactive) {
+      const prompt =
+        variable.description === undefined ? `${variable.name}: ` : `${variable.name} (${variable.description}): `;
+      const answer = (await deps.prompt.ask(prompt)).trim();
+      if (answer === '') throw new AccountCommandError(`${variable.name} is needed for ${preset.label} — fill it in`);
+      env[variable.name] = answer;
+      continue;
+    }
+    throw new AccountCommandError(`${variable.name} is needed for ${preset.label} — pass --env ${variable.name}=VALUE`);
+  }
+  return env;
+}
+
+/**
+ * `fy login add <provider>`, `--from-env` and a bare `--env` (docs/provider-presets.md §2–4): one
+ * login, made from a preset, that drives every CLI the preset offers with one secret.
+ */
+async function addProviderLogin(
+  deps: AccountCommandDeps,
+  word: string | undefined,
+  options: {
+    readonly label?: string;
+    readonly id?: string;
+    readonly env?: Record<string, string>;
+    readonly cloudCredential?: string;
+    readonly for?: string;
+    readonly fromEnv?: boolean;
+    readonly test?: boolean;
+  } & Record<string, unknown>,
+): Promise<void> {
+  const bin = deps.binaryName;
+  const given = options.env ?? {};
+  const fromEnv = options.fromEnv === true;
+  const forHarness = options.for === undefined ? undefined : parseHarness(options.for);
+
+  const sample = fromEnv ? definedEnv(deps.env) : given;
+  const preset = await resolveOneClickPreset(deps, word, sample);
+  const refusal = presetOfferedRefusal(preset);
+  if (refusal !== undefined) throw new AccountCommandError(refusal);
+
+  const placement = resolveAddHarness(preset, forHarness);
+  if ('refusal' in placement) throw new AccountCommandError(placement.refusal);
+  const harness = placement.harness;
+  const harnesses = offeredHarnesses(preset);
+  const shellEnv = fromEnv ? sample : {};
+
+  const env = await resolveProviderPlainEnv(deps, preset, harnesses, given, shellEnv);
+  await resolveProviderSecrets(deps, preset, harnesses, shellEnv);
+
+  const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
+  const id = options.id ?? suggestCredentialId(harness, options.label ?? preset.id, taken);
+  const flags = writeFlags(options);
+  const cloudCredential = options.cloudCredential ?? preset.cloudCredential?.suggested;
+
+  const outcome = await runChange(deps, {
+    change: {
+      kind: 'credential.add',
+      id,
+      harness,
+      store: 'environment',
+      preset: preset.id,
+      env,
+      ...(options.label === undefined ? {} : { label: options.label }),
+      ...(cloudCredential === undefined ? {} : { cloudCredential }),
+    },
+    destructive: false,
+    options: flags,
+  });
+  if (outcome === undefined || flags.json) return;
+  deps.out.success(`${id} added — ${presetDriveSentence(preset)}.`);
+  if (options.test === true) {
+    const result = await deps.gateway.test(id, false);
+    deps.out.report(`${id}: ${result.message}`);
+    if (!result.ok) deps.out.setExitCode(1);
+    return;
+  }
+  deps.out.report(`Test it: ${bin} login test ${id}`);
 }
 
 /** Commander's collector for a repeated `--env NAME=VALUE`. */

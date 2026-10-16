@@ -26,9 +26,9 @@ import type { SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
+import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
-import type { SessionTurn } from '../lib/session-activity.ts';
 
 /**
  * The name a person calls this session by: its callsign, else whatever the session was labelled,
@@ -86,6 +86,8 @@ export function SessionTopBar({
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
+  // The harness dialog a needs-input session is parked on: the one thing it is waiting for.
+  const blockedBy = turn === 'needs-input' ? session.state.turnPrompt : undefined;
 
   return (
     <header className="fy-session-bar" data-compact={compact ? '' : undefined} data-session-bar="">
@@ -107,11 +109,18 @@ export function SessionTopBar({
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}
           data-session-status={session.state.status}
+          title={blockedBy === undefined ? undefined : `On screen: ${blockedBy}`}
         >
           <StatusMark ready={turn === 'your-turn' && session.state.turnState === undefined} view={session} />
           <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>
             {turn === null ? sessionStatusLabel(session.state.status) : TURN_WORD[turn]}
           </span>
+          {blockedBy === undefined ? null : (
+            <span className={compact ? 'sr-only' : 'fy-session-bar__blocked'} data-session-blocked-by="">
+              <span className="sr-only">, on screen: </span>
+              {blockedBy}
+            </span>
+          )}
           {status}
         </span>
       </div>

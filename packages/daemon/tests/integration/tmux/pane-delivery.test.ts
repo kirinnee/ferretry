@@ -36,6 +36,39 @@ describe('tmux pane delivery — readiness', () => {
     );
   });
 
+  it("should answer Claude's auto-mode dialog NO, keeping the mode the owner chose, then deliver", async () => {
+    // Arrange — the dialog that parked a bypass agent with every message failing, cursor on Yes.
+    const server = new FakeTmuxServer();
+    server.modal = [
+      ' Make auto mode your default permission mode?',
+      '',
+      '   ❯ Yes, set auto mode as my default permission mode',
+      '     No, keep bypass permissions',
+    ].join('\n');
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'continue');
+
+    // Assert — one step down to No, then Enter; never Enter on the highlighted Yes.
+    const keys = server.calls.filter(call => call[0] === 'send-keys' && !call.includes('-l')).map(call => call.at(-1));
+    should(keys.slice(0, 2)).deepEqual(['Down', 'Enter']);
+    should(server.submitted).deepEqual(['continue']);
+  });
+
+  it('should name the dialog when one it cannot answer keeps the pane from ever being ready', async () => {
+    // Arrange — a dialog with no safe answer to read off the screen.
+    const server = new FakeTmuxServer();
+    server.modal = 'Try the new fullscreen renderer?\n  Yes, try it   Not now';
+    const { subject } = delivery(server, { readinessAttempts: 2 });
+
+    // Act / Assert
+    await should(subject.waitReady(SESSION)).be.rejectedWith(
+      /blocked by a prompt on screen: "Try the new fullscreen renderer\?" — answer it in the terminal/u,
+    );
+    should(server.calls.some(call => call[0] === 'send-keys')).be.false();
+  });
+
   it('should walk the resume menu to the configured row rather than pressing Enter on the default', async () => {
     // Arrange — Claude Code's large-session gate, cursor on row 1.
     const server = new FakeTmuxServer();

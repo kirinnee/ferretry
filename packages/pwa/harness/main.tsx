@@ -1726,7 +1726,10 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   };
   return {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
-      schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
+      // A profile's Edit as YAML reads its file through the same client, as it does from a real daemon.
+      path.startsWith('/v1/config/')
+        ? (await HARNESS_CONFIG_FILES_CLIENT(connection)).request(path, schema as never, init)
+        : schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
 };
 

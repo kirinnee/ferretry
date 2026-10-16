@@ -13,7 +13,7 @@ where the two disagree, read that one and fix this one.
 | **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`.                                                                                                                                                                        |
 | **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                                                                                                                                                                                       |
 | **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins. Its scope — Generic, Claude only or Codex only — is derived from its layers; Claude only + Codex only is refused.                                                                                                                                                              |
-| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`). An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last.                                                                                                                                                                                           |
+| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`), running ONE CLI. An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last. On a login that drives both CLIs it runs the one it names (`harness`), else the one its profile is scoped to, else the login's first.                                    |
 
 A credential's status is one of **Ready**, **Refresh due**, **Needs sign-in** or **Checking**. Ferretry
 never refreshes a login on a timer and never spends a model turn to learn a status. History is one pool
@@ -23,8 +23,12 @@ An `environment` credential is no sign-in at all: a named set of variables put i
 each a plain value, a `${secret:NAME}` reference or — for a cloud — a reference to a credential this
 machine already has (`aws-profile:<name>`, `gcloud-adc`, `azure-cli`). It is usually made from a
 **provider preset** (GLM, DeepSeek, Bedrock, OpenRouter…), has a **Test** instead of Check now, and is
-copied by Clone as plain values and secret NAMES with what the target still needs. Its scope chip
-(Claude-only, Codex-only) comes from the CLI it drives. See [provider-presets.md](provider-presets.md).
+copied by Clone as plain values and secret NAMES with what the target still needs. A provider that serves
+both CLIs makes ONE environment login with a `claude:` and a `codex:` half and one secret, so it drives
+either. Its scope chip — **Claude only**, **Codex only** or **Claude + Codex** — comes from the CLIs it
+drives, and every place that picks a login for one CLI offers only logins with a half for it. A dual login
+fits a Claude-only and a Codex-only profile alike: the runtime runs the CLI the profile is scoped to. See
+[provider-presets.md](provider-presets.md).
 
 ## Where state lives
 

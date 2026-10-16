@@ -379,6 +379,28 @@ describe('a send past its deadline', () => {
     should(unreadable.events).eql(['control.send_unaccounted']);
   });
 
+  it('says a dialog on screen blocked the send, rather than that the transcript was unreadable', async () => {
+    // A harness parked on a one-shot dialog writes no transcript at all: "unreadable" was true and useless.
+    const NUDGE = 'Make auto mode your default permission mode?';
+    const noTranscript = new World(record());
+    noTranscript.reading = { readable: false, inputs: [] };
+    noTranscript.pane = pane({ promptReady: false, blockingPrompt: NUDGE });
+    await noTranscript.checkAt(60_000);
+    // With a transcript, the dialog still means nothing will land — and a retype would type into it.
+    const readable = new World(record());
+    readable.pane = pane({ promptReady: false, blockingPrompt: NUDGE });
+    await readable.checkAt(60_000);
+    // An unreadable transcript whose pane cannot be read either stays what it was.
+    const blind = new World(record());
+    blind.reading = { readable: false, inputs: [] };
+    blind.pane = undefined;
+    await blind.checkAt(60_000);
+
+    should(noTranscript.only).match({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt', retryable: false });
+    should(readable.only).match({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt', attempt: 1 });
+    should(blind.only.unaccountedReason).equal('transcript_unreadable');
+  });
+
   it('times out a send whose session ended or whose pane is gone, without offering a plain retry', async () => {
     const ended = new World(record());
     ended.target = { id: ID, status: 'stopped', mode: 'auto', turn: 4 };

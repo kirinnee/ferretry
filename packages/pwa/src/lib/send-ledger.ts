@@ -177,6 +177,7 @@ const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'composer_discarded',
   'transcript_unreadable',
   'pane_unreadable',
+  'blocked_by_prompt',
   'not_delivered',
 ]);
 const SENDERS: ReadonlySet<string> = new Set<SendSenderKind>(['human', 'agent', 'daemon']);

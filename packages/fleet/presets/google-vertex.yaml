@@ -35,3 +35,5 @@ quota:
   source: transcript-pricing
   note: Google reports limits in the Cloud Console only, so cost is counted from the transcript at Vertex prices.
 pricing: anthropic
+detect:
+  variables: [CLAUDE_CODE_USE_VERTEX, ANTHROPIC_VERTEX_PROJECT_ID, CLOUD_ML_REGION]

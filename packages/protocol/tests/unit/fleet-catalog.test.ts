@@ -262,10 +262,33 @@ const cases: readonly SchemaCase[] = [
     value: { layers: ['profile/default', 'mcp/notes'], editing: 'agent' },
   },
   {
+    name: 'FleetResolvedFieldSchema',
+    schema: catalog.FleetResolvedFieldSchema,
+    value: 'env',
+  },
+  {
+    name: 'FleetResolvedSetterSchema',
+    schema: catalog.FleetResolvedSetterSchema,
+    value: { value: '‹hidden›', hidden: true, from: 'settings/claude' },
+  },
+  {
+    name: 'FleetResolvedEntrySchema',
+    schema: catalog.FleetResolvedEntrySchema,
+    value: {
+      harness: 'claude',
+      field: 'settings',
+      key: 'permissions.defaultMode',
+      value: 'acceptEdits',
+      from: 'settings/agent',
+      overridden: [{ value: 'plan', from: 'profile/default' }],
+    },
+  },
+  {
     name: 'FleetProfileDraftViewSchema',
     schema: catalog.FleetProfileDraftViewSchema,
     value: {
       harnesses: [stack],
+      resolved: [],
       scope: { kind: 'scoped', scope: 'generic' },
       refusal: 'no profile ghost exists on this machine',
     },
@@ -344,6 +367,31 @@ describe('the account-model catalogue wire contract', () => {
 
     // Assert
     should(parsed).deepEqual(changes.map(() => true));
+  });
+
+  it('should accept a runtime.put naming which half of a dual login it runs, and leave it optional', () => {
+    // Act
+    const named = catalog.FleetAccountChangeSchema.safeParse({
+      kind: 'runtime.put',
+      name: 'Codex Review',
+      credential: 'glm',
+      profile: 'default',
+      harness: 'codex',
+      agent: false,
+      create: true,
+    });
+    const unnamed = catalog.FleetAccountChangeSchema.safeParse({
+      kind: 'runtime.put',
+      name: 'Default',
+      credential: 'claude-you',
+      profile: 'default',
+      agent: false,
+      create: false,
+    });
+
+    // Assert
+    should(named.success && named.data.kind === 'runtime.put' && named.data.harness).equal('codex');
+    should(unnamed.success && unnamed.data.kind === 'runtime.put' && 'harness' in unnamed.data).be.false();
   });
 
   it('should require ferretrySettings in what a machine reports, and leave it optional in what a client sends', () => {

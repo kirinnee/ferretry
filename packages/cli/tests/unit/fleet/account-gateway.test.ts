@@ -169,4 +169,42 @@ describe('ProtocolAccountGateway environment logins', () => {
     should(body(fake.sent[1])).deepEqual({});
     should(body(fake.sent[2])).deepEqual({ allowInference: true });
   });
+
+  it('should read the secret store’s names for a one-click add, treating "damaged" as none', async () => {
+    // Arrange
+    const AT = '2026-10-16T09:00:00.000Z';
+    const ready = client({
+      '/v1/secrets': {
+        v: 1,
+        health: 'ready',
+        secrets: [{ name: 'ZAI_API_KEY', createdAt: AT, updatedAt: AT }],
+        references: [],
+      },
+    });
+    const damaged = client({
+      '/v1/secrets': { v: 1, health: 'damaged', diagnosis: 'no key', secrets: [], references: [] },
+    });
+
+    // Act
+    const names = await new ProtocolAccountGateway(ready).secretNames();
+    const none = await new ProtocolAccountGateway(damaged).secretNames();
+
+    // Assert
+    should([...names]).eql(['ZAI_API_KEY']);
+    should([...none]).eql([]);
+  });
+
+  it('should store a one-click secret through the very same client', async () => {
+    // Arrange
+    const AT = '2026-10-16T09:00:00.000Z';
+    const fake = client({ '/v1/secrets': { name: 'ZAI_API_KEY', createdAt: AT, updatedAt: AT } });
+    const gateway = new ProtocolAccountGateway(fake);
+
+    // Act
+    await gateway.putSecret('ZAI_API_KEY', 'sk-value');
+
+    // Assert
+    should(body(fake.sent[0])).eql({ name: 'ZAI_API_KEY', value: 'sk-value' });
+    should(fake.sent[0]?.path).equal('/v1/secrets');
+  });
 });

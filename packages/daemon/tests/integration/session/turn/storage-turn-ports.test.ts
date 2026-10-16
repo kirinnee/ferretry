@@ -15,6 +15,7 @@ import {
   StorageTurnPorts,
   SystemClock,
 } from '../../../../src/adapters/index.ts';
+import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
 import {
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -24,7 +25,6 @@ import {
   SessionTurnWatcher,
   TmuxController,
 } from '../../../../src/lib/index.ts';
-import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
 
 /**
  * Whose turn it is, read from REAL evidence: a real tmux server whose panes draw what each harness
@@ -47,6 +47,24 @@ afterEach(async () => {
 const CLAUDE_IDLE = '  ? for shortcuts · ✻ Welcome back\n╭────────────────────╮\n│ > ';
 const CLAUDE_WORKING = '⏺ Reading.\n✽ Pontificating… (3s · ↓ 1.2k tokens · esc to interrupt)\n\n│ > ';
 const CLAUDE_PERMISSION = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
+/**
+ * A fresh bypass agent parked on Claude 2.1.281's one-shot auto-mode dialog, drawn under its composer
+ * the way the owner saw it: the composer's `❯` and the dialog's cursor row both read as a prompt.
+ */
+const CLAUDE_AUTO_NUDGE = [
+  ' ▐▛███▜▌   Claude Code v2.1.281',
+  '──────────────────────────────',
+  '❯ ',
+  '──────────────────────────────',
+  '  ⏵⏵ bypass permissions on (shift+tab to cycle)',
+  '',
+  ' Make auto mode your default permission mode?',
+  '',
+  '   Auto mode lets Claude handle permission prompts automatically.',
+  '',
+  '     Yes, set auto mode as my default permission mode',
+  '   ❯ No, keep bypass permissions',
+].join('\n');
 const CODEX_IDLE = '  100% context left\n\n› Ask Codex to do anything';
 const CODEX_WORKING = '• Working (5s • Esc to interrupt)\n\n› ';
 const CODEX_INTERRUPTED = '■ Conversation interrupted - tell the model what to do differently\n\n› ';
@@ -66,6 +84,7 @@ interface Fixture {
   readonly transcript: (text: string) => Promise<void>;
   readonly status: (status: string) => Promise<void>;
   readonly turnState: () => Promise<unknown>;
+  readonly turnPrompt: () => Promise<unknown>;
   readonly events: () => Promise<readonly (string | null)[]>;
   readonly settle: () => Promise<void>;
 }
@@ -141,6 +160,7 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string): Promi
       await opened.storage.updateState(id, raw => ({ ...(raw as Record<string, unknown>), status }));
     },
     turnState: async () => (await state()).turnState,
+    turnPrompt: async () => (await state()).turnPrompt,
     events: async () =>
       (await opened.storage.replay(id)).events
         .filter(event => event.type === 'turn.state')
@@ -250,6 +270,22 @@ describe('the turn watcher over real panes and transcripts', () => {
     await subject.status('stopped');
     await until(subject, undefined);
   }, 60_000);
+
+  it('Claude parked on a one-shot dialog: needs input, saying what is on screen, until it is answered', async () => {
+    // A fresh agent with no transcript at all — the case the send path called "transcript unreadable".
+    const subject = await fixture('claude', CLAUDE_AUTO_NUDGE);
+    await subject.settle();
+
+    await until(subject, 'needs-input');
+    should(await subject.turnPrompt()).equal('Make auto mode your default permission mode?');
+
+    // Answered: the dialog closes on the idle composer, and the dialog leaves the record with it.
+    await subject.frame(CLAUDE_IDLE);
+    await subject.settle();
+    await until(subject, 'your-turn');
+    should(await subject.turnPrompt()).be.undefined();
+    should(await subject.events()).deepEqual(['needs-input', 'your-turn']);
+  }, 30_000);
 
   it('should re-derive a turn still running after the daemon restarts, from the transcript alone', async () => {
     // Arrange — a working turn, then a fresh watcher (a restarted daemon) with no memory of it.

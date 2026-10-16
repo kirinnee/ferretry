@@ -170,6 +170,8 @@ export interface SendPaneObservation {
   /** The harness is visibly mid-turn. A pane can be neither prompt-ready nor working: a human's
    *  half-typed draft is exactly that, and it must not be treated as busy. */
   readonly activeWork: boolean;
+  /** A harness dialog the pane is parked on, in the words a person is shown for it. */
+  readonly blockingPrompt?: string | undefined;
 }
 
 /** One session, as everything in this slice reads it. */

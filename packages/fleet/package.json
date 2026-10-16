@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/lib/index.ts",
     "./harness": "./src/lib/harness.ts",
-    "./adapters": "./src/adapters/index.ts"
+    "./adapters": "./src/adapters/index.ts",
+    "./detect": "./src/lib/presets/detect.ts"
   },
   "types": "./src/lib/index.ts",
   "dependencies": {

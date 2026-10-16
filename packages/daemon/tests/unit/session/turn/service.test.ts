@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { SessionTurnState } from '@ferretry/protocol';
 import should from 'should';
-import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
 import type { TurnPaneEvidence } from '../../../../src/lib/session/turn/policy.ts';
 import {
   type SessionTurnPorts,
@@ -10,6 +9,7 @@ import {
   type TurnStateChange,
   type TurnWatchSession,
 } from '../../../../src/lib/session/turn/service.ts';
+import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
 import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
 
 /**
@@ -44,7 +44,8 @@ const ports = (world: World): SessionTurnPorts => ({
     if (world.refuse) return false;
     world.recorded.push({ id, change });
     const state = world.states.get(id);
-    if (state !== undefined) world.states.set(id, { ...state, turnState: change.to as SessionTurnState });
+    if (state !== undefined)
+      world.states.set(id, { ...state, turnState: change.to as SessionTurnState, turnPrompt: change.prompt });
     return true;
   },
   clock: { now: () => '2026-10-16T08:00:00.000Z' },
@@ -56,6 +57,33 @@ describe('SessionTurnWatcher', () => {
   it('should look every couple of seconds', () => {
     should(new SessionTurnWatcher(ports(world())).intervalMs).equal(TURN_WATCH_INTERVAL_MS);
     should(TURN_WATCH_INTERVAL_MS).be.belowOrEqual(2_000);
+  });
+
+  it('should record the dialog a session is parked on, a new one beside the same needs-input, and clear it once answered', async () => {
+    const w = world();
+    w.states.set(A, { status: 'running', turn: 1 });
+    const parked = (prompt: string): TurnPaneEvidence => ({
+      working: false,
+      atPrompt: true,
+      permission: false,
+      prompt,
+    });
+    w.panes.set(A, parked('Make auto mode your default permission mode?'));
+    const watcher = new SessionTurnWatcher(ports(w));
+
+    await watcher.tick();
+    await watcher.tick();
+    w.panes.set(A, parked('Try the new fullscreen renderer?'));
+    await watcher.tick();
+    w.panes.set(A, IDLE);
+    await watcher.tick();
+    await watcher.tick();
+
+    should(w.recorded.map(entry => entry.change)).deepEqual([
+      { from: undefined, to: 'needs-input', prompt: 'Make auto mode your default permission mode?' },
+      { from: 'needs-input', to: 'needs-input', prompt: 'Try the new fullscreen renderer?' },
+      { from: 'needs-input', to: 'your-turn' },
+    ]);
   });
 
   it('should record a turn start, its end once, and nothing more while nothing changes', async () => {

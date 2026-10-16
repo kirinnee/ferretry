@@ -36,7 +36,7 @@ import {
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { AccountModel } from '../account/schema.ts';
-import type { ProviderPreset, ProviderPresetFile } from '../presets/schema.ts';
+import { type ProviderPreset, type ProviderPresetFile, presetFromFile } from '../presets/schema.ts';
 import { type CheckedConfigFile, checkConfigFile, schemaIssues } from './check.ts';
 import { configLoosening, SINGLETON_DEFAULTS, type SingletonKind } from './kinds.ts';
 import { assembleAccountModel, type FleetFileValue, isFleetFile, modelIssueSite } from './model.ts';
@@ -228,7 +228,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
           const address = candidate.checked.address;
           if (address.kind !== 'preset') return [];
           const preset = candidate.checked.value as ProviderPresetFile;
-          return [[address.name, { ...preset, id: address.name, origin: 'file' as const }]];
+          return [[address.name, presetFromFile(address.name, preset, 'file')]];
         }),
       ),
     },
