@@ -117,6 +117,8 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
     case '/v1/config/file': {
       if (method === 'PUT') {
         const written = String(body(init).path);
+        // Only the three settings files Copy writes; every other file is the Files panel's fixture.
+        if (!(written in SOURCE_FILES)) return undefined;
         // The copied Warden turns on the Jev guard, which spends: the daemon holds it for the owner.
         return written === 'warden.yaml'
           ? {
@@ -132,6 +134,7 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
           : { path: written, etag: `sha256:harness-${written}`, outcome: 'applied' };
       }
       const file = url.searchParams.get('path') ?? '';
+      if (!(file in SOURCE_FILES)) return undefined;
       const text = source ? SOURCE_FILES[file] : undefined;
       return {
         path: file,
@@ -146,7 +149,7 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
       };
     }
     case '/v1/config/confirm':
-      return { path: String(body(init).path), confirmed: true };
+      return String(body(init).path) in SOURCE_FILES ? { path: String(body(init).path), confirmed: true } : undefined;
     default:
       return undefined;
   }
