@@ -601,6 +601,16 @@ const settleTabStrip = async (page: Page): Promise<void> => {
   );
 };
 
+/**
+ * Move the pointer off every control. A ghost button paints its hover fill, so one left under the pointer
+ * by the click that opened a page (a disclosure, a row that moved under it) reads as a painted box whose
+ * edge sits in the gutter, though a person looking at the page sees no fill. The corner is padding.
+ */
+const parkPointer = async (page: Page): Promise<void> => {
+  await page.mouse.move(1, 1);
+  await settleTransitions(page);
+};
+
 const assertMachinesGeometry = async (page: Page, where: string): Promise<void> => {
   await settleTransitions(page);
   await settleTabStrip(page);
@@ -624,7 +634,11 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
       hovered = target.id;
       await page.mouse.move(target.x, target.y);
       await settleTransitions(page);
+    } else {
+      await parkPointer(page);
     }
+  } else {
+    await parkPointer(page);
   }
   const problems = await page.evaluate(hoveredTab => {
     const found: string[] = [];
