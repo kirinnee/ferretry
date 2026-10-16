@@ -68,6 +68,10 @@ export interface SessionInfoProps {
   readonly now?: () => number;
 }
 
+/** A failure in words a person can read: a raw parse dump says nothing to them. */
+export const readableReason = (reason: string): string =>
+  reason.length > 160 || /^\s*[[{]/u.test(reason) ? 'the daemon answered with something this page cannot read' : reason;
+
 const listRead = <T,>(
   read: ReturnType<typeof useContextRead<T>>['load'],
   items: (value: T) => readonly string[],
@@ -75,7 +79,7 @@ const listRead = <T,>(
   read.kind === 'ready'
     ? { kind: 'ready', items: items(read.value) }
     : read.kind === 'failed'
-      ? { kind: 'failed', reason: read.reason }
+      ? { kind: 'failed', reason: readableReason(read.reason) }
       : { kind: 'loading' };
 
 export function SessionInfo({
@@ -114,13 +118,13 @@ export function SessionInfo({
     verdicts.load.kind === 'ready'
       ? { kind: 'ready', verdicts: verdicts.load.value }
       : verdicts.load.kind === 'failed'
-        ? { kind: 'failed', reason: verdicts.load.reason }
+        ? { kind: 'failed', reason: readableReason(verdicts.load.reason) }
         : { kind: 'loading' };
   const analyticsRead: InfoAnalyticsRead =
     analytics.load.kind === 'ready'
       ? { kind: 'ready', response: analytics.load.value }
       : analytics.load.kind === 'failed'
-        ? { kind: 'failed', reason: analytics.load.reason }
+        ? { kind: 'failed', reason: readableReason(analytics.load.reason) }
         : { kind: 'loading' };
 
   return (

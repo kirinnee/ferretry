@@ -2728,12 +2728,33 @@ const harnessInfoAnswer = (method: string, url: URL, body: string): unknown => {
         reportPath: 'warden/reports/harness-workspace-1.md',
       },
     ];
-  if (method === 'GET' && path === '/v1/analytics')
+  if (method === 'GET' && path === '/v1/analytics') {
+    const measure = (value: number | null) => ({ value, known: value === null ? 0 : 12, total: 12 });
     return {
       ...ANALYTICS,
       query: 'sum {id="harness-workspace"}',
-      results: [{ ...ANALYTICS.results[0], labels: {}, sessions: 1 }],
+      results: [
+        {
+          labels: {},
+          sessions: 1,
+          rates: { stall: 0, failure: 0, completion: 100 },
+          tokens: measure(1_482_300),
+          inputTokens: measure(1_204_100),
+          outputTokens: measure(96_200),
+          cachedInputTokens: measure(182_000),
+          cacheWriteInputTokens: measure(24_000),
+          cacheWrite5mInputTokens: measure(24_000),
+          cacheWrite1hInputTokens: measure(0),
+          reasoningTokens: measure(0),
+          equivalentApiCostUsdMicros: measure(4_210_000),
+          turns: measure(12),
+          durationMs: measure(2_640_000),
+          timeToFirstOutputMs: measure(2_100),
+          contextEndPercent: measure(61),
+        },
+      ],
     };
+  }
   if (method === 'GET' && path === '/v1/fleet/components') return harnessCatalogAnswer(path);
   if (method === 'GET' && path === '/v1/fleet/mcp-auth') return { connections: [] };
   const route = harnessSessionRoute(path);
