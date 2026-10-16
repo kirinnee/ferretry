@@ -5,6 +5,7 @@ import type { InterruptSessionController, ResumeSessionController } from './life
 import type { SuggestNamesController } from './name-controller.ts';
 import type { SessionPresenter } from './presenter.ts';
 import type { ListSessionsController } from './ps-controller.ts';
+import type { RenameSessionController } from './rename-controller.ts';
 import type { SendMessageController } from './send-controller.ts';
 import type { SignalSessionController } from './signal-controller.ts';
 import type { StartSessionController } from './start-controller.ts';
@@ -25,6 +26,7 @@ export interface SessionCommandDeps {
   readonly interrupt: InterruptSessionController;
   readonly resume: ResumeSessionController;
   readonly signal: SignalSessionController;
+  readonly rename: RenameSessionController;
 }
 
 /** Repeatable option accumulator. */
@@ -270,6 +272,22 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
           ...(text(options, 'until') === undefined ? {} : { until: text(options, 'until') }),
           ...(text(options, 'on') === undefined ? {} : { on: text(options, 'on') }),
           ...(text(options, 'peer') === undefined ? {} : { peer: text(options, 'peer') }),
+          ...(flag(options, 'json') === undefined ? {} : { json: true }),
+        });
+      }),
+    );
+
+  program
+    .command('rename')
+    .description('give an agent a new first name, a new task title, or both')
+    .argument('<session>', 'session id or current first name')
+    .argument('[name]', 'the new first name: letters, digits or hyphens, starting with a letter')
+    .option('--title <title>', 'a new task title')
+    .option('--json', 'print the renamed session as JSON')
+    .action(
+      guard(async (session: string, name: string | undefined, options: CommanderOptions) => {
+        await deps.rename.execute(session, name, {
+          ...(text(options, 'title') === undefined ? {} : { title: text(options, 'title') }),
           ...(flag(options, 'json') === undefined ? {} : { json: true }),
         });
       }),
