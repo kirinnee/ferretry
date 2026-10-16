@@ -81,6 +81,7 @@ import {
 } from '../src/adapters/fleet-credentials/credential-facts.ts';
 import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-delivery.ts';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
+import { systemPortHolders } from '../src/adapters/fleet-login/port-holders.ts';
 import {
   FileSessionForkReceiptStore,
   forkOpeningTurnRefusal,
@@ -4732,6 +4733,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     deliverCallback: deliverCodexCallback,
     environment: process.env,
     timer: harnessLoginTimer,
+    portHolders: systemPortHolders(),
     clientName: CLIENT_NAME,
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only

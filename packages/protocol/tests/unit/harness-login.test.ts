@@ -98,6 +98,12 @@ describe('harness-login schemas', () => {
         value: { credentialId: 'codex-kirin', method: 'link' },
       },
       { name: 'switch to a link', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { method: 'link' } },
+      {
+        name: 'start over',
+        schema: harnessLogin.HarnessLoginStartRequestSchema,
+        value: { credentialId: 'codex-kirin', method: 'link', restart: true },
+      },
+      { name: 'picked up', schema: harnessLogin.CodexLoginFlowSchema, value: { ...awaitingCallback, resumed: true } },
     ]);
     assertRejects([
       rejects('the pasted address on the wire', harnessLogin.CodexLoginFlowSchema, {
@@ -320,6 +326,14 @@ describe('harness-login schemas', () => {
       }),
       rejects('a retired account id', harnessLogin.HarnessLoginStartRequestSchema, {
         accountId: '00000000-0000-4000-8000-000000000001',
+      }),
+      rejects('a start-over that is not a plain yes', harnessLogin.HarnessLoginStartRequestSchema, {
+        credentialId: 'claude-kirin',
+        restart: false,
+      }),
+      rejects('a flow picked up by anything but a plain yes', harnessLogin.ClaudeLoginFlowSchema, {
+        ...claudeAwaiting,
+        resumed: false,
       }),
     ]);
   });

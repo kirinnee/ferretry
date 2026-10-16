@@ -456,4 +456,84 @@ describe('CredentialSignIn with a Codex link', () => {
     expect(failed.view.container.textContent).toContain('Sign in to Codex with a link');
     await failed.view.unmount();
   });
+
+  it('picks up a sign-in already running, says so, and starts it over in one press', async () => {
+    let started = 0;
+    const { view, calls } = await open({
+      [LOGIN]: () => {
+        started += 1;
+        return started === 1
+          ? { ...claudeFlow('awaiting-code'), resumed: true }
+          : {
+              ...claudeFlow('awaiting-code'),
+              flowId: 'flow-2',
+              verificationUrl: 'https://claude.ai/oauth/authorize?code=fresh',
+            };
+      },
+      [`DELETE ${FLOW}`]: claudeFlow('failed'),
+    });
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    expect(state(view.container)).toBe('awaiting-code');
+    expect(text(view.container, '[data-sign-in-resumed]')).toBe(
+      'You started this sign-in earlier, so it carries on from where you left it.',
+    );
+    expect(view.container.textContent).not.toContain('flow-1');
+
+    await click(button(view.container, 'Start over'), 'Start over');
+    expect(only(calls, `DELETE ${FLOW}`)).toHaveLength(1);
+    expect(only(calls, LOGIN).map(call => call.body)).toEqual([
+      { credentialId: 'claude-work' },
+      { credentialId: 'claude-work', restart: true },
+    ]);
+    expect(view.container.textContent).toContain('https://claude.ai/oauth/authorize?code=fresh');
+    expect(view.container.querySelector('[data-sign-in-resumed]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('says a start-over the machine refused, and leaves the running sign-in on screen', async () => {
+    let started = 0;
+    const { view } = await open({
+      [LOGIN]: () => {
+        started += 1;
+        return started === 1
+          ? claudeFlow('awaiting-code')
+          : new FyHttpError('This machine is stopping.', 409, 'fleet_login_unavailable');
+      },
+      [`DELETE ${FLOW}`]: new FyHttpError('gone', 409, 'fleet_login_unknown'),
+    });
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    await click(button(view.container, 'Start over'), 'Start over');
+    expect(text(view.container, '[role="alert"]')).toBe('This machine is stopping.');
+    expect(state(view.container)).toBe('awaiting-code');
+    await view.unmount();
+  });
+
+  it('starts over after a sign-in failed, so a leftover holding the port is cleared on the way', async () => {
+    let started = 0;
+    const { view, calls } = await open({
+      [LOGIN]: () => {
+        started += 1;
+        return started === 1 ? claudeFlow('failed') : claudeFlow('awaiting-code');
+      },
+    });
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    await click(button(view.container, 'Start a new sign-in'), 'Start a new sign-in');
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    expect(only(calls, LOGIN).map(call => call.body)).toEqual([
+      { credentialId: 'claude-work' },
+      { credentialId: 'claude-work', restart: true },
+    ]);
+    expect(only(calls, `DELETE ${FLOW}`)).toHaveLength(0);
+    expect(state(view.container)).toBe('awaiting-code');
+    await view.unmount();
+  });
+
+  it('offers a link sign-in as a real outlined button, never a bare ghost', async () => {
+    const { view } = await open({ [LOGIN]: codexFlow('awaiting-approval') }, { credential: CODEX });
+    expect(button(view.container, 'Sign in with a link instead').getAttribute('data-variant')).toBeNull();
+    await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+    expect(button(view.container, 'Sign in with a link instead').getAttribute('data-variant')).toBeNull();
+    expect(button(view.container, 'Start over').getAttribute('data-variant')).toBeNull();
+    await view.unmount();
+  });
 });

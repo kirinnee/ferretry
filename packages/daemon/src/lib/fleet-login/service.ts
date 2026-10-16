@@ -34,14 +34,32 @@
  *
  * - **A credential that is not a login** — one from the environment, or one this machine cannot reach.
  *   The credentials surface says why in words; offering it would be a control that cannot succeed.
- * - **A second flow for one credential** — two logins into one store race for it. This service can only
- *   be single-flight within itself, and it says so.
  * - **A harness that is not installed** — nothing to launch.
  * - **A flow that recognised nothing** — it ends as ITSELF, saying this host's harness did not offer a
  *   remotable login and naming the host command. Never a hang, never a bare exit code. Both flows depend
  *   on somebody else's output format, and one of them depends on an UNDOCUMENTED flag
  *   (`codex login --device-auth`, empty description at 0.145.0), so this is the path that keeps a
  *   third-party change from becoming an outage.
+ *
+ * ## One flow per credential, PICKED UP rather than refused
+ *
+ * Two logins into one store race for it, so a credential has at most one running flow. A second start
+ * for it does not launch another and does not refuse either: it answers with the flow already running,
+ * marked `resumed`. A person whose page reloaded, whose phone slept or who opened the sign-in from a
+ * different screen (setup, Credentials, `fy credential signin`) lands back on the link and code they
+ * already had, instead of on an error naming a flow they cannot reach. Every caller here holds the same
+ * `fleet`/`configure` authority a status read needs, so picking a flow up shows nobody anything new.
+ *
+ * `restart` is the other answer: end the running flow, wait for its child to exit — a Codex link
+ * sign-in holds this machine's callback port until it does — and start a fresh one in its place.
+ *
+ * ## A flow nobody follows ends early
+ *
+ * Every flow ends when its window closes. A flow that can only finish through a person bringing a value
+ * BACK — Claude's code, or a Codex link's address — also ends once nobody has read it for
+ * {@link HARNESS_LOGIN_IDLE_MINUTES}: nothing can complete it, and a pending Codex link sign-in holds the
+ * callback port every other Codex link sign-in on this machine needs. A Codex DEVICE code is exempt,
+ * because it completes at the provider with nobody reading — ending it would throw an approval away.
  *
  * ## One Codex flow, two children, in turn
  *
@@ -74,6 +92,7 @@ import {
   decideClaudeSubmit,
   observeClaudeLine,
 } from './claude-flow.ts';
+import { CODEX_CALLBACK_PORTS } from './codex-link.ts';
 import {
   CODEX_LINK_LOGIN_ARGV,
   CODEX_LINK_START,
@@ -88,20 +107,18 @@ import {
   decideCodexSubmit,
   observeCodexLine,
 } from './codex-flow.ts';
+import { type CallbackPortHolder, type HeldVerdict, heldPortsWords, isLeftoverCodexLogin } from './port-holders.ts';
 import type {
   HarnessLoginCallbackDeliver,
   HarnessLoginChild,
   HarnessLoginFlowBase,
+  HarnessLoginPortHolders,
   HarnessLoginSpawn,
   HarnessLoginTimer,
 } from './ports.ts';
 
 /** Every refusal this surface answers with, so a client branches on cause rather than on prose. */
-export type HarnessLoginRefusalCode =
-  | 'fleet_login_unavailable'
-  | 'fleet_login_in_progress'
-  | 'fleet_login_unknown'
-  | 'fleet_login_unauthorized';
+export type HarnessLoginRefusalCode = 'fleet_login_unavailable' | 'fleet_login_unknown' | 'fleet_login_unauthorized';
 
 export class HarnessLoginRefusal extends Error {
   constructor(
@@ -131,6 +148,10 @@ export interface DaemonHarnessLoginOptions {
   readonly credentialTargets: { target(credentialId: string): Promise<CredentialSignInTarget> };
   /** The harness command, by this daemon's one rule. A sign-in launches it directly. */
   readonly locate: (harness: HarnessKind) => string | undefined;
+  /** Who listens on Codex's callback ports, so starting over can clear a leftover Codex sign-in. */
+  readonly portHolders: HarnessLoginPortHolders;
+  /** The ports a Codex link sign-in listens on. Codex's own, unless a test names others. */
+  readonly callbackPorts?: readonly number[];
 }
 
 /**
@@ -143,6 +164,15 @@ export const HARNESS_LOGIN_SHUTDOWN_GRACE_MS = 2_000;
 
 /** The default login window. Long enough to find a phone, short enough that a stray child is not forever. */
 export const HARNESS_LOGIN_WINDOW_MINUTES = 10;
+
+/**
+ * How long a flow that needs a person to bring a value back may go unread before it is abandoned.
+ *
+ * Long enough to sign in at a provider on the same phone (the app is in the background and reads
+ * nothing while that happens), short enough that a forgotten Codex link frees the callback port well
+ * inside the window.
+ */
+export const HARNESS_LOGIN_IDLE_MINUTES = 5;
 
 /** How many settled flows are kept so a poller can still read its own outcome. */
 const RETAINED_FLOWS = 8;
@@ -165,6 +195,9 @@ interface FlowRecord {
   spawned: boolean;
   /** The running child is being replaced (a Codex device code moving to a link), so its exit is not the end. */
   relaunch: boolean;
+  /** When anybody last read or acted on this flow. A flow that needs a reader ends once this goes stale. */
+  readAt: number;
+  disarmIdle: (() => void) | undefined;
 }
 
 const settled = (stage: FlowStage): boolean => stage.stage.stage === 'complete' || stage.stage.stage === 'failed';
@@ -174,6 +207,13 @@ const CODEX_PUBLISHED: ReadonlySet<CodexLoginStage['stage']> = new Set([
   'awaiting-callback',
   'finishing',
 ]);
+
+/**
+ * A stage that only a person bringing a value back can finish. A Codex device code is not one: the
+ * child finishes at the provider by itself, read or not.
+ */
+const needsReader = (stage: FlowStage): boolean =>
+  stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : stage.stage.stage === 'awaiting-callback';
 
 const published = (stage: FlowStage): boolean =>
   stage.harness === 'claude' ? stage.stage.stage === 'awaiting-code' : CODEX_PUBLISHED.has(stage.stage.stage);
@@ -226,7 +266,7 @@ export class HarnessLoginService {
         'Claude Code has one way to sign in; choosing a device code or a link applies to Codex only',
       );
     }
-    return this.#launch(target, request.method === 'link');
+    return this.#launch(target, request.method === 'link', request.restart === true);
   }
 
   /** This flow as it stands, expiring it first if its window has closed. */
@@ -331,6 +371,16 @@ export class HarnessLoginService {
       record.child?.kill();
       this.#end(record, 'the daemon stopped, so this sign-in ended with it');
     }
+    await this.#gone(children);
+  }
+
+  /**
+   * Wait for these children to exit, killing outright any still running at the end of the grace.
+   *
+   * The wait is RACED, never awaited on its own: a child's exit settles only once its pipes are read to
+   * the end, and anything it started that still holds a pipe would keep that from ever happening.
+   */
+  async #gone(children: readonly HarnessLoginChild[]): Promise<void> {
     if (children.length === 0) return;
     let disarm: () => void = () => undefined;
     const exited = Promise.all(children.map(async child => await child.exited.catch(() => 0))).then(() => true);
@@ -342,38 +392,75 @@ export class HarnessLoginService {
     if (!settledInTime) for (const child of children) child.kill('SIGKILL');
   }
 
-  // ─── refusals ───────────────────────────────────────────────────────────────────────────────────
-
-  /**
-   * One flow per credential at a time.
-   *
-   * Two logins into one store race for it. So this is single-flight WITHIN this daemon, and the
-   * refusal says which flow holds the credential rather than implying nothing else can.
-   */
-  #assertKeyFree(key: string): void {
-    for (const record of this.#flows.values()) {
-      if (record.identityKey !== key || settled(record.stage)) continue;
-      throw new HarnessLoginRefusal(
-        'fleet_login_in_progress',
-        `a sign-in for "${key}" is already running as flow "${record.flowId}"; finish or cancel it first`,
-      );
-    }
-  }
-
   // ─── the flow ───────────────────────────────────────────────────────────────────────────────────
 
-  #launch(target: Extract<CredentialSignInTarget, { kind: 'store' }>, link: boolean): HarnessLoginFlow {
+  /**
+   * The flow already running for this credential, if any — lapsed first, so a flow whose window
+   * closed or that nobody followed is not handed back as if it were still waiting.
+   */
+  #running(key: string): FlowRecord | undefined {
+    for (const record of this.#flows.values()) {
+      if (record.identityKey !== key || settled(record.stage)) continue;
+      this.#lapse(record);
+      if (!settled(record.stage)) return record;
+    }
+    return undefined;
+  }
+
+  #launch(
+    target: Extract<CredentialSignInTarget, { kind: 'store' }>,
+    link: boolean,
+    restart: boolean,
+  ): HarnessLoginFlow {
     if (this.#stopped)
       throw new HarnessLoginRefusal('fleet_login_unavailable', 'this daemon is stopping, so it starts no sign-in');
     // Nothing between here and the record landing in `#flows` awaits, so of two starts for one
-    // credential the later is refused here.
-    this.#assertKeyFree(target.credentialId);
+    // credential the later finds the earlier here.
+    const running = this.#running(target.credentialId);
+    if (running !== undefined && !restart) {
+      this.#touch(running);
+      return { ...this.#projection(running), resumed: true };
+    }
+    // Starting over: the old child is ended now and the new one launched only once it has exited, so the
+    // two never hold one store — or one Codex callback port — at the same time.
+    const previous = running?.child;
+    if (running !== undefined) this.#end(running, 'this sign-in was replaced by a new one');
     const record = this.#record(target.harness, target.credentialId, link);
     // Deliberately not awaited: a start answers with the flow so a surface can begin polling, and the
     // login itself takes as long as a person takes. Every failure is recorded on the record, so nothing
     // here can reject into an unhandled rejection.
-    void this.#run(target, record);
+    void this.#run(target, record, {
+      replaced: previous === undefined ? [] : [previous],
+      clearPorts: restart && target.harness === 'codex',
+    });
     return this.#projection(record);
+  }
+
+  /**
+   * Starting a Codex sign-in over: stop any leftover Codex sign-in still listening on the callback port,
+   * and name — never stop — anything else there.
+   *
+   * A leftover is one {@link isLeftoverCodexLogin} PROVES is a Codex login run by this daemon's own
+   * user: a daemon killed before it could end its sign-ins leaves exactly that, and it keeps the port
+   * from every later link sign-in. A link sign-in that would find EVERY callback port still taken ends
+   * here, saying which program holds each one, rather than launching Codex to fail on it.
+   */
+  async #clearCallbackPorts(record: FlowRecord): Promise<void> {
+    const ports = this.options.callbackPorts ?? CODEX_CALLBACK_PORTS;
+    const holders = await this.options.portHolders.holders(ports);
+    if (holders === undefined) return;
+    const kept: { readonly holder: CallbackPortHolder; readonly verdict: HeldVerdict }[] = [];
+    for (const holder of holders) {
+      if (!isLeftoverCodexLogin(holder, this.options.portHolders.ownUid)) kept.push({ holder, verdict: 'not-codex' });
+      else if (!(await this.options.portHolders.stop(holder.pid))) kept.push({ holder, verdict: 'could-not-stop' });
+    }
+    const linking = record.stage.harness === 'codex' && record.stage.stage.stage === 'linking';
+    if (!linking || !ports.every(port => kept.some(entry => entry.holder.port === port))) return;
+    this.#endWith(record, {
+      stage: 'failed',
+      reason: `Codex cannot listen for the sign-in: ${heldPortsWords(kept)}`,
+      remedy: 'Stop that program yourself and start over, or sign in with a device code instead.',
+    });
   }
 
   #record(harness: HarnessKind, credentialId: string, link: boolean): FlowRecord {
@@ -394,12 +481,46 @@ export class HarnessLoginService {
       disarm: undefined,
       spawned: false,
       relaunch: false,
+      readAt: startedAt,
+      disarmIdle: undefined,
     };
     this.#flows.set(record.flowId, record);
     record.disarm = this.options.timer.after(window, () => {
       this.#expire(record);
     });
+    this.#armIdle(record);
     return record;
+  }
+
+  /** Somebody read or acted on this flow: its idle clock starts again. */
+  #touch(record: FlowRecord): void {
+    record.readAt = this.options.clock.now();
+    if (!settled(record.stage)) this.#armIdle(record);
+  }
+
+  /**
+   * The idle deadline. When it fires on a flow that still needs a reader, nobody is coming back to it;
+   * on any other stage — a device code the provider may still approve — it simply looks again later.
+   */
+  #armIdle(record: FlowRecord): void {
+    record.disarmIdle?.();
+    record.disarmIdle = this.options.timer.after(HARNESS_LOGIN_IDLE_MINUTES * 60_000, () => {
+      record.disarmIdle = undefined;
+      if (settled(record.stage)) return;
+      if (needsReader(record.stage)) this.#expire(record);
+      else this.#armIdle(record);
+    });
+  }
+
+  /**
+   * End this flow if its window has closed, or if it needs a reader and nobody has read it for the idle
+   * time — checked lazily as well as by timer, because a suspended host wakes up with both overdue.
+   */
+  #lapse(record: FlowRecord): void {
+    const now = this.options.clock.now();
+    if (now >= record.expiresAt) this.#expire(record);
+    else if (needsReader(record.stage) && now - record.readAt >= HARNESS_LOGIN_IDLE_MINUTES * 60_000)
+      this.#expire(record);
   }
 
   /**
@@ -408,8 +529,15 @@ export class HarnessLoginService {
    * The environment is sanitized, then given the store's variables, so a sign-in started from inside an
    * agent session cannot authenticate against that session's login.
    */
-  async #run(target: Extract<CredentialSignInTarget, { kind: 'store' }>, record: FlowRecord): Promise<void> {
+  async #run(
+    target: Extract<CredentialSignInTarget, { kind: 'store' }>,
+    record: FlowRecord,
+    before: { readonly replaced: readonly HarnessLoginChild[]; readonly clearPorts: boolean },
+  ): Promise<void> {
     try {
+      await this.#gone(before.replaced);
+      if (before.clearPorts && !settled(record.stage)) await this.#clearCallbackPorts(record);
+      if (settled(record.stage)) return;
       const binary = this.options.locate(target.harness);
       if (binary === undefined) {
         this.#end(
@@ -480,6 +608,8 @@ export class HarnessLoginService {
     if (settled(record.stage)) return;
     record.disarm?.();
     record.disarm = undefined;
+    record.disarmIdle?.();
+    record.disarmIdle = undefined;
     record.stage =
       record.stage.harness === 'claude'
         ? { harness: 'claude', stage: { stage: 'complete' } }
@@ -500,6 +630,8 @@ export class HarnessLoginService {
     if (settled(record.stage)) return;
     record.disarm?.();
     record.disarm = undefined;
+    record.disarmIdle?.();
+    record.disarmIdle = undefined;
     record.child?.kill();
     record.child = undefined;
     record.stage =
@@ -524,18 +656,22 @@ export class HarnessLoginService {
     return stage.harness === 'claude' ? claudeEnding(stage.stage, cause) : codexEnding(stage.stage, cause);
   }
 
-  /** This flow, or a refusal. A window that has closed ends the flow before it is read. */
+  /**
+   * This flow, or a refusal. A flow that lapsed ends before it is read; one that did not counts as read.
+   *
+   * The refusal names no flow id: it is read by a person, and an internal handle is not something they
+   * can act on.
+   */
   #require(flowId: string): FlowRecord {
     const record = this.#flows.get(flowId);
     if (record === undefined) {
       throw new HarnessLoginRefusal(
         'fleet_login_unknown',
-        `no sign-in "${flowId}" is running on this host; it may have finished or run out of time`,
+        'that sign-in is no longer running on this machine; it may have finished or run out of time',
       );
     }
-    if (this.options.clock.now() >= record.expiresAt) {
-      this.#expire(record);
-    }
+    this.#lapse(record);
+    this.#touch(record);
     return record;
   }
 

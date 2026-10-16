@@ -36,6 +36,7 @@ interface SurfaceOptions {
   readonly tabs?: Parameters<typeof MachinesSurface>[0]['tabs'];
   readonly setUp?: string[];
   readonly daemonPanels?: DaemonPanelsRenderer;
+  readonly removed?: string[];
 }
 
 const surface = (options: SurfaceOptions = {}) => (
@@ -51,6 +52,7 @@ const surface = (options: SurfaceOptions = {}) => (
     createClient={answering}
     {...(options.tabs === undefined ? {} : { tabs: options.tabs })}
     {...(options.daemonPanels === undefined ? {} : { daemonPanels: options.daemonPanels })}
+    {...(options.removed === undefined ? {} : { onRemove: (id: DaemonId) => options.removed?.push(String(id)) })}
   />
 );
 
@@ -288,5 +290,24 @@ describe('MachinesSurface: a machine that is not set up', () => {
     expect(view.container.querySelector('[data-machine-finish-setup]')).toBeNull();
     expect(view.container.querySelectorAll('[data-machine-tab]')).toHaveLength(5);
     await view.unmount();
+  });
+
+  it('calls a pairing a newer one replaced the old pairing, and offers to remove it', async () => {
+    // The owner's case: the machine was reset, paired again at the same address, and the old pairing stayed.
+    const old = { ...pairing('old-identity', 'studio-mac'), baseUrl: studio.baseUrl, pairedAt: 1 };
+    const current = { ...studio, pairedAt: 5 };
+    const removed: string[] = [];
+    const view = await mount(surface({ daemonId: old.daemonId, connections: [current, old], removed }));
+    expect(view.container.querySelector('h2#settings-machine-heading')?.textContent).toBe('studio-mac (old pairing)');
+    expect(view.container.textContent).not.toContain('old-identity');
+    await click(view.container, '[data-machine-replaced-remove]');
+    expect(removed).toEqual(['old-identity']);
+    await view.unmount();
+
+    // The live pairing reads as itself, with no suffix and no banner.
+    const live = await mount(surface({ daemonId: current.daemonId, connections: [current, old], removed }));
+    expect(live.container.querySelector('h2#settings-machine-heading')?.textContent).toBe('studio-mac');
+    expect(live.container.querySelector('[data-machine-replaced]')).toBeNull();
+    await live.unmount();
   });
 });

@@ -147,6 +147,11 @@ const flowShape = {
   startedAt: InstantSchema,
   /** When this flow is abandoned and its child killed. Bounded in minutes, never open-ended. */
   expiresAt: InstantSchema,
+  /**
+   * Set only on a START's answer, when the start picked up the sign-in already running for this
+   * credential instead of launching a second one. A surface says so, and offers to start over.
+   */
+  resumed: z.literal(true).optional(),
 };
 
 /** Present in `failed` on both flows: what went wrong, and the host command that always works. */
@@ -261,6 +266,12 @@ export const HarnessLoginStartRequestSchema = z.strictObject({
   credentialId: CredentialIdSchema,
   /** Codex only: which of its two sign-ins to run. Absent means a device code. */
   method: HarnessLoginCodexMethodSchema.optional(),
+  /**
+   * Start over. A credential has at most one running sign-in, and a start without this picks that one
+   * up (`resumed`). With it, the running one is ended — its child killed and waited for, so a Codex
+   * link frees the machine's callback port — and a fresh one starts in its place.
+   */
+  restart: z.literal(true).optional(),
 });
 export type HarnessLoginStartRequest = z.infer<typeof HarnessLoginStartRequestSchema>;
 

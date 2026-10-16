@@ -25,6 +25,7 @@ import {
   HarnessLoginSubmissionSchema,
   HarnessLoginSubmitRequestSchema,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from './fleet-client.ts';
 
 export const FLEET_LOGIN_PATH = '/v1/fleet/login';
@@ -37,19 +38,63 @@ export type CredentialLoginFlow = HarnessLoginFlow;
 /** Starting a sign-in from a credential, which every runtime on it then reads (E31). */
 export type CredentialLoginStartRequest = HarnessLoginStartRequest;
 
-/**
- * Starts signing one CREDENTIAL in: every runtime on it, or none yet — an empty slot is signed in
- * before anything uses it (E12, E31).
- */
-export const startCredentialSignIn = async (
-  client: FleetClient,
-  request: CredentialLoginStartRequest,
-): Promise<CredentialLoginFlow> =>
+const postStart = async (client: FleetClient, request: CredentialLoginStartRequest): Promise<CredentialLoginFlow> =>
   await client.request(FLEET_LOGIN_PATH, HarnessLoginFlowSchema, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(HarnessLoginStartRequestSchema.parse(request)),
   });
+
+/**
+ * How a daemon released before sign-ins were picked up refused a second start: in prose, naming the
+ * running flow. The id is read out of it only to open that flow — it is never shown.
+ */
+const LEGACY_IN_PROGRESS = /already running as flow "([^"]+)"/u;
+
+/**
+ * Starts signing one CREDENTIAL in: every runtime on it, or none yet — an empty slot is signed in
+ * before anything uses it (E12, E31).
+ *
+ * A sign-in already running for it is PICKED UP (`resumed`), never an error: the daemon answers with
+ * it, and a daemon too old to do that is asked for the flow its refusal named, so this browser lands on
+ * the same link and code whichever daemon it is talking to.
+ */
+export const startCredentialSignIn = async (
+  client: FleetClient,
+  request: CredentialLoginStartRequest,
+): Promise<CredentialLoginFlow> => {
+  try {
+    return await postStart(client, request);
+  } catch (error) {
+    const running =
+      error instanceof FyHttpError && error.code === 'fleet_login_in_progress'
+        ? LEGACY_IN_PROGRESS.exec(error.message)?.[1]
+        : undefined;
+    if (running === undefined) throw error;
+    return { ...(await readCredentialSignIn(client, running)), resumed: true };
+  }
+};
+
+/**
+ * Starts one credential's sign-in OVER: the running one ends — its child killed and waited for — any
+ * leftover Codex sign-in is cleared off the callback port, and a fresh one starts.
+ *
+ * The running flow is cancelled first because a daemon too old to know `restart` needs exactly that,
+ * and refuses the field itself as a malformed body; it is then asked for an ordinary start.
+ */
+export const restartCredentialSignIn = async (
+  client: FleetClient,
+  request: CredentialLoginStartRequest,
+  running: string | undefined,
+): Promise<CredentialLoginFlow> => {
+  if (running !== undefined) await cancelCredentialSignIn(client, running).catch(() => undefined);
+  try {
+    return await postStart(client, { ...request, restart: true });
+  } catch (error) {
+    if (error instanceof FyHttpError && error.status === 400) return await startCredentialSignIn(client, request);
+    throw error;
+  }
+};
 
 /** Re-reads one live credential sign-in. Polled, because the person is acting somewhere this browser cannot see. */
 export const readCredentialSignIn = async (client: FleetClient, flowId: string): Promise<CredentialLoginFlow> =>
