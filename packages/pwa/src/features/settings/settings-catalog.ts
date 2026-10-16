@@ -448,6 +448,34 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'performance',
     ],
   },
+  {
+    // The words somebody types when they want the file behind a setting: the file names themselves, and
+    // "yaml" and "config", which is what a person who edits files by hand calls them.
+    id: 'files',
+    label: 'Configuration files',
+    description:
+      'The YAML files this machine’s settings live in: where they are, what is wrong with them, edits waiting for your confirmation, and editing one as YAML. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#files`,
+    keywords: [
+      'yaml',
+      'config',
+      'configuration',
+      'files',
+      'file',
+      'edit as yaml',
+      'machine.yaml',
+      'warden.yaml',
+      'learning.yaml',
+      'voice.yaml',
+      'logins',
+      'profiles',
+      'runtimes',
+      'components',
+      'confirm',
+      'waiting',
+      'invalid',
+    ],
+  },
 ] as const;
 
 const SETTINGS_BY_ID = new Map(SETTINGS_DEFINITIONS.map(definition => [definition.id, definition]));

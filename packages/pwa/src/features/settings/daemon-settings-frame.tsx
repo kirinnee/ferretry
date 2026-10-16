@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  FileCode2,
   Fingerprint,
   Gauge,
   KeyRound,
@@ -87,6 +88,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   // The measured PATH the traffic is on, which is exactly what a route is.
   carrier: <Route size={16} aria-hidden="true" />,
   'host-checks': <Radar size={16} aria-hidden="true" />,
+  // Source code in a file, because the panel is the YAML files this machine's settings live in.
+  files: <FileCode2 size={16} aria-hidden="true" />,
 };
 
 /**
