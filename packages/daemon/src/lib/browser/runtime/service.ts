@@ -12,6 +12,7 @@ import {
   type BrowserViewport,
   type SurfaceOpener,
 } from '@ferretry/protocol';
+import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation } from '../transport/automation-contracts.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 
@@ -51,7 +52,9 @@ export type BrowserActGuard = () => Promise<void>;
 
 /** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
 export interface BrowserSessionDirectory {
-  get(sessionId: string): Promise<{ readonly config?: { readonly name?: string | null } } | undefined>;
+  get(
+    sessionId: string,
+  ): Promise<{ readonly config?: { readonly name?: string | null; readonly teammate?: string } } | undefined>;
 }
 
 /** What can be done to ONE named page: the agent tools' browser verbs. */
@@ -143,7 +146,7 @@ export class BrowserSessionService implements BrowserSubsystem {
   private run: Running | undefined;
   private starting: Promise<Running> | undefined;
   private readonly serial = new Map<string, Promise<void>>();
-  /** Session id → display name, as last read from the session directory. */
+  /** Session id → the agent's spoken name (its first name, else its task title), as last read. */
   private readonly sessionNames = new Map<string, string>();
 
   constructor(
@@ -584,7 +587,14 @@ export class BrowserSessionService implements BrowserSubsystem {
     const session = await this.sessions.get(sessionId);
     if (session === undefined) throw new BrowserSessionError('not_found', 'the session does not exist');
     const name = session.config?.name;
-    if (typeof name === 'string' && name !== '') this.sessionNames.set(sessionId, name);
+    if (typeof name === 'string' && name !== '')
+      this.sessionNames.set(
+        sessionId,
+        agentSpokenName({
+          name,
+          ...(session.config?.teammate === undefined ? {} : { teammate: session.config.teammate }),
+        }),
+      );
   }
 
   /** Work on one page runs in order; work on different pages runs side by side. `''` is the browser. */

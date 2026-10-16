@@ -115,7 +115,16 @@ const known = new Set(['s1', 's2']);
 function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy) {
   let launches = 0;
   const service = new BrowserSessionService(
-    { get: async id => (known.has(id) ? (id === 's1' ? { config: { name: 'Hadi' } } : {}) : undefined) },
+    {
+      get: async id =>
+        known.has(id)
+          ? id === 's1'
+            ? { config: { name: 'Fix the login page', teammate: 'hadi' } }
+            : id === 's2'
+              ? { config: { name: 'Docs' } }
+              : {}
+          : undefined,
+    },
     {
       launch: async () => {
         launches += 1;
@@ -156,8 +165,8 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     should(mine).match({ state: 'running', activePageId: app.id, url: 'https://app.test/', canGoBack: true });
     // Every page names the session it belongs to, and that session's display name when it has one.
     should(mine.pages[0]).match({ ownerSessionId: 's1', ownerName: 'Hadi' });
-    should(theirs.pages[0]).match({ ownerSessionId: 's2' });
-    should(theirs.pages[0]).not.have.property('ownerName');
+    // …its task title when it has no first name.
+    should(theirs.pages[0]).match({ ownerSessionId: 's2', ownerName: 'Docs' });
     // Chrome's own first tab belongs to nobody, so it is in nobody's listing.
     should(mine.pages.some(page => page.id === 'p0')).be.false();
   });

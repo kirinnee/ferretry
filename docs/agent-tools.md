@@ -65,9 +65,9 @@ daemon replays its journal on start, so a takeover or a hand-over outlives a res
 - **One window per page, grouped per agent in the UI.** The window is Chrome's rendering unit, not
   what a person sees: a reader groups pages by their owning session, so every page one agent opened
   shows together as that agent's browser ("Hadi's browser"). Every page summary carries what that
-  grouping needs — `ownerSessionId` and, when the session has one, `ownerName` (its display name),
+  grouping needs — `ownerSessionId` and `ownerName` — what a person calls the agent: its first name, else its task title,
   popups included (a popup is its opener's) — and every driving event carries `agentSessionId` and
-  `agentName`.
+  `agentName`, the same name.
 - **There is no active tab.** Every act, every input and every screencast names its page (each page's
   own CDP session). A person's input and live view go to the page their session is viewing; an
   agent's act moves nothing. Acts are serialized per page, not per browser, and input never queues

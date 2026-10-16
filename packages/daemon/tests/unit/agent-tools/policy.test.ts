@@ -45,6 +45,7 @@ describe('agent-tools policy', () => {
 describe('CredentialAgentIdentities', () => {
   const sessions: CredentialedSession[] = [
     { id: 's1', name: 'Hadi', active: true, sessionCapabilityHash: 'hash:alpha' },
+    { id: 's4', name: 'Fix the login page', teammate: 'marin', active: true, sessionCapabilityHash: 'hash:delta' },
     { id: 's2', name: null, active: true, sessionCapabilityHash: 'hash:beta' },
     { id: 's3', name: 'Marin', active: false, sessionCapabilityHash: 'hash:gamma' },
   ];
@@ -57,6 +58,8 @@ describe('CredentialAgentIdentities', () => {
   it('should resolve a credential to the live session it was minted for, and to nothing else', async () => {
     should(await resolver.resolve('alpha')).deepEqual({ sessionId: 's1', name: 'Hadi' });
     should(await resolver.resolve('beta')).deepEqual({ sessionId: 's2' });
+    // An agent with a first name is called by it, not by its task title.
+    should(await resolver.resolve('delta')).deepEqual({ sessionId: 's4', name: 'Marin' });
   });
 
   it('should refuse a stopped session’s credential and one that names no session', async () => {

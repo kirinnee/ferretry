@@ -1,5 +1,6 @@
 import { AGENT_TOOL_MAX_OUTPUT_CHARS, type SurfaceKind, type TerminalKey } from '@ferretry/protocol';
 import type { AgentControlKind } from '../fleet/agent-control.ts';
+import { agentSpokenName } from '../names/session-names.ts';
 import type { AgentIdentity, AgentIdentityResolver } from './types.ts';
 
 /**
@@ -87,6 +88,8 @@ export function controlRefusal(kind: AgentControlKind): string {
 export interface CredentialedSession {
   readonly id: string;
   readonly name: string | null;
+  /** The agent's first name, when it has one — what a person calls it. */
+  readonly teammate?: string | null;
   readonly active: boolean;
   readonly sessionCapabilityHash: string;
 }
@@ -112,6 +115,11 @@ export class CredentialAgentIdentities implements AgentIdentityResolver {
       candidate => candidate.active && this.matches(candidate.sessionCapabilityHash, digest),
     );
     if (session === undefined) return undefined;
-    return { sessionId: session.id, ...(session.name === null ? {} : { name: session.name }) };
+    if (session.name === null) return { sessionId: session.id };
+    const teammate = session.teammate ?? undefined;
+    return {
+      sessionId: session.id,
+      name: agentSpokenName({ name: session.name, ...(teammate === undefined ? {} : { teammate }) }),
+    };
   }
 }
