@@ -155,12 +155,11 @@ export function planProviderProbe(
   const reference = env[test.keyVariable];
   const whole = reference === undefined ? null : WHOLE_REFERENCE.exec(reference);
   if (whole === null) {
-    return refusal(
-      'not_testable',
+    const reason =
       reference === undefined
         ? `This login has no ${test.keyVariable}, so there is no key to Test.`
-        : `${test.keyVariable} is not a single \${secret:NAME}, so the Test cannot tell which key it is.`,
-    );
+        : `${test.keyVariable} is not a single \${secret:NAME}, so the Test cannot tell which key it is.`;
+    return refusal('not_testable', reason);
   }
   const url = resolveUrl(test.url, env);
   if (isRefusal(url)) return url;
