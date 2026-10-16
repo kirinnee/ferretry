@@ -3,7 +3,6 @@ import {
   describeSnapshotError,
   formatSnapshotAge,
   formatSnapshotClock,
-  isPinnedToBottom,
   readPaneSnapshot,
   snapshotUrl,
 } from '../../src/components/terminal-snapshot-model.ts';
@@ -87,11 +86,5 @@ describe('snapshot freshness strings', () => {
     const at = new Date(2026, 6, 31, 9, 5, 3).getTime();
     expect(formatSnapshotClock(at)).toBe('09:05:03');
     expect(formatSnapshotClock(Number.NaN)).toBe('');
-  });
-
-  it('treats sub-pixel rounding at the end of the log as still pinned', () => {
-    expect(isPinnedToBottom(1_000, 900, 100)).toBe(true);
-    expect(isPinnedToBottom(1_000, 897, 100)).toBe(true);
-    expect(isPinnedToBottom(1_000, 800, 100)).toBe(false);
   });
 });

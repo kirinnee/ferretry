@@ -16,7 +16,6 @@ export type SettingId =
   | 'density'
   | 'theme'
   | 'chat-width'
-  | 'show-details'
   | 'motion'
   | 'composer-markdown'
   | 'composer-enter-key'
@@ -89,7 +88,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'composer-markdown',
     label: 'Editor style',
     description:
-      'Markdown, Notion-style (the default) shapes the line as you type — headings, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text shows headings at their real size and hides the markers; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
+      'Markdown, Notion-style (the default) formats as you type — headings at their real size, bold, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text hides the markers and adds a toolbar; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
     keywords: [
       'composer',
       'markdown',
@@ -218,13 +217,6 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
-    id: 'show-details',
-    label: 'Show details',
-    description:
-      'Whether the conversation opens its folded bookkeeping — reasoning, token usage, turn and daemon lines — or keeps it behind “Show details”. Hidden by default.',
-    keywords: ['details', 'system', 'reasoning', 'tokens', 'usage', 'notices', 'conversation', 'transcript', 'verbose'],
-  },
-  {
     id: 'motion',
     label: 'Motion',
     description: 'Follow this device’s reduced-motion setting, or always keep spinners and transitions still here.',
@@ -243,7 +235,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'appearance',
     label: 'Appearance',
     description: 'Text, colour, density, and conversation layout on this browser.',
-    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'show-details'],
+    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width'],
   },
   {
     id: 'behaviour',

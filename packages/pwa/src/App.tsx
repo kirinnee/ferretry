@@ -133,6 +133,7 @@ import {
   setupPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
+import { createSurfaceEventHub } from './lib/surface-control.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
@@ -865,6 +866,14 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   }>({ owner: null, status: 'connecting' });
   const streamControl = useRef<SessionEventStreamControl | null>(null);
   /**
+   * The live feed's share for the session page: every event this route receives is handed on, so the
+   * AGENT marker and Take over / Hand back move the moment the daemon journals a change — on the same
+   * one subscription, never a second socket. A new hub per session: one session's events are never
+   * another's.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the session id is the hub's identity
+  const surfaceEvents = useMemo(() => createSurfaceEventHub(), [daemonId, sessionId]);
+  /**
    * The carrier this daemon's traffic is MEASURED on, subscribed rather than read once.
    *
    * `useActiveCarrier` re-renders when the router publishes a new answer, which is what makes the
@@ -986,6 +995,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       onEvent: event => {
         liveCursorRef.current = Math.max(liveCursorRef.current, event.sequence);
         setLiveCursor(current => Math.max(current, event.sequence));
+        surfaceEvents.publish(event);
         void refreshControl.current?.refresh(true);
       },
       // Stamped with the owner, so a report can never be read by a later one. The model publishes
@@ -999,7 +1009,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       stream.stop();
       if (streamControl.current === stream) streamControl.current = null;
     };
-  }, [streamOwner]);
+  }, [streamOwner, surfaceEvents]);
 
   /**
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
@@ -1090,7 +1100,6 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
-          showDetails={controls.showDetails}
           composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
@@ -1128,6 +1137,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           pins={store.pins}
           refreshError={sessionIssue}
           session={session}
+          surfaceEvents={surfaceEvents}
           usage={store.usage}
         />
       ) : (

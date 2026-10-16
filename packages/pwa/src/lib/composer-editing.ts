@@ -68,17 +68,3 @@ export const toggleWrap = (value: string, start: number, end: number, marker: st
     caret: end + marker.length * (start === end ? 1 : 2),
   };
 };
-
-/** The marker a ⌘/Ctrl shortcut wraps with, or `null` for any other key. */
-export const wrapMarkerFor = (key: string): string | null => {
-  switch (key.toLowerCase()) {
-    case 'b':
-      return '**';
-    case 'i':
-      return '*';
-    case 'e':
-      return '`';
-    default:
-      return null;
-  }
-};

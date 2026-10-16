@@ -9,7 +9,7 @@
  * that must put a reader back in insert mode.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { type ComposerProps, Composer as ProductionComposer } from '../../src/components/composer.tsx';
 import { DictationControl } from '../../src/components/dictation-control.tsx';
@@ -19,6 +19,12 @@ import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 const renderers: ReactTestRenderer[] = [];
 afterEach(() => {
@@ -119,14 +125,14 @@ describe('composer Vim adapter', () => {
     type(view, 'alpha');
     press(view, 'Escape');
     expect(modeOf(view)).toBe('normal');
-    // Ctrl/Meta/Alt keys and the navigation keys belong to the platform.
+    // Ctrl/Meta/Alt keys and the navigation keys belong to the platform; Backspace is a motion.
     expect(press(view, 'a', { ctrlKey: true })).toBe(false);
     expect(press(view, 'ArrowLeft')).toBe(false);
-    expect(press(view, 'Backspace')).toBe(false);
+    expect(press(view, 'Backspace')).toBe(true);
     expect(draftOf(view)).toBe('alpha');
   });
 
-  test('keeps the send policy in normal mode, because the engine never claims Enter', () => {
+  test('never sends on Enter in normal mode — Enter is a motion there — but ⌘/Ctrl+Enter still sends', () => {
     let sent = 0;
     const view = mounted(
       <Composer
@@ -149,6 +155,8 @@ describe('composer Vim adapter', () => {
     press(view, 'Escape');
     expect(modeOf(view)).toBe('normal');
     expect(press(view, 'Enter')).toBe(true);
+    expect(sent).toBe(0);
+    expect(press(view, 'Enter', { ctrlKey: true })).toBe(true);
     expect(sent).toBe(1);
   });
 
@@ -213,14 +221,14 @@ describe('composer Vim adapter', () => {
     expect(announcer.some(node => node.children.includes('Insert mode'))).toBe(true);
 
     const toggle = modeButton(view);
-    expect(String(toggle.props.className)).toContain('min-h-[44px]');
-    expect(String(toggle.props.className)).toContain('min-w-[44px]');
+    // The 44px touch floor is the stylesheet's, under a coarse pointer (session-screens.css).
+    expect(String(toggle.props.className)).toContain('fy-composer-vim');
     expect(toggle.props['aria-label']).toBe('Vim Insert mode. Switch to Normal mode');
-    expect(toggle.children).toEqual(['Insert']);
+    expect(toggle.children).toEqual(['-- INSERT --']);
 
     run(() => toggle.props.onClick());
     expect(modeOf(view)).toBe('normal');
-    expect(view.root.findByProps({ 'data-composer-vim-mode': 'normal' }).children).toEqual(['Normal']);
+    expect(view.root.findByProps({ 'data-composer-vim-mode': 'normal' }).children).toEqual(['-- NORMAL --']);
   });
 
   test('puts the caret back into the element, after the value that carries it', () => {
@@ -284,7 +292,7 @@ describe('composer Vim adapter', () => {
       await runAsync(async () => {
         textarea(view).props.onKeyDown({
           key: 'Enter',
-          ctrlKey: false,
+          ctrlKey: true,
           metaKey: false,
           altKey: false,
           shiftKey: false,

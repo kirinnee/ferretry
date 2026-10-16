@@ -43,6 +43,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { useInputModality } from '../hooks/use-input-modality.ts';
 import type {
   ComposerAutocompleteCandidate,
   ComposerAutocompleteController,
@@ -211,15 +212,21 @@ function TierLadder({
   );
 }
 
-/** The footer's one line of keys, and on the ladder what one more `@` reaches. */
+/**
+ * The footer's one line: the keys, and on the ladder what one more `@` reaches. A touch screen has
+ * no arrow keys, Tab or Escape to name, so there it is only the ladder — or nothing at all.
+ */
 export const autocompleteFooterHint = (
   legend: readonly ComposerReferenceTierLegendItem[] | undefined,
   activeTier: number | undefined,
   active: ComposerAutocompleteCandidate | undefined,
-): string => {
-  const keys = active === undefined ? '↑↓ choose · esc' : `↵ inserts ${active.replacement} · ⇥ complete · esc`;
+  touch = false,
+): string | null => {
   const next = legend?.find(item => item.tier === (activeTier ?? 0) + 1);
-  return next === undefined ? keys : `${keys} · type @ again for ${next.label.toLowerCase()}`;
+  const ladder = next === undefined ? null : `type @ again for ${next.label.toLowerCase()}`;
+  if (touch) return ladder;
+  const keys = active === undefined ? '↑↓ choose · esc' : `↵ inserts ${active.replacement} · ⇥ complete · esc`;
+  return ladder === null ? keys : `${keys} · ${ladder}`;
 };
 
 /**
@@ -232,6 +239,8 @@ export const autocompleteFooterHint = (
  */
 export function ComposerAutocompletePopover({ surface }: { readonly surface: ComposerAutocompleteSurface }) {
   const { activeIndex, candidates, contextLabel, error, listboxId, match, notice, open, provider, status } = surface;
+  // A touch screen gets no key names it cannot press.
+  const { touchAffected } = useInputModality();
   const activeOptionId = open && activeIndex >= 0 ? optionId(listboxId, activeIndex) : undefined;
   // Arrow keys must not walk the selection out of the scroller. The row is
   // looked up by id rather than held in a ref because the active row moves.
@@ -251,6 +260,12 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
       />
     ));
   const ready = status === 'ready' && candidates.length > 0;
+  const footer = autocompleteFooterHint(
+    provider?.legend,
+    match?.referenceTier,
+    ready ? candidates[activeIndex] : undefined,
+    touchAffected,
+  );
   return (
     <>
       <span aria-atomic="true" aria-live="polite" className="sr-only">
@@ -317,13 +332,7 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
               {notice}
             </div>
           )}
-          <div className="fy-ac-foot">
-            {autocompleteFooterHint(
-              provider?.legend,
-              match?.referenceTier,
-              ready ? candidates[activeIndex] : undefined,
-            )}
-          </div>
+          {footer === null ? null : <div className="fy-ac-foot">{footer}</div>}
         </div>
       ) : null}
     </>

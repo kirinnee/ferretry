@@ -9,13 +9,14 @@
  * WHAT THIS FILE OWNS is the mapping from a tab to the surface that already exists for it; it builds
  * no surface of its own. Chat is the page's own transcript and composer, handed in untouched. Console
  * is the agent's managed pane. A terminal tab is ONE shell from the existing co-controlled deck; a
- * browser tab is the existing remote browser; a file tab is the existing file view, and `file:.` is
- * the existing Files picker. The layout itself is the page's (`useSessionWorkspace`), so a reference
+ * browser tab is the existing remote browser under the session's page strip (`BrowserSurfaceList`),
+ * and a browser tab whose key names a page — `%browser:app` — brings that page into the person's view
+ * when it is opened; a file tab is the existing file view, and `file:.` is the existing Files picker. The layout itself is the page's (`useSessionWorkspace`), so a reference
  * chip and a tab click change the same remembered layout.
  */
 
-import type { SessionView } from '@ferretry/protocol';
-import { type ReactNode, useCallback, useId, useRef, useState, useSyncExternalStore } from 'react';
+import type { BrowserPageSummary, SessionView } from '@ferretry/protocol';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import type { FilesMarkdownContext } from '../../components/files-views.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
@@ -37,8 +38,13 @@ import {
   type WorkspaceTab,
   workspacePanes,
 } from '../../lib/workspace-layout.ts';
+import { sidePaneInstanceTabId } from '../../shell/side-pane-tab-model.ts';
 import type { WorkspaceRailPreferenceStore } from '../../lib/workspace-rail-preferences.ts';
+import { BrowserSurfaceList, browserPageLabel } from '../browser/browser-surface-list.tsx';
+import { remoteBrowserPage } from '../browser/remote-browser-chrome.tsx';
+import { rememberBrowserEngine } from '../browser/unified-browser-model.ts';
 import { UnifiedBrowserSurface, type UnifiedBrowserDependencies } from '../browser/unified-browser-surface.tsx';
+import { browserPageForKey, type SessionBrowser } from '../browser/use-session-browser.ts';
 import { ContextRail } from '../context-rail/context-rail.tsx';
 import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
 import type { ContextRailTab } from '../context-rail/context-rail-model.ts';
@@ -109,7 +115,28 @@ export interface SessionWorkspaceProps {
   /** Typing into the Console; absent, it types through the daemon's own route. */
   readonly typeIntoConsole?: ConsoleTyper;
   readonly browser?: UnifiedBrowserDependencies;
+  /** The session's browser pages, for the page strip over every browser tab. */
+  readonly browserPages?: SessionBrowser;
   readonly onOpenLoginWindow?: () => Promise<BrowserLoginSnapshot>;
+}
+
+/**
+ * Brings a page into the person's view when its tab is shown — once per showing, not on every poll:
+ * two panes each showing a page would otherwise take the session's one view back and forth for ever.
+ */
+function BrowserPageFocus({
+  active,
+  pageId,
+  activate,
+}: {
+  readonly active: boolean;
+  readonly pageId: string | undefined;
+  readonly activate: (pageId: string) => void;
+}) {
+  useEffect(() => {
+    if (active && pageId !== undefined) activate(pageId);
+  }, [active, pageId, activate]);
+  return null;
 }
 
 /** Is this tab the one on screen in a shown pane? A parked or deselected tab is not. */
@@ -142,6 +169,7 @@ export function SessionWorkspace({
   readSnapshot,
   typeIntoConsole,
   browser,
+  browserPages,
   onOpenLoginWindow,
 }: SessionWorkspaceProps) {
   const titleId = useId();
@@ -184,14 +212,72 @@ export function SessionWorkspace({
       else ports.current.set(tabId, port);
     };
 
-  const marker = (tab: WorkspaceTab): ReactNode => (
+  const marker = (tab: WorkspaceTab, inline = false): ReactNode => (
     <AgentControlMarker
       driver={driving.driverFor(tab.id)}
+      inline={inline}
       takenOver={driving.takenOver(tab.id)}
       onTakeOver={() => driving.takeOver(tab.id)}
       onHandBack={() => driving.handBack(tab.id)}
     />
   );
+  /** A page's control facts, read the way its own tab reads them. */
+  const pageTabId = (pageId: string): string => sidePaneInstanceTabId('browser', pageId);
+
+  /** Opens a page's own tab: keyed by its name when it has one, as a `%browser:` reference is. */
+  const openPage = (page: BrowserPageSummary): void =>
+    workspace.openSurface('browser', page.name ?? page.id, browserPageLabel(page));
+  const newPage = (pages: SessionBrowser): void => {
+    setNotice(null);
+    void pages.act({ action: 'new-page' }).then(status => {
+      const opened =
+        status === null ? undefined : browserPageForKey(status, remoteBrowserPage(status)?.activePageId ?? '');
+      if (opened === undefined) setNotice('Could not open a new page in this session’s browser.');
+      else openPage(opened);
+    });
+  };
+
+  const renderBrowser = (tab: WorkspaceTab, active: boolean): ReactNode => {
+    const status = browserPages?.status ?? null;
+    const page = browserPageForKey(status, tab.key);
+    // A page's tab shows that page in the session's real browser, never the preview reader.
+    if (page !== undefined) rememberBrowserEngine(scope, 'remote');
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col" data-workspace-browser={tab.key}>
+        {browserPages === undefined ? (
+          marker(tab)
+        ) : (
+          <>
+            <BrowserSurfaceList
+              driverFor={candidate => driving.driverFor(pageTabId(candidate.id))}
+              onClosePage={candidate => void browserPages.act({ action: 'close-page', pageId: candidate.id })}
+              onNewPage={() => newPage(browserPages)}
+              onOpenPage={openPage}
+              sessionName={agentName}
+              status={status}
+              takenOver={candidate => driving.takenOver(pageTabId(candidate.id))}
+              trailing={marker(tab, true)}
+              {...(page === undefined ? {} : { selectedPageId: page.id })}
+            />
+            <BrowserPageFocus active={active} activate={browserPages.activatePage} pageId={page?.id} />
+          </>
+        )}
+        <UnifiedBrowserSurface
+          daemon={connection}
+          isActive={active}
+          key={page === undefined ? 'browser' : 'page'}
+          onClose={() => undefined}
+          presentation={formFactor === 'phone' ? 'sheet' : 'pane'}
+          scope={scope}
+          showPageTabs={browserPages === undefined}
+          streamTicket={null}
+          titleId={`${titleId}-${tab.key}`}
+          {...(browser === undefined ? {} : { dependencies: browser })}
+          {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}
+        />
+      </div>
+    );
+  };
 
   const renderBody = (
     tab: WorkspaceTab,
@@ -222,7 +308,11 @@ export function SessionWorkspace({
         );
       return (
         <div className="relative flex min-h-0 flex-1 flex-col" data-workspace-terminal={tab.key}>
-          {marker(tab)}
+          {/* A strip of its own over the shell, never floating on it: a pill there would cover the
+              deck's own header and the line it is writing. */}
+          {driving.driverFor(tab.id) !== null || driving.takenOver(tab.id) ? (
+            <div className="fy-ws-marker-row">{marker(tab, true)}</div>
+          ) : null}
           <SessionTerminalDeck
             connection={connection}
             dependencies={deck}
@@ -236,23 +326,7 @@ export function SessionWorkspace({
         </div>
       );
     }
-    if (tab.kind === 'browser')
-      return (
-        <div className="relative flex min-h-0 flex-1 flex-col" data-workspace-browser={tab.key}>
-          {marker(tab)}
-          <UnifiedBrowserSurface
-            daemon={connection}
-            isActive={options.active}
-            onClose={() => undefined}
-            presentation={formFactor === 'phone' ? 'sheet' : 'pane'}
-            scope={scope}
-            streamTicket={null}
-            titleId={`${titleId}-${tab.key}`}
-            {...(browser === undefined ? {} : { dependencies: browser })}
-            {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}
-          />
-        </div>
-      );
+    if (tab.kind === 'browser') return renderBrowser(tab, options.active);
     if (tab.key === WORKSPACE_FILES_PICKER_KEY)
       return (
         <FilesTab
@@ -273,10 +347,12 @@ export function SessionWorkspace({
     );
   };
 
+  // A refused Take over / Hand back is said where every other workspace failure is.
+  const shownNotice = notice ?? driving.failure;
   const noticeLine =
-    notice === null ? null : (
+    shownNotice === null ? null : (
       <p className="m-0 px-3 py-1 text-ui text-err" role="alert">
-        {notice}
+        {shownNotice}
       </p>
     );
 
