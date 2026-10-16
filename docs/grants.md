@@ -566,3 +566,31 @@ command says so at the moment somebody might be tempted to do that instead.
   with a stored secret without the operator ever being asked. They now demand `secrets` (see the capability
   seven section); a device paired before B5 reads as the default, `fleet.use` only, so it lost that access
   on upgrade and must be widened deliberately.
+
+## Adding an MCP server for one ferret
+
+Actions › Add MCP server… writes in one of two places, and each is governed by the capability that
+already owns that place. A route declares exactly one capability, so each scope has its own route
+(`packages/daemon/src/lib/runtime/mounts/session-mcp.ts`):
+
+| Route                                       | Capability             | What it does                                                           |
+| ------------------------------------------- | ---------------------- | ---------------------------------------------------------------------- |
+| `GET /v1/sessions/:id/mcp`                  | `filesystem.use`       | lists the project `.mcp.json`'s servers, or why there is none          |
+| `POST /v1/sessions/:id/mcp/project/preview` | `filesystem.use`       | the diff a project add would make, and the file's etag; writes nothing |
+| `POST /v1/sessions/:id/mcp/project`         | `filesystem.configure` | writes the previewed change into the repository's `.mcp.json`          |
+| `POST /v1/sessions/:id/mcp/login/preview`   | `fleet.use`            | the runtime, profile and ferret count a login add would reach          |
+| `POST /v1/sessions/:id/mcp/login`           | `fleet.configure`      | adds an MCP component and appends it to the runtime's profile          |
+
+- **`filesystem.configure` now also gates a project `.mcp.json` write.** It is a write into the
+  person's repository, so it lands only at the root of a folder the daemon already knows — a
+  registered project or a managed worktree, the longest one holding the ferret's folder. A ferret
+  anywhere else has no project scope. The write is a compare-and-swap against the etag the preview
+  showed, never follows a symbolic link, and keeps the file's mode. A governed caller confirms it with
+  the same passkey step-up every `configure` act needs.
+- **`fleet.configure` gates the login add**, which is two reviewed changes (`component.put`, then
+  `profile.put`) applied through the same catalogue service and governance as Settings › Machines, so
+  it is not a second way to change the fleet.
+- Both adds are recorded in the security log as `fleet.configured` (`action: mcp-add`, with `scope`),
+  naming the session and the server, never its command, address or environment. The previews are not.
+- No secret value crosses either route: a project file may reference `${NAME}`, a login may reference
+  `${secret:NAME}`, and a value that looks like a raw key is refused by both ends.

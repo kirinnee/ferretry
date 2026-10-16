@@ -353,6 +353,23 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  sessionMcp: {
+    list: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    previewProject: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    addProject: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    previewLogin: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    addLogin: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionRuntime: {
     models: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -575,6 +592,7 @@ describe('the mounted daemon surface', () => {
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // an agent's rename: a new first name or task title
+      5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
@@ -724,6 +742,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/rename',
+      'POST /v1/sessions/:sessionId/mcp/project/preview',
+      'POST /v1/sessions/:sessionId/mcp/login/preview',
+      'POST /v1/sessions/:sessionId/mcp/project',
+      'POST /v1/sessions/:sessionId/mcp/login',
+      'GET /v1/sessions/:sessionId/mcp',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
       'GET /v1/sessions/:sessionId/sends',
