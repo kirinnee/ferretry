@@ -146,6 +146,22 @@ pre,
   }
 }
 
+/* Settings › Appearance › Motion › Reduced: the same flat version, whatever the OS says, and every
+   animation and transition stilled — spinners included. `<html data-motion="reduced">` is set by
+   `MotionFollower` in App.tsx. */
+:root[data-motion='reduced'],
+:root[data-motion='reduced'][data-theme] {
+  --overlay-opacity: 0;
+  --glow-alpha: 0;
+}
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation: none !important;
+  scroll-behavior: auto !important;
+  transition: none !important;
+}
+
 /* ---- thin, unobtrusive scrollbars in scroll regions ---------------------- */
 .scroll-thin {
   scrollbar-width: thin;

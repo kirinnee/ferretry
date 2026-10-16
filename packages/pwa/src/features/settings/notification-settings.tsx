@@ -1,24 +1,22 @@
 /**
- * Notification preferences, presented over explicit runtime controls.
+ * Web Push enrolment for ONE daemon: the master switch, delivery status, and this daemon's own
+ * registered-device list.
  *
  * A public PWA cannot assume that the page has notification permission, a
  * service worker, or a selected daemon. The composition host supplies those
  * facts and performs permission/subscription work only after a reader presses
  * the master control. This screen deliberately owns no daemon-global state.
+ *
+ * WHICH EVENT KINDS SHOW, AND QUIET HOURS, ARE NOT HERE. Both are decisions about this browser, made
+ * once rather than once per daemon, and the daemon no longer stores or enforces a per-device
+ * preference at all — see `notification-filter-settings.tsx`, rendered alongside this card.
  */
-import type { PushDeviceView, PushNotificationKind, PushPreferences } from '@ferretry/protocol';
+import type { PushDeviceView } from '@ferretry/protocol';
 
 import { cn } from '../../lib/class-names.ts';
 
 export type NotificationPermission = 'unsupported' | 'default' | 'denied' | 'granted';
 export type PushDeliveryState = 'idle' | 'checking' | 'active' | 'unavailable';
-
-export const NOTIFICATION_KIND_COPY: Record<PushNotificationKind, { label: string; description: string }> = {
-  attention: { label: 'Attention', description: 'A session is waiting at the prompt.' },
-  question: { label: 'Questions', description: 'A session asked a structured question.' },
-  failed: { label: 'Failures', description: 'A session failed, stalled, or could not be stopped.' },
-  completed: { label: 'Completions', description: 'A session finished its task.' },
-};
 
 export const NOTIFICATION_UNSUPPORTED_NOTE =
   'This browser does not expose notifications to this app. On iPhone or iPad, install the app first (Share → Add to Home Screen) and open it from the Home Screen.';
@@ -29,9 +27,7 @@ export const NOTIFICATION_SCOPE_NOTE =
 export const NOTIFICATION_IOS_NOTE =
   'On iPhone or iPad, Web Push requires iOS/iPadOS 16.4+ and this PWA installed to the Home Screen. Every browser also requires a secure HTTPS context.';
 
-const kinds: readonly PushNotificationKind[] = ['attention', 'question', 'failed', 'completed'];
-
-function Toggle({
+export function Toggle({
   checked,
   onChange,
   label,
@@ -84,13 +80,11 @@ export interface NotificationSettingsViewProps {
   readonly permission: NotificationPermission;
   /** Reader preference after the selected daemon has accepted a device registration. */
   readonly enabled: boolean;
-  readonly preferences: PushPreferences;
   readonly delivery: PushDeliveryState;
   readonly deliveryMessage?: string | null;
   readonly devices?: readonly PushDeviceView[];
   readonly currentDeviceId?: string | null;
   readonly onEnabled: (enabled: boolean) => void;
-  readonly onPreferences: (preferences: PushPreferences) => void;
   readonly onRevokeDevice: (deviceId: string) => void;
 }
 
@@ -101,13 +95,11 @@ export interface NotificationSettingsViewProps {
 export function NotificationSettingsView({
   permission,
   enabled,
-  preferences,
   delivery,
   deliveryMessage = null,
   devices = [],
   currentDeviceId = null,
   onEnabled,
-  onPreferences,
   onRevokeDevice,
 }: NotificationSettingsViewProps) {
   if (permission === 'unsupported') {
@@ -140,28 +132,6 @@ export function NotificationSettingsView({
         <p role="status" className="m-0 text-ui leading-base text-warn">
           {NOTIFICATION_DENIED_NOTE}
         </p>
-      )}
-      {active && (
-        <>
-          <fieldset className="flex flex-col gap-2">
-            <legend className="sr-only">Notify about</legend>
-            {kinds.map(kind => (
-              <Toggle
-                key={kind}
-                checked={preferences.events[kind]}
-                onChange={next => onPreferences({ ...preferences, events: { ...preferences.events, [kind]: next } })}
-                label={NOTIFICATION_KIND_COPY[kind].label}
-                description={NOTIFICATION_KIND_COPY[kind].description}
-              />
-            ))}
-          </fieldset>
-          <Toggle
-            checked={preferences.interactiveOnly}
-            onChange={next => onPreferences({ ...preferences, interactiveOnly: next })}
-            label="Interactive sessions only"
-            description="Skip auto sessions. Off means every session can notify, including auto sessions that reach a permission prompt."
-          />
-        </>
       )}
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_SCOPE_NOTE}</p>
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_IOS_NOTE}</p>

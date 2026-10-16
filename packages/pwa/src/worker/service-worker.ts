@@ -16,7 +16,9 @@
  *     way out, with the headers `_headers` names;
  *     leave everything else — every daemon request included — exactly as the page sent it;
  *   - message: answer the page's "check now", "what happened" and "is this new worker signed?";
- *   - push / notificationclick: show a daemon's Web Push notification and open what it names.
+ *   - push / notificationclick: show a daemon's Web Push notification and open what it names, after
+ *     applying this device's own notification filter (`lib/notification-filter.ts`) — see the `push`
+ *     listener's own comment for what is shown when the filter says hide it.
  *
  * ONE FILE, TWO KINDS OF REGISTRATION. The app registers this worker at `/`, and once per machine at
  * `/push/<daemonId>/` for that machine's own push subscription (`lib/push-scope.ts`). Every copy runs
@@ -33,17 +35,20 @@
  * trusted, because any page on this origin can write IndexedDB and Cache Storage.
  */
 
-import { PushNotificationPayloadSchema, isLoopbackHost } from '@ferretry/protocol';
+import { isLoopbackHost, PushNotificationPayloadSchema } from '@ferretry/protocol';
+import { shouldShowNotification } from '../lib/notification-filter.ts';
+import { readMirroredNotificationFilter } from '../lib/notification-filter-mirror.ts';
 import { showGroupedNotification } from '../lib/notify.ts';
 import {
+  filteredPushNotification,
   machineNotification,
   notificationUrl,
   pushMachineOf,
   unreadablePushTitle,
   unverifiedNotification,
 } from '../lib/push-scope.ts';
-import { ReleaseKeeper, answerReleaseRequest, parseReleaseRequest } from '../lib/release-keeper.ts';
 import type { ReleaseHeaderRule } from '../lib/release-headers.ts';
+import { answerReleaseRequest, parseReleaseRequest, ReleaseKeeper } from '../lib/release-keeper.ts';
 import type { ReleaseRewrite } from '../lib/release-manifest.ts';
 import { CacheStorageReleaseCaches, FetchReleaseNetwork, IndexedDbReleaseState } from '../lib/release-storage.ts';
 
@@ -170,17 +175,42 @@ worker.addEventListener('push', event => {
     payload = null;
   }
   const parsed = PushNotificationPayloadSchema.safeParse(payload);
-  // A push the daemon did not compose is still shown, plainly: a subscription that receives a push
-  // and shows nothing is penalised by the browser and eventually revoked.
-  const shown = parsed.success
-    ? showGroupedNotification(
+  event.waitUntil(
+    (async () => {
+      if (!parsed.success) {
+        // A push the daemon did not compose is still shown, plainly: a subscription that receives a
+        // push and shows nothing is penalised by the browser and eventually revoked. There is no
+        // `kind` to filter on — this branch never reaches the decision below at all.
+        await worker.registration.showNotification(unreadablePushTitle(machine), {
+          body: 'Something needs your attention.',
+        });
+        return;
+      }
+      // Every daemon sends every event now (no server-side filter left to consult — see
+      // `packages/daemon/src/lib/push/service.ts`); this device's own filter is the only thing left
+      // that decides. The mirror (`notification-filter-mirror.ts`) is what makes that possible here:
+      // a service worker cannot read `localStorage`, which is where the live, authoritative answer
+      // actually lives.
+      const kind = 'kind' in parsed.data && parsed.data.kind !== undefined ? parsed.data.kind : null;
+      const filter = await readMirroredNotificationFilter(globalThis.indexedDB);
+      const visible = shouldShowNotification({ kind, daemonId: machine?.daemonId ?? null }, filter, new Date());
+      if (!visible) {
+        // THE LEAST-BAD COMPLIANT ANSWER (see `filteredPushNotification`'s own doc): a push that
+        // shows nothing risks the browser revoking the subscription, so something is shown — quiet,
+        // never the suppressed content, and collapsed with every other filtered push for this
+        // machine under one fixed tag rather than piling up.
+        const quiet = filteredPushNotification(machine, origin);
+        await worker.registration.showNotification(quiet.title, quiet.options);
+        return;
+      }
+      await showGroupedNotification(
         worker.registration,
         machine === null
           ? unverifiedNotification(parsed.data, origin)
           : machineNotification(parsed.data, machine, origin),
-      )
-    : worker.registration.showNotification(unreadablePushTitle(machine), { body: 'Something needs your attention.' });
-  event.waitUntil(Promise.resolve(shown).catch(() => undefined));
+      );
+    })().catch(() => undefined),
+  );
 });
 
 worker.addEventListener('notificationclick', event => {

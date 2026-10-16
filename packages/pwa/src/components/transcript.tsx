@@ -25,6 +25,10 @@ export interface TranscriptProps {
   readonly activity?: PaneActivity | null;
   /** The daemon's activity sentence, shown when the pane said nothing readable. */
   readonly activityFallback?: string | null;
+  /** Folded runs start open (Settings › Show details). Each can still be toggled on its own. */
+  readonly detailsShown?: boolean;
+  /** The agent's own name, which every assistant row is labelled with instead of a harness or account. */
+  readonly agentName?: string;
 }
 
 /**
@@ -62,6 +66,16 @@ function TranscriptDetails({
     </div>
   );
 }
+
+/**
+ * An assistant row labelled with the agent's name — "Hadi · 10:11:13" rather than "Assistant", the
+ * harness, or the runtime's account. The clock the daemon printed is kept.
+ */
+export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry => {
+  if (entry.kind !== 'assistant' || agentName === '') return entry;
+  const clock = /\u00b7\s*(\d{2}:\d{2}:\d{2})$/u.exec(entry.label ?? '')?.[1];
+  return { ...entry, label: clock === undefined ? agentName : `${agentName} · ${clock}` };
+};
 
 type ScrollPort = { scrollHeight: number; scrollTop: number; clientHeight: number };
 
@@ -103,6 +117,8 @@ export function Transcript({
   onResend,
   activity = null,
   activityFallback = null,
+  detailsShown = false,
+  agentName,
 }: TranscriptProps) {
   const viewport = useRef<ScrollPort | null>(null);
   const viewportElement = useRef<HTMLDivElement | null>(null);
@@ -114,6 +130,7 @@ export function Transcript({
     null,
   );
   const previousLength = useRef(entries.length);
+  // The runs the reader flipped away from the default, so a setting change re-applies to every other run.
   const [openDetails, setOpenDetails] = useState<ReadonlySet<string>>(() => new Set());
   const toggleDetails = useCallback((id: string) => {
     setOpenDetails(current => {
@@ -240,12 +257,12 @@ export function Transcript({
                 entries={item.entries}
                 key={item.id}
                 onToggle={() => toggleDetails(item.id)}
-                open={openDetails.has(item.id)}
+                open={detailsShown !== openDetails.has(item.id)}
               />
             ) : (
               <TranscriptRow
                 asOf={asOf}
-                entry={item.entry}
+                entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
                 isLast={index === items.length - 1}
                 key={item.entry.id}
                 live={busy}

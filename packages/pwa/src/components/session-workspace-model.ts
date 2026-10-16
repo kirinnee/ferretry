@@ -56,6 +56,7 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
     text: text || title(record.kind),
     label: recordLabel(record),
     ...(isDetailRecord(record) ? { detail: true } : {}),
+    ...(record.kind === 'error' ? { alert: true } : {}),
   };
 };
 

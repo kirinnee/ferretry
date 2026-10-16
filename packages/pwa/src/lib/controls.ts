@@ -13,11 +13,9 @@
  *   - `density` and `dashboardView` absent means `null`, not a written default,
  *     so the first-load pointer policy stays free to choose compact on a phone
  *     and full on a desktop.
- *   - `chatWidth` absent means `'full'`, which IS the behaviour that predates the
- *     field — which is why adding it needed no version bump. The four composer
- *     preferences follow that precedent exactly: absent means every suggestion
- *     family is offered and Vim keys are off, which is what this app did before
- *     they existed, so they add no version either.
+ *   - `chatWidth` absent means `'readable'` (Comfortable), the session redesign's
+ *     default; a stored choice is kept. Every later field follows the same rule:
+ *     absent reads as the shipped default, so none of them needs a version bump.
  *   - An empty `projectScope` is NO scope, not a folder named nothing.
  *   - A patch that changes nothing writes nothing and notifies nobody.
  *
@@ -67,6 +65,9 @@ export const SUGGESTION_KEYS: readonly SuggestionKeys[] = ['ladder', 'symbols', 
 
 export const DEFAULT_SUGGESTION_KEYS: SuggestionKeys = 'ladder';
 
+/** Settings › Appearance › Motion. `system` follows prefers-reduced-motion; `reduced` always reduces. */
+export type MotionPreference = 'system' | 'reduced';
+
 /** The sole browser-storage key for persisted UI controls. */
 export const CONTROLS_KEY = 'fy-controls-v1';
 export const CONTROLS_VERSION = 1;
@@ -98,8 +99,14 @@ export interface DeviceControls {
   readonly density: Density | null;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
-  /** null follows this device’s input capability rather than another device’s choice. */
+  /** Bare Enter on a keyboard (desktop). null = the default, Enter sends. */
   readonly composerEnterKey: ComposerEnterKeyPreference | null;
+  /** Return on a phone or other touch-first device. null = the default, return starts a new line. */
+  readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
+  /** Whether the transcript opens its folded bookkeeping (reasoning, usage, notices) by default. */
+  readonly showDetails: boolean;
+  /** Reduced motion: follow the operating system, or always reduce it on this device. */
+  readonly motion: MotionPreference;
   readonly sidebarCollapsed: boolean;
   /**
    * Which keys open the composer's reference menu: the `@` ladder, the direct
@@ -138,8 +145,11 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   includeFinished: false,
   dashboardView: null,
   density: null,
-  chatWidth: 'full',
+  chatWidth: 'readable',
   composerEnterKey: null,
+  composerPhoneEnterKey: null,
+  showDetails: false,
+  motion: 'system',
   sidebarCollapsed: false,
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
@@ -238,6 +248,12 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       : DEFAULT_DEVICE_CONTROLS.suggestionKeys,
     skillSuggestions: readFlag(fields.skillSuggestions, DEFAULT_DEVICE_CONTROLS.skillSuggestions),
     composerVimMode: readFlag(fields.composerVimMode, DEFAULT_DEVICE_CONTROLS.composerVimMode),
+    composerPhoneEnterKey:
+      fields.composerPhoneEnterKey === 'send' || fields.composerPhoneEnterKey === 'newline'
+        ? fields.composerPhoneEnterKey
+        : null,
+    showDetails: readFlag(fields.showDetails, DEFAULT_DEVICE_CONTROLS.showDetails),
+    motion: fields.motion === 'reduced' ? 'reduced' : 'system',
   };
 };
 

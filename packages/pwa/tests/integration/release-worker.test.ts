@@ -23,7 +23,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -608,6 +608,76 @@ describe('per-machine push workers', () => {
     // Home reused Work's tag and pointed at Work's settings: it replaced nothing and opens only Home.
     expect(await shown('/push/home/')).toEqual([
       { title: 'Home · Needs you', tag: 'fy-push:home:pairing', url: `${origin()}/d/home` },
+    ]);
+    await context.close();
+  }, 120_000);
+
+  /**
+   * THE FILTER, APPLIED IN THE REAL WORKER (lead's follow-up to #503: the gap was the main path).
+   *
+   * Every daemon now sends every event unconditionally; this device's own filter
+   * (`lib/notification-filter.ts`) is what decides what is actually shown, and the worker cannot
+   * read `localStorage` — only the mirror this test writes directly into IndexedDB, exactly the way
+   * `DeviceNotificationFilterStore` would from the page. One category ("failed") is muted; a push of
+   * that kind must show the quiet placeholder (`filteredPushNotification`), never its real content,
+   * while a push of a kind that is still on reaches the reader exactly as before.
+   */
+  test('shows the quiet placeholder for a muted kind, and the real push for one that is not', async () => {
+    const { context, page } = await installed(first);
+    const { push, shown } = await machines(context, page);
+
+    await page.evaluate(async () => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('ferretry-notification-filter', 1);
+        request.onupgradeneeded = () => {
+          if (!request.result.objectStoreNames.contains('mirror')) request.result.createObjectStore('mirror');
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const value = JSON.stringify({
+        version: 1,
+        categories: { 'needs-you': true, finished: true, failed: false, 'new-device': true },
+        quietHours: { enabled: false, startMinute: 0, endMinute: 0 },
+        machines: {},
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('mirror', 'readwrite');
+        transaction.objectStore('mirror').put(value, 'preferences');
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    });
+
+    // Muted: "failed" is off. Sent to Work.
+    await push('/push/work/', {
+      sessionId: 's1',
+      kind: 'failed',
+      title: 'Session failed',
+      body: 'the real reason, which must not appear',
+      tag: 'session-s1',
+      url: '/',
+    });
+    // Still on: "completed" is untouched. Sent to Home, so each machine's own registration answers
+    // for exactly one push and `shown()` cannot confuse one machine's result with the other's.
+    await push('/push/home/', {
+      sessionId: 's2',
+      kind: 'completed',
+      title: 'Session finished',
+      body: 'all good',
+      tag: 'session-s2',
+      url: '/',
+    });
+
+    const muted = await shown('/push/work/');
+    expect(muted).toHaveLength(1);
+    expect(muted[0]?.title).toBe('Work laptop · Notifications muted');
+    expect(muted[0]?.tag).toBe('fy-quiet:work');
+    expect(JSON.stringify(muted)).not.toContain('Session failed');
+    expect(JSON.stringify(muted)).not.toContain('the real reason');
+
+    expect(await shown('/push/home/')).toEqual([
+      { title: 'Home · Session finished', tag: 'fy-push:home:session-s2', url: `${origin()}/d/home` },
     ]);
     await context.close();
   }, 120_000);

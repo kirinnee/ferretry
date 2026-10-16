@@ -16,6 +16,8 @@ export type SettingId =
   | 'density'
   | 'theme'
   | 'chat-width'
+  | 'show-details'
+  | 'motion'
   | 'composer-markdown'
   | 'composer-enter-key'
   | 'composer-suggestions'
@@ -58,13 +60,15 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'chat-width',
     label: 'Conversation width',
     description:
-      'Full-bleed is the default. On a wide conversation, choose the available pane, a balanced 900px cap, or a readable 768px column; at 768px and below all three look the same.',
+      'Comfortable (about 75 characters a line) is the default. On a wide screen choose Wide (900px) or Full (the whole pane); at 768px and below all three look the same.',
     keywords: [
       'chat',
       'conversation',
       'width',
       'measure',
       'readable',
+      'comfortable',
+      'wide',
       'balanced',
       'middle',
       'medium',
@@ -80,9 +84,9 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
   {
     id: 'composer-markdown',
-    label: 'Composer editing',
+    label: 'Editor style',
     description:
-      'Colour Markdown markers in the native message textarea and show a separate live rendered preview with proven, clickable references — off by default pending a mobile Safari pass. Optional Vim-style modal keys live here too; the native textarea stays the input owner either way.',
+      'Markdown, Notion-style (the default) shapes the line as you type — headings, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible, or choose a plain text box. Either way you send exactly the markdown you typed. Optional Vim-style modal keys live here too.',
     keywords: [
       'composer',
       'markdown',
@@ -105,10 +109,21 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
   {
     id: 'composer-enter-key',
-    label: 'Enter key',
+    label: 'Send key',
     description:
-      'Choose whether Enter sends or starts a new line in the transcript composer. The other action stays reachable with Shift+Enter on a keyboard or the visible composer controls on touch.',
-    keywords: ['enter', 'return', 'send', 'newline', 'new line', 'shift enter', 'composer', 'keyboard'],
+      'Choose, separately for a keyboard and for a phone, whether Enter sends or starts a new line. On a keyboard ↵ sends and ⇧↵ starts a line by default; on a phone return starts a line and the ↑ button sends. ⌘/Ctrl+↵ always sends.',
+    keywords: [
+      'enter',
+      'return',
+      'send',
+      'send key',
+      'newline',
+      'new line',
+      'shift enter',
+      'composer',
+      'keyboard',
+      'phone',
+    ],
   },
   {
     id: 'composer-suggestions',
@@ -184,7 +199,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'notifications',
     label: 'Notifications',
     description:
-      'System notification when a session needs attention — waiting at the prompt, asking a question, failed, or finished. Off by default; turning it on asks the browser for permission.',
+      'System notification when a session needs you, finishes, or fails — or a new device is paired. Every paired machine sends every event; these switches, quiet hours, and the per-machine list decide what this browser shows. Off by default; turning it on asks the browser for permission.',
     keywords: [
       'notify',
       'notification',
@@ -195,7 +210,22 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'needs attention',
       'question',
       'background',
+      'quiet hours',
+      'new device',
     ],
+  },
+  {
+    id: 'show-details',
+    label: 'Show details',
+    description:
+      'Whether the conversation opens its folded bookkeeping — reasoning, token usage, turn and daemon lines — or keeps it behind “Show details”. Hidden by default.',
+    keywords: ['details', 'system', 'reasoning', 'tokens', 'usage', 'notices', 'conversation', 'transcript', 'verbose'],
+  },
+  {
+    id: 'motion',
+    label: 'Motion',
+    description: 'Follow this device’s reduced-motion setting, or always keep spinners and transitions still here.',
+    keywords: ['motion', 'animation', 'reduced', 'reduce', 'spinner', 'accessibility', 'vestibular'],
   },
 ] as const;
 
@@ -210,7 +240,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'appearance',
     label: 'Appearance',
     description: 'Text, colour, density, and conversation layout on this browser.',
-    settingIds: ['text-size', 'theme', 'density', 'chat-width'],
+    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'show-details'],
   },
   {
     id: 'behaviour',

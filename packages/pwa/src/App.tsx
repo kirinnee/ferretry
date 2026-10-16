@@ -65,6 +65,7 @@ import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
+import { NotificationFilterSettingsView } from './features/settings/notification-filter-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
@@ -86,6 +87,7 @@ import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
   useNotificationControls,
+  useNotificationFilterPreferences,
   useNotificationWatch,
 } from './hooks/use-notifications.ts';
 import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
@@ -103,6 +105,7 @@ import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
+import type { NotificationCategory, QuietHours } from './lib/notification-filter.ts';
 import type {
   NotificationPermissionState,
   NotificationRegistrationLike,
@@ -152,17 +155,17 @@ import {
   type UpdateReason,
 } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
+import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
+import { paletteSessionEntries } from './shell/palette-model.ts';
+import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
+import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
 import {
   SessionsBar,
   type SessionsBarPlace,
   type SessionsBarPresentation,
   type SessionsBarUpdate,
 } from './shell/sessions-bar.tsx';
-import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
-import { paletteSessionEntries } from './shell/palette-model.ts';
-import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
-import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
 
 /**
  * Wraps a one-shot document-lifetime side effect, latching only on SUCCESS.
@@ -781,6 +784,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const { navigate } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
+  // The "This folder" rail reads through the app's own clients: the ONE attention client, a fleet
+  // client per machine, and the machine's display name for the MCP sign-in sheet.
+  const sessionContext = useMemo(
+    () => ({
+      attention: store.attention,
+      createFleetClient: async (daemon: DaemonConnection) => await store.clients.client(daemon),
+      machineName: daemonDisplayName(connection),
+    }),
+    [store.attention, store.clients, connection],
+  );
   const { daemonId, sessionId } = scope;
   // The session's Attention, read through the ONE daemon-scoped client the app
   // store owns — same carrier as every generated call, and invalidated with the
@@ -1057,9 +1070,13 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           attention={attention}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
+          composerPhoneEnterKey={controls.composerPhoneEnterKey}
+          showDetails={controls.showDetails}
           composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
+          context={sessionContext}
+          workspaceLayouts={store.workspaceLayouts}
           // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,
           // rename, close, and the ticket purchase — defaulted to the raw network, so on a
           // relay-only network a reader opening a shell got a bare `Failed to fetch` from an
@@ -1137,6 +1154,36 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   const dictation = useSttSettings(store.stt);
   const carrier = useActiveCarrier(store.carrier, connection.daemonId);
   const notifications = useNotificationControls(useNotificationControlsHost(), connection);
+  const notificationFilter = useNotificationFilterPreferences(store.notificationFilter);
+  // Every OTHER paired machine: the current one already has its own "Notify me" switch above, which
+  // is the real Web Push subscription control — this list is the lighter-weight display filter
+  // (`notification-filter.ts`), so showing the active connection twice would invite the two to be
+  // read as the same control when they are not.
+  const notificationFilterMachines = connectionSnapshot.connections
+    .filter(candidate => candidate.daemonId !== connection.daemonId)
+    .map(candidate => ({
+      daemonId: candidate.daemonId,
+      label: distinctDaemonName(candidate, connectionSnapshot.connections),
+      enabled: notificationFilter.machines[candidate.daemonId] !== false,
+    }));
+  const onNotificationCategoryChange = useCallback(
+    (category: NotificationCategory, next: boolean) => {
+      store.notificationFilter.set({ categories: { [category]: next } });
+    },
+    [store.notificationFilter],
+  );
+  const onNotificationQuietHoursChange = useCallback(
+    (patch: Partial<QuietHours>) => {
+      store.notificationFilter.set({ quietHours: patch });
+    },
+    [store.notificationFilter],
+  );
+  const onNotificationMachineToggle = useCallback(
+    (daemonId: string, next: boolean) => {
+      store.notificationFilter.set({ machines: { [daemonId]: next } });
+    },
+    [store.notificationFilter],
+  );
   const probeDaemon = useCallback(
     async (daemon: DaemonConnection) => {
       const client = await store.clients.client(daemon);
@@ -1216,18 +1263,25 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // would hide "there is no relay to fall back on" from the one reader it is written for.
       relayAdvertised={daemonCarriers(connection).some(method => method.kind === 'relay')}
       notifications={
-        <NotificationSettingsView
-          permission={notifications.permission}
-          enabled={notifications.enabled}
-          preferences={notifications.preferences}
-          delivery={notifications.delivery}
-          deliveryMessage={notifications.deliveryMessage}
-          devices={notifications.devices}
-          currentDeviceId={notifications.currentDeviceId}
-          onEnabled={notifications.setEnabled}
-          onPreferences={notifications.setPreferences}
-          onRevokeDevice={notifications.revokeDevice}
-        />
+        <div className="flex flex-col gap-4">
+          <NotificationSettingsView
+            permission={notifications.permission}
+            enabled={notifications.enabled}
+            delivery={notifications.delivery}
+            deliveryMessage={notifications.deliveryMessage}
+            devices={notifications.devices}
+            currentDeviceId={notifications.currentDeviceId}
+            onEnabled={notifications.setEnabled}
+            onRevokeDevice={notifications.revokeDevice}
+          />
+          <NotificationFilterSettingsView
+            preferences={notificationFilter}
+            machines={notificationFilterMachines}
+            onCategoryChange={onNotificationCategoryChange}
+            onQuietHoursChange={onNotificationQuietHoursChange}
+            onToggleMachine={onNotificationMachineToggle}
+          />
+        </div>
       }
       onNavigate={navigate}
     />
@@ -1652,12 +1706,13 @@ export function AppShell() {
         snapshot: () => store.fleet.getSnapshot(),
       },
       preferences: store.notificationPreferences,
+      filter: store.notificationFilter,
       surface: notificationSurface,
       hidden: () => document.hidden,
       foregroundSession: getForegroundPinScope,
       now: Date.now,
     }),
-    [notificationSurface, store.fleet, store.notificationPreferences],
+    [notificationSurface, store.fleet, store.notificationPreferences, store.notificationFilter],
   );
   useNotificationWatch(notificationWatchHost, permission);
 
@@ -1905,6 +1960,7 @@ export function AppShell() {
   return (
     <NotificationControlsContext.Provider value={notificationControlsHost}>
       <ThemeFollower />
+      <MotionFollower />
       {release.notice === null ? null : (
         <ReleaseNoticeDock>
           <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
@@ -1974,6 +2030,21 @@ function ReleaseNoticeDock({ children }: { readonly children: ReactNode }) {
  */
 function ThemeFollower() {
   useTheme();
+  return null;
+}
+
+/**
+ * Keeps `<html data-motion>` following Settings › Appearance › Motion on every page: `reduced` stills
+ * every animation in this browser (`styles/index.css`), `system` leaves it to prefers-reduced-motion.
+ */
+function MotionFollower() {
+  const store = useAppStore();
+  const motion = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot().device.motion);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (motion === 'reduced') root.dataset.motion = 'reduced';
+    else delete root.dataset.motion;
+  }, [motion]);
   return null;
 }
 

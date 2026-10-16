@@ -61,6 +61,7 @@ import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
@@ -1965,24 +1966,20 @@ describe('AppShell', () => {
     }
     const streamsOpened = (): { t: string; path?: string }[] =>
       (daemonNetwork?.requests('alpha.example.test') ?? []) as { t: string; path?: string }[];
-    const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
+    const { carrierRequests, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {
       await settle();
-      // The deck is not mounted yet, so nothing has asked the daemon about terminals at all.
-      expect(carrierRequests.some(url => url.includes('/terminals'))).toBe(false);
+      // No terminal tab is open yet, so no shell is attached — the page reads the LISTING only, to
+      // prove `%terminal:` chips in the transcript.
+      expect(streamsOpened().some(record => record.t === 'stream')).toBe(false);
 
-      // The terminals open from the session bar's ⋯ menu, which is where the pane openers live now.
-      await interact(() =>
-        must(view.container.querySelector<HTMLButtonElement>('button[data-session-more]'), 'the session menu').click(),
-      );
-      await interact(() =>
-        must(
-          [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-            item => item.textContent === 'Terminal',
-          ),
-          'the Terminal menu row',
-        ).click(),
-      );
+      // A terminal tab in this agent's workspace — as a chip click or a remembered layout opens it —
+      // attaches that one shell.
+      await interact(() => {
+        store.workspaceLayouts.update(daemonSessionScope(alpha, 'shared'), layout =>
+          openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL_ID, { label: 'dev' })),
+        );
+      });
       // ACROSS REAL TASK BOUNDARIES, not just microtasks. The chain is module load → listing →
       // stream session, with a task between the links; `settle` flushes two microtasks, which is
       // right for everything else in this file and is not enough for this. The socket is what the
@@ -2032,12 +2029,19 @@ describe('AppShell', () => {
     const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     await settle();
     const surface = must(view.container.querySelector('[data-chat-width]'), 'the chat-width surface');
-    expect(surface.getAttribute('data-chat-width')).toBe('full');
+    // Comfortable is the shipped default.
+    expect(surface.getAttribute('data-chat-width')).toBe('readable');
 
-    await interact(() => store.controls.setDeviceControls({ chatWidth: 'readable' }));
+    await interact(() => store.controls.setDeviceControls({ chatWidth: 'full' }));
 
     expect(view.container.querySelector('[data-chat-width]')).toBe(surface);
-    expect(surface.getAttribute('data-chat-width')).toBe('readable');
+    expect(surface.getAttribute('data-chat-width')).toBe('full');
+
+    // Settings › Appearance › Motion › Reduced marks the document; System clears it again.
+    await interact(() => store.controls.setDeviceControls({ motion: 'reduced' }));
+    expect(document.documentElement.dataset.motion).toBe('reduced');
+    await interact(() => store.controls.setDeviceControls({ motion: 'system' }));
+    expect(document.documentElement.dataset.motion).toBeUndefined();
     await view.unmount();
   });
 
@@ -3628,6 +3632,90 @@ describe('the fleet notification watch', () => {
     // notification here would mean the watch is reading some other visibility,
     // or none at all.
     expect(FakeNotification.shown).toEqual([]);
+
+    await view.unmount();
+  });
+});
+
+describe('the notifications settings card', () => {
+  /**
+   * Every machine sends every event now (the daemon no longer stores a preference); this device's
+   * own four category switches, quiet hours, and the per-machine list are the only filter left, and
+   * they live in `NotificationFilterSettingsView`, stacked under the per-daemon Web Push card.
+   */
+  const open = async () => {
+    const { store, view } = await renderShell(`/d/${ALPHA}/settings#behaviour`, [alpha.daemonId, beta.daemonId]);
+    await settle();
+    const card = must(
+      view.container.querySelector<HTMLElement>('[data-setting-id="notifications"]'),
+      'the notifications settings card',
+    );
+    return { store, view, card };
+  };
+
+  const switches = (card: HTMLElement): HTMLElement[] => [...card.querySelectorAll<HTMLElement>('[role="switch"]')];
+
+  it('flips exactly the category switch pressed, leaving the others on', async () => {
+    const { store, view, card } = await open();
+
+    const failedSwitch = must(
+      switches(card).find(toggle => toggle.textContent?.includes('Failed')),
+      'the Failed category switch',
+    );
+    expect(failedSwitch.getAttribute('aria-checked')).toBe('true');
+
+    await interact(() => failedSwitch.click());
+
+    expect(store.notificationFilter.get().categories).toEqual({
+      'needs-you': true,
+      finished: true,
+      failed: false,
+      'new-device': true,
+    });
+
+    await view.unmount();
+  });
+
+  it('reveals the two time inputs only once quiet hours is on, and reports a parsed minute', async () => {
+    const { store, view, card } = await open();
+
+    expect(card.querySelectorAll('input[type="time"]')).toHaveLength(0);
+    const quietSwitch = must(
+      switches(card).find(toggle => toggle.textContent?.includes('Quiet hours')),
+      'the quiet-hours switch',
+    );
+
+    await interact(() => quietSwitch.click());
+
+    expect(store.notificationFilter.get().quietHours.enabled).toBe(true);
+    const start = must(card.querySelector<HTMLInputElement>('input[type="time"]'), 'the quiet-hours start time input');
+    const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'input setter');
+
+    await interact(() => {
+      setter.call(start, '22:30');
+      start.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(store.notificationFilter.get().quietHours.startMinute).toBe(22 * 60 + 30);
+
+    await view.unmount();
+  });
+
+  it('mutes exactly the other paired machine pressed, through the local filter only', async () => {
+    const { store, view, card } = await open();
+
+    expect(store.notificationFilter.get().machines[beta.daemonId]).toBeUndefined();
+    const machineSwitch = must(
+      switches(card).find(toggle => toggle.textContent?.includes('beta.example.test')),
+      'the per-machine switch for beta',
+    );
+    expect(machineSwitch.getAttribute('aria-checked')).toBe('true');
+
+    await interact(() => machineSwitch.click());
+
+    expect(store.notificationFilter.get().machines).toEqual({ [beta.daemonId]: false });
+    // The active connection's own Web Push master switch — a different control entirely — is untouched.
+    expect(store.notificationPreferences.get(alpha.daemonId).enabled).toBe(false);
 
     await view.unmount();
   });

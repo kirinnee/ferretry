@@ -27,6 +27,7 @@ import type { AttentionId, SessionView, TerminalListView } from '@ferretry/proto
 import { createContext, type ReactNode, useContext } from 'react';
 
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
+import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
@@ -99,6 +100,21 @@ export interface SessionReferenceSurfaceOptions {
    * link whose click is swallowed.
    */
   readonly onNavigate?: (to: string) => void;
+  /**
+   * Where the session page shows what a reference opens — the split workspace's tabs and the context
+   * rail. Each one absent falls back to this scope's side pane, which is what a host with no
+   * workspace (a test, a harness card) still has. The CLICK is the same either way: Markdown calls
+   * this surface, and only the destination differs.
+   */
+  readonly destinations?: ReferenceDestinations;
+}
+
+/** The session page's own places for what a proved reference opens. */
+interface ReferenceDestinations {
+  readonly openFile?: (path: string, selection?: SidePaneFileSelection) => void;
+  readonly openSurface?: (reference: ResolvedSurfaceReference) => void;
+  readonly openTasks?: () => void;
+  readonly openSkills?: () => void;
 }
 
 const fileSelection = (line?: number, endLine?: number): SidePaneFileSelection | undefined => {
@@ -127,6 +143,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     skills,
     terminals,
     onNavigate,
+    destinations = {},
   } = options;
   const attention = attentionIds === undefined ? undefined : new Set<string>(attentionIds);
   // EXACT names, never case-folded. The catalog accepts any nonempty trimmed
@@ -152,17 +169,23 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     resolveFilePaths: async (candidates, signal) =>
       await resolveFsFilePaths(connection, scope, candidates, cwd, fetcher, signal),
     onCodeReferenceOpen: reference => {
-      openSidePaneFileTab(scope, reference.path, fileSelection(reference.line, reference.endLine));
+      const selection = fileSelection(reference.line, reference.endLine);
+      if (destinations.openFile !== undefined) destinations.openFile(reference.path, selection);
+      else openSidePaneFileTab(scope, reference.path, selection);
     },
-    onTaskOpen: () => openSidePaneTab(scope, 'tasks'),
+    onTaskOpen: destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')),
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
     // unresolved id now opens the focused action modal; when either the ledger
     // or opener is absent Markdown still leaves `!A3` as prose rather than
     // manufacturing a dead link.
     ...(attention === undefined || onAttentionOpen === undefined ? {} : { onAttentionOpen }),
-    onSkillOpen: () => openSidePaneTab(scope, 'skills'),
+    onSkillOpen: destinations.openSkills ?? (() => openSidePaneTab(scope, 'skills')),
     ...(onNavigate === undefined ? {} : { onNavigate }),
     onSurfaceOpen: reference => {
+      if (destinations.openSurface !== undefined) {
+        destinations.openSurface(reference);
+        return;
+      }
       // Only terminals have a pane to focus. A `%browser:…` surface cannot be
       // proved at all on this daemon (there is no worker and no page listing), so
       // this arm is unreachable for one today — and it refuses rather than

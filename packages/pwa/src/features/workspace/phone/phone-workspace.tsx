@@ -39,6 +39,11 @@ export interface PhoneWorkspaceProps extends PhoneNewTabActions {
   readonly onTerminalInput: (tabId: string, data: string) => void;
   /** Focus a terminal-like tab's input so the phone keyboard opens. */
   readonly onFocusTerminal: (tabId: string) => void;
+  /**
+   * False while the Console cannot take typed keys (no daemon route types into the agent's own pane
+   * yet), so it gets no key bar that would send nowhere. Terminals always get one.
+   */
+  readonly consoleTakesKeys?: boolean;
 }
 
 export function PhoneWorkspace({
@@ -49,6 +54,7 @@ export function PhoneWorkspace({
   renderTab,
   onTerminalInput,
   onFocusTerminal,
+  consoleTakesKeys = true,
   ...actions
 }: PhoneWorkspaceProps) {
   const rowId = useId();
@@ -79,13 +85,15 @@ export function PhoneWorkspace({
             id={phonePanelId(rowId, tab.id)}
             aria-labelledby={phoneChipId(rowId, tab.id)}
             hidden={tab.id !== active.id}
-            className="flex min-h-0 flex-1 flex-col"
+            // A class `display` beats the user-agent `[hidden]` rule, so the hidden panel takes no
+            // display class at all: otherwise every tab stacks under the active one.
+            className={tab.id === active.id ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0 flex-1 flex-col'}
           >
             {renderTab(tab, { active: tab.id === active.id, interceptInput: intercept })}
           </div>
         ))}
       </div>
-      {phoneTabTakesKeys(active.kind) && (
+      {phoneTabTakesKeys(active.kind) && (consoleTakesKeys || active.kind !== 'console') && (
         <TerminalKeyBar
           onSend={data => onTerminalInput(active.id, data)}
           ctrl={ctrl}

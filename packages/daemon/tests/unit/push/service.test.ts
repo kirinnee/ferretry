@@ -9,7 +9,7 @@ import {
   type PushSubscriptionRecord,
   type PushSubscriptionStore,
 } from '../../../src/lib/push/index.ts';
-import { AT, allEvents, deviceId, LATER, record, refused, subscription } from './support.ts';
+import { AT, deviceId, LATER, record, refused, subscription } from './support.ts';
 
 /** An enrolment store held in a field. The projection, the sweep and the lifetime rules are all real. */
 class FakeStore implements PushSubscriptionStore {
@@ -76,7 +76,6 @@ function world(
 const registration = (endpoint: string, deviceName = 'Pixel 8'): RegisterPushDeviceRequest => ({
   deviceName,
   subscription: subscription(endpoint),
-  prefs: allEvents,
 });
 
 describe('PairedPushDevices', () => {
@@ -300,12 +299,14 @@ describe('PushService.notify', () => {
     should(transport.sent.map(sent => sent.subscription.endpoint)).eql([two.subscription.endpoint]);
   });
 
-  it('should count a device that declined in neither total, because it was never asked', async () => {
-    const declining = record({ prefs: { events: { ...allEvents.events, attention: false }, interactiveOnly: false } });
-    const { service, transport } = world({ records: [declining] });
+  it('should tell a device unconditionally, with no preference row left to consult', async () => {
+    // There is no server-stored preference any more: every enrolled device is sent every event, and
+    // deciding whether to show it is entirely the browser's own local choice.
+    const enrolled = record();
+    const { service, transport } = world({ records: [enrolled] });
 
-    should(await service.notify({ payload: attention })).eql({ delivered: 0, failed: 0 });
-    should(transport.sent).be.empty();
+    should(await service.notify({ payload: attention })).eql({ delivered: 1, failed: 0 });
+    should(transport.sent).have.length(1);
   });
 
   it('should forget an endpoint the push service reports as gone', async () => {

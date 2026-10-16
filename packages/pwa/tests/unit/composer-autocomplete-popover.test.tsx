@@ -360,6 +360,7 @@ describe('composer send arbitration', () => {
           }
           daemon={daemon}
           enterKeyPreference={enterKeyPreference}
+          phoneEnterKeyPreference={enterKeyPreference}
           sessionId={sessionId}
         />,
       ),

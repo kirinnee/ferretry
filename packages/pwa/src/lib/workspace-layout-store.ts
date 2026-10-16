@@ -117,6 +117,11 @@ export class WorkspaceLayoutStore {
     return next;
   }
 
+  /** The connection registry's invalidation hook: an unpaired machine's layouts go with it. */
+  clearDaemon(daemonId: DaemonId): void {
+    this.forgetDaemon(daemonId);
+  }
+
   /** Drops every remembered layout of one daemon (unpair, credential reset). */
   forgetDaemon(daemonId: DaemonId): void {
     for (const key of [...this.#layouts.keys()]) {

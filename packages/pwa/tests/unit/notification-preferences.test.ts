@@ -31,22 +31,12 @@ class MemoryStorage implements NotificationPreferenceStorage {
 }
 
 describe('notification preference parsing', () => {
-  it('should default every field independently and migrate needsYou', () => {
+  it('should default every field independently', () => {
     // Act
-    const actual = parseNotificationPreferences({
-      enabled: true,
-      events: { needsYou: false, question: 'yes', failed: false },
-      interactiveOnly: 'no',
-      onlyWhenHidden: false,
-    });
+    const actual = parseNotificationPreferences({ enabled: true, onlyWhenHidden: 'no' });
 
     // Assert
-    should(actual).deepEqual({
-      enabled: true,
-      events: { attention: false, question: true, failed: false, completed: true },
-      interactiveOnly: false,
-      onlyWhenHidden: false,
-    });
+    should(actual).deepEqual({ enabled: true, onlyWhenHidden: true });
     should(parseNotificationPreferences(42)).deepEqual(DEFAULT_NOTIFICATION_PREFERENCES);
   });
 
@@ -56,7 +46,7 @@ describe('notification preference parsing', () => {
       version: 1,
       daemons: {
         '': { enabled: true },
-        [daemonA]: { enabled: true, events: { completed: false } },
+        [daemonA]: { enabled: true, onlyWhenHidden: false },
         [daemonB]: 'broken',
       },
     });
@@ -67,7 +57,7 @@ describe('notification preference parsing', () => {
     // Assert
     should(actual.size).equal(1);
     should(actual.get(daemonA)?.enabled).be.true();
-    should(actual.get(daemonA)?.events.completed).be.false();
+    should(actual.get(daemonA)?.onlyWhenHidden).be.false();
     should(parseNotificationPreferenceStore(null).size).equal(0);
     should(parseNotificationPreferenceStore('garbage').size).equal(0);
     should(parseNotificationPreferenceStore(JSON.stringify({ version: 2, daemons: {} })).size).equal(0);
@@ -86,21 +76,15 @@ describe('DaemonNotificationPreferences', () => {
     const store = new DaemonNotificationPreferences(storage);
 
     // Act
-    const nextA = store.set(daemonA, { events: { completed: false }, interactiveOnly: true });
+    const nextA = store.set(daemonA, { onlyWhenHidden: false });
     const nextB = store.set(daemonB, { enabled: true, onlyWhenHidden: false });
 
     // Assert
-    should(nextA).deepEqual({
-      enabled: true,
-      events: { attention: true, question: true, failed: true, completed: false },
-      interactiveOnly: true,
-      onlyWhenHidden: true,
-    });
-    should(nextB.events.completed).be.true();
-    should(nextB.onlyWhenHidden).be.false();
+    should(nextA).deepEqual({ enabled: true, onlyWhenHidden: false });
+    should(nextB).deepEqual({ enabled: true, onlyWhenHidden: false });
     const persisted = parseNotificationPreferenceStore(storage.values.get(NOTIFICATION_PREFERENCES_KEY) ?? null);
-    should(persisted.get(daemonA)?.events.completed).be.false();
-    should(persisted.get(daemonB)?.events.completed).be.true();
+    should(persisted.get(daemonA)?.onlyWhenHidden).be.false();
+    should(persisted.get(daemonB)?.enabled).be.true();
   });
 
   it('should notify only the changed daemon and allow unsubscribe', () => {
@@ -125,7 +109,7 @@ describe('DaemonNotificationPreferences', () => {
     const storage = new MemoryStorage();
     const store = new DaemonNotificationPreferences(storage);
     store.set(daemonA, { enabled: true });
-    store.set(daemonB, { enabled: true, events: { question: false } });
+    store.set(daemonB, { enabled: true, onlyWhenHidden: false });
     let cleared = 0;
     store.subscribe(daemonA, () => cleared++);
 
@@ -139,7 +123,7 @@ describe('DaemonNotificationPreferences', () => {
     should(cleared).equal(1);
     should(store.get(daemonA)).deepEqual(DEFAULT_NOTIFICATION_PREFERENCES);
     should(store.get(daemonB).enabled).be.true();
-    should(store.get(daemonB).events.question).be.false();
+    should(store.get(daemonB).onlyWhenHidden).be.false();
   });
 
   it('should keep memory state when browser storage is denied', () => {
@@ -170,7 +154,7 @@ describe('DaemonNotificationPreferences', () => {
 
     // Act
     store.set(prototypeId, { enabled: true });
-    store.set(constructorId, { events: { failed: false } });
+    store.set(constructorId, { onlyWhenHidden: false });
     const raw = storage.values.get(NOTIFICATION_PREFERENCES_KEY) ?? null;
     const document = JSON.parse(raw ?? 'null') as { daemons?: Record<string, unknown> } | null;
     const restored = parseNotificationPreferenceStore(raw);
@@ -180,6 +164,6 @@ describe('DaemonNotificationPreferences', () => {
     should(Object.hasOwn(document?.daemons ?? {}, '__proto__')).be.true();
     should(Object.hasOwn(document?.daemons ?? {}, 'constructor')).be.true();
     should(restored.get(prototypeId)?.enabled).be.true();
-    should(restored.get(constructorId)?.events.failed).be.false();
+    should(restored.get(constructorId)?.onlyWhenHidden).be.false();
   });
 });

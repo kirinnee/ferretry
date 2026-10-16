@@ -13,18 +13,15 @@ const DEVICE_ID = 'push-3fa85f64-5717-4562-b3fc-2c963f66afa6';
 
 const endpointOfLength = (length: number): string => `${ENDPOINT_PREFIX}${'a'.repeat(length - ENDPOINT_PREFIX.length)}`;
 
-const events = { attention: true, question: false, failed: true, completed: false };
-const prefs = { events, interactiveOnly: false };
 const keys = { p256dh: P256DH, auth: AUTH };
 const subscription = { endpoint: ENDPOINT, expirationTime: null, keys };
-const registration = { deviceName: 'Pixel 8', subscription, prefs };
+const registration = { deviceName: 'Pixel 8', subscription };
 const deviceView = {
   id: DEVICE_ID,
   deviceName: 'Pixel 8',
   createdAt: INSTANT,
   updatedAt: LATER_INSTANT,
   expirationTime: null,
-  prefs,
 };
 const payloadBase = {
   version: 1,
@@ -36,10 +33,10 @@ const payloadBase = {
   count: 1,
 };
 const sessionPayload = { ...payloadBase, sessionId: 'session-1', kind: 'attention' };
+const devicePairedPayload = { ...payloadBase, kind: 'device-paired' };
 
 const pushCases: SchemaCase[] = [
   { name: 'notification kind', schema: push.PushNotificationKindSchema, value: 'attention' },
-  { name: 'preferences', schema: push.PushPreferencesSchema, value: prefs },
   { name: 'browser subscription', schema: push.BrowserPushSubscriptionSchema, value: subscription },
   { name: 'register request', schema: push.RegisterPushDeviceRequestSchema, value: registration },
   { name: 'device view', schema: push.PushDeviceViewSchema, value: deviceView },
@@ -62,35 +59,25 @@ describe('push schemas', () => {
 
   it('should resolve every notification kind, error code, and payload variant', () => {
     // Arrange
-    const kinds = ['attention', 'question', 'failed', 'completed'] as const;
+    const sessionKinds = ['attention', 'question', 'failed', 'completed'] as const;
     const codes = ['invalid', 'corrupt_store', 'not_found'] as const;
-    const payloads = [sessionPayload, payloadBase];
+    const payloads = [sessionPayload, payloadBase, devicePairedPayload];
 
     // Act + Assert
-    for (const kind of kinds) should(push.PushNotificationKindSchema.parse(kind)).equal(kind);
+    for (const kind of sessionKinds) should(push.PushNotificationKindSchema.parse(kind)).equal(kind);
+    should(push.PushNotificationKindSchema.parse('device-paired')).equal('device-paired');
     for (const code of codes) should(push.PushErrorCodeSchema.parse(code)).equal(code);
-    for (const kind of kinds) {
+    for (const kind of sessionKinds) {
       should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, kind }).success).be.true();
     }
     for (const value of payloads) should(push.PushNotificationPayloadSchema.parse(value)).deepEqual(value);
   });
 
-  it('should require an exhaustive event preference map and normalise device names', () => {
-    // Arrange
-    const allOn = { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: true };
-    const allOff = {
-      events: { attention: false, question: false, failed: false, completed: false },
-      interactiveOnly: false,
-    };
-
-    // Act
-    const parsedOn = push.PushPreferencesSchema.parse(allOn);
-    const parsedOff = push.PushPreferencesSchema.parse(allOff);
+  it('should normalise device names', () => {
+    // Arrange + Act
     const padded = push.PushDeviceViewSchema.parse({ ...deviceView, deviceName: `  ${'a'.repeat(80)}  ` });
 
     // Assert
-    should(parsedOn).deepEqual(allOn);
-    should(parsedOff).deepEqual(allOff);
     should(padded.deviceName).equal('a'.repeat(80));
   });
 
@@ -306,7 +293,7 @@ describe('push schemas', () => {
     assertRejects(cases);
   });
 
-  it('should reject malformed device registrations, identifiers, and preferences', () => {
+  it('should reject malformed device registrations and identifiers', () => {
     // Arrange
     const cases: SchemaCase[] = [
       {
@@ -339,22 +326,6 @@ describe('push schemas', () => {
         schema: push.RegisterPushDeviceRequestSchema,
         value: { ...registration, id: DEVICE_ID },
       },
-      {
-        name: 'partial event map',
-        schema: push.PushPreferencesSchema,
-        value: { events: { attention: true }, interactiveOnly: false },
-      },
-      {
-        name: 'unknown event in the map',
-        schema: push.PushPreferencesSchema,
-        value: { events: { ...events, digest: true }, interactiveOnly: false },
-      },
-      {
-        name: 'non-boolean event value',
-        schema: push.PushPreferencesSchema,
-        value: { events: { ...events, attention: 'yes' }, interactiveOnly: false },
-      },
-      { name: 'missing interactiveOnly flag', schema: push.PushPreferencesSchema, value: { events } },
       {
         name: 'device id without the push prefix',
         schema: push.PushDeviceViewSchema,
@@ -412,6 +383,11 @@ describe('push schemas', () => {
         value: { ...sessionPayload, kind: 'digest' },
       },
       {
+        name: 'device-paired kind naming a session',
+        schema: push.PushNotificationPayloadSchema,
+        value: { ...sessionPayload, kind: 'device-paired' },
+      },
+      {
         name: 'future payload version',
         schema: push.PushNotificationPayloadSchema,
         value: { ...payloadBase, version: 2 },
@@ -440,5 +416,32 @@ describe('push schemas', () => {
 
     // Act + Assert
     assertRejects(cases);
+  });
+
+  it('should tolerate a legacy prefs bundle at both wire boundaries, version skew', () => {
+    // Arrange: an un-upgraded PWA still sending the preference bundle this endpoint used to require.
+    const legacyPrefs = {
+      events: { attention: true, question: true, failed: true, completed: true },
+      interactiveOnly: false,
+    };
+    const legacyRegistration = { ...registration, prefs: legacyPrefs };
+    // An un-upgraded daemon's response still carrying the field the new PWA stopped reading.
+    const legacyDeviceView = { ...deviceView, prefs: legacyPrefs };
+
+    // Act
+    const parsedRegistration = push.RegisterPushDeviceRequestSchema.parse(legacyRegistration);
+    const parsedDeviceView = push.PushDeviceViewSchema.parse(legacyDeviceView);
+
+    // Assert — accepted, and the legacy field carries no meaning: nothing downstream ever reads
+    // `.prefs` off either parsed value (`PushService.register`, `pushDeviceView`), so a value this
+    // permissive (`z.unknown()`) is exactly as safe as dropping it outright.
+    should(parsedRegistration.deviceName).equal(registration.deviceName);
+    should(parsedRegistration.prefs).deepEqual(legacyPrefs);
+    should(parsedDeviceView).deepEqual(deviceView);
+    should(Object.hasOwn(parsedDeviceView, 'prefs')).be.false();
+
+    // An unrelated unknown field — one with no version-skew story — is still refused outright: the
+    // tolerance above is for exactly one named legacy field, not a general relaxation.
+    should(push.RegisterPushDeviceRequestSchema.safeParse({ ...registration, deviceId: DEVICE_ID }).success).be.false();
   });
 });

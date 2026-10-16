@@ -75,27 +75,27 @@ export function LedgerMessage({
     <div className="kt-bubble-row" data-ledger-placement={placement}>
       <span className="sr-only">{from ? `${displayCallsign(from.name)} sent:` : 'You said:'}</span>
       <div className="kt-bubble">
+        {/* ONE small chip for the send's state. When it was accepted and where it sits relative to the
+            loaded history are details, so they live in the chip's hover/long-press title and in the
+            screen-reader text rather than as two lines of chrome over the message. */}
         <div className="flex min-w-0 items-center gap-2 px-panel pt-1">
           {from ? (
             <span className="shrink-0 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</span>
           ) : null}
-          <span className="mono min-w-0 truncate text-[10.5px] tabular-nums text-faint">
-            accepted {absoluteTime(record.acceptedAt)}
-          </span>
           <span
             className={cn(
               'ml-auto inline-flex shrink-0 select-none items-center gap-1 rounded-sm border px-1.5 py-px text-[10.5px] font-medium leading-[1.5]',
               tone,
             )}
-            title={detail}
+            title={[detail, `accepted ${absoluteTime(record.acceptedAt)}`, boundary].filter(Boolean).join('\n')}
           >
             {label}
           </span>
         </div>
         {boundary === undefined ? null : (
-          <div className="px-panel pt-0.5 text-[10.5px] leading-snug text-muted" data-ledger-boundary>
+          <span className="sr-only" data-ledger-boundary>
             {boundary}
-          </div>
+          </span>
         )}
         {body ? (
           <div className="kt-user-copy min-w-0 max-w-full whitespace-pre-wrap break-words px-panel pb-1.5 pt-0.5 text-[13px] leading-snug text-[color:var(--bubble-fg)]">

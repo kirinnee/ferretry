@@ -40,7 +40,16 @@ export interface TranscriptEntry {
    * "Show details" so the conversation reads as a conversation.
    */
   readonly detail?: boolean;
+  /** A failure the reader must see: a notice that never folds behind "Show details". */
+  readonly alert?: boolean;
 }
+
+/**
+ * Does this row fold behind "Show details"? Bookkeeping always does, and so does every daemon notice
+ * except an alert — "Browser automation stays unavailable" is context, not conversation.
+ */
+export const foldsIntoDetails = (entry: TranscriptEntry): boolean =>
+  entry.detail === true || (entry.kind === 'notice' && entry.alert !== true);
 
 /** One rendered transcript item: a row, or a folded run of consecutive detail rows. */
 export type TranscriptItem =
@@ -57,7 +66,7 @@ export const transcriptItems = (entries: readonly TranscriptEntry[]): readonly T
   let previous: TranscriptEntry | undefined;
   let run: TranscriptEntry[] | null = null;
   for (const entry of entries) {
-    if (entry.detail === true) {
+    if (foldsIntoDetails(entry)) {
       if (run === null) {
         run = [];
         items.push({ kind: 'details', id: `details:${entry.id}`, entries: run });
