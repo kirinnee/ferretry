@@ -12,10 +12,10 @@ import type {
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
-const OVERVIEW = `Learning mines finished sessions for the corrections a human made and turns the
-recurring ones into proposed guidance. Nothing is ever applied automatically:
-a proposal you accept is rendered by "patch" for you to paste into your own
-guidance file.`;
+const OVERVIEW = `Lessons are rules learned from ferrets: filed by a ferret instructed to learn, or found by
+an explicit scan of older transcripts. Nothing is ever applied automatically: accepting a
+lesson writes nothing, and "apply" shows the diff into the global instructions or the
+project's AGENTS.md / CLAUDE.md before it writes.`;
 
 /** Add the shared flags every learning verb carries. */
 function scoped(command: Command): Command {
