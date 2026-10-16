@@ -17,6 +17,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import type { LucideIcon } from 'lucide-react';
 import { displayCallsign, shortSessionId } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 // The palette names a folder exactly as the sidebar and dashboard do. Sharing
@@ -60,6 +61,11 @@ export interface PaletteCommand {
    */
   readonly searchTerms: string;
   readonly run: () => void;
+  /**
+   * The mark the row draws. A command without one keeps the key, which is what the browser-login
+   * command it was written for means; an act like pairing a phone carries its own.
+   */
+  readonly Icon?: LucideIcon;
 }
 
 /**
