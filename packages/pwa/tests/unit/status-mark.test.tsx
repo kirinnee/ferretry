@@ -148,3 +148,26 @@ describe('StatusMark', () => {
     expect(wrapper.props.className).toBe('inline-flex shrink-0 items-center justify-center mr-2');
   });
 });
+
+describe('statusMark from the daemon turn fact', () => {
+  const live = (turnState: 'working' | 'your-turn' | 'needs-input', status: 'running' | 'completed' = 'running') =>
+    statusMark(sessionView('s', { state: { status, turnState } }));
+
+  it('breathes only while the agent is working', () => {
+    expect(live('working')).toMatchObject({ shape: 'circle', klass: 'active', live: true });
+    expect(live('your-turn')).toMatchObject({ shape: 'diamond', klass: 'waiting', tone: 'ok', live: false });
+    expect(live('your-turn').label).toBe('waiting — your turn');
+    expect(live('needs-input')).toMatchObject({ shape: 'diamond', klass: 'waiting', tone: 'accent', live: false });
+    expect(live('needs-input').label).toBe('waiting — needs your input');
+  });
+
+  it('never lets a stale turn fact override a finished session or a declared park', () => {
+    expect(live('working', 'completed').klass).toBe('finished');
+    const parked = statusMark(
+      sessionView('s', {
+        state: { status: 'running', turnState: 'your-turn', waiting: { since: '2026-01-01T00:00:00Z' } },
+      }),
+    );
+    expect(parked.label).toBe('waiting — parked');
+  });
+});

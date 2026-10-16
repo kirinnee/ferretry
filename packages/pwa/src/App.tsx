@@ -1,4 +1,5 @@
 import { DoctorReportSchema, HealthViewSchema, type WardenVerdictsView } from '@ferretry/protocol';
+import { QrCode } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -69,6 +70,12 @@ import { dictationShortcutLabel } from './features/settings/dictation-shortcut.t
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationFilterSettingsView } from './features/settings/notification-filter-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
+import {
+  PAIR_PHONE_DESCRIPTION,
+  PairPhoneSheet,
+  pairPhoneLabel,
+  usePairPhoneAllowed,
+} from './features/settings/pair-phone.tsx';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
@@ -134,7 +141,6 @@ import {
   setupPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
-import { createSurfaceEventHub } from './lib/surface-control.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
@@ -151,6 +157,7 @@ import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
 import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
+import { createSurfaceEventHub } from './lib/surface-control.ts';
 import {
   AppBar,
   AppTabBar,
@@ -163,6 +170,7 @@ import {
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
+import { pairPhonePaletteCommand } from './shell/palette-destinations.ts';
 import { paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
@@ -689,6 +697,7 @@ function ShellSessionsBar({
   search,
   updateReady,
   onApplyUpdate,
+  onPairPhone,
 }: {
   readonly connection: DaemonConnection;
   readonly route: PageRoute;
@@ -698,6 +707,8 @@ function ShellSessionsBar({
   readonly search: ReactNode;
   readonly updateReady: UpdateReason | null;
   readonly onApplyUpdate: () => void;
+  /** Absent when this machine says the reader may not pair a device with it. */
+  readonly onPairPhone: (() => void) | undefined;
 }) {
   const store = useAppStore();
   const { navigate } = useRouter();
@@ -726,6 +737,7 @@ function ShellSessionsBar({
       }))}
       {...(updateReady === null ? {} : { update: updateOffer(updateReady), onApplyUpdate })}
       onAddMachine={() => navigate(connectionPickerPath())}
+      {...(onPairPhone === undefined ? {} : { onPairPhone })}
       onNavigate={navigate}
       onOpenPalette={onOpenPalette}
       presentation={shape}
@@ -1764,6 +1776,17 @@ export function AppShell() {
   const openSessionsDrawer = useCallback(() => setSessionsDrawer(true), []);
   const closeSessionsDrawer = useCallback(() => setSessionsDrawer(false), []);
   /*
+   * "PAIR A PHONE WITH ‹THIS MACHINE›", from the machine switcher or the finder: the Add-a-device
+   * surface in a sheet over whatever page is open. Offered only when this machine says the reader may
+   * pair a device with it, and held per machine, so switching machines can never leave one open over
+   * another machine's page.
+   */
+  const pairPhoneAllowed = usePairPhoneAllowed(connection);
+  const [pairPhoneFor, setPairPhoneFor] = useState<string | null>(null);
+  const pairPhoneDaemon = connection?.daemonId;
+  const openPairPhone = useCallback(() => setPairPhoneFor(pairPhoneDaemon ?? null), [pairPhoneDaemon]);
+  const closePairPhone = useCallback(() => setPairPhoneFor(null), []);
+  /*
    * THE SETTINGS CATALOG ANSWERS THE WHOLE SETTINGS QUESTION.
    *
    * The palette takes a query FUNCTION rather than a list, so which controls
@@ -1895,6 +1918,11 @@ export function AppShell() {
   } else {
     const sessions = fleet.daemons.get(connection.daemonId)?.sessions ?? [];
     const phone = layout === 'drawer';
+    const machineRecord = connectionSnapshot.connections.find(candidate => candidate.daemonId === connection.daemonId);
+    const machineName =
+      machineRecord === undefined
+        ? daemonDisplayName(connection)
+        : distinctDaemonName(machineRecord, connectionSnapshot.connections);
     const sessionsBar = (presentation: SessionsBarPresentation, onClose?: () => void) => (
       <ShellSessionsBar
         connection={connection}
@@ -1907,6 +1935,7 @@ export function AppShell() {
         search={barSessionSearch ? <SessionSearchControl shortcutTarget /> : undefined}
         updateReady={updateReady}
         onApplyUpdate={applyUpdate}
+        onPairPhone={pairPhoneAllowed ? openPairPhone : undefined}
       />
     );
     content = (
@@ -1980,6 +2009,26 @@ export function AppShell() {
               settings={paletteSettings}
               touchAffected={touchAffected}
               shortcutAvailable={!barSessionSearch}
+              {...(pairPhoneAllowed
+                ? {
+                    commands: [
+                      pairPhonePaletteCommand(
+                        pairPhoneLabel(machineName),
+                        PAIR_PHONE_DESCRIPTION,
+                        QrCode,
+                        openPairPhone,
+                      ),
+                    ],
+                  }
+                : {})}
+            />
+            {/* After the finder, so the finder hands focus back to its opener before this captures it. */}
+            <PairPhoneSheet
+              connection={connection}
+              machineName={machineName}
+              onClose={closePairPhone}
+              open={pairPhoneAllowed && pairPhoneFor === connection.daemonId}
+              presentation={phone ? 'sheet' : 'dialog'}
             />
           </div>
         </SessionsDrawerContext.Provider>

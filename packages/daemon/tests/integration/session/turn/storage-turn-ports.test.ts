@@ -1,0 +1,320 @@
+import { afterEach, describe, it } from 'bun:test';
+import { appendFile, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import should from 'should';
+import {
+  BunSqliteIndexFactory,
+  BunTmuxProcess,
+  DaemonStorageFactory,
+  KeyedSerialExecutor,
+  RuntimeEnvironment,
+  SqliteHomeLockFactory,
+  StateFileSystemFactory,
+  StateHomeLayout,
+  StorageTurnPorts,
+  SystemClock,
+} from '../../../../src/adapters/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  parseSessionId,
+  type SessionId,
+  type SessionTranscriptTail,
+  SessionTurnWatcher,
+  TmuxController,
+} from '../../../../src/lib/index.ts';
+import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
+
+/**
+ * Whose turn it is, read from REAL evidence: a real tmux server whose panes draw what each harness
+ * draws (idle prompt, working line, permission prompt, interrupted banner), real Claude and Codex
+ * transcripts parsed by the daemon's own parsers, and the real storage the record is written to.
+ *
+ * Every pane runs a tiny frame player — it redraws whatever the test writes to its frame file, with
+ * the cursor left at the start of its last line — the prompt, where a ready harness leaves it — so a state change is one
+ * file write and nothing here can spend a token.
+ */
+
+const NOW = '2026-10-16T08:00:00.000Z';
+const cleanups = new Set<() => Promise<void>>();
+
+afterEach(async () => {
+  await Promise.all([...cleanups].map(cleanup => cleanup()));
+  cleanups.clear();
+});
+
+const CLAUDE_IDLE = '  ? for shortcuts · ✻ Welcome back\n╭────────────────────╮\n│ > ';
+const CLAUDE_WORKING = '⏺ Reading.\n✽ Pontificating… (3s · ↓ 1.2k tokens · esc to interrupt)\n\n│ > ';
+const CLAUDE_PERMISSION = ' Do you want to proceed?\n ❯ 1. Yes\n   2. No, and tell Claude what to do differently';
+const CODEX_IDLE = '  100% context left\n\n› Ask Codex to do anything';
+const CODEX_WORKING = '• Working (5s • Esc to interrupt)\n\n› ';
+const CODEX_INTERRUPTED = '■ Conversation interrupted - tell the model what to do differently\n\n› ';
+
+const claudeUser = (text: string) =>
+  `${JSON.stringify({ type: 'user', sessionId: 's', uuid: `u-${text}`, parentUuid: null, timestamp: NOW, message: { role: 'user', content: text } })}\n`;
+const claudeAnswer = (stop: string | null) =>
+  `${JSON.stringify({ type: 'assistant', sessionId: 's', uuid: `a-${String(stop)}-${Math.random()}`, parentUuid: null, timestamp: NOW, message: { id: 'm', role: 'assistant', stop_reason: stop, content: [{ type: 'text', text: 'ok' }] } })}\n`;
+const codexEvent = (type: string) =>
+  `${JSON.stringify({ timestamp: NOW, type: 'event_msg', payload: { type, turn_id: 'turn-1' } })}\n`;
+
+interface Fixture {
+  readonly watcher: SessionTurnWatcher;
+  readonly ports: StorageTurnPorts;
+  readonly id: SessionId;
+  readonly frame: (text: string) => Promise<void>;
+  readonly transcript: (text: string) => Promise<void>;
+  readonly status: (status: string) => Promise<void>;
+  readonly turnState: () => Promise<unknown>;
+  readonly events: () => Promise<readonly (string | null)[]>;
+  readonly settle: () => Promise<void>;
+}
+
+async function fixture(harness: 'claude' | 'codex', initialFrame: string): Promise<Fixture> {
+  const tmux = Bun.which('tmux');
+  if (tmux === null) throw new Error('tmux is required for turn-state integration coverage');
+  const home = await mkdtemp(join(tmpdir(), 'ferretry-turn-'));
+  const opened = await new DaemonStorageFactory(
+    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
+    new StateFileSystemFactory(),
+    new StateHomeLayout(),
+    new SqliteHomeLockFactory(),
+    new BunSqliteIndexFactory(),
+    new SystemClock(() => new Date(NOW)),
+    () => new KeyedSerialExecutor(),
+  ).open();
+  const id = parseSessionId(`turn-${harness}`);
+  const tmuxSession = `fy-turn-${harness}`;
+  await opened.storage.writeConfig(id, { id, name: 'Turn', tmuxSession, harness, mode: 'interactive' });
+  await opened.storage.writeState(id, { id, status: 'running', turn: 1 });
+
+  const frameFile = join(home, 'frame.txt');
+  const transcriptFile = join(home, harness === 'claude' ? 'transcript.jsonl' : 'rollout.jsonl');
+  await writeFile(frameFile, initialFrame);
+  await writeFile(transcriptFile, '');
+  // Redraw on change; print the frame, then put the cursor back on its last line, column zero.
+  const player = join(home, 'player.sh');
+  await writeFile(
+    player,
+    [
+      '#!/bin/sh',
+      'last=""',
+      'while :; do',
+      `  now="$(cat '${frameFile}')"`,
+      '  if [ "$now" != "$last" ]; then printf \'\\033[H\\033[2J%s\\n\\033[1A\' "$now"; last="$now"; fi',
+      '  sleep 0.05',
+      'done',
+    ].join('\n'),
+  );
+  await chmod(player, 0o755);
+  const commands = new BunTmuxProcess(tmux, join(home, 'tmux.sock'));
+  const controller = new TmuxController(commands);
+  await controller.launch({ session: tmuxSession, cwd: home, command: ['/bin/sh', player], width: 100, height: 30 });
+
+  const source = new NodeTranscriptSource(
+    harness === 'claude' ? new ClaudeTranscriptParser() : new CodexTranscriptParser(),
+  );
+  const tail: SessionTranscriptTail = {
+    tail: async (_id, limit) => ({ kind: 'read', events: (await source.read(transcriptFile)).events.slice(-limit) }),
+  };
+  const ports = new StorageTurnPorts(opened.storage, tail, async () => transcriptFile, controller, {
+    now: () => NOW,
+  });
+  cleanups.add(async () => {
+    await Bun.spawn([tmux, '-S', join(home, 'tmux.sock'), 'kill-server'], { stdout: 'ignore', stderr: 'ignore' })
+      .exited;
+    await opened.storage.close();
+    await rm(home, { recursive: true, force: true });
+  });
+  const state = async () => (await opened.storage.readState(id)) as Record<string, unknown>;
+  return {
+    watcher: new SessionTurnWatcher(ports),
+    ports,
+    id,
+    frame: async text => {
+      await writeFile(frameFile, text);
+    },
+    transcript: async text => {
+      await appendFile(transcriptFile, text);
+    },
+    status: async status => {
+      await opened.storage.updateState(id, raw => ({ ...(raw as Record<string, unknown>), status }));
+    },
+    turnState: async () => (await state()).turnState,
+    events: async () =>
+      (await opened.storage.replay(id)).events
+        .filter(event => event.type === 'turn.state')
+        .map(event => (event.data as { to: string | null }).to),
+    // Long enough for the player's 50ms poll to redraw and tmux to show it.
+    settle: async () => await Bun.sleep(400),
+  };
+}
+
+/** Ticks until the record reads `expected` or the budget runs out, and answers how long it took. */
+async function until(subject: Fixture, expected: unknown, budgetMs = 6_000): Promise<number> {
+  const started = Date.now();
+  while (Date.now() - started < budgetMs) {
+    await subject.watcher.tick();
+    if ((await subject.turnState()) === expected) return Date.now() - started;
+    await Bun.sleep(200);
+  }
+  throw new Error(`turnState never became ${String(expected)}; it is ${String(await subject.turnState())}`);
+}
+
+describe('the turn watcher over real panes and transcripts', () => {
+  it('Claude: idle at the prompt, mid-turn, turn complete, permission prompt, interrupted, crashed', async () => {
+    const subject = await fixture('claude', CLAUDE_IDLE);
+    await subject.settle();
+
+    // Idle at the prompt, nothing in the transcript: the person's turn.
+    await until(subject, 'your-turn');
+
+    // Mid-turn: the person spoke and the harness paints its working line.
+    await subject.transcript(claudeUser('go'));
+    await subject.frame(CLAUDE_WORKING);
+    await subject.settle();
+    await until(subject, 'working');
+
+    // Permission prompt mid-turn: blocked on a person.
+    await subject.frame(CLAUDE_PERMISSION);
+    await subject.settle();
+    await until(subject, 'needs-input');
+
+    // Turn complete: end_turn in the transcript and the idle prompt on screen. REGRESSION: the spinner
+    // must stop within a few seconds of the turn ending.
+    await subject.frame(CLAUDE_WORKING);
+    await subject.settle();
+    await until(subject, 'working');
+    await subject.transcript(claudeAnswer('end_turn'));
+    await subject.frame(CLAUDE_IDLE);
+    await subject.settle();
+    should(await until(subject, 'your-turn')).be.below(3_000);
+
+    // Interrupted: Claude writes NO end, so the idle pane is the only witness — it still ends the turn.
+    await subject.transcript(claudeUser('again'));
+    await subject.frame(CLAUDE_WORKING);
+    await subject.settle();
+    await until(subject, 'working');
+    await subject.frame(CLAUDE_IDLE);
+    await subject.settle();
+    await until(subject, 'your-turn');
+
+    // Crashed: the session is no longer live, so it has no turn at all.
+    await subject.status('failed');
+    await until(subject, undefined);
+
+    // Each boundary was journaled exactly once, in order.
+    should(await subject.events()).deepEqual([
+      'your-turn',
+      'working',
+      'needs-input',
+      'working',
+      'your-turn',
+      'working',
+      'your-turn',
+      null,
+    ]);
+  }, 60_000);
+
+  it('Codex: idle at the prompt, mid-turn, turn complete, permission prompt, interrupted, crashed', async () => {
+    const subject = await fixture('codex', CODEX_IDLE);
+    await subject.settle();
+    await until(subject, 'your-turn');
+
+    await subject.transcript(codexEvent('task_started'));
+    await subject.frame(CODEX_WORKING);
+    await subject.settle();
+    await until(subject, 'working');
+
+    await subject.frame('Would you like to run the following command?\n  $ git push\n› 1. Yes, proceed\n  2. No');
+    await subject.settle();
+    await until(subject, 'needs-input');
+
+    await subject.frame(CODEX_WORKING);
+    await subject.settle();
+    await until(subject, 'working');
+    await subject.transcript(codexEvent('task_complete'));
+    await subject.frame(CODEX_IDLE);
+    await subject.settle();
+    should(await until(subject, 'your-turn')).be.below(3_000);
+
+    await subject.transcript(codexEvent('task_started'));
+    await subject.frame(CODEX_WORKING);
+    await subject.settle();
+    await until(subject, 'working');
+    await subject.transcript(codexEvent('turn_aborted'));
+    await subject.frame(CODEX_INTERRUPTED);
+    await subject.settle();
+    await until(subject, 'your-turn');
+
+    await subject.status('stopped');
+    await until(subject, undefined);
+  }, 60_000);
+
+  it('should re-derive a turn still running after the daemon restarts, from the transcript alone', async () => {
+    // Arrange — a working turn, then a fresh watcher (a restarted daemon) with no memory of it.
+    const subject = await fixture('codex', CODEX_WORKING);
+    await subject.transcript(codexEvent('task_started'));
+    await subject.settle();
+    await until(subject, 'working');
+    const restarted = new SessionTurnWatcher(subject.ports);
+
+    // Act — the pane goes blank mid-turn (a redraw), and only the transcript is left to say.
+    await subject.frame('');
+    await subject.settle();
+    await restarted.tick();
+
+    // Assert
+    should(await subject.turnState()).equal('working');
+  }, 30_000);
+
+  it('should refuse a stale change, and never mark a finished session working', async () => {
+    const subject = await fixture('claude', CLAUDE_IDLE);
+
+    // A change whose `from` no longer matches the record lost a race and writes nothing.
+    should(await subject.ports.record(subject.id, { from: 'working', to: 'your-turn' }, NOW)).be.false();
+    // A stop that committed after the watcher looked has the last word.
+    await subject.status('stopped');
+    should(await subject.ports.record(subject.id, { from: undefined, to: 'working' }, NOW)).be.false();
+    should(await subject.turnState()).be.undefined();
+    should(await subject.events()).deepEqual([]);
+  }, 30_000);
+
+  it('should answer nothing for a transcript file that cannot be read as this session', async () => {
+    const subject = await fixture('codex', CODEX_IDLE);
+    const storage = (subject.ports as unknown as { storage: never }).storage;
+    const file = join(tmpdir(), `ferretry-turn-unreadable-${process.pid}.jsonl`);
+    await writeFile(file, '');
+    cleanups.add(async () => await rm(file, { force: true }));
+    const unreadable = new StorageTurnPorts(
+      storage,
+      { tail: async () => ({ kind: 'unreadable' }) },
+      async () => file,
+      { state: async () => Promise.reject(new Error('unused')) },
+      { now: () => NOW },
+    );
+    should(await unreadable.transcript(subject.id)).be.undefined();
+  }, 30_000);
+
+  it('should read no pane and no transcript for a session without either', async () => {
+    const subject = await fixture('claude', CLAUDE_IDLE);
+    const bare = new StorageTurnPorts(
+      // Same storage, a session with no tmux name and no transcript.
+      (subject.ports as unknown as { storage: never }).storage,
+      { tail: async () => ({ kind: 'unresolved' }) },
+      async () => undefined,
+      { state: async () => Promise.reject(new Error('unreachable')) },
+      { now: () => NOW },
+    );
+    should(await bare.transcript(subject.id)).be.undefined();
+    const missing = new StorageTurnPorts(
+      (subject.ports as unknown as { storage: never }).storage,
+      { tail: async () => ({ kind: 'unresolved' }) },
+      async () => '/nonexistent/transcript.jsonl',
+      { state: async () => ({ alive: false, dead: true, promptReady: false, history: '', visible: '' }) },
+      { now: () => NOW },
+    );
+    should(await missing.transcript(subject.id)).be.undefined();
+    should(await missing.pane(subject.id)).be.undefined();
+  }, 30_000);
+});

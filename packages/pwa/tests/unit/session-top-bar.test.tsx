@@ -89,3 +89,29 @@ describe('SessionTopBar', () => {
     expect(view.container.querySelector('.fy-session-bar__project')).toBeNull();
   });
 });
+
+describe('SessionTopBar turn word', () => {
+  test("says whose turn it is in the person's words, and marks it for the page", async () => {
+    for (const [turn, word] of [
+      ['working', 'working'],
+      ['your-turn', 'your turn'],
+      ['needs-input', 'needs input'],
+    ] as const) {
+      view = await mount(
+        <SessionTopBar
+          actions={null}
+          compact={false}
+          menuItems={[]}
+          project={null}
+          session={sessionView('s1', { state: { status: 'running', turnState: turn } })}
+          turn={turn}
+        />,
+      );
+      const status = must(view.container.querySelector('.fy-session-bar__status'), 'the status');
+      expect(status.getAttribute('data-session-activity')).toBe(turn);
+      expect(status.querySelector('.fy-session-bar__word')?.textContent).toBe(word);
+      await view.unmount();
+      view = null;
+    }
+  });
+});
