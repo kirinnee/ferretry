@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { buildFleetManifest } from '@ferretry/fleet';
 import {
   AgentToolResultSchema,
@@ -303,6 +304,61 @@ async function bootAgentToolsDaemon(home: string) {
   };
 }
 
+/** The CLI's own entry, run the way a harness runs a stdio MCP server. */
+const FY_ENTRY = resolve(import.meta.dir, '../../../../cli/bin/fy.ts');
+
+/**
+ * An MCP client over a real `fy mcp serve` child: newline-delimited JSON-RPC on its stdin and stdout,
+ * exactly what Claude Code and Codex speak to a stdio server.
+ */
+function mcpClient(environment: Readonly<Record<string, string>>) {
+  const child = Bun.spawn({
+    cmd: [process.execPath, FY_ENTRY, 'mcp', 'serve'],
+    env: environment,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const waiting = new Map<number, (message: unknown) => void>();
+  void (async () => {
+    let buffer = '';
+    for await (const chunk of child.stdout) {
+      buffer += new TextDecoder().decode(chunk);
+      for (let newline = buffer.indexOf('\n'); newline !== -1; newline = buffer.indexOf('\n')) {
+        const message = JSON.parse(buffer.slice(0, newline)) as { id: number };
+        buffer = buffer.slice(newline + 1);
+        waiting.get(message.id)?.(message);
+      }
+    }
+  })();
+  let next = 0;
+  const send = (message: unknown): void => {
+    void child.stdin.write(`${JSON.stringify(message)}\n`);
+    void child.stdin.flush();
+  };
+  return {
+    request: async (method: string, params?: unknown): Promise<any> => {
+      next += 1;
+      const id = next;
+      const answer = new Promise<unknown>(done => waiting.set(id, done));
+      send({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
+      return await answer;
+    },
+    notify: (method: string): void => send({ jsonrpc: '2.0', method }),
+    call: async (name: string, args: Record<string, unknown>): Promise<any> => {
+      next += 1;
+      const id = next;
+      const answer = new Promise<unknown>(done => waiting.set(id, done));
+      send({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
+      return ((await answer) as { result: unknown }).result;
+    },
+    close: async (): Promise<number> => {
+      void child.stdin.end();
+      return await child.exited;
+    },
+  };
+}
+
 describe('the agent tools, through the production composition root', () => {
   const previousHome = process.env.FY_HOME;
 
@@ -530,5 +586,92 @@ describe('the agent tools, through the production composition root', () => {
       agentSessionId: hadi,
       agentName: 'Hadi',
     });
+  }, 60_000);
+
+  it('should let an agent drive a terminal and a browser through `fy mcp serve`, as itself and only itself', async () => {
+    // Arrange — the agent's environment as the fixed layer hands it to the tools server: the session's
+    // credential and where the daemon is, and NO admin token. FY_HOME points at an empty folder, so
+    // there is no token file to fall back on either: the session credential is all it has.
+    const home = await tempDirectory('fyd-agent-mcp');
+    const daemon = await bootAgentToolsDaemon(home);
+    const hadi = await daemon.startSession('req-mcp-hadi', 'Hadi');
+    const empty = await mkdtemp(join(tmpdir(), 'fy-no-token-'));
+    const environment: Record<string, string> = {
+      PATH: process.env.PATH ?? '',
+      HOME: empty,
+      FY_HOME: empty,
+      FY_URL: daemon.base,
+      FY_SESSION_ID: hadi,
+      FY_SESSION_BOARD_CAPABILITY: await daemon.capabilityOf(hadi),
+    };
+    const mcp = mcpClient(environment);
+
+    // Act
+    const initialized = await mcp.request('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'fake-harness', version: '1' },
+    });
+    mcp.notify('notifications/initialized');
+    const listed = await mcp.request('tools/list');
+    const opened = await mcp.call('terminal_open', { name: 'dev', command: 'bun dev' });
+    const sent = await mcp.call('terminal_send', { name: '%terminal:dev', text: `echo ${SECRET}`, keys: ['enter'] });
+    const read = await mcp.call('terminal_read', { name: 'dev' });
+    const waited = await mcp.call('terminal_wait', { name: 'dev', exit: true, timeoutMs: 5_000 });
+    const page = await mcp.call('browser_open', { name: 'app', url: 'http://localhost:5173/' });
+    const typed = await mcp.call('browser_type', { name: 'app', selector: '#q', text: SECRET });
+    const tree = await mcp.call('browser_read', { name: 'app', mode: 'a11y' });
+    const shot = await mcp.call('browser_screenshot', { name: 'app' });
+    await fetch(`${daemon.base}/v1/sessions/${hadi}/surfaces/browser/control`, {
+      method: 'POST',
+      headers: daemon.human,
+      body: JSON.stringify({ action: 'takeover', key: 'app' }),
+    });
+    const refused = await mcp.call('browser_click', { name: 'app', selector: 'button' });
+    const elsewhere = await mcp.call('terminal_list', { sessionId: 'someone-else' });
+    const exit = await mcp.close();
+    const audit = JSON.stringify(
+      await (await fetch(`${daemon.base}/v1/audit?limit=200`, { headers: daemon.human })).json(),
+    );
+    const code = await daemon.stop();
+
+    // Assert
+    should(code).equal(0);
+    should(exit).equal(0);
+    should(initialized.result).match({ protocolVersion: '2025-06-18', capabilities: { tools: {} } });
+    should(listed.result.tools.map((tool: { name: string }) => tool.name)).containDeep([
+      'terminal_open',
+      'terminal_send',
+      'terminal_read',
+      'terminal_wait',
+      'browser_open',
+      'browser_screenshot',
+    ]);
+    should(opened).deepEqual({ content: [{ type: 'text', text: 'Opened %terminal:dev and started the command.' }] });
+    should(sent.content[0].text).equal(
+      `Sent ${String(`echo ${SECRET}`.length)} characters and 1 key to %terminal:dev.`,
+    );
+    should(read.content[0].text).containEql(`echo ${SECRET}`);
+    should(waited.content[0].text).startWith('The command ended in %terminal:dev.');
+    should(page.content[0].text).equal('Opened %browser:app at http://localhost:5173/.');
+    should(typed.isError).be.undefined();
+    should(tree.content[0].text).containEql('Sign in to continue');
+    should(shot.content).containDeep([{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }]);
+    should(refused).deepEqual({
+      content: [{ type: 'text', text: 'A person has taken over %browser:app; wait or ask them.' }],
+      isError: true,
+    });
+    should(elsewhere.isError).be.true();
+    // It acted as Hadi, in Hadi's session, and the audit never saw what it typed.
+    should([...daemon.terminals.records.values()].map(record => [record.ownerId, record.openedBy])).deepEqual([
+      [hadi, { by: 'agent', sessionId: hadi }],
+    ]);
+    should(daemon.browser.acts).deepEqual(['page-1:type', 'page-1:read-a11y', 'page-1:screenshot']);
+    // The server never held host authority.
+    should(Object.keys(environment)).not.containEql('FY_TOKEN');
+    should(Object.values(environment)).not.containEql(daemon.token);
+    await rm(empty, { recursive: true, force: true });
+    should(audit).containEql('"tool":"browser.type"');
+    should(audit).not.containEql(SECRET);
   }, 60_000);
 });

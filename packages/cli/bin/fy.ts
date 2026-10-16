@@ -62,6 +62,8 @@ import {
   registerTerminalCommands,
 } from '../src/lib/agent-tools';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { McpServer, registerMcpCommands } from '../src/lib/mcp';
+import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
@@ -626,18 +628,26 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
   // the browser group, because `browser page` mounts onto it.
   ({ program, world, client, ownSessionId }) => {
-    const tools = new AgentToolsController(
-      new AgentToolsClient(agentToolsGateways(world, client), {
-        ...(world.environment.FY_SESSION_BOARD_CAPABILITY === undefined
-          ? {}
-          : { capability: world.environment.FY_SESSION_BOARD_CAPABILITY }),
-        ...(ownSessionId === undefined ? {} : { ownSessionId }),
-      }),
-      world.io,
-      new FileScreenshotWriter(),
-    );
+    const toolsClient = new AgentToolsClient(agentToolsGateways(world, client), {
+      ...(world.environment.FY_SESSION_BOARD_CAPABILITY === undefined
+        ? {}
+        : { capability: world.environment.FY_SESSION_BOARD_CAPABILITY }),
+      ...(ownSessionId === undefined ? {} : { ownSessionId }),
+    });
+    const tools = new AgentToolsController(toolsClient, world.io, new FileScreenshotWriter());
     registerTerminalCommands(program, tools);
     registerBrowserPageCommands(program, tools);
+    // The same client, as the MCP server every agent runtime starts: it acts only as the agent session
+    // whose credential is in its environment. Stdout carries nothing but protocol.
+    registerMcpCommands(program, async () => {
+      await serveMcpOverStdio(
+        new McpServer(toolsClient, { name: PRODUCT_NAME, version: assertSemver(pkg.version) }),
+        Bun.stdin.stream(),
+        line => {
+          process.stdout.write(line);
+        },
+      );
+    });
   },
   ({ program, world, client }) =>
     registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),

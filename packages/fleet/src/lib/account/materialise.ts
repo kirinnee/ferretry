@@ -307,11 +307,13 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
               agentPermissions: model.machine.agentPermissions,
               cwd: LAUNCH_FOLDER_PLACEHOLDER,
               acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
+              fyCommand: input.fyCommand,
             })
           : fixedLayerFor({
               harness,
               agentPermissions: model.machine.agentPermissions,
               cwd: LAUNCH_FOLDER_PLACEHOLDER,
+              fyCommand: input.fyCommand,
             });
       if (result.ok) fixed = withoutLaunchFolder(result.layer);
       else reasons.push(result.refusal.message);

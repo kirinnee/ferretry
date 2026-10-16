@@ -119,3 +119,24 @@ daemon replays its journal on start, so a takeover or a hand-over outlives a res
   removal this change can make unconditionally. Until then a renderer exploit on a page an agent is
   steered to runs as the daemon's user.
 - **A terminal's folder** is where the shell starts, not a boundary.
+
+## The tools server in every agent runtime
+
+`fy mcp serve` is a stdio MCP server (hand-written JSON-RPC 2.0: `initialize`, `ping`, `tools/list`,
+`tools/call`; notifications are never answered). It holds exactly the authority of the agent session
+whose credential is in its environment, and nothing else: it talks only to the daemon on this machine,
+sends no bearer token, and never reads the host's admin token. The fleet's fixed layer adds it to every
+agent runtime as a locked entry, with a short built-in instruction:
+
+- **Claude**: `--mcp-config=<inline JSON for server "ferretry">` (the person's own servers stay; its
+  `env` blanks `FY_TOKEN`, since Claude hands a stdio server its whole environment) and
+  `--append-system-prompt=<instruction>`. A profile's own `--append-system-prompt` is KEPT: Ferretry's
+  instruction is appended after it, in the one flag Claude takes.
+- **Codex**: `-c mcp_servers.ferretry.command/args/env_vars` (forwarding `FY_HOME`, `FY_URL`,
+  `FY_SESSION_ID`, `FY_SESSION_BOARD_CAPABILITY` — never `FY_TOKEN`) and
+  `-c developer_instructions=<instruction>`. A profile's own `developer_instructions` is kept the same
+  way: the person's text first, then Ferretry's.
+
+MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
+the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the
+daemon's sentence, so the model reads it. The server reads lines up to 1 MiB and drops longer ones.
