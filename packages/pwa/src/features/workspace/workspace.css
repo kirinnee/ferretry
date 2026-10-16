@@ -1,0 +1,308 @@
+/* Session workspace: split panes, per-pane tab strips, dividers and the
+   agent-control marker. Theme tokens only (themes.css) — every family, light
+   and dark, must read as native. The AGENT badge and the agent marker use the
+   warn tone: across every family it already means "something other than you
+   is acting here". */
+
+.fy-ws {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+.fy-ws-split {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.fy-ws-split[data-direction='column'] {
+  flex-direction: column;
+}
+.fy-ws-split-child {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.fy-ws-pane {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+/* ---- strip ------------------------------------------------------------ */
+.fy-ws-strip {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  border-bottom: var(--stroke) solid var(--border);
+  background: var(--surface-2);
+}
+.fy-ws-tabs {
+  display: flex;
+  flex: 1 1 0;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--gap-xs) var(--gap-xs) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.fy-ws-tabs[data-drop-target='true'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.fy-ws-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gap-xs);
+  max-width: 220px;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--pad-control-x);
+  border: var(--stroke) solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-tab) var(--radius-tab) 0 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-ws-tab:hover {
+  color: var(--fg);
+}
+.fy-ws-tab[aria-selected='true'] {
+  margin-bottom: calc(-1 * var(--stroke));
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-ws-tab[data-pinned='true'] {
+  font-weight: var(--weight-medium);
+}
+.fy-ws-tab[data-dragging='true'] {
+  opacity: 0.5;
+}
+.fy-ws-tab:focus-visible,
+.fy-ws-strip-button:focus-visible,
+.fy-ws-menu-item:focus-visible,
+.fy-ws-marker-action:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+.fy-ws-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-ws-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+}
+.fy-ws-tab-close:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-ws-agent-badge {
+  padding: 0 var(--pad-badge-x);
+  border: var(--stroke) solid var(--warn-border);
+  border-radius: var(--radius-badge);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-label);
+}
+
+.fy-ws-strip-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding-inline: var(--gap-xs);
+}
+.fy-ws-strip-menu {
+  position: relative;
+}
+.fy-ws-strip-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-h-sm);
+  min-height: var(--control-h-sm);
+  border: var(--stroke) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-ws-strip-button:hover,
+.fy-ws-strip-button[aria-expanded='true'] {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-ws-strip-button[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.fy-ws-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  min-width: 190px;
+  margin-top: var(--gap-xs);
+  padding: var(--gap-xs);
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+}
+.fy-ws-menu-sep {
+  margin: var(--gap-xs) 0;
+  border: 0;
+  border-top: var(--stroke) solid var(--border);
+}
+.fy-ws-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: var(--control-h-sm);
+  align-items: center;
+  padding: 0 var(--pad-control-x);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.fy-ws-menu-item:hover {
+  background: var(--accent-soft);
+}
+.fy-ws-menu-item[aria-checked='true'] {
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+}
+
+/* ---- body ------------------------------------------------------------- */
+.fy-ws-pane-body {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.fy-ws-panel {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.fy-ws-empty {
+  margin: auto;
+  padding: var(--pad-panel);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* ---- dividers ----------------------------------------------------------- */
+.fy-ws-divider {
+  position: relative;
+  display: flex;
+  flex: 0 0 6px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: var(--surface-2);
+  touch-action: none;
+  cursor: col-resize;
+}
+.fy-ws-divider[data-axis='column'] {
+  cursor: row-resize;
+}
+.fy-ws-divider-line {
+  width: var(--stroke);
+  height: 100%;
+  background: var(--border-strong);
+}
+.fy-ws-divider[data-axis='column'] .fy-ws-divider-line {
+  width: 100%;
+  height: var(--stroke);
+}
+.fy-ws-divider:hover .fy-ws-divider-line,
+.fy-ws-divider:focus-visible .fy-ws-divider-line {
+  background: var(--accent);
+}
+.fy-ws-divider:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* ---- agent-control marker ---------------------------------------------- */
+.fy-ws-marker {
+  max-width: calc(100% - 2 * var(--gap-sm));
+  white-space: nowrap;
+  position: absolute;
+  top: var(--gap-sm);
+  right: var(--gap-sm);
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-xs) var(--gap-xs) var(--pad-control-x);
+  border: var(--stroke) solid var(--warn-border);
+  border-radius: 999px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.fy-ws-marker[data-state='human'] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-ws-marker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--warn);
+}
+.fy-ws-marker-action {
+  min-height: var(--control-h-sm);
+  padding: 0 var(--pad-control-x);
+  border: var(--stroke) solid currentColor;
+  border-radius: 999px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A class `display` beats the user-agent `[hidden]` rule; retained bodies and a
+   parked workspace must really disappear. */
+.fy-ws-panel[hidden],
+.fy-ws-split-child[hidden] {
+  display: none;
+}

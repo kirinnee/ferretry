@@ -51,6 +51,22 @@ import type { InteractionMode } from '@ferretry/protocol';
 import type { ComposerEnterKeyPreference } from './composer-keybinding.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
+/**
+ * WHICH KEYS OPEN A REFERENCE MENU — Settings › Behaviour › "Open suggestions with".
+ *
+ *   ladder   @ files, @@ agents, @@@ attention. Typing `:` or `!` in prose never pops a menu.
+ *   symbols  @ files, then the direct sigils `:` agents and `!` attention. No `@@` tiers.
+ *   both     either way works.
+ *
+ * `/` and `%` open in every mode. The default is the ladder because a single repeated key
+ * teaches itself from the legend, while the symbols are ordinary punctuation in prose.
+ */
+export type SuggestionKeys = 'ladder' | 'symbols' | 'both';
+
+export const SUGGESTION_KEYS: readonly SuggestionKeys[] = ['ladder', 'symbols', 'both'];
+
+export const DEFAULT_SUGGESTION_KEYS: SuggestionKeys = 'ladder';
+
 /** The sole browser-storage key for persisted UI controls. */
 export const CONTROLS_KEY = 'fy-controls-v1';
 export const CONTROLS_VERSION = 1;
@@ -86,18 +102,16 @@ export interface DeviceControls {
   readonly composerEnterKey: ComposerEnterKeyPreference | null;
   readonly sidebarCollapsed: boolean;
   /**
-   * Whether the composer OFFERS the whole `@` ladder — bare `@` files and the
-   * repeated `@@` / `@@@` / `@@@@` tiers alike.
+   * Which keys open the composer's reference menu: the `@` ladder, the direct
+   * symbols, or both (`SuggestionKeys`).
    *
-   * Every suggestion field below governs a MENU and nothing else. An authored
+   * Every suggestion field governs a MENU and nothing else. An authored
    * reference is still parsed, still proved and still linked with the menu off,
    * and inserting one from elsewhere (the transcript's Add to chat) is not a
    * suggestion and never consults these. That asymmetry is the whole contract:
    * turning a family off removes an offer, never a capability.
    */
-  readonly mentionSuggestions: boolean;
-  /** Whether the direct sigils `:` agent, `&` task and `!` attention open a menu. */
-  readonly directReferenceSuggestions: boolean;
+  readonly suggestionKeys: SuggestionKeys;
   /** Whether `$` opens the skill menu. `/` is a command surface and is never governed. */
   readonly skillSuggestions: boolean;
   /**
@@ -127,8 +141,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   chatWidth: 'full',
   composerEnterKey: null,
   sidebarCollapsed: false,
-  mentionSuggestions: true,
-  directReferenceSuggestions: true,
+  suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
   composerVimMode: false,
 });
@@ -217,11 +230,12 @@ const readDeviceControls = (value: unknown): DeviceControls => {
     composerEnterKey:
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
     sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
-    mentionSuggestions: readFlag(fields.mentionSuggestions, DEFAULT_DEVICE_CONTROLS.mentionSuggestions),
-    directReferenceSuggestions: readFlag(
-      fields.directReferenceSuggestions,
-      DEFAULT_DEVICE_CONTROLS.directReferenceSuggestions,
-    ),
+    // The two switches this choice replaced (`mentionSuggestions`, `directReferenceSuggestions`) may
+    // still sit in a stored record; they are left unread rather than translated, because the new
+    // default is a deliberate change of offer and an old "all on" is not a choice of keys.
+    suggestionKeys: (SUGGESTION_KEYS as readonly unknown[]).includes(fields.suggestionKeys)
+      ? (fields.suggestionKeys as SuggestionKeys)
+      : DEFAULT_DEVICE_CONTROLS.suggestionKeys,
     skillSuggestions: readFlag(fields.skillSuggestions, DEFAULT_DEVICE_CONTROLS.skillSuggestions),
     composerVimMode: readFlag(fields.composerVimMode, DEFAULT_DEVICE_CONTROLS.composerVimMode),
   };

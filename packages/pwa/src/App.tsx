@@ -11,6 +11,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { composerSuggestionSwitches } from './components/composer-autocomplete.ts';
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
 import { liveStreamState } from './components/live-stream-indicator.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
@@ -38,8 +39,8 @@ import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
-import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
+import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -70,7 +71,7 @@ import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
-import { UNLOCK_COPY, StepUpDialog } from './features/step-up/step-up-dialog.tsx';
+import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
@@ -79,6 +80,7 @@ import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useFleetPoll } from './hooks/use-fleet-poll.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
@@ -86,10 +88,11 @@ import {
   useNotificationControls,
   useNotificationWatch,
 } from './hooks/use-notifications.ts';
+import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
 import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
 import {
-  type ServiceWorkerUpdateEnvironment,
   canRegister,
+  type ServiceWorkerUpdateEnvironment,
   useServiceWorkerUpdate,
   workerUrl,
 } from './hooks/use-service-worker-update.ts';
@@ -99,7 +102,7 @@ import { useWardenStatus } from './hooks/use-warden-status.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
-import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
+import { projectKeyFor } from './lib/fleet-grouping.ts';
 import type {
   NotificationPermissionState,
   NotificationRegistrationLike,
@@ -136,14 +139,29 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
+import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
-import { AppBar, AppTabBar, appBarDestinationForRoute, type Crumb, showsTabBar } from './shell/app-bar.tsx';
+import {
+  AppBar,
+  AppTabBar,
+  appBarDestinationForRoute,
+  type Crumb,
+  showsTabBar,
+  UPDATE_CHIP,
+  type UpdateReason,
+} from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
+import { InsightsFrame } from './shell/insights-frame.tsx';
+import {
+  SessionsBar,
+  type SessionsBarPlace,
+  type SessionsBarPresentation,
+  type SessionsBarUpdate,
+} from './shell/sessions-bar.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
-import { ThemeToggle } from './shell/theme-toggle.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
 
 /**
@@ -620,6 +638,102 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/**
+ * The phone's sessions drawer opener, for the one page that draws its own ☰: the session page's bar.
+ * `null` wherever there is no drawer to open — every width but a phone.
+ */
+const SessionsDrawerContext = createContext<(() => void) | null>(null);
+
+/** The sessions bar's reload offer, worded exactly as the app bar's chip always was. */
+export const updateOffer = (reason: UpdateReason): SessionsBarUpdate => ({
+  ...UPDATE_CHIP[reason],
+  tone: reason === 'recovery' ? 'warn' : 'accent',
+});
+
+/** Which foot place of the sessions bar a route belongs to. */
+export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
+  switch (route.kind) {
+    case 'projects':
+    case 'project-detail':
+      return 'projects';
+    case 'analytics':
+    case 'warden':
+    case 'learning':
+      return 'insights';
+    case 'settings':
+      return 'settings';
+    default:
+      return null;
+  }
+};
+
+/**
+ * The sessions bar, wired to the app store: this machine's sessions kept fresh, its projects, every
+ * paired machine for the switcher, and the reader's collapsed preference.
+ */
+function ShellSessionsBar({
+  connection,
+  route,
+  presentation,
+  onClose,
+  onOpenPalette,
+  search,
+  updateReady,
+  onApplyUpdate,
+}: {
+  readonly connection: DaemonConnection;
+  readonly route: PageRoute;
+  readonly presentation: SessionsBarPresentation;
+  readonly onClose: (() => void) | undefined;
+  readonly onOpenPalette: () => void;
+  readonly search: ReactNode;
+  readonly updateReady: UpdateReason | null;
+  readonly onApplyUpdate: () => void;
+}) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const { connections } = useConnectionSnapshot();
+  useFleetPoll(store.fleet, connection);
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  const projects = useProjects(store.projects, connection);
+  const collapsed = useSyncExternalStore(store.controls.subscribe, () =>
+    store.controls.controls(connection.daemonId),
+  ).sidebarCollapsed;
+  const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
+  // A desktop column the reader may fold to a rail; a rail the viewport forces is not theirs to unfold.
+  const shape: SessionsBarPresentation = presentation === 'column' && collapsed ? 'rail' : presentation;
+  return (
+    <SessionsBar
+      active={sessionsBarPlace(route)}
+      activeSessionId={route.kind === 'session' ? route.sessionId : null}
+      daemonId={connection.daemonId}
+      machineName={record === undefined ? daemonDisplayName(connection) : distinctDaemonName(record, connections)}
+      machines={connections.map(candidate => ({
+        daemonId: candidate.daemonId,
+        name: distinctDaemonName(candidate, connections),
+      }))}
+      {...(updateReady === null ? {} : { update: updateOffer(updateReady), onApplyUpdate })}
+      onAddMachine={() => navigate(connectionPickerPath())}
+      onNavigate={navigate}
+      onOpenPalette={onOpenPalette}
+      presentation={shape}
+      projects={projects}
+      sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
+      {...(search === undefined ? {} : { search })}
+      {...(onClose === undefined ? {} : { onClose })}
+      {...(shape === 'column'
+        ? { onCollapse: () => store.controls.setDeviceControls({ sidebarCollapsed: true }) }
+        : {})}
+      {...(presentation === 'column' && shape === 'rail'
+        ? { onExpand: () => store.controls.setDeviceControls({ sidebarCollapsed: false }) }
+        : {})}
+    />
+  );
+}
+
 type SessionState = 'opening' | 'connected' | 'failed';
 
 /**
@@ -682,19 +796,17 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const fleet = useSyncExternalStore(subscribe, snapshot);
   const controls = useSyncExternalStore(store.controls.subscribe, () => store.controls.controls(daemonId));
   // THE mapping from the persisted device preference to the composer's rule,
-  // written once. It is memoised on the three booleans rather than rebuilt on
+  // written once. It is memoised on the two values rather than rebuilt on
   // every render because the composer rebuilds its providers from it, and a
   // fresh object each render would abort an open list on every keystroke.
   const composerSuggestions = useMemo(
-    () => ({
-      mentionSuggestions: controls.mentionSuggestions,
-      directReferenceSuggestions: controls.directReferenceSuggestions,
-      skillSuggestions: controls.skillSuggestions,
-    }),
-    [controls.mentionSuggestions, controls.directReferenceSuggestions, controls.skillSuggestions],
+    () => composerSuggestionSwitches(controls.suggestionKeys, controls.skillSuggestions),
+    [controls.suggestionKeys, controls.skillSuggestions],
   );
   const fleetSlice = fleet.daemons.get(scope.daemonId);
   const session = fleetSlice?.byId.get(scope.sessionId);
+  const openSessions = useContext(SessionsDrawerContext);
+  const projects = useKnownProjects(store.projects, daemonId);
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -970,8 +1082,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
             ? {}
             : { daemonSessions: fleetSlice.sessions })}
           entries={entries}
-          onBack={() => navigate(daemonSessionsPath(connection.daemonId))}
           onNavigate={navigate}
+          {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
+          project={projectKeyFor(session.config.cwd, projects).name}
           onRefresh={refresh}
           onSessionChange={publishSession}
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
@@ -1245,15 +1358,30 @@ const WARDEN_SLOTS = {
 } as const;
 
 function WardenRoute({ connection }: DaemonPageProps) {
-  return <WardenPage connection={connection} slots={WARDEN_SLOTS} />;
+  const { navigate } = useRouter();
+  return (
+    <InsightsFrame current="warden" daemonId={connection.daemonId} onNavigate={navigate}>
+      <WardenPage connection={connection} slots={WARDEN_SLOTS} />
+    </InsightsFrame>
+  );
 }
 
 function AnalyticsRoute({ connection }: DaemonPageProps) {
-  return <GlobalAnalyticsPage connection={connection} />;
+  const { navigate } = useRouter();
+  return (
+    <InsightsFrame current="analytics" daemonId={connection.daemonId} onNavigate={navigate}>
+      <GlobalAnalyticsPage connection={connection} />
+    </InsightsFrame>
+  );
 }
 
 function LearningRoute({ connection }: DaemonPageProps) {
-  return <LearningPage connection={connection} />;
+  const { navigate } = useRouter();
+  return (
+    <InsightsFrame current="learning" daemonId={connection.daemonId} onNavigate={navigate}>
+      <LearningPage connection={connection} />
+    </InsightsFrame>
+  );
 }
 
 function ImportedHistoryRoute({ connection }: DaemonPageProps) {
@@ -1543,6 +1671,10 @@ export function AppShell() {
     [],
   );
   const closePalette = useCallback(() => setPalette(current => ({ ...current, open: false })), []);
+  /** The phone's sessions drawer, behind the session bar's ☰ and the top bar's opener. */
+  const [sessionsDrawer, setSessionsDrawer] = useState(false);
+  const openSessionsDrawer = useCallback(() => setSessionsDrawer(true), []);
+  const closeSessionsDrawer = useCallback(() => setSessionsDrawer(false), []);
   /*
    * THE SETTINGS CATALOG ANSWERS THE WHOLE SETTINGS QUESTION.
    *
@@ -1563,6 +1695,8 @@ export function AppShell() {
     [pushToTalk],
   );
   const { touchAffected } = useInputModality();
+  const sidebarCollapsed = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot()).device
+    .sidebarCollapsed;
   const currentSessionScope = useMemo(
     () =>
       connection !== undefined && pageRoute.kind === 'session'
@@ -1586,6 +1720,11 @@ export function AppShell() {
    * the browser has already placed focus, and stealing it would skip whatever
    * the reader was given.
    */
+  /**
+   * WHERE THIS SESSION'S SEARCH IS MOUNTED: in the sessions bar's full column, on a session page. A rail
+   * and a phone have no room for it, so there Cmd/Ctrl+K opens the finder instead of focusing nothing.
+   */
+  const barSessionSearch = currentSessionScope !== null && layout === 'full' && !sidebarCollapsed;
   const pageKey = routePageKey(effectiveRoute);
   const routeAnnouncer = useRef<HTMLParagraphElement>(null);
   // Seed the previous key during render instead of latching the first effect.
@@ -1617,7 +1756,7 @@ export function AppShell() {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
-      const sessionScoped = currentSessionScope !== null;
+      const sessionScoped = barSessionSearch;
       if (isModalShortcutTarget(event.target)) return;
       if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();
@@ -1626,7 +1765,7 @@ export function AppShell() {
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [currentSessionScope, openPalette]);
+  }, [barSessionSearch, openPalette]);
 
   let content: ReactNode;
   if (effectiveRoute.kind === 'setup') {
@@ -1667,70 +1806,93 @@ export function AppShell() {
     );
   } else {
     const sessions = fleet.daemons.get(connection.daemonId)?.sessions ?? [];
+    const phone = layout === 'drawer';
+    const sessionsBar = (presentation: SessionsBarPresentation, onClose?: () => void) => (
+      <ShellSessionsBar
+        connection={connection}
+        onClose={onClose}
+        onOpenPalette={openPalette}
+        presentation={presentation}
+        route={pageRoute}
+        // ONE SEARCH. On a session page it is that session's own file search, which Cmd/Ctrl+K focuses;
+        // everywhere else the bar's box opens the finder.
+        search={barSessionSearch ? <SessionSearchControl shortcutTarget /> : undefined}
+        updateReady={updateReady}
+        onApplyUpdate={applyUpdate}
+      />
+    );
     content = (
       <SessionSearchProvider connection={connection} focusSignal={sessionSearchFocusSignal} scope={currentSessionScope}>
-        <div className="kt-shell flex flex-col overflow-hidden">
-          <AppBar
-            crumbs={pageCrumbs(pageRoute)}
-            daemon={connection.daemonId}
-            onOpenPalette={openPalette}
-            sessionCount={sessions.length}
-            updateReady={updateReady}
-            onApplyUpdate={applyUpdate}
-            active={appBarDestinationForRoute(pageRoute)}
-            onNavigate={navigate}
-            themeToggle={<ThemeToggle />}
-            tabBarShown={layout === 'drawer' && showsTabBar(pageRoute)}
-            {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl shortcutTarget /> })}
-          />
-          <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
-          {pageRoute.kind === 'settings' ? null : (
-            <PasskeyNudge
-              key={String(connection.daemonId)}
-              connection={connection}
-              onOpenSecurity={() => navigate(`${daemonSettingsPath(connection.daemonId)}#security`)}
-            />
-          )}
-          {/*
-            The finder's touch affordance wraps the page area rather than one
-            page: a phone has no Cmd/Ctrl+K, and the top bar's own Find button is
-            behind the destination sheet on that width. The region is passive and
-            discovers the touched page scroller, so ordinary scrolling stays
-            browser-owned and a transcript — where the same movement loads history
-            — can explicitly decline it.
-          */}
-          <PullToPaletteRegion
-            className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3"
-            enabled={touchAffected}
-            onOpen={openPalette}
-          >
-            <DeviceRefusedGate connection={connection}>
-              <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
-                <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
-              </ChunkErrorBoundary>
-            </DeviceRefusedGate>
-          </PullToPaletteRegion>
-          {/* The phone's level one sits under the page, above the home indicator. */}
-          {layout === 'drawer' && showsTabBar(pageRoute) ? (
-            <AppTabBar
+        <SessionsDrawerContext.Provider value={phone ? openSessionsDrawer : null}>
+          <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`}>
+            {phone ? null : sessionsBar(layout === 'rail' ? 'rail' : 'column')}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* A phone keeps its top bar off the session page only: there the session's own bar
+                  carries ☰, and every other page still needs a way to the drawer and the finder. */}
+              {phone && pageRoute.kind !== 'session' ? (
+                <AppBar
+                  crumbs={pageCrumbs(pageRoute)}
+                  daemon={connection.daemonId}
+                  onOpenPalette={openPalette}
+                  onOpenSidebar={openSessionsDrawer}
+                  sessionCount={sessions.length}
+                  updateReady={updateReady}
+                  onApplyUpdate={applyUpdate}
+                  active={appBarDestinationForRoute(pageRoute)}
+                  onNavigate={navigate}
+                  tabBarShown={showsTabBar(pageRoute)}
+                />
+              ) : null}
+              <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
+              {pageRoute.kind === 'settings' ? null : (
+                <PasskeyNudge
+                  key={String(connection.daemonId)}
+                  connection={connection}
+                  onOpenSecurity={() => navigate(`${daemonSettingsPath(connection.daemonId)}#security`)}
+                />
+              )}
+              {/*
+                The finder's touch affordance wraps the page area rather than one
+                page: a phone has no Cmd/Ctrl+K. The region is passive and
+                discovers the touched page scroller, so ordinary scrolling stays
+                browser-owned and a transcript — where the same movement loads history
+                — can explicitly decline it.
+              */}
+              <PullToPaletteRegion
+                className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3"
+                enabled={touchAffected}
+                onOpen={openPalette}
+              >
+                <DeviceRefusedGate connection={connection}>
+                  <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
+                    <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+                  </ChunkErrorBoundary>
+                </DeviceRefusedGate>
+              </PullToPaletteRegion>
+              {/* The phone's level one sits under the page, above the home indicator. */}
+              {phone && showsTabBar(pageRoute) ? (
+                <AppTabBar
+                  daemon={connection.daemonId}
+                  active={appBarDestinationForRoute(pageRoute)}
+                  onNavigate={navigate}
+                  onOpenPalette={openPalette}
+                />
+              ) : null}
+            </div>
+            {phone && sessionsDrawer ? sessionsBar('drawer', closeSessionsDrawer) : null}
+            <CommandPalette
+              open={palette.open}
+              focusSignal={palette.focusSignal}
+              onClose={closePalette}
               daemon={connection.daemonId}
-              active={appBarDestinationForRoute(pageRoute)}
+              sessions={paletteSessionEntries(sessions)}
               onNavigate={navigate}
-              onOpenPalette={openPalette}
+              settings={paletteSettings}
+              touchAffected={touchAffected}
+              shortcutAvailable={!barSessionSearch}
             />
-          ) : null}
-          <CommandPalette
-            open={palette.open}
-            focusSignal={palette.focusSignal}
-            onClose={closePalette}
-            daemon={connection.daemonId}
-            sessions={paletteSessionEntries(sessions)}
-            onNavigate={navigate}
-            settings={paletteSettings}
-            touchAffected={touchAffected}
-            shortcutAvailable={currentSessionScope === null}
-          />
-        </div>
+          </div>
+        </SessionsDrawerContext.Provider>
       </SessionSearchProvider>
     );
   }

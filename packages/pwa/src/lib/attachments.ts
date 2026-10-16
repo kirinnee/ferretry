@@ -18,7 +18,9 @@ export const DOCUMENT_MIME_TYPES = [
   'application/json',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ] as const;
-export const ATTACHMENT_MIME_TYPES = [...IMAGE_MIME_TYPES, ...DOCUMENT_MIME_TYPES] as const;
+/** Voice notes and recordings: the agent is handed the file and transcribes or plays it itself. */
+export const AUDIO_MIME_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg'] as const;
+export const ATTACHMENT_MIME_TYPES = [...IMAGE_MIME_TYPES, ...DOCUMENT_MIME_TYPES, ...AUDIO_MIME_TYPES] as const;
 export type AttachmentMime = (typeof ATTACHMENT_MIME_TYPES)[number];
 
 export type AttachmentErrorCode =
@@ -121,6 +123,11 @@ const MIME_ALIASES: Readonly<Record<string, AttachmentMime>> = {
   'application/x-pdf': 'application/pdf',
   'text/x-markdown': 'text/markdown',
   'text/x-csv': 'text/csv',
+  'audio/x-m4a': 'audio/mp4',
+  'audio/m4a': 'audio/mp4',
+  'audio/mp3': 'audio/mpeg',
+  'audio/x-wav': 'audio/wav',
+  'audio/wave': 'audio/wav',
 };
 
 const GENERIC_DECLARED_MIME_TYPES = new Set(['', 'application/octet-stream', 'binary/octet-stream']);
@@ -217,8 +224,15 @@ export const validateAttachmentFile = (file: Pick<File, 'size' | 'type'>): Attac
   if (file.size > MAX_ATTACHMENT_BYTES) return 'attachment_too_large';
   const normalized = normalizeAttachmentMime(file.type.trim().toLowerCase());
   if (GENERIC_DECLARED_MIME_TYPES.has(normalized)) return null;
+  // Any text the browser can name — a source file is `text/x-typescript` on one OS and `text/plain`
+  // on another — because the agent reads it as text whatever its subtype.
+  if (normalized.startsWith('text/')) return null;
   return (ATTACHMENT_MIME_TYPES as readonly string[]).includes(normalized) ? null : 'unsupported_mime';
 };
+
+/** Is this a recording the composer previews as audio? */
+export const isAudioMime = (mime: string | undefined): boolean =>
+  (AUDIO_MIME_TYPES as readonly string[]).includes(normalizeAttachmentMime(mime));
 
 export const normalizeAttachmentMime = (mime: string | undefined): string => {
   const bare = (mime ?? '').split(';', 1)[0]?.trim().toLowerCase() ?? '';
@@ -242,6 +256,12 @@ export const attachmentTypeLabel = (mime: string | undefined): string => {
       return 'JSON file';
     case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
       return 'Word document';
+    case 'audio/mpeg':
+    case 'audio/mp4':
+    case 'audio/wav':
+    case 'audio/webm':
+    case 'audio/ogg':
+      return 'Audio recording';
     default:
       return mime || 'File';
   }
