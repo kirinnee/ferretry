@@ -293,14 +293,17 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
                 {notice ?? 'Nothing matches yet'}
               </div>
             ) : (
-              candidateSections(candidates).map(section =>
+              candidateSections(candidates).map((section, _index, sections) =>
                 section.group === undefined ? (
                   rows(section)
                 ) : (
                   <fieldset aria-label={section.group} className="m-0 min-w-0 border-0 p-0" key={section.group}>
-                    <div aria-hidden="true" className="fy-ac-group">
-                      {section.group}
-                    </div>
+                    {/* One group needs no heading: the header above already names the list. */}
+                    {sections.length === 1 ? null : (
+                      <div aria-hidden="true" className="fy-ac-group">
+                        {section.group}
+                      </div>
+                    )}
                     {rows(section)}
                   </fieldset>
                 ),

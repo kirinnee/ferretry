@@ -647,11 +647,13 @@
 .fy-transcript-details-toggle {
   background: transparent;
   border: 0;
-  border-bottom: 1px dashed var(--border-strong, var(--fy-border));
   color: var(--faint, var(--fy-muted));
   cursor: pointer;
   font-size: 12px;
-  padding: 0;
+  min-height: 0;
+  padding: 2px 0;
+  text-decoration: underline dashed var(--border-strong, var(--fy-border));
+  text-underline-offset: 3px;
 }
 .fy-transcript-details-toggle:hover {
   color: var(--fy-fg);
@@ -705,7 +707,26 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
   position: relative;
+}
+/* A wide row of attachment previews scrolls inside the composer; it never widens the chat column. */
+.fy-composer > * {
+  min-width: 0;
+}
+/* No accent ring on the line itself: the row's border is the focus signal. */
+.fy-composer textarea:focus,
+.fy-composer textarea:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+/* One line at rest even under a coarse pointer: the 44px touch floor is the ROW around it. */
+.fy-composer .fy-composer-input-layer textarea {
+  min-height: 22px;
+}
+.fy-composer .fy-composer-row button {
+  min-height: 36px;
+  min-width: 36px;
 }
 .fy-composer-row {
   align-items: flex-end;
