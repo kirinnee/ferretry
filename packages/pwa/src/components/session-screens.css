@@ -802,10 +802,17 @@
   outline: 2px solid var(--fy-accent);
   outline-offset: 2px;
 }
+.fy-composer-recalled {
+  color: var(--warn, var(--fy-muted));
+  font-size: 12px;
+  margin: 0;
+  padding: 0 4px;
+}
 /* THE RICH TEXT EDITOR STYLE: a contenteditable document in the composer row. Headings at their real
    size, lists, quotes and marks rendered; the draft underneath is still markdown. */
 .fy-rich-editor {
   align-self: center;
+  position: relative;
   color: var(--fy-fg);
   flex: 1 1 auto;
   line-height: 22px;

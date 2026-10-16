@@ -201,6 +201,10 @@ function ComposerReferenceStrip({
   );
 }
 
+/** The daemon's words for a message that waits behind the running turn rather than arriving now. */
+const isQueuedDisposition = (disposition: unknown): boolean =>
+  disposition === 'queued' || disposition === 'queued-for-revive';
+
 /** Does a drag or a drop carry files, rather than text or a link? */
 const hasFiles = (transfer: Pick<DataTransfer, 'types'> | null): boolean =>
   transfer !== null && Array.from(transfer.types).includes('Files');
@@ -494,11 +498,15 @@ export function Composer({
     setSending(true);
     setError(null);
     try {
-      await api.send(sessionId, {
-        message: draft.trim() || 'See the attached files.',
+      const message = draft.trim() || 'See the attached files.';
+      const sent = (await api.send(sessionId, {
+        message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
         now: !busy,
-      });
+      })) as { readonly disposition?: unknown } | undefined;
+      // Remembered only while it waits in the agent's queue: ↑ in an empty box brings it back.
+      lastQueued.current = isQueuedDisposition(sent?.disposition) ? { key: scopeKey, text: message } : null;
+      setRecalled(false);
       for (const provider of autocompleteProviders) provider.reset?.();
       attachments.clear();
       setDraft('');
@@ -563,6 +571,24 @@ export function Composer({
     },
     [setDraft],
   );
+
+  /**
+   * ↑ IN AN EMPTY BOX BRINGS BACK THE LAST QUEUED MESSAGE — this browser's last send to this session
+   * that the daemon reported as queued behind a running turn.
+   *
+   * The harness already holds the original in its own queue, and no daemon route can take a typed
+   * message back out of it, so this is an edit of a COPY: the box says so, and that the original will
+   * still arrive unless the turn is interrupted. Recalling never sends and never withdraws anything.
+   */
+  const lastQueued = useRef<{ readonly key: string; readonly text: string } | null>(null);
+  const [recalled, setRecalled] = useState(false);
+  const recallQueued = (): boolean => {
+    const queued = lastQueued.current;
+    if (queued === null || queued.key !== scopeKey || draft !== '') return false;
+    setDraft(queued.text);
+    setRecalled(true);
+    return true;
+  };
 
   /** Does this Enter send? ⌘/Ctrl always does; otherwise this device's send key, reversed by Shift. */
   const sendsOnEnter = (event: { readonly shiftKey: boolean; readonly metaKey: boolean; readonly ctrlKey: boolean }) => {
@@ -765,6 +791,10 @@ export function Composer({
                   return;
                 }
               }
+              if (event.key === 'ArrowUp' && !modified && !event.shiftKey && recallQueued()) {
+                event.preventDefault();
+                return;
+              }
               if (event.key !== 'Enter') return;
               // ⌘/Ctrl+Enter sends in every mode, on every device.
               if (modified) {
@@ -867,6 +897,12 @@ export function Composer({
           </button>
         ) : null}
       </div>
+      {recalled && draft !== '' ? (
+        <p className="fy-composer-recalled" data-composer-recalled="" role="status">
+          Editing a copy of your queued message. The original is still in the agent’s queue and will arrive too
+          unless you interrupt the turn.
+        </p>
+      ) : null}
       {error ? (
         <p className="fy-composer-error" role="alert">
           {error}

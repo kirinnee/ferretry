@@ -51,7 +51,7 @@ class MemoryStorage implements DraftStorage {
 
 const daemon = daemonConnection({ daemonId: 'edit', baseUrl: 'https://edit.example.test', deviceId: 'device' });
 
-const mountComposer = (draft: string) => {
+const mountComposer = (draft: string, disposition?: string) => {
   const sent: unknown[] = [];
   const store = new DaemonDraftStore(new MemoryStorage());
   const view = render(
@@ -59,7 +59,7 @@ const mountComposer = (draft: string) => {
       api={{
         send: async (_id: string, request: unknown) => {
           sent.push(request);
-          return {} as never;
+          return (disposition === undefined ? {} : { disposition }) as never;
         },
       }}
       daemon={daemon}
@@ -132,6 +132,27 @@ describe('the Notion-style composer keys', () => {
     const remove = view.view.root.findByProps({ 'aria-label': 'Remove @src/app.ts from this message' });
     run(() => remove.props.onClick());
     expect(view.textarea().props.value).toBe('see  now');
+  });
+
+  test('↑ in an empty box brings back a copy of the last queued message, and says the original still runs', async () => {
+    const view = mountComposer('fix it later', 'queued');
+    expect(view.key({ key: 'ArrowUp' })).toBe(false);
+    await runAsync(async () => {
+      view.key({ key: 'Enter' });
+    });
+    expect(view.textarea().props.value).toBe('');
+    expect(view.key({ key: 'ArrowUp', shiftKey: true })).toBe(false);
+    expect(view.key({ key: 'ArrowUp' })).toBe(true);
+    expect(view.textarea().props.value).toBe('fix it later');
+    expect(view.view.root.findByProps({ 'data-composer-recalled': '' }).props.role).toBe('status');
+    // A full box is the reader's own text: ↑ moves the caret as it always has.
+    expect(view.key({ key: 'ArrowUp' })).toBe(false);
+
+    const delivered = mountComposer('now', 'delivered');
+    await runAsync(async () => {
+      delivered.key({ key: 'Enter' });
+    });
+    expect(delivered.key({ key: 'ArrowUp' })).toBe(false);
   });
 
   test('the plain text box keeps Enter and ⌘B to the browser', () => {
