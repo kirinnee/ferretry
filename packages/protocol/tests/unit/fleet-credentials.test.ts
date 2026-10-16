@@ -49,6 +49,106 @@ const view = {
   },
 } satisfies FleetCredentialView;
 
+const testAct = {
+  available: true,
+  spends: 'nothing',
+  note: 'Lists the models the key can use. Spends nothing.',
+} as const;
+
+const environment = {
+  preset: { id: 'zai-glm', label: 'GLM / Z.ai', docs: 'https://docs.z.ai/devpack/tool/claude' },
+  variables: [
+    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic' },
+    { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['ZAI_API_KEY'], set: true },
+    { name: 'PASTED', kind: 'hidden' },
+  ],
+  cloudCredential: {
+    reference: 'aws-profile:acme',
+    kind: 'aws-profile',
+    sentence: 'Uses your AWS profile acme on this machine. It is named here, never copied.',
+    variable: 'AWS_PROFILE',
+  },
+  codexProvider: { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.ai/v1' },
+  quotaSource: 'zai-coding-plan',
+  missingSecrets: [],
+  test: testAct,
+} as const;
+
+const preset = {
+  id: 'zai-glm',
+  label: 'GLM / Z.ai',
+  harness: 'claude',
+  summary: 'Claude Code on GLM models with a Z.ai Coding Plan key.',
+  docs: 'https://docs.z.ai/devpack/tool/claude',
+  origin: 'built-in',
+  variables: [
+    {
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      value: 'https://api.z.ai/api/anthropic',
+      required: true,
+      allowEmpty: false,
+    },
+    { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'ZAI_API_KEY', required: true, allowEmpty: false },
+  ],
+  cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
+  models: ['glm-5.3'],
+  test: testAct,
+  quota: { source: 'zai-coding-plan', note: 'A 5-hour and a weekly window.' },
+  unverified: ['The quota endpoint is described by community tools.'],
+  verified: '2026-10-16',
+  offered: { available: true },
+} as const;
+
+const testResult = {
+  credentialId: 'glm',
+  ok: false,
+  code: 'consent_required',
+  message: 'Confirm to send it.',
+  spent: 'nothing',
+  at: INSTANT,
+} as const;
+
+/** The environment-login half of the contract (docs/provider-presets.md). */
+const ENVIRONMENT_CASES: readonly SchemaCase[] = [
+  { name: 'ProviderQuotaSourceSchema', schema: credentials.ProviderQuotaSourceSchema, value: 'deepseek-balance' },
+  { name: 'CloudCredentialKindSchema', schema: credentials.CloudCredentialKindSchema, value: 'gcloud-adc' },
+  {
+    name: 'FleetEnvironmentVariableSchema',
+    schema: credentials.FleetEnvironmentVariableSchema,
+    value: environment.variables[1],
+  },
+  {
+    name: 'FleetCloudCredentialViewSchema',
+    schema: credentials.FleetCloudCredentialViewSchema,
+    value: environment.cloudCredential,
+  },
+  {
+    name: 'FleetCredentialTestActSchema',
+    schema: credentials.FleetCredentialTestActSchema,
+    value: { available: false, reason: 'Needs request signing.' },
+  },
+  {
+    name: 'FleetCredentialEnvironmentSchema',
+    schema: credentials.FleetCredentialEnvironmentSchema,
+    value: environment,
+  },
+  {
+    name: 'FleetCredentialTestRequestSchema',
+    schema: credentials.FleetCredentialTestRequestSchema,
+    value: { allowInference: true },
+  },
+  { name: 'FleetCredentialTestCodeSchema', schema: credentials.FleetCredentialTestCodeSchema, value: 'not_testable' },
+  { name: 'FleetCredentialTestResultSchema', schema: credentials.FleetCredentialTestResultSchema, value: testResult },
+  { name: 'FleetPresetVariableSchema', schema: credentials.FleetPresetVariableSchema, value: preset.variables[0] },
+  { name: 'FleetProviderPresetViewSchema', schema: credentials.FleetProviderPresetViewSchema, value: preset },
+  {
+    name: 'FleetProviderPresetCatalogSchema',
+    schema: credentials.FleetProviderPresetCatalogSchema,
+    value: { presets: [preset] },
+  },
+];
+
 const cases: readonly SchemaCase[] = [
   { name: 'FleetCredentialIdSchema', schema: credentials.FleetCredentialIdSchema, value: 'claude-work' },
   { name: 'FleetCredentialStatusWordSchema', schema: credentials.FleetCredentialStatusWordSchema, value: 'checking' },
@@ -82,6 +182,7 @@ const cases: readonly SchemaCase[] = [
     schema: credentials.FleetCredentialCheckRequestSchema,
     value: {},
   },
+  ...ENVIRONMENT_CASES,
 ];
 
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
@@ -139,5 +240,45 @@ describe('the credential wire contract', () => {
     // Assert
     should(parsed.fiveHour).not.have.property('usedPercent');
     should(parsed).not.have.property('source');
+  });
+});
+
+describe('the environment-login wire contract (docs/provider-presets.md)', () => {
+  it('should carry a login row with its environment, and refuse a secret value anywhere in it', () => {
+    // Act
+    const parsed = credentials.FleetCredentialViewSchema.parse({ ...view, store: 'environment', environment });
+
+    // Assert
+    should(parsed.environment?.variables[1]).deepEqual({
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      kind: 'secret',
+      secrets: ['ZAI_API_KEY'],
+      set: true,
+    });
+    assertRejects([
+      rejects('a secret variable carrying its value', credentials.FleetEnvironmentVariableSchema, {
+        ...environment.variables[1],
+        value: 'sk-fake',
+      }),
+      rejects('a hidden variable carrying its value', credentials.FleetEnvironmentVariableSchema, {
+        name: 'PASTED',
+        kind: 'hidden',
+        value: 'sk-fake',
+      }),
+      rejects('a test request carrying a key', credentials.FleetCredentialTestRequestSchema, { key: 'sk-fake' }),
+      rejects('a test result carrying the reply', credentials.FleetCredentialTestResultSchema, {
+        ...testResult,
+        body: '{}',
+      }),
+      rejects('a preset variable carrying a secret value', credentials.FleetPresetVariableSchema, {
+        ...preset.variables[1],
+        value: 'sk-fake',
+        extra: true,
+      }),
+    ]);
+  });
+
+  it('should name the presets route', () => {
+    should(credentials.FLEET_PRESETS_PATH).equal('/v1/fleet/presets');
   });
 });

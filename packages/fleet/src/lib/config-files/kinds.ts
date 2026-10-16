@@ -45,6 +45,7 @@ import {
   SettingsComponentSchema,
   SkillsComponentSchema,
 } from '../account/schema.ts';
+import { type ProviderPresetFile, ProviderPresetFileSchema } from '../presets/schema.ts';
 
 /** `machine.yaml`: the machine's settings and the advanced block a beginner never sees. */
 export const MachineFileSchema = z.strictObject({ ...MACHINE_SHAPE, advanced: AdvancedSchema });
@@ -90,6 +91,7 @@ export const CONFIG_FILE_SCHEMAS: Readonly<Record<ConfigSchemaId, z.ZodType>> = 
   warden: WardenFileSchema,
   learning: LearningFileSchema,
   voice: VoiceConfigSchema,
+  preset: ProviderPresetFileSchema,
 };
 
 /** What each kind of file means once it has been checked. */
@@ -102,6 +104,7 @@ export interface ConfigValues {
   readonly warden: WardenConfig;
   readonly learning: LearningConfig;
   readonly voice: VoiceConfig;
+  readonly preset: ProviderPresetFile;
 }
 
 /** A checked file's meaning, from the schema's output. */
@@ -302,4 +305,6 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
   voice:
     '# Voice. Transcription is on-device; this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',
+  preset:
+    '# A provider preset: a template for environment logins (docs/provider-presets.md). Secrets are named, never written.\nlabel: My gateway\nharness: claude\nsummary: Claude Code through my gateway.\ndocs: https://example.com/docs\nverified: "2026-01-01"\nenv:\n  ANTHROPIC_BASE_URL:\n    value: https://gateway.example.com\n  ANTHROPIC_AUTH_TOKEN:\n    secretName: GATEWAY_API_KEY\ntest:\n  kind: none\n  reason: no test yet\nquota:\n  source: transcript-pricing\n  note: counted from the transcript\n',
 };

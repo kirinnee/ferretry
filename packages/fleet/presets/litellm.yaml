@@ -1,0 +1,27 @@
+# Claude Code through a LiteLLM proxy you run.
+label: LiteLLM proxy
+harness: claude
+summary: Claude Code through your own LiteLLM proxy, with a master or virtual key.
+docs: https://docs.litellm.ai/docs/tutorials/claude_responses_api
+verified: '2026-10-16'
+unverified:
+  - The Test's model list is LiteLLM's OpenAI-style route, read in community sources rather than LiteLLM's Claude Code guide.
+  - Whether a virtual key may read its own spend from /key/info is not documented.
+env:
+  ANTHROPIC_BASE_URL:
+    value: http://localhost:4000
+    description: your proxy's address
+  ANTHROPIC_AUTH_TOKEN:
+    secretName: LITELLM_API_KEY
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:
+    value: '1'
+    required: false
+models: []
+test:
+  kind: request
+  url: '{ANTHROPIC_BASE_URL}/v1/models'
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Lists the models the proxy offers this key. Spends nothing.
+quota:
+  source: litellm-key-info
+  note: The key's spend and budget, from the proxy's /key/info.

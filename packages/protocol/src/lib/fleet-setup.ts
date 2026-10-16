@@ -160,12 +160,22 @@ export type FleetSetupScan = z.infer<typeof FleetSetupScanSchema>;
 /** The bundle's format marker, so a file that is not one is refused by name. */
 export const FLEET_CLONE_BUNDLE_FORMAT = 'ferretry-clone';
 
-/** A login the source runtimes use, as a descriptor: it becomes an empty slot on the target (L2). */
+/**
+ * A login the source runtimes use, as a descriptor (L2). A signed-in login becomes an empty slot on the
+ * target. An ENVIRONMENT login (docs/provider-presets.md) travels as what its file holds — plain values,
+ * secret NAMES as `${secret:NAME}`, its cloud credential REFERENCE and its Codex provider — and never a
+ * secret value, which no file may hold; the target is told which secrets and references it needs.
+ */
 export const FleetCloneCredentialSchema = z.strictObject({
   id: NonEmptyStringSchema,
   harness: HarnessKindSchema,
   label: NonEmptyStringSchema.optional(),
   email: NonEmptyStringSchema.optional(),
+  store: z.literal('environment').optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  preset: NonEmptyStringSchema.optional(),
+  cloudCredential: NonEmptyStringSchema.optional(),
+  codexProvider: z.record(z.string(), z.unknown()).optional(),
 });
 export type FleetCloneCredential = z.infer<typeof FleetCloneCredentialSchema>;
 

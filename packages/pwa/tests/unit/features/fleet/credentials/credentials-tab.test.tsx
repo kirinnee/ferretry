@@ -3,6 +3,7 @@ import type { FleetCredentialList, FleetCredentialView, FleetMachineView } from 
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import { CredentialsTab } from '../../../../../src/features/fleet/credentials/credentials-tab.tsx';
+import { secretRef } from '../../../../../src/features/fleet/credentials/environment-model.ts';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
@@ -21,6 +22,7 @@ import {
   stagedFrom,
   withStatus,
 } from '../account-support.ts';
+import { ENVIRONMENT } from './environment-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
@@ -133,7 +135,7 @@ describe('CredentialsTab · the list', () => {
     expect(personal.getAttribute('href')).toBe('#machines/studio-mac/credentials/claude-personal');
     expect(personal.textContent).toContain('you@example.com');
     expect(personal.querySelector('[data-credential-badges]')?.textContent).toBe(
-      'personalShared with claude in your terminal',
+      'Claude onlypersonalShared with claude in your terminal',
     );
     expect(personal.textContent).toContain('Ready · Used by 3 runtimes');
     const bars = Array.from(personal.querySelectorAll('[role="img"]'));
@@ -149,7 +151,7 @@ describe('CredentialsTab · the list', () => {
     const work = must(c.querySelector('[data-credential-row="claude-work"]'), 'work row');
     expect(work.textContent).toContain('Refresh due · Used by 1 runtime');
     expect(work.querySelector('[data-credential-usage]')).toBeNull();
-    expect(work.querySelector('[data-credential-badges]')?.textContent).toBe('work');
+    expect(work.querySelector('[data-credential-badges]')?.textContent).toBe('Claude onlywork');
 
     const codexRow = must(c.querySelector('[data-credential-row="codex"]'), 'codex row');
     expect(codexRow.textContent).toContain('Shared with codex in your terminal');
@@ -177,7 +179,7 @@ describe('CredentialsTab · the list', () => {
     const { view } = await open({ [LIST]: listOf([empty, partial]) });
     const slot = must(view.container.querySelector('[data-credential-row="claude-slot"]'), 'slot row');
     expect(slot.textContent).toContain('Claude Code login');
-    expect(slot.querySelector('[data-credential-badges]')?.textContent).toBe('Copied slot from laptop');
+    expect(slot.querySelector('[data-credential-badges]')?.textContent).toBe('Claude onlyCopied slot from laptop');
     expect(slot.textContent).toContain('Needs sign-in · Not used yet');
     const half = must(view.container.querySelector('[data-credential-row="claude-half"]'), 'half row');
     expect(Array.from(half.querySelectorAll('[role="img"]')).map(bar => bar.getAttribute('aria-label'))).toEqual([
@@ -185,7 +187,7 @@ describe('CredentialsTab · the list', () => {
       'Week: not measured yet',
     ]);
     expect(half.textContent).toContain('not measured');
-    expect(half.querySelector('[data-credential-badges]')).toBeNull();
+    expect(half.querySelector('[data-credential-badges]')?.textContent).toBe('Claude only');
     expect(view.container.querySelector('[data-credentials-labels-hint]')).toBeNull();
     expect(view.container.querySelector('[data-credentials-group="codex"]')).toBeNull();
     await view.unmount();
@@ -270,7 +272,7 @@ describe('CredentialsTab · a login’s page', () => {
     expect(c.querySelector('[data-credential-page]')?.getAttribute('data-credential-page')).toBe('claude-personal');
     expect(text(c, 'h3')).toBe('Claude Code login');
     expect(text(c, '[data-credential-page] p.font-mono')).toBe('you@example.com (personal)');
-    expect(text(c, '[data-credential-badges]')).toBe('personalShared with claude in your terminal');
+    expect(text(c, '[data-credential-badges]')).toBe('Claude onlypersonalShared with claude in your terminal');
     expect(c.querySelector('[data-credential-status]')?.getAttribute('data-credential-status')).toBe('ready');
     expect(text(c, '[data-credential-status]')).toContain('Ready. Checked a few minutes ago.');
     expect(c.querySelectorAll('[data-credential-status] [role="img"]')).toHaveLength(2);
@@ -689,6 +691,36 @@ describe('CredentialsTab · Add a login from the tab', () => {
     expect(c.querySelector('[data-machine-stepper]')).toBeNull();
     expect(c.querySelector('[data-credential-page]')?.getAttribute('data-credential-page')).toBe('claude');
     expect(text(c, '[data-credential-page] p.font-mono')).toBe('new@example.com');
+    await view.unmount();
+  });
+});
+
+describe('CredentialsTab · an environment login', () => {
+  const glm = credential({ id: 'glm-env', store: 'environment', environment: ENVIRONMENT });
+  const bare = credential({ id: 'hand-env', harness: 'codex', store: 'environment' });
+
+  it('lists it by its id with its scope and preset chips', async () => {
+    const { preset: _preset, ...noPreset } = ENVIRONMENT;
+    const { view } = await open({
+      [LIST]: listOf([glm, bare, credential({ id: 'hand-made', store: 'environment', environment: noPreset })]),
+    });
+    const row = must(view.container.querySelector('[data-credential-row="glm-env"]'), 'the GLM row');
+    expect(row.textContent).toContain('glm-env');
+    expect(row.querySelector('[data-credential-badges]')?.textContent).toBe('Claude onlyEnvironment · GLM / Z.ai');
+    expect(
+      view.container.querySelector('[data-credential-row="hand-made"] [data-credential-environment-chip]')?.textContent,
+    ).toBe('Environment');
+    expect(view.container.querySelector('[data-credential-row="hand-env"] [data-credential-badges]')?.textContent).toBe(
+      'Codex only',
+    );
+    await view.unmount();
+  });
+
+  it('shows its variables and its Test on its page', async () => {
+    const { view } = await open({ [LIST]: listOf([glm]) }, { hash: `${HASH}/glm-env` });
+    const panel = must(view.container.querySelector('[data-credential-environment="glm-env"]'), 'the panel');
+    expect(panel.textContent).toContain(`${secretRef('ZAI_API_KEY')} set ✓`);
+    expect(panel.querySelector('[data-login-test-run]')).not.toBeNull();
     await view.unmount();
   });
 });

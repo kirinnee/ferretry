@@ -36,6 +36,12 @@
  */
 import { isAbsolute, join } from 'node:path';
 import type { HarnessKind } from '../manifest.ts';
+import {
+  cloudCredentialEnvironment,
+  codexProviderArgs,
+  codexProviderModelArgs,
+  parseCloudCredential,
+} from './environment.ts';
 import type { Credential } from './schema.ts';
 
 /** The directory, under the fleet root, that holds every `store: ferretry` credential. */
@@ -92,12 +98,22 @@ export interface CodexStoreResolution {
   readonly ownedDirectory?: string;
 }
 
-/** A credential that is no login at all: its own `env` authenticates every runtime on it. */
+/**
+ * A credential that is no login at all: its own `env` authenticates every runtime on it, plus the
+ * variable its cloud credential reference is handed over as and, for Codex, the launch flags that
+ * point it at its model provider (`./environment.ts`).
+ */
 export interface EnvironmentStoreResolution {
   readonly harness: HarnessKind;
   readonly store: 'environment';
   /** A secret travels as a `${secret:NAME}` reference, never a value. */
   readonly env: Readonly<Record<string, string>>;
+  /** Launch arguments every runtime on it starts with: Codex's `-c model_provider…` flags. */
+  readonly args?: readonly string[];
+  /** Why it cannot launch, when its Codex provider cannot be put together from its variables. */
+  readonly problem?: string;
+  /** The flags that start it on its Codex provider's own model, used when the profile names none. */
+  readonly modelArgs?: readonly string[];
 }
 
 /** A `host` Codex credential on a machine whose Codex home cannot be named: nothing to share. */
@@ -156,9 +172,7 @@ export function resolveCredentialStore(
   credential: Credential,
   paths: CredentialStorePaths,
 ): CredentialStoreResolution {
-  if (credential.store === 'environment') {
-    return { harness: credential.harness, store: 'environment', env: credential.env ?? {} };
-  }
+  if (credential.store === 'environment') return environmentResolution(credential, paths.userHome);
   const owned = credential.store === 'ferretry' ? ferretryCredentialDirectory(paths.fleetRoot, id) : undefined;
   if (credential.harness === 'claude') {
     const secureStorage = owned ?? HOST_CLAUDE_SECURE_STORAGE;
@@ -215,4 +229,36 @@ export function codexCredentialLink(
 ): CodexCredentialLink | undefined {
   if (resolution.harness !== 'codex' || !('canonicalFile' in resolution)) return undefined;
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.canonicalFile };
+}
+
+/** An environment credential, resolved: its variables, its cloud reference's variable, its Codex flags. */
+function environmentResolution(credential: Credential, userHome: string): EnvironmentStoreResolution {
+  const own = credential.env ?? {};
+  const reference =
+    credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
+  const env = { ...own, ...(reference === undefined ? {} : cloudCredentialEnvironment(reference, userHome)) };
+  const provider =
+    credential.codexProvider === undefined ? undefined : codexProviderArgs(credential.codexProvider, own);
+  return {
+    harness: credential.harness,
+    store: 'environment',
+    env,
+    ...(provider !== undefined && 'args' in provider ? { args: provider.args } : {}),
+    ...(provider !== undefined && 'problem' in provider ? { problem: provider.problem } : {}),
+    ...(credential.codexProvider?.model === undefined
+      ? {}
+      : { modelArgs: codexProviderModelArgs(credential.codexProvider.model) }),
+  };
+}
+
+/**
+ * The launch arguments a runtime on this credential starts with, before its profile's own: its Codex
+ * model provider, and that provider's model when the runtime's profile names none.
+ */
+export function credentialLaunchArguments(
+  resolution: CredentialStoreResolution,
+  profileNamesModel = false,
+): readonly string[] {
+  if (resolution.store !== 'environment') return [];
+  return [...(resolution.args ?? []), ...(profileNamesModel ? [] : (resolution.modelArgs ?? []))];
 }

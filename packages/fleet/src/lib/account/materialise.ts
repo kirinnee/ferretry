@@ -36,7 +36,7 @@ import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../as
 import { buildFleetManifest, type FleetManifestModel, type HarnessKind } from '../manifest.ts';
 import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
-import { serializeSettings, type SettingsObject } from '../settings.ts';
+import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolDirectory, sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../usage.ts';
 import {
@@ -56,6 +56,7 @@ import {
 import {
   CODEX_CREDENTIAL_FILE,
   codexCredentialLink,
+  credentialLaunchArguments,
   credentialLaunchEnvironment,
   resolveCredentialStore,
 } from './credentials.ts';
@@ -268,6 +269,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths);
     if ('unavailable' in store)
       reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
+    if (store.store === 'environment' && store.problem !== undefined) {
+      reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+    }
 
     const availableModels = input.availableModels?.[runtime.credential];
     const resolution = resolveProfile({
@@ -382,7 +386,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         agent: runtime.agent,
         configDirectory: home,
         env,
-        args: launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs],
+        args: [
+          ...credentialLaunchArguments(store, defaultModel !== null),
+          ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
+        ],
         defaultModel: defaultModel ?? undefined,
         seedFirstRun: runtime.agent && harness === 'claude',
         trustLaunchFolder: runtime.agent && harness === 'codex',

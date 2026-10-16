@@ -1,0 +1,29 @@
+# Claude Code through the Vercel AI Gateway.
+label: Vercel AI Gateway
+harness: claude
+summary: Claude Code through the Vercel AI Gateway, which lists the gateway's models in the model picker.
+docs: https://vercel.com/docs/ai-gateway/coding-agents/claude-code
+verified: '2026-10-16'
+unverified:
+  - The credits address the Test and usage read was found in search results, not read in Vercel's documentation.
+env:
+  ANTHROPIC_BASE_URL:
+    value: https://ai-gateway.vercel.sh/claude-code
+  ANTHROPIC_AUTH_TOKEN:
+    secretName: AI_GATEWAY_API_KEY
+  ANTHROPIC_API_KEY:
+    value: ''
+    allowEmpty: true
+    description: deliberately empty, so the gateway key is the one sent
+  CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:
+    value: '1'
+    required: false
+models: [claude-code/anthropic/claude-opus-5]
+test:
+  kind: request
+  url: https://ai-gateway.vercel.sh/v1/credits
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Reads the gateway's credit balance. Spends nothing.
+quota:
+  source: vercel-credits
+  note: The gateway's credit balance.

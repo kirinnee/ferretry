@@ -1,0 +1,25 @@
+# Codex through OpenRouter's Responses endpoint.
+label: OpenRouter
+harness: codex
+summary: Codex through OpenRouter's Responses API, on OpenAI models or any other it routes to.
+docs: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
+verified: '2026-10-16'
+env:
+  OPENROUTER_API_KEY:
+    secretName: OPENROUTER_API_KEY
+codexProvider:
+  id: openrouter
+  name: OpenRouter
+  baseUrl: https://openrouter.ai/api/v1
+  keyVariable: OPENROUTER_API_KEY
+  model: ~openai/gpt-sol-latest
+models: [~openai/gpt-sol-latest]
+test:
+  kind: request
+  url: https://openrouter.ai/api/v1/key
+  keyVariable: OPENROUTER_API_KEY
+  note: Reads the key's limit and what it has used. Spends nothing.
+quota:
+  source: openrouter-key
+  note: The key's credit limit and what it has used.
+pricing: openrouter

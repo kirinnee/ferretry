@@ -230,7 +230,9 @@ describe('AddLoginStep · Choose tool', () => {
     expect(text(view.container, '[data-add-login-tool="codex"]')).toContain(
       'Not installed on studio-mac · install it in Settings',
     );
-    const [claude, codex] = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+    const [claude, codex] = Array.from(
+      view.container.querySelectorAll<HTMLInputElement>('input[name="add-login-tool"]'),
+    );
     expect(claude?.disabled).toBe(false);
     expect(codex?.disabled).toBe(true);
     expect(next(view.container).disabled).toBe(true);
@@ -248,7 +250,7 @@ describe('AddLoginStep · Choose tool', () => {
 
   it('a machine that has not answered with its setup has no tool installed', async () => {
     const { view } = await open({ existing: [], fresh: credential({ id: 'claude' }) }, { tool: null });
-    const radios = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'));
+    const radios = Array.from(view.container.querySelectorAll<HTMLInputElement>('input[name="add-login-tool"]'));
     expect(radios.map(radio => radio.disabled)).toEqual([true, true]);
     expect(view.container.textContent).toContain('Not installed on studio-mac');
     expect(next(view.container).disabled).toBe(true);

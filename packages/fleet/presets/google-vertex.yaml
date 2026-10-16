@@ -1,0 +1,37 @@
+# Claude Code on Google Vertex AI, with this machine's Google application-default credentials.
+label: Google Vertex AI
+harness: claude
+summary: Claude Code through Vertex AI in your Google Cloud project, using application-default credentials or a credentials file on this machine — named, never copied.
+docs: https://code.claude.com/docs/en/google-vertex-ai
+verified: '2026-10-16'
+unverified:
+  - The count-tokens address and whether it is billed could not be confirmed, so no Test is offered.
+env:
+  CLAUDE_CODE_USE_VERTEX:
+    value: '1'
+  CLOUD_ML_REGION:
+    value: us-east5
+    description: global, us, eu, or a region
+  ANTHROPIC_VERTEX_PROJECT_ID:
+    value: ''
+    description: your Google Cloud project id
+  ANTHROPIC_DEFAULT_OPUS_MODEL:
+    value: claude-opus-5-5
+    required: false
+  ANTHROPIC_DEFAULT_HAIKU_MODEL:
+    value: claude-haiku-4-5@20251001
+    required: false
+cloudCredential:
+  kinds: [gcloud-adc]
+  suggested: gcloud-adc
+models:
+  - claude-opus-5-5
+  - claude-sonnet-5
+  - claude-haiku-4-5@20251001
+test:
+  kind: none
+  reason: Vertex needs a Google access token from your credentials, which Ferretry does not mint. Check them with `gcloud auth application-default print-access-token`.
+quota:
+  source: transcript-pricing
+  note: Google reports limits in the Cloud Console only, so cost is counted from the transcript at Vertex prices.
+pricing: anthropic

@@ -1,0 +1,31 @@
+# Codex on an Azure OpenAI resource, through its v1 Responses endpoint.
+label: Azure OpenAI
+harness: codex
+summary: Codex on your Azure OpenAI resource with its API key. The model is your deployment name. Entra ID sign-in is not supported by Codex.
+docs: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex
+verified: '2026-10-16'
+unverified:
+  - The Test lists models on the v1 endpoint with the api-key header; Microsoft's Codex guide does not describe a test.
+env:
+  AZURE_OPENAI_RESOURCE:
+    value: ''
+    description: the resource name, as in <name>.openai.azure.com
+  AZURE_OPENAI_API_KEY:
+    secretName: AZURE_OPENAI_API_KEY
+codexProvider:
+  id: azure-openai
+  name: Azure OpenAI
+  baseUrl: https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1
+  keyVariable: AZURE_OPENAI_API_KEY
+models: []
+test:
+  kind: request
+  url: https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1/models
+  keyVariable: AZURE_OPENAI_API_KEY
+  header: api-key
+  scheme: ''
+  note: Lists the models on your resource. Spends nothing.
+quota:
+  source: transcript-pricing
+  note: Azure reports quota in the portal only, so cost is counted from the transcript.
+pricing: openai

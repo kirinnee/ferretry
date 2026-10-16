@@ -6,11 +6,13 @@ import type {
   FleetComponentCatalog,
   FleetComponentView,
   FleetCredentialList,
+  FleetCredentialTestResult,
   FleetCredentialView,
   FleetLayeredProfileCatalog,
   FleetLayeredProfileView,
   FleetMachineAuthority,
   FleetMachineView,
+  FleetProviderPresetCatalog,
   FleetRuntimeCatalog,
   FleetRuntimeView,
   FleetSetupScan,
@@ -232,6 +234,8 @@ export interface FakeAnswers {
   runtimes: () => FleetRuntimeCatalog;
   credentials: () => FleetCredentialList;
   check: () => FleetCredentialView;
+  test: () => FleetCredentialTestResult;
+  presets: () => FleetProviderPresetCatalog;
   stage: (change: FleetAccountChange) => FleetAccountChangeView;
   apply: () => FleetAccountChangeOutcome;
   scan: () => FleetSetupScan;
@@ -255,6 +259,15 @@ class FakeGateway implements IAccountGateway {
       runtimes: () => ({ format: 'version-2', runtimes: [] }),
       credentials: () => ({ format: 2, machine: 'studio', credentials: [] }),
       check: () => credential(),
+      test: () => ({
+        credentialId: 'glm',
+        ok: true,
+        code: 'ok',
+        message: 'The provider accepted this login.',
+        spent: 'nothing',
+        at: LATER,
+      }),
+      presets: () => ({ presets: [] }),
       stage: change => changeView(change),
       apply: () => committed(),
       scan: () => scan(),
@@ -298,6 +311,12 @@ class FakeGateway implements IAccountGateway {
   }
   check(id: string) {
     return this.#record('check', [id], this.answers.check);
+  }
+  test(id: string, allowInference: boolean) {
+    return this.#record('test', [id, allowInference], this.answers.test);
+  }
+  presets() {
+    return this.#record('presets', [], this.answers.presets);
   }
   stage(change: FleetAccountChange) {
     return this.#record('stage', [change], () => this.answers.stage(change));

@@ -3,8 +3,9 @@ import { requireMayApply } from '../fleet/account-authority.ts';
 import { runChange } from '../fleet/account-change.ts';
 import { parseHarness, readOptions, writeFlags, writeOptions } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
+import { HARNESS_LABEL } from '../fleet/account-render.ts';
 import { runSignIn } from '../fleet/sign-in.ts';
-import { renderCredentialList, renderCredentialRow } from './render.ts';
+import { renderCredentialList, renderCredentialRow, renderPresetList } from './render.ts';
 
 const CREDENTIAL_ID_LIMIT = 64;
 
@@ -59,24 +60,48 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
       .argument('<tool>', 'claude or codex')
       .option('--label <label>', 'a name to tell this login apart from another with the same email')
       .option('--id <id>', 'the id to give it (default: made from the tool and the label)')
-      .option('--no-sign-in', 'add the login without signing in now'),
+      .option('--no-sign-in', 'add the login without signing in now')
+      .option('--preset <id>', `an environment login from a provider preset (see \`${bin} login presets\`)`)
+      .option(
+        '--env <NAME=VALUE>',
+        'an environment login variable: a plain value, or ${secret:NAME} for a secret (repeat it)',
+        collectEnv,
+        {},
+      )
+      .option('--cloud-credential <reference>', 'aws-profile:<name>, gcloud-adc[:<path>] or azure-cli'),
   ).action(
-    async (tool: string, options: { label?: string; id?: string; signIn?: boolean } & Record<string, unknown>) => {
+    async (
+      tool: string,
+      options: {
+        label?: string;
+        id?: string;
+        signIn?: boolean;
+        preset?: string;
+        env?: Record<string, string>;
+        cloudCredential?: string;
+      } & Record<string, unknown>,
+    ) => {
       const harness = parseHarness(tool);
       const taken = new Set((await deps.gateway.credentials()).credentials.map(entry => entry.id));
-      const id = options.id ?? suggestCredentialId(harness, options.label, taken);
+      const id = options.id ?? suggestCredentialId(harness, options.label ?? options.preset, taken);
       const flags = writeFlags(options);
+      const environment = await environmentLogin(deps, harness, options);
       const outcome = await runChange(deps, {
         change: {
           kind: 'credential.add',
           id,
           harness,
           ...(options.label === undefined ? {} : { label: options.label }),
+          ...environment,
         },
         destructive: false,
         options: flags,
       });
       if (outcome === undefined || flags.json) return;
+      if (environment.store === 'environment') {
+        deps.out.report(`Store each secret it names with \`${bin} secret set NAME\`, then: ${bin} login test ${id}`);
+        return;
+      }
       if (options.signIn === false) {
         deps.out.report(`Sign it in when you are ready: ${bin} credential signin ${id}`);
         return;
@@ -98,6 +123,29 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
       if (!options.json) deps.out.error(`${id} needs sign-in: ${bin} credential signin ${id}`);
       deps.out.setExitCode(1);
     }
+  });
+
+  readOptions(
+    credential
+      .command('test')
+      .description('test an environment login with one request, the cheapest its provider allows')
+      .argument('<id>', 'the login')
+      .option('--allow-inference', 'agree to one message capped at one token, for a provider with no free check'),
+  ).action(async (id: string, options: { json?: boolean; allowInference?: boolean }) => {
+    await requireMayApply(deps);
+    const result = await deps.gateway.test(id, options.allowInference === true);
+    deps.out.report(options.json ? JSON.stringify(result, null, 2) : `${id}: ${result.message}`);
+    if (result.code === 'consent_required' && !options.json) {
+      deps.out.error(`To send it: ${bin} login test ${id} --allow-inference`);
+    }
+    if (!result.ok) deps.out.setExitCode(1);
+  });
+
+  readOptions(
+    credential.command('presets').description('the provider presets an environment login can be made from'),
+  ).action(async (options: { json?: boolean }) => {
+    const catalog = await deps.gateway.presets();
+    deps.out.report(options.json ? JSON.stringify(catalog, null, 2) : renderPresetList(catalog, bin));
   });
 
   credential
@@ -156,4 +204,60 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
       options: writeFlags(options),
     });
   });
+}
+
+/** Commander's collector for a repeated `--env NAME=VALUE`. */
+function collectEnv(pair: string, into: Record<string, string>): Record<string, string> {
+  const separator = pair.indexOf('=');
+  if (separator <= 0) throw new AccountCommandError(`Write --env as NAME=VALUE, not ${pair}`);
+  return { ...into, [pair.slice(0, separator)]: pair.slice(separator + 1) };
+}
+
+/**
+ * The environment half of `credential add` (docs/provider-presets.md): nothing when none of its options
+ * is given, else an environment login — from a preset's variables when one is named, each overridden
+ * by an `--env`, a secret as `${secret:NAME}` and never a value.
+ */
+async function environmentLogin(
+  deps: AccountCommandDeps,
+  harness: AccountHarness,
+  options: { readonly preset?: string; readonly env?: Record<string, string>; readonly cloudCredential?: string },
+): Promise<
+  | Record<string, never>
+  | {
+      readonly store: 'environment';
+      readonly preset?: string;
+      readonly env: Record<string, string>;
+      readonly cloudCredential?: string;
+    }
+> {
+  const given = options.env ?? {};
+  if (options.preset === undefined && Object.keys(given).length === 0 && options.cloudCredential === undefined) {
+    return {};
+  }
+  const preset =
+    options.preset === undefined
+      ? undefined
+      : (await deps.gateway.presets()).presets.find(entry => entry.id === options.preset);
+  if (options.preset !== undefined && preset === undefined) {
+    throw new AccountCommandError(`There is no preset ${options.preset}: see \`${deps.binaryName} login presets\``);
+  }
+  if (preset !== undefined && preset.harness !== harness) {
+    throw new AccountCommandError(
+      `${preset.label} is a preset for ${HARNESS_LABEL[preset.harness]}, not ${HARNESS_LABEL[harness]}`,
+    );
+  }
+  const defaults = Object.fromEntries(
+    (preset?.variables ?? []).map(variable => [
+      variable.name,
+      variable.kind === 'secret' ? `\${secret:${variable.secret ?? variable.name}}` : (variable.value ?? ''),
+    ]),
+  );
+  const cloudCredential = options.cloudCredential ?? preset?.cloudCredential?.suggested;
+  return {
+    store: 'environment',
+    ...(preset === undefined ? {} : { preset: preset.id }),
+    env: { ...defaults, ...given },
+    ...(cloudCredential === undefined ? {} : { cloudCredential }),
+  };
 }

@@ -1,4 +1,5 @@
 import {
+  FLEET_PRESETS_PATH,
   type FleetAccountChange,
   type FleetAccountChangeOutcome,
   FleetAccountChangeOutcomeSchema,
@@ -12,6 +13,9 @@ import {
   FleetCredentialCheckRequestSchema,
   type FleetCredentialList,
   FleetCredentialListSchema,
+  FleetCredentialTestRequestSchema,
+  type FleetCredentialTestResult,
+  FleetCredentialTestResultSchema,
   type FleetCredentialView,
   FleetCredentialViewSchema,
   type FleetLayeredProfileCatalog,
@@ -19,6 +23,8 @@ import {
   type FleetMachineView,
   FleetMachineViewSchema,
   FleetProposalApplyRequestSchema,
+  type FleetProviderPresetCatalog,
+  FleetProviderPresetCatalogSchema,
   type FleetRuntimeCatalog,
   FleetRuntimeCatalogSchema,
   type FleetSetupScan,
@@ -92,6 +98,18 @@ export class ProtocolAccountGateway implements IAccountGateway {
       FleetCredentialViewSchema,
       post(FleetCredentialCheckRequestSchema.parse({})),
     );
+  }
+
+  async test(credentialId: string, allowInference: boolean): Promise<FleetCredentialTestResult> {
+    return await this.client.request(
+      `${FLEET_CREDENTIALS_PATH}/${segment(credentialId)}/test`,
+      FleetCredentialTestResultSchema,
+      post(FleetCredentialTestRequestSchema.parse(allowInference ? { allowInference } : {})),
+    );
+  }
+
+  async presets(): Promise<FleetProviderPresetCatalog> {
+    return await this.client.request(FLEET_PRESETS_PATH, FleetProviderPresetCatalogSchema, GET);
   }
 
   async stage(change: FleetAccountChange): Promise<FleetAccountChangeView> {

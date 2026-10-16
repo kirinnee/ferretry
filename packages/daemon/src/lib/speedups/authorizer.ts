@@ -1,4 +1,4 @@
-import type { SecretName } from '@ferretry/protocol';
+import { isLoopbackHost, type SecretName } from '@ferretry/protocol';
 import { SecretStoreError } from '../secrets/types.ts';
 import type {
   AuthorizedOutcome,
@@ -22,7 +22,7 @@ import type {
  * - **The value never leaves through a return.** {@link send} answers an {@link AuthorizedOutcome}: a
  *   status, a parsed reply, or a refusal kind. No branch carries the request it built.
  * - **The value only reaches an allowlisted host.** The caller names the hosts; the URL must be
- *   `https:` and its host must be one of them, compared exactly, or nothing is sent. A caller that
+ *   `https:` (or `http:` to this machine) and its host must be one of them, compared exactly, or nothing is sent. A caller that
  *   built a URL from configuration cannot point a Groq key at somebody else's server by accident.
  * - **A reply that echoes the value is not a reply.** A provider that reflected the credential back
  *   (a debugging proxy, a misconfigured gateway) would otherwise hand it to a caller that may log or
@@ -68,7 +68,11 @@ export class OutboundProviderAuthorizer implements OutboundAuthorizerPort {
 
 const DEFAULT_PLACEMENT: CredentialPlacement = { header: 'authorization', scheme: 'Bearer' };
 
-/** `https:` to an exactly-listed host (port included when one is written), and nothing else. */
+/**
+ * `https:` to an exactly-listed host (port included when one is written) — or plain `http:` to an
+ * exactly-listed host on THIS machine, where a key never crosses a network (a LiteLLM proxy on
+ * localhost, docs/provider-presets.md). Nothing else.
+ */
 export function allowedDestination(url: string, hostAllowlist: readonly string[]): boolean {
   let parsed: URL;
   try {
@@ -76,7 +80,7 @@ export function allowedDestination(url: string, hostAllowlist: readonly string[]
   } catch {
     return false;
   }
-  if (parsed.protocol !== 'https:') return false;
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname))) return false;
   if (parsed.username !== '' || parsed.password !== '') return false;
   return hostAllowlist.includes(parsed.host.toLowerCase());
 }
