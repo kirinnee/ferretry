@@ -1,11 +1,20 @@
 import {
   type LearningActionRequest,
   LearningActionRequestSchema,
+  type LearningApplyPreview,
+  LearningApplyPreviewSchema,
+  LearningApplyRequestSchema,
   type LearningConfig,
   LearningConfigSchema,
   type LearningPatchResponse,
   LearningPatchResponseSchema,
   LearningRunRequestSchema,
+  type LearningScanEstimate,
+  LearningScanEstimateSchema,
+  type LearningScanProgress,
+  LearningScanProgressSchema,
+  type LearningScanRequest,
+  LearningScanRequestSchema,
   type LearningStatus,
   LearningStatusSchema,
   type ProposalState,
@@ -36,6 +45,20 @@ export function learningProposalPath(id: string): string {
 export function learningPatchPath(id: string): string {
   return `${learningProposalPath(id)}/patch`;
 }
+
+/** Exactly what Apply would write, and the etag that pins it. */
+export function learningApplyPreviewPath(id: string): string {
+  return `${learningProposalPath(id)}/apply-preview`;
+}
+
+/** Writes the lesson into its target file; refused if the file moved since the etag was read. */
+export function learningApplyPath(id: string): string {
+  return `${learningProposalPath(id)}/apply`;
+}
+
+/** Scan routes: estimate costs nothing and starts nothing; the plain path starts one, explicitly. */
+export const LEARNING_SCAN_ESTIMATE_PATH = '/v1/learning/scan/estimate';
+export const LEARNING_SCAN_PATH = '/v1/learning/scan';
 
 const ProposalListSchema = z.array(ProposalViewSchema);
 
@@ -82,5 +105,25 @@ export class ProtocolLearningGateway implements ILearningGateway {
    */
   async patch(id: string): Promise<LearningPatchResponse> {
     return await this.client.request(learningPatchPath(id), LearningPatchResponseSchema);
+  }
+
+  /** A GET, like `patch`: reading what Apply would write spends nothing and writes nothing. */
+  async applyPreview(id: string): Promise<LearningApplyPreview> {
+    return await this.client.request(learningApplyPreviewPath(id), LearningApplyPreviewSchema);
+  }
+
+  async apply(id: string, etag: string): Promise<ProposalView> {
+    const body = LearningApplyRequestSchema.parse({ etag });
+    return await this.client.request(learningApplyPath(id), ProposalViewSchema, jsonPost(body));
+  }
+
+  async scanEstimate(request: LearningScanRequest): Promise<LearningScanEstimate> {
+    const body = LearningScanRequestSchema.parse(request);
+    return await this.client.request(LEARNING_SCAN_ESTIMATE_PATH, LearningScanEstimateSchema, jsonPost(body));
+  }
+
+  async scan(request: LearningScanRequest): Promise<LearningScanProgress> {
+    const body = LearningScanRequestSchema.parse(request);
+    return await this.client.request(LEARNING_SCAN_PATH, LearningScanProgressSchema, jsonPost(body));
   }
 }

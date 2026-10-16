@@ -143,9 +143,12 @@ agent runtime as a locked entry, with a short built-in instruction:
   `--append-system-prompt=<instruction>`. A profile's own `--append-system-prompt` is KEPT: Ferretry's
   instruction is appended after it, in the one flag Claude takes.
 - **Codex**: `-c mcp_servers.ferretry.command/args/env_vars` (forwarding `FY_HOME`, `FY_URL`,
-  `FY_SESSION_ID`, `FY_SESSION_BOARD_CAPABILITY` — never `FY_TOKEN`) and
+  `FY_SESSION_ID`, `FY_SESSION_BOARD_CAPABILITY`, `FY_LEARNING_PASSIVE` — never `FY_TOKEN`) and
   `-c developer_instructions=<instruction>`. A profile's own `developer_instructions` is kept the same
   way: the person's text first, then Ferretry's.
+
+A ferret instructed to learn (`FY_LEARNING_PASSIVE=1`) also gets the lessons teaching in the server's `initialize`
+instructions, and `lessons_suggest` files a lesson through `POST /v1/agent/lessons` ([learning.md](learning.md)).
 
 MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
 the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the

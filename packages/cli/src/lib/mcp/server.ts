@@ -4,6 +4,9 @@ import {
   type AgentConfigToolCall,
   AgentConfigToolCallSchema,
   type AgentConfigToolResult,
+  type AgentLessonToolCall,
+  AgentLessonToolCallSchema,
+  type AgentLessonToolResult,
   type AgentToolCall,
   AgentToolCallSchema,
   type AgentToolResult,
@@ -11,7 +14,7 @@ import {
 import { z } from 'zod';
 import type { TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';
-import { MCP_CONFIG_TOOLS, MCP_TOOLS } from './tools.ts';
+import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_TOOLS } from './tools.ts';
 
 /**
  * THE FERRETRY TOOLS AS AN MCP SERVER — JSON-RPC 2.0 over stdio, written out by hand.
@@ -41,6 +44,8 @@ export interface McpToolsPort {
   wait(wait: TerminalWait): Promise<AgentToolResult>;
   /** One `config.*` call, as the agent (docs/config-files.md). */
   config(call: AgentConfigToolCall): Promise<AgentConfigToolResult>;
+  /** One `lessons.suggest` call, as the agent (docs/learning.md). */
+  lessons(call: AgentLessonToolCall): Promise<AgentLessonToolResult>;
 }
 
 export interface McpServerInfo {
@@ -126,6 +131,11 @@ function configContent(result: AgentConfigToolResult) {
   return { content: [{ type: 'text', text: parts.join('\n') }] };
 }
 
+/** A lesson suggestion's answer as MCP content: the daemon's own sentence, verbatim. */
+function lessonContent(result: AgentLessonToolResult) {
+  return { content: [{ type: 'text', text: result.summary }] };
+}
+
 /** A tool's answer as MCP content: the words, then the picture when there is one. */
 function content(result: AgentToolResult) {
   return {
@@ -174,11 +184,13 @@ export class McpServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: [...MCP_TOOLS, ...MCP_CONFIG_TOOLS].map(({ name, description, inputSchema }) => ({
-              name,
-              description,
-              inputSchema,
-            })),
+            tools: [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS].map(
+              ({ name, description, inputSchema }) => ({
+                name,
+                description,
+                inputSchema,
+              }),
+            ),
           },
         };
       case 'tools/call':
@@ -207,6 +219,8 @@ export class McpServer {
     const args = parsed.data.arguments ?? {};
     const configTool = MCP_CONFIG_TOOLS.find(candidate => candidate.name === parsed.data.name);
     if (configTool !== undefined) return await this.config(id, configTool.configTool, args);
+    const lessonTool = MCP_LESSON_TOOLS.find(candidate => candidate.name === parsed.data.name);
+    if (lessonTool !== undefined) return await this.lessons(id, lessonTool.lessonTool, args);
     const tool = MCP_TOOLS.find(candidate => candidate.name === parsed.data.name);
     if (tool === undefined) return failure(id, JSON_RPC_ERRORS.invalidParams, `there is no tool ${parsed.data.name}`);
     try {
@@ -238,6 +252,20 @@ export class McpServer {
     if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
     try {
       return { jsonrpc: '2.0', id, result: configContent(await this.tools.config(call.data)) };
+    } catch (error) {
+      return { jsonrpc: '2.0', id, result: toolError(error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  private async lessons(
+    id: string | number,
+    tool: AgentLessonToolCall['tool'],
+    args: Record<string, unknown>,
+  ): Promise<JsonRpcResponse> {
+    const call = AgentLessonToolCallSchema.safeParse({ ...args, tool });
+    if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
+    try {
+      return { jsonrpc: '2.0', id, result: lessonContent(await this.tools.lessons(call.data)) };
     } catch (error) {
       return { jsonrpc: '2.0', id, result: toolError(error instanceof Error ? error.message : String(error)) };
     }

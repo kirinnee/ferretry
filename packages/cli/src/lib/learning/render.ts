@@ -1,7 +1,10 @@
 import type {
   EvidenceView,
+  LearningApplyPreview,
   LearningConfig,
   LearningPatchResponse,
+  LearningScanEstimate,
+  LearningScanProgress,
   LearningStatus,
   ProposalView,
   RunManifest,
@@ -36,11 +39,22 @@ function evidenceLine(evidence: EvidenceView): string {
   return `${INDENT}· [${evidence.kind}] ${who} in ${evidence.repo} at ${evidence.at}\n${INDENT}  "${compact(evidence.quote, QUOTE_WIDTH)}"`;
 }
 
+/** `Global` for every ferret, `Repo · <project>` for one project's own guidance. */
+function typeChip(proposal: ProposalView): string {
+  const kind = proposal.category === 'global' ? 'Global' : 'Repo';
+  return proposal.project === undefined ? kind : `${kind} · ${proposal.project}`;
+}
+
+/** How strong a lesson reads and where it came from: the strength chip, then the chip naming who filed it. */
+function strengthLine(proposal: ProposalView): string {
+  return `${typeChip(proposal)} · ${proposal.source} · ${proposal.count}× · ${weight(proposal)} · last seen ${proposal.lastSeen}`;
+}
+
 /** One proposal as a list row: enough to decide whether to open it. */
 function renderProposalRow(proposal: ProposalView): string {
   return [
     `  ${proposal.id}  [${proposal.state}]  ${compact(proposal.title, RULE_WIDTH)}`,
-    `${INDENT}${weight(proposal)} · last seen ${proposal.lastSeen}`,
+    `${INDENT}${strengthLine(proposal)}`,
     `${INDENT}→ ${proposal.target.kind} ${proposal.target.path}`,
   ].join('\n');
 }
@@ -75,8 +89,10 @@ export function renderProposalDetail(proposal: ProposalView): string {
   return [
     `${proposal.id}  [${proposal.state}]  ${proposal.title}`,
     `  rule: ${proposal.ruleText}`,
+    `  type: ${typeChip(proposal)} · source: ${proposal.source} · strength: ${proposal.count}×`,
     `  target: ${proposal.target.kind} ${proposal.target.path}${proposal.target.anchor === undefined ? '' : ` (${proposal.target.anchor})`}`,
     `  ${weight(proposal)} · first seen ${proposal.firstSeen} · last seen ${proposal.lastSeen}`,
+    ...(proposal.applied === undefined ? [] : [`  applied ${proposal.applied.at} → ${proposal.applied.path}`]),
     `  evidence (${proposal.evidence.length}):`,
     ...proposal.evidence.map(evidenceLine),
     '  history:',
@@ -139,4 +155,40 @@ export function renderLearningConfig(config: LearningConfig): string {
  */
 export function renderLearningPatch(patch: LearningPatchResponse): string {
   return [`${patch.path} — apply this yourself; the daemon never writes it`, patch.contents].join('\n');
+}
+
+/**
+ * Exactly what Apply would write: the diff, where it goes, and anything else worth knowing before
+ * writing it — then the exact re-run that actually writes it, because the preview alone never does.
+ */
+export function renderLearningApplyPreview(preview: LearningApplyPreview, bin: string): string {
+  return [
+    `${preview.proposalId}  [${preview.category}]  → ${preview.path}${preview.exists ? '' : ' (new file)'}`,
+    preview.diff,
+    ...preview.notes.map(note => `  note: ${note}`),
+    `nothing written yet — re-run with --yes to apply: ${bin} learning apply ${preview.proposalId} --yes`,
+  ].join('\n');
+}
+
+/** What a scan would cost, before it reads anything. */
+export function renderLearningScanEstimate(estimate: LearningScanEstimate): string {
+  const lines = [
+    `${plural(estimate.sessions, 'session')} in scope (${estimate.skipped} skipped) · ${plural(estimate.miners, 'miner')} · ${estimate.agent}${estimate.model === undefined ? '' : ` (${estimate.model})`}`,
+    `  ~${estimate.tokens} tokens${estimate.usd === undefined ? ', usd unknown' : ` · ~$${estimate.usd.toFixed(2)}`}`,
+  ];
+  if (estimate.sessionIds.length > 0) lines.push(`  ${estimate.sessionIds.join(', ')}`);
+  if (estimate.beyondLimit > 0)
+    lines.push(`  ${estimate.beyondLimit} more beyond this scan’s limit — scan again afterwards`);
+  lines.push('nothing read yet — re-run with --start to scan');
+  return lines.join('\n');
+}
+
+/** One scan's progress, as the daemon left it when this was asked. */
+export function renderLearningScanProgress(progress: LearningScanProgress): string {
+  const lines = [
+    `scan ${progress.runId} [${progress.state}] ${progress.done}/${progress.total} started ${progress.startedAt}${progress.finishedAt === undefined ? '' : ` finished ${progress.finishedAt}`}`,
+    `  added ${progress.added}, merged ${progress.merged}`,
+  ];
+  if (progress.message !== undefined) lines.push(`  ${progress.message}`);
+  return lines.join('\n');
 }

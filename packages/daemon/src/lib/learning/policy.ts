@@ -93,3 +93,62 @@ export function parseJsonl<S extends z.ZodType>(text: string, schema: S): readon
   }
   return records;
 }
+
+/** Words that carry no meaning in a rule, so "Use bun, not Python." and "use bun not python" agree. */
+const RULE_STOPWORDS: ReadonlySet<string> = new Set([
+  'a',
+  'an',
+  'the',
+  'to',
+  'of',
+  'in',
+  'on',
+  'for',
+  'and',
+  'or',
+  'be',
+  'is',
+  'are',
+  'it',
+  'this',
+  'that',
+  'with',
+  'when',
+  'you',
+  'your',
+  'please',
+  'always',
+  'should',
+  'must',
+]);
+
+/** A rule's meaningful words, lowercased and stripped of punctuation. */
+export function ruleWords(rule: string): ReadonlySet<string> {
+  return new Set(
+    rule
+      .toLowerCase()
+      .normalize('NFKD')
+      .split(/[^a-z0-9]+/u)
+      .filter(word => word.length > 0 && !RULE_STOPWORDS.has(word)),
+  );
+}
+
+/** How alike two rules' meaningful words are, from 0 (nothing shared) to 1 (the same words). */
+export function ruleSimilarity(left: string, right: string): number {
+  const a = ruleWords(left);
+  const b = ruleWords(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  const shared = [...a].filter(word => b.has(word)).length;
+  return shared / (a.size + b.size - shared);
+}
+
+/**
+ * The threshold at which two filings are the SAME lesson. Deliberately high: merging two different
+ * rules would show the owner a count nobody earned, while a missed merge costs one extra row to reject.
+ */
+export const RULE_MERGE_THRESHOLD = 0.75;
+
+/** Whether two rules say the same thing, by their meaningful words. */
+export function sameRule(left: string, right: string): boolean {
+  return ruleSimilarity(left, right) >= RULE_MERGE_THRESHOLD;
+}

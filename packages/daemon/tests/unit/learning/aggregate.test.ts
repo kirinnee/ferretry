@@ -42,6 +42,8 @@ const proposal = (observationIds: string[]): Proposal => ({
   lastSeen: at,
   identity: 'use-project-environment',
   history: [{ at, event: 'proposed:old', by: 'miner' }],
+  source: 'scan',
+  count: Math.max(1, observationIds.length),
 });
 
 const observation = (id: string): Observation => ({
@@ -234,5 +236,146 @@ describe('learning aggregation', () => {
     should(actual.proposals).have.length(1);
     should(actual.proposals[0]?.observationIds).have.length(1);
     should(actual.stats).match({ proposalsCreated: 1, proposalsStrengthened: 0 });
+  });
+
+  describe('lesson scope', () => {
+    const evidence = {
+      observations: [
+        {
+          key: 'one',
+          sessionId: 'session-1',
+          kind: 'preference',
+          gist: 'Use environment',
+          quote: 'project environment',
+        },
+      ],
+    };
+
+    it('should file a repo lesson against the project its first quote came from', () => {
+      // Act
+      const actual = applyMinerOutput(
+        [],
+        [],
+        {
+          ...evidence,
+          proposals: [
+            {
+              title: 'Use project environment',
+              ruleText: 'Use the project environment.',
+              scope: 'repo',
+              observationKeys: ['one'],
+            },
+          ],
+        },
+        new Map([['session-1', digest()]]),
+        new Map(),
+        'run-1',
+        at,
+      );
+
+      // Assert
+      should(actual.proposals[0]).match({
+        category: 'repo',
+        target: { kind: 'repo-instructions', path: '/repo-a' },
+        source: 'scan',
+        project: '/repo-a',
+        suggestedCategory: 'repo',
+        count: 1,
+      });
+    });
+
+    it('should file a global lesson at the global instructions and keep the type the miner picked', () => {
+      // Act
+      const actual = applyMinerOutput(
+        [],
+        [],
+        {
+          ...evidence,
+          proposals: [
+            {
+              title: 'Use project environment',
+              ruleText: 'Use the project environment.',
+              scope: 'global',
+              observationKeys: ['one'],
+            },
+          ],
+        },
+        new Map([['session-1', digest()]]),
+        new Map(),
+        'run-1',
+        at,
+      );
+
+      // Assert
+      should(actual.proposals[0]).match({
+        category: 'global',
+        target: { kind: 'global-instructions', path: 'instructions/lessons.md' },
+        suggestedCategory: 'global',
+      });
+    });
+
+    it('should strengthen an open lesson that says the same thing under another identity, counting the new evidence', () => {
+      // Arrange — an applied lesson is still the same lesson: a scan must not file it again.
+      const known = new Map([['old-observation', observation('old-observation')]]);
+      const existing: Proposal = {
+        ...proposal(['old-observation']),
+        identity: 'environment-first',
+        state: 'applied',
+        count: 4,
+      };
+
+      // Act
+      const actual = applyMinerOutput(
+        [existing],
+        [],
+        {
+          ...evidence,
+          proposals: [
+            { title: 'Environment', ruleText: 'Always use the project environment!', observationKeys: ['one'] },
+          ],
+        },
+        new Map([['session-1', digest()]]),
+        known,
+        'run-2',
+        at,
+      );
+
+      // Assert
+      should(actual.proposals).have.length(1);
+      should(actual.proposals[0]).match({ identity: 'environment-first', count: 5, state: 'applied' });
+      should(actual.stats).match({ proposalsCreated: 0, proposalsStrengthened: 1 });
+    });
+
+    it('should not merge a repo lesson into the same rule filed for another project', () => {
+      // Arrange
+      const known = new Map([['old-observation', observation('old-observation')]]);
+      const existing: Proposal = {
+        ...proposal(['old-observation']),
+        identity: 'environment-first',
+        category: 'repo',
+        project: '/repo-b',
+        target: { kind: 'repo-instructions', path: '/repo-b' },
+      };
+
+      // Act
+      const actual = applyMinerOutput(
+        [existing],
+        [],
+        {
+          ...evidence,
+          proposals: [
+            { title: 'Environment', ruleText: 'Use the project environment.', scope: 'repo', observationKeys: ['one'] },
+          ],
+        },
+        new Map([['session-1', digest()]]),
+        known,
+        'run-2',
+        at,
+      );
+
+      // Assert
+      should(actual.proposals.map(entry => entry.project)).deepEqual(['/repo-b', '/repo-a']);
+      should(actual.stats).match({ proposalsCreated: 1, proposalsStrengthened: 0 });
+    });
   });
 });
