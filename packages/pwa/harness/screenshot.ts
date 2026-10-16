@@ -697,10 +697,20 @@ const assertTerminalGeometry = async (page: Page, rootUrl: string, family: strin
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   if (theme !== `${family}-${SCHEME}`)
     fail(`the terminal geometry pass asked for ${family}-${SCHEME} and got ${theme}`);
-  const row = page.locator('[data-workspace-terminal] .xterm-rows > div', { hasText: 'GET /login 200 18ms' });
+  // The `dev` shell `?split` puts on screen. The harness's second shell paints the same output into a
+  // hidden panel, and a row there has text but no layout, so it would measure as zero wide.
+  const row = page.locator('[data-workspace-terminal="a1b2c3d4e5f6"] .xterm-rows > div', {
+    hasText: 'GET /login 200 18ms',
+  });
   // A phone shows one tab at a time; the terminal is a chip away from the Chat it opens on.
   if (!(await row.first().isVisible())) await page.getByRole('tab', { name: /^dev/u }).first().click();
   await row.first().waitFor({ state: 'visible' });
+  // Settled before measuring: the face finishes loading and xterm redraws its rows once more after it
+  // re-measures, and a row caught mid-redraw has text but no layout yet.
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   const measured = await row.first().evaluate(element => {
     const rows = element.parentElement as HTMLElement;
     const style = getComputedStyle(rows);
@@ -714,9 +724,17 @@ const assertTerminalGeometry = async (page: Page, rootUrl: string, family: strin
       return width;
     };
     const text = (element.textContent ?? '').trimEnd();
+    // From the row's first character to its last visible one, whatever spans or bare text nodes xterm
+    // drew them in — trailing blank cells are not part of the text being measured.
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) nodes.push(node as Text);
+    const last = nodes.findLast(node => (node.textContent ?? '').trim() !== '');
     const range = document.createRange();
-    range.selectNodeContents(element);
-    const spans = [...element.querySelectorAll('span')];
+    if (nodes[0] !== undefined && last !== undefined) {
+      range.setStart(nodes[0], 0);
+      range.setEnd(last, (last.textContent ?? '').trimEnd().length);
+    }
     const host = rows.closest('.xterm') as HTMLElement;
     const hostStyle = getComputedStyle(host);
     return {
@@ -725,8 +743,7 @@ const assertTerminalGeometry = async (page: Page, rootUrl: string, family: strin
       narrow: probe('iiiiiiiiii'),
       wide: probe('WWWWWWWWWW'),
       advance: probe('0123456789') / 10,
-      rendered:
-        Math.max(...spans.map(span => span.getBoundingClientRect().right)) - element.getBoundingClientRect().left,
+      rendered: range.getBoundingClientRect().right - element.getBoundingClientRect().left,
       letterSpacing: hostStyle.letterSpacing,
       wordSpacing: hostStyle.wordSpacing,
       textTransform: hostStyle.textTransform,
