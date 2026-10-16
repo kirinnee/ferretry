@@ -41,10 +41,7 @@ import {
   SESSION_ACTION_IDS,
 } from '../../features/session-actions/core-actions.ts';
 import { ForkForm } from '../../features/session-actions/fork-form.tsx';
-import {
-  type SessionActionContribution,
-  sessionActionSections,
-} from '../../features/session-actions/registry.ts';
+import { type SessionActionContribution, sessionActionSections } from '../../features/session-actions/registry.ts';
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
@@ -556,10 +553,6 @@ export function SessionChatPage({
   );
 
   const runAction = async (action: SessionAction): Promise<void> => {
-    if (action === 'migrate') {
-      setMigrateOpen(true);
-      return;
-    }
     if (action === 'stop' && !confirmStop) {
       setConfirmStop(true);
       return;
@@ -758,7 +751,9 @@ export function SessionChatPage({
    */
   const restart = useCallback(async (): Promise<void> => {
     const daemon = await routedClient(connection);
-    publish(await restartWithResume(daemon, session, `restart-${session.config.id}-${session.state.turn}-${Date.now()}`));
+    publish(
+      await restartWithResume(daemon, session, `restart-${session.config.id}-${session.state.turn}-${Date.now()}`),
+    );
   }, [connection, publish, routedClient, session]);
   const mcpPorts = useMemo<AddMcpPorts>(
     () => ({
@@ -791,7 +786,17 @@ export function SessionChatPage({
             },
           }),
     }),
-    [connection, scope, referenceFetch, restart, daemonSessions, routedClient, session.config.id, runtime, contextDependencies],
+    [
+      connection,
+      scope,
+      referenceFetch,
+      restart,
+      daemonSessions,
+      routedClient,
+      session.config.id,
+      runtime,
+      contextDependencies,
+    ],
   );
   const coreContext: CoreActionContext = {
     view: session,
@@ -834,13 +839,7 @@ export function SessionChatPage({
       />
     ),
     renderAddMcp: host => (
-      <AddMcpForm
-        agentName={agentName}
-        host={host}
-        login={runtime}
-        ports={mcpPorts}
-        project={project}
-      />
+      <AddMcpForm agentName={agentName} host={host} login={runtime} ports={mcpPorts} project={project} />
     ),
   };
   const actionSections = sessionActionSections([...CORE_SESSION_ACTIONS, ...actionContributions], coreContext);
@@ -866,7 +865,8 @@ export function SessionChatPage({
     const loginMcp = fleetMcpLoader(connection, contextDependencies.createFleetClient, runtime);
     return {
       worktrees: async signal =>
-        (await (await routedClient(connection)).request('/v1/worktrees', WorktreeListResponseSchema, { signal })).worktrees,
+        (await (await routedClient(connection)).request('/v1/worktrees', WorktreeListResponseSchema, { signal }))
+          .worktrees,
       verdicts: async () => await (await routedClient(connection)).wardenVerdicts(),
       analytics: async () =>
         await fetchSessionAnalytics(connection, scope, `sum ${analyticsIdQuery(scope.sessionId)}`, referenceFetch),

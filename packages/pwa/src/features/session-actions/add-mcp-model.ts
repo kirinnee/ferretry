@@ -41,9 +41,7 @@ export const EMPTY_MCP_DRAFT: McpDraft = {
 };
 
 /** The environment lines as a record, or the first line that is not `NAME=value`. */
-export const parseEnvLines = (
-  text: string,
-): { readonly env: Record<string, string> } | { readonly error: string } => {
+export const parseEnvLines = (text: string): { readonly env: Record<string, string> } | { readonly error: string } => {
   const env: Record<string, string> = {};
   const lines = text.split('\n');
   for (const [index, raw] of lines.entries()) {
@@ -71,7 +69,8 @@ export const draftRequest = (draft: McpDraft): DraftResult => {
   if (draft.transport === 'url') {
     const url = draft.url.trim();
     if (url === '') return { kind: 'incomplete', reason: null };
-    if (!/^https?:\/\/\S+$/u.test(url)) return { kind: 'incomplete', reason: 'URL: use an http:// or https:// address.' };
+    if (!/^https?:\/\/\S+$/u.test(url))
+      return { kind: 'incomplete', reason: 'URL: use an http:// or https:// address.' };
     server = { transport: 'url', url, oauth: draft.scope === 'login' && draft.oauth };
   } else {
     const [command, ...args] = splitCommandLine(draft.command);

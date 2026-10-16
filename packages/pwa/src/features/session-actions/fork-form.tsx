@@ -55,11 +55,7 @@ export function ForkForm({
 
   return (
     <form className="fy-action-form__body" noValidate onSubmit={event => void submit(event)}>
-      <FormField
-        help="Leave it empty and Ferretry picks a name."
-        id={`${id}-name`}
-        label="Name for the new ferret"
-      >
+      <FormField help="Leave it empty and Ferretry picks a name." id={`${id}-name`} label="Name for the new ferret">
         <input
           autoCapitalize="none"
           autoComplete="off"

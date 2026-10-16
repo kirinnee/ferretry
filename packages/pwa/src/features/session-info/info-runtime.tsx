@@ -87,7 +87,9 @@ export function InfoRuntime({ view, mcp, instructions, skills, controls }: InfoR
       <InfoRow hint={INFO_HINT.instructions} label="Instructions">
         {listText(instructions, 'None at the folder’s root')}
       </InfoRow>
-      <InfoRow label="Skills">{skills === null ? <span className="fy-info-muted">Reading…</span> : `${skills} available`}</InfoRow>
+      <InfoRow label="Skills">
+        {skills === null ? <span className="fy-info-muted">Reading…</span> : `${skills} available`}
+      </InfoRow>
     </InfoSection>
   );
 }

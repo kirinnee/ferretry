@@ -100,7 +100,12 @@ export function InfoUsage({ view, analytics, quota, now, onOpenAnalytics }: Info
         </InfoRow>
         {onOpenAnalytics === undefined ? null : (
           <InfoRow label="Analytics">
-            <button className="fy-info-inline-action" data-info-open-analytics="" onClick={onOpenAnalytics} type="button">
+            <button
+              className="fy-info-inline-action"
+              data-info-open-analytics=""
+              onClick={onOpenAnalytics}
+              type="button"
+            >
               <BarChart3 aria-hidden="true" size={12} />
               Open this ferret’s analytics
             </button>

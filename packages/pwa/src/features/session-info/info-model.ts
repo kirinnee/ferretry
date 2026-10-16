@@ -49,8 +49,7 @@ export const INFO_HINT = {
 } as const;
 
 /** The CLI a harness is, in words. */
-export const harnessLabel = (view: SessionView): string =>
-  view.config.harness === 'codex' ? 'Codex' : 'Claude Code';
+export const harnessLabel = (view: SessionView): string => (view.config.harness === 'codex' ? 'Codex' : 'Claude Code');
 
 /** A login only one CLI can use carries that CLI as a scope chip. */
 export const loginScope = (view: SessionView): string =>
@@ -66,7 +65,11 @@ export interface ModelFacts {
 }
 
 /** Strips a context-window or variant suffix (`[1m]`) and case, so a variant is not called a mismatch. */
-const modelStem = (model: string): string => model.replace(/\[.*\]$/u, '').trim().toLocaleLowerCase();
+const modelStem = (model: string): string =>
+  model
+    .replace(/\[.*\]$/u, '')
+    .trim()
+    .toLocaleLowerCase();
 
 /**
  * Requested (the model it was LAUNCHED on: an operator --model flag, else the resolved model — the
@@ -126,8 +129,7 @@ export const lineage = (
   sessions: readonly SessionView[] | undefined,
 ): { readonly parent: SessionView | string | null; readonly children: readonly SessionView[] } => {
   const parentId = view.config.parent ?? null;
-  const parent =
-    parentId === null ? null : (sessions?.find(session => session.config.id === parentId) ?? parentId);
+  const parent = parentId === null ? null : (sessions?.find(session => session.config.id === parentId) ?? parentId);
   const children = (sessions ?? []).filter(session => session.config.parent === view.config.id);
   return { parent, children };
 };

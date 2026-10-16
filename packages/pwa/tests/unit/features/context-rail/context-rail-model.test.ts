@@ -5,10 +5,15 @@ import {
   contextMcpServers,
   docChips,
   docSize,
+  FERRETRY_TOOLS_SERVER,
+  FOLDER_TABS,
   instructionDocs,
   matchesQuery,
   mcpChips,
+  MCP_SCOPE_LABEL,
   mcpRowStatus,
+  mcpScopeTitle,
+  scopedMcpServers,
   signalAuthor,
   signalChips,
   signalMeta,
@@ -159,11 +164,43 @@ describe('MCP', () => {
     const notion = { ...connection, component: 'notion' };
 
     expect(contextMcpServers(catalog, [notion])).toEqual([
-      { name: 'Docs', transport: 'url', signsIn: false },
-      { name: 'github', transport: 'command', signsIn: false },
-      { name: 'notion', transport: 'url', signsIn: true, connection: notion },
+      { name: 'Docs', transport: 'url', signsIn: false, scope: 'login' },
+      { name: 'github', transport: 'command', signsIn: false, scope: 'login' },
+      { name: 'notion', transport: 'url', signsIn: true, scope: 'login', connection: notion },
     ]);
     expect(contextMcpServers(catalog, [], 'claude-default').map(server => server.name)).toEqual(['github', 'notion']);
+  });
+
+  it('scopes every server a ferret sees: Ferretry’s own tools first, then the project’s, then the login’s', () => {
+    expect(scopedMcpServers(MCP, null)).toEqual([
+      { name: FERRETRY_TOOLS_SERVER, transport: 'command', signsIn: false, scope: 'ferretry' },
+      { name: 'github', transport: 'command', signsIn: false, scope: 'login' },
+      {
+        name: 'linear',
+        transport: 'url',
+        signsIn: true,
+        scope: 'login',
+        connection: MCP[1]!.connection,
+      },
+      { name: 'notion', transport: 'url', signsIn: true, scope: 'login' },
+    ]);
+    expect(scopedMcpServers([], [{ name: 'repo-tools', transport: 'command' }])).toEqual([
+      { name: FERRETRY_TOOLS_SERVER, transport: 'command', signsIn: false, scope: 'ferretry' },
+      { name: 'repo-tools', transport: 'command', signsIn: false, scope: 'project' },
+    ]);
+  });
+
+  it('labels and titles every MCP scope', () => {
+    expect(MCP_SCOPE_LABEL).toEqual({ project: 'Project', login: 'Login', ferretry: 'Ferretry' });
+    expect(mcpScopeTitle('project')).toBe('The repo’s .mcp.json, shared with everyone on the repo');
+    expect(mcpScopeTitle('login')).toBe('The login’s profile: every ferret on it');
+    expect(mcpScopeTitle('ferretry')).toBe('Ferretry’s built-in tools server');
+  });
+});
+
+describe('FOLDER_TABS', () => {
+  it('opens on Files, then Docs, Skills, MCP — the folder itself before what the agent reaches from it', () => {
+    expect(FOLDER_TABS).toEqual(['files', 'docs', 'skills', 'mcp']);
   });
 });
 
@@ -231,6 +268,7 @@ describe('docs', () => {
 describe('contextEmptyCopy', () => {
   it('tells an empty list from a filtered-out one', () => {
     expect(contextEmptyCopy('signals', 0, '', 'Open')).toBe('Nothing is waiting on you here.');
+    expect(contextEmptyCopy('files', 0, '', 'All')).toBe('This folder is empty.');
     expect(contextEmptyCopy('mcp', 0, 'x', 'All')).toBe('This agent has no MCP servers.');
     expect(contextEmptyCopy('skills', 0, '', 'All')).toBe('No skills are installed for this agent.');
     expect(contextEmptyCopy('docs', 0, '', 'All')).toBe('No instruction files in this folder.');

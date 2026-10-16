@@ -249,11 +249,17 @@ export function AddMcpForm({
           </FormField>
           {draft.scope === 'login' ? (
             <label className="fy-action-form__check">
-              <input checked={draft.oauth} onChange={event => update({ oauth: event.target.checked })} type="checkbox" />
+              <input
+                checked={draft.oauth}
+                onChange={event => update({ oauth: event.target.checked })}
+                type="checkbox"
+              />
               <span>Sign in through Ferretry (OAuth); the token goes to the secret store.</span>
             </label>
           ) : (
-            <p className="fy-action-form__note">Claude Code signs in to a project server itself, the first time it uses it.</p>
+            <p className="fy-action-form__note">
+              Claude Code signs in to a project server itself, the first time it uses it.
+            </p>
           )}
         </>
       ) : (
@@ -273,13 +279,13 @@ export function AddMcpForm({
             help={
               draft.scope === 'login' ? (
                 <>
-                  One NAME=value per line. A secret is <span className="font-mono">{reference('secret:NAME')}</span>, never the
-                  value.
+                  One NAME=value per line. A secret is <span className="font-mono">{reference('secret:NAME')}</span>,
+                  never the value.
                 </>
               ) : (
                 <>
-                  One NAME=value per line. A secret is <span className="font-mono">{reference('NAME')}</span>, filled in from the
-                  ferret’s environment.
+                  One NAME=value per line. A secret is <span className="font-mono">{reference('NAME')}</span>, filled in
+                  from the ferret’s environment.
                 </>
               )
             }
@@ -345,7 +351,8 @@ function ChoiceCard({
 }
 
 /** A diff repeats lines, so a line's position is the only identity it has. */
-const numbered = (diff: readonly SessionMcpDiffLine[]) => diff.map((line, position) => ({ id: `line-${position}`, line }));
+const numbered = (diff: readonly SessionMcpDiffLine[]) =>
+  diff.map((line, position) => ({ id: `line-${position}`, line }));
 
 function PreviewView({ preview, currentKey }: { readonly preview: Preview; readonly currentKey: string }) {
   if (preview.kind === 'idle' || currentKey === '') return null;
@@ -365,8 +372,8 @@ function PreviewView({ preview, currentKey }: { readonly preview: Preview; reado
   if (shown.scope === 'login')
     return (
       <p className="fy-action-form__note" data-add-mcp-preview="login">
-        {shown.replaces ? 'Replaces' : 'Adds'} the server in profile <span className="font-mono">{shown.profile}</span>
-        , used by <span className="font-mono">{shown.runtime}</span>
+        {shown.replaces ? 'Replaces' : 'Adds'} the server in profile <span className="font-mono">{shown.profile}</span>,
+        used by <span className="font-mono">{shown.runtime}</span>
         {shown.ferrets > 1 ? ` — ${shown.ferrets} ferrets run on it` : ''}.
       </p>
     );

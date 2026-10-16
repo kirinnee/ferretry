@@ -46,7 +46,9 @@ export function InfoRow({
       </dt>
       <dd className="fy-info-row__value" data-mono={mono ? '' : undefined}>
         <span className="fy-info-row__text">{children}</span>
-        {copy === undefined || write === undefined ? null : <CopyButton label={`Copy ${label}`} text={copy} write={write} />}
+        {copy === undefined || write === undefined ? null : (
+          <CopyButton label={`Copy ${label}`} text={copy} write={write} />
+        )}
       </dd>
       {hint === undefined || !open ? null : (
         <p className="fy-info-row__hint" id={hintId} role="note">

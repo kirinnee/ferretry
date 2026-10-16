@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { ReactNode } from 'react';
+import { useState } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { FileInstanceSurface } from '../../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../../src/components/files-tab.tsx';
@@ -12,19 +12,14 @@ import {
 } from '../../../src/features/browser/unified-browser-model.ts';
 import { UnifiedBrowserSurface } from '../../../src/features/browser/unified-browser-surface.tsx';
 import type { SessionBrowser } from '../../../src/features/browser/use-session-browser.ts';
-import { ContextRail } from '../../../src/features/context-rail/context-rail.tsx';
-import { ContextRailBody } from '../../../src/features/context-rail/context-rail-body.tsx';
 import { SessionSearchProvider } from '../../../src/features/session-search/session-search.tsx';
 import { AgentControlMarker } from '../../../src/features/workspace/agent-control-marker.tsx';
-import { ContextSheet, ContextSheetButton } from '../../../src/features/workspace/phone/context-sheet.tsx';
 import type { WorkspaceFormFactor } from '../../../src/features/workspace/phone/phone-tab.ts';
 import { PhoneWorkspace } from '../../../src/features/workspace/phone/phone-workspace.tsx';
 import {
-  type SessionContextPlacement,
-  type SessionContextRailProps,
+  type SessionInfoSlot,
   SessionWorkspace,
   type SessionWorkspaceProps,
-  useContextPlacement,
 } from '../../../src/features/workspace/session-workspace.tsx';
 import { RailDivider } from '../../../src/features/workspace/split-divider.tsx';
 import {
@@ -44,6 +39,7 @@ import {
 } from '../../../src/features/workspace/use-workspace-environment.ts';
 import { WorkspaceView } from '../../../src/features/workspace/workspace-view.tsx';
 import { ConsoleSurface } from '../../../src/features/workspace/console-surface.tsx';
+import { BottomSheet } from '../../../src/shell/bottom-sheet.tsx';
 import { ContextMenu } from '../../../src/shell/context-menu.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -54,7 +50,6 @@ import '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { sessionView } from '../../support/sessions.ts';
 import { fakeDeck, terminalListing, terminalView } from '../../support/terminal-deck.ts';
-import { DOCS, fakeSignals, MCP, SKILLS } from './context-rail/context-rail-fixtures.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'alpha-token' });
 const scope = daemonSessionScope(alpha, 'shared');
@@ -77,25 +72,22 @@ const settle = async (): Promise<void> => {
   });
 };
 
-const railProps = (): SessionContextRailProps => ({
-  agentName: 'Hadi',
-  signals: fakeSignals(),
-  loadMcp: async () => MCP,
-  loadSkills: async () => SKILLS,
-  loadDocs: async () => DOCS,
-  onInsertSkill: () => undefined,
-  onOpenFile: () => undefined,
-});
-
 /** Scripted browser engine: the surface's own chrome renders, no engine is reached. */
 const browserEngine = { PreviewFrame: () => null, RemotePane: () => null };
 
 interface Captured {
   workspace: SessionWorkspaceController;
-  placement: SessionContextPlacement;
+  /** Opens or closes Info, as the page's ⓘ does. */
+  setInfoOpen: (open: boolean) => void;
+  setSheetSize: (size: SessionInfoSlot['sheetSize']) => void;
+  /** Every (presentation, titleId) Info was rendered with. */
+  rendered: Array<[string, string]>;
 }
 
-/** Mounts the workspace the way the page does: the controller and the placement are the host's. */
+/**
+ * Mounts the workspace the way the page does: the controller and Info's open state are the host's.
+ * `withInfo: false` is a host with no Info at all.
+ */
 function Host({
   store,
   formFactor,
@@ -105,32 +97,49 @@ function Host({
   readonly store: WorkspaceLayoutStore;
   readonly formFactor: WorkspaceFormFactor;
   readonly captured: Captured;
-  readonly props: Partial<SessionWorkspaceProps>;
+  readonly props: Partial<SessionWorkspaceProps> & { readonly withInfo?: boolean };
 }) {
   const workspace = useSessionWorkspace(store, scope);
-  const placement = useContextPlacement(formFactor);
+  const [open, setOpen] = useState(false);
+  const [sheetSize, setSheetSize] = useState<SessionInfoSlot['sheetSize']>('half');
   captured.workspace = workspace;
-  captured.placement = placement;
+  captured.setInfoOpen = setOpen;
+  captured.setSheetSize = setSheetSize;
+  captured.rendered ??= [];
+  const { withInfo = true, ...rest } = props;
+  const info: SessionInfoSlot = {
+    open,
+    onClose: () => setOpen(false),
+    sheetSize,
+    render: (presentation, titleId) => {
+      captured.rendered.push([presentation, titleId]);
+      return (
+        <section data-info-body={presentation}>
+          <h2 id={titleId}>Info</h2>
+        </section>
+      );
+    },
+  };
   return (
     <SessionWorkspace
       chat={<p data-chat="">the chat</p>}
       connection={alpha}
-      context={placement}
       driving={NO_SURFACE_DRIVING}
       formFactor={formFactor}
       rails={new WorkspaceRailPreferenceStore(NO_STORAGE)}
       references={{}}
-      renderHeader={(button: ReactNode) => <header data-header="">{button}</header>}
+      renderHeader={() => <header data-header="">bar</header>}
       session={sessionView('shared')}
       workspace={workspace}
-      {...props}
+      {...(withInfo ? { info } : {})}
+      {...rest}
     />
   );
 }
 
 const mountWorkspace = (
   formFactor: WorkspaceFormFactor,
-  props: Partial<SessionWorkspaceProps> = {},
+  props: Partial<SessionWorkspaceProps> & { readonly withInfo?: boolean } = {},
   store = new WorkspaceLayoutStore(NO_STORAGE),
 ) => {
   const captured = {} as Captured;
@@ -156,32 +165,52 @@ const textOf = (node: ReactTestInstance): string =>
   node.children.map(child => (typeof child === 'string' ? child : textOf(child))).join('');
 
 describe('SessionWorkspace on a desktop', () => {
-  test('puts Chat in the agent pane and the context rail beside the split, resizable and collapsible', async () => {
+  test('puts Chat in the agent pane, and opens Info in a resizable panel beside the split', async () => {
     const rails = new WorkspaceRailPreferenceStore(NO_STORAGE);
-    const { page, captured } = mountWorkspace('desktop', { rail: railProps(), rails });
+    const { page, captured } = mountWorkspace('desktop', { rails });
     try {
       const view = page.root.findByType(WorkspaceView);
       expect(view.findAllByProps({ 'data-chat': '' })).toHaveLength(1);
-      // Beside a rail there is no ◧ in the bar: the context is already on screen.
-      expect(page.root.findAllByType(ContextSheetButton)).toHaveLength(0);
-      expect(page.root.findByType(ContextRail).props.collapsed).toBe(false);
+      expect(page.root.findAllByProps({ 'data-header': '' })).toHaveLength(1);
+      // Closed, there is no frame, no divider and no sheet: a desktop never draws Info in a sheet.
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+      expect(page.root.findAllByType(RailDivider)).toHaveLength(0);
+      expect(page.root.findAllByType(BottomSheet)).toHaveLength(0);
+
+      run(() => captured.setInfoOpen(true));
+      const frame = () => page.root.findByProps({ 'data-info-frame': '' });
+      // The remembered rail is 320px; Info never draws narrower than 360px.
+      expect(frame().props.style.width).toBe('360px');
+      expect(frame().findAllByProps({ 'data-info-body': 'panel' })).toHaveLength(1);
+      const [presentation, titleId] = captured.rendered.at(-1) ?? [];
+      expect(presentation).toBe('panel');
+      expect(frame().props['aria-labelledby']).toBe(titleId);
 
       const divider = page.root.findByType(RailDivider);
+      expect(divider.props.side).toBe('right');
       run(() => divider.props.onPreview(400));
-      expect(page.root.findByProps({ 'data-context-rail-frame': '' }).props.style.width).toBe('400px');
+      expect(frame().props.style.width).toBe('400px');
       run(() => page.root.findByType(RailDivider).props.onCommit(410));
       expect(rails.snapshot().right).toBe(410);
+      expect(frame().props.style.width).toBe('410px');
+      // A drag below the floor is held at it.
+      run(() => page.root.findByType(RailDivider).props.onPreview(280));
+      expect(frame().props.style.width).toBe('360px');
 
-      run(() => captured.placement.setTab('docs'));
-      expect(page.root.findByType(ContextRail).props.tab).toBe('docs');
-      run(() => page.root.findByType(ContextRail).props.onCollapsedChange(true));
-      expect(page.root.findByType(ContextRail).props.collapsed).toBe(true);
+      run(() => captured.setInfoOpen(false));
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
       expect(page.root.findAllByType(RailDivider)).toHaveLength(0);
-      // A `/skill` chip brings the rail back on its Skills tab.
-      run(() => captured.placement.reveal('skills'));
-      expect(page.root.findByType(ContextRail).props.collapsed).toBe(false);
-      expect(page.root.findByType(ContextRail).props.tab).toBe('skills');
       await settle();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a host with no Info draws no frame and no sheet', () => {
+    const { page } = mountWorkspace('desktop', { withInfo: false });
+    try {
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+      expect(page.root.findAllByType(BottomSheet)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }
@@ -540,11 +569,7 @@ describe('SessionWorkspace on a phone and a tablet', () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(TERMINAL)]));
     const store = new WorkspaceLayoutStore(NO_STORAGE);
     store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL, { label: 'dev' })));
-    const { page, captured } = mountWorkspace(
-      'phone',
-      { deck: deck.dependencies, rail: railProps(), browser: browserEngine },
-      store,
-    );
+    const { page, captured } = mountWorkspace('phone', { deck: deck.dependencies, browser: browserEngine }, store);
     try {
       await settle();
       const phone = () => page.root.findByType(PhoneWorkspace);
@@ -580,27 +605,37 @@ describe('SessionWorkspace on a phone and a tablet', () => {
       await settle();
       expect(phone().props.activeId).toBe('terminal:100000000000');
 
-      // ◧ in the bar opens the context sheet, on the sub-tab the placement holds.
-      const button = page.root.findByType(ContextSheetButton);
-      run(() => button.props.onOpen());
-      expect(page.root.findByType(ContextSheet).props.open).toBe(true);
-      expect(page.root.findByType(ContextRailBody).props.tab).toBe('signals');
-      run(() => captured.placement.reveal('mcp'));
-      expect(page.root.findByType(ContextRailBody).props.tab).toBe('mcp');
-      run(() => page.root.findByType(ContextSheet).props.onClose());
-      expect(page.root.findByType(ContextSheet).props.open).toBe(false);
+      // ⓘ opens Info in a bottom sheet at half height; the Info header toggles it to full.
+      const sheet = () => page.root.findByType(BottomSheet);
+      expect(sheet().props.open).toBe(false);
+      expect(sheet().findAllByProps({ 'data-info-body': 'sheet' })).toHaveLength(0);
+      run(() => captured.setInfoOpen(true));
+      expect(sheet().props.open).toBe(true);
+      expect(sheet().props.closeLabel).toBe('Close Info');
+      expect(sheet().props.height).toContain('56dvh');
+      expect(sheet().findAllByProps({ 'data-info-body': 'sheet' })).toHaveLength(1);
+      expect(sheet().props.labelledBy).toBe(captured.rendered.at(-1)?.[1]);
+      run(() => captured.setSheetSize('full'));
+      expect(sheet().props.height).toBe('calc(var(--app-h, 100dvh) - 28px)');
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+      run(() => sheet().props.onClose());
+      expect(sheet().props.open).toBe(false);
       await settle();
     } finally {
       run(() => page.unmount());
     }
   });
 
-  test('keeps the split on a tablet, with the context behind ◧', () => {
-    const { page } = mountWorkspace('tablet-split', { rail: railProps() });
+  test('keeps the split on a tablet, with Info in the bottom sheet rather than a panel', () => {
+    const { page, captured } = mountWorkspace('tablet-split');
     try {
       expect(page.root.findAllByType(WorkspaceView)).toHaveLength(1);
-      expect(page.root.findAllByType(ContextRail)).toHaveLength(0);
-      expect(page.root.findAllByType(ContextSheetButton)).toHaveLength(1);
+      expect(page.root.findAllByType(BottomSheet)).toHaveLength(1);
+      run(() => captured.setInfoOpen(true));
+      expect(page.root.findByType(BottomSheet).props.open).toBe(true);
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+      expect(page.root.findAllByType(RailDivider)).toHaveLength(0);
+      expect(captured.rendered.at(-1)?.[0]).toBe('sheet');
     } finally {
       run(() => page.unmount());
     }
@@ -610,7 +645,6 @@ describe('SessionWorkspace on a phone and a tablet', () => {
     const { page } = mountWorkspace('phone');
     try {
       expect(page.root.findByType(PhoneWorkspace).props.onNewTerminal).toBeUndefined();
-      expect(page.root.findAllByType(ContextSheetButton)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }

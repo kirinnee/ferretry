@@ -2677,7 +2677,6 @@ const HARNESS_LIVE_PANE = [
   '> ',
 ].join('\n');
 
-
 /**
  * INFO AND ACTIONS, ANSWERED IN THE PAGE. The workspace session works in a managed worktree with
  * uncommitted changes; the Warden nudged it once; its analytics are priced; its project `.mcp.json`

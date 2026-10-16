@@ -83,7 +83,13 @@ export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreAction
   {
     group: 'session',
     order: 30,
-    build: context => ({ kind: 'run', id: SESSION_ACTION_IDS.copyId, label: 'Copy session id', icon: Copy, run: context.copyId }),
+    build: context => ({
+      kind: 'run',
+      id: SESSION_ACTION_IDS.copyId,
+      label: 'Copy session id',
+      icon: Copy,
+      run: context.copyId,
+    }),
   },
   {
     group: 'move',

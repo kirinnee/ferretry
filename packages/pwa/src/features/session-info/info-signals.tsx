@@ -79,7 +79,11 @@ export function InfoSignals({
       ) : (
         <ul className="fy-info-verdicts">
           {mine.map(verdict => (
-            <li className="fy-info-verdict" data-info-verdict={verdict.verdict} key={`${verdict.reportPath}-${verdict.at}`}>
+            <li
+              className="fy-info-verdict"
+              data-info-verdict={verdict.verdict}
+              key={`${verdict.reportPath}-${verdict.at}`}
+            >
               <Shield aria-hidden="true" size={14} />
               <div>
                 <strong>{VERDICT_WORDS[verdict.verdict]}</strong>

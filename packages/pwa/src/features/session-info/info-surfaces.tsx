@@ -38,7 +38,14 @@ interface SurfaceRow {
 const pagesOf = (browser: BrowserStatus | null): readonly BrowserPageSummary[] =>
   browser !== null && 'pages' in browser ? (browser.pages ?? []) : [];
 
-export function InfoSurfaces({ agentName, terminals, browser, driving, onOpenTerminal, onOpenPage }: InfoSurfacesProps) {
+export function InfoSurfaces({
+  agentName,
+  terminals,
+  browser,
+  driving,
+  onOpenTerminal,
+  onOpenPage,
+}: InfoSurfacesProps) {
   const rows: SurfaceRow[] = [
     ...(terminals?.terminals ?? []).map(terminal => ({
       kind: 'terminal' as const,
@@ -61,7 +68,9 @@ export function InfoSurfaces({ agentName, terminals, browser, driving, onOpenTer
     <div className="fy-info-surfaces">
       <InfoNote>Terminals and browser pages {agentName} owns. Taking over pauses its input on that surface.</InfoNote>
       {rows.length === 0 ? (
-        <InfoNote>{terminals === null && browser === null ? 'Reading surfaces…' : 'No terminals or browser pages yet.'}</InfoNote>
+        <InfoNote>
+          {terminals === null && browser === null ? 'Reading surfaces…' : 'No terminals or browser pages yet.'}
+        </InfoNote>
       ) : (
         <ul className="fy-info-surface-list">
           {rows.map(row => {

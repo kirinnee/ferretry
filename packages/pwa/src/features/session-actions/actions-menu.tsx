@@ -248,7 +248,12 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
                       onConfirm={() => confirmRun(entry)}
                     />
                   ) : (
-                    <MenuRow entry={entry} key={entry.id} onChoose={() => choose(entry)} pending={pending === entry.id} />
+                    <MenuRow
+                      entry={entry}
+                      key={entry.id}
+                      onChoose={() => choose(entry)}
+                      pending={pending === entry.id}
+                    />
                   ),
                 )}
               </div>

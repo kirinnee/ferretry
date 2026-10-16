@@ -131,7 +131,9 @@ export function SessionInfo({
       openSignals={signals.snapshot?.count ?? 0}
       tab={tab}
       titleId={titleId}
-      {...(presentation === 'sheet' ? { sheetSize: placement.sheetSize, onSheetSizeChange: placement.setSheetSize } : {})}
+      {...(presentation === 'sheet'
+        ? { sheetSize: placement.sheetSize, onSheetSizeChange: placement.setSheetSize }
+        : {})}
       render={{
         overview: () => (
           <InfoOverview
@@ -151,7 +153,9 @@ export function SessionInfo({
           <InfoRuntime
             instructions={listRead(docs.load, value => value.map(doc => doc.name))}
             mcp={listRead(mcp.load, value =>
-              value.filter(server => server.name !== FERRETRY_TOOLS_SERVER || server.scope !== 'ferretry').map(server => server.name),
+              value
+                .filter(server => server.name !== FERRETRY_TOOLS_SERVER || server.scope !== 'ferretry')
+                .map(server => server.name),
             )}
             skills={skills.load.kind === 'ready' ? skills.load.value.skills.length : null}
             view={view}
@@ -187,13 +191,13 @@ export function SessionInfo({
         ),
         surfaces: () => (
           <InfoSurfaces
-              agentName={name}
-              browser={browser}
-              driving={driving}
-              onOpenPage={onOpenPage}
-              onOpenTerminal={onOpenTerminal}
-              terminals={terminals}
-            />
+            agentName={name}
+            browser={browser}
+            driving={driving}
+            onOpenPage={onOpenPage}
+            onOpenTerminal={onOpenTerminal}
+            terminals={terminals}
+          />
         ),
       }}
     />
