@@ -129,6 +129,7 @@ const sessionCases: SchemaCase[] = [
   },
   { name: 'runtime control', schema: session.RuntimeControlRequestSchema, value: { action: 'model', model: 'model' } },
   { name: 'session status', schema: session.SessionStatusSchema, value: 'running' },
+  { name: 'session turn state', schema: session.SessionTurnStateSchema, value: 'your-turn' },
   { name: 'question option', schema: session.PendingQuestionOptionSchema, value: { label: 'Yes' } },
   { name: 'pending question', schema: session.PendingQuestionSchema, value: pendingQuestion },
   { name: 'board access', schema: session.TaskBoardAccessSchema, value: 'worker' },

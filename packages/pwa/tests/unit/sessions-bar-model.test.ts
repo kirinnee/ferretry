@@ -16,6 +16,8 @@ describe('who needs the reader', () => {
   test('a session parked on a person, by any of the three ways it can say so', () => {
     expect(needsYou(sessionView('a', { state: { status: 'awaiting_user' } }))).toBe(true);
     expect(needsYou(sessionView('b', { state: { status: 'awaiting_question' } }))).toBe(true);
+    expect(needsYou(sessionView('n', { state: { status: 'running', turnState: 'needs-input' } }))).toBe(true);
+    expect(needsYou(sessionView('y', { state: { status: 'running', turnState: 'your-turn' } }))).toBe(false);
     expect(
       needsYou(
         sessionView('c', {

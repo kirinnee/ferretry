@@ -67,6 +67,12 @@ export interface StatusMarkInfo {
 export function statusMark(view: SessionView): StatusMarkInfo {
   const status = view.state.status;
   const parked = !!view.state.waiting;
+  // WHOSE TURN, when the daemon's turn watcher says. A live session at its prompt is waiting on the
+  // person — so it is drawn and filed as waiting — and one blocked on a permission prompt is a
+  // request for a human, exactly as an unanswered question is. Only a working one breathes.
+  const turn = TERMINAL_STATUSES.has(status) || parked ? undefined : view.state.turnState;
+  if (turn === 'your-turn') return YOUR_TURN_MARK;
+  if (turn === 'needs-input') return NEEDS_INPUT_MARK;
 
   if (TERMINAL_STATUSES.has(status)) {
     const ok = status === 'completed';
@@ -117,6 +123,24 @@ export const READY_MARK: StatusMarkInfo = Object.freeze({
   klass: 'active',
   tone: 'ok',
   label: 'ready — at its prompt',
+  live: false,
+});
+
+/** The daemon says it is the person's turn: parked on them, so a diamond, in the calm `ok` tone. */
+export const YOUR_TURN_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'diamond',
+  klass: 'waiting',
+  tone: 'ok',
+  label: 'waiting — your turn',
+  live: false,
+});
+
+/** Blocked on a person — a permission prompt or a question — in the same accent a question uses. */
+export const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'diamond',
+  klass: 'waiting',
+  tone: 'accent',
+  label: 'waiting — needs your input',
   live: false,
 });
 

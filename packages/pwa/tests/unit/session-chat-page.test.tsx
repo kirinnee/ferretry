@@ -1916,11 +1916,11 @@ describe('SessionChatPage on a brand-new idle session', () => {
 
       try {
         // Assert — turn zero is ready before the first frame lands, and stays ready once it has.
-        expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(true);
+        expect(page.root.findByType(SessionTopBar).props.turn).toBe('your-turn');
         await settleUntil(() => reads.length > 0, 'the live pane read', runAsync);
         await runAsync(async () => await Promise.resolve());
-        expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(true);
-        expect(statusWord(page.root)).toBe('ready');
+        expect(page.root.findByType(SessionTopBar).props.turn).toBe('your-turn');
+        expect(statusWord(page.root)).toBe('your turn');
         expect(page.root.findByType(Transcript).props.busy).toBe(false);
         expect(liveLines(page.root)).toHaveLength(0);
         expect(page.root.findByType(Composer).props.busy).toBe(false);
@@ -1955,8 +1955,8 @@ describe('SessionChatPage on a brand-new idle session', () => {
         expect(page.root.findByType(Transcript).props.activity.verb).toBe(verb);
         expect(page.root.findByType(Transcript).props.busy).toBe(true);
         expect(liveLines(page.root)).toHaveLength(1);
-        expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(false);
-        expect(statusWord(page.root)).toBe('running');
+        expect(page.root.findByType(SessionTopBar).props.turn).toBe('working');
+        expect(statusWord(page.root)).toBe('working');
       } finally {
         run(() => page.unmount());
       }
@@ -1971,7 +1971,11 @@ describe('SessionChatPage on a brand-new idle session', () => {
     try {
       // Assert — working until the frame is read, ready after.
       expect(page.root.findByType(Transcript).props.busy).toBe(true);
-      await settleUntil(() => page.root.findByType(SessionTopBar).props.atPrompt === true, 'the idle frame', runAsync);
+      await settleUntil(
+        () => page.root.findByType(SessionTopBar).props.turn === 'your-turn',
+        'the idle frame',
+        runAsync,
+      );
       expect(reads.length).toBeGreaterThan(0);
       expect(page.root.findByType(Transcript).props.busy).toBe(false);
     } finally {
@@ -1989,13 +1993,54 @@ describe('SessionChatPage on a brand-new idle session', () => {
       await runAsync(async () => await Promise.resolve());
 
       // Assert — no evidence either way is not evidence of idleness.
-      expect(page.root.findByType(SessionTopBar).props.atPrompt).toBe(false);
+      expect(page.root.findByType(SessionTopBar).props.turn).toBe('working');
       expect(page.root.findByType(Transcript).props.busy).toBe(true);
       expect(textOf(must(liveLines(page.root)[0]))).toBe('Working…');
     } finally {
       run(() => page.unmount());
     }
   });
+
+  test("the daemon's turn fact decides the spinner: working spins with the harness's own line", async () => {
+    // Arrange — the daemon says working; the pane shows the harness at it.
+    const reads = paneAnswers(CLAUDE_WORKING);
+    const page = mountPage(fresh('claude', { turn: 2, turnState: 'working', turnStateAt: '2026-10-16T08:00:00.000Z' }));
+
+    try {
+      await settleUntil(() => page.root.findByType(Transcript).props.activity !== null, 'the status line', runAsync);
+      // Assert
+      expect(reads.length).toBeGreaterThan(0);
+      expect(page.root.findByType(Transcript).props.busy).toBe(true);
+      expect(page.root.findByType(Composer).props.busy).toBe(true);
+      expect(statusWord(page.root)).toBe('working');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  for (const [turnState, word] of [
+    ['your-turn', 'your turn'],
+    ['needs-input', 'needs input'],
+  ] as const) {
+    test(`the daemon's ${turnState} stops the spinner at once and reads no pane at all`, async () => {
+      // Arrange — even a pane that would say otherwise is never asked: the daemon owns this fact.
+      const reads = paneAnswers(CLAUDE_WORKING);
+      const page = mountPage(fresh('codex', { turn: 2, turnState, turnStateAt: '2026-10-16T08:00:00.000Z' }));
+
+      try {
+        await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 30)));
+        // Assert
+        expect(reads).toHaveLength(0);
+        expect(page.root.findByType(Transcript).props.busy).toBe(false);
+        expect(liveLines(page.root)).toHaveLength(0);
+        expect(page.root.findByType(Composer).props.busy).toBe(false);
+        expect(page.root.findByType(SessionTopBar).props.turn).toBe(turnState);
+        expect(statusWord(page.root)).toBe(word);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+  }
 
   test("shows the account's real quota from the daemon's usage feed, and says unknown without one", async () => {
     // Arrange

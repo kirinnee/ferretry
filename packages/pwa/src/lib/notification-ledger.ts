@@ -37,6 +37,53 @@ export const classifyTransition = (prev: SessionStatus | undefined, next: Sessio
   return next === 'completed' ? 'completed' : null;
 };
 
+/** One recorded turn boundary: the daemon's `turnState` and the instant it last changed. */
+export interface TurnBoundary {
+  readonly state: NonNullable<SessionView['state']['turnState']>;
+  readonly at: string;
+}
+
+/** The boundary a view carries, or `undefined` from a daemon that predates the turn watcher. */
+export const turnBoundary = (view: SessionView): TurnBoundary | undefined =>
+  view.state.turnState === undefined ? undefined : { state: view.state.turnState, at: view.state.turnStateAt ?? '' };
+
+/**
+ * A notification for a NEW turn boundary, or none.
+ *
+ * The daemon's turn watcher is the one owner of whose turn it is, and `turnStateAt` moves exactly
+ * when the value changes — so a boundary is notified once, however many times it is read, and a
+ * working → your-turn → working cycle that fell between two polls still shows as a new `your-turn`
+ * boundary rather than being missed. Never while working; never on first sight.
+ */
+export const classifyTurnTransition = (
+  prev: TurnBoundary | undefined,
+  next: TurnBoundary | undefined,
+): SessionNotifyKind | null => {
+  if (prev === undefined || next === undefined) return null;
+  if (prev.state === next.state && prev.at === next.at) return null;
+  if (next.state === 'needs-input') return 'question';
+  return next.state === 'your-turn' ? 'attention' : null;
+};
+
+/**
+ * What one view notifies, given what this ledger last saw of it.
+ *
+ * With a daemon turn fact, "your turn" and "needs input" come from it ALONE — the status words that
+ * used to stand in for them (`awaiting_user`, `awaiting_question`) would otherwise notify the same
+ * moment a second time. Endings that are not turns (finished, failed) still come from the status.
+ */
+export const classifySessionNotification = (
+  prevStatus: SessionStatus | undefined,
+  prevTurn: TurnBoundary | undefined,
+  view: SessionView,
+): SessionNotifyKind | null => {
+  const next = turnBoundary(view);
+  const byStatus = classifyTransition(prevStatus, view.state.status);
+  if (next === undefined) return byStatus;
+  if (byStatus === 'failed' || byStatus === 'completed') return byStatus;
+  return classifyTurnTransition(prevTurn, next);
+};
+
 export const NOTIFY_COOLDOWN_MS = 60_000;
 export const NOTIFY_GROUP_WINDOW_MS = 15 * 60_000;
 
@@ -58,6 +105,7 @@ const isDaemonKey = (key: string, daemonId: DaemonId): boolean => {
  */
 export class DaemonNotificationLedger {
   readonly #statuses = new Map<string, SessionStatus>();
+  readonly #turns = new Map<string, TurnBoundary | undefined>();
   readonly #fired = new Map<string, Fired>();
   readonly #groups = new Map<string, Group>();
 
@@ -67,6 +115,14 @@ export class DaemonNotificationLedger {
 
   setStatus(scope: DaemonSessionScope, status: SessionStatus): void {
     this.#statuses.set(daemonSessionKey(scope), status);
+  }
+
+  turn(scope: DaemonSessionScope): TurnBoundary | undefined {
+    return this.#turns.get(daemonSessionKey(scope));
+  }
+
+  setTurn(scope: DaemonSessionScope, turn: TurnBoundary | undefined): void {
+    this.#turns.set(daemonSessionKey(scope), turn);
   }
 
   /** A new logical event may update the same grouped notification immediately. */
@@ -99,6 +155,7 @@ export class DaemonNotificationLedger {
     );
     for (const key of this.#statuses.keys())
       if (isDaemonKey(key, daemonId) && !live.has(key)) this.#statuses.delete(key);
+    for (const key of this.#turns.keys()) if (isDaemonKey(key, daemonId) && !live.has(key)) this.#turns.delete(key);
     for (const key of this.#fired.keys()) {
       const [entryDaemon, sessionId] = JSON.parse(key) as [DaemonId, string, NotifyKind];
       if (entryDaemon === daemonId && !live.has(daemonSessionKey(daemonSessionScope({ daemonId }, sessionId))))
@@ -109,6 +166,7 @@ export class DaemonNotificationLedger {
 
   clearDaemon(daemonId: DaemonId): void {
     for (const key of this.#statuses.keys()) if (isDaemonKey(key, daemonId)) this.#statuses.delete(key);
+    for (const key of this.#turns.keys()) if (isDaemonKey(key, daemonId)) this.#turns.delete(key);
     for (const key of this.#fired.keys()) if (isDaemonKey(key, daemonId)) this.#fired.delete(key);
     for (const key of this.#groups.keys()) if (isDaemonKey(key, daemonId)) this.#groups.delete(key);
   }
@@ -135,10 +193,12 @@ const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
       const question = view.state.pendingQuestion?.questions[0]?.question;
       if (question)
         return question.length > QUESTION_PREVIEW_LEN ? `${question.slice(0, QUESTION_PREVIEW_LEN - 1)}…` : question;
-      return 'Asked you a question.';
+      return view.state.turnState === 'needs-input' ? 'Needs your input to continue.' : 'Asked you a question.';
     }
     case 'attention':
-      return 'Waiting for you at the prompt.';
+      return view.state.turnState === 'your-turn'
+        ? 'Your turn — finished and waiting for you.'
+        : 'Waiting for you at the prompt.';
     case 'failed': {
       const label =
         view.state.status === 'stalled' ? 'Stalled' : view.state.status === 'kill_failed' ? 'Kill failed' : 'Failed';
@@ -164,7 +224,12 @@ const notificationEventParts = (
     kind,
     view.state.status,
     view.state.turn,
-    kind === 'question' ? (view.state.pendingQuestion?.toolUseId ?? '') : '',
+    // The boundary itself, so each turn end is its own event and never collapsed into the last one.
+    kind === 'question'
+      ? (view.state.pendingQuestion?.toolUseId ?? view.state.turnStateAt ?? '')
+      : kind === 'attention'
+        ? (view.state.turnStateAt ?? '')
+        : '',
   ];
 };
 
@@ -241,8 +306,9 @@ export const planNotifications = (
   for (const view of views) {
     const scope = daemonSessionScope({ daemonId }, view.config.id);
     liveSessionIds.add(scope.sessionId);
-    const kind = classifyTransition(ledger.status(scope), view.state.status);
+    const kind = classifySessionNotification(ledger.status(scope), ledger.turn(scope), view);
     ledger.setStatus(scope, view.state.status);
+    ledger.setTurn(scope, turnBoundary(view));
     if (kind === null || !prefs.enabled || !shouldShowNotification({ kind, daemonId }, filter, now)) continue;
     const eventKey = notificationEventKey(scope, view, kind);
     if (!ledger.shouldFire(scope, kind, at, eventKey)) continue;

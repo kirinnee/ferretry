@@ -71,7 +71,7 @@ import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts'
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
-import { sessionAtPrompt } from '../session-activity.ts';
+import { sessionTurn } from '../session-activity.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
@@ -561,17 +561,19 @@ export function SessionChatPage({
     [canControl, session],
   );
   // LIVE is not WORKING. `running` means the agent's terminal is up — a brand-new session is
-  // `running` before anything is sent — so liveness only decides whether the pane is worth reading.
-  // Whether the agent is working is decided from the pane and the daemon's own record of a turn
-  // (`lib/session-activity.ts`); a session at its prompt shows no spinner and reads as ready.
-  const terminalLive = statusMark(session).klass === 'active';
+  // `running` before anything is sent. Whose turn it is comes from the daemon's turn watcher
+  // (`state.turnState`, read through `lib/session-activity.ts`), the same field the status dots and
+  // the notifications read. The pane is read only to print the harness's own working line — and, for
+  // a daemon that sends no `turnState`, as the fallback evidence.
+  const working = session.state.turnState === 'working';
+  const legacyLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
   const readActivityFrame = useCallback<PaneFrameReader>(
     async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true),
     [connection, referenceFetch, scope],
   );
-  const pane = usePaneActivity(readActivityFrame, terminalLive);
-  const atPrompt = terminalLive && sessionAtPrompt(session, pane);
-  const busy = terminalLive && !atPrompt;
+  const pane = usePaneActivity(readActivityFrame, working || legacyLive);
+  const turn = sessionTurn(session, pane);
+  const busy = turn === 'working' || (turn === null && legacyLive);
   // The account's quota for this session, from the daemon's passive usage feed. The session document
   // itself never carries one, so reading `state.quota` showed "—" for every window, always.
   const quota = useOptionalSessionQuota(usage, connection, session);
@@ -783,7 +785,7 @@ export function SessionChatPage({
             {contextButton}
           </>
         }
-        atPrompt={atPrompt}
+        turn={turn}
         compact={compact}
         menuItems={menuItems}
         project={project}
