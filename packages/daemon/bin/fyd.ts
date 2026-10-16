@@ -20,6 +20,7 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
 } from '@ferretry/fleet';
@@ -320,6 +321,7 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
+import { AccountModelAgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -1604,6 +1606,13 @@ function createSessionControlSubsystem(
    */
   provenance: SessionProvenanceStamper,
   clock: ClockPort,
+  /**
+   * "Default runtime for new agents" (T): the runtime a start with no `agent` named uses, resolved
+   * fresh from this machine's own configuration — never cached, so a change applies to the very next
+   * start. `undefined` when nothing resolves, which {@link resolveStartAccount} then refuses in its
+   * own words.
+   */
+  defaultAgentName: () => Promise<string | undefined>,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1649,7 +1658,13 @@ function createSessionControlSubsystem(
           );
         return { role: request.boardAccess, capability: boardCapability };
       })();
-      const { account, executable } = await resolveStartAccount(accounts, request.agent, executables, CLIENT_NAME);
+      const { account, executable } = await resolveStartAccount(
+        accounts,
+        request.agent,
+        executables,
+        CLIENT_NAME,
+        defaultAgentName,
+      );
       // Canonicalized HERE rather than only inside the lifecycle, because the transcript path below
       // is derived from it. The lifecycle resolves it again over an already-canonical value, and a
       // directory the agent could not have started in is refused as an invalid request — which is
@@ -5982,6 +5997,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
           spawnProvenance,
           clock,
+          async () => {
+            const model = await declaredAccountModel();
+            return model === undefined ? undefined : resolveDefaultRuntime(model);
+          },
         ),
         attachmentStore,
       );
@@ -6245,6 +6264,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         fleetCredentials,
         // The catalogue runs the setup service's import and clone as two of its reviewed changes.
         fleetCatalog: createFleetCatalogSubsystem({ ...fleetCatalogDeps, executors: fleetSetup.executors }),
+        // Unit M's rebase target: the same single reader every other in-process consumer of this
+        // document shares, so this never disagrees with what the catalogue or a start just read.
+        agentControl: new AccountModelAgentControlPolicy(declaredAccountModel),
         fleetSetup,
         /**
          * How much of this machine the managed fleet may take.

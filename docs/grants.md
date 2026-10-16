@@ -119,8 +119,11 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing` and `secrets` — except minting a code or widening a device, which always want a
-passkey for that act ([design/zero-trust.md](design/zero-trust.md) B1). It needs no setup beyond pairing,
+`browser`, `pairing` and `secrets` — except minting a code, widening a device, or turning "what agents
+may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
+that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
+for more than the ordinary `fleet.configure` step-up — only the ON half of a write does, so a single
+save that turns some off and others on asks once, for the ON half. It needs no setup beyond pairing,
 because the passkey is the one the person already holds.
 
 **What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
@@ -242,9 +245,11 @@ governed device is answered `401 unlock_required` on everything but the routes i
 unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default) for that device.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
-with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code and
-widening another device want a passkey proved for that one act, from any device, unlocked or not
-([design/zero-trust.md](design/zero-trust.md) B6). At the machine, nothing is asked.
+with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code,
+widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
+want a passkey proved for that one act, from any device, unlocked or not
+([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. At the
+machine, nothing is asked.
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's

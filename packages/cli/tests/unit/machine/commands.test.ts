@@ -32,9 +32,21 @@ describe('renderMachine', () => {
     should(text).match(/^studio\n {2}Setup: the account model, 2 runtime\(s\)/);
     should(text)
       .match(/Agent permissions: auto/)
+      .and.match(/Default runtime for new agents: claude-default/)
+      .and.match(/What agents may control: terminals on, browsers on, files on/)
       .and.match(/Claude Code: installed \(\/usr\/bin\/claude\)/)
       .and.match(/Codex: not installed/);
     should(text).not.match(/fz daemon setup/);
+  });
+
+  it('should say when no default runtime resolves', () => {
+    const text = renderMachine(
+      machine({ defaultRuntime: null, agentControl: { terminals: false, browsers: true, files: false } }),
+      'fz',
+    );
+    should(text)
+      .match(/Default runtime for new agents: none set, and no claude-default runtime exists yet/)
+      .and.match(/What agents may control: terminals off, browsers on, files off/);
   });
 
   it('should say when it is not set up yet', () => {
@@ -171,10 +183,15 @@ describe('registerMachineCommands', () => {
     should(JSON.parse(world.out.lines[1]?.text as string).name).equal('studio');
   });
 
-  it('should change agent permissions after a yes, and refuse anything else', async () => {
+  it('should change agent permissions after a yes, restating the other two settings unchanged', async () => {
     const world = fakeWorld({ answers: ['y'] });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-permissions', 'skip']);
-    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'machine.settings', agentPermissions: 'skip' });
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: 'claude-default',
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
     should(world.gateway.called('apply')).have.length(1);
     await should(runCommand(registerMachineCommands, world, ['machine', 'set', 'colour', 'blue'])).be.rejectedWith(
       /not a machine setting/,
@@ -182,6 +199,44 @@ describe('registerMachineCommands', () => {
     await should(
       runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-permissions', 'never']),
     ).be.rejectedWith(/auto or skip/);
+  });
+
+  it('should change the default runtime, or unset it back to automatic', async () => {
+    const world = fakeWorld({ answers: ['y', 'y'] });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', 'claude-review']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'claude-review',
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', 'automatic']);
+    should(world.gateway.called('stage')[1]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
+    await should(runCommand(registerMachineCommands, world, ['machine', 'set', 'default-runtime', ''])).be.rejectedWith(
+      /Name a runtime/,
+    );
+  });
+
+  it('should switch one of what agents may control, and refuse an unknown kind or state', async () => {
+    const world = fakeWorld({ answers: ['y'] });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'terminals', 'off']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'claude-default',
+      agentControl: { terminals: false, browsers: true, files: true },
+    });
+    await should(
+      runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'network', 'off']),
+    ).be.rejectedWith(/terminals, browsers, files/);
+    await should(
+      runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'terminals', 'maybe']),
+    ).be.rejectedWith(/on or off/);
   });
 
   it('should install the named tools once each', async () => {

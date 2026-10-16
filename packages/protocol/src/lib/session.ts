@@ -543,7 +543,12 @@ const HarnessFlagSchema = z
   .refine(value => !/\p{Cc}/u.test(value), 'a harness flag may not contain a control character');
 
 const StartSessionBaseSchema = z.strictObject({
-  agent: z.string().min(1),
+  /**
+   * The runtime to start on. Omitted, a start uses this machine's "Default runtime for new agents"
+   * (T, session-spec.html Settings) — resolved daemon-side, never guessed by a client — and is
+   * refused when nothing resolves (`unknown_agent`, naming the machine setting to use instead).
+   */
+  agent: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   teammate: z.string().min(1).optional(),
   teammateFallback: z.boolean().optional(),

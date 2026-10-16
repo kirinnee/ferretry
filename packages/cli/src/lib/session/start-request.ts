@@ -21,7 +21,8 @@ interface StartNumericFlags {
 
 /** Every `start` flag, already parsed out of argv by the composition root. */
 export interface StartFlags extends StartNumericFlags {
-  readonly agent: string;
+  /** Omitted to use this machine's own "Default runtime for new agents" (T), resolved daemon-side. */
+  readonly agent?: string;
   readonly mode: 'auto' | 'interactive';
   readonly prompt?: string;
   readonly name?: string;
@@ -133,7 +134,9 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     mode: flags.mode,
   });
   const common = {
-    agent: flags.agent,
+    // Omitted entirely, not sent as `agent: undefined`, so the daemon reads "nothing was named"
+    // and resolves its own default (T) — never a client guessing at one.
+    ...(flags.agent === undefined ? {} : { agent: flags.agent }),
     boardAccess,
     cwd: flags.cwd ?? environment.cwd,
     harnessFlags: [...(flags.harnessFlags ?? [])],

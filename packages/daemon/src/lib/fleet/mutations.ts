@@ -32,6 +32,7 @@ import {
 } from '@ferretry/fleet';
 import type {
   FleetAccountChange,
+  FleetAgentControl,
   FleetComponentInput,
   FleetEnvInput,
   FleetSettingsEntriesInput,
@@ -432,19 +433,68 @@ function applyAccountChange(
       }
       return `Remove login ${change.id}`;
     }
-    default: {
-      const previous = model.machine.agentPermissions;
-      draft.machine.agentPermissions = change.agentPermissions;
-      // E32: the setting is read at launch, so a running session keeps the mode it started with.
-      const running = facts.runningSessions;
-      consequences.push(
-        running === 0
-          ? 'Applies to new sessions.'
-          : `Applies to new sessions. ${counted(running, 'running session')} ${running === 1 ? 'keeps' : 'keep'} the old mode (${AGENT_PERMISSION_WORDS[previous]}) until restarted.`,
-      );
-      return `Set agent permissions to ${AGENT_PERMISSION_WORDS[change.agentPermissions]}`;
-    }
+    default:
+      return putMachineSettings(model, draft, change, facts, consequences);
   }
+}
+
+/** The three things "What agents may control" names, in the order a summary lists them. */
+const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = ['terminals', 'browsers', 'files'];
+
+/**
+ * `machine.settings` (T): a caller always sends all three machine settings together, so this writes
+ * only the ones that actually moved and says exactly those in the summary and consequences — a save
+ * that touched nothing reads as "nothing changed" rather than repeating agent permissions unasked.
+ *
+ * `defaultRuntime` needs no cross-reference check of its own: the draft goes through the same
+ * {@link AccountModelSchema} parse every other change does ({@link deriveAccountChange}), which
+ * already refuses a name that is not an agent runtime on this machine, by name.
+ */
+function putMachineSettings(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'machine.settings' }>,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const parts: string[] = [];
+
+  if (change.agentPermissions !== model.machine.agentPermissions) {
+    draft.machine.agentPermissions = change.agentPermissions;
+    parts.push(`agent permissions to ${AGENT_PERMISSION_WORDS[change.agentPermissions]}`);
+    // E32: the setting is read at launch, so a running session keeps the mode it started with.
+    const running = facts.runningSessions;
+    consequences.push(
+      running === 0
+        ? 'Applies to new sessions.'
+        : `Applies to new sessions. ${counted(running, 'running session')} ${running === 1 ? 'keeps' : 'keep'} the old mode (${AGENT_PERMISSION_WORDS[model.machine.agentPermissions]}) until restarted.`,
+    );
+  }
+
+  const previousDefault = model.machine.defaultRuntime ?? null;
+  if (change.defaultRuntime !== previousDefault) {
+    if (change.defaultRuntime === null) delete draft.machine.defaultRuntime;
+    else draft.machine.defaultRuntime = change.defaultRuntime;
+    parts.push(
+      change.defaultRuntime === null
+        ? 'the default runtime for new agents back to automatic'
+        : `the default runtime for new agents to ${change.defaultRuntime}`,
+    );
+  }
+
+  const movedControls = AGENT_CONTROL_KINDS.filter(
+    kind => change.agentControl[kind] !== model.machine.agentControl[kind],
+  );
+  if (movedControls.length > 0) {
+    draft.machine.agentControl = { ...change.agentControl };
+    parts.push(
+      `what agents may control (${movedControls.map(kind => `${kind} ${change.agentControl[kind] ? 'on' : 'off'}`).join(', ')})`,
+    );
+    consequences.push('Applies to an agent’s next action; nothing already running is interrupted.');
+  }
+
+  if (parts.length === 0) return 'Keep machine settings the same';
+  return `Set ${parts.join('; ')}`;
 }
 
 /** The product's words for each Agent permissions choice (F4). */

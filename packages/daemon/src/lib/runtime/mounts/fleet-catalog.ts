@@ -31,6 +31,9 @@ import {
   FleetProfileDraftViewSchema,
   FleetProposalApplyRequestSchema,
   FleetRuntimeCatalogSchema,
+  STEP_UP_ACTS,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
@@ -39,7 +42,12 @@ import { decodeParameter } from '../../api/http.ts';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { FleetCatalogRefusal, FleetCatalogService, type FleetCatalogServiceDeps } from '../../fleet/catalog-service.ts';
+import {
+  FleetCatalogFreshStepUpRequired,
+  FleetCatalogRefusal,
+  FleetCatalogService,
+  type FleetCatalogServiceDeps,
+} from '../../fleet/catalog-service.ts';
 
 /** The machine, its components, profiles and runtimes, and every change to them. */
 export type FleetCatalogSubsystem = Pick<
@@ -150,12 +158,36 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       handle: async context => {
         // An empty strict body: a field an older client still sends is refused, not ignored.
         await parseOptionalBody(context.request, FleetProposalApplyRequestSchema);
-        return await answer(FleetAccountChangeOutcomeSchema, () =>
-          subsystem.apply(proposalId(context), context.governance),
-        );
+        try {
+          return await answer(FleetAccountChangeOutcomeSchema, () =>
+            subsystem.apply(proposalId(context), context.governance, {
+              presentation: context.presentation,
+              spend: () => context.spendFreshStepUp?.(),
+            }),
+          );
+        } catch (error) {
+          if (error instanceof FleetCatalogFreshStepUpRequired) return freshStepUpRefusal(error.message);
+          throw error;
+        }
       },
     },
   ];
+}
+
+/**
+ * "What agents may control" turned back on from a device that has not JUST proved a passkey for it —
+ * the same `403 grant_step_up_required` shape minting a pairing code and widening a device answer
+ * with, naming this act instead so the prompt says what it is confirming.
+ */
+function freshStepUpRefusal(message: string): ApiResponse {
+  return jsonResponse(
+    {
+      error: message,
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { ...CONFIGURE, act: STEP_UP_ACTS.enableAgentControl },
+    } satisfies StepUpRequiredBody,
+    403,
+  );
 }
 
 /** Builds the catalog subsystem the composition root mounts. */

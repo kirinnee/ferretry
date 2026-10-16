@@ -11,7 +11,12 @@ import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from './change-support.ts';
 
-const CHANGE = { kind: 'machine.settings', agentPermissions: 'auto' } as const;
+const CHANGE = {
+  kind: 'machine.settings',
+  agentPermissions: 'auto',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true },
+} as const;
 const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
 const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 
