@@ -1,11 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { FleetProfileDraftView, FleetResolvedEntry } from '@ferretry/protocol';
 import { ProfilesTab } from '../../../../../src/features/fleet/profiles/profiles-tab.tsx';
-import { type Mounted, mount } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount } from '../../../../support/dom.ts';
 import {
-  CONFLICT,
-  component,
-  componentCatalog,
-  instructions,
   profile,
   profileCatalog,
   runtime,
@@ -25,7 +22,6 @@ import {
   submit,
   tabProps,
   text,
-  tick,
   type,
 } from '../components/view-support.tsx';
 
@@ -41,108 +37,70 @@ const open = async (machine: Machine = scriptedMachine(), overrides: Parameters<
   return mounted.container;
 };
 
-describe('ProfilesTab — list and page', () => {
-  it('leads each profile with its name, its scope badge and one line: its size and what runs on it', async () => {
+const must = <T,>(value: T | null | undefined, what = 'element'): T => {
+  if (value === null || value === undefined) throw new Error(`missing ${what}`);
+  return value;
+};
+
+const resolvedEntry = (overrides: Partial<FleetResolvedEntry>): FleetResolvedEntry => ({
+  harness: 'claude',
+  field: 'settings',
+  key: 'permissions.defaultMode',
+  value: 'acceptEdits',
+  from: 'settings/Claude settings',
+  overridden: [],
+  ...overrides,
+});
+
+/** What the daemon answers for Default's contents: Claude settings overrides the instructions' key. */
+const defaultPreview = (overrides: Partial<FleetProfileDraftView> = {}): FleetProfileDraftView => ({
+  harnesses: [stack('claude'), stack('codex')],
+  scope: { kind: 'scoped', scope: 'claude' },
+  resolved: [
+    resolvedEntry({ field: 'mcp', key: 'github', value: 'npx -y github', from: 'mcp/github' }),
+    resolvedEntry({ overridden: [{ value: 'plan', from: 'instructions/Main instructions' }] }),
+    resolvedEntry({ field: 'env', key: 'env.API_KEY', value: '‹hidden›', hidden: true }),
+    resolvedEntry({ harness: 'codex', field: 'mcp', key: 'github', value: 'npx', from: 'mcp/github' }),
+  ],
+  ...overrides,
+});
+
+const rows = (root: ParentNode): string[] =>
+  [...root.querySelectorAll('[data-profile-item]')].map(row => row.getAttribute('data-profile-item') ?? '');
+
+const drag = async (target: Element, kind: 'dragstart' | 'dragover' | 'drop' | 'dragend'): Promise<void> => {
+  await interact(async () => {
+    target.dispatchEvent(new Event(kind, { bubbles: true, cancelable: true }));
+    for (let turn = 0; turn < 20; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  });
+};
+
+/** A full drag: pick `from` up, pass over `over`, drop there, let go. */
+const dragTo = async (from: Element, over: Element): Promise<void> => {
+  await drag(from, 'dragstart');
+  await drag(over, 'dragover');
+  await drag(over, 'drop');
+  await drag(from, 'dragend');
+};
+
+const q = (root: ParentNode, selector: string): Element => must(root.querySelector(selector), selector);
+
+describe('ProfilesTab — list', () => {
+  it('leads each profile with its name, scope badge, size and what runs on it', async () => {
     const root = await open();
     expect(text(root, 'h3')).toBe('Profiles');
     expect(root.textContent).toContain('3 profiles');
     expect(text(root, '[data-profile-row="Default"] [data-component-badges]')).toBe('Claude only');
-    expect(text(root, '[data-profile-row="Default"]')).toContain('4 parts · used by 3 runtimes');
-    expect(text(root, '[data-profile-row="Review"] [data-component-badges]')).toBe('Generic');
+    expect(text(root, '[data-profile-row="Default"]')).toContain('4 items · 4 parts · used by 3 runtimes');
     expect(text(root, '[data-profile-row="Review"]')).toContain('used by 1 runtime');
-    expect(root.textContent).not.toContain('base for');
-    expect(root.querySelector('[data-layer-stack]')).toBeNull();
   });
 
-  it('leads with what the profile gives and what it is built from; how the layers combine waits behind Advanced', async () => {
-    const root = await open();
-    await click(root, '[data-profile-row="Default"]');
-    expect(text(root, 'h3')).toBe('Default');
-    expect(text(root, '[data-profile-summary] [data-component-badges]')).toBe('Claude only');
-    expect(text(root, '[data-profile-gives]')).toBe(
-      'Instructions: Main instructions · 1 MCP server · 4 settings · Models: Claude models',
-    );
-    expect(text(root, '[data-profile-built-from]')).toBe(
-      'Built from Main instructions + github + Claude settings + Claude models',
-    );
-    expect(root.querySelector('[data-layer-stack]')).toBeNull();
-    const toggle = must(root.querySelector('[data-disclosure-toggle="layers"]'));
-    expect(toggle.textContent).toBe('Advanced: how these combine');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    await click(root, '[data-disclosure-toggle="layers"]');
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(root.querySelector('[data-disclosure-body="layers"]')?.id).toBe(
-      toggle.getAttribute('aria-controls') ?? 'none',
-    );
-    const layers = [...root.querySelectorAll('[data-layer]')].map(layer => layer.getAttribute('data-layer'));
-    expect(layers).toEqual([
-      'modelSets/Claude models',
-      'settings/Claude settings',
-      'mcp/github',
-      'instructions/Main instructions',
-    ]);
-    expect(root.textContent).toContain('Newest on top · newer layer wins');
-    expect(root.textContent).toContain('is skipped on Codex');
-    expect(root.textContent).toContain('No conflicts.');
-    expect(root.querySelector('[data-profile-includer="Agent work"]')?.textContent).toContain('Builds on Default');
-    const runtimes = [...root.querySelectorAll('[data-catalog-link]')].map(link => link.textContent);
-    expect(runtimes).toEqual([
-      'claude-agentRuntime · through Agent work',
-      'claude-defaultRuntime',
-      'claude-reviewRuntime · through Review',
-    ]);
-    expect(root.querySelector('[data-catalog-link]')?.getAttribute('href')).toBe(
-      '#machines/studio-mac/runtimes/claude-agent',
-    );
-    await click(root, '[data-profile-includer="Agent work"]');
-    expect(text(root, 'h3')).toBe('Agent work');
-    await click(root, '[data-disclosure-toggle="layers"]');
-    const conflict = must(root.querySelector('[data-conflicts] li'));
-    expect(conflict.querySelector('.font-mono')?.textContent).toBe('permissions.defaultMode');
-    expect(conflict.textContent).toBe(CONFLICT.sentence.replaceAll('`', ''));
-    expect(text(root, '[data-layer="profile/Default"]')).toContain('Profile · Default4 parts, used as a base');
-    await click(root, '[data-catalog-back]');
-    expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
-  });
-
-  it('says nothing uses a profile, draws an unknown layer as written, and a base it cannot find as no parts', async () => {
-    const catalog = studioCatalog({
-      profiles: profileCatalog([profile('Lonely', ['profile/Missing', 'widgets/x', 'mcp/unknown'])]),
-      runtimes: runtimeCatalog([]),
-    });
-    const root = await open(scriptedMachine({ catalog }));
-    await click(root, '[data-profile-row="Lonely"]');
-    expect(root.textContent).toContain('Nothing uses this profile yet.');
-    expect(text(root, '[data-profile-gives]')).toBe('Nothing for the agent yet.');
-    expect(text(root, '[data-profile-built-from]')).toBe('Built from Missing profile + widgets/x + unknown');
-    await click(root, '[data-disclosure-toggle="layers"]');
-    expect(text(root, '[data-layer="widgets/x"]')).toBe('2widgets/x');
-    expect(text(root, '[data-layer="profile/Missing"]')).toContain('0 parts, used as a base');
-    expect(text(root, '[data-layer="mcp/unknown"]')).toContain('MCP server · unknown');
-  });
-
-  it('P7: a profile written before scopes reads as Mixed, naming the layers that disagree', async () => {
-    const sentence =
-      "Profile Old can't be both Claude only and Codex only: settings claude is Claude only and settings codex is Codex only.";
-    const catalog = studioCatalog({
-      profiles: profileCatalog([profile('Old', ['mcp/github'], { scope: { kind: 'mixed', sentence } })]),
-      runtimes: runtimeCatalog([]),
-    });
-    const root = await open(scriptedMachine({ catalog }));
-    expect(text(root, '[data-profile-row="Old"] [data-component-badges]')).toBe('Mixed');
-    await click(root, '[data-profile-row="Old"]');
-    const note = text(root, '[data-catalog-note="mixed"]');
-    expect(note).toContain(sentence);
-    expect(note).toContain('Edit its layers so it is Claude only or Codex only.');
-  });
-
-  it('offers to build the first profile on an empty machine', async () => {
+  it('offers a new profile on an empty machine', async () => {
     const root = await open(scriptedMachine({ catalog: studioCatalog({ profiles: profileCatalog([]) }) }));
     expect(root.textContent).toContain('No profiles yet');
-    await click(root, '[data-profile-build]');
-    expect(root.querySelector('[data-machine-stepper="build-profile"]')).not.toBeNull();
-    expect(root.textContent).toContain('No profiles yet. Start from nothing.');
-    expect(text(root, '[data-build-next]')).toBe('Next, start from nothing');
+    expect(root.textContent).toContain('A profile is a bag of components');
+    await click(root, '[data-profile-new]');
+    expect(root.querySelector('[data-profiles-page="new"]')).not.toBeNull();
   });
 
   it('shows Reading… first, and why when the read fails', async () => {
@@ -153,7 +111,6 @@ describe('ProfilesTab — list and page', () => {
     await mounted.unmount();
     const root = await open(scriptedMachine({ readFails: new Error('down') }));
     expect(root.textContent).toContain('did not answer');
-    expect(root.querySelector('[data-catalog-retry]')).not.toBeNull();
     await click(root, '[data-catalog-retry]');
   });
 
@@ -168,23 +125,356 @@ describe('ProfilesTab — list and page', () => {
   });
 });
 
-describe('ProfilesTab — delete (E21)', () => {
-  it('is blocked while it is a base; Remove from those first, then switch its runtime and delete', async () => {
+describe('ProfilesTab — the profile page', () => {
+  it('shows the contents in order with override chips, the library, its scope and where it is used', async () => {
+    const machine = scriptedMachine({ preview: defaultPreview() });
+    const root = await open(machine);
+    await click(root, '[data-profile-row="Default"]');
+    expect(text(root, 'h3')).toBe('Default');
+    expect(rows(root)).toEqual([
+      'instructions/Main instructions',
+      'mcp/github',
+      'settings/Claude settings',
+      'modelSets/Claude models',
+    ]);
+    expect(text(root, '[data-profile-scope]')).toContain('Claude only');
+    expect(text(root, '[data-profile-scope]')).toContain('derived from the contents');
+    expect(text(root, '[data-profile-box]')).toContain('4 items · later overrides earlier');
+    expect(text(root, '[data-profile-item="settings/Claude settings"] [data-override-chip]')).toBe(
+      'overrides Main instructions · permissions.defaultMode',
+    );
+    expect(text(root, '[data-profile-item="settings/Claude settings"] [data-item-scope]')).toBe('Claude only');
+    expect(machine.calls.find(call => call.path === '/v1/fleet/profiles/preview')?.body).toEqual({
+      layers: ['instructions/Main instructions', 'mcp/github', 'settings/Claude settings', 'modelSets/Claude models'],
+      editing: 'Default',
+    });
+    expect(text(root, '[data-library-add="mcp/github"]')).toBe('In profile');
+    expect(q(root, '[data-library-add="mcp/github"]').getAttribute('aria-label')).toBe('github is in Default');
+    expect(text(root, '[data-library-add="mcp/notes"]')).toBe('Add');
+    expect(root.querySelector('[data-library-item="profile/Default"]')).toBeNull();
+    expect(root.querySelector('[data-profile-includer="Agent work"]')?.textContent).toContain('Contains Default');
+    const runtimes = [...root.querySelectorAll('[data-catalog-link]')].map(link => link.textContent);
+    expect(runtimes).toEqual([
+      'claude-agentRuntime · through Agent work',
+      'claude-defaultRuntime',
+      'claude-reviewRuntime · through Review',
+    ]);
+    expect(text(root, '[data-change-submit]')).toBe('Save changes');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(true);
+    await click(root, '[data-profile-includer="Agent work"]');
+    expect(text(root, 'h3')).toBe('Agent work');
+    await click(root, '[data-catalog-back]');
+    expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
+  });
+
+  it('adds with the library’s Add, reorders with ↑ / ↓ keeping focus, removes with ✕, and saves ONE change', async () => {
+    const machine = scriptedMachine({ preview: defaultPreview() });
+    const root = await open(machine);
+    await click(root, '[data-profile-row="Default"]');
+    await click(root, '[data-library-add="mcp/notes"]');
+    expect(rows(root).at(-1)).toBe('mcp/notes');
+    expect(text(root, '[data-profile-said]')).toBe('Added notes at position 5 of 5.');
+    expect(text(root, '[data-library-add="mcp/notes"]')).toBe('In profile');
+    expect(machine.calls.filter(call => call.path === '/v1/fleet/profiles/preview')).toHaveLength(2);
+
+    await click(root, '[data-profile-item="mcp/notes"] [data-item-move="up"]');
+    expect(rows(root).indexOf('mcp/notes')).toBe(3);
+    expect(document.activeElement?.closest('[data-profile-item]')?.getAttribute('data-profile-item')).toBe('mcp/notes');
+    expect(text(root, '[data-profile-said]')).toBe('Moved notes to position 4 of 5.');
+    await click(root, '[data-profile-item="mcp/notes"] [data-item-move="down"]');
+    expect(rows(root).at(-1)).toBe('mcp/notes');
+    // At the end, focus stays on the button that still works.
+    expect(document.activeElement?.getAttribute('data-item-move')).toBe('up');
+    await click(root, '[data-profile-item="instructions/Main instructions"] [data-item-move="up"]');
+    expect(rows(root)[0]).toBe('instructions/Main instructions');
+
+    await click(root, '[data-profile-item="mcp/github"] [data-item-remove]');
+    expect(rows(root)).not.toContain('mcp/github');
+    expect(text(root, '[data-profile-said]')).toBe('Removed github.');
+    expect(root.textContent).toContain('Unsaved: new sessions keep the saved contents');
+
+    await submit(root);
+    expect(stagedChanges(machine)).toEqual([
+      {
+        kind: 'profile.put',
+        name: 'Default',
+        layers: ['instructions/Main instructions', 'settings/Claude settings', 'modelSets/Claude models', 'mcp/notes'],
+        create: false,
+      },
+    ]);
+    expect(text(root, '[data-profiles-saved]')).toBe('Saved. New sessions use the new contents.');
+  });
+
+  it('discards an edit back to the saved contents', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Default"]');
+    expect(root.querySelector('[data-profile-discard]')).toBeNull();
+    await click(root, '[data-profile-item="mcp/github"] [data-item-remove]');
+    await click(root, '[data-profile-discard]');
+    expect(rows(root)).toContain('mcp/github');
+    expect(text(root, '[data-profile-said]')).toBe('Changes discarded.');
+  });
+
+  it('drags a library item in where the line is, reorders by drag, and drags a row out to remove it', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Default"]');
+    const target = q(root, '[data-profile-item="settings/Claude settings"]');
+    await drag(q(root, '[data-library-item="mcp/notes"]'), 'dragstart');
+    await drag(target, 'dragover');
+    expect(target.className).toContain('shadow-');
+    await drag(target, 'drop');
+    expect(rows(root)).toEqual([
+      'instructions/Main instructions',
+      'mcp/github',
+      'mcp/notes',
+      'settings/Claude settings',
+      'modelSets/Claude models',
+    ]);
+    expect(text(root, '[data-profile-said]')).toBe('Added notes at position 3 of 5.');
+
+    // Reorder: the first row dropped on the list's end goes last.
+    await dragTo(q(root, '[data-profile-item="instructions/Main instructions"]'), q(root, '[data-profile-contents]'));
+    expect(rows(root).at(-1)).toBe('instructions/Main instructions');
+    expect(text(root, '[data-profile-said]')).toBe('Moved Main instructions to position 5 of 5.');
+    await dragTo(q(root, '[data-profile-item="modelSets/Claude models"]'), q(root, '[data-profile-item="mcp/github"]'));
+    expect(rows(root)[0]).toBe('modelSets/Claude models');
+
+    // Out: a row dragged onto the library is taken out.
+    const row = q(root, '[data-profile-item="mcp/notes"]');
+    await drag(row, 'dragstart');
+    const library = q(root, '[data-profile-library]');
+    expect(library.className).toContain('outline-dashed');
+    await drag(library, 'dragover');
+    await drag(library, 'drop');
+    expect(rows(root)).not.toContain('mcp/notes');
+    await drag(row, 'dragend');
+
+    // A drag over the list with nothing picked up is ignored, and so is a drop on the library.
+    await drag(q(root, '[data-profile-contents]'), 'dragover');
+    await drag(library, 'drop');
+    await drag(q(root, '[data-profile-contents]'), 'drop');
+    expect(rows(root)).toHaveLength(4);
+  });
+
+  it('refuses a drop that would mix Claude-only with Codex-only content, naming the culprits', async () => {
+    const catalog = studioCatalog({
+      profiles: profileCatalog([
+        ...profileCatalog().profiles,
+        profile('Codex', ['mcp/github'], { scope: { kind: 'scoped', scope: 'codex' } }),
+      ]),
+    });
+    const root = await open(scriptedMachine({ catalog, preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Default"]');
+    await dragTo(q(root, '[data-library-item="profile/Codex"]'), q(root, '[data-profile-contents]'));
+    expect(text(root, '[data-catalog-note="refused"]')).toContain(
+      'Refused: Codex is Codex only, but Default is Claude only because of Claude settings. A profile can’t mix Claude-only and Codex-only content.',
+    );
+    expect(rows(root)).not.toContain('profile/Codex');
+    await click(root, '[data-refusal-dismiss]');
+    expect(root.querySelector('[data-catalog-note="refused"]')).toBeNull();
+    // A profile that contains this one cannot go in it either.
+    await click(root, '[data-library-add="profile/Review"]');
+    expect(text(root, '[data-catalog-note="refused"]')).toContain('Default would contain itself');
+    // A successful add clears it.
+    await click(root, '[data-library-add="mcp/notes"]');
+    expect(root.querySelector('[data-catalog-note="refused"]')).toBeNull();
+  });
+
+  it('filters the library by search and by kind', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Default"]');
+    const library = q(root, '[data-profile-library]');
+    await type(library, '[data-library-search]', 'not');
+    expect(
+      [...library.querySelectorAll('[data-library-item]')].map(row => row.getAttribute('data-library-item')),
+    ).toEqual(['mcp/notes']);
+    await type(library, '[data-library-search]', 'zzz');
+    expect(library.textContent).toContain('No components match.');
+    await type(library, '[data-library-search]', '');
+    await choose(library, '[data-library-kind]', 'profile');
+    expect(library.querySelectorAll('[data-library-item]')).toHaveLength(2);
+  });
+
+  it('shows the Resolved view: each final value, where it came from, overridden ones struck through', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Default"]');
+    await click(root, '[data-profile-view="resolved"]');
+    expect(q(root, '[data-profile-view="resolved"]').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-profile-contents]')).toBeNull();
+    const table = q(root, '[data-resolved="claude"]');
+    expect(table.querySelector('[data-resolved-harness]')).toBeNull();
+    const row = q(table, '[data-resolved-row="permissions.defaultMode"]');
+    expect(row.textContent).toBe(
+      'permissions.defaultModeacceptEditsoverrode planfrom Claude settingsMain instructions',
+    );
+    expect(row.querySelectorAll('s')).toHaveLength(2);
+    expect(text(table, '[data-resolved-row="github"]')).toContain('MCP server · github');
+    expect(text(table, '[data-resolved-row="env.API_KEY"]')).toContain('‹hidden›');
+    await click(root, '[data-profile-view="list"]');
+    expect(root.querySelector('[data-profile-contents]')).not.toBeNull();
+  });
+
+  it('switches Resolved between the tools of a Generic profile, and says when the machine is too old', async () => {
+    const machine = scriptedMachine({
+      preview: defaultPreview({ scope: { kind: 'scoped', scope: 'generic' } }),
+      catalog: studioCatalog({ profiles: profileCatalog([profile('Shared', ['mcp/github'])]) }),
+    });
+    const root = await open(machine);
+    await click(root, '[data-profile-row="Shared"]');
+    await click(root, '[data-profile-view="resolved"]');
+    expect(root.querySelector('[data-resolved="claude"]')).not.toBeNull();
+    await click(root, '[data-resolved-harness="codex"]');
+    expect(text(root, '[data-resolved="codex"]')).toContain('npx');
+    // Every item out: nothing resolves, and nothing is asked.
+    await click(root, '[data-profile-view="list"]');
+    await click(root, '[data-profile-item="mcp/github"] [data-item-remove]');
+    await click(root, '[data-profile-view="resolved"]');
+    expect(root.textContent).toContain('Nothing resolves yet');
+    await click(root, '[data-profile-view="list"]');
+    expect(root.textContent).toContain('Tap Add to put components in.');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(true);
+    await click(root, '[data-profile-discard]');
+    machine.preview = defaultPreview({ resolved: undefined });
+    await click(root, '[data-profile-item="mcp/github"] [data-item-remove]');
+    await click(root, '[data-library-add="mcp/github"]');
+    await click(root, '[data-profile-view="resolved"]');
+    expect(text(root, '[data-resolved="unavailable"]')).toContain('too old to show the resolved values');
+  });
+
+  it('says when the overrides cannot be read, retries, and holds Save on the daemon’s refusal', async () => {
     const machine = scriptedMachine();
     const root = await open(machine);
+    await click(root, '[data-profile-row="Default"]');
+    expect(text(root, '[data-profile-preview-failed]')).toContain('studio-mac did not answer');
+    machine.preview = defaultPreview({ refusal: 'no MCP server ghost exists on this machine' });
+    await click(root, '[data-profile-preview-retry]');
+    expect(text(root, '[data-catalog-note="draft-refused"]')).toContain('no MCP server ghost exists on this machine');
+    await click(root, '[data-profile-item="mcp/github"] [data-item-remove]');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('reads a profile written before scopes as Mixed and will not save it until it is one tool’s', async () => {
+    const sentence =
+      "Profile Old can't be both Claude only and Codex only: settings claude is Claude only and settings codex is Codex only.";
+    const catalog = studioCatalog({
+      profiles: profileCatalog([
+        profile('Codex', ['mcp/github'], { scope: { kind: 'scoped', scope: 'codex' } }),
+        profile('Old', ['settings/Claude settings', 'profile/Codex'], { scope: { kind: 'mixed', sentence } }),
+      ]),
+      runtimes: runtimeCatalog([]),
+    });
+    const root = await open(scriptedMachine({ catalog, preview: defaultPreview() }));
+    expect(text(root, '[data-profile-row="Old"] [data-component-badges]')).toBe('Mixed');
+    await click(root, '[data-profile-row="Old"]');
+    expect(text(root, '[data-catalog-note="mixed"]')).toContain(sentence);
+    expect(text(root, '[data-profile-scope]')).toContain('Mixed');
+    expect(root.textContent).toContain('Nothing uses this profile yet.');
+    await click(root, '[data-profile-item="profile/Codex"] [data-item-move="up"]');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(true);
+    await click(root, '[data-profile-item="profile/Codex"] [data-item-remove]');
+    expect(text(root, '[data-profile-scope]')).toContain('Claude only');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(false);
+  });
+
+  it('draws an item the catalogue does not know as written', async () => {
+    const catalog = studioCatalog({ profiles: profileCatalog([profile('Lonely', ['widgets/x', 'mcp/unknown'])]) });
+    const root = await open(scriptedMachine({ catalog, preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Lonely"]');
+    expect(text(root, '[data-profile-item="widgets/x"]')).toContain('Unknownwidgets/x');
+    expect(text(root, '[data-profile-item="mcp/unknown"]')).toContain('MCPunknown');
+  });
+
+  it('opens the profile’s file as YAML and reads the catalogue again after an edit there', async () => {
+    const machine = scriptedMachine({ preview: defaultPreview() });
+    const root = await open(machine);
+    await click(root, '[data-profile-row="Default"]');
+    expect(text(root, '[data-profile-file]')).toContain('config/profiles/Default.yaml');
+    await click(root, '[data-profile-yaml]');
+    expect(document.querySelector('[data-config-editor="profiles/Default.yaml"]')).not.toBeNull();
+    expect(machine.calls.some(call => call.path === '/v1/config/file?path=profiles%2FDefault.yaml')).toBe(true);
+    await click(document, '[data-config-cancel]');
+    expect(document.querySelector('[data-config-editor]')).toBeNull();
+  });
+});
+
+describe('ProfilesTab — a new profile', () => {
+  it('names it, fills it, and saves it as a new profile, then opens it', async () => {
+    const machine = scriptedMachine({ preview: defaultPreview({ scope: { kind: 'scoped', scope: 'generic' } }) });
+    const root = await open(machine);
+    await click(root, '[data-profile-new]');
+    expect(text(root, 'h3')).toBe('New profile');
+    expect(text(root, '[data-change-submit]')).toBe('Save profile');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(true);
+    expect(root.querySelector('[data-profile-file]')).toBeNull();
+    expect(text(root, '[data-profile-box]')).toContain('this profile');
+    await type(root, '[data-profile-name]', 'Default');
+    expect(root.textContent).toContain('You already have a profile called Default.');
+    await type(root, '[data-profile-name]', 'Docs');
+    expect(text(root, '[data-profile-box]')).toContain('Docs');
+    await click(root, '[data-library-add="profile/Default"]');
+    await click(root, '[data-library-add="mcp/notes"]');
+    machine.onApply = current => {
+      current.catalog = studioCatalog({
+        profiles: profileCatalog([...profileCatalog().profiles, profile('Docs', ['profile/Default', 'mcp/notes'])]),
+      });
+    };
+    await submit(root);
+    expect(stagedChanges(machine)).toEqual([
+      { kind: 'profile.put', name: 'Docs', layers: ['profile/Default', 'mcp/notes'], create: true },
+    ]);
+    expect(text(root, 'h3')).toBe('Docs');
+    expect(text(root, '[data-profiles-saved]')).toBe('Profile Docs saved.');
+  });
+
+  it('cancels back to the list, and Back does too', async () => {
+    const root = await open();
+    await click(root, '[data-profile-new]');
+    await click(root, '[data-profile-cancel]');
+    expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
+    await click(root, '[data-profile-new]');
+    await click(root, '[data-catalog-back]');
+    expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
+  });
+
+  it('on a phone, adds from the picker sheet, saying there why something is refused', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Default"]');
+    await click(root, '[data-profile-pick]');
+    const picker = q(document, '[data-profile-picker]');
+    expect(text(picker, 'h2')).toBe('Add to Default');
+    await type(picker, '[data-library-search]', 'notes');
+    await click(picker, '[data-library-add="mcp/notes"]');
+    expect(rows(root).at(-1)).toBe('mcp/notes');
+    expect(text(picker, '[data-library-add="mcp/notes"]')).toBe('Added');
+    await type(picker, '[data-library-search]', '');
+    await click(picker, '[data-library-add="profile/Agent work"]');
+    expect(text(picker, '[data-catalog-note="picker-refused"]')).toContain('would contain itself');
+    await click(picker, '[data-picker-done]');
+    await settle();
+  });
+
+  it('holds Save while the machine is offline', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }), { online: false });
+    await click(root, '[data-profile-row="Default"]');
+    await click(root, '[data-profile-item="mcp/github"] [data-item-remove]');
+    expect(q(root, '[data-change-submit]').hasAttribute('disabled')).toBe(true);
+  });
+});
+
+describe('ProfilesTab — delete (E21)', () => {
+  it('is blocked while another profile contains it; Remove from those first, then switch its runtime', async () => {
+    const root = await open(scriptedMachine({ preview: defaultPreview() }));
     await click(root, '[data-profile-row="Default"]');
     await click(root, '[data-profile-delete]');
     const blocked = text(root, '[data-catalog-note="delete"]');
     expect(blocked).toContain('Default is in use, so it can’t be deleted');
-    expect(blocked).toContain('It is the base of Agent work and Review, and these runtimes use it: claude-default.');
+    expect(blocked).toContain('It is inside Agent work and Review, and these runtimes use it: claude-default.');
     await click(root, '[data-profile-keep]');
     await click(root, '[data-profile-delete]');
     await click(root, '[data-profile-detach]');
     const moving = text(root, '[data-catalog-note="delete"]');
     expect(moving).toContain('Pick another profile for this runtime first');
     expect(moving).toContain('It is taken out of Agent work and Review first.');
-    // Profiles built on it are not offered: they include it.
-    expect([...root.querySelectorAll('[data-profile-switch] option')].map(option => option.textContent)).toEqual([]);
     expect(moving).toContain('There is no other profile to move to yet.');
   });
 
@@ -197,28 +487,28 @@ describe('ProfilesTab — delete (E21)', () => {
       ]),
       runtimes: runtimeCatalog([runtime('a', 'Old'), runtime('b', 'Old')]),
     });
-    const machine = scriptedMachine({ catalog });
+    const machine = scriptedMachine({ catalog, preview: defaultPreview() });
     const root = await open(machine);
     await click(root, '[data-profile-row="Old"]');
     await click(root, '[data-profile-delete]');
-    expect(text(root, '[data-catalog-note="delete"]')).toContain('Pick another profile for these runtimes first');
     expect(text(root, '[data-catalog-note="delete"]')).toContain('a, b move to:');
     expect([...root.querySelectorAll('[data-profile-switch] option')].map(option => option.textContent)).toEqual([
       'New · Generic',
       'Other · Generic',
     ]);
     await choose(root, '[data-profile-switch]', 'Other');
-    expect(text(root, '[data-change-submit]')).toBe('Switch 2 runtimes and delete Old');
+    const panel = q(root, '[data-catalog-note="delete"]');
+    expect(text(panel, '[data-change-submit]')).toBe('Switch 2 runtimes and delete Old');
     machine.onApply = current => {
       current.catalog = studioCatalog({ profiles: profileCatalog([profile('Other', ['mcp/github'])]) });
     };
-    await submit(root);
+    await click(panel, '[data-change-submit]');
     expect(stagedChanges(machine)).toEqual([{ kind: 'profile.remove', name: 'Old', switchRuntimesTo: 'Other' }]);
     expect(text(root, '[data-profiles-saved]')).toBe('Deleted profile Old.');
     expect(root.querySelector('[data-profiles-page="list"]')).not.toBeNull();
   });
 
-  it('confirms deleting a profile nothing uses, keeping its components', async () => {
+  it('confirms deleting a profile nothing uses, keeping its components, and says when it fails', async () => {
     const catalog = studioCatalog({
       profiles: profileCatalog([
         profile('Spare', ['mcp/github'], { usedBy: ['solo'] }),
@@ -226,250 +516,19 @@ describe('ProfilesTab — delete (E21)', () => {
       ]),
       runtimes: runtimeCatalog([runtime('solo', 'Spare')]),
     });
-    const machine = scriptedMachine({ catalog, stage: new Error('down') });
+    const machine = scriptedMachine({ catalog, stage: new Error('down'), preview: defaultPreview() });
     const root = await open(machine);
     await click(root, '[data-profile-row="Spare"]');
     await click(root, '[data-profile-delete]');
-    expect(text(root, '[data-catalog-note="delete"]')).toContain('Pick another profile for this runtime first');
     expect(text(root, '[data-catalog-note="delete"]')).toContain('solo moves to:');
     await click(root, '[data-profile-keep]');
     await click(root, '[data-catalog-back]');
     await click(root, '[data-profile-row="Unused"]');
     await click(root, '[data-profile-delete]');
-    expect(text(root, '[data-catalog-note="delete"]')).toContain('Nothing uses it now. Its components stay saved.');
-    await submit(root);
-    expect(root.querySelector('[data-change-refusal]')).not.toBeNull();
+    const panel = q(root, '[data-catalog-note="delete"]');
+    expect(panel.textContent).toContain('Nothing uses it now. Its components stay saved.');
+    await click(panel, '[data-change-submit]');
+    expect(panel.querySelector('[data-change-refusal]')).not.toBeNull();
     expect(text(root, 'h3')).toBe('Unused');
   });
 });
-
-describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', () => {
-  it('builds a profile from two bases and a component, reviews the conflict, names it and opens it', async () => {
-    const machine = scriptedMachine({
-      preview: {
-        harnesses: [
-          stack('claude', { applied: ['instructions/Main instructions'], conflicts: [CONFLICT] }),
-          stack('codex', { conflicts: [CONFLICT] }),
-        ],
-        scope: { kind: 'scoped', scope: 'claude' },
-      },
-    });
-    const root = await open(machine);
-    await click(root, '[data-profile-build]');
-    expect(text(root, '#machine-stepper-title')).toBe('Build a profile');
-    expect(text(root, '[data-stepper-position]')).toBe('Step 1 of 8 · Start from');
-    await tick(root, '[data-build-base="Review"]');
-    await tick(root, '[data-build-base="Default"]');
-    expect(root.querySelector('[data-build-order]')).toBeNull();
-    await click(root, '[data-disclosure-toggle="order"]');
-    expect(text(root, '[data-build-order]')).toContain('Default · wins');
-    await click(root, '[aria-label="Move Default earlier"]');
-    expect(text(root, '[data-build-order]')).toContain('Review · wins');
-    await click(root, '[aria-label="Move Default later"]');
-    await tick(root, '[data-build-base="Review"]');
-    await tick(root, '[data-build-base="Agent work"]');
-    await click(root, '[data-build-next]');
-
-    expect(text(root, '[data-stepper-position]')).toBe('Step 2 of 8 · Instructions');
-    expect(text(root, '[data-build-next]')).toBe('Skip, add no instructions');
-    await tick(root, '[data-build-pick="instructions/Main instructions"]');
-    expect(text(root, '[data-build-next]')).toBe('Next');
-    await tick(root, '[data-build-pick="instructions/Main instructions"]');
-    await tick(root, '[data-build-pick="instructions/Main instructions"]');
-    await click(root, '[data-build-next]');
-    await click(root, '[data-build-next]');
-    await click(root, '[data-build-next]');
-    await click(root, '[data-build-next]');
-    expect(text(root, '[data-stepper-position]')).toBe('Step 6 of 8 · Model set');
-    expect(root.querySelector<HTMLInputElement>('[data-build-pick=""] input')?.checked).toBe(true);
-    await tick(root, '[data-build-pick="modelSets/Claude models"]');
-    await tick(root, '[data-build-pick=""]');
-    await click(root, '[data-build-next]');
-
-    expect(text(root, '[data-stepper-position]')).toBe('Step 7 of 8 · Review layers');
-    expect(text(root, '[data-profile-summary] [data-component-badges]')).toBe('Claude only');
-    expect(text(root, '[data-profile-gives]')).toBe('Instructions: Main instructions');
-    expect(text(root, '[data-profile-built-from]')).toBe(
-      'Built from Default profile + Agent work profile + Main instructions',
-    );
-    await click(root, '[data-disclosure-toggle="layers"]');
-    const layers = [...root.querySelectorAll('[data-layer]')].map(layer => layer.getAttribute('data-layer'));
-    expect(layers).toEqual(['instructions/Main instructions', 'profile/Agent work', 'profile/Default']);
-    expect(text(root, '[data-conflicts]')).toContain('permissions.defaultMode');
-    expect(root.querySelectorAll('[data-conflicts] li')).toHaveLength(1);
-    const preview = machine.calls.find(call => call.path === '/v1/fleet/profiles/preview');
-    expect(preview?.body).toEqual({
-      layers: ['profile/Default', 'profile/Agent work', 'instructions/Main instructions'],
-    });
-    await click(root, '[data-build-next]');
-
-    expect(text(root, '[data-stepper-position]')).toBe('Step 8 of 8 · Name');
-    expect(text(root, '[data-build-scope]')).toBe('This profile will be Claude only');
-    expect(root.textContent).toContain('3 layers.');
-    expect(root.textContent).not.toContain('You go back to choosing a profile');
-    await typeName(root, 'Default');
-    expect(root.textContent).toContain('You already have a profile called Default.');
-    await typeName(root, 'Docs');
-    machine.onApply = current => {
-      current.catalog = studioCatalog({
-        profiles: profileCatalog([...profileCatalog().profiles, profile('Docs', ['profile/Default'])]),
-      });
-    };
-    await submit(root);
-    expect(stagedChanges(machine)).toEqual([
-      {
-        kind: 'profile.put',
-        name: 'Docs',
-        layers: ['profile/Default', 'profile/Agent work', 'instructions/Main instructions'],
-        create: true,
-      },
-    ]);
-    expect(root.querySelector('[data-machine-stepper]')).toBeNull();
-    expect(text(root, 'h3')).toBe('Docs');
-    expect(text(root, '[data-profiles-saved]')).toBe('Profile Docs saved.');
-  });
-
-  it('cannot review an empty stack, and says when the conflicts cannot be read or a layer is refused', async () => {
-    const machine = scriptedMachine();
-    const root = await open(machine);
-    await click(root, '[data-profile-build]');
-    for (let step = 0; step < 6; step += 1) await click(root, '[data-build-next]');
-    expect(text(root, '[data-catalog-note="empty"]')).toContain('This profile has no layers yet');
-    expect(root.querySelector<HTMLButtonElement>('[data-build-next]')?.disabled).toBe(true);
-    await click(root, '[data-stepper-back]');
-    await tick(root, '[data-build-pick="modelSets/Claude models"]');
-    await click(root, '[data-build-next]');
-    expect(root.textContent).toContain('did not answer, so what it gives cannot be shown yet');
-    machine.preview = {
-      harnesses: [],
-      scope: { kind: 'scoped', scope: 'generic' },
-      refusal: 'no profile Ghost exists on this machine',
-    };
-    await click(root, '[data-catalog-retry]');
-    expect(text(root, '[data-catalog-note="refused"]')).toBe('no profile Ghost exists on this machine');
-    await click(root, '[data-disclosure-toggle="layers"]');
-    expect(text(root, '[data-catalog-section="conflicts"]')).toContain('Shown once the profile can be saved.');
-    expect(root.querySelector<HTMLButtonElement>('[data-build-next]')?.disabled).toBe(true);
-  });
-
-  it('P7: badges every base by scope, and refuses a Claude-and-Codex draft in one sentence until it is fixed', async () => {
-    const sentence =
-      "A profile can't be both Claude only and Codex only: profile Default is Claude only and profile Codex is Codex only.";
-    const catalog = studioCatalog({
-      profiles: profileCatalog([
-        ...profileCatalog().profiles,
-        profile('Codex', ['mcp/github'], { scope: { kind: 'scoped', scope: 'codex' } }),
-      ]),
-    });
-    const machine = scriptedMachine({
-      catalog,
-      preview: { harnesses: [stack('claude'), stack('codex')], scope: { kind: 'mixed', sentence }, refusal: sentence },
-    });
-    const root = await open(machine);
-    await click(root, '[data-profile-build]');
-    expect(text(root, '[data-build-base="Default"] [data-component-badges]')).toBe('Claude only');
-    expect(text(root, '[data-build-base="Codex"] [data-component-badges]')).toBe('Codex only');
-    await tick(root, '[data-build-base="Default"]');
-    await tick(root, '[data-build-base="Codex"]');
-    for (let step = 0; step < 6; step += 1) await click(root, '[data-build-next]');
-    expect(text(root, '[data-stepper-position]')).toBe('Step 7 of 8 · Review layers');
-    expect(text(root, '[data-catalog-note="refused"]')).toBe(sentence);
-    expect(root.querySelector('[data-build-scope]')).toBeNull();
-    expect(root.querySelector<HTMLButtonElement>('[data-build-next]')?.disabled).toBe(true);
-  });
-
-  it('creates a missing component in place, picks it and saves it for reuse (E17)', async () => {
-    const machine = scriptedMachine();
-    const root = await open(machine);
-    await click(root, '[data-profile-build]');
-    await click(root, '[data-build-next]');
-    await click(root, '[data-build-create="instructions"]');
-    expect(root.querySelector('[data-build-create="instructions"]')).toBeNull();
-    expect(root.querySelector<HTMLButtonElement>('[data-build-next]')?.disabled).toBe(true);
-    await click(root, '[data-build-create-cancel]');
-    await click(root, '[data-build-create="instructions"]');
-    await typeField(root, '[data-component-field="name"]', 'Team rules');
-    await typeField(root, '[data-component-field="body"]', 'Be kind.');
-    machine.onApply = current => {
-      current.catalog = studioCatalog({
-        components: componentCatalog({
-          instructions: [component({ ...instructions, reference: 'instructions/Team rules', name: 'Team rules' })],
-        }),
-      });
-    };
-    await submit(root);
-    expect(stagedChanges(machine)[0]).toMatchObject({ kind: 'component.put', name: 'Team rules', create: true });
-    expect(root.querySelector<HTMLInputElement>('[data-build-pick="instructions/Team rules"] input')?.checked).toBe(
-      true,
-    );
-    await click(root, '[data-stepper-cancel]');
-    expect(text(root, '[data-stepper-saved]')).toBe('Instructions Team rules');
-    await click(root, '[data-stepper-keep]');
-    expect(text(root, '[data-stepper-position]')).toBe('Step 2 of 8 · Instructions');
-  });
-
-  it('edits a profile’s layers: itself and what includes it would include itself, and it saves under its name', async () => {
-    const machine = scriptedMachine({
-      preview: { harnesses: [stack('claude'), stack('codex')], scope: { kind: 'scoped', scope: 'generic' } },
-    });
-    const root = await open(machine);
-    await click(root, '[data-profile-row="Default"]');
-    await click(root, '[data-profile-edit]');
-    expect(text(root, '#machine-stepper-title')).toBe('Edit Default');
-    await settle();
-    const loops = [...root.querySelectorAll('[data-build-loop]')].map(loop =>
-      loop.closest('[data-build-base]')?.getAttribute('data-build-base'),
-    );
-    expect(loops).toEqual(['Agent work', 'Default', 'Review']);
-    expect(root.querySelector<HTMLInputElement>('[data-build-base="Default"] input')?.disabled).toBe(true);
-    await click(root, '[data-build-next]');
-    expect(
-      root.querySelector<HTMLInputElement>('[data-build-pick="instructions/Main instructions"] input')?.checked,
-    ).toBe(true);
-    for (let step = 0; step < 6; step += 1) await click(root, '[data-build-next]');
-    expect(root.textContent).toContain('Saving the new layers of Default.');
-    expect(text(root, '[data-change-submit]')).toBe('Save changes');
-    await submit(root);
-    expect(stagedChanges(machine)).toEqual([
-      {
-        kind: 'profile.put',
-        name: 'Default',
-        layers: ['instructions/Main instructions', 'mcp/github', 'settings/Claude settings', 'modelSets/Claude models'],
-        create: false,
-      },
-    ]);
-    expect(text(root, '[data-profiles-saved]')).toBe('Saved. New sessions use the new layers.');
-    expect(text(root, 'h3')).toBe('Default');
-  });
-
-  it('pauses on an offline machine and stops when the person leaves', async () => {
-    const root = await open(scriptedMachine(), { online: false });
-    await click(root, '[data-profile-build]');
-    expect(root.querySelector('[data-stepper-paused]')).not.toBeNull();
-    await click(root, '[data-stepper-cancel]');
-    expect(text(root, '[data-stepper-confirm]')).toContain('No profile is created.');
-    await click(root, '[data-stepper-stop]');
-    expect(root.querySelector('[data-machine-stepper]')).toBeNull();
-    expect(text(root, 'h3')).toBe('Profiles');
-  });
-
-  it('edits a profile the catalogue no longer has as a fresh draft', async () => {
-    const machine = scriptedMachine();
-    const root = await open(machine);
-    await click(root, '[data-profile-row="Review"]');
-    machine.catalog = studioCatalog({ profiles: profileCatalog([profile('Default', ['mcp/github'])]) });
-    await click(root, '[data-profile-edit]');
-    expect(root.querySelectorAll('[data-build-base] input:checked')).toHaveLength(0);
-    await click(root, '[data-build-next]');
-    await tick(root, '[data-build-pick="instructions/Main instructions"]');
-  });
-});
-
-const must = <T,>(value: T | null | undefined): T => {
-  if (value === null || value === undefined) throw new Error('missing');
-  return value;
-};
-
-const typeField = type;
-
-const typeName = (root: ParentNode, value: string) => typeField(root, '[data-build-name]', value);

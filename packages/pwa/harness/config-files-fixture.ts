@@ -61,6 +61,14 @@ const FILES: Readonly<Record<string, string>> = {
     '  - mcp/github',
     '',
   ].join('\n'),
+  'profiles/Agent work.yaml': [
+    '# yaml-language-server: $schema=../.schema/profile.json',
+    '# Later items override earlier ones on the same key.',
+    'contents:',
+    '  - profile/Default',
+    '  - profile/Agent',
+    '',
+  ].join('\n'),
   'runtimes/claude-default.yaml': [
     '# yaml-language-server: $schema=../.schema/runtime.json',
     'login: claude',
