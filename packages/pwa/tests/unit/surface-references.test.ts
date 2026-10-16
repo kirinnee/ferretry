@@ -1,5 +1,5 @@
 import { describe, test } from 'bun:test';
-import type { TerminalListView, TerminalView } from '@ferretry/protocol';
+import type { BrowserPageSummary, BrowserStatus, TerminalListView, TerminalView } from '@ferretry/protocol';
 import should from 'should';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -160,12 +160,88 @@ describe('createSurfaceReferenceResolver', () => {
     should(second({ kind: 'surface', surface: 'terminal', key: FIRST })).have.property('daemonId', daemonB);
   });
 
-  test('should leave a browser page unproved rather than calling it closed', () => {
-    // Arrange — there is no browser worker, so this module holds no page evidence.
+  test('should leave a browser page unproved rather than calling it closed when no status was read', () => {
+    // Arrange — a terminal listing is no evidence about pages.
     const resolve = createSurfaceReferenceResolver(scopeA, listing([terminal(FIRST, 'build')]));
 
     // Assert
     should(resolve({ kind: 'surface', surface: 'browser', key: 'page-1' })).be.undefined();
+  });
+});
+
+const page = (id: string, name?: string): BrowserPageSummary => ({
+  id,
+  url: 'https://example.test/',
+  title: id,
+  ...(name === undefined ? {} : { name }),
+});
+
+const browserStatus = (
+  state: BrowserStatus['state'],
+  pages: readonly BrowserPageSummary[],
+  sessionId = 'sess-1',
+): BrowserStatus =>
+  ({
+    sessionId,
+    state,
+    pages: [...pages],
+    viewport: { width: 1280, height: 800 },
+    viewers: 0,
+    persistentProfile: true,
+    idleTimeoutSeconds: 900,
+    capacity: { running: pages.length, maximum: 60 },
+    ...(state === 'error' ? { error: 'the browser exited' } : {}),
+  }) as BrowserStatus;
+
+describe('browser pages as references', () => {
+  test('should prove a page by its name and by its id, and call any other page closed', () => {
+    // Arrange
+    const resolve = createSurfaceReferenceResolver(scopeA, null, browserStatus('running', [page('PAGE1', 'app')]));
+
+    // Act + Assert
+    should(resolve({ kind: 'surface', surface: 'browser', key: 'app' })).deepEqual({
+      state: 'open',
+      daemonId: daemonA,
+      sessionId: 'sess-1',
+      surface: 'browser',
+      key: 'app',
+    });
+    should(resolve({ kind: 'surface', surface: 'browser', key: 'PAGE1' })).match({ state: 'open', key: 'PAGE1' });
+    should(resolve({ kind: 'surface', surface: 'browser', key: 'docs' })).deepEqual({ state: 'closed' });
+    // The page list proves nothing about terminals.
+    should(resolve({ kind: 'surface', surface: 'terminal', key: FIRST })).be.undefined();
+  });
+
+  test('should prove every page closed once the browser has stopped, since its pages ended with it', () => {
+    const resolve = createSurfaceReferenceResolver(scopeA, null, browserStatus('stopped', []));
+    should(resolve({ kind: 'surface', surface: 'browser', key: 'app' })).deepEqual({ state: 'closed' });
+  });
+
+  test('should prove nothing from a starting or failed browser, or another session status', () => {
+    for (const status of [
+      browserStatus('starting', []),
+      browserStatus('error', [page('PAGE1', 'app')]),
+      browserStatus('running', [page('PAGE1', 'app')], 'sess-2'),
+    ]) {
+      const resolve = createSurfaceReferenceResolver(scopeA, null, status);
+      should(resolve({ kind: 'surface', surface: 'browser', key: 'app' })).be.undefined();
+      should(resolve({ kind: 'surface', surface: 'browser', key: 'docs' })).be.undefined();
+    }
+  });
+
+  test('should change the identity key when a page opens, is named or the list becomes evidence', () => {
+    const one = surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [page('PAGE1')]));
+    should(surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [page('PAGE1', 'app')]))).not.equal(one);
+    should(
+      surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [page('PAGE1'), page('PAGE2')])),
+    ).not.equal(one);
+    should(surfaceReferenceIdentityKey(scopeA, null, browserStatus('starting', []))).not.equal(
+      surfaceReferenceIdentityKey(scopeA, null, browserStatus('stopped', [])),
+    );
+    // A retitled page is the same referenceable surface.
+    should(
+      surfaceReferenceIdentityKey(scopeA, null, browserStatus('running', [{ ...page('PAGE1'), title: 'Renamed' }])),
+    ).equal(one);
   });
 });
 

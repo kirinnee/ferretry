@@ -23,7 +23,7 @@
  * file, terminal or session.
  */
 
-import type { AttentionId, SessionView, TerminalListView } from '@ferretry/protocol';
+import type { AttentionId, BrowserStatus, SessionView, TerminalListView } from '@ferretry/protocol';
 import { createContext, type ReactNode, useContext } from 'react';
 
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
@@ -95,6 +95,11 @@ export interface SessionReferenceSurfaceOptions {
    */
   readonly terminals?: TerminalListView | null;
   /**
+   * This session's browser status, for proving `%browser:…` pages. Like the terminal listing, a null or
+   * absent status — or one in a state whose page list is not complete — proves nothing either way.
+   */
+  readonly browser?: BrowserStatus | null;
+  /**
    * In-app navigation, for the one reference kind that IS a route. Without it an
    * agent reference has no destination, so it stays prose rather than becoming a
    * link whose click is swallowed.
@@ -142,6 +147,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     onAttentionOpen,
     skills,
     terminals,
+    browser,
     onNavigate,
     destinations = {},
   } = options;
@@ -165,7 +171,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     // Always supplied, because this resolver is the only thing that can say
     // "closed" as opposed to "unknown", and it answers nothing when it has no
     // listing to answer from.
-    surfaceReferenceResolver: createSurfaceReferenceResolver(scope, terminals),
+    surfaceReferenceResolver: createSurfaceReferenceResolver(scope, terminals, browser),
     resolveFilePaths: async (candidates, signal) =>
       await resolveFsFilePaths(connection, scope, candidates, cwd, fetcher, signal),
     onCodeReferenceOpen: reference => {
@@ -186,10 +192,9 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
         destinations.openSurface(reference);
         return;
       }
-      // Only terminals have a pane to focus. A `%browser:…` surface cannot be
-      // proved at all on this daemon (there is no worker and no page listing), so
-      // this arm is unreachable for one today — and it refuses rather than
-      // guessing a destination if that ever changes before the pane does.
+      // Only terminals have a side-pane tab to focus: a page is opened as a workspace tab, which a host
+      // without a workspace does not have, so a proved `%browser:…` opens nothing here rather than a
+      // guessed destination.
       if (reference.surface === 'terminal')
         openSidePaneTerminalTab(scope, terminalIdForSurfaceKey(terminals, reference.key) ?? reference.key);
     },
