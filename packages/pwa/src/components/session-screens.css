@@ -1356,3 +1356,38 @@
     min-height: 44px;
   }
 }
+/* The composer's readouts (model, effort, context, quota) lay out as items of the status line. */
+.fy-composer-status-chrome {
+  display: contents;
+}
+/* KEYBOARD UP ON A PHONE: the reader is writing and needs the turn they are answering, so the
+   readouts step aside and the status line goes entirely when nothing else is on it (the Vim
+   indicator and New line stay). `display: none`, not an unmount, so an open chip keeps its state. */
+@media (pointer: coarse), (max-width: 767px) {
+  html[data-keyboard='open'] .fy-composer-status-chrome {
+    display: none;
+  }
+  html[data-keyboard='open'] .fy-composer-actions:not(:has(.fy-composer-vim, .fy-composer-chip)) {
+    display: none;
+  }
+  html[data-keyboard='open'] .fy-composer {
+    gap: 4px;
+  }
+  /* The suggestion list spans the whole composer row on a phone, anchored to the row rather than
+     to the field, so it can never start left of the screen. */
+  .fy-composer-row {
+    position: relative;
+  }
+  .fy-composer-row > .fy-composer-input-layer {
+    position: static;
+  }
+  .fy-composer-row .fy-ac-pop {
+    bottom: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    width: auto;
+  }
+  html[data-keyboard='open'] .fy-ac-list {
+    max-height: min(calc(4 * 44px + 8px), max(96px, calc(var(--app-h, 100dvh) * 0.3)));
+  }
+}

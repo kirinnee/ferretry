@@ -12,10 +12,13 @@
  *   ?vim=1                Vim keys on
  *   ?compact=1            the phone composer
  *   ?draft=<text>         a saved draft to open with
+ *   ?layout=chat          a phone chat page: a transcript above the composer, sized by the app's own
+ *                         viewport hook, so a (faked) keyboard shrinks it exactly as in the app
  */
-import { StrictMode } from 'react';
+import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../../../src/components/composer.tsx';
+import { useAppViewport } from '../../../src/hooks/use-app-viewport.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
@@ -36,24 +39,47 @@ drafts.save(daemonSessionScope(daemon, 'scene-session'), parameters.get('draft')
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene has no #root to mount into');
 
+const TRANSCRIPT = Array.from(
+  { length: 12 },
+  (_unused, index) =>
+    `Turn ${index + 1}: the agent explains what it changed and what it will do next, in a paragraph long enough to wrap.`,
+);
+
+/** The chat page's shape: the transcript takes what the composer leaves, inside the app viewport. */
+function ChatPage({ children }: { readonly children: ReactNode }) {
+  useAppViewport();
+  return (
+    <div className="scene-chat">
+      <div className="scene-transcript" data-scene-transcript="">
+        {TRANSCRIPT.map(line => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+      <div className="scene-composer">{children}</div>
+    </div>
+  );
+}
+
+const composer = (
+  <Composer
+    api={{
+      send: async (_id, body) => {
+        sent.push(body);
+        return { disposition: 'queued' } as never;
+      },
+    }}
+    busy={parameters.get('busy') === '1'}
+    compact={parameters.get('compact') === '1'}
+    daemon={daemon}
+    draftStore={drafts}
+    enterKeyPreference="send"
+    sessionId="scene-session"
+    vimMode={parameters.get('vim') === '1'}
+  />
+);
+
 createRoot(root).render(
   <StrictMode>
-    <main className="scene">
-      <Composer
-        api={{
-          send: async (_id, body) => {
-            sent.push(body);
-            return { disposition: 'queued' } as never;
-          },
-        }}
-        busy={parameters.get('busy') === '1'}
-        compact={parameters.get('compact') === '1'}
-        daemon={daemon}
-        draftStore={drafts}
-        enterKeyPreference="send"
-        sessionId="scene-session"
-        vimMode={parameters.get('vim') === '1'}
-      />
-    </main>
+    {parameters.get('layout') === 'chat' ? <ChatPage>{composer}</ChatPage> : <main className="scene">{composer}</main>}
   </StrictMode>,
 );

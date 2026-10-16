@@ -20,18 +20,7 @@ import { type DraftEdit, toggleWrap } from './composer-editing.ts';
 import { findReferences } from './references.ts';
 
 /** What a whole line is. `fence` is a ``` line itself; `code` is a line inside a fence. */
-type LiveBlockKind =
-  | 'p'
-  | 'h1'
-  | 'h2'
-  | 'h3'
-  | 'bullet'
-  | 'ordered'
-  | 'check'
-  | 'quote'
-  | 'hr'
-  | 'fence'
-  | 'code';
+type LiveBlockKind = 'p' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'check' | 'quote' | 'hr' | 'fence' | 'code';
 
 /** How a run of characters inside a line is painted. */
 type LiveRunStyle = 'strong' | 'em' | 'strike' | 'code' | 'link' | 'url' | 'reference';

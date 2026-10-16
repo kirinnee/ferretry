@@ -41,6 +41,9 @@ const PHONE = {
 const SCENE_CSS = `
   body { background: var(--fy-bg, var(--bg)); margin: 0; }
   .scene { box-sizing: border-box; margin: 0 auto; max-width: 760px; padding: 24px 16px; }
+  .scene-chat { box-sizing: border-box; display: flex; flex-direction: column; height: var(--app-h, 100dvh); left: 0; position: fixed; right: 0; top: var(--app-top, 0px); }
+  .scene-transcript { color: var(--fy-fg); flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 16px; }
+  .scene-composer { padding: 6px 12px 8px; }
 `;
 
 let browser: Browser;
@@ -224,7 +227,11 @@ describe('the composer in a real browser', () => {
       expect(await draftOf(page)).toBe('# Plan\nmake this **loud**');
       await press(page, 'ArrowUp');
       // On the heading's own line its marker is back, so it can be edited.
-      expect(await heading.evaluate(node => getComputedStyle(node).display)).not.toBe('none');
+      // The reveal follows `selectionchange`, which the browser delivers asynchronously.
+      await page.waitForFunction(
+        () =>
+          getComputedStyle(document.querySelector('[data-block="h1"] [data-md-marker]') as Element).display !== 'none',
+      );
       await press(page, 'ArrowDown');
       await page.getByRole('button', { name: 'Bulleted list' }).click();
       expect(await draftOf(page)).toBe('# Plan\n- make this **loud**');
@@ -461,6 +468,119 @@ describe('the composer in a real browser', () => {
           } finally {
             await scene.close();
           }
+        }
+      }
+  }, 180_000);
+});
+
+/**
+ * A software keyboard, faked the way the phone audit does: `visualViewport.height` shrinks while the
+ * layout viewport stays, which is what iOS reports. The app's own viewport hook reads it and stamps
+ * `data-keyboard="open"`; nothing here sets that attribute by hand.
+ */
+const FAKE_KEYBOARD = `(() => {
+  const real = window.visualViewport; if (!real) return;
+  const target = new EventTarget(); let override = null;
+  for (const n of ['width', 'offsetTop', 'offsetLeft', 'pageTop', 'pageLeft', 'scale'])
+    Object.defineProperty(target, n, { get: () => real[n], configurable: true });
+  Object.defineProperty(target, 'height', { get: () => override ?? real.height, configurable: true });
+  real.addEventListener('resize', () => target.dispatchEvent(new Event('resize')));
+  Object.defineProperty(window, 'visualViewport', { get: () => target, configurable: true });
+  window.__setVisualViewportHeight = next => { override = next; target.dispatchEvent(new Event('resize')); };
+})();`;
+
+/** The visible height above a phone keyboard, measured in the phone audit (portrait). */
+const KEYBOARD_VISIBLE_PX = 430;
+
+const openWithKeyboard = async (theme: string, editor = 'on'): Promise<Scene> => {
+  const context = await browser.newContext(PHONE);
+  await context.addInitScript(FAKE_KEYBOARD);
+  const page = await context.newPage();
+  await page.route(/^(?!http:\/\/127\.0\.0\.1:)/u, route => route.abort());
+  await page.route(/\/v1\//u, route => route.abort());
+  const query = new URLSearchParams({ editor, theme, busy: '1', compact: '1', layout: 'chat' });
+  await page.goto(`${server.url}?${query.toString()}`);
+  await page.waitForSelector('[data-composer-send]');
+  await page.locator(EDITOR).click();
+  await page.evaluate(
+    height => (window as unknown as { __setVisualViewportHeight(h: number): void }).__setVisualViewportHeight(height),
+    KEYBOARD_VISIBLE_PX,
+  );
+  await page.waitForSelector('html[data-keyboard="open"]');
+  return { context, page, close: () => context.close() };
+};
+
+describe('the composer on a phone with the keyboard up', () => {
+  test('stays compact so the turn being answered stays readable, and the @ list fits the screen', async () => {
+    const scene = await openWithKeyboard('studio-light');
+    const { page } = scene;
+    try {
+      for (let line = 0; line < 9; line += 1) {
+        await page.keyboard.type(`line ${line} of a long reply`);
+        await press(page, 'Shift+Enter');
+      }
+      const measured = await page.evaluate(() => {
+        const box = (selector: string) => (document.querySelector(selector) as Element).getBoundingClientRect();
+        return {
+          transcript: box('[data-scene-transcript]').height,
+          composer: box('.fy-composer').height,
+          editor: box('[data-live-editor]').height,
+          bottom: box('.fy-composer').bottom,
+          status: getComputedStyle(document.querySelector('[data-composer-status-chrome]') as Element).display,
+        };
+      });
+      expect(measured.editor).toBeLessThanOrEqual(88 + 1);
+      expect(measured.composer).toBeLessThanOrEqual(150);
+      expect(measured.transcript).toBeGreaterThanOrEqual(KEYBOARD_VISIBLE_PX * 0.55);
+      expect(measured.bottom).toBeLessThanOrEqual(KEYBOARD_VISIBLE_PX);
+      expect(measured.status).toBe('none');
+
+      await page.keyboard.type('@');
+      const popover = page.locator('.fy-ac-pop');
+      await popover.waitFor();
+      const rect = await popover.boundingBox();
+      expect(rect?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((rect?.x ?? 0) + (rect?.width ?? 999)).toBeLessThanOrEqual(PHONE.viewport.width);
+      expect(rect?.y ?? -1).toBeGreaterThanOrEqual(0);
+      // No keys a touch screen does not have.
+      expect(await popover.textContent()).not.toMatch(/esc|↑↓|⇥/u);
+
+      // The keyboard going away brings the readouts back.
+      await page.evaluate(() =>
+        (window as unknown as { __setVisualViewportHeight(h: number | null): void }).__setVisualViewportHeight(null),
+      );
+      await page.waitForSelector('html:not([data-keyboard])');
+      expect(await page.locator('[data-composer-status-chrome]').evaluate(node => getComputedStyle(node).display)).toBe(
+        'contents',
+      );
+    } finally {
+      await scene.close();
+    }
+  }, 60_000);
+
+  test('evidence: keyboard up, a long draft and the @ list, three themes', async () => {
+    if (evidenceDir === null) return;
+    await mkdir(evidenceDir, { recursive: true });
+    for (const theme of ['studio-light', 'neo-light', 'phosphor-dark'])
+      for (const editor of ['on', 'rich']) {
+        const scene = await openWithKeyboard(theme, editor);
+        try {
+          const { page } = scene;
+          await page.keyboard.type('# Reply');
+          await press(page, 'Shift+Enter');
+          await page.keyboard.type('- **first** point');
+          await press(page, 'Enter');
+          await page.keyboard.type('second point');
+          const clip = { x: 0, y: 0, width: PHONE.viewport.width, height: KEYBOARD_VISIBLE_PX };
+          await page.screenshot({ clip, path: join(evidenceDir, `keyboard-${editor}-${theme}-phone.png`) });
+          if (editor === 'on') {
+            await press(page, 'Shift+Enter');
+            await page.keyboard.type('ask @');
+            await page.locator('.fy-ac-pop').waitFor();
+            await page.screenshot({ clip, path: join(evidenceDir, `keyboard-at-${theme}-phone.png`) });
+          }
+        } finally {
+          await scene.close();
         }
       }
   }, 180_000);

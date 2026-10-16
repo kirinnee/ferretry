@@ -136,10 +136,10 @@ describe('composer auto-grow', () => {
     document.documentElement.setAttribute('data-keyboard', 'open');
     const { input, unmount } = await grown({ compact: true, contentHeight: 4_000, sessionId: 'keyboard' });
     try {
-      // With ~430px of visible viewport, 160px of composer is more than a third
-      // of everything the reader can see, so the ceiling comes down with the
+      // With ~430px of visible viewport, four lines is all the composer may take
+      // while the reader still needs the turn above it, so the ceiling comes down with the
       // keyboard — and the dependency on it is what brings it back up.
-      should(input.style.height).equal('140px');
+      should(input.style.height).equal('88px');
     } finally {
       await unmount();
       document.documentElement.removeAttribute('data-keyboard');

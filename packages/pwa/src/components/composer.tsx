@@ -122,13 +122,14 @@ export interface ComposerProps {
  * the conversation it is about.
  *
  * The phone gets a slightly taller rest ceiling than the desktop because its
- * lines are shorter, and a LOWER one while the keyboard is up: with ~430px of
- * visible viewport, 160px of composer is more than a third of everything the
- * reader can see.
+ * lines are shorter, and a much LOWER one while the keyboard is up: with ~430px of
+ * visible viewport, the turn being answered has to stay readable above the box, so
+ * four lines is the ceiling (the status line also steps aside then; see
+ * `.fy-composer-status-chrome`).
  */
 const MAX_TEXTAREA_PX = 148;
 const COMPACT_MAX_TEXTAREA_PX = 160;
-const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 140;
+const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 88;
 /** ONE LINE at rest, the same 22px `.fy-composer textarea` declares — stated here so the two cannot
  *  drift. The touch target is the row around it (36px controls plus its padding, 44px tall), not the
  *  bare line, which is what lets an idle composer be a single compact line. */
@@ -940,13 +941,17 @@ export function Composer({
         </button>
       </div>
       <div className="fy-composer-actions" data-composer-status="">
-        {statusSlot}
-        {contextPercent === undefined ? null : (
-          <span className="fy-composer-context" title="How full this session's context window is">
-            ctx {Math.round(contextPercent)}%
-          </span>
-        )}
-        <ComposerQuota quota={quota} />
+        {/* The session's readouts. On a phone with the keyboard up they step aside (CSS, never an
+            unmount, so an open chip keeps its state), leaving the transcript the room. */}
+        <span className="fy-composer-status-chrome" data-composer-status-chrome="">
+          {statusSlot}
+          {contextPercent === undefined ? null : (
+            <span className="fy-composer-context" title="How full this session's context window is">
+              ctx {Math.round(contextPercent)}%
+            </span>
+          )}
+          <ComposerQuota quota={quota} />
+        </span>
         <span className="fy-composer-spacer" />
         {vimMode ? (
           <>
