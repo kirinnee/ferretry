@@ -114,7 +114,7 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
     const page: FakePage = {
       id: `page-${String(this.minted)}`,
       url: url ?? 'about:blank',
-      title: '',
+      title: url === undefined ? '' : `Page at ${new URL(url).host}`,
       name,
       ...(openedBy === undefined ? {} : { openedBy }),
       ...(options.incognito === true ? { incognito: true as const } : {}),

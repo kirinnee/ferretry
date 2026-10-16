@@ -62,11 +62,19 @@ daemon replays its journal on start, so a takeover or a hand-over outlives a res
   a tab only while it is visible in its window, which is why each page gets its own window — and a
   headless window is never shown, so the daemon's per-session ownership, not the window, is what keeps
   agents' tabs apart.
+- **One window per page, grouped per agent in the UI.** The window is Chrome's rendering unit, not
+  what a person sees: a reader groups pages by their owning session, so every page one agent opened
+  shows together as that agent's browser ("Hadi's browser"). Every page summary carries what that
+  grouping needs — `ownerSessionId` and, when the session has one, `ownerName` (its display name),
+  popups included (a popup is its opener's) — and every driving event carries `agentSessionId` and
+  `agentName`.
 - **There is no active tab.** Every act, every input and every screencast names its page (each page's
   own CDP session). A person's input and live view go to the page their session is viewing; an
   agent's act moves nothing. Acts are serialized per page, not per browser, and input never queues
   behind a page load — a person and an agent work at the same time without blocking each other.
-- Caps: 20 pages per session, 60 per machine — refused past them, never hidden. The browser stops
+- Caps: 20 pages per session, 60 per machine — refused past them, never hidden. The machine cap
+  counts every page that belongs to a session, so the popups an agent's clicks opened count too; the
+  pages are read fresh before each open. The browser stops
   after 15 minutes with nobody watching and nobody acting.
 - The CDP port listens on loopback and accepts no cross-origin WebSocket (`--remote-allow-origins` is
   gone; the worker sends no `Origin`).
@@ -83,7 +91,9 @@ daemon replays its journal on start, so a takeover or a hand-over outlives a res
    `fy terminal`/`fy browser page` send no bearer token at all.
 3. **An agent acts only on what it opened, or what a person handed to it.** A person's own terminal or
    page in the agent's session is refused ("… is a person's, not yours") until they hand it over
-   (`handover`). The listing tells the agent which rows it may use (`available`).
+   (`handover`). An agent's `terminal.list` / `browser.list` show only its own surfaces and the ones
+   handed to it: a person's page is absent — not its name, its URL or its title — until it is handed
+   over.
 4. **A person's route refuses an agent that says it is one** (`peer:` / `warden:` actors).
 5. **What agents may control.** Every agent call first asks the machine's `AgentControlPolicy` (unit S's
    store, read per call). The same switches also wrap every ordinary terminal, browser and filesystem

@@ -491,7 +491,8 @@ describe('the agent tools, through the production composition root', () => {
     should(otherTab.status).equal(200);
     should(incognito.summary).startWith('Opened an incognito page, %browser:private');
     should(pages.surfaces?.find(surface => surface.name === 'private')).match({ incognito: true, available: true });
-    should(pages.surfaces?.find(surface => surface.name === 'bank')).match({ available: false });
+    // The person's page is not in the agent's list at all — not its name, URL or title.
+    should(pages.surfaces?.map(surface => surface.name)).not.containEql('bank');
 
     // The switch, read fresh per call through the real configuration.
     should(switchedOff.status).equal(403);

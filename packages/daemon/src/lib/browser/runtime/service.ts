@@ -49,8 +49,9 @@ export interface BrowserIdlePolicy {
 /** Refuses an agent's act from inside its page's own queue — a takeover that landed while it waited. */
 export type BrowserActGuard = () => Promise<void>;
 
+/** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
 export interface BrowserSessionDirectory {
-  get(sessionId: string): Promise<unknown | undefined>;
+  get(sessionId: string): Promise<{ readonly config?: { readonly name?: string | null } } | undefined>;
 }
 
 /** What can be done to ONE named page: the agent tools' browser verbs. */
@@ -142,6 +143,8 @@ export class BrowserSessionService implements BrowserSubsystem {
   private run: Running | undefined;
   private starting: Promise<Running> | undefined;
   private readonly serial = new Map<string, Promise<void>>();
+  /** Session id → display name, as last read from the session directory. */
+  private readonly sessionNames = new Map<string, string>();
 
   constructor(
     private readonly sessions: BrowserSessionDirectory,
@@ -326,12 +329,15 @@ export class BrowserSessionService implements BrowserSubsystem {
     options: BrowserOpenOptions,
   ): Promise<BrowserPageActionSnapshot> {
     return await this.exclusive('', async () => {
+      // Read the pages fresh: a popup a click opened since the last act counts toward both caps.
+      run.snapshot = pageOf(await run.driver.location());
       if (this.owned(run, sessionId).length >= BROWSER_MAX_PAGES)
         throw new BrowserSessionError(
           'capacity',
           `this session already has ${String(BROWSER_MAX_PAGES)} browser pages open; close one before opening another`,
         );
-      if (run.owners.size >= BROWSER_MAX_MACHINE_PAGES)
+      // Every page that belongs to a session counts — the popups an agent's clicks opened included.
+      if (this.sessionPages(run) >= BROWSER_MAX_MACHINE_PAGES)
         throw new BrowserSessionError(
           'capacity',
           `this machine's browser already has ${String(BROWSER_MAX_MACHINE_PAGES)} pages open; close one before opening another`,
@@ -461,6 +467,11 @@ export class BrowserSessionService implements BrowserSubsystem {
     return opener === undefined ? undefined : this.ownerOf(run, opener, depth + 1);
   }
 
+  /** Pages that belong to some session (popups included) — what the machine cap counts. */
+  private sessionPages(run: Running): number {
+    return run.snapshot.pages.filter(page => this.ownerOf(run, page) !== undefined).length;
+  }
+
   /** This session's pages, among the pages the browser reported last. */
   private owned(run: Running, sessionId: string): BrowserPageSummary[] {
     return run.snapshot.pages.filter(page => this.ownerOf(run, page) === sessionId);
@@ -498,10 +509,14 @@ export class BrowserSessionService implements BrowserSubsystem {
     const page = run.snapshot.pages.find(candidate => candidate.id === pageId) as BrowserPageSummary;
     const name = run.names.get(page.id);
     const openedBy = run.openers.get(page.id);
+    const owner = this.ownerOf(run, page);
+    const ownerName = owner === undefined ? undefined : this.sessionNames.get(owner);
     return {
       ...page,
       ...(name === undefined ? {} : { name }),
       ...(openedBy === undefined ? {} : { openedBy }),
+      ...(owner === undefined ? {} : { ownerSessionId: owner }),
+      ...(ownerName === undefined ? {} : { ownerName }),
     };
   }
 
@@ -516,7 +531,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       profileKind: 'shared' as const,
       idleTimeoutSeconds: Math.round((this.idle?.timeoutMs ?? 0) / 1_000),
       startedAt: run.startedAt,
-      capacity: { running: run.owners.size, maximum: BROWSER_MAX_MACHINE_PAGES },
+      capacity: { running: this.sessionPages(run), maximum: BROWSER_MAX_MACHINE_PAGES },
     };
     const viewed = this.viewedPage(run, sessionId);
     const active = pages.find(page => page.id === viewed);
@@ -566,8 +581,10 @@ export class BrowserSessionService implements BrowserSubsystem {
   }
 
   private async requireSession(sessionId: string): Promise<void> {
-    if ((await this.sessions.get(sessionId)) === undefined)
-      throw new BrowserSessionError('not_found', 'the session does not exist');
+    const session = await this.sessions.get(sessionId);
+    if (session === undefined) throw new BrowserSessionError('not_found', 'the session does not exist');
+    const name = session.config?.name;
+    if (typeof name === 'string' && name !== '') this.sessionNames.set(sessionId, name);
   }
 
   /** Work on one page runs in order; work on different pages runs side by side. `''` is the browser. */
