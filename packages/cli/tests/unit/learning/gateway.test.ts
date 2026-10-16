@@ -4,14 +4,27 @@ import type { z } from 'zod';
 import {
   LEARNING_CONFIG_PATH,
   LEARNING_RUN_PATH,
+  LEARNING_SCAN_ESTIMATE_PATH,
+  LEARNING_SCAN_PATH,
   LEARNING_STATUS_PATH,
+  learningApplyPath,
+  learningApplyPreviewPath,
   learningPatchPath,
   learningProposalPath,
   learningProposalsPath,
   ProtocolLearningGateway,
 } from '../../../src/lib/learning/gateway';
 import type { LearningApiClient } from '../../../src/lib/learning/ports';
-import { learningConfig, learningStatus, patchResponse, proposal, runManifest } from './fixtures';
+import {
+  applyPreview,
+  learningConfig,
+  learningStatus,
+  patchResponse,
+  proposal,
+  runManifest,
+  scanEstimate,
+  scanProgress,
+} from './fixtures';
 
 interface Call {
   path: string;
@@ -41,6 +54,8 @@ describe('learning routes', () => {
     // Act + Assert
     should(learningProposalPath('a/b')).equal('/v1/learning/proposals/a%2Fb');
     should(learningPatchPath('a b')).equal('/v1/learning/proposals/a%20b/patch');
+    should(learningApplyPreviewPath('a b')).equal('/v1/learning/proposals/a%20b/apply-preview');
+    should(learningApplyPath('a b')).equal('/v1/learning/proposals/a%20b/apply');
   });
 });
 
@@ -142,5 +157,70 @@ describe('protocol learning gateway', () => {
 
     // Act + Assert
     await should(gateway.status()).be.rejected();
+  });
+
+  it('should fetch an apply preview with a GET, because reading what Apply would write mutates nothing', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolLearningGateway(fakeClient(applyPreview(), calls));
+
+    // Act
+    const actual = await gateway.applyPreview('p1');
+
+    // Assert
+    should(calls[0]?.path).equal('/v1/learning/proposals/p1/apply-preview');
+    should(calls[0]?.init).be.undefined();
+    should(actual.etag).equal('etag-1');
+  });
+
+  it('should post an apply with only the etag', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolLearningGateway(fakeClient(proposal('p1', { state: 'applied' }), calls));
+
+    // Act
+    const actual = await gateway.apply('p1', 'etag-1');
+
+    // Assert
+    should(calls[0]?.path).equal('/v1/learning/proposals/p1/apply');
+    should(calls[0]?.init?.method).equal('POST');
+    should(body(calls[0]?.init)).eql({ etag: 'etag-1' });
+    should(actual.state).equal('applied');
+  });
+
+  it('should post a scan estimate as validated protocol JSON', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolLearningGateway(fakeClient(scanEstimate(), calls));
+
+    // Act
+    const actual = await gateway.scanEstimate({ scope: { kind: 'not-passive' } });
+
+    // Assert
+    should(calls[0]?.path).equal(LEARNING_SCAN_ESTIMATE_PATH);
+    should(body(calls[0]?.init)).eql({ scope: { kind: 'not-passive' } });
+    should(actual.sessions).equal(4);
+  });
+
+  it('should post an explicit scan start', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolLearningGateway(fakeClient(scanProgress(), calls));
+
+    // Act
+    const actual = await gateway.scan({ scope: { kind: 'sessions', sessionIds: ['s1'] }, agent: 'miner' });
+
+    // Assert
+    should(calls[0]?.path).equal(LEARNING_SCAN_PATH);
+    should(body(calls[0]?.init)).eql({ scope: { kind: 'sessions', sessionIds: ['s1'] }, agent: 'miner' });
+    should(actual.runId).equal('scan-1');
+  });
+
+  it('should refuse a scan scope the protocol does not define before asking the daemon', async () => {
+    // Arrange
+    const gateway = new ProtocolLearningGateway(fakeClient(scanEstimate()));
+
+    // Act + Assert
+    await should(gateway.scanEstimate({ scope: { kind: 'sessions', sessionIds: [] } })).be.rejected();
   });
 });

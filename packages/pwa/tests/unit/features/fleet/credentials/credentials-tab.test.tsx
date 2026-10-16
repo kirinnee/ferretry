@@ -738,6 +738,36 @@ describe('CredentialsTab · an environment login', () => {
     await view.unmount();
   });
 
+  it('shows its provider quota in the list and on its page, in place of the 5-hour and weekly bars', async () => {
+    const quoted = credential({
+      id: 'glm-env',
+      store: 'environment',
+      environment: ENVIRONMENT,
+      usage: {
+        fiveHour: { usedPercent: 64 },
+        weekly: {},
+        source: 'provider-quota',
+        provider: {
+          source: 'zai-coding-plan',
+          via: 'endpoint',
+          windows: [{ label: '5h', usedPercent: 64 }],
+          exhausted: false,
+          unverified: true,
+          at: '2026-10-16T09:00:00.000Z',
+        },
+      },
+    });
+    const { view } = await open({ [LIST]: listOf([quoted]) });
+    const row = must(view.container.querySelector('[data-credential-row="glm-env"]'), 'the row');
+    expect(row.querySelector('[data-provider-quota="endpoint"]')).not.toBeNull();
+    expect(row.querySelector('[data-credential-usage=""]')).toBeNull();
+    await view.unmount();
+
+    const page = await open({ [LIST]: listOf([quoted]) }, { hash: `${HASH}/glm-env` });
+    expect(page.view.container.querySelector('[data-provider-quota-window="5h"]')?.textContent).toContain('64% used');
+    await page.view.unmount();
+  });
+
   it('shows its variables and its Test on its page', async () => {
     const { view } = await open({ [LIST]: listOf([glm]) }, { hash: `${HASH}/glm-env` });
     const panel = must(view.container.querySelector('[data-credential-environment="glm-env"]'), 'the panel');

@@ -16,7 +16,7 @@ import { HARNESS_NAMES } from '../components/component-model.ts';
 import { checkFleetCredential } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from '../runtimes/machine-data.ts';
-import { AccountStatus } from '../shell/account-status.tsx';
+import { AccountStatus, ProviderQuota } from '../shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
@@ -207,7 +207,13 @@ function CredentialPage({
         <p className="m-0 text-cell leading-base text-muted">
           {checking ? `Checking with ${HARNESS_NAMES[credential.harness]}…` : credentialExplanation(credential)}
         </p>
-        {credential.status.word === 'ready' ? <UsageBars credential={credential} now={now} /> : null}
+        {credential.usage.provider === undefined ? (
+          credential.status.word === 'ready' ? (
+            <UsageBars credential={credential} now={now} />
+          ) : null
+        ) : (
+          <ProviderQuota reading={credential.usage.provider} now={now} />
+        )}
       </div>
 
       {credential.environment === undefined ? null : (
@@ -406,7 +412,13 @@ function CredentialRow({
         <span className="text-cell text-muted">
           {credential.status.label} · {credentialUse(credential)}
         </span>
-        {credential.status.word === 'ready' ? <UsageBars credential={credential} now={now} /> : null}
+        {credential.usage.provider === undefined ? (
+          credential.status.word === 'ready' ? (
+            <UsageBars credential={credential} now={now} />
+          ) : null
+        ) : (
+          <ProviderQuota reading={credential.usage.provider} now={now} />
+        )}
       </span>
       <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
     </a>

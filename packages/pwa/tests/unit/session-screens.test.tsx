@@ -499,6 +499,12 @@ describe('session screen components', () => {
     expect(limited.root.findAllByProps({ className: 'fy-quota-error' })).toHaveLength(1);
     expect(composerQuotaSpoken({ atLimit: true })).toContain('Account is at limit');
 
+    // A credit-billed login with no window says its money, in words and aloud.
+    const credit = render(<ComposerQuota quota={{ balance: { amount: 12.5, currency: 'USD' } }} />);
+    expect(credit.root.findByProps({ className: 'fy-composer-quota' }).props['data-quota']).toBe('known');
+    expect(findText(credit.root, '$12.50 left')).toHaveLength(1);
+    expect(composerQuotaSpoken({ spendUsd: 3 })).toBe('Account usage: $3.00 this month.');
+
     // One window known: only that one is drawn.
     const weekOnly = render(<ComposerQuota quota={{ weeklyPercent: 40 }} />);
     expect(findText(weekOnly.root, 'wk 40%')).toHaveLength(1);

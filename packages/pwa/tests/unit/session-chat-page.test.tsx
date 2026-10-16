@@ -21,6 +21,7 @@ import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
+import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
 import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
 import type { CoreActionContext } from '../../src/features/session-actions/core-actions.ts';
@@ -2484,6 +2485,80 @@ describe('SessionChatPage Info and Actions', () => {
       expect(ran).toEqual(['shared']);
     } finally {
       run(() => page.unmount());
+    }
+  });
+
+  test('a form’s notice shows as the page’s toast, and a session change clears it', () => {
+    const noticing: SessionActionContribution<CoreActionContext> = {
+      group: 'warden',
+      order: 10,
+      build: () => ({
+        kind: 'form',
+        id: 'notice-form',
+        label: 'Notice…',
+        title: 'Notice',
+        icon: Copy,
+        render: host => (
+          <button data-notify="" onClick={() => host.notify('Investigation queued.')} type="button">
+            go
+          </button>
+        ),
+      }),
+    };
+    const page = renderSessionChatPage(chatPage({ actionContributions: [noticing] }));
+    try {
+      expect(page.root.findByType(ActionToast).props.notice).toBeNull();
+      chooseAction(page.root, 'notice-form');
+      run(() => page.root.findByProps({ 'data-notify': '' }).props.onClick());
+      expect(page.root.findByType(ActionToast).props.notice).toBe('Investigation queued.');
+      run(() => page.root.findByType(ActionToast).props.onDismiss());
+      expect(page.root.findByType(ActionToast).props.notice).toBeNull();
+
+      chooseAction(page.root, 'notice-form');
+      run(() => page.root.findByProps({ 'data-notify': '' }).props.onClick());
+      run(() =>
+        page.update(
+          withSessionSearch(
+            chatPage({
+              actionContributions: [noticing],
+              formFactor: 'desktop',
+              session: sessionView('other'),
+              workspaceLayouts: new WorkspaceLayoutStore(NO_STORAGE),
+              workspaceRails: new WorkspaceRailPreferenceStore(NO_STORAGE),
+            }),
+          ),
+        ),
+      );
+      expect(page.root.findByType(ActionToast).props.notice).toBeNull();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Info › Runtime draws the composer’s own model and effort pickers when the host hands none', async () => {
+    const ready = sessionView('shared');
+    const page = renderSessionChatPage(
+      chatPage({ client: { ...client([], ready), runtime: async () => ready }, initialInfo: 'runtime' }),
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      const pickers = page.root.findByType(SessionInfo).props.runtimeControls;
+      expect(pickers?.type).toBe(ComposerRuntime);
+      // The same pickers, twice: the composer's status line and Info › Runtime's "Change" row.
+      expect(page.root.findAllByType(ComposerRuntime)).toHaveLength(2);
+    } finally {
+      run(() => page.unmount());
+    }
+
+    // A daemon without the runtime route offers no pickers in either place.
+    const bare = renderSessionChatPage(chatPage({ initialInfo: 'runtime' }), fakeDaemon().factory);
+    try {
+      await flush();
+      expect(bare.root.findByType(SessionInfo).props.runtimeControls).toBeUndefined();
+      expect(bare.root.findAllByType(ComposerRuntime)).toHaveLength(0);
+    } finally {
+      run(() => bare.unmount());
     }
   });
 

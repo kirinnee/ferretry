@@ -64,6 +64,11 @@ export interface SessionActionFormHost {
   readonly close: () => void;
   /** Re-opens another action's form in place of this one ("Add MCP server" → "Reload this ferret"). */
   readonly open: (actionId: string) => void;
+  /**
+   * Says, in one short toast, what a form settled that the reader will not see happen here: "queued —
+   * the report lands in Info › Signals". The form closes itself; the toast outlives it.
+   */
+  readonly notify: (sentence: string) => void;
   /** Phone layout: the form is in a sheet, rows are 44px. */
   readonly compact: boolean;
 }

@@ -124,6 +124,33 @@ const CREDENTIALS = {
       word: 'ready',
       store: 'environment',
       usedBy: ['glm-agent'],
+      // Its quota, read from Z.ai's Coding Plan endpoint by the daemon's provider quota reader
+      // (docs/provider-quotas.md): the 5-hour and weekly windows, and the separate tool allowance.
+      usage: {
+        fiveHour: { usedPercent: 64, resetsAt: new Date(Date.now() + 130 * 60_000).toISOString() },
+        weekly: { usedPercent: 31, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
+        source: 'provider-quota',
+        at: new Date().toISOString(),
+        provider: {
+          source: 'zai-coding-plan',
+          via: 'endpoint',
+          windows: [
+            { label: '5h', usedPercent: 64, resetsAt: new Date(Date.now() + 130 * 60_000).toISOString() },
+            { label: 'week', usedPercent: 31, resetsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() },
+            {
+              label: 'tools',
+              unit: 'requests',
+              used: 120,
+              limit: 1000,
+              usedPercent: 12,
+              resetsAt: new Date(Date.now() + 20 * 86_400_000).toISOString(),
+            },
+          ],
+          exhausted: false,
+          unverified: true,
+          at: new Date().toISOString(),
+        },
+      },
       status: {
         word: 'ready',
         label: 'Ready',

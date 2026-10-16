@@ -127,6 +127,33 @@ const testResult = {
   at: INSTANT,
 } as const;
 
+/** A provider quota reading (docs/provider-quotas.md): a 5-hour window, a key limit, money and spend. */
+const providerReading = {
+  source: 'openrouter-key',
+  via: 'endpoint',
+  windows: [
+    { label: '5h', usedPercent: 40, resetsAt: LATER_INSTANT },
+    { label: 'key', unit: 'usd', used: 4.2, limit: 10, usedPercent: 42 },
+  ],
+  balance: { amount: 5.8, currency: 'USD' },
+  spend: { amountUsd: 3.1, since: INSTANT, sessions: 4, unpriced: 1 },
+  exhausted: false,
+  unverified: false,
+  note: 'Read from the provider.',
+  at: INSTANT,
+} as const;
+
+const PROVIDER_QUOTA_CASES: readonly SchemaCase[] = [
+  { name: 'ProviderQuotaWindowSchema', schema: credentials.ProviderQuotaWindowSchema, value: { label: 'week' } },
+  {
+    name: 'ProviderQuotaBalanceSchema',
+    schema: credentials.ProviderQuotaBalanceSchema,
+    value: providerReading.balance,
+  },
+  { name: 'ProviderQuotaSpendSchema', schema: credentials.ProviderQuotaSpendSchema, value: providerReading.spend },
+  { name: 'ProviderQuotaReadingSchema', schema: credentials.ProviderQuotaReadingSchema, value: providerReading },
+];
+
 /** The environment-login half of the contract (docs/provider-presets.md). */
 const ENVIRONMENT_CASES: readonly SchemaCase[] = [
   { name: 'ProviderQuotaSourceSchema', schema: credentials.ProviderQuotaSourceSchema, value: 'deepseek-balance' },
@@ -202,6 +229,12 @@ const cases: readonly SchemaCase[] = [
     value: {},
   },
   ...ENVIRONMENT_CASES,
+  ...PROVIDER_QUOTA_CASES,
+  {
+    name: 'FleetCredentialUsageSchema with a provider reading',
+    schema: credentials.FleetCredentialUsageSchema,
+    value: { fiveHour: {}, weekly: {}, source: 'provider-quota', at: INSTANT, provider: providerReading },
+  },
 ];
 
 const rejects = (name: string, schema: SchemaCase['schema'], value: unknown): SchemaCase => ({ name, schema, value });
@@ -336,5 +369,33 @@ describe('the environment-login wire contract (docs/provider-presets.md)', () =>
     // Assert
     should(halved).containDeep({ harness: 'claude' });
     should(shared).not.have.property('harness');
+  });
+});
+
+describe('the provider quota wire contract (docs/provider-quotas.md)', () => {
+  it('should refuse a currency that is not a code, a negative share and a window it does not know', () => {
+    // Arrange / Act / Assert
+    assertRejects([
+      rejects('a currency symbol', credentials.ProviderQuotaBalanceSchema, { amount: 1, currency: '$' }),
+      rejects('a negative share', credentials.ProviderQuotaWindowSchema, { label: '5h', usedPercent: -1 }),
+      rejects('an unknown window', credentials.ProviderQuotaWindowSchema, { label: 'day' }),
+      rejects('a reading carrying the key', credentials.ProviderQuotaReadingSchema, {
+        source: 'deepseek-balance',
+        via: 'endpoint',
+        windows: [],
+        exhausted: false,
+        unverified: false,
+        at: INSTANT,
+        key: 'sk-fake',
+      }),
+    ]);
+  });
+
+  it('should read a window the provider did not measure as unknown rather than zero', () => {
+    // Act
+    const parsed = credentials.ProviderQuotaWindowSchema.parse({ label: '5h' });
+
+    // Assert
+    should(parsed).deepEqual({ label: '5h' });
   });
 });

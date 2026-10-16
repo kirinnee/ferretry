@@ -203,6 +203,14 @@ file is refused**, and every write edits only the changed keys so comments survi
 `fleet/config.yaml` is refused by sentence, never converted. The contract is
 [docs/config-files.md](docs/config-files.md).
 
+**Lessons** are rules learned from ferrets ([docs/learning.md](docs/learning.md)). The passive switch only
+decides whether a ferret is **instructed** to file them (`fy lesson suggest "<rule>" --scope global|repo`);
+the daemon attaches the evidence from the session credential, so it cannot be forged. **Accept never
+writes**: **Apply** is a separate act — a diff preview with an etag, then a write of exactly that diff into
+the fleet's global lessons component (`fleet.configure`) or the project's AGENTS.md/CLAUDE.md
+(`filesystem.configure`, passkey step-up from a remote device). A scan shows its estimate and never starts
+by itself.
+
 How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code
 redeemed inside a session, which registers a **non-extractable device key** the browser generated; the
 daemon keeps only the public half, and the grant ends on revocation or after its idle period unused (30 days unless the owner changed it). **There is no

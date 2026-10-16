@@ -272,6 +272,16 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   { method: 'PUT', path: '/v1/config/file', event: 'fleet.configured', detail: { action: 'config-write' } },
   { method: 'POST', path: '/v1/config/confirm', event: 'fleet.configured', detail: { action: 'config-confirm' } },
   { method: 'POST', path: '/v1/agent/config', event: 'fleet.configured', detail: { action: 'agent-config' } },
+  // Lessons (docs/learning.md): the machine default written into `learning.yaml`, and an Apply — the one
+  // write outside the state home, into the global instructions or a project's AGENTS.md / CLAUDE.md.
+  { method: 'PATCH', path: '/v1/learning/config', event: 'fleet.configured', detail: { action: 'learning-config' } },
+  {
+    method: 'POST',
+    path: '/v1/learning/proposals/:id/apply',
+    event: 'fleet.configured',
+    subject: 'id',
+    detail: { action: 'lesson-apply' },
+  },
 ];
 
 /** What the decorator needs: where to write, and how to name a device id. */

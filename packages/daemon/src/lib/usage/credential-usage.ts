@@ -5,6 +5,7 @@ import type {
   FleetCredentialUsageWindow,
   FleetCredentialView,
 } from '@ferretry/protocol';
+import { providerAccountFields } from './provider-quota/account.ts';
 import type { UsageSourcePort } from './types.ts';
 
 /**
@@ -78,6 +79,9 @@ const resetAt = (window: FleetCredentialUsageWindow): number | undefined =>
  * `checking` states nothing about availability: a check in flight has not concluded, and saying
  * "available" for it would be the benign reading of absent evidence. `needs_sign_in` is a proven
  * unavailability for `auth`. An absent window is an absent field, never `0%`.
+ *
+ * An environment login's provider quota (`usage.provider`) adds what only it can say — money left,
+ * this month's transcript cost, and an at-limit the provider itself reported.
  */
 function usageRow(agent: string, credential: FleetCredentialView): AccountUsage {
   const word = credential.status.word;
@@ -96,12 +100,22 @@ function usageRow(agent: string, credential: FleetCredentialView): AccountUsage 
           availability: signedIn ? 'available' : 'unavailable',
           unavailable: !signedIn,
           ...(signedIn ? {} : { unavailableReason: 'auth' as const }),
-          atLimit: fiveHour === 100 || weekly === 100,
+          atLimit:
+            fiveHour === 100 ||
+            weekly === 100 ||
+            (credential.usage.provider?.via === 'endpoint' && credential.usage.provider.exhausted),
         }
       : {}),
     ...(fiveHour === undefined ? {} : { fiveHourPercent: fiveHour }),
     ...(weekly === undefined ? {} : { weeklyPercent: weekly }),
     ...(fiveHourReset === undefined ? {} : { fiveHourResetAt: fiveHourReset }),
     ...(weeklyReset === undefined ? {} : { weeklyResetAt: weeklyReset }),
+    ...(credential.usage.provider === undefined ? {} : providerExtras(credential.usage.provider)),
   };
+}
+
+/** The provider reading's money fields; its windows already rode in on `fiveHour` and `weekly`. */
+function providerExtras(reading: NonNullable<FleetCredentialView['usage']['provider']>): Partial<AccountUsage> {
+  const { balance, spendUsd } = providerAccountFields(reading);
+  return { ...(balance === undefined ? {} : { balance }), ...(spendUsd === undefined ? {} : { spendUsd }) };
 }

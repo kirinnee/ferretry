@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { ObservationKind, ObservationSource, Proposal } from './types.ts';
 import type { SessionDigest } from './extract.ts';
-import { matchesTombstone, observationId, recomputeProposal, slugify, verifyQuote } from './policy.ts';
+import { matchesTombstone, observationId, recomputeProposal, sameRule, slugify, verifyQuote } from './policy.ts';
+import { lessonTarget } from './suggest.ts';
 import type { Observation, Tombstone } from './types.ts';
 
 /** Untrusted observation emitted by a miner session. */
@@ -22,6 +23,8 @@ const MinerProposalSchema = z.object({
   ruleText: z.string(),
   target: z.enum(['global-agent-guidance', 'automation-guidance']).optional(),
   anchor: z.string().optional(),
+  /** Where the lesson goes when applied: every ferret (`global`) or that project (`repo`). */
+  scope: z.enum(['global', 'repo']).optional(),
   observationKeys: z.array(z.string()),
 });
 export type MinerProposal = z.infer<typeof MinerProposalSchema>;
@@ -90,7 +93,8 @@ function normalizeSource(source: string | undefined, digest: SessionDigest): Obs
   return source === 'teammate' || digest.humanMessages === 0 ? 'teammate' : 'human';
 }
 
-function targetFor(candidate: MinerProposal): Proposal['target'] {
+function targetFor(candidate: MinerProposal, project: string | undefined): Proposal['target'] {
+  if (candidate.scope !== undefined) return lessonTarget(candidate.scope, project);
   return candidate.target === 'automation-guidance'
     ? { kind: 'automation-guidance', path: 'automation.md', anchor: candidate.anchor }
     : { kind: 'global-agent-guidance', path: 'guidance.md', anchor: candidate.anchor ?? '## Agent rules' };
@@ -178,8 +182,16 @@ export function applyMinerOutput(
       continue;
     }
 
+    const scope = candidate.scope ?? 'global';
+    // A repo lesson belongs to the project its evidence came from; the first verified quote decides.
+    const project = observationIndex.get(observationIds[0] ?? '')?.repo;
     const existingIndex = proposals.findIndex(
-      proposal => proposal.identity === identity && (proposal.state === 'pending' || proposal.state === 'accepted'),
+      proposal =>
+        (proposal.state === 'pending' || proposal.state === 'accepted' || proposal.state === 'applied') &&
+        (proposal.identity === identity ||
+          (proposal.category === scope &&
+            (scope === 'global' || proposal.project === project) &&
+            sameRule(proposal.ruleText, ruleText))),
     );
     if (existingIndex >= 0) {
       const current = proposals[existingIndex];
@@ -189,6 +201,7 @@ export function applyMinerOutput(
       const recomputed = recomputeProposal({ ...current, observationIds: mergedIds }, observationIndex);
       proposals[existingIndex] = {
         ...recomputed,
+        count: current.count + (mergedIds.length - current.observationIds.length),
         history: [...current.history, { at, event: `strengthened:${runId}`, by: 'miner' }],
       };
       stats.proposalsStrengthened += 1;
@@ -197,11 +210,11 @@ export function applyMinerOutput(
 
     const base: Proposal = {
       id: `proposal_${identity}_${runId}`,
-      category: 'global',
+      category: scope === 'repo' && project !== undefined ? 'repo' : 'global',
       state: 'pending',
       title: candidate.title.trim().slice(0, 200),
       ruleText,
-      target: targetFor(candidate),
+      target: targetFor(candidate, project),
       observationIds,
       occurrences: 1,
       crossRepoCount: 1,
@@ -209,6 +222,10 @@ export function applyMinerOutput(
       lastSeen: at,
       identity,
       history: [{ at, event: `proposed:${runId}`, by: 'miner' }],
+      source: 'scan',
+      ...(project === undefined ? {} : { project }),
+      ...(candidate.scope === undefined ? {} : { suggestedCategory: candidate.scope }),
+      count: observationIds.length,
     };
     proposals.push(recomputeProposal(base, observationIndex));
     stats.proposalsCreated += 1;

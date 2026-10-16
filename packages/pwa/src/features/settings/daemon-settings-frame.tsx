@@ -16,6 +16,7 @@ import {
   FileCode2,
   Fingerprint,
   Gauge,
+  GraduationCap,
   KeyRound,
   Lock,
   Radar,
@@ -89,6 +90,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   'host-checks': <Radar size={16} aria-hidden="true" />,
   // Source code in a file, because the panel is the YAML files this machine's settings live in.
   files: <FileCode2 size={16} aria-hidden="true" />,
+  // What new ferrets are instructed to learn, and each ferret's own switch.
+  learning: <GraduationCap size={16} aria-hidden="true" />,
 };
 
 /**

@@ -840,6 +840,47 @@ describe('FleetCredentialsService — environment logins (docs/provider-presets.
     should(list.credentials.find(entry => entry.id === 'signed')).not.have.property('environment');
   });
 
+  it('should lay an environment login’s provider quota on its row, and none on a sign-in', async () => {
+    // Arrange
+    const reading = {
+      source: 'zai-coding-plan' as const,
+      via: 'endpoint' as const,
+      windows: [{ label: '5h' as const, usedPercent: 40 }],
+      exhausted: false,
+      unverified: true,
+      at: '2026-10-16T09:00:00.000Z',
+    };
+    const peeked: string[] = [];
+    const service = createFleetCredentialsSubsystem({
+      catalog: catalogOf(v2({ glm, signed: claudeFerretry })),
+      status: new FakeStatus(),
+      email: async () => undefined,
+      machineName: () => 'studio',
+      locate: () => undefined,
+      run: async () => 0,
+      baseEnvironment: () => ({}),
+      environment: environment(new Set(['ZAI_API_KEY'])),
+      providerQuota: {
+        peek: id => {
+          peeked.push(id);
+          return reading;
+        },
+      },
+    });
+
+    // Act
+    const list = await service.list();
+
+    // Assert
+    should(list.credentials.find(entry => entry.id === 'glm')?.usage).containDeep({
+      fiveHour: { usedPercent: 40 },
+      source: 'provider-quota',
+      provider: reading,
+    });
+    should(list.credentials.find(entry => entry.id === 'signed')?.usage).not.have.property('provider');
+    should(peeked).deepEqual(['glm']);
+  });
+
   it('should list a machine with no environment login without reading presets or secrets', async () => {
     // Arrange
     let read = 0;

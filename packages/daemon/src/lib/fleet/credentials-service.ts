@@ -65,10 +65,12 @@ import {
   type FleetCredentialView,
   FleetCredentialViewSchema,
   type FleetProviderPresetCatalog,
+  type ProviderQuotaReading,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
 import { credentialEnvironmentView } from '../provider-probe/environment-view.ts';
 import type { ProviderProbeSubject } from '../provider-probe/service.ts';
+import { withProviderQuota } from '../usage/provider-quota/account.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -422,6 +424,11 @@ export interface FleetCredentialsServiceDeps {
    * Test itself. Absent on a daemon that has none, where an environment login shows no variables.
    */
   readonly environment?: CredentialEnvironmentDeps;
+  /**
+   * An environment login's last provider quota reading (`lib/usage/provider-quota`). A cache read:
+   * listing logins never asks a provider anything; whoever is watching asks the reader first.
+   */
+  readonly providerQuota?: { peek(id: string): ProviderQuotaReading | undefined };
 }
 
 /** The harness's own sign-out arguments. Neither touches a model. */
@@ -638,7 +645,10 @@ export class FleetCredentialsService {
         lastCheckInconclusive: status.lastCheckInconclusive,
         ...(status.planType === undefined ? {} : { planType: status.planType }),
       },
-      usage: usageOf(view.usage),
+      usage: withProviderQuota(
+        usageOf(view.usage),
+        entry.credential.store === 'environment' ? this.deps.providerQuota?.peek(entry.id) : undefined,
+      ),
       usedBy: entry.usedBy,
       signIn: signInAct(this.deps.catalog.signInTarget(entry)),
       checkNow: checkAct(entry),

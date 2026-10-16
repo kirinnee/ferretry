@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import type { z } from 'zod';
 import should from 'should';
+import type { z } from 'zod';
 import { AgentToolsClient, AgentToolsCommandError } from '../../../src/lib/agent-tools/client';
 
 interface Sent {
@@ -181,6 +181,47 @@ describe('AgentToolsClient — config tools', () => {
     const agent = gateway();
     const client = new AgentToolsClient({ agent, person: gateway() }, { capability: ' ' });
     const error = await client.config({ tool: 'config.read' }).catch((failure: unknown) => failure);
+    should(error).be.instanceOf(AgentToolsCommandError);
+    should((error as Error).message).containEql('pass --session <id>');
+    should(agent.sent).be.empty();
+  });
+});
+
+describe('AgentToolsClient — lessons', () => {
+  it('should dial POST /v1/agent/lessons as the agent, with the session capability and never the person gateway', async () => {
+    // Arrange
+    const agent = gateway([{ summary: 'filed as a new lesson', outcome: 'filed' }]);
+    const person = gateway();
+    const client = new AgentToolsClient({ agent, person }, { capability: 'cap-1', ownSessionId: 's1' });
+
+    // Act
+    const result = await client.lessons({
+      tool: 'lessons.suggest',
+      rule: 'Run bun install inside the target package.',
+      scope: 'global',
+    });
+
+    // Assert
+    should(result).deepEqual({ summary: 'filed as a new lesson', outcome: 'filed' });
+    should(agent.sent[0]).match({ path: '/v1/agent/lessons', timeoutMs: 60_000, init: { method: 'POST' } });
+    should(JSON.parse(String(agent.sent[0]?.init?.body))).deepEqual({
+      tool: 'lessons.suggest',
+      rule: 'Run bun install inside the target package.',
+      scope: 'global',
+    });
+    should(headers(agent.sent[0])).deepEqual({
+      'content-type': 'application/json',
+      'x-fy-session-capability': 'cap-1',
+    });
+    should(person.sent).be.empty();
+  });
+
+  it('should refuse with no capability, naming the way out', async () => {
+    const agent = gateway();
+    const client = new AgentToolsClient({ agent, person: gateway() }, { capability: '' });
+    const error = await client
+      .lessons({ tool: 'lessons.suggest', rule: 'a rule', scope: 'global' })
+      .catch((failure: unknown) => failure);
     should(error).be.instanceOf(AgentToolsCommandError);
     should((error as Error).message).containEql('pass --session <id>');
     should(agent.sent).be.empty();

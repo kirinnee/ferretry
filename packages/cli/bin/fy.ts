@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { setUpFerretrySkill } from '@ferretry/fleet';
+import { LESSONS_INSTRUCTION, PASSIVE_LEARNING_ENV, setUpFerretrySkill } from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import { type AnalyticsResponse, CONFIG_DIRECTORY_NAME, type IFyApiClient, type SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -12,6 +12,7 @@ import root from '../../../package.json' with { type: 'json' };
 // The daemon package names the daemon binary, exactly as this package names the client one.
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
+import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
@@ -28,6 +29,7 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
+import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
@@ -48,6 +50,13 @@ import { environmentBoardCredentials, environmentSessionId } from '../src/adapte
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
 import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
+import {
+  AgentToolsClient,
+  AgentToolsController,
+  type AgentToolsGateways,
+  registerBrowserPageCommands,
+  registerTerminalCommands,
+} from '../src/lib/agent-tools';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
 import { AnalyticsController } from '../src/lib/analytics/controller';
 import { registerAttentionCommands } from '../src/lib/attention/commands';
@@ -56,20 +65,10 @@ import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
-import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
-import {
-  AgentToolsClient,
-  type AgentToolsGateways,
-  AgentToolsController,
-  registerBrowserPageCommands,
-  registerTerminalCommands,
-} from '../src/lib/agent-tools';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
-import { McpServer, registerMcpCommands } from '../src/lib/mcp';
-import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
@@ -99,6 +98,9 @@ import { HistoryController } from '../src/lib/history/controller';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
+import { registerLessonCommands } from '../src/lib/lesson/commands';
+import { LessonController } from '../src/lib/lesson/controller';
+import { McpServer, mcpInitializeInstructions, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
@@ -649,6 +651,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     const tools = new AgentToolsController(toolsClient, world.io, new FileScreenshotWriter());
     registerTerminalCommands(program, tools);
     registerBrowserPageCommands(program, tools);
+    // `fy lesson suggest`: the same agent route and credential as the MCP tool below.
+    registerLessonCommands(program, new LessonController(toolsClient, world.io));
     // The same client, as the MCP server every agent runtime starts: it acts only as the agent session
     // whose credential is in its environment. Stdout carries nothing but protocol.
     registerMcpCommands(program, async () => {
@@ -656,7 +660,14 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new McpServer(toolsClient, {
           name: PRODUCT_NAME,
           version: assertSemver(pkg.version),
-          instructions: setUpFerretrySkill(BINARY_NAME),
+          // PASSIVE LEARNING: FY_LEARNING_PASSIVE=1 names a ferret instructed to file lessons; the
+          // env read stays here, in the composition root, and only a boolean crosses into the pure
+          // joining function.
+          instructions: mcpInitializeInstructions(
+            setUpFerretrySkill(BINARY_NAME),
+            world.environment[PASSIVE_LEARNING_ENV] === '1',
+            LESSONS_INSTRUCTION(BINARY_NAME),
+          ),
         }),
         Bun.stdin.stream(),
         line => {
@@ -666,7 +677,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     });
   },
   ({ program, world, client }) =>
-    registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
+    registerLearningCommands(
+      program,
+      new LearningController(new ProtocolLearningGateway(client), world.io, BINARY_NAME),
+    ),
   ({ program, world, client }) =>
     registerSttCommands(program, new SttController(new ProtocolSttGateway(client), world.io)),
   // `fy config` (docs/config-files.md): check, find and confirm the configuration files. `check`,

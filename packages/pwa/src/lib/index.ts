@@ -104,15 +104,15 @@ export * from '../features/fleet/setup/index.ts';
 export * from '../features/fleet/setup-api.ts';
 export * from '../features/fleet/shell/index.ts';
 export * from '../features/fleet/sign-in-restart.tsx';
-export * from '../features/learning/learning-header.tsx';
-export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
-export {
-  LearningPage,
-  LearningReview,
-  learningErrorMessage,
-  learningStrength,
-  ProposalCard,
-} from '../features/learning/learning-page.tsx';
+export * from '../features/learning/apply-diff.tsx';
+export * from '../features/learning/learning-model.ts';
+export * from '../features/learning/learning-page.tsx';
+export * from '../features/learning/learning-session-actions.tsx';
+export * from '../features/learning/learning-settings.tsx';
+export * from '../features/learning/lesson-row.tsx';
+export * from '../features/learning/passive-learning.tsx';
+export * from '../features/learning/scan-dialog.tsx';
+export * from '../features/learning/use-learning-scan.ts';
 export * from '../features/lineage/lineage-name.tsx';
 export * from '../features/lineage/lineage-surface.tsx';
 export * from '../features/lineage/lineage-surface-model.ts';
@@ -143,6 +143,7 @@ export * from '../features/projects/projects-api.ts';
 export * from '../features/secrets/secrets-api.ts';
 export * from '../features/secrets/secrets-card.tsx';
 export * from '../features/secrets/secrets-surface.tsx';
+export * from '../features/session-actions/action-toast.tsx';
 export * from '../features/session-actions/actions-menu.tsx';
 export * from '../features/session-actions/add-mcp-form.tsx';
 export * from '../features/session-actions/add-mcp-model.ts';
@@ -198,6 +199,8 @@ export * from '../features/tasks/task-presentation.ts';
 export * from '../features/tasks/task-projections.ts';
 export * from '../features/tasks/task-row.tsx';
 export * from '../features/tasks/task-status-filter.tsx';
+export * from '../features/warden/ask-warden.tsx';
+export * from '../features/warden/ask-warden-model.ts';
 export * from '../features/warden/warden-config-card.tsx';
 export * from '../features/warden/warden-overview.tsx';
 export * from '../features/warden/warden-overview-model.ts';

@@ -1,15 +1,28 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  renderLearningApplyPreview,
   renderLearningConfig,
   renderLearningPatch,
+  renderLearningScanEstimate,
+  renderLearningScanProgress,
   renderLearningStatus,
   renderProposalAction,
   renderProposalDetail,
   renderProposalList,
   renderRunManifest,
 } from '../../../src/lib/learning/render';
-import { evidence, learningConfig, learningStatus, patchResponse, proposal, runManifest } from './fixtures';
+import {
+  applyPreview,
+  evidence,
+  learningConfig,
+  learningStatus,
+  patchResponse,
+  proposal,
+  runManifest,
+  scanEstimate,
+  scanProgress,
+} from './fixtures';
 
 describe('proposal list rendering', () => {
   it('should say plainly that nothing is waiting rather than printing an empty header', () => {
@@ -67,6 +80,19 @@ describe('proposal list rendering', () => {
     should(rendered).containEql('…');
     should(rendered.split('\n')[1]?.length).be.belowOrEqual(115);
   });
+
+  it('should show the type, source and strength chips on each row', () => {
+    // Arrange
+    const global = proposal('p1');
+    const repo = proposal('p2', { category: 'repo', project: 'ferretry', source: 'scan', count: 9 });
+
+    // Act
+    const rendered = renderProposalList([global, repo], undefined);
+
+    // Assert
+    should(rendered).containEql('Global · passive · 3×');
+    should(rendered).containEql('Repo · ferretry · scan · 9×');
+  });
 });
 
 describe('proposal detail rendering', () => {
@@ -121,6 +147,26 @@ describe('proposal detail rendering', () => {
 
     // Act + Assert
     should(renderProposalDetail(noisy)).containEql('…"');
+  });
+
+  it('should show the type, source and strength', () => {
+    // Act
+    const rendered = renderProposalDetail(proposal('p1', { category: 'repo', project: 'ferretry', count: 9 }));
+
+    // Assert
+    should(rendered).containEql('type: Repo · ferretry · source: passive · strength: 9×');
+  });
+
+  it('should show when and where an applied lesson landed, and omit it otherwise', () => {
+    // Act
+    const applied = renderProposalDetail(
+      proposal('p1', { state: 'applied', applied: { at: '2026-08-01T09:00:00.000Z', path: 'guidance.md' } }),
+    );
+    const unapplied = renderProposalDetail(proposal('p1'));
+
+    // Assert
+    should(applied).containEql('applied 2026-08-01T09:00:00.000Z → guidance.md');
+    should(unapplied).not.containEql('applied ');
   });
 });
 
@@ -233,5 +279,87 @@ describe('config and patch rendering', () => {
     // Assert
     should(rendered).startWith('guidance.md — apply this yourself; the daemon never writes it');
     should(rendered).containEql('- install from the package directory');
+  });
+});
+
+describe('apply preview rendering', () => {
+  it('should show the diff, the path, the notes, and the exact re-run that writes it', () => {
+    // Act
+    const rendered = renderLearningApplyPreview(
+      applyPreview({ notes: ['no profile includes the global instructions component yet'] }),
+      'fy',
+    );
+
+    // Assert
+    should(rendered).containEql('p1  [global]  → guidance.md');
+    should(rendered).containEql('+ install from the package directory');
+    should(rendered).containEql('note: no profile includes the global instructions component yet');
+    should(rendered).containEql('nothing written yet — re-run with --yes to apply: fy learning apply p1 --yes');
+  });
+
+  it('should mark a target file that does not exist yet', () => {
+    // Act
+    const rendered = renderLearningApplyPreview(applyPreview({ exists: false }), 'fy');
+
+    // Assert
+    should(rendered).containEql('guidance.md (new file)');
+  });
+
+  it('should use the install’s own binary name in the re-run hint', () => {
+    // Act
+    const rendered = renderLearningApplyPreview(applyPreview(), 'ferretry-cli');
+
+    // Assert
+    should(rendered).containEql('ferretry-cli learning apply p1 --yes');
+  });
+});
+
+describe('scan rendering', () => {
+  it('should show what a scan would cost, and never claim it started one', () => {
+    // Act
+    const rendered = renderLearningScanEstimate(scanEstimate());
+
+    // Assert
+    should(rendered).containEql('4 sessions in scope (1 skipped)');
+    should(rendered).containEql('1 miner');
+    should(rendered).containEql('miner');
+    should(rendered).containEql('~12000 tokens · ~$0.42');
+    should(rendered).containEql('s1, s2, s3, s4');
+    should(rendered).containEql('re-run with --start to scan');
+  });
+
+  it('should say the price is unknown rather than guessing one', () => {
+    // Act
+    const rendered = renderLearningScanEstimate(scanEstimate({ usd: undefined, sessionIds: [] }));
+
+    // Assert
+    should(rendered).containEql('usd unknown');
+    should(rendered).not.containEql('$');
+  });
+
+  it('should say how many ferrets sit beyond this scan’s limit, and omit the line when there are none', () => {
+    // Act
+    const over = renderLearningScanEstimate(scanEstimate({ beyondLimit: 5 }));
+    const none = renderLearningScanEstimate(scanEstimate({ beyondLimit: 0 }));
+
+    // Assert
+    should(over).containEql('5 more beyond this scan’s limit — scan again afterwards');
+    should(none).not.containEql('beyond this scan');
+  });
+
+  it('should report one scan’s progress, with its message when there is one', () => {
+    // Act
+    const running = renderLearningScanProgress(scanProgress());
+    const finished = renderLearningScanProgress(
+      scanProgress({ state: 'finished', done: 4, finishedAt: '2026-07-31T09:05:00.000Z', added: 2, merged: 1 }),
+    );
+    const failed = renderLearningScanProgress(scanProgress({ state: 'failed', message: 'the miner crashed' }));
+
+    // Assert
+    should(running).containEql('scan scan-1 [running] 0/4 started 2026-07-31T09:00:00.000Z');
+    should(running).not.containEql('finished');
+    should(finished).containEql('finished 2026-07-31T09:05:00.000Z');
+    should(finished).containEql('added 2, merged 1');
+    should(failed).containEql('the miner crashed');
   });
 });
