@@ -24,16 +24,15 @@
  * survey flagged (`pwa-shape.md:115`).
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import {
+  type AgentAddressCandidate,
+  isLiveAgentCandidate,
+  resolveAgentAddress,
+  type SessionView,
+} from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import type { AgentReferenceResolver, ResolvedAgent } from './references.ts';
 
-/**
- * How long a bare callsign keeps resolving to its newest holder. Mirrors the
- * daemon's own callsign semantics rather than inventing a UI rule: a name is
- * reusable, so an old session must not keep claiming it forever.
- */
-const NAME_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
 const TEAMMATE_NAME = /^[a-z][a-z0-9-]{0,31}$/iu;
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
@@ -44,51 +43,50 @@ const normalizedName = (raw: string | undefined): string | null => {
 
 const safeSessionId = (raw: string): boolean => SESSION_ID.test(raw) && raw !== '.' && raw !== '..';
 
-const createdAt = (view: SessionView): number => {
-  const value = Date.parse(view.config.createdAt);
-  return Number.isFinite(value) ? value : 0;
-};
+/** A session as name resolution reads it. The view's state may be absent in a partial snapshot. */
+const candidateOf = (view: SessionView, name: string): AgentAddressCandidate => ({
+  id: view.config.id,
+  name,
+  status: (view as { readonly state?: { readonly status?: string } }).state?.status,
+});
 
 /**
  * Builds one immutable resolver from an already-live fleet snapshot.
  *
  * Exact ids resolve for the whole retained fleet, which is why an old finished
- * transcript remains referenceable. Bare names mirror the daemon's callsign
- * semantics: case-insensitive, sessions created inside the name window, newest
- * holder wins.
+ * transcript remains referenceable. Bare names follow the protocol's addressing
+ * rule (`resolveAgentAddress`) — the very one the daemon applies when an agent
+ * runs `fy send <name>` — case-insensitive, the live holder preferred, and a
+ * name two sessions hold on the same footing proves nothing and stays prose.
  */
 export const createAgentReferenceResolver = (
   daemonId: DaemonId,
   sessions: readonly SessionView[],
-  now: number = Date.now(),
 ): AgentReferenceResolver => {
   const byId = new Map<string, ResolvedAgent>();
-  const byName = new Map<string, { readonly target: ResolvedAgent; readonly createdAt: number }>();
-  const cutoff = now - NAME_WINDOW_MS;
+  const candidates: AgentAddressCandidate[] = [];
 
   for (const view of sessions) {
     const name = normalizedName(view.config.teammate);
     if (!name || !safeSessionId(view.config.id)) continue;
-    const target: ResolvedAgent = { daemonId, sessionId: view.config.id, name };
-    byId.set(view.config.id, target);
-
-    const created = createdAt(view);
-    if (created < cutoff) continue;
-    const current = byName.get(name);
-    if (!current || created > current.createdAt) byName.set(name, { target, createdAt: created });
+    byId.set(view.config.id, { daemonId, sessionId: view.config.id, name });
+    candidates.push(candidateOf(view, name));
   }
 
   return lookup => {
     if (lookup.sessionId !== undefined) return byId.get(lookup.sessionId) ?? null;
     const name = normalizedName(lookup.name);
-    return name ? (byName.get(name)?.target ?? null) : null;
+    if (!name) return null;
+    const resolution = resolveAgentAddress(name, candidates);
+    return resolution.kind === 'session' ? (byId.get(resolution.id) ?? null) : null;
   };
 };
 
 /**
- * A key over the ONLY fields the resolver copies, so status and activity churn
+ * A key over the ONLY facts the resolver reads, so status and activity churn
  * does not make every already-rendered Markdown block parse again. A newly
- * hydrated or renamed callsign changes it and becomes referenceable at once.
+ * hydrated or renamed callsign — or a holder going live or dormant, which can
+ * move a name to another session — changes it and re-proves at once.
  *
  * The daemon is part of the key: two daemons' fleets can carry identical session
  * ids and callsigns, and reusing one's resolver for the other is the exact bug
@@ -97,9 +95,10 @@ export const createAgentReferenceResolver = (
 export const agentReferenceIdentityKey = (daemonId: DaemonId, sessions: readonly SessionView[]): string =>
   [
     daemonId,
-    ...sessions.flatMap(view =>
-      normalizedName(view.config.teammate)
-        ? [`${view.config.id}\u0000${view.config.teammate}\u0000${view.config.createdAt}`]
-        : [],
-    ),
+    ...sessions.flatMap(view => {
+      const name = normalizedName(view.config.teammate);
+      if (!name) return [];
+      const live = isLiveAgentCandidate(candidateOf(view, name)) ? 'live' : 'dormant';
+      return [`${view.config.id}\u0000${view.config.teammate}\u0000${live}`];
+    }),
   ].join('\u0001');

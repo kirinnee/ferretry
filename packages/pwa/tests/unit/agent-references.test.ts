@@ -7,18 +7,14 @@ import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 const daemonA = 'daemon-a' as DaemonId;
 const daemonB = 'daemon-b' as DaemonId;
 
-const NOW = Date.parse('2026-08-01T00:00:00.000Z');
-const recently = new Date(NOW - 60_000).toISOString();
-const longAgo = new Date(NOW - 30 * 24 * 60 * 60 * 1000).toISOString();
-
 /** Only the identity fields the resolver reads are populated. */
-const view = (id: string, teammate: string | undefined, createdAt = recently): SessionView =>
-  ({ config: { id, teammate, createdAt } }) as unknown as SessionView;
+const view = (id: string, teammate: string | undefined, status = 'running'): SessionView =>
+  ({ config: { id, teammate }, state: { status } }) as unknown as SessionView;
 
 describe('createAgentReferenceResolver', () => {
   test('should resolve a bare callsign to its session, stamped with the daemon', () => {
     // Arrange
-    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda')], NOW);
+    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda')]);
 
     // Act
     const actual = resolve({ name: 'zelda' });
@@ -29,7 +25,7 @@ describe('createAgentReferenceResolver', () => {
 
   test('should resolve a callsign case-insensitively', () => {
     // Arrange
-    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'Zelda')], NOW);
+    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'Zelda')]);
 
     // Assert
     should(resolve({ name: 'ZELDA' })?.sessionId).equal('s1');
@@ -37,35 +33,37 @@ describe('createAgentReferenceResolver', () => {
 
   test('should never answer with another daemon identity', () => {
     // Arrange — the same callsign and session id exist on two daemons.
-    const first = createAgentReferenceResolver(daemonA, [view('same-id', 'zelda')], NOW);
-    const second = createAgentReferenceResolver(daemonB, [view('same-id', 'zelda')], NOW);
+    const first = createAgentReferenceResolver(daemonA, [view('same-id', 'zelda')]);
+    const second = createAgentReferenceResolver(daemonB, [view('same-id', 'zelda')]);
 
     // Assert
     should(first({ name: 'zelda' })?.daemonId).equal(daemonA);
     should(second({ name: 'zelda' })?.daemonId).equal(daemonB);
   });
 
-  test('should give a reused callsign to its newest holder', () => {
-    // Arrange
-    const older = view('old', 'zelda', new Date(NOW - 2 * 60 * 60 * 1000).toISOString());
-    const newer = view('new', 'zelda', recently);
-
-    // Assert — order of the fleet list must not decide it.
-    should(createAgentReferenceResolver(daemonA, [older, newer], NOW)({ name: 'zelda' })?.sessionId).equal('new');
-    should(createAgentReferenceResolver(daemonA, [newer, older], NOW)({ name: 'zelda' })?.sessionId).equal('new');
-  });
-
-  test('should stop resolving a bare callsign once its holder falls outside the name window', () => {
-    // Arrange
-    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda', longAgo)], NOW);
+  test('should give a reused callsign to its live holder, whatever the fleet order', () => {
+    // Arrange — the rule the daemon applies to `fy send zelda`, so a link and a send agree.
+    const old = view('old', 'zelda', 'stopped');
+    const live = view('new', 'zelda', 'waiting');
 
     // Assert
-    should(resolve({ name: 'zelda' })).be.null();
+    should(createAgentReferenceResolver(daemonA, [old, live])({ name: 'zelda' })?.sessionId).equal('new');
+    should(createAgentReferenceResolver(daemonA, [live, old])({ name: 'zelda' })?.sessionId).equal('new');
+  });
+
+  test('should resolve a lone dormant holder, and prove nothing for a tie', () => {
+    // Arrange
+    const lone = createAgentReferenceResolver(daemonA, [view('s1', 'zelda', 'completed')]);
+    const tie = createAgentReferenceResolver(daemonA, [view('s1', 'zelda'), view('s2', 'Zelda')]);
+
+    // Assert — an ambiguous name stays prose rather than linking to a guess.
+    should(lone({ name: 'zelda' })?.sessionId).equal('s1');
+    should(tie({ name: 'zelda' })).be.null();
   });
 
   test('should still resolve an exact session id for the whole retained fleet', () => {
     // Arrange — an old finished transcript stays referenceable by id.
-    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda', longAgo)], NOW);
+    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda', 'stopped')]);
 
     // Assert
     should(resolve({ sessionId: 's1' })).deepEqual({ daemonId: daemonA, sessionId: 's1', name: 'zelda' });
@@ -73,7 +71,7 @@ describe('createAgentReferenceResolver', () => {
 
   test('should answer nothing for an unknown session id or callsign', () => {
     // Arrange
-    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda')], NOW);
+    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda')]);
 
     // Assert
     should(resolve({ sessionId: 'absent' })).be.null();
@@ -83,11 +81,11 @@ describe('createAgentReferenceResolver', () => {
 
   test('should skip a session with no callsign or an unusable one', () => {
     // Arrange
-    const resolve = createAgentReferenceResolver(
-      daemonA,
-      [view('none', undefined), view('bad', '1nope'), view('spaced', '  ')],
-      NOW,
-    );
+    const resolve = createAgentReferenceResolver(daemonA, [
+      view('none', undefined),
+      view('bad', '1nope'),
+      view('spaced', '  '),
+    ]);
 
     // Assert
     should(resolve({ sessionId: 'none' })).be.null();
@@ -97,43 +95,37 @@ describe('createAgentReferenceResolver', () => {
 
   test('should skip a session whose id could not be used as a path segment', () => {
     // Arrange
-    const resolve = createAgentReferenceResolver(daemonA, [view('..', 'zelda'), view('.', 'link')], NOW);
+    const resolve = createAgentReferenceResolver(daemonA, [view('..', 'zelda'), view('.', 'link')]);
 
     // Assert
     should(resolve({ name: 'zelda' })).be.null();
     should(resolve({ name: 'link' })).be.null();
   });
 
-  test('should treat an unparseable creation time as the epoch rather than throwing', () => {
+  test('should read a snapshot that carries no state as a dormant holder', () => {
     // Arrange
-    const resolve = createAgentReferenceResolver(daemonA, [view('s1', 'zelda', 'not-a-date')], NOW);
-
-    // Assert — outside the name window, but still resolvable by exact id.
-    should(resolve({ name: 'zelda' })).be.null();
-    should(resolve({ sessionId: 's1' })?.sessionId).equal('s1');
-  });
-
-  test('should default its clock to now', () => {
-    // Arrange — created a minute ago against the real clock.
-    const resolve = createAgentReferenceResolver(daemonA, [
-      view('s1', 'zelda', new Date(Date.now() - 60_000).toISOString()),
-    ]);
+    const partial = { config: { id: 's1', teammate: 'zelda' } } as unknown as SessionView;
 
     // Assert
-    should(resolve({ name: 'zelda' })?.sessionId).equal('s1');
+    should(createAgentReferenceResolver(daemonA, [partial])({ name: 'zelda' })?.sessionId).equal('s1');
   });
 });
 
 describe('agentReferenceIdentityKey', () => {
   test('should not change when only status or activity churns', () => {
-    // Arrange — the resolver copies id, callsign and creation time and nothing else.
-    const before = agentReferenceIdentityKey(daemonA, [view('s1', 'zelda')]);
-    const after = agentReferenceIdentityKey(daemonA, [
-      { config: { id: 's1', teammate: 'zelda', createdAt: recently }, state: { health: 'thinking' } } as SessionView,
-    ]);
+    // Arrange — the resolver copies id, callsign and liveness and nothing else.
+    const before = agentReferenceIdentityKey(daemonA, [view('s1', 'zelda', 'running')]);
+    const after = agentReferenceIdentityKey(daemonA, [view('s1', 'zelda', 'thinking')]);
 
     // Assert
     should(after).equal(before);
+  });
+
+  test('should change when a holder goes dormant, because that can move the name', () => {
+    // Assert
+    should(agentReferenceIdentityKey(daemonA, [view('s1', 'zelda', 'stopped')])).not.equal(
+      agentReferenceIdentityKey(daemonA, [view('s1', 'zelda', 'running')]),
+    );
   });
 
   test('should change when a callsign is renamed or a session joins', () => {

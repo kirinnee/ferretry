@@ -275,6 +275,7 @@ import {
   TimerSendScheduler,
   TmuxSendTerminal,
 } from '../src/adapters/session/send/index.ts';
+import { sessionAddressCandidates } from '../src/adapters/session/session-address-candidates.ts';
 import {
   FileSignalArtifacts,
   LauncherSignalTerminal,
@@ -6992,6 +6993,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           { next: () => crypto.randomUUID() },
         ),
         sessions,
+        // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
+        // so a route, the attribution on a message and a declared wait agree on which agent a name means.
+        sessionAddresses: {
+          has: reference => {
+            const id = tryParseSessionId(reference);
+            return id !== undefined && storage.findSession(id) !== undefined;
+          },
+          candidates: async () => await sessionAddressCandidates(storage),
+        },
         catalogs,
         // The evidence is read through the SAME collaborators the rest of the daemon serves from —
         // the session directory, the terminal runtime and the project catalog — so a refusal to

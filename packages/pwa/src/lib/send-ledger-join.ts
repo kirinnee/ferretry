@@ -10,6 +10,7 @@
 // identity, by attachment-set equality, and by a forward-only time window.
 
 import { sameAttachmentIds } from './attachment-ids.ts';
+import { peerFrom } from './peer-message.ts';
 import { hasLedgerHardExpired, RECORD_CLOCK_SLACK_MS, type LedgerSendRecord } from './send-ledger.ts';
 
 /**
@@ -167,13 +168,10 @@ const samePeerIdentity = (row: VisibleUserRow, record: LedgerSendRecord): boolea
 };
 
 /**
- * Strips the daemon's peer attribution banner, matching the transcript parser.
+ * Strips the daemon's peer attribution banner with the transcript's own parser.
  * A message with no banner (the normal human send) is returned untouched.
  */
-const peerBody = (message: string): string => {
-  const match = /^\[peer message from teammate [^\]]*\]\n(?:.*?)\n\n/su.exec(message);
-  return match === null ? message : message.slice(match[0].length);
-};
+const peerBody = (message: string): string => peerFrom(message).body;
 
 const sortNewestFirst = (records: LedgerSendRecord[]): LedgerSendRecord[] =>
   records.sort((left, right) => (Date.parse(right.acceptedAt) || 0) - (Date.parse(left.acceptedAt) || 0));
