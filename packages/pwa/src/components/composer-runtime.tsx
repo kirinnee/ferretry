@@ -6,8 +6,8 @@
  * instead of buried in the `⋯` details sheet, which is a hard one-handed reach on a
  * phone. That request was explicitly about the REASONING level, for BOTH harnesses.
  *
- * So the bar carries TWO tap targets side by side, each opening a focused bottom
- * sheet:
+ * So the bar carries TWO tap targets side by side, each opening a focused picker —
+ * a bottom sheet on a phone, a small popover anchored to the chip elsewhere:
  *   - The MODEL chip opens the model switcher.
  *   - The REASONING chip opens the reasoning switcher. Claude effort is a real
  *     in-session command that persists to the account's settings; Codex reasoning
@@ -50,11 +50,23 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { Brain, ChevronsUpDown } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import { isTopEscapeLayer, pushEscapeLayer } from '../hooks/use-dialog-focus.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { cn } from '../lib/class-names.ts';
 import { isTerminalSessionStatus } from '../lib/session-screens.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
+import { clampMenuPosition, type MenuPosition, type MenuSize, type MenuViewport } from '../shell/context-menu.tsx';
+import type { RuntimePickerPresentation } from './runtime-controls.tsx';
 
 /** The model fact a switch is measured against: its value AND its timestamp. */
 export interface ModelObservation {
@@ -161,6 +173,12 @@ export interface RuntimeSwitchLifecycle {
    * its catalog only while it is visible, without maintaining a second sheet
    * state outside the composer runtime. */
   readonly open: boolean;
+  /** Which shell the body is drawn in, so a popover body can drop the prose a
+   *  sheet has room for. */
+  readonly presentation: RuntimePickerPresentation;
+  /** The Claude effort the chip shows as in force — last sent this session, else
+   *  the launch level — so the picker can check the same value the chip names. */
+  readonly claudeEffort?: string;
   /** A switch was submitted: the readout goes stale-until-evidence. */
   readonly onSwitchSubmitted: () => void;
   /** The submit failed, so nothing is pending and the readout is current again. */
@@ -177,6 +195,10 @@ export interface ComposerRuntimeProps {
   /** The session is mid-turn: a switch needs an idle prompt, so the trigger is
    *  disabled, matching the details sheet's refusal of a busy pane. */
   readonly busy: boolean;
+  /** `sheet` (the default) on a phone; `popover` — a small menu anchored to the
+   *  chip — wherever there is a pointer and room, so a two-word choice does not
+   *  raise a panel the width of the window. */
+  readonly presentation?: RuntimePickerPresentation;
   /** The model switcher's body. Not built here — see the file header. */
   readonly renderModelControls?: (lifecycle: RuntimeSwitchLifecycle) => ReactNode;
   /** The reasoning switcher's body. Not built here — see the file header. */
@@ -190,6 +212,7 @@ export interface ComposerRuntimeWithKeyboardProps extends ComposerRuntimeProps {
 
 interface ChipProps {
   readonly id: string;
+  readonly buttonRef: RefObject<HTMLButtonElement | null>;
   readonly sheetId: string;
   readonly open: boolean;
   readonly onOpen: () => void;
@@ -215,6 +238,7 @@ interface ChipProps {
  */
 function RuntimeChip({
   id,
+  buttonRef,
   sheetId,
   open,
   onOpen,
@@ -242,6 +266,7 @@ function RuntimeChip({
       disabled={disabled}
       id={id}
       onClick={onOpen}
+      ref={buttonRef}
       title={disabledReason ?? title}
       type="button"
     >
@@ -254,6 +279,150 @@ function RuntimeChip({
       ) : null}
       <ChevronsUpDown aria-hidden="true" className="shrink-0" size={11} />
     </button>
+  );
+}
+
+/** The chip's box, as far as placing a popover against it is concerned. */
+export interface ChipBox {
+  readonly left: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/**
+ * Where a picker popover sits against its chip. The chips live on the composer's
+ * bottom edge, so the popover opens UPWARD, left-aligned with the chip and clear
+ * of it by `gap`; only when there is no room above does it drop below instead.
+ * The context menu's clamp is the final guarantee that it stays on screen. Pure,
+ * so the placement is asserted without a layout engine.
+ */
+export const runtimePopoverPosition = (
+  chip: ChipBox,
+  size: MenuSize,
+  viewport: MenuViewport,
+  gap = 6,
+  margin = 8,
+): MenuPosition => {
+  const above = chip.top - gap - size.height;
+  const y = above >= margin ? above : chip.bottom + gap;
+  return clampMenuPosition({ x: chip.left, y }, size, viewport, margin);
+};
+
+interface RuntimePopoverProps {
+  readonly id: string;
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly anchorRef: RefObject<HTMLButtonElement | null>;
+  readonly title: string;
+  readonly harness: string;
+  readonly children: ReactNode;
+}
+
+/**
+ * The desktop shell for a picker: a small non-modal panel anchored to its chip.
+ *
+ * It borrows the context menu's clamp and the app's escape-layer stack, and the
+ * theme popover's focus policy: Escape closes and hands focus back to the chip,
+ * an outside press or focus leaving the panel just closes (the reader has put
+ * focus somewhere on purpose), and a window resize closes because the chip it
+ * was measured against has moved. Not `aria-modal`: the page behind stays live.
+ */
+function RuntimePopover({ id, open, onClose, anchorRef, title, harness, children }: RuntimePopoverProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState<MenuPosition | null>(null);
+  const layer = useRef<object>({});
+  // Read through a ref so the listeners below depend on `open` alone: a
+  // re-registration would push this layer back to the TOP of the escape stack.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    const token = layer.current;
+    const release = pushEscapeLayer(token);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !isTopEscapeLayer(token)) return;
+      event.stopPropagation();
+      onCloseRef.current();
+      anchorRef.current?.focus();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      // A press on a layer above this one belongs to that layer; a press on the
+      // chip is the chip's own toggle.
+      if (!isTopEscapeLayer(token)) return;
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      onCloseRef.current();
+    };
+    const onResize = () => onCloseRef.current();
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('resize', onResize);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('resize', onResize);
+      release();
+    };
+  }, [open, anchorRef]);
+
+  // Focus the panel as it opens, in a LAYOUT effect, so the choice list's own
+  // passive effect can then move focus on to the value in force.
+  useLayoutEffect(() => {
+    if (open) panelRef.current?.focus();
+    else setPosition(null);
+  }, [open]);
+
+  // The placement is a function of the chip, the panel's size and the window.
+  // The write keeps the previous object when nothing moved, so it cannot loop.
+  const place = useCallback(() => {
+    const panel = panelRef.current;
+    const chip = anchorRef.current;
+    if (!panel || !chip) return;
+    const next = runtimePopoverPosition(
+      chip.getBoundingClientRect(),
+      { width: panel.offsetWidth, height: panel.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPosition(current => (current?.left === next.left && current.top === next.top ? current : next));
+  }, [anchorRef]);
+
+  // Place after every render of this shell, and again whenever the panel itself
+  // changes size: the body re-renders on its own when its catalog arrives, and a
+  // taller panel must be lifted rather than left hanging off the window's edge.
+  useLayoutEffect(() => {
+    if (open) place();
+  });
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !panel || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => place());
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [open, place]);
+
+  if (!open) return null;
+  return (
+    <div
+      aria-label={title}
+      className="kt-panel fixed z-50 flex w-[min(22rem,calc(100vw-16px))] flex-col overflow-hidden font-ui shadow-popover"
+      data-runtime-popover={id}
+      id={id}
+      onBlur={event => {
+        const next = event.relatedTarget as Node | null;
+        if (next && !event.currentTarget.contains(next) && !anchorRef.current?.contains(next)) onClose();
+      }}
+      ref={panelRef}
+      role="dialog"
+      style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}
+      tabIndex={-1}
+    >
+      <div className="flex shrink-0 items-baseline gap-sm border-b border-border-soft px-cell-x py-1.5">
+        <span className="min-w-0 flex-1 truncate font-semibold text-fg text-ui">{title}</span>
+        <span className="fy-label shrink-0">{harness}</span>
+      </div>
+      <div className="max-h-[min(26rem,calc(100dvh-6rem))] min-h-0 overflow-y-auto scroll-thin p-1">{children}</div>
+    </div>
   );
 }
 
@@ -286,6 +455,7 @@ export function ComposerRuntimeWithKeyboard({
   view,
   canControl,
   busy,
+  presentation = 'sheet',
   renderModelControls,
   renderEffortControls,
   keyboardOpen,
@@ -299,6 +469,8 @@ export function ComposerRuntimeWithKeyboard({
   const reasonId = `${baseId}-reason`;
   const [modelOpen, setModelOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
+  const modelChipRef = useRef<HTMLButtonElement | null>(null);
+  const effortChipRef = useRef<HTMLButtonElement | null>(null);
 
   // The row is `data-kb-hide`, and these chips own dialogs — the one thing that
   // subtree class must never hide with an open panel inside it. In practice a chip
@@ -398,29 +570,37 @@ export function ComposerRuntimeWithKeyboard({
       : `Switch model — currently ${modelLabel}`;
   const { label: effortLabel, aria: effortAria } = runtimeEffortReadout(view, sentClaudeEffort);
 
+  const claudeEffort = present(sentClaudeEffort) ?? present(config.launchReasoningEffort);
+  const closeModel = useCallback(() => setModelOpen(false), []);
+  const closeEffort = useCallback(() => setEffortOpen(false), []);
   const modelLifecycle: RuntimeSwitchLifecycle = {
     open: modelOpen,
+    presentation,
+    ...(claudeEffort === undefined ? {} : { claudeEffort }),
     onSwitchSubmitted: submitted,
     onSwitchFailed: failed,
     onClaudeEffortSent: setSentClaudeEffort,
-    onClose: () => setModelOpen(false),
+    onClose: closeModel,
   };
   const effortLifecycle: RuntimeSwitchLifecycle = {
     ...modelLifecycle,
     open: effortOpen,
-    onClose: () => setEffortOpen(false),
+    onClose: closeEffort,
   };
+  const modelBody = renderModelControls?.(modelLifecycle);
+  const effortBody = renderEffortControls?.(effortLifecycle);
 
   return (
     <>
       <div className="fy-composer__runtime-row inline-flex min-w-0 items-center gap-xs" data-kb-hide>
         <RuntimeChip
           ariaLabel={modelAria}
+          buttonRef={modelChipRef}
           disabled={disabled}
           disabledReason={disabledReason}
           id={modelTriggerId}
           label={modelLabel}
-          onOpen={() => setModelOpen(true)}
+          onOpen={() => setModelOpen(open => !open)}
           open={modelOpen}
           pending={modelPending}
           reasonId={reasonId}
@@ -429,12 +609,13 @@ export function ComposerRuntimeWithKeyboard({
         />
         <RuntimeChip
           ariaLabel={effortAria}
+          buttonRef={effortChipRef}
           disabled={disabled}
           disabledReason={disabledReason}
           id={effortTriggerId}
           label={effortLabel}
           leadingIcon={<Brain aria-hidden="true" className="shrink-0" size={11} />}
-          onOpen={() => setEffortOpen(true)}
+          onOpen={() => setEffortOpen(open => !open)}
           open={effortOpen}
           pending={codex && reasoningPending}
           reasonId={reasonId}
@@ -448,35 +629,62 @@ export function ComposerRuntimeWithKeyboard({
         </span>
       ) : null}
 
-      <BottomSheet
-        ariaLabel="Switch model"
-        closeLabel="Close model switcher"
-        id={modelSheetId}
-        labelledBy={modelTriggerId}
-        onClose={() => setModelOpen(false)}
-        open={modelOpen}
-        zIndexClass="z-50"
-      >
-        <SheetHead harness={config.harness} title="Switch model" />
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-          <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{renderModelControls?.(modelLifecycle)}</div>
-        </div>
-      </BottomSheet>
+      {presentation === 'popover' ? (
+        <>
+          <RuntimePopover
+            anchorRef={modelChipRef}
+            harness={config.harness}
+            id={modelSheetId}
+            onClose={closeModel}
+            open={modelOpen}
+            title="Switch model"
+          >
+            {modelBody}
+          </RuntimePopover>
+          <RuntimePopover
+            anchorRef={effortChipRef}
+            harness={config.harness}
+            id={effortSheetId}
+            onClose={closeEffort}
+            open={effortOpen}
+            title="Reasoning effort"
+          >
+            {effortBody}
+          </RuntimePopover>
+        </>
+      ) : (
+        <>
+          <BottomSheet
+            ariaLabel="Switch model"
+            closeLabel="Close model switcher"
+            id={modelSheetId}
+            labelledBy={modelTriggerId}
+            onClose={closeModel}
+            open={modelOpen}
+            zIndexClass="z-50"
+          >
+            <SheetHead harness={config.harness} title="Switch model" />
+            <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
+              <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{modelBody}</div>
+            </div>
+          </BottomSheet>
 
-      <BottomSheet
-        ariaLabel="Change reasoning level"
-        closeLabel="Close reasoning switcher"
-        id={effortSheetId}
-        labelledBy={effortTriggerId}
-        onClose={() => setEffortOpen(false)}
-        open={effortOpen}
-        zIndexClass="z-50"
-      >
-        <SheetHead harness={config.harness} title="Reasoning effort" />
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-          <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{renderEffortControls?.(effortLifecycle)}</div>
-        </div>
-      </BottomSheet>
+          <BottomSheet
+            ariaLabel="Change reasoning level"
+            closeLabel="Close reasoning switcher"
+            id={effortSheetId}
+            labelledBy={effortTriggerId}
+            onClose={closeEffort}
+            open={effortOpen}
+            zIndexClass="z-50"
+          >
+            <SheetHead harness={config.harness} title="Reasoning effort" />
+            <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
+              <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{effortBody}</div>
+            </div>
+          </BottomSheet>
+        </>
+      )}
     </>
   );
 }
