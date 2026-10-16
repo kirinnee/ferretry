@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ComposerEnterKeySettings } from '../../../../src/features/settings/composer-enter-key-settings.tsx';
-import { MotionSetting, ShowDetailsSetting } from '../../../../src/features/settings/conversation-settings.tsx';
+import { MotionSetting } from '../../../../src/features/settings/conversation-settings.tsx';
 import { render, run } from '../../../support/react.ts';
 
 const radios = (view: ReturnType<typeof render>, name: string) =>
@@ -35,19 +35,6 @@ describe('ComposerEnterKeySettings', () => {
 });
 
 describe('conversation and motion settings', () => {
-  test('Show details is hidden by default and patches a boolean', () => {
-    const changes: boolean[] = [];
-    const view = render(<ShowDetailsSetting onChange={next => changes.push(next)} showDetails={false} />);
-    const options = radios(view, 'conversation-show-details');
-    expect(options.map(option => option.props.checked)).toEqual([true, false]);
-    for (const option of options) run(() => option.props.onChange());
-    expect(changes).toEqual([false, true]);
-    expect(
-      radios(render(<ShowDetailsSetting onChange={() => {}} showDetails />), 'conversation-show-details')[1]?.props
-        .checked,
-    ).toBe(true);
-  });
-
   test('motion follows the system unless reduced is chosen', () => {
     const changes: string[] = [];
     const view = render(<MotionSetting motion="system" onChange={next => changes.push(next)} />);
