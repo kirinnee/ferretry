@@ -144,8 +144,9 @@ const TAB_BAR_TAIL: readonly AppBarDestinationId[] = ['settings'];
 export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
 
 /**
- * The page title a phone shows in place of the breadcrumb, which it has no room for. Only the Insights
- * views carry one: they sit under More, so without it nothing on screen said where the reader was.
+ * The name a phone's top bar gives the place, overriding the page's own. The Insights views share one:
+ * they sit together under More, so the bar says "Insights" while the tabs below it name the view.
+ * Every other page is named by the last crumb of its trail ({@link AppBar}).
  */
 export const appBarTitle = (active: AppBarDestinationId | null): string | null =>
   active !== null && MORE_PLACES.includes(active) ? 'Insights' : null;
@@ -392,7 +393,8 @@ export function AppBar({
 }: AppBarProps) {
   const layout = useLayoutMode();
   const statusVisible = connectionStatus !== 'open' || updateReady !== null;
-  const title = appBarTitle(active);
+  // A phone hides the breadcrumb, so the page's name takes the empty centre of the bar instead.
+  const title = appBarTitle(active) ?? crumbs[crumbs.length - 1]?.label ?? null;
 
   return (
     // Not sticky: the shell does not scroll, so the bar is simply the first row
@@ -407,11 +409,6 @@ export function AppBar({
         {/* Identity stays together at the start. */}
         <div className="flex min-w-0 items-center justify-self-start gap-md">
           {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} sessionCount={sessionCount} />}
-          {layout === 'drawer' && title !== null && (
-            <span className="truncate text-title font-semibold text-fg min-[480px]:hidden" data-app-bar-title="">
-              {title}
-            </span>
-          )}
           <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-md text-muted min-[480px]:flex">
             {crumbTrail(crumbs).map(({ crumb, trail, last }) => (
               // Keyed by the trail rather than the index: two crumbs on one
@@ -436,11 +433,12 @@ export function AppBar({
         <div className="flex min-h-control min-w-0 items-center justify-center" data-app-bar-session-search-slot="">
           {currentSessionSearch ? (
             <div className="w-full max-w-[34rem]">{currentSessionSearch}</div>
-          ) : crumbs.length > 0 ? (
+          ) : title !== null ? (
             // Below 480px the breadcrumb is hidden, which left a phone's bar saying nothing but the fleet
-            // count. The page's own name takes the empty centre there instead.
+            // count. The page's name takes the empty centre there instead; the stylesheet hides it wherever
+            // the breadcrumb shows.
             <span className="truncate font-semibold text-fg min-[480px]:hidden" data-app-bar-title="">
-              {crumbs[crumbs.length - 1]?.label}
+              {title}
             </span>
           ) : null}
         </div>
