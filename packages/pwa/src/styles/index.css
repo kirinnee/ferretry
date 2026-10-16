@@ -1856,31 +1856,67 @@ body {
   clip-path: var(--clip-panel);
 }
 
-/* ---- chat width surface (item 5) ---------------------------------------
-   The chat pane's horizontal measure, toggled by `data-chat-width` on the
-   surface that wraps the transcript card + composer (SessionChatPage).
-   'readable' caps that surface at 768px; 'balanced' is the measured middle at
-   900px. Both stay centered. 'balanced' and 'full' remove Transcript's legacy
-   880px inner cap so their prose, code and tables reach the intended surface.
-   At 768px and below every rule is inert, so all three modes remain identical
-   on phones. Both capped measures remain tunable per theme. */
-.kt-content {
-  max-width: var(--chat-measure-content, 880px);
+/* ---- the conversation measure (Settings › Appearance › Conversation width)
+   ONE column with two halves: the transcript's text column and the composer under it share one
+   measure and one side padding, so their left and right edges are the same line. The SURFACE is
+   never capped: the pane, its tab strip and the transcript's scroller always span the whole pane, so
+   the scrollbar stays at the pane's edge and the setting moves only the conversation.
+
+   Compact caps the column at 720px, Wide at 1200px, Full leaves it the pane's width. Each is a
+   maximum, so in a pane narrower than the measure every mode is that pane's width — a phone always is.
+
+   NO AUTO MARGIN ON THE SURFACE, and the log is a `minmax(0, 1fr)` track. A centred surface sized to
+   its content (an auto margin cancels flex stretch) and an `auto` grid track both refused to shrink
+   below the conversation's min-content width, so opening a split pane or the context rail left the
+   chat running underneath them. The surface now always stretches to its pane and never exceeds it.
+
+   `--fy-chat-gutter` is the transcript scrollbar's width, written by `useChatScrollbarGutter`: the
+   text column centres in the scroller's client box, so the composer reserves the same strip on the
+   right and both centre on one axis. Themes may tune either measure. */
+.kt-chat-surface {
+  --chat-column: var(--chat-measure-readable, 720px);
+  --chat-gutter-x: 12px;
+  width: 100%;
+  min-width: 0;
 }
-.kt-chat-surface[data-chat-width='balanced'],
-.kt-chat-surface[data-chat-width='readable'] {
-  margin-left: auto;
-  margin-right: auto;
+@media (min-width: 640px) {
+  .kt-chat-surface {
+    --chat-gutter-x: 16px;
+  }
 }
 .kt-chat-surface[data-chat-width='balanced'] {
-  max-width: var(--chat-measure-balanced, 900px);
+  --chat-column: var(--chat-measure-balanced, 1200px);
 }
-.kt-chat-surface[data-chat-width='readable'] {
-  max-width: var(--chat-measure-readable, 768px);
+.kt-chat-surface[data-chat-width='full'] {
+  --chat-column: none;
 }
-.kt-chat-surface[data-chat-width='balanced'] .kt-content,
-.kt-chat-surface[data-chat-width='full'] .kt-content {
-  max-width: none;
+.fy-chat-log {
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+.kt-chat-surface .fy-transcript-content {
+  width: 100%;
+  max-width: var(--chat-column);
+  margin-inline: auto;
+  padding-inline: var(--chat-gutter-x);
+}
+.fy-chat-input {
+  flex-shrink: 0;
+  min-width: 0;
+  padding-top: 0.5rem;
+  padding-right: var(--fy-chat-gutter, 0px);
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+.fy-chat-input__column {
+  width: 100%;
+  min-width: 0;
+  max-width: var(--chat-column);
+  margin-inline: auto;
+  padding-inline: var(--chat-gutter-x);
 }
 
 /* ---- table / list rows -------------------------------------------------- */

@@ -47,6 +47,7 @@ import {
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
+import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import type { ContextMenuItem } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -559,6 +560,8 @@ export function SessionChatPage({
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
   const compact = presentation === 'sheet';
+  const chatSurface = useRef<HTMLDivElement | null>(null);
+  useChatScrollbarGutter(chatSurface, session.config.id);
   /**
    * BOUND, BECAUSE THE SHIPPED CLIENT IS AN OBJECT AND NOT A BAG OF FUNCTIONS.
    *
@@ -762,9 +765,11 @@ export function SessionChatPage({
       {actionAlert}
     </>
   );
+  // The text column and the composer share one measure (`.kt-chat-surface`, styles/index.css); the
+  // composer's row reserves the transcript scrollbar's width so both centre on one axis.
   const chat = (
-    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
-      <div className="grid min-h-0 flex-1">
+    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
+      <div className="fy-chat-log">
         <Transcript
           activity={paneActivity}
           activityFallback={session.state.activity ?? null}
@@ -777,90 +782,96 @@ export function SessionChatPage({
           sessionId={session.config.id}
         />
       </div>
-      <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
-        {question !== null && canControl ? (
-          <QuestionForm
-            api={questionApi}
-            compact={compact}
-            daemon={connection}
-            key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
-            question={question}
-            sessionId={session.config.id}
-          />
-        ) : awaitingAnswer ? (
-          /* Status without a validated payload is damaged or incomplete
+      <div className="fy-chat-input" data-session-input="">
+        <div className="fy-chat-input__column">
+          {question !== null && canControl ? (
+            <QuestionForm
+              api={questionApi}
+              compact={compact}
+              daemon={connection}
+              key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
+              question={question}
+              sessionId={session.config.id}
+            />
+          ) : awaitingAnswer ? (
+            /* Status without a validated payload is damaged or incomplete
            evidence, never an empty question. Keep the recovery action
            visible, but do not invent options or send an unbound answer. */
-          <section
-            aria-label="Structured question"
-            className="fy-question-form"
-            data-question-unavailable=""
-            role="status"
-          >
-            <p className="m-0">
-              This session reports a structured question, but its complete validated prompt is unavailable. No answer
-              can be sent safely; refresh the session or interrupt the turn to abandon it.
-            </p>
-          </section>
-        ) : (
-          <Composer
-            api={client}
-            {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
-            {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
-            {...(composerCatalogs.attention === undefined ? {} : { autocompleteAttention: composerCatalogs.attention })}
-            {...(composerCatalogs.skills?.skills === undefined ? {} : { autocompleteSkills: composerCatalogs.skills })}
-            // The in-flight owner reads: a menu opened before they settle waits
-            // instead of inventing an empty family or fetching a fact twice.
-            autocompleteReady={composerCatalogs.settled}
-            busy={busy}
-            compact={compact}
-            {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
-            vimMode={composerVimMode}
-            {...(dictationSettings === undefined ? {} : { dictationSettings })}
-            enterKeyPreference={composerEnterKey}
-            phoneEnterKeyPreference={composerPhoneEnterKey}
-            daemon={connection}
-            disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-            onSent={onRefresh}
-            quota={session.state.quota}
-            sessionId={session.config.id}
-            {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
-            // The model and effort chips ride the composer's own status line, so the
-            // runtime costs no row of its own above the message box.
-            statusSlot={
-              runtimeApi === null ? null : (
-                <ComposerRuntime
-                  busy={runtimeSwitchBusy}
-                  canControl={canControl}
-                  renderEffortControls={lifecycle => (
-                    <RuntimeEffortControls
-                      api={runtimeApi}
-                      canControl={canControl}
-                      catalogs={routedRuntimeCatalogs}
-                      daemon={connection}
-                      onOpenTerminal={openConsole}
-                      view={session}
-                      {...lifecycle}
-                    />
-                  )}
-                  renderModelControls={lifecycle => (
-                    <RuntimeModelControls
-                      api={runtimeApi}
-                      canControl={canControl}
-                      catalogs={routedRuntimeCatalogs}
-                      daemon={connection}
-                      onOpenTerminal={openConsole}
-                      view={session}
-                      {...lifecycle}
-                      open={lifecycle.open}
-                    />
-                  )}
-                  view={session}
-                />
-              )
-            }
-          />
-        )}
+            <section
+              aria-label="Structured question"
+              className="fy-question-form"
+              data-question-unavailable=""
+              role="status"
+            >
+              <p className="m-0">
+                This session reports a structured question, but its complete validated prompt is unavailable. No answer
+                can be sent safely; refresh the session or interrupt the turn to abandon it.
+              </p>
+            </section>
+          ) : (
+            <Composer
+              api={client}
+              {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
+              {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
+              {...(composerCatalogs.attention === undefined
+                ? {}
+                : { autocompleteAttention: composerCatalogs.attention })}
+              {...(composerCatalogs.skills?.skills === undefined
+                ? {}
+                : { autocompleteSkills: composerCatalogs.skills })}
+              // The in-flight owner reads: a menu opened before they settle waits
+              // instead of inventing an empty family or fetching a fact twice.
+              autocompleteReady={composerCatalogs.settled}
+              busy={busy}
+              compact={compact}
+              {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
+              vimMode={composerVimMode}
+              {...(dictationSettings === undefined ? {} : { dictationSettings })}
+              enterKeyPreference={composerEnterKey}
+              phoneEnterKeyPreference={composerPhoneEnterKey}
+              daemon={connection}
+              disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
+              onSent={onRefresh}
+              quota={session.state.quota}
+              sessionId={session.config.id}
+              {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
+              // The model and effort chips ride the composer's own status line, so the
+              // runtime costs no row of its own above the message box.
+              statusSlot={
+                runtimeApi === null ? null : (
+                  <ComposerRuntime
+                    busy={runtimeSwitchBusy}
+                    canControl={canControl}
+                    renderEffortControls={lifecycle => (
+                      <RuntimeEffortControls
+                        api={runtimeApi}
+                        canControl={canControl}
+                        catalogs={routedRuntimeCatalogs}
+                        daemon={connection}
+                        onOpenTerminal={openConsole}
+                        view={session}
+                        {...lifecycle}
+                      />
+                    )}
+                    renderModelControls={lifecycle => (
+                      <RuntimeModelControls
+                        api={runtimeApi}
+                        canControl={canControl}
+                        catalogs={routedRuntimeCatalogs}
+                        daemon={connection}
+                        onOpenTerminal={openConsole}
+                        view={session}
+                        {...lifecycle}
+                        open={lifecycle.open}
+                      />
+                    )}
+                    view={session}
+                  />
+                )
+              }
+            />
+          )}
+        </div>
       </div>
     </div>
   );

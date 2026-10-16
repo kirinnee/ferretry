@@ -223,7 +223,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-sbar__session[aria-current='page'] .fy-sbar__sub {
+/* The directory: mono, the quietest ink, truncated from the LEFT so a worktree's own name survives. */
+.fy-sbar__dir {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint, var(--muted));
+  direction: rtl;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__sub,
+.fy-sbar__session[aria-current='page'] .fy-sbar__dir {
   color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));
 }
 .fy-sbar__foot {

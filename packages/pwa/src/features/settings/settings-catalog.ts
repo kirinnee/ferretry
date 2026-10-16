@@ -60,7 +60,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'chat-width',
     label: 'Conversation width',
     description:
-      'Comfortable (about 75 characters a line) is the default. On a wide screen choose Wide (900px) or Full (the whole pane); at 768px and below all three look the same.',
+      'How wide messages and the composer run: Compact (a 720px column) is the default, 1200px leaves room for code and tables, Full uses the whole pane. A narrower pane looks the same in all three.',
     keywords: [
       'chat',
       'conversation',
@@ -68,6 +68,9 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'measure',
       'readable',
       'comfortable',
+      'compact',
+      '720',
+      '1200',
       'wide',
       'balanced',
       'middle',
