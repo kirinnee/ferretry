@@ -1,0 +1,147 @@
+/**
+ * The daemon-bound host of the Warden page: it reads the status and the "who needs you" feed, runs the
+ * owner's sweep and investigate requests, and opens reports — all through the ONE paired connection it
+ * was given, so nothing read from one daemon is shown or acted on through another.
+ *
+ * Everything below is keyed by the daemon id, so a switch to another paired daemon mounts a fresh body:
+ * a late answer, a notice or an in-flight request from the previous one cannot reach the screen.
+ *
+ * SWEEP NOW is the free deterministic sweep (`spawn: false`): it flags, and whatever the triage then does
+ * is the configured triage's business. INVESTIGATE skips Jev and the blessing, waits for a slot and counts
+ * against today's cap; the daemon refuses it (409) when the Warden is off or the cap is hit, and its own
+ * sentence is shown, because it is the one that knows which.
+ */
+
+import type { IFyApiClient, SessionView } from '@ferretry/protocol';
+import { useCallback, useState } from 'react';
+
+import { useWardenPoll, type WardenPollOptions } from '../../hooks/use-warden-poll.ts';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
+import type { WardenRow } from './warden-overview-model.ts';
+import { type WardenNotice, WardenOverview } from './warden-overview.tsx';
+import { WardenReportDialog, type WardenReportDialogRequest } from './warden-report-dialog.tsx';
+
+export type WardenOverviewClient = Pick<
+  IFyApiClient,
+  'wardenStatus' | 'wardenAttention' | 'wardenRun' | 'wardenInvestigate' | 'wardenReport'
+>;
+export type WardenOverviewClientFactory = (connection: DaemonConnection) => Promise<WardenOverviewClient>;
+
+export interface WardenOverviewSurfaceProps {
+  readonly connection: DaemonConnection;
+  readonly sessions?: readonly SessionView[] | null;
+  readonly onNavigate?: (to: string) => void;
+  /** Test and harness seam; production uses the carrier-routed client. */
+  readonly createClient?: WardenOverviewClientFactory;
+  readonly now?: () => number;
+  readonly pollOptions?: Omit<WardenPollOptions, 'revision'>;
+}
+
+/** Settings › Warden for one daemon. */
+export const wardenSettingsHref = (connection: DaemonConnection): string =>
+  `${daemonSettingsPath(connection.daemonId)}#warden`;
+
+const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+
+export function WardenOverviewSurface(props: WardenOverviewSurfaceProps) {
+  return <WardenOverviewBody key={props.connection.daemonId} {...props} />;
+}
+
+function WardenOverviewBody({
+  connection,
+  sessions = null,
+  onNavigate,
+  createClient: injected,
+  now = Date.now,
+  pollOptions = {},
+}: WardenOverviewSurfaceProps) {
+  const routed = useDaemonClient();
+  const createClient: WardenOverviewClientFactory = injected ?? routed;
+  const [revision, setRevision] = useState(0);
+  const [sweeping, setSweeping] = useState(false);
+  const [notice, setNotice] = useState<WardenNotice | null>(null);
+  const [investigating, setInvestigating] = useState<ReadonlySet<string>>(new Set());
+  const [report, setReport] = useState<WardenReportDialogRequest | null>(null);
+
+  const readStatus = useCallback(
+    async (daemon: DaemonConnection) => await (await createClient(daemon)).wardenStatus(),
+    [createClient],
+  );
+  const readAttention = useCallback(
+    async (daemon: DaemonConnection) => await (await createClient(daemon)).wardenAttention(),
+    [createClient],
+  );
+  const readReport = useCallback(
+    async (daemon: DaemonConnection, reportPath: string) => await (await createClient(daemon)).wardenReport(reportPath),
+    [createClient],
+  );
+  const status = useWardenPoll(connection, readStatus, { ...pollOptions, revision });
+  const attention = useWardenPoll(connection, readAttention, { ...pollOptions, revision });
+
+  const sweep = async (): Promise<void> => {
+    setSweeping(true);
+    setNotice(null);
+    try {
+      const run = await (await createClient(connection)).wardenRun(false);
+      const flagged = run.anomalies.length;
+      setNotice({
+        tone: 'ok',
+        text: run.message ?? `Swept: ${flagged === 0 ? 'nothing flagged' : `${flagged} flagged`}.`,
+      });
+    } catch (cause) {
+      setNotice({ tone: 'err', text: `The sweep did not run: ${reasonOf(cause)}` });
+    } finally {
+      setSweeping(false);
+      setRevision(current => current + 1);
+    }
+  };
+
+  const investigate = async (sessionId: string): Promise<void> => {
+    setInvestigating(current => new Set([...current, sessionId]));
+    setNotice(null);
+    try {
+      const answer = await (await createClient(connection)).wardenInvestigate({ sessionId });
+      setNotice({ tone: 'ok', text: answer.message });
+    } catch (cause) {
+      setNotice({ tone: 'err', text: `No investigation: ${reasonOf(cause)}` });
+    } finally {
+      setInvestigating(current => new Set([...current].filter(id => id !== sessionId)));
+      setRevision(current => current + 1);
+    }
+  };
+
+  const openReport = (row: WardenRow & { readonly reportPath: string }): void => {
+    setReport({
+      connection,
+      verdict: {
+        at: row.at ?? '',
+        targetSession: row.sessionId,
+        verdict: row.verdict ?? 'unknown',
+        reportPath: row.reportPath,
+      },
+    });
+  };
+
+  return (
+    <>
+      <WardenOverview
+        connection={connection}
+        status={status}
+        attention={attention}
+        sessions={sessions}
+        now={now()}
+        sweeping={sweeping}
+        notice={notice}
+        investigating={investigating}
+        settingsHref={wardenSettingsHref(connection)}
+        {...(onNavigate === undefined ? {} : { onNavigate })}
+        onSweep={() => void sweep()}
+        onInvestigate={sessionId => void investigate(sessionId)}
+        onOpenReport={openReport}
+      />
+      <WardenReportDialog request={report} read={readReport} onClose={() => setReport(null)} />
+    </>
+  );
+}

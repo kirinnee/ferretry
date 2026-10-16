@@ -11,16 +11,17 @@
  * what the owner changed; the rest is {@link defaultWardenConfig}. An edit to it
  * that turns spending on is held until the owner confirms it.
  *
- * WHAT `enabled` GATES. Only the LLM escalation. Detection is always on: the
- * anomaly list, the fingerprint and the failover status are deterministic and
- * cost nothing but a fleet read, so an operator who has not opted into spending
- * agent sessions still gets the evidence. That split is kteam's and it is the
- * reason the default is `false` — a fresh daemon must not start spending tokens
- * on its own.
+ * WHAT `enabled` AND `triage` GATE. Detection is always on: the anomaly list,
+ * the fingerprint and the failover status are deterministic and cost nothing but
+ * a fleet read. `enabled` is the owner's On/Off for everything after that, and
+ * `triage` decides whether a flag may cost anything at all: `rules` — the
+ * default — never spends, so a fresh daemon is on and watching without spending
+ * a token. Jev and LLM triage are each an explicit opt-in with a daily cap
+ * (`triage.ts`).
  *
  * TOLERANT ON READ, STRICT ON WRITE. A stored document that no longer validates
  * falls back to the defaults and SAYS SO in a warning, because the defaults are
- * the safe direction: `enabled: false` means a configuration the daemon cannot
+ * the safe direction: `triage: rules` means a configuration the daemon cannot
  * understand can never authorise a spawn. A PATCH is parsed strictly instead —
  * an operator naming a field that does not exist has made a mistake worth
  * refusing, not worth silently dropping.
@@ -30,6 +31,7 @@
 
 import {
   DEFAULT_WARDEN_CONFIG,
+  mergeWardenConfig,
   type WardenConfig,
   type WardenConfigPatch,
   WardenConfigPatchSchema,
@@ -101,21 +103,17 @@ function issueSummary(issues: readonly { readonly path: readonly PropertyKey[]; 
 /**
  * Apply an operator patch, nested sections merged rather than replaced.
  *
- * `failover` and `providerOutage` merge one level deeper because both are
- * declared `.partial()` on the wire: an operator switching the policy must not
- * thereby reset the strike threshold to whatever a fresh object would carry.
+ * Every nested section — the guard, the caps, what the Warden may do alone, the
+ * events, the investigation, `failover` and `providerOutage` — merges one level
+ * deeper, because each is `.partial()` on the wire: an owner ticking one box must
+ * not thereby reset its siblings to whatever a fresh object would carry.
  *
  * The result is re-parsed through the full schema, so a merge cannot produce a
  * document the loader would later refuse — the bounds hold on the way out, not
  * only on the way in.
  */
 export function applyWardenConfigPatch(config: WardenConfig, patch: WardenConfigPatch): WardenConfig {
-  return WardenConfigSchema.parse({
-    ...config,
-    ...patch,
-    failover: { ...config.failover, ...(patch.failover ?? {}) },
-    providerOutage: { ...config.providerOutage, ...(patch.providerOutage ?? {}) },
-  });
+  return mergeWardenConfig(config, patch);
 }
 
 /** Parses a patch as an operator stated it, refusing unknown fields. */
@@ -145,7 +143,7 @@ export function wardenConfigWarnings(config: WardenConfig, installedAgents: read
       warnings.push('every configured warden account is missing from this host, so no check can run');
   }
   if (!config.enabled)
-    warnings.push('escalation is disabled (enabled=false); detection still runs and reports evidence');
+    warnings.push('the Warden is off (enabled=false); detection still runs, but nothing is triaged or acted on');
   return warnings;
 }
 

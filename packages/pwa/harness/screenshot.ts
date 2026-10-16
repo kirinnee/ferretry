@@ -2390,7 +2390,7 @@ try {
           await openMachineTab(unreachableMachine);
           const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
           await openDaemonPanel(unavailableWardenFrame, 'warden');
-          await unavailableWardenFrame.getByLabel('Warden status unavailable').waitFor({ state: 'visible' });
+          await unavailableWardenFrame.getByLabel('Warden settings unavailable').waitFor({ state: 'visible' });
           // A FAILURE STATE IS A LAYOUT, not an absence of one. These two frames explain why a panel
           // could not be read, and the sentences that do the explaining are the longest unbroken text
           // in Settings — an unwrapped URL or daemon id in one of them widens the page exactly as a
@@ -2909,13 +2909,9 @@ try {
           });
 
           await capturePairingFailures(page, viewport.name);
-          const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
-          await captureElement(
-            page,
-            page.locator('[aria-labelledby="warden-attention-heading"]'),
-            wardenAttentionTarget,
-          );
-          process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
+          const wardenOverviewTarget = join(outDir, `warden-overview-${viewport.name}.png`);
+          await captureElement(page, page.locator('[data-harness="warden-overview"]'), wardenOverviewTarget);
+          process.stdout.write(`📸 Warden page -> ${wardenOverviewTarget}\n`);
           const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
           await captureElement(page, page.locator('[data-harness="warden-strip"]'), wardenStripTarget);
           process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);

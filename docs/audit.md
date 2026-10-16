@@ -102,7 +102,7 @@ actor phrases (`this computer`, `a supervising agent`, …).
 | `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                                                                      |
 | `secrets.changed`      | secret put and delete — the name only                                                                                                 |
 | `warden.configured`    | `PATCH /v1/warden/config`                                                                                                             |
-| `warden.ran`           | `POST /v1/warden/run`                                                                                                                 |
+| `warden.ran`           | `POST /v1/warden/run`, and `POST /v1/warden/investigate` (detail `action: investigate`)                                               |
 | `worktree.removed`     | `POST /v1/worktrees/remove`                                                                                                           |
 
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and

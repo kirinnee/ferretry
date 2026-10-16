@@ -26,7 +26,10 @@ import {
   TERMINAL_MAX_PER_SESSION,
   type TerminalListView,
   type TerminalView,
+  type WardenAttentionView,
   type WardenConfigView,
+  type WardenInvestigateRequest,
+  type WardenInvestigateView,
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
@@ -104,6 +107,7 @@ import type {
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
+import type { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import {
   configuredReferences,
   type SecretChildOutcome,
@@ -1491,16 +1495,54 @@ export class FakeSpeedups implements SpeedupsSubsystem {
 export class FakeWarden implements WardenSubsystem {
   readonly runs: boolean[] = [];
   readonly patches: unknown[] = [];
+  readonly investigations: WardenInvestigateRequest[] = [];
   armed = 0;
   disarmed = 0;
 
-  constructor(private readonly failure?: WardenError) {}
+  constructor(private readonly failure?: WardenError | WardenRequestError) {}
 
   async status(): Promise<WardenStatusView> {
     if (this.failure !== undefined) throw this.failure;
     // No `lastSweepAt`: "nothing has run yet" is a distinct answer from "a sweep found nothing", and
     // the fixture defaults to the one that claims less.
-    return { config: defaultWardenConfig, anomalies: [], fingerprint: '', failover: FAKE_FAILOVER };
+    return {
+      config: defaultWardenConfig,
+      anomalies: [],
+      fingerprint: '',
+      failover: FAKE_FAILOVER,
+      triage: { configured: 'rules', effective: 'rules', reason: 'configured' },
+      spend: {
+        day: '2026-07-31',
+        jevUsd: 0,
+        jevCapUsd: 0.5,
+        investigationUsd: 0,
+        investigationCapUsd: 2,
+        pendingInvestigations: 0,
+        investigationsLastHour: 0,
+        maxInvestigationsPerHour: 6,
+      },
+      savings: { day: '2026-07-31', flags: 0, jevDecisions: 0, jevSkips: 0, investigations: 0 },
+      investigations: [],
+      actions: [],
+      blessings: [],
+    };
+  }
+
+  async attention(): Promise<WardenAttentionView> {
+    if (this.failure !== undefined) throw this.failure;
+    return {
+      generatedAt: '2026-07-31T00:00:00.000Z',
+      outcome: 'no-sweep',
+      items: [],
+      boardsWithParseErrors: [],
+      verdictCoverage: { limit: 100, truncated: false },
+    };
+  }
+
+  async investigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView> {
+    if (this.failure !== undefined) throw this.failure;
+    this.investigations.push(request);
+    return { sessionId: request.sessionId, state: 'queued', position: 1, message: 'Queued.' };
   }
 
   async verdicts(): Promise<WardenVerdictsView> {

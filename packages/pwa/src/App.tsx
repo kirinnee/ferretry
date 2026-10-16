@@ -1,4 +1,4 @@
-import { DoctorReportSchema, HealthViewSchema, type WardenVerdictsView } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema } from '@ferretry/protocol';
 import { QrCode } from 'lucide-react';
 import {
   createContext,
@@ -84,11 +84,7 @@ import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
-import { WardenAttention } from './features/warden/warden-attention.tsx';
-import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
-import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
-import { WardenStrip } from './features/warden/warden-strip.tsx';
-import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
+import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
@@ -111,9 +107,8 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
-import { useWardenStatus } from './hooks/use-warden-status.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
-import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
@@ -1335,128 +1330,23 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   );
 }
 
-function WardenStatusRoute({ connection }: DaemonPageProps) {
+function WardenOverviewRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
-  const read = useCallback(
-    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
-    [store.clients],
+  const { navigate } = useRouter();
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
   );
-  return <WardenStrip status={useWardenStatus(connection, read)} />;
-}
-
-function WardenAttentionRoute({ connection }: DaemonPageProps) {
   return (
-    <WardenAttention
+    <WardenOverviewSurface
       connection={connection}
-      state={{ status: 'error', reason: 'The dedicated attention report feed is not available in this build.' }}
+      sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
+      onNavigate={navigate}
     />
   );
 }
 
-function WardenConfigurationRoute({ connection }: DaemonPageProps) {
-  return <WardenConfigSurface connection={connection} />;
-}
-
-type WardenVerdictReadState =
-  | { readonly status: 'loading' }
-  | { readonly status: 'ready'; readonly verdicts: WardenVerdictsView }
-  | { readonly status: 'stale'; readonly verdicts: WardenVerdictsView }
-  | { readonly status: 'unavailable' };
-
-/** Read one daemon's concise report index. This intentionally lives beside the
- * route that mounts it: the state is not a reusable global cache, and a failed
- * read must remain visibly unavailable rather than quietly becoming []. */
-function useWardenVerdicts(
-  daemon: DaemonConnection,
-  read: (daemon: DaemonConnection) => Promise<WardenVerdictsView>,
-): WardenVerdictReadState {
-  const [held, setHeld] = useState<{ readonly daemon: DaemonConnection; readonly state: WardenVerdictReadState }>({
-    daemon,
-    state: { status: 'loading' },
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    setHeld({ daemon, state: { status: 'loading' } });
-    const poll = async (): Promise<void> => {
-      if (typeof document !== 'undefined' && document.hidden) return;
-      try {
-        const verdicts = await read(daemon);
-        if (!cancelled) setHeld({ daemon, state: { status: 'ready', verdicts } });
-      } catch {
-        if (cancelled) return;
-        setHeld(current => {
-          if (!sameDaemonConnection(current.daemon, daemon)) return current;
-          return current.state.status === 'ready' || current.state.status === 'stale'
-            ? { daemon, state: { status: 'stale', verdicts: current.state.verdicts } }
-            : { daemon, state: { status: 'unavailable' } };
-        });
-      }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [daemon, read]);
-
-  return sameDaemonConnection(held.daemon, daemon) ? held.state : { status: 'loading' };
-}
-
-function WardenVerdictsRoute({ connection }: DaemonPageProps) {
-  const store = useAppStore();
-  const readVerdicts = useCallback(
-    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenVerdicts(),
-    [store.clients],
-  );
-  const readReport = useCallback(
-    async (daemon: DaemonConnection, reportPath: string) =>
-      await (await store.clients.client(daemon)).wardenReport(reportPath),
-    [store.clients],
-  );
-  const state = useWardenVerdicts(connection, readVerdicts);
-  const [report, setReport] = useState<WardenReportDialogRequest | null>(null);
-
-  if (state.status === 'loading')
-    return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading Warden reports">
-        <p className="m-0 text-ui text-muted">Checking recent Warden reports…</p>
-      </section>
-    );
-  if (state.status === 'unavailable')
-    return (
-      <section className="kt-panel p-panel" role="alert" aria-label="Warden reports unavailable">
-        <h2 className="m-0 text-title font-semibold">Recent verdicts unavailable</h2>
-        <p className="mb-0 mt-1 text-ui text-muted">
-          This daemon could not provide the report index. Ferretry will not present an empty history as evidence that
-          the fleet is healthy.
-        </p>
-      </section>
-    );
-
-  return (
-    <>
-      {state.status === 'stale' && (
-        <p
-          className="m-0 rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-cell text-warn"
-          role="status"
-        >
-          The latest report check failed; showing the last verified index.
-        </p>
-      )}
-      <WardenVerdicts connection={connection} verdicts={state.verdicts} onOpenReport={request => setReport(request)} />
-      <WardenReportDialog request={report} read={readReport} onClose={() => setReport(null)} />
-    </>
-  );
-}
-
-const WARDEN_SLOTS = {
-  Attention: WardenAttentionRoute,
-  Status: WardenStatusRoute,
-  Configuration: WardenConfigurationRoute,
-  Verdicts: WardenVerdictsRoute,
-} as const;
+const WARDEN_SLOTS = { Overview: WardenOverviewRoute } as const;
 
 function WardenRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();

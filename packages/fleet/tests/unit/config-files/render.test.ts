@@ -101,12 +101,12 @@ describe('renderConfigFile: a new file', () => {
     const actual = renderConfigFile(
       'warden.yaml',
       WARDEN,
-      { ...DEFAULT_WARDEN_CONFIG, enabled: true },
+      { ...DEFAULT_WARDEN_CONFIG, enabled: false },
       undefined,
     ) as string;
 
     // Assert
-    should(actual.split('\n').filter(line => !line.startsWith('#') && line !== '')).deepEqual(['enabled: true']);
+    should(actual.split('\n').filter(line => !line.startsWith('#') && line !== '')).deepEqual(['enabled: false']);
   });
 });
 

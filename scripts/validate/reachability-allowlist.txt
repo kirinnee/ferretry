@@ -390,7 +390,10 @@
 # is REACHABLE — the composition root imports it — while the daemon serves no warden route at all.
 # `/v1/warden/status`, `/v1/warden/run` and `/v1/warden/config` are all `unknown_route`, and status
 # could not be answered honestly even so: `anomalies` is a required field of `WardenStatusView`.
-packages/daemon/src/lib/warden/attention.ts # the sweep runtime now WRITES the durable warden state this projection decides over, so the original reason is spent; what it still lacks is a ROUTE. It is a fleet-wide attention VIEW joining every session board with the warden verdicts, and the protocol declares no such call — IFyApiClient has no fleet-attention method and neither does the PWA. Wiring it means agreeing that wire shape first, which is the unit that lands the fleet attention surface, not this one.
+#
+# LANDED (P5, the Warden's Needs-you feed): `attention.ts` is served at `GET /v1/warden/attention`. The
+# unwatched-fleet objection above is met by `collapseUnsupervisedMonitors`, which states the missing
+# monitor subsystem as ONE daemon-level fault instead of a wall of per-session `dead_monitor` rows.
 
 # PR #21 — establish terminal IO policies: FULLY MOUNTED, nothing to list.
 # The lifecycle landed with the subsystem-wiring unit; the STREAM landed with the WebSocket seam.

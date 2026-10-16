@@ -1,12 +1,41 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { WardenSweepLoop, type WardenScheduler, type WardenSweepRunner } from '../../../src/lib/warden/index.ts';
+import {
+  WARDEN_TRIGGER_DEBOUNCE_MS,
+  WARDEN_TRIGGER_MIN_GAP_MS,
+  WardenSweepLoop,
+  type WardenScheduler,
+  type WardenSweepRunner,
+} from '../../../src/lib/warden/index.ts';
 
 /** A scheduler that never fires on its own: the test decides when a tick happens. */
 class ManualScheduler implements WardenScheduler {
   intervals: number[] = [];
   cancels = 0;
+  now = 1_000_000;
+  readonly delays: number[] = [];
+  timerCancels = 0;
   private tick: (() => void) | undefined;
+  private pending: (() => void) | undefined;
+
+  after(delayMs: number, action: () => void): () => void {
+    this.delays.push(delayMs);
+    this.pending = action;
+    return () => {
+      this.timerCancels += 1;
+    };
+  }
+
+  nowMs(): number {
+    return this.now;
+  }
+
+  /** Runs the pending one-shot timer, as the clock reaching it would. */
+  elapse(): void {
+    const action = this.pending;
+    this.pending = undefined;
+    action?.();
+  }
 
   every(intervalMs: number, tick: () => void): () => void {
     this.intervals.push(intervalMs);
@@ -192,5 +221,156 @@ describe('arming the sweep timer', () => {
 
     // Assert
     should(scheduler.cancels).equal(1);
+  });
+});
+
+describe('serializing other state changes with the sweeps', () => {
+  it('should run exclusive work only after the sweep already queued', async () => {
+    // Arrange
+    let releaseFirst: (() => void) | undefined;
+    const runner = new RecordingRunner(300_000, async call =>
+      call === 0 ? await new Promise<string>(resolve => (releaseFirst = () => resolve('first'))) : 'next',
+    );
+    const loop = new WardenSweepLoop(runner, new ManualScheduler());
+
+    // Act
+    const sweep = loop.run(false);
+    const work = loop.exclusive(async () => {
+      runner.order.push('work');
+      return 7;
+    });
+    await settle();
+    releaseFirst?.();
+    const [, answer] = await Promise.all([sweep, work]);
+
+    // Assert
+    should(answer).equal(7);
+    should(runner.order).deepEqual(['start:0', 'end:0', 'work']);
+  });
+});
+
+describe('bringing a sweep forward on an event', () => {
+  it('should ignore an event before the loop is armed', () => {
+    // Arrange
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(new RecordingRunner(), scheduler);
+
+    // Act
+    const scheduled = loop.trigger();
+
+    // Assert
+    should(scheduled).be.false();
+    should(scheduler.delays).deepEqual([]);
+  });
+
+  it('should sweep once, unforced, after the debounce', async () => {
+    // Arrange
+    const runner = new RecordingRunner();
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(runner, scheduler);
+    await loop.arm();
+    await settle();
+
+    // Act
+    const scheduled = loop.trigger();
+    scheduler.elapse();
+    await settle();
+
+    // Assert
+    should(scheduled).be.true();
+    should(scheduler.delays).deepEqual([WARDEN_TRIGGER_DEBOUNCE_MS]);
+    should(runner.calls).deepEqual([false, false]);
+  });
+
+  it('should coalesce a burst of events into the one pending sweep', async () => {
+    // Arrange
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(new RecordingRunner(), scheduler);
+    await loop.arm();
+
+    // Act
+    const first = loop.trigger();
+    const second = loop.trigger();
+
+    // Assert
+    should([first, second]).deepEqual([true, false]);
+    should(scheduler.delays).have.length(1);
+  });
+
+  it('should space two event sweeps by the minimum gap', async () => {
+    // Arrange
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(new RecordingRunner(), scheduler);
+    await loop.arm();
+    loop.trigger();
+    scheduler.elapse();
+    scheduler.now += 10_000;
+
+    // Act
+    loop.trigger();
+
+    // Assert
+    should(scheduler.delays).deepEqual([WARDEN_TRIGGER_DEBOUNCE_MS, WARDEN_TRIGGER_MIN_GAP_MS - 10_000]);
+  });
+
+  it('should swallow a failed event sweep', async () => {
+    // Arrange
+    const runner = new RecordingRunner(300_000, async () => {
+      throw new Error('the fleet read failed');
+    });
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(runner, scheduler);
+    await loop.arm();
+    loop.trigger();
+
+    // Act
+    scheduler.elapse();
+    await settle();
+
+    // Assert
+    should(runner.calls).have.length(2);
+  });
+
+  it('should cancel a pending event sweep on disarm, and ignore events after it', async () => {
+    // Arrange
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(new RecordingRunner(), scheduler);
+    const disarm = await loop.arm();
+    loop.trigger();
+
+    // Act
+    disarm();
+    const after = loop.trigger();
+
+    // Assert
+    should(scheduler.timerCancels).equal(1);
+    should(after).be.false();
+  });
+});
+
+describe('when the next sweep is due', () => {
+  it('should be unknown before the timer is armed', () => {
+    // Act
+    const actual = new WardenSweepLoop(new RecordingRunner(), new ManualScheduler()).nextDueAtMs();
+
+    // Assert
+    should(actual).be.undefined();
+  });
+
+  it('should be the next tick of the armed cadence', async () => {
+    // Arrange
+    const scheduler = new ManualScheduler();
+    const loop = new WardenSweepLoop(new RecordingRunner(120_000), scheduler);
+    await loop.arm();
+    const armedAt = scheduler.now;
+
+    // Act
+    const right = loop.nextDueAtMs();
+    scheduler.now += 250_000;
+    const later = loop.nextDueAtMs();
+
+    // Assert
+    should(right).equal(armedAt + 120_000);
+    should(later).equal(armedAt + 360_000);
   });
 });
