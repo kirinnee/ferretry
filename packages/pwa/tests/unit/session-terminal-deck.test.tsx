@@ -703,3 +703,72 @@ describe('SessionTerminalDeck focused by a side-pane tab', () => {
     run(() => page.unmount());
   });
 });
+
+describe('SessionTerminalDeck as one workspace tab', () => {
+  test('shows only its own shell, with no strip of its own, and says so once that shell is gone', async () => {
+    let listing = terminalListing([terminalView(FIRST), terminalView(SECOND)]);
+    const deck = fakeDeck(async () => listing);
+    const page = mount(
+      <SessionTerminalDeck
+        connection={alpha}
+        dependencies={deck.dependencies}
+        focusTerminalId={SECOND}
+        scope={scopeAlpha}
+        solo
+      />,
+    );
+    // Before the listing lands there is nothing to prove the shell against.
+    expect(json(page)).toContain('Asking the daemon for this terminal');
+    await settle();
+    expect(page.root.findAll(node => node.props.role === 'tablist')).toHaveLength(0);
+    const canvases = page.root.findAll(node => node.props['data-terminal-canvas'] !== undefined && node.type === 'div');
+    expect(canvases.map(node => node.props['data-terminal-canvas'])).toEqual([SECOND]);
+
+    listing = terminalListing([terminalView(FIRST)]);
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, 5_050));
+    });
+    await settle();
+    expect(json(page)).toContain('This terminal is no longer open on the daemon');
+    run(() => page.unmount());
+  }, 10_000);
+
+  test('rewrites typed keys through the host and hands it a port to type into and focus', async () => {
+    const spy = xtermSpy();
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const ports: Array<{ write: (data: string) => void; focus: () => void } | null> = [];
+    const page = mount(
+      <SessionTerminalDeck
+        connection={alpha}
+        dependencies={deck.dependencies}
+        focusTerminalId={FIRST}
+        interceptInput={data => data.toUpperCase()}
+        onInputPort={port => ports.push(port)}
+        scope={scopeAlpha}
+        solo
+      />,
+    );
+    await settle();
+    const socket = deck.sockets[0];
+    const pane = spy.instances[0];
+    if (socket === undefined || pane === undefined) throw new Error('the deck did not attach a pane');
+    await runAsync(async () => {
+      socket.emit('open');
+      await Promise.resolve();
+    });
+
+    run(() => pane.type('ls'));
+    const port = ports.at(-1);
+    if (port === undefined || port === null) throw new Error('no input port was published');
+    run(() => port.write('\u001b'));
+    run(() => port.focus());
+
+    const typed = socket.sent
+      .filter((frame): frame is Uint8Array => frame instanceof Uint8Array)
+      .map(frame => new TextDecoder().decode(frame));
+    expect(typed).toEqual(['LS', '\u001b']);
+    expect(pane.focused()).toBe(1);
+    run(() => page.unmount());
+    expect(ports.at(-1)).toBeNull();
+  });
+});

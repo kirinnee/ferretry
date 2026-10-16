@@ -293,4 +293,30 @@ describe('sessionReferenceSurface', () => {
     // Assert
     should(visited).deepEqual(['/d/daemon-a/session/session-9']);
   });
+
+  test('should open every reference in the host destinations when the page offers them', () => {
+    // Arrange
+    const opened: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      destinations: {
+        openFile: (path, selection) => opened.push(`file:${path}:${selection?.line ?? '-'}`),
+        openSurface: reference => opened.push(`${reference.surface}:${reference.key}`),
+        openTasks: () => opened.push('tasks'),
+        openSkills: () => opened.push('skills'),
+      },
+    });
+
+    // Act
+    surface.onCodeReferenceOpen?.({ path: 'src/a.ts', line: 3 });
+    surface.onSurfaceOpen?.({ kind: 'surface', surface: 'browser', key: 'b1', daemonId, sessionId: scope.sessionId });
+    surface.onTaskOpen?.('F1');
+    surface.onSkillOpen?.('floop');
+
+    // Assert — the workspace took every one, and the side pane opened nothing.
+    should(opened).deepEqual(['file:src/a.ts:3', 'browser:b1', 'tasks', 'skills']);
+    should(readSidePaneTabsState(scope).active).equal(null);
+  });
 });
