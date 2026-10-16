@@ -97,11 +97,13 @@ import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
+import { AnalyticsCostChart } from '../src/features/analytics/analytics-cost-chart.tsx';
+import type { AnalyticsRequest } from '../src/features/analytics/analytics-custom-query.tsx';
+import { analyticsOverview, analyticsRangeDays } from '../src/features/analytics/analytics-overview.ts';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
-import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
-import { type AnalyticsRequest, GlobalAnalyticsPage } from '../src/features/analytics/global-analytics-page.tsx';
+import { GlobalAnalyticsPage } from '../src/features/analytics/global-analytics-page.tsx';
 import {
   type SessionAnalyticsRequest,
   SessionAnalyticsSurface,
@@ -265,6 +267,7 @@ import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -1031,7 +1034,17 @@ function AppChromeHarness({ active }: { readonly active: string }) {
     candidate => candidate === active,
   );
   const insights = destination === 'analytics' || destination === 'warden' || destination === 'learning';
-  const page = <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>;
+  const page =
+    destination === 'analytics' ? (
+      <GlobalAnalyticsPage
+        connection={daemon}
+        requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
+        now={() => ANALYTICS_FIXTURE_NOW}
+        initialQuery={null}
+      />
+    ) : (
+      <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
+    );
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} id="harness-app-chrome">
       {phone ? null : (
@@ -3491,57 +3504,16 @@ const ANALYTICS_RAW: AnalyticsResponse = {
   ],
 };
 
-/** Temporal fixture intentionally has a missing day and an unknown cost so the
- * screenshot makes the chart's honest-gap treatment reviewable. */
-const ANALYTICS_TIME = {
-  kind: 'aggregate',
-  aggregation: 'sum',
-  query: 'sum by (day)',
-  parsed: { aggregation: 'sum', groupBy: ['day'], matchers: [] },
-  scope: { allSessions: true, indexed: 3, matched: 3 },
-  index: {
-    schemaVersion: 6,
-    sessions: 3,
-    tokenSessions: 3,
-    transcriptSources: 3,
-    indexedTranscriptSources: 3,
-    pendingTranscriptSources: 0,
-    sourceErrors: 0,
-    refreshing: false,
-  },
-  results: [
-    {
-      labels: { day: '2026-07-29' },
-      sessions: 2,
-      tokens: { value: 904_320, known: 2, total: 2 },
-      inputTokens: { value: 700_100, known: 2, total: 2 },
-      outputTokens: { value: 204_220, known: 2, total: 2 },
-      cachedInputTokens: { value: 100_000, known: 2, total: 2 },
-      cacheWriteInputTokens: { value: 10_000, known: 2, total: 2 },
-      equivalentApiCostUsdMicros: { value: 2_450_000, known: 2, total: 2 },
-    },
-    {
-      labels: { day: '2026-07-31' },
-      sessions: 1,
-      tokens: { value: 80_120, known: 1, total: 1 },
-      inputTokens: { value: 67_000, known: 1, total: 1 },
-      outputTokens: { value: 13_120, known: 1, total: 1 },
-      cachedInputTokens: { value: 0, known: 1, total: 1 },
-      cacheWriteInputTokens: { value: 0, known: 1, total: 1 },
-      equivalentApiCostUsdMicros: { value: null, known: 0, total: 1 },
-    },
-  ],
-} as unknown as AnalyticsAggregateResponse;
-
 /** Stable injected requests prevent parent harness renders from restarting either analytics surface. */
-const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (_connection, query) => ({
-  ...ANALYTICS_TIME,
-  query: query ?? ANALYTICS_TIME.query,
-});
-const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (_connection, _scope, query) => ({
-  ...ANALYTICS,
-  query: query ?? ANALYTICS.query,
-});
+const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (_connection, query) =>
+  answerAnalyticsFixture(query ?? 'sum by (day)', ANALYTICS);
+const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (_connection, _scope, query) =>
+  answerAnalyticsFixture(query ?? 'sum by (model)', ANALYTICS);
+/** The cost chart on its own, over the same fleet the Analytics page reads. */
+const HARNESS_ANALYTICS_DAYS = analyticsOverview(
+  analyticsRangeDays(14, ANALYTICS_FIXTURE_NOW),
+  ANALYTICS_FIXTURE_ROWS,
+).days;
 
 class HarnessBrowserSocket implements RemoteBrowserSocket {
   readyState = 0;
@@ -5508,7 +5480,14 @@ function Shell() {
     },
     {
       label: 'Global analytics',
-      render: () => <GlobalAnalyticsPage connection={daemon} requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST} />,
+      render: () => (
+        <GlobalAnalyticsPage
+          connection={daemon}
+          requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
+          now={() => ANALYTICS_FIXTURE_NOW}
+          initialQuery={null}
+        />
+      ),
     },
     {
       label: 'Session analytics',
@@ -5518,6 +5497,7 @@ function Shell() {
             connection={daemon}
             scope={scope}
             requestAnalytics={HARNESS_SESSION_ANALYTICS_REQUEST}
+            requestFleetAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
           />
         </Card>
       ),
@@ -5535,14 +5515,14 @@ function Shell() {
       ),
     },
     {
-      label: 'Analytics time series',
+      label: 'Analytics cost chart',
       render: () => (
-        <Card aria-label="Analytics time series" className="min-w-0 overflow-hidden">
+        <Card aria-label="Analytics cost chart" className="min-w-0 overflow-hidden">
           <PanelHeader>
-            <Label>Analytics — time series</Label>
+            <Label>Analytics — cost per day</Label>
           </PanelHeader>
           <PanelBody className="min-w-0">
-            <AnalyticsTimeSeries response={ANALYTICS_TIME} />
+            <AnalyticsCostChart days={HARNESS_ANALYTICS_DAYS} />
           </PanelBody>
         </Card>
       ),

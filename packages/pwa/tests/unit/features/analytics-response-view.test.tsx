@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import type { AnalyticsResponse } from '@ferretry/protocol';
-
-import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 import {
-  analyticsErrorMessage,
   AnalyticsResponseView,
+  analyticsErrorMessage,
 } from '../../../src/features/analytics/analytics-response-view.tsx';
+import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
 import { render } from '../../support/react.ts';
 
 const index = {
@@ -101,9 +100,9 @@ describe('AnalyticsResponseView', () => {
     const renderer = render(<AnalyticsResponseView response={raw()} />);
     const text = JSON.stringify(renderer.toJSON());
 
-    expect(renderer.root.findAllByType('p')[0]?.children.join('')).toContain('1 matched');
+    expect(renderer.root.findAllByType('p')[0]?.children.join('')).toContain('1 of 2 sessions matched');
     expect(text).toContain('session-one');
-    expect(text).toContain('Cost unknown');
+    expect(text).toContain('Unpriced');
     expect(text).not.toContain('$0.00');
   });
 

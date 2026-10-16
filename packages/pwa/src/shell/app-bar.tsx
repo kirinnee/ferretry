@@ -143,6 +143,13 @@ const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'projects'];
 const TAB_BAR_TAIL: readonly AppBarDestinationId[] = ['settings'];
 export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
 
+/**
+ * The page title a phone shows in place of the breadcrumb, which it has no room for. Only the Insights
+ * views carry one: they sit under More, so without it nothing on screen said where the reader was.
+ */
+export const appBarTitle = (active: AppBarDestinationId | null): string | null =>
+  active !== null && MORE_PLACES.includes(active) ? 'Insights' : null;
+
 const entry = (id: AppBarDestinationId): AppNavigationEntry =>
   APP_NAVIGATION.find(candidate => candidate.id === id) ?? SESSIONS_ENTRY;
 
@@ -385,6 +392,7 @@ export function AppBar({
 }: AppBarProps) {
   const layout = useLayoutMode();
   const statusVisible = connectionStatus !== 'open' || updateReady !== null;
+  const title = appBarTitle(active);
 
   return (
     // Not sticky: the shell does not scroll, so the bar is simply the first row
@@ -399,6 +407,11 @@ export function AppBar({
         {/* Identity stays together at the start. */}
         <div className="flex min-w-0 items-center justify-self-start gap-md">
           {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} sessionCount={sessionCount} />}
+          {layout === 'drawer' && title !== null && (
+            <span className="truncate text-title font-semibold text-fg min-[480px]:hidden" data-app-bar-title="">
+              {title}
+            </span>
+          )}
           <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-md text-muted min-[480px]:flex">
             {crumbTrail(crumbs).map(({ crumb, trail, last }) => (
               // Keyed by the trail rather than the index: two crumbs on one
