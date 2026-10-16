@@ -35,6 +35,7 @@ import {
   type PartialSupport,
   type ProfileScope,
   profileScope,
+  resolveDefaultRuntime,
   type ResolvedProfile,
   resolveProfile,
   type SettingsObject,
@@ -187,6 +188,8 @@ export function machineView(
     format: facts.format,
     setUp: runtimeCount > 0,
     agentPermissions: model.machine.agentPermissions,
+    defaultRuntime: resolveDefaultRuntime(model) ?? null,
+    agentControl: { ...model.machine.agentControl },
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];
       return {

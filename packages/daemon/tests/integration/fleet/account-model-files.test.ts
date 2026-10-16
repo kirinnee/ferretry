@@ -262,7 +262,12 @@ describe('a reviewed change applied by the real provisioner', () => {
   it('should refuse a stale change when the configuration was edited on the host after review', async () => {
     // Arrange
     const host = await machine();
-    const staged = await host.service.propose({ kind: 'machine.settings', agentPermissions: 'skip' });
+    const staged = await host.service.propose({
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
     await writeFile(path.join(host.fleet, 'config.yaml'), `${renderConfig(MODEL)}# edited by hand\n`);
 
     // Act
@@ -284,7 +289,15 @@ describe('a reviewed change applied by the real provisioner', () => {
 
     // Act
     const [read, staged] = await Promise.all(
-      [host.service.machine(LOCAL), host.service.propose({ kind: 'machine.settings', agentPermissions: 'skip' })].map(
+      [
+        host.service.machine(LOCAL),
+        host.service.propose({
+          kind: 'machine.settings',
+          agentPermissions: 'skip',
+          defaultRuntime: null,
+          agentControl: { terminals: true, browsers: true, files: true },
+        }),
+      ].map(
         async work =>
           await work.then(
             () => undefined,
@@ -306,10 +319,17 @@ describe('a reviewed change applied by the real provisioner', () => {
     await writeFile(path.join(host.fleet, 'ids.json'), '{ not json');
 
     // Act
-    const error = await host.service.propose({ kind: 'machine.settings', agentPermissions: 'skip' }).then(
-      () => undefined,
-      (thrown: unknown) => thrown,
-    );
+    const error = await host.service
+      .propose({
+        kind: 'machine.settings',
+        agentPermissions: 'skip',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
 
     // Assert
     should(error).be.instanceOf(Error);

@@ -37,13 +37,26 @@ export interface RuntimeNamesPort {
  *
  * `clientName` is the CLI a human drives. It is a parameter because only the composition root knows
  * it; every refusal below names the command to run next.
+ *
+ * `requested` IS OPTIONAL: a start with no runtime named reads this machine's "Default runtime for
+ * new agents" (T) through `defaultAgentName`, so there is exactly one place — not `fy start`, not the
+ * PWA's form — where "nobody said which runtime" turns into a name. A machine with none refuses
+ * plainly, naming the setting to use instead.
  */
 export async function resolveStartAccount(
   accounts: AccountInventoryPort & Partial<RuntimeNamesPort>,
-  requested: string,
+  requested: string | undefined,
   executables: ExecutableResolverPort,
   clientName: string,
+  defaultAgentName?: () => Promise<string | undefined>,
 ): Promise<{ readonly account: CoreAccount; readonly executable: string }> {
+  const name = requested ?? (await defaultAgentName?.());
+  if (name === undefined) {
+    throw new SessionControlError(
+      'unknown_agent',
+      `no runtime was named, and this machine has no default runtime for new agents — name one with -a/--agent, or set a default with \`${clientName} machine set default-runtime <name>\``,
+    );
+  }
   // A manifest this daemon cannot read refuses the START, rather than answering it with an empty
   // fleet and the unknown-agent message that empty fleet would earn. The caller asked for an account
   // that may well be published; what this daemon has is no way to tell.
@@ -52,11 +65,11 @@ export async function resolveStartAccount(
       throw new SessionControlError('unavailable', fleetManifestRefusal(error, clientName));
     throw error;
   });
-  const account = await findRequested(published, requested, accounts.ids?.bind(accounts));
+  const account = await findRequested(published, name, accounts.ids?.bind(accounts));
   if (account === undefined)
     throw new SessionControlError(
       'unknown_agent',
-      `no account in the fleet manifest is published as ${JSON.stringify(requested)}`,
+      `no account in the fleet manifest is published as ${JSON.stringify(name)}`,
     );
   // Refused HERE, where the published accounts are in hand, rather than left to the launch: the
   // launch's own authorization sees only a path, so it can say the path is wrong but not which

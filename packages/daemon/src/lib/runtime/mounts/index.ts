@@ -12,6 +12,7 @@ import type { AttentionService } from '../../attention/index.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
 import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
+import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { PinService } from '../../pins/index.ts';
@@ -139,6 +140,13 @@ export interface MountedSubsystems {
   /** The account model's catalogue reads: the machine, its components, layered profiles and runtimes
    *  (docs/design/account-model.md §7). */
   readonly fleetCatalog: FleetCatalogSubsystem;
+  /**
+   * "What agents may control" (T), over this machine's own account model. NOT A SUBSYSTEM BUT A
+   * PORT, like `carriers`: it serves no route of its own — Unit M's agent tool-call routes call it
+   * directly — and keeping it here proves production constructs a real one rather than an
+   * all-allowed stand-in nobody ever replaced.
+   */
+  readonly agentControl: AgentControlPolicy;
   /** The account model's first run and clone: the setup scan, tool install and the export bundle
    *  (docs/design/account-model.md §7). */
   readonly fleetSetup: FleetSetupSubsystem;

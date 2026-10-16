@@ -15,28 +15,56 @@
  * "Set up <machine>" link lands straight in the first run.
  */
 
-import type { FleetMachineView } from '@ferretry/protocol';
+import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
+import { readFleetRuntimes } from '../catalog-api.ts';
 import { CloneMachine } from '../setup/clone.tsx';
 import { MachineFirstRun } from '../setup/first-run.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
 import { type SettingsFlow, useSettingsFlow } from '../setup/settings-route.ts';
 import { type SetupAccess, useSetupAccess } from '../setup/setup-access.ts';
-import { RadioChoices, SetupNote, SetupRow, SetupSection } from '../setup/setup-ui.tsx';
+import { CheckChoices, RadioChoices, SetupNote, SetupRow, SetupSection } from '../setup/setup-ui.tsx';
 import { countWords } from '../setup/setup-words.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 
 type AgentPermissions = FleetMachineView['agentPermissions'];
+type AgentControlKind = keyof FleetAgentControl;
 
 export const AGENT_PERMISSION_WORDS: Readonly<Record<AgentPermissions, string>> = {
   auto: 'Auto mode',
   skip: 'Skip all permission checks',
 };
+
+/** "What agents may control" (T): each switch's label and what it covers. */
+export const AGENT_CONTROL_WORDS: Readonly<
+  Record<AgentControlKind, { readonly title: string; readonly detail: string }>
+> = {
+  terminals: { title: 'Terminals', detail: 'Open, read and type into session terminals.' },
+  browsers: { title: 'Browsers', detail: 'Open, navigate and read the session browser.' },
+  files: { title: 'Files', detail: "Read and change files in the session's project." },
+};
+
+/** The three things a `machine.settings` change always carries, unchanged unless the caller means
+ *  to change one of them — so a section that edits only one never clobbers the other two. */
+const machineSettings = (
+  machine: FleetMachineView,
+  edit: Partial<{
+    readonly agentPermissions: AgentPermissions;
+    readonly defaultRuntime: string | null;
+    readonly agentControl: FleetAgentControl;
+  }>,
+) => ({
+  kind: 'machine.settings' as const,
+  agentPermissions: machine.agentPermissions,
+  defaultRuntime: machine.defaultRuntime,
+  agentControl: machine.agentControl,
+  ...edit,
+});
 
 /** E32: what happens to sessions already running when the mode changes. */
 export const runningSessionsSentence = (running: number, old: AgentPermissions): string =>
@@ -99,7 +127,7 @@ function AgentPermissionsSection({
   const pending = draft !== current;
   const old = pending ? current : changedFrom;
   const save = (): void => {
-    void changes.apply({ kind: 'machine.settings', agentPermissions: draft }).then(result => {
+    void changes.apply(machineSettings(machine, { agentPermissions: draft })).then(result => {
       if (result.kind === 'refused') return;
       setChangedFrom(current);
       onSaved();
@@ -156,6 +184,146 @@ function AgentPermissionsSection({
   );
 }
 
+/** "Default runtime for new agents" (T): every agent runtime on this machine, read once for the
+ *  picker. `null` while loading or on a read that failed — the section just stays hidden then,
+ *  same as a machine with no agent runtime yet, because there is nothing useful to pick from. */
+function useAgentRuntimeNames(machine: FleetMachineView, access: SetupAccess): readonly string[] | null {
+  const [names, setNames] = useState<readonly string[] | null>(null);
+  const { read } = access;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the machine's own facts change, not on every render
+  useEffect(() => {
+    setNames(null);
+    void read(client => readFleetRuntimes(client)).then(result => {
+      if (result.kind !== 'done') return;
+      setNames(result.value.runtimes.filter(runtime => runtime.agent).map(runtime => runtime.name));
+    });
+  }, [machine.name, machine.runtimeCount, read]);
+  return names;
+}
+
+function DefaultRuntimeSection({
+  machine,
+  machineName,
+  access,
+  onSaved,
+}: {
+  readonly machine: FleetMachineView;
+  readonly machineName: string;
+  readonly access: SetupAccess;
+  readonly onSaved: () => void;
+}) {
+  const { changes } = access;
+  const runtimes = useAgentRuntimeNames(machine, access);
+  const current = machine.defaultRuntime;
+  const [draft, setDraft] = useState<string | null>(current);
+  const pending = draft !== current && draft !== null;
+  const save = (): void => {
+    void changes.apply(machineSettings(machine, { defaultRuntime: draft })).then(result => {
+      if (result.kind === 'refused') return;
+      onSaved();
+    });
+  };
+  if (runtimes === null) return null;
+  if (runtimes.length === 0) {
+    return (
+      <SetupSection title="Default runtime for new agents" name="default-runtime">
+        <p className="m-0 text-cell text-muted" data-default-runtime-empty="">
+          {machineName} has no agent runtime yet. Add one on the Runtimes tab, then come back here to pick it.
+        </p>
+      </SetupSection>
+    );
+  }
+  return (
+    <SetupSection title="Default runtime for new agents" name="default-runtime">
+      <RadioChoices
+        legend="Default runtime for new agents"
+        legendHidden
+        name="default-runtime"
+        value={draft}
+        onChoose={value => {
+          setDraft(value);
+          changes.clear();
+        }}
+        options={runtimes.map(name => ({ id: name, title: name }))}
+      />
+      <p className="m-0 text-meta leading-base text-muted" data-default-runtime-hint="">
+        A session started with no runtime named uses this one.
+      </p>
+      {pending ? (
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Save default runtime"
+          onSubmit={save}
+        >
+          <Button type="button" data-default-runtime-undo="" onClick={() => setDraft(current)}>
+            Keep {current ?? 'automatic'}
+          </Button>
+        </ChangeApplyPanel>
+      ) : null}
+    </SetupSection>
+  );
+}
+
+const AGENT_CONTROL_KINDS: readonly AgentControlKind[] = ['terminals', 'browsers', 'files'];
+
+function AgentControlSection({
+  machine,
+  machineName,
+  access,
+  onSaved,
+}: {
+  readonly machine: FleetMachineView;
+  readonly machineName: string;
+  readonly access: SetupAccess;
+  readonly onSaved: () => void;
+}) {
+  const { changes } = access;
+  const current = machine.agentControl;
+  const [draft, setDraft] = useState<FleetAgentControl>(current);
+  const pending = AGENT_CONTROL_KINDS.some(kind => draft[kind] !== current[kind]);
+  const save = (): void => {
+    void changes.apply(machineSettings(machine, { agentControl: draft })).then(result => {
+      if (result.kind === 'refused') return;
+      onSaved();
+    });
+  };
+  return (
+    <SetupSection title="What agents may control" name="agent-control">
+      <CheckChoices
+        legend="What agents may control"
+        legendHidden
+        name="agent-control"
+        values={AGENT_CONTROL_KINDS.filter(kind => draft[kind])}
+        onToggle={(kind, on) => {
+          setDraft({ ...draft, [kind]: on });
+          changes.clear();
+        }}
+        options={AGENT_CONTROL_KINDS.map(kind => ({ id: kind, ...AGENT_CONTROL_WORDS[kind] }))}
+      />
+      <p className="m-0 text-meta leading-base text-muted" data-agent-control-hint="">
+        Applies to an agent’s next action on {machineName}; nothing already running is interrupted.
+      </p>
+      {pending ? (
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Save what agents may control"
+          onSubmit={save}
+        >
+          <Button type="button" data-agent-control-undo="" onClick={() => setDraft(current)}>
+            Undo
+          </Button>
+        </ChangeApplyPanel>
+      ) : null}
+    </SetupSection>
+  );
+}
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
   const route = useSettingsFlow(machineName, browser);
@@ -189,8 +357,24 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
   return (
     <div className="flex min-w-0 flex-col gap-5" data-machine-settings="">
+      <DefaultRuntimeSection
+        key={machine.defaultRuntime}
+        machine={machine}
+        machineName={machineName}
+        access={access}
+        onSaved={onRetry}
+      />
+
       <AgentPermissionsSection
         key={machine.agentPermissions}
+        machine={machine}
+        machineName={machineName}
+        access={access}
+        onSaved={onRetry}
+      />
+
+      <AgentControlSection
+        key={AGENT_CONTROL_KINDS.map(kind => machine.agentControl[kind]).join(',')}
         machine={machine}
         machineName={machineName}
         access={access}

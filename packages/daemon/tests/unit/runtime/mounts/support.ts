@@ -801,8 +801,9 @@ export function sessionDirectory(
  * refusal is raised in the production taxonomy the mount restates.
  */
 export class FakeSessionControl implements SessionControlSubsystem {
-  /** Every start that reached the subsystem, as `requestId` and the agent it named. */
-  readonly starts: Array<readonly [string, string]> = [];
+  /** Every start that reached the subsystem, as `requestId` and the agent it named, or `undefined`
+   *  for a start that left the daemon to resolve its own default (T). */
+  readonly starts: Array<readonly [string, string | undefined]> = [];
   /** Every stop that reached it, as the session and the reason given. */
   readonly stops: Array<readonly [string, string | undefined]> = [];
   /** Every callsign a start asked for, with whether a taken one could be substituted. */
@@ -843,7 +844,7 @@ export class FakeSessionControl implements SessionControlSubsystem {
         throw new SessionControlError('conflict', `request id ${JSON.stringify(requestId)} started another session`);
       return sessionView(already.id, { agent: request.agent }, { status: 'running' });
     }
-    if (this.unknownAgents.includes(request.agent))
+    if (request.agent !== undefined && this.unknownAgents.includes(request.agent))
       throw new SessionControlError('unknown_agent', `no account is published as ${JSON.stringify(request.agent)}`);
     this.minted += 1;
     const id = `started-${this.minted}`;

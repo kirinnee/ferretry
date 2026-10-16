@@ -7,6 +7,7 @@ import {
   layerReferenceText,
   parseAccountModel,
   parseLayerReference,
+  resolveDefaultRuntime,
   wouldIncludeItself,
 } from '../../src/lib/account/schema.ts';
 
@@ -38,7 +39,10 @@ describe('AccountModelSchema', () => {
     const actual = parseAccountModel(input);
 
     // Assert
-    should(actual.machine).deepEqual({ agentPermissions: 'auto' });
+    should(actual.machine).deepEqual({
+      agentPermissions: 'auto',
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
     should(actual.runtimes['claude-default']).deepEqual({ credential: 'claude-you', profile: 'default', agent: false });
     should(actual.components.mcp).deepEqual({});
     should(actual.components.settings).deepEqual({});
@@ -458,6 +462,51 @@ describe('AccountModelSchema', () => {
     });
   });
 
+  describe('machine.defaultRuntime (T)', () => {
+    it('should accept a default runtime that is an agent runtime on this machine', () => {
+      // Act
+      const actual = parseAccountModel(
+        documentWith({
+          machine: { defaultRuntime: 'claude-default' },
+          runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+        }),
+      );
+
+      // Assert
+      should(actual.machine.defaultRuntime).equal('claude-default');
+    });
+
+    it('should refuse a default runtime that does not exist, naming the agent runtimes there are', () => {
+      // Act
+      const actual = messagesOf(
+        documentWith({
+          machine: { defaultRuntime: 'missing' },
+          runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+        }),
+      );
+
+      // Assert
+      should(actual).deepEqual([
+        'machine.defaultRuntime: the default runtime for new agents, "missing", is not an agent runtime on this machine (agent runtimes: claude-default)',
+      ]);
+    });
+
+    it('should refuse a default runtime that exists but is not an agent runtime, naming none available', () => {
+      // Act
+      const actual = messagesOf(
+        documentWith({
+          machine: { defaultRuntime: 'claude-default' },
+          runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+        }),
+      );
+
+      // Assert
+      should(actual).deepEqual([
+        'machine.defaultRuntime: the default runtime for new agents, "claude-default", is not an agent runtime on this machine (agent runtimes: none)',
+      ]);
+    });
+  });
+
   describe('advanced', () => {
     it('should accept a command that runs a runtime, and an alias', () => {
       // Act
@@ -544,5 +593,61 @@ describe('wouldIncludeItself', () => {
   it('should allow a base that does not include the profile being edited', () => {
     // Assert
     should(wouldIncludeItself(profiles, 'top', 'middle')).be.false();
+  });
+});
+
+describe('resolveDefaultRuntime', () => {
+  it('should use the explicit setting', () => {
+    // Act
+    const actual = resolveDefaultRuntime(
+      parseAccountModel(
+        documentWith({
+          machine: { defaultRuntime: 'claude-review' },
+          runtimes: {
+            'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
+            'claude-review': { credential: 'claude-you', profile: 'default', agent: true },
+          },
+        }),
+      ),
+    );
+
+    // Assert
+    should(actual).equal('claude-review');
+  });
+
+  it('should fall back to claude-default when it is an agent runtime and nothing was set', () => {
+    // Act
+    const actual = resolveDefaultRuntime(
+      parseAccountModel(
+        documentWith({ runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } } }),
+      ),
+    );
+
+    // Assert
+    should(actual).equal('claude-default');
+  });
+
+  it('should resolve to nothing when claude-default is not an agent runtime and nothing was set', () => {
+    // Act
+    const actual = resolveDefaultRuntime(
+      parseAccountModel(
+        documentWith({
+          runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: false } },
+        }),
+      ),
+    );
+
+    // Assert
+    should(actual).be.undefined();
+  });
+
+  it('should resolve to nothing on a machine with no claude-default runtime at all', () => {
+    // Act
+    const actual = resolveDefaultRuntime(
+      parseAccountModel(documentWith({ runtimes: { other: { credential: 'claude-you', profile: 'default' } } })),
+    );
+
+    // Assert
+    should(actual).be.undefined();
   });
 });

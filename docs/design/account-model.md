@@ -413,6 +413,8 @@ version: 2
 
 machine:
   agentPermissions: auto # auto | skip
+  defaultRuntime: claude-default # optional; must name an agent runtime (T); unset falls back to claude-default if it is one
+  agentControl: { terminals: true, browsers: true, files: true } # "What agents may control" (T), default all on
 
 credentials:
   claude-you: { harness: claude, store: host } # shared in place with your own `claude`
@@ -475,6 +477,8 @@ runtimes:
 version: 2
 machine:
   agentPermissions: auto | skip # default auto
+  defaultRuntime: <name> # optional; "Default runtime for new agents" (T) — must be an agent runtime; the daemon resolves `claude-default` when unset and that name is one
+  agentControl: { terminals: bool, browsers: bool, files: bool } # "What agents may control" (T), each default true
 credentials:
   <id>: # safe slug; directory name for store: ferretry
     harness: claude | codex

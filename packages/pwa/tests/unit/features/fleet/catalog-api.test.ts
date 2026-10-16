@@ -40,6 +40,8 @@ const MACHINE = {
   format: 'version-2',
   setUp: true,
   agentPermissions: 'auto',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true },
   tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
   runtimeCount: 1,
   runningSessions: 0,
@@ -58,7 +60,12 @@ const RUNTIMES = { format: 'version-2', runtimes: [] } satisfies FleetRuntimeCat
 const VIEW = {
   id: CHANGE_ID,
   revision: 'absent',
-  change: { kind: 'machine.settings', agentPermissions: 'skip' },
+  change: {
+    kind: 'machine.settings',
+    agentPermissions: 'skip',
+    defaultRuntime: 'claude-default',
+    agentControl: { terminals: true, browsers: true, files: true },
+  },
   summary: 'Set agent permissions to Skip all permission checks',
   consequences: ['Applies to new sessions.'],
   expiresAt: '2026-10-13T08:15:00.000Z',
@@ -114,14 +121,24 @@ describe('the catalogue wire client', () => {
     const { client, calls } = clientFor(VIEW);
 
     // Act
-    const view = await stageFleetChange(client, { kind: 'machine.settings', agentPermissions: 'skip' });
+    const view = await stageFleetChange(client, {
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: 'claude-default',
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
 
     // Assert
     expect(view).toEqual(VIEW);
     expect(calls[0]?.path).toBe(FLEET_PROPOSALS_PATH);
     expect(calls[0]?.init?.method).toBe('POST');
     expect(JSON.parse(calls[0]?.init?.body as string)).toEqual({
-      change: { kind: 'machine.settings', agentPermissions: 'skip' },
+      change: {
+        kind: 'machine.settings',
+        agentPermissions: 'skip',
+        defaultRuntime: 'claude-default',
+        agentControl: { terminals: true, browsers: true, files: true },
+      },
     });
   });
 

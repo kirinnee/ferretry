@@ -152,6 +152,17 @@ describe('registerSessionCommands · start', () => {
     should(subject.api.calls[0]?.args[1]).equal('req-9');
   });
 
+  it('should start with no -a/--agent at all, leaving the daemon to resolve its own default (T)', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.run(['start', 'go']);
+
+    // Assert
+    should(subject.api.calls[0]?.args[0]).not.have.property('agent');
+  });
+
   it('should send no remote-control decision unless one was typed', async () => {
     // Arrange
     const subject = harness();

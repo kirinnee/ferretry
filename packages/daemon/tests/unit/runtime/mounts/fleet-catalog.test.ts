@@ -38,6 +38,8 @@ const MACHINE: FleetMachineView = {
   format: 'version-2',
   setUp: true,
   agentPermissions: 'auto',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true },
   tools: [],
   runtimeCount: 1,
   runningSessions: 0,
@@ -47,7 +49,12 @@ const MACHINE: FleetMachineView = {
 const VIEW: FleetAccountChangeView = {
   id: ID,
   revision: 'absent',
-  change: { kind: 'machine.settings', agentPermissions: 'skip' },
+  change: {
+    kind: 'machine.settings',
+    agentPermissions: 'skip',
+    defaultRuntime: null,
+    agentControl: { terminals: true, browsers: true, files: true },
+  },
   summary: 'Set agent permissions to Skip all permission checks',
   consequences: ['Applies to new sessions.'],
   expiresAt: '2026-10-13T08:15:00.000Z',
@@ -143,6 +150,18 @@ describe('the fleet catalogue mount', () => {
     should(jsonBody(responses[0] as never)).deepEqual(MACHINE);
   });
 
+  it('should let nothing write machine settings — agent permissions, the default runtime, or what agents may control — below operator (T, S)', () => {
+    // Assert — proposing and applying are the ONLY routes that change `machine.*`, and both demand
+    // the operator class: an admin token or a paired device, never the warden and never a lesser
+    // class an agent's own session credential could ever hold. An agent therefore has no route that
+    // could flip its own control switches, whatever credential a future agent tool-call path mints.
+    const writes = fleetCatalogRoutes(stub().subsystem).filter(
+      route => route.path === '/v1/fleet/proposals' || route.path === '/v1/fleet/proposals/:proposalId/apply',
+    );
+    should(writes).have.length(2);
+    should(writes.map(route => route.minimum)).deepEqual(['operator', 'operator']);
+  });
+
   it('should hand the machine read the caller governance, so its authority is this caller', async () => {
     // Arrange
     const { subsystem, calls } = stub();
@@ -197,7 +216,12 @@ describe('the fleet catalogue mount', () => {
   it('should stage the one change the body names and read it back by id', async () => {
     // Arrange
     const { subsystem, calls } = stub();
-    const change = { kind: 'machine.settings', agentPermissions: 'skip' };
+    const change = {
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
 
     // Act
     const staged = await dispatcher(subsystem).dispatch(post('/v1/fleet/proposals', JSON.stringify({ change })));

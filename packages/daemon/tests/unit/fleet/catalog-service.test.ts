@@ -411,7 +411,12 @@ describe('staging a change', () => {
   it('should carry a change that sends no text unchanged in its view', async () => {
     // Arrange
     const { service } = world();
-    const change = { kind: 'machine.settings', agentPermissions: 'skip' } as const;
+    const change = {
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    } as const;
 
     // Act
     const view = await service.propose(change);

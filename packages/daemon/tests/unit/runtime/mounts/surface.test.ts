@@ -187,6 +187,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  agentControl: {
+    allows: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   fleetSetup: {
     scan: async () => {
       throw new Error('not exercised by the surface inventory');
