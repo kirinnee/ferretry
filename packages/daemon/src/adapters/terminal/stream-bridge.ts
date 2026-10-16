@@ -3,6 +3,7 @@ import {
   decideTerminalSend,
   parseTerminalFrame,
   releaseTerminalFrame,
+  TERMINAL_INPUT_REDRAW_MS,
   TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
   TERMINAL_REDRAW_POLL_MS,
   TERMINAL_STREAM_CLOSES,
@@ -44,6 +45,19 @@ export class TerminalStreamBridge {
   private queuedBytes = 0;
   private serial = Promise.resolve();
   private poll?: TerminalStreamTimer;
+  /**
+   * The last redraw the transport ACCEPTED, so an unchanged pane is not sent again.
+   *
+   * The poll runs ten times a second whether or not anything changed, and every frame is a complete
+   * redraw — so an idle terminal was ten identical frames a second, forever, for as long as a viewer
+   * watched. Over a relay each one is a sealed record, a credit and a metered frame. A redraw equal to
+   * the one the viewer already has carries nothing, so it is skipped. Only a frame the transport took
+   * counts: one it DROPPED (`send` answering `0`) never reached the viewer, so the next poll sends the
+   * same picture again. A resize forgets it, because the viewer's emulator has just reflowed.
+   */
+  private lastSent?: Uint8Array;
+  /** The next poll should come soon rather than on the ordinary tick: a keystroke wants its echo. */
+  private soon = false;
 
   constructor(
     private readonly service: TerminalStreamService,
@@ -75,7 +89,9 @@ export class TerminalStreamBridge {
       .then(async () => {
         if (parsed.charged.operation.kind === 'input') {
           await this.service.write(this.sessionId, this.terminalId, parsed.charged.operation.bytes);
+          this.hurry();
         } else {
+          this.lastSent = undefined;
           const { cols, rows } = parsed.charged.operation.size;
           await this.service.resize(this.sessionId, this.terminalId, cols, rows);
         }
@@ -98,10 +114,24 @@ export class TerminalStreamBridge {
 
   private schedule(): void {
     if (this.closed || this.poll) return;
+    const delay = this.soon ? TERMINAL_INPUT_REDRAW_MS : TERMINAL_REDRAW_POLL_MS;
+    this.soon = false;
     this.poll = this.scheduler.schedule(() => {
       this.poll = undefined;
       void this.redraw().finally(() => this.schedule());
-    }, TERMINAL_REDRAW_POLL_MS);
+    }, delay);
+  }
+
+  /**
+   * Pull the next capture forward. An armed poll is re-armed short; one already capturing picks the
+   * short delay up when it re-arms, so there is still never more than one capture in flight.
+   */
+  private hurry(): void {
+    this.soon = true;
+    if (this.poll === undefined) return;
+    this.poll.cancel();
+    this.poll = undefined;
+    this.schedule();
   }
 
   /**
@@ -127,8 +157,14 @@ export class TerminalStreamBridge {
       // closing the DAEMON'S SOCKET, taking every other relayed session with it. The link now refuses
       // that frame on its own side as well; this is the half that belongs to whoever produced it.
       if (this.closed) return;
-      const result = decideTerminalSend(this.downstream.send(snapshot));
-      if (result.outcome === 'rejected') this.finish(result.close.code, result.close.reason);
+      if (this.lastSent !== undefined && sameBytes(this.lastSent, snapshot)) return;
+      const sent = this.downstream.send(snapshot);
+      const result = decideTerminalSend(sent);
+      if (result.outcome === 'rejected') {
+        this.finish(result.close.code, result.close.reason);
+        return;
+      }
+      this.lastSent = sent === 0 ? undefined : snapshot;
     } catch {
       this.finish(TERMINAL_STREAM_CLOSES.redrawFailed.code, TERMINAL_STREAM_CLOSES.redrawFailed.reason);
     }
@@ -141,4 +177,10 @@ export class TerminalStreamBridge {
     this.poll = undefined;
     if (closeDownstream) this.downstream.close(code, reason);
   }
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) if (left[index] !== right[index]) return false;
+  return true;
 }

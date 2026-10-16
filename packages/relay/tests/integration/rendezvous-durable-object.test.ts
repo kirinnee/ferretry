@@ -355,10 +355,66 @@ describe('hosted rendezvous enforcement', () => {
     };
     const encoded = bytesOf(frame);
     await harness.object.webSocketMessage(clientSocket, encoded);
+    // Forwarded BEFORE it is metered: the meter is never on a frame's path (§13).
     should(daemonSocket.drain()).deepEqual([frame]);
+    await harness.object.metered();
     const meterCalls = hosted.calls.filter(call => call.path === '/internal/meter');
     should(meterCalls.at(-1)?.input).deepEqual({ daemonId: identity.daemonId, bytes: encoded.byteLength });
     should(meterCalls.some(call => (call.input as { bytes?: number }).bytes === 0)).be.true();
+  });
+
+  it('should forward every frame at once and report them in one batch while a report is in flight', async () => {
+    // The meter lives in ONE global object, often an ocean away. Holding each frame for its answer made
+    // a rendezvous forward at one frame per control round trip; the report now trails the traffic.
+    // Arrange — a control object that answers the first report only when the test says so.
+    let releaseFirst: () => void = () => undefined;
+    const firstHeld = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    let meterCalls = 0;
+    let armed = false;
+    const hosted = hostedEnvironment();
+    const inner = hosted.environment.RELAY_CONTROL;
+    if (inner === undefined) throw new Error('hosted fixture has no control object');
+    const environment: RelayEnvironment = {
+      ...hosted.environment,
+      RELAY_CONTROL: {
+        idFromName: name => inner.idFromName(name),
+        get: id => ({
+          fetch: async request => {
+            if (new URL(request.url).pathname === '/internal/meter') {
+              meterCalls += 1;
+              if (armed && meterCalls === 1) await firstHeld;
+            }
+            return inner.get(id).fetch(request);
+          },
+        }),
+      },
+    };
+    const harness = makeObject({}, environment);
+    const { identity, daemonSocket } = await claimRendezvous(harness, 'daemon_reservation');
+    const { clientSocket, sessionId } = await joinClient(harness, identity.daemonId, 'client_reservation');
+    await harness.object.metered();
+    daemonSocket.drain();
+    hosted.calls.length = 0;
+    meterCalls = 0;
+    armed = true;
+    const frames = [1, 2, 3].map(sequence =>
+      bytesOf({ kind: FRAME_KINDS.data, sessionId, sequence, payload: new Uint8Array(sequence) }),
+    );
+
+    // Act
+    for (const frame of frames) await harness.object.webSocketMessage(clientSocket, frame);
+    const forwardedBeforeAnyAnswer = daemonSocket.drain().length;
+    releaseFirst();
+    await harness.object.metered();
+
+    // Assert
+    should(forwardedBeforeAnyAnswer).equal(3);
+    should(hosted.calls.filter(call => call.path === '/internal/meter').map(call => call.input)).deepEqual([
+      { daemonId: identity.daemonId, bytes: frames[0]?.byteLength },
+      { daemonId: identity.daemonId, bytes: (frames[1]?.byteLength ?? 0) + (frames[2]?.byteLength ?? 0), events: 2 },
+    ]);
   });
 
   it('should send a control refusal before closing when metering denies or disappears', async () => {
@@ -391,6 +447,7 @@ describe('hosted rendezvous enforcement', () => {
         client,
         bytesOf({ kind: FRAME_KINDS.data, sessionId, sequence: 1, payload: new Uint8Array([1]) }),
       );
+      await harness.object.metered();
       should(controlOf(client.frames()[0])).match({ t: 'error' });
       should(client.closed?.code).be.oneOf(RELAY_CLOSE_CODES.hostedBandwidth, RELAY_CLOSE_CODES.relayInternal);
       // A refusal that closes the socket and keeps the slot spends it for the deployment's lifetime.
@@ -472,7 +529,9 @@ describe('hosted rendezvous enforcement', () => {
     const muteHarness = makeObject({}, mute.environment);
     const unsendable = new BrokenSocket('send');
     unsendable.serializeAttachment({ socketId: 'mute', reservationId: 'mute_reservation' });
+    muteHarness.objectState.sockets.push(unsendable);
     await muteHarness.object.webSocketMessage(unsendable, liveSessionFrame(muteHarness, 'mute'));
+    await muteHarness.object.metered();
     // The explanation was undeliverable, so the close and the release carried on without it.
     should(unsendable.closed?.code).equal(RELAY_CLOSE_CODES.hostedBandwidth);
     should(releasedBy(mute.calls)).deepEqual(['mute_reservation']);
@@ -481,10 +540,18 @@ describe('hosted rendezvous enforcement', () => {
     const stuckHarness = makeObject({}, stuck.environment);
     const unclosable = new BrokenSocket('close');
     unclosable.serializeAttachment({ socketId: 'stuck', reservationId: 'stuck_reservation' });
-    await should(
-      stuckHarness.object.webSocketMessage(unclosable, liveSessionFrame(stuckHarness, 'stuck')),
-    ).be.rejectedWith(/already gone/u);
+    stuckHarness.objectState.sockets.push(unclosable);
+    const loud: unknown[] = [];
+    const quiet = console.error;
+    console.error = (...line: unknown[]) => loud.push(line);
+    try {
+      await stuckHarness.object.webSocketMessage(unclosable, liveSessionFrame(stuckHarness, 'stuck'));
+      await stuckHarness.object.metered();
+    } finally {
+      console.error = quiet;
+    }
     // A close that fails is loud, but the slot is already back before anyone hears about it.
+    should(String(loud.flat().join(' '))).match(/already gone/u);
     should(releasedBy(stuck.calls)).deepEqual(['stuck_reservation']);
   });
 

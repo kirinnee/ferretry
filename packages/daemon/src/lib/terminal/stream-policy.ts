@@ -29,6 +29,16 @@ export const TERMINAL_MAX_BUFFERED_OUTPUT_BYTES = 1024 * 1024;
 /** How long to wait before re-testing a behind viewer's socket for a redraw. */
 export const TERMINAL_REDRAW_POLL_MS = 100;
 
+/**
+ * How soon after a keystroke reaches the pane its echo is captured.
+ *
+ * The poll alone made every keystroke wait for the next tick — about 100 ms, on any carrier, before
+ * the network was even involved. Input is the one moment a redraw is known to be wanted, so the next
+ * capture is pulled forward to just after the write; a shell that has not echoed yet is caught by the
+ * ordinary poll after it.
+ */
+export const TERMINAL_INPUT_REDRAW_MS = 15;
+
 /** WebSocket close reasons this stream can produce, paired with their close codes. */
 export const TERMINAL_STREAM_CLOSES = {
   viewerDisconnected: { code: 1000, reason: 'terminal viewer disconnected' },

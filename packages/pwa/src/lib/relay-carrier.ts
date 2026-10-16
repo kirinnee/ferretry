@@ -330,7 +330,21 @@ export interface OpenRelaySessionOptions {
    */
   readonly mode: RelaySessionMode;
   readonly onData?: RelayClientSessionDependencies['onData'];
+  /** How long the session may take to be accepted. The heartbeat grace by default. */
+  readonly deadlineMs?: number;
 }
+
+/**
+ * How long a DIRECT session may take to be accepted before the walk moves on to a rendezvous.
+ *
+ * The same reasoning as the pairing walk's direct leg, applied to every session. A daemon's published
+ * direct address is often a private one, and from cellular those packets are DROPPED rather than
+ * refused, so a socket to it neither opens nor fails — it waited out the whole heartbeat grace (45 s)
+ * before the walk tried the relay, on every page load away from home. A reachable daemon keys a
+ * session in three round trips, well inside this even across an ocean; past it, "this address is not
+ * answering" is the more useful conclusion. A relay keeps the full grace: it is the last resort.
+ */
+export const DIRECT_SESSION_DEADLINE_MS = 4_000;
 
 /**
  * Dial a rendezvous and return the session only once the daemon has accepted this
@@ -427,6 +441,7 @@ export const openRelaySession = async ({
   heartbeat = browserHeartbeat,
   mode,
   onData,
+  deadlineMs,
 }: OpenRelaySessionOptions): Promise<RelayClientSession> => {
   const url =
     method.kind === 'direct'
@@ -448,7 +463,14 @@ export const openRelaySession = async ({
     socket,
     ...(onData === undefined ? {} : { onData }),
   });
-  return await driveRelaySession({ socket, session, heartbeat, settled: session.ready(), keepAlive: true });
+  return await driveRelaySession({
+    socket,
+    session,
+    heartbeat,
+    settled: session.ready(),
+    keepAlive: true,
+    ...(deadlineMs === undefined ? {} : { deadlineMs }),
+  });
 };
 
 /* ---------- the router every daemon-bound request goes through ------------- */
@@ -1374,6 +1396,7 @@ export class DaemonCarrierRouter {
         ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
         mode: mode(claim),
         ...(onData === undefined ? {} : { onData }),
+        ...(method.kind === 'direct' ? { deadlineMs: DIRECT_SESSION_DEADLINE_MS } : {}),
       });
     try {
       return await open(device);

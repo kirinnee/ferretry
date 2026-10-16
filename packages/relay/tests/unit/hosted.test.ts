@@ -332,6 +332,40 @@ describe('hosted relay byte and request metering', () => {
     }
   });
 
+  it('should count a reported batch as its events and bytes, and refuse a nonsensical batch', () => {
+    // A rendezvous reports everything it forwarded while its previous report was in flight.
+    const base = admitted();
+    const batch = meterHostedRelayRequest(configuration(), base.global, base.daemon, 3 * 4_096, at + 2, 3);
+    should(batch.decision).deepEqual({ ok: true });
+    should(batch.global).match({ requestCount: base.global.requestCount + 3, bytesRelayed: 3 * 4_096 });
+    for (const [bytes, events] of [
+      [1, 0],
+      [1, 1.5],
+      [2 * MAX_FRAME_BYTES + 1, 2],
+    ] as const) {
+      should(meterHostedRelayRequest(configuration(), base.global, base.daemon, bytes, at + 2, events).decision).match({
+        ok: false,
+        code: RELAY_CLOSE_CODES.relayInternal,
+      });
+    }
+  });
+
+  it('should count bytes that already crossed a ceiling, then refuse what follows', () => {
+    // The report trails the traffic, so the bytes it names were relayed: the bill keeps them.
+    const base = admitted();
+    const capped = meterHostedRelayRequest(
+      configuration({ maxBytesPerMinutePerDaemon: 100 }),
+      base.global,
+      { ...base.daemon, minute: { ...base.daemon.minute, bytes: 90 } },
+      20,
+      at + 2,
+      2,
+    );
+    should(capped.decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth });
+    should(capped.daemon).match({ bytesRelayed: base.daemon.bytesRelayed + 20, minute: { bytes: 110 } });
+    should(capped.global).match({ bytesRelayed: base.global.bytesRelayed + 20 });
+  });
+
   it('should reset elapsed windows without erasing cumulative byte counts', () => {
     const base = admitted();
     const filled = meterHostedRelayRequest(configuration(), base.global, base.daemon, 100, at + 2);

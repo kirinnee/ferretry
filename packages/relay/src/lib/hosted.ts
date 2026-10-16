@@ -258,8 +258,14 @@ export function admitHostedRelayConnection(
 }
 
 /**
- * Count one frame event and, when it will actually be forwarded, reserve its opaque encoded bytes.
- * A zero-byte call counts protocol/control work without claiming content was relayed.
+ * Count a batch of frame events a rendezvous has ALREADY forwarded, and the opaque encoded bytes they
+ * carried, then decide whether that rendezvous may keep forwarding.
+ *
+ * A rendezvous reports in batches — every frame it forwarded while its previous report was in flight
+ * (§13, "What is metered and capped") — so the meter is never on a frame's path. The bytes were
+ * relayed, so they are counted even when they cross a ceiling: the bill does not shrink because the
+ * report arrived after the bytes did. Crossing is what refuses, and the refusal stops what follows.
+ * A zero-byte event counts protocol/control work without claiming content was relayed.
  */
 export function meterHostedRelayRequest(
   configuration: HostedRelayConfiguration,
@@ -267,12 +273,16 @@ export function meterHostedRelayRequest(
   daemon: HostedRelayDaemonMetrics,
   bytes: number,
   at: number,
+  events = 1,
 ): HostedRelayMetricsTransition {
-  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > MAX_FRAME_BYTES) {
+  if (!Number.isSafeInteger(events) || events < 1) {
+    return internalFailure(global, daemon, 'relay meter received an invalid event count');
+  }
+  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > events * MAX_FRAME_BYTES) {
     return internalFailure(global, daemon, 'relay meter received an invalid byte count');
   }
-  const touchedGlobal = touchRequest(global, at);
-  const touchedDaemon = touchRequest(daemon, at);
+  const touchedGlobal = touchRequest(global, at, events);
+  const touchedDaemon = touchRequest(daemon, at, events);
   if (touchedGlobal === null || touchedDaemon === null) {
     return internalFailure(global, daemon, 'relay meter clock moved backwards');
   }
@@ -318,7 +328,13 @@ export function meterHostedRelayRequest(
   ];
   for (const [used, limit, reason, retryAt] of checks) {
     if (bytes > limit - used) {
-      return refuseBandwidth(rolledGlobal, rolledDaemon, RELAY_CLOSE_CODES.hostedBandwidth, reason, retryAt);
+      return refuseBandwidth(
+        addBytes(rolledGlobal, bytes),
+        addBytes(rolledDaemon, bytes),
+        RELAY_CLOSE_CODES.hostedBandwidth,
+        reason,
+        retryAt,
+      );
     }
   }
 
@@ -485,11 +501,15 @@ function safeAdd(value: number, amount: number): number {
   return Math.min(Number.MAX_SAFE_INTEGER, value + amount);
 }
 
-function touchRequest<T extends HostedRelayGlobalMetrics | HostedRelayDaemonMetrics>(value: T, at: number): T | null {
+function touchRequest<T extends HostedRelayGlobalMetrics | HostedRelayDaemonMetrics>(
+  value: T,
+  at: number,
+  events = 1,
+): T | null {
   if (value.lastActivityAt !== null && at < value.lastActivityAt) return null;
   return {
     ...value,
-    requestCount: safeAdd(value.requestCount, 1),
+    requestCount: safeAdd(value.requestCount, events),
     firstActivityAt: value.firstActivityAt ?? at,
     lastActivityAt: at,
   };

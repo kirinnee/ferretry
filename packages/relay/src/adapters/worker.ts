@@ -351,8 +351,32 @@ interface SocketAttachment {
   readonly reservationId?: string;
 }
 
+/** Frames this rendezvous forwarded that the hosted meter has not been told about yet. */
+interface UnmeteredBatch {
+  daemonId: string;
+  bytes: number;
+  events: number;
+}
+
 export class RendezvousDurableObject {
   private queue: Promise<void> = Promise.resolve();
+  /**
+   * THE HOSTED METER IS NEVER ON A FRAME'S PATH.
+   *
+   * It used to be: every frame waited for a transactional round trip to the ONE global control object
+   * before it was forwarded, and the per-rendezvous queue made every later frame wait behind it. The
+   * control object lives wherever it was first created, so a rendezvous in Tokyo paid a Pacific round
+   * trip per frame, serially — a page load's hundred frames became seconds, and a terminal redrawing
+   * ten times a second outran the queue for good.
+   *
+   * Now a frame is forwarded first and counted here; at most ONE report is in flight per rendezvous,
+   * and everything forwarded while it travels goes in the next one. So the meter costs a round trip
+   * per round trip instead of per frame, and a refusal lands within one report's round trip of the
+   * bytes that crossed a ceiling (§13 states that overshoot). A pending report is outstanding I/O, so
+   * the object is not hibernated with bytes still uncounted.
+   */
+  private unmetered: UnmeteredBatch | undefined;
+  private metering: Promise<void> | undefined;
 
   constructor(
     private readonly objectState: RelayObjectState,
@@ -432,11 +456,63 @@ export class RendezvousDurableObject {
       const relayedBytes = step.effects.some(effect => effect.kind === 'send' && effect.frame === decoded.frame)
         ? message.byteLength
         : 0;
-      const decision = await this.hostedDecision('meter', { daemonId: state.daemonId, bytes: relayedBytes });
-      if (!decision.ok) return this.refuseSocketClearly(socket, decision.code, decision.reason);
       await this.applyStep(step);
+      this.meter(state.daemonId, relayedBytes);
     });
     await this.queue;
+  }
+
+  /** Settles once every frame forwarded so far has been reported to the hosted meter. */
+  async metered(): Promise<void> {
+    while (this.metering !== undefined) await this.metering;
+  }
+
+  private meter(daemonId: string, bytes: number): void {
+    if (!this.isHosted()) return;
+    const batch = this.unmetered ?? { daemonId, bytes: 0, events: 0 };
+    batch.bytes += bytes;
+    batch.events += 1;
+    this.unmetered = batch;
+    this.startMeterReport();
+  }
+
+  /** One report in flight at most; a batch that arrived as the last one settled starts the next. */
+  private startMeterReport(): void {
+    if (this.metering !== undefined || this.unmetered === undefined) return;
+    this.metering = this.reportMeter().finally(() => {
+      this.metering = undefined;
+      this.startMeterReport();
+    });
+  }
+
+  /**
+   * Report batches until nothing is left unreported. A refusal — a ceiling crossed, the switch off, or a
+   * meter that could not be reached — closes every socket this rendezvous holds, each told why first:
+   * a ceiling is per daemon and this object serves exactly one, and nothing degrades into an unmetered
+   * path. It never throws; a failure here has no caller left to hear it.
+   */
+  private async reportMeter(): Promise<void> {
+    for (let batch = this.unmetered; batch !== undefined; batch = this.unmetered) {
+      this.unmetered = undefined;
+      const decision = await this.hostedDecision('meter', {
+        daemonId: batch.daemonId,
+        bytes: batch.bytes,
+        ...(batch.events === 1 ? {} : { events: batch.events }),
+      });
+      if (decision.ok) continue;
+      this.unmetered = undefined;
+      this.enqueue(async () => {
+        for (const socket of this.objectState.getWebSockets()) {
+          // One socket too far gone to close must not shield the rest; its reservation is already back
+          // (`closeSocket` releases in a `finally`), and the failure is still said out loud.
+          await this.refuseSocketClearly(socket, decision.code, decision.reason).catch((error: unknown) => {
+            console.error('relay meter refusal could not close a socket', error);
+          });
+        }
+      });
+      await this.queue.catch(() => undefined);
+      return;
+    }
   }
 
   async webSocketClose(socket: RelaySocket): Promise<void> {
