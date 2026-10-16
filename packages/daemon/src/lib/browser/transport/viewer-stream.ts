@@ -1,4 +1,10 @@
-import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
+import {
+  type BrowserInputEvent,
+  type BrowserScreencastFrame,
+  encodeBrowserStreamChunks,
+  nextBrowserStreamSerial,
+} from '@ferretry/protocol';
+import { MAX_TUNNEL_DATA_BYTES } from '../../relay/tunnel.ts';
 import type { FrameClock, FrameTimer } from './contracts.ts';
 import { MAX_FRAME_BYTES, encodeFrameEnvelope } from './envelope.ts';
 import { type BrowserKeyInput, keyIdentity, keyReleaseSequence, normalizeBrowserInput } from './input.ts';
@@ -23,6 +29,12 @@ export const MAX_QUEUED_INPUT_BYTES = 1024 * 1024;
 export const MAX_BUFFERED_BYTES = 0;
 export const FRAME_RECOVERY_POLL_MS = 16;
 
+const sameBytes = (left: Uint8Array, right: Uint8Array): boolean => {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1) if (left[index] !== right[index]) return false;
+  return true;
+};
+
 /** What the client sent us, before it is known to be anything. */
 export type ViewerInputChunk = string | ArrayBuffer | ArrayBufferView;
 
@@ -45,9 +57,17 @@ function decodeBase64(text: string): Uint8Array | undefined {
 }
 
 /**
- * One authenticated viewer stream: atomic page-id/JPEG envelopes flow down, bounded JSON input flows
- * up. Neither direction is logged or persisted, and one slow viewer can never affect another —
- * frames are replaced rather than queued, so nothing accumulates per socket.
+ * One authenticated viewer stream: page-id/JPEG envelopes flow down as `FYBC` chunks, bounded JSON
+ * input flows up. Neither direction is logged or persisted, and one slow viewer can never affect
+ * another — frames are replaced rather than queued, so nothing accumulates per stream.
+ *
+ * A FRAME IS CHUNKED BECAUSE THE STREAM IS A §14 SESSION ON EVERY CARRIER. One record carries about
+ * 48 KiB of raw bytes and a desktop frame is often larger, so the envelope is cut at the record budget
+ * (`@ferretry/protocol`'s `browser-stream.ts` owns the layout and why a lost chunk costs one frame).
+ *
+ * The same two rules the terminal redraw follows (§14) apply here: a frame identical to the last one
+ * the transport ACCEPTED is not sent again, and one the transport dropped is retained and resent —
+ * whole, under a new serial — because the viewer never had it.
  */
 export class BrowserViewerStream {
   private closed = false;
@@ -55,11 +75,15 @@ export class BrowserViewerStream {
   private serial: Promise<void> = Promise.resolve();
   private readonly pressedKeys = new Map<string, BrowserKeyInput>();
   private pendingFrame?: Uint8Array;
+  /** The last envelope every chunk of which the transport took: what the viewer is showing. */
+  private deliveredFrame?: Uint8Array;
+  private serialNumber = 0;
   private recoveryTimer?: FrameTimer;
   private readonly maxInputMessageBytes: number;
   private readonly maxQueuedInputBytes: number;
   private readonly maxBufferedBytes: number;
   private readonly recoveryPollMs: number;
+  private readonly chunkBytes: number;
 
   private constructor(
     private readonly host: BrowserViewerHost,
@@ -73,6 +97,7 @@ export class BrowserViewerStream {
     this.maxQueuedInputBytes = options.maxQueuedInputBytes ?? MAX_QUEUED_INPUT_BYTES;
     this.maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
     this.recoveryPollMs = Math.max(1, options.recoveryPollMs ?? FRAME_RECOVERY_POLL_MS);
+    this.chunkBytes = options.chunkBytes ?? MAX_TUNNEL_DATA_BYTES;
   }
 
   /**
@@ -183,7 +208,12 @@ export class BrowserViewerStream {
     }
     const envelope = encodeFrameEnvelope(frame.pageId, bytes);
     if (!envelope.ok) return;
-    // Replace, never queue: a viewer that fell behind wants the current pixels.
+    // Replace, never queue: a viewer that fell behind wants the current pixels. Pixels it already
+    // holds are not sent again — and supersede a different frame still waiting, which is now stale.
+    if (this.deliveredFrame !== undefined && sameBytes(this.deliveredFrame, envelope.value)) {
+      this.pendingFrame = undefined;
+      return;
+    }
     this.pendingFrame = envelope.value;
     this.flushPendingFrame();
   }
@@ -196,19 +226,28 @@ export class BrowserViewerStream {
     }
     const envelope = this.pendingFrame;
     this.pendingFrame = undefined;
-    let sent: number | void;
-    try {
-      sent = this.downstream.send(envelope);
-    } catch {
-      this.finish(VIEWER_CLOSE_INTERNAL, 'browser display send failed');
-      return;
+    const chunks = encodeBrowserStreamChunks(this.serialNumber, envelope, this.chunkBytes);
+    this.serialNumber = nextBrowserStreamSerial(this.serialNumber);
+    for (const chunk of chunks) {
+      let sent: number | void;
+      try {
+        sent = this.downstream.send(chunk);
+      } catch {
+        this.finish(VIEWER_CLOSE_INTERNAL, 'browser display send failed');
+        return;
+      }
+      if (sent === 0) {
+        // The transport dropped this chunk rather than accepting it, so the viewer will discard the
+        // partial frame. Retain exactly this latest envelope and resend it whole; a negative result is
+        // accepted-but-backpressured and must never be resent.
+        this.pendingFrame = envelope;
+        this.scheduleRecovery();
+        return;
+      }
     }
-    if (sent === 0) {
-      // The transport dropped this frame rather than accepting it. Retain exactly this latest
-      // envelope; a negative result is accepted-but-backpressured and must never be resent.
-      this.pendingFrame = envelope;
-      this.scheduleRecovery();
-    }
+    // An envelope that yields no chunks (a budget too small for one) was never sent, so it is not
+    // what the viewer holds.
+    if (chunks.length > 0) this.deliveredFrame = envelope;
   }
 
   private scheduleRecovery(): void {
@@ -227,6 +266,7 @@ export class BrowserViewerStream {
     if (this.closed) return;
     this.closed = true;
     this.pendingFrame = undefined;
+    this.deliveredFrame = undefined;
     this.recoveryTimer?.cancel();
     this.recoveryTimer = undefined;
 

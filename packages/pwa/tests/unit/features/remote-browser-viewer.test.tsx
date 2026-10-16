@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import type { BrowserInputEvent, BrowserStatus } from '@ferretry/protocol';
+import { type BrowserInputEvent, type BrowserStatus, encodeBrowserStreamChunks } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { useLayoutEffect } from 'react';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../../../src/features/browser/remote-browser-viewer.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import type { RelayStreamRequest } from '../../../src/lib/relay-carrier.ts';
+import type { RelayClientSession, RelayStreamFrame } from '../../../src/lib/relay-session.ts';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, mount } from '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
@@ -74,7 +77,6 @@ describe('RemoteBrowserViewer', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
-        streamTicket="ticket"
         status={running('session-a')}
         isActive={false}
         socketFactory={() => {
@@ -93,7 +95,6 @@ describe('RemoteBrowserViewer', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
-        streamTicket={null}
         status={null}
         showHeader={false}
       />,
@@ -113,7 +114,6 @@ describe('RemoteBrowserViewer', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={scopeA}
-        streamTicket="ticket-a"
         status={running('same-session')}
         socketFactory={socketFactory}
         createObjectUrl={() => 'blob:daemon-a'}
@@ -127,7 +127,6 @@ describe('RemoteBrowserViewer', () => {
         <RemoteBrowserViewer
           daemon={daemonB}
           scope={daemonSessionScope(daemonB, 'same-session')}
-          streamTicket="ticket-b"
           status={running('same-session')}
           socketFactory={socketFactory}
           createObjectUrl={() => 'blob:daemon-b'}
@@ -159,7 +158,6 @@ describe('RemoteBrowserViewer', () => {
       <RemoteBrowserViewer
         daemon={daemon}
         scope={daemonSessionScope(daemon, 'same-session')}
-        streamTicket="ticket"
         status={running('same-session')}
         socketFactory={socketFactory}
         createObjectUrl={() => blob}
@@ -191,7 +189,6 @@ describe('RemoteBrowserViewer', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
-        streamTicket="ticket"
         status={running('session-a')}
         socketFactory={() => socket}
         createObjectUrl={() => 'blob:latest-frame'}
@@ -214,7 +211,6 @@ describe('RemoteBrowserViewer', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
-        streamTicket="ticket"
         status={running('session-a')}
         reconnectAfterMs={1}
         socketFactory={() => {
@@ -241,6 +237,85 @@ describe('RemoteBrowserViewer', () => {
     expect(sockets).toHaveLength(4);
     run(() => renderer.root.findByType('button').props.onClick());
     expect(sockets).toHaveLength(5);
+  });
+
+  it('does not ask a refusal that cannot change again, and says why', async () => {
+    const sockets: FakeSocket[] = [];
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        status={running('session-a')}
+        reconnectAfterMs={1}
+        socketFactory={() => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }}
+      />,
+    );
+    run(() => sockets[0]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'browser use is not granted' })));
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 5)));
+    expect(sockets).toHaveLength(1);
+    expect(JSON.stringify(renderer.toJSON())).toContain('browser use is not granted');
+
+    // The person may still ask again; a refusal with no sentence gets the plain one.
+    run(() => renderer.root.findByType('button').props.onClick());
+    expect(sockets).toHaveLength(2);
+    run(() => sockets[1]?.emit('close', new CloseEvent('close', { code: 1008 })));
+    expect(JSON.stringify(renderer.toJSON())).toContain('The daemon refused the remote display.');
+  });
+
+  it('opens the display through the paired carrier when no transport is injected', async () => {
+    const opened: string[] = [];
+    let onData: ((frame: RelayStreamFrame) => void) | undefined;
+    const session = {
+      sendStream: () => undefined,
+      closeStream: () => undefined,
+      onStreamClosed: () => undefined,
+    } as unknown as RelayClientSession;
+    const store = {
+      carrier: {
+        openStream: async (_daemon: DaemonConnection, request: RelayStreamRequest) => {
+          opened.push(request.path);
+          onData = request.onData;
+          return session;
+        },
+      },
+    } as unknown as AppStore;
+    const mounted = await mount(
+      <StoreProvider store={store}>
+        <RemoteBrowserViewer
+          daemon={daemonA}
+          scope={daemonSessionScope(daemonA, 'session-a')}
+          status={running('session-a')}
+          createObjectUrl={() => 'blob:carried'}
+          revokeObjectUrl={() => undefined}
+        />
+      </StoreProvider>,
+    );
+    await interact(async () => await Promise.resolve());
+    expect(opened).toEqual(['/v1/sessions/session-a/browser/stream']);
+    await interact(() => {
+      for (const chunk of encodeBrowserStreamChunks(0, new Uint8Array(frame('page-a')), 64))
+        onData?.({ kind: 'bytes', bytes: chunk });
+    });
+    expect(mounted.container.innerHTML).toContain('blob:carried');
+    await mounted.unmount();
+  });
+
+  it('cannot open a display with no paired carrier, and says so instead of reaching the network', async () => {
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        status={running('session-a')}
+        reconnectAfterMs={60_000}
+      />,
+    );
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+    expect(JSON.stringify(renderer.toJSON())).toContain('Remote display disconnected; reconnecting');
+    run(() => renderer.unmount());
   });
 });
 
@@ -269,12 +344,11 @@ describe('RemoteBrowserViewer re-scoping', () => {
       duringCommit?.();
       painted.push(box.container?.innerHTML ?? '');
     };
-    const tree = (daemon: typeof daemonA, ticket: string, blob: string) => (
+    const tree = (daemon: typeof daemonA, blob: string) => (
       <CommitProbe onCommit={onCommit}>
         <RemoteBrowserViewer
           daemon={daemon}
           scope={daemonSessionScope(daemon, 'same-session')}
-          streamTicket={ticket}
           status={running('same-session')}
           socketFactory={socketFactory}
           createObjectUrl={() => blob}
@@ -283,7 +357,7 @@ describe('RemoteBrowserViewer re-scoping', () => {
       </CommitProbe>
     );
 
-    const mounted = await mount(tree(daemonA, 'ticket-a', 'blob:daemon-a'));
+    const mounted = await mount(tree(daemonA, 'blob:daemon-a'));
     box.container = mounted.container;
     const first = sockets[0];
     if (first === undefined) throw new Error('the viewer opened no stream');
@@ -295,7 +369,7 @@ describe('RemoteBrowserViewer re-scoping', () => {
     // commit run, so this is a late frame from a transport that no longer speaks
     // for the viewer — exactly the delivery that must not repopulate it.
     duringCommit = () => first.emit('message', new MessageEvent('message', { data: frame('page-a') }));
-    await mounted.render(tree(daemonB, 'ticket-b', 'blob:daemon-b'));
+    await mounted.render(tree(daemonB, 'blob:daemon-b'));
     duringCommit = null;
 
     // Not one committed frame — not merely the settled tree — showed daemon A's
@@ -331,7 +405,6 @@ describe('RemoteBrowserViewer re-scoping', () => {
         <RemoteBrowserViewer
           daemon={daemonA}
           scope={daemonSessionScope(daemonA, 'session-a')}
-          streamTicket="ticket"
           status={running('session-a', pageId)}
           socketFactory={socketFactory}
           createObjectUrl={createObjectUrl}
@@ -379,7 +452,6 @@ const interactive = (overrides: Record<string, unknown> = {}) => {
     <RemoteBrowserViewer
       daemon={daemonA}
       scope={daemonSessionScope(daemonA, 'session-a')}
-      streamTicket="ticket"
       status={running('session-a')}
       interactive
       measureFrame={() => frameRect}
@@ -558,6 +630,15 @@ describe('RemoteBrowserViewer input', () => {
     expect(socket.inputs()).toHaveLength(2);
   });
 
+  it('sends a long paste as several whole text events, never splitting a character', () => {
+    const { socket, canvas } = interactive();
+    const text = `${'a'.repeat(7_999)}😀${'b'.repeat(10)}`;
+    run(() => canvas.props.onPaste({ clipboardData: { getData: () => text }, preventDefault: () => {} }));
+    const pieces = socket.inputs().map(input => (input.kind === 'insertText' ? input.text : ''));
+    expect(pieces).toEqual(['a'.repeat(7_999), `😀${'b'.repeat(10)}`]);
+    expect(pieces.join('')).toBe(text);
+  });
+
   it('lets the local paste chord through so the page paste handler can run', () => {
     const { socket, canvas, activity } = interactive();
     run(() => canvas.props.onKeyDown(keyEvent({ key: 'v', code: 'KeyV', ctrlKey: true })));
@@ -598,7 +679,6 @@ describe('RemoteBrowserViewer input', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
-        streamTicket="ticket"
         status={running('session-a')}
         socketFactory={() => {
           const socket = new FakeSocket();
@@ -654,7 +734,6 @@ describe('RemoteBrowserViewer input', () => {
       <RemoteBrowserViewer
         daemon={daemonA}
         scope={daemonSessionScope(daemonA, 'session-a')}
-        streamTicket="ticket"
         status={running('session-a')}
         interactive
         fit

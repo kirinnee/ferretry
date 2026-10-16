@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
+import {
+  assembleBrowserStream,
+  type BrowserInputEvent,
+  type BrowserScreencastFrame,
+  EMPTY_BROWSER_STREAM_ASSEMBLY,
+} from '@ferretry/protocol';
 import {
   BrowserViewerStream,
   type BrowserViewerHost,
@@ -9,8 +14,27 @@ import {
   decodeFrameEnvelope,
   type ViewerAttachment,
   type ViewerDownstream,
+  type ViewerStreamOptions,
   type ViewerTerminalSignal,
 } from '../../../../src/lib/index.ts';
+
+/** Every whole envelope a run of sent chunks carries, read exactly as a viewer reads the stream. */
+const envelopesIn = (sent: readonly Uint8Array[]): Uint8Array[] => {
+  let assembly = EMPTY_BROWSER_STREAM_ASSEMBLY;
+  const envelopes: Uint8Array[] = [];
+  for (const chunk of sent) {
+    const step = assembleBrowserStream(assembly, chunk);
+    if (!step.ok) throw new Error(step.message);
+    assembly = step.assembly;
+    envelopes.push(...step.envelopes);
+  }
+  return envelopes;
+};
+
+const jpegTextOf = (envelope: Uint8Array | undefined): string | false => {
+  const decoded = decodeFrameEnvelope(envelope as Uint8Array);
+  return decoded.ok && new TextDecoder().decode(decoded.value.jpegBytes);
+};
 
 class FakeClock implements FrameClock {
   private current = 0;
@@ -116,16 +140,16 @@ const message = (value: unknown): string => JSON.stringify(value);
 
 const mouseMove = { kind: 'mouse', type: 'mouseMoved', x: 4, y: 5 } as const;
 
-async function connect(overrides: { readonly host?: FakeHost } = {}) {
+async function connect(overrides: { readonly host?: FakeHost; readonly options?: ViewerStreamOptions } = {}) {
   const host = overrides.host ?? new FakeHost();
   const downstream = new FakeDownstream();
   const clock = new FakeClock();
-  const stream = await BrowserViewerStream.connect(host, 'session-1', downstream, clock);
+  const stream = await BrowserViewerStream.connect(host, 'session-1', downstream, clock, overrides.options);
   return { host, downstream, clock, stream };
 }
 
 describe('browser viewer stream — downstream frames', () => {
-  it('should send each frame as one page-id envelope', async () => {
+  it('should send a small frame as one chunk carrying one page-id envelope', async () => {
     // Arrange
     const { host, downstream } = await connect();
 
@@ -134,7 +158,7 @@ describe('browser viewer stream — downstream frames', () => {
 
     // Assert
     should(downstream.sent).have.length(1);
-    const decoded = decodeFrameEnvelope(downstream.sent[0] as Uint8Array);
+    const decoded = decodeFrameEnvelope(envelopesIn(downstream.sent)[0] as Uint8Array);
     should(decoded.ok && decoded.value.pageId).equal('page-1');
     should(decoded.ok && new TextDecoder().decode(decoded.value.jpegBytes)).equal('jpeg-bytes');
   });
@@ -184,8 +208,90 @@ describe('browser viewer stream — downstream frames', () => {
 
     // Assert
     should(downstream.sent).have.length(1);
-    const decoded = decodeFrameEnvelope(downstream.sent[0] as Uint8Array);
-    should(decoded.ok && new TextDecoder().decode(decoded.value.jpegBytes)).equal('second');
+    should(jpegTextOf(envelopesIn(downstream.sent)[0])).equal('second');
+  });
+
+  it('should cut a frame larger than one record into chunks that each fit it', async () => {
+    // Arrange: a record of 40 bytes leaves 19 for the payload after the 21-byte chunk header.
+    const { host, downstream } = await connect({ options: { chunkBytes: 40 } });
+    const pixels = 'x'.repeat(100);
+
+    // Act
+    host.onFrame?.(frame({ dataBase64: btoa(pixels) }));
+
+    // Assert
+    should(downstream.sent.length).be.above(1);
+    should(downstream.sent.every(chunk => chunk.byteLength <= 40)).be.true();
+    should(jpegTextOf(envelopesIn(downstream.sent)[0])).equal(pixels);
+  });
+
+  it('should not send a frame identical to the last one the transport accepted', async () => {
+    // Arrange
+    const { host, downstream } = await connect();
+    host.onFrame?.(frame());
+
+    // Act: the same pixels for the same page, then a change.
+    host.onFrame?.(frame());
+    host.onFrame?.(frame({ dataBase64: btoa('changed') }));
+
+    // Assert
+    should(envelopesIn(downstream.sent).map(jpegTextOf)).eql(['jpeg-bytes', 'changed']);
+  });
+
+  it('should let pixels the viewer already holds supersede a different frame still waiting', async () => {
+    // Arrange
+    const { host, downstream, clock } = await connect();
+    host.onFrame?.(frame());
+    downstream.buffered = 1;
+    host.onFrame?.(frame({ dataBase64: btoa('transient') }));
+
+    // Act: the page returns to what the viewer is showing before the waiting frame could go.
+    host.onFrame?.(frame());
+    downstream.buffered = 0;
+    clock.advance(16);
+
+    // Assert
+    should(envelopesIn(downstream.sent).map(jpegTextOf)).eql(['jpeg-bytes']);
+  });
+
+  it('should resend a frame whole, under a new serial, when the transport drops one of its chunks', async () => {
+    // Arrange
+    const { host, downstream, clock } = await connect({ options: { chunkBytes: 40 } });
+    const pixels = 'y'.repeat(100);
+    let calls = 0;
+    downstream.send = chunk => {
+      calls += 1;
+      downstream.sent.push(chunk);
+      return calls === 2 ? 0 : undefined;
+    };
+
+    // Act
+    host.onFrame?.(frame({ dataBase64: btoa(pixels) }));
+
+    // Assert: the send stopped at the dropped chunk, and nothing complete reached the viewer yet.
+    should(downstream.sent).have.length(2);
+    should(envelopesIn(downstream.sent)).have.length(0);
+
+    // Act
+    clock.advance(16);
+
+    // Assert
+    should(envelopesIn(downstream.sent).map(jpegTextOf)).eql([pixels]);
+    // A resend of what the viewer still lacks is not "identical to what it holds".
+    host.onFrame?.(frame({ dataBase64: btoa(pixels) }));
+    should(envelopesIn(downstream.sent)).have.length(1);
+  });
+
+  it('should send nothing, and remember nothing as shown, when no chunk fits the record', async () => {
+    // Arrange
+    const { host, downstream } = await connect({ options: { chunkBytes: 21 } });
+
+    // Act
+    host.onFrame?.(frame());
+    host.onFrame?.(frame());
+
+    // Assert
+    should(downstream.sent).be.empty();
   });
 
   it('should retain a dropped frame and resend it once the transport recovers', async () => {

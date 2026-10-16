@@ -173,8 +173,7 @@ GET ws(s)://<daemon address>/v1/rendezvous/<daemonId>/client      (WebSocket upg
   session instead of calling `fetch`, and event, terminal and remote-browser streams open stream
   sessions on either carrier. Single-use socket tickets are deleted entirely — daemon routes,
   protocol schema and PWA client: a stream is its own session, so nothing is left for a ticket to do.
-  (GAP: the remote-browser viewer is unmounted and still written against tickets; it moves onto a
-  stream session before it is mounted again.)
+  The remote-browser viewer, the last surface written against tickets, opens its stream the same way.
 - **Admission is a cheap check in front of the expensive one.** A socket's hello costs the daemon a
   key agreement and a signature before anything is known about the caller, so the upgrade is admitted
   first: at most **30 admitted upgrades a minute from one peer address** (a refusal spends none), at

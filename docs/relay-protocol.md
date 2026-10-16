@@ -788,7 +788,8 @@ and when, from which IP — never the code, the key or the device name, and neve
 anything readable, but the outcome IS inferable from the size of the one sealed answer, because
 `paired` carries a whole redemption response and `pair-refused` carries one word (§10).
 When a terminal stream crosses it, frame timing is keystroke timing, and — because an unchanged redraw
-is not sent again (§14) — the timing of daemon-to-browser frames is when the screen changed. The operator meter persists the
+is not sent again (§14) — the timing of daemon-to-browser frames is when the screen changed. The same
+is true of a remote-browser view, whose frame sizes also track how much of the page is changing. The operator meter persists the
 counts, sizes and timing fields described above. Neither party can observe frame payloads, device
 tokens, pairing codes, session content, stream content, commands, output, daemon names or device
 names. The same X25519/Ed25519/AES-256-GCM channel described in §§2, 6 and 7 terminates only at the
@@ -978,8 +979,7 @@ The relay, the control plane, the caps and the disclosure text are implemented a
 three §14 session modes are now built on both ends** — requests, live streams, and first pairing —
 so a phone that can never reach a daemon's address can pair with it and then watch it work. What
 remains is listed exactly below and is narrower than it was: an operator still edits the carrier
-list by hand, a fresh device can discover only the hosted rendezvous, the remote-browser viewer is unmounted
-until it moves onto a stream session, no surface renders the session-ceiling refusal §14 requires it to, and one onboarding
+list by hand, a fresh device can discover only the hosted rendezvous, no surface renders the session-ceiling refusal §14 requires it to, and one onboarding
 screen has not caught up with §1.
 
 **What proved it, and what that proof does not cover.** A real Google Chrome, holding the link a
@@ -1191,9 +1191,9 @@ outstanding:
      root hands the session-routed fetcher to every port it builds, and every component that reaches a
      daemon reads it from `useDaemonFetch()`; an audit of each `fetcher = browserFetch` default found
      no production caller that omits it. The defaults remain only so a component rendered alone in a
-     test reaches its stub. One surface is outside this: the **remote-browser viewer** is unmounted and
-     still written against the deleted socket tickets, so it must move onto a stream session before it
-     is mounted again — a declared GAP, not a working path.
+     test reaches its stub. The **remote-browser viewer** was the last surface outside this, written
+     against the deleted socket tickets; it is now a stream session on either carrier like the
+     terminal (§14, "Stream sessions").
 4. **Active-carrier disclosure on screen** — DONE. `ActiveCarrierCard` renders
    `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
    carrier a live session won on, from `DaemonCarrierRouter.choice`, on the machine’s Machine tab in Settings (Carrier). A
@@ -1207,8 +1207,8 @@ outstanding:
 
 **Deploying a relay now gets you the whole journey**: first pairing for a device that has never
 reached the daemon directly, every request/response route afterwards, and the live event and
-terminal streams that make the phone worth opening twice. What it does not get you is the feature
-unmounted remote-browser viewer named in piece 3 above, a live event feed refused `4429` (swallowed,
+terminal streams and the remote-browser live view that make the phone worth opening twice. What it
+does not get you is a live event feed refused `4429` (swallowed,
 so it fails silently until the gap above is closed), and a carrier list an operator can edit with a
 command.
 The kill switch does not wait on any of it: `relayUrl: null` is enforced by this Worker at admission
@@ -1481,8 +1481,9 @@ numbers order the wire; they do not order the work.
 
 ### Stream sessions
 
-The daemon's protocol-switching surfaces — `/v1/events` and
-`/v1/sessions/:sessionId/terminals/:terminalId/stream` — are sockets that keep talking, which one
+The daemon's protocol-switching surfaces — `/v1/events`,
+`/v1/sessions/:sessionId/terminals/:terminalId/stream` and `/v1/sessions/:sessionId/browser/stream`
+(the remote-browser live view) — are sockets that keep talking, which one
 request and one answer cannot carry. A stream session carries **exactly one of them**: the socket is
 the session, so the session layer already owns the stream's ordering, its flow control, its teardown
 and its cancellation, and nothing below this heading invents a second version of any of those.
@@ -1546,7 +1547,8 @@ event are text — and an envelope that collapsed them would leave the receiving
 one it was handed. Binary travels as unpadded base64url, like every other binary value in this
 protocol. What a stream means by its frames is the route's own contract, directionality included:
 the event stream is server-to-client and refuses client data itself, the terminal stream carries
-bytes both ways and a JSON resize control from the client.
+bytes both ways and a JSON resize control from the client, and the browser stream carries frame
+bytes from the daemon and one JSON input event per text record from the client.
 
 The two value shapes carry **different delivery semantics**, and the difference is what makes an
 envelope smaller than the direct socket's frames honest rather than lossy:
@@ -1570,6 +1572,17 @@ envelope does. What happens when a producer's frame exceeds it is decided by wha
   by the next, so a redraw that exceeds the budget is **dropped** exactly as a backpressured one is
   (below). The residual is disclosed rather than hidden: a pane whose every redraw exceeds the
   budget stays stale for a relayed viewer until it draws something smaller;
+- a **browser frame** (daemon → client) is one JPEG with its page id in front, routinely larger than
+  the budget, so the browser stream is a byte stream with its own framing: each frame is cut into
+  self-delimiting `FYBC` chunks no larger than the budget — magic, version `1`, frame serial, whole
+  length, offset, chunk length, then the bytes — defined once in `@ferretry/protocol`'s
+  `browser-stream.ts` for both ends. A reader parses chunks out of the byte stream, never one per
+  record, and reassembles a frame only from contiguous chunks of one serial. A chunk the stream dropped
+  (below) leaves a hole at a chunk boundary: the reader discards that partial frame, and the daemon
+  resends the newest picture whole under a new serial. A stream whose chunk headers stop making sense
+  has lost its framing and is closed by the reader with `1003` — the route's repair is a fresh attach;
+- **browser input** (client → daemon) is one JSON event per text record and never split; a client
+  sends a long paste as several `insertText` events in order;
 - an **event** frame is a unique record that may be neither dropped nor split, so an event that
   cannot fit one record **closes the stream** with `1009` — the honest refusal, like the `502` on
   a request session, rather than a truncated event a client would parse and believe.
@@ -1589,6 +1602,12 @@ the two that exist differ on purpose:
   identical records a second for as long as anyone watched — while one the stream dropped is sent again
   on the next poll, because the viewer never had it. A stream reports a drop to its producer as
   `0` ("not taken"), the transport convention every producer in the daemon reads;
+- a **browser** frame follows the same two rules — one identical to the last frame every chunk of
+  which the stream accepted is not sent, and one with a dropped chunk is resent whole — and adds a
+  third: a new frame starts only when the session has **no un-credited backlog at all**, so frames are
+  paced by the credit the viewer returns and a slow link shows fewer, current frames rather than a
+  queue of old ones. The daemon's screencast itself is JPEG at quality 50 at the page's viewport size,
+  capped near 15 frames a second, so the credit window is the only throttle the relay path adds;
 - an **event** frame is a unique journal record whose loss is silent data corruption, so the stream
   refuses to drop and instead **closes with `1013`**, exactly as it does on a direct socket.
 

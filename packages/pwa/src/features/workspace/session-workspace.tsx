@@ -254,7 +254,6 @@ export function SessionWorkspace({
           presentation={formFactor === 'phone' ? 'sheet' : 'pane'}
           scope={scope}
           showPageTabs={browserPages === undefined}
-          streamTicket={null}
           titleId={`${titleId}-${tab.key}`}
           {...(browser === undefined ? {} : { dependencies: browser })}
           {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}

@@ -25,8 +25,7 @@
  *
  * MULTI-DAEMON. The daemon is an explicit runtime prop and its scope must name
  * it; a mismatched pair is refused before any transport exists. Nothing here
- * reads the page origin, a build-time default or a bundled daemon identity, and
- * the stream ticket stays a runtime value that may honestly be `null`.
+ * reads the page origin, a build-time default or a bundled daemon identity.
  *
  * A RE-PAIR IS A LIVENESS BOUNDARY, NOT AN IDENTITY ONE. `daemonId` survives a
  * re-pair while the base URL and device token rotate, so the reader is looking
@@ -94,12 +93,6 @@ export interface UnifiedBrowserSurfaceProps {
   readonly daemon: DaemonConnection;
   /** Must name `daemon`; a scope from another daemon is a programming error. */
   readonly scope: DaemonSessionScope;
-  /**
-   * The daemon-issued stream credential for the live display. No endpoint mints
-   * one yet, so `null` is the honest value and the remote engine stays fully
-   * usable over HTTP without it.
-   */
-  readonly streamTicket: string | null;
   /** Null when the Browser surface is opened before any transcript link. */
   readonly destination?: BrowserDestination | null;
   readonly presentation: 'pane' | 'sheet';
@@ -147,7 +140,6 @@ const firstNonEmpty = (...values: readonly (string | undefined)[]): string =>
 export function UnifiedBrowserSurface({
   daemon,
   scope,
-  streamTicket,
   destination = null,
   presentation,
   titleId,
@@ -666,7 +658,6 @@ export function UnifiedBrowserSurface({
         <RemotePane
           daemon={daemon}
           scope={scope}
-          streamTicket={streamTicket}
           isActive={isActive}
           showNavigation={false}
           showPageTabs={showPageTabs}

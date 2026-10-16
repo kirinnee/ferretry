@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
+import {
+  assembleBrowserStream,
+  type BrowserInputEvent,
+  type BrowserScreencastFrame,
+  EMPTY_BROWSER_STREAM_ASSEMBLY,
+} from '@ferretry/protocol';
 import { SocketViewerDownstream, SystemFrameClock, type ViewerSocket } from '../../../../src/adapters/index.ts';
 import {
   BrowserViewerStream,
@@ -152,7 +157,7 @@ describe('socket viewer downstream', () => {
 });
 
 describe('viewer stream over a real socket adapter', () => {
-  it('should place a captured frame on the socket as one decodable envelope', async () => {
+  it('should place a captured frame on the socket as one chunk carrying a decodable envelope', async () => {
     // Arrange
     const host = new RecordingHost();
     const socket = new FakeSocket();
@@ -171,7 +176,8 @@ describe('viewer stream over a real socket adapter', () => {
 
     // Assert
     should(socket.sent).have.length(1);
-    const decoded = decodeFrameEnvelope(socket.sent[0]?.bytes ?? Uint8Array.of());
+    const step = assembleBrowserStream(EMPTY_BROWSER_STREAM_ASSEMBLY, socket.sent[0]?.bytes ?? Uint8Array.of());
+    const decoded = decodeFrameEnvelope((step.ok && step.envelopes[0]) || Uint8Array.of());
     should(decoded.ok && decoded.value.pageId).equal('page-7');
     should(host.dispatched).deepEqual([{ kind: 'insertText', text: 'typed' }]);
 
