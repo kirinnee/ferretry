@@ -193,7 +193,11 @@ const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
       const question = view.state.pendingQuestion?.questions[0]?.question;
       if (question)
         return question.length > QUESTION_PREVIEW_LEN ? `${question.slice(0, QUESTION_PREVIEW_LEN - 1)}…` : question;
-      return view.state.turnState === 'needs-input' ? 'Needs your input to continue.' : 'Asked you a question.';
+      if (view.state.turnState !== 'needs-input') return 'Asked you a question.';
+      // A harness dialog: say what the screen is asking, because nothing in the chat will.
+      return view.state.turnPrompt === undefined
+        ? 'Needs your input to continue.'
+        : `Blocked by a prompt on screen: ${view.state.turnPrompt}`;
     }
     case 'attention':
       return view.state.turnState === 'your-turn'

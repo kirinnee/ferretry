@@ -15,7 +15,14 @@
 
 /** A dialog whose affirmative path is known, and the exact keys that take it. */
 export interface StartupDialogAction {
-  readonly kind: 'claude-trust' | 'codex-trust' | 'permission-bypass' | 'api-key' | 'onboarding' | 'resume-menu';
+  readonly kind:
+    | 'claude-trust'
+    | 'codex-trust'
+    | 'permission-bypass'
+    | 'api-key'
+    | 'onboarding'
+    | 'resume-menu'
+    | 'auto-default-nudge';
   readonly keys: readonly string[];
 }
 
@@ -82,6 +89,30 @@ export function resumeMenuAction(pane: string, choice: 'full' | 'summary'): Star
   return keys.length === 0 ? undefined : { kind: 'resume-menu', keys };
 }
 
+/** `❯ No, keep bypass permissions` — the auto-default nudge draws its rows with no numbers. */
+const AUTO_NUDGE_ROW = /^\s*[│|]?\s*([>›❯»])?\s*(yes, set auto mode as my default permission mode|no, keep \S.*)$/iu;
+
+/**
+ * Claude Code's one-shot "Make auto mode your default permission mode?" dialog, answered NO.
+ *
+ * No is the answer that changes nothing: the session keeps the permission mode its owner chose, and
+ * Claude only records that the dialog was seen. Yes would rewrite the account's own default — a
+ * choice no daemon gets to make. The fixed layer stops the dialog appearing at all; this is for a
+ * runtime that has not been re-applied since, or a harness that brings it back another way.
+ */
+export function autoDefaultNudgeAction(pane: string): StartupDialogAction | undefined {
+  if (!pane.toLowerCase().includes('make auto mode your default permission mode?')) return undefined;
+  const options = pane.split('\n').flatMap(line => {
+    const match = AUTO_NUDGE_ROW.exec(line);
+    return match === null ? [] : [{ selected: match[1] !== undefined, label: match[2]!.trim().toLowerCase() }];
+  });
+  const keys = keysTo(
+    options,
+    options.findIndex(option => option.label.startsWith('no, keep')),
+  );
+  return keys.length === 0 ? undefined : { kind: 'auto-default-nudge', keys };
+}
+
 /** Which of the recognised trust/confirmation dialogs the frame is showing, if any. */
 function dialogKind(lower: string): StartupDialogAction['kind'] | undefined {
   if (lower.includes('do you trust the contents of this directory')) return 'codex-trust';
@@ -113,6 +144,9 @@ function affirmativeRow(options: readonly MenuOption[]): number {
 export function startupDialogAction(pane: string, options: StartupDialogOptions = {}): StartupDialogAction | undefined {
   const resumeMenu = resumeMenuAction(pane, options.resumeMenuChoice ?? 'full');
   if (resumeMenu !== undefined) return resumeMenu;
+  // Its rows carry no numbers, so it has its own row parser rather than the affirmative search below.
+  const nudge = autoDefaultNudgeAction(pane);
+  if (nudge !== undefined) return nudge;
   const lower = pane.toLowerCase();
   // The theme picker has no wrong answer: every row is a text style, and the harness proceeds on any
   // of them. It is the one dialog that needs no row search.

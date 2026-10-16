@@ -5,15 +5,15 @@ import {
   composerEvidence,
   composerHolds,
   composerTransport,
+  type DeliveryFrame,
   landingEvidence,
   MAX_STARTUP_DIALOG_ATTEMPTS,
   nextReadinessStep,
-  paneShowsOpenPicker,
   PASTE_TRANSPORT_CHARS,
+  paneShowsOpenPicker,
   resumeMenuAction,
-  startupDialogAction,
-  type DeliveryFrame,
   type StartupDialogAction,
+  startupDialogAction,
 } from '../../../src/lib/index.ts';
 
 const IDLE: DeliveryFrame = { alive: true, dead: false, promptReady: true, visible: '> ' };
@@ -44,6 +44,38 @@ describe('startup dialogs', () => {
       permissionBypass: { kind: 'permission-bypass', keys: ['Up', 'Enter'] },
       apiKey: { kind: 'api-key', keys: ['Up', 'Enter'] },
     });
+  });
+
+  it('should answer the auto-mode dialog NO, the answer that keeps the mode its owner chose', () => {
+    // Arrange — the dialog draws its rows without numbers; the cursor may sit on either.
+    const dialog = (cursorOnYes: boolean) =>
+      [
+        ' Make auto mode your default permission mode?',
+        '',
+        `   ${cursorOnYes ? '❯' : ' '} Yes, set auto mode as my default permission mode`,
+        `   ${cursorOnYes ? ' ' : '❯'} No, keep bypass permissions`,
+      ].join('\n');
+
+    // Act
+    const actual = [startupDialogAction(dialog(true)), startupDialogAction(dialog(false))];
+
+    // Assert — never Yes: that would rewrite the account's own default mode.
+    should(actual).deepEqual([
+      { kind: 'auto-default-nudge', keys: ['Down', 'Enter'] },
+      { kind: 'auto-default-nudge', keys: ['Enter'] },
+    ]);
+  });
+
+  it('should not guess at the auto-mode dialog when no cursor is drawn', () => {
+    // Arrange — Enter there submits whatever is highlighted, which may be Yes.
+    const pane = [
+      'Make auto mode your default permission mode?',
+      '  Yes, set auto mode as my default permission mode',
+      '  No, keep auto mode',
+    ].join('\n');
+
+    // Act / Assert
+    should(startupDialogAction(pane)).be.undefined();
   });
 
   it('should press Enter on the theme picker, where every row is an acceptable answer', () => {

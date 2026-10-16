@@ -1,6 +1,21 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { paneShowsActiveWork, paneShowsPermissionPrompt, promptIsReady } from '../../../src/lib/index.ts';
+import {
+  paneBlockingPrompt,
+  paneShowsActiveWork,
+  paneShowsPermissionPrompt,
+  promptIsReady,
+} from '../../../src/lib/index.ts';
+
+/** Claude 2.1.281's one-shot auto-mode dialog, as a bypass agent showed it: rows with no numbers. */
+const AUTO_NUDGE = [
+  ' Make auto mode your default permission mode?',
+  '',
+  '   Auto mode lets Claude handle permission prompts automatically.',
+  '',
+  '   ❯ Yes, set auto mode as my default permission mode',
+  '     No, keep bypass permissions',
+].join('\n');
 
 /**
  * Frames taken from the two harnesses this daemon launches. The point of every case here is that a
@@ -158,5 +173,51 @@ describe('paneShowsPermissionPrompt on a tall pane', () => {
   it('should find a prompt drawn near the top of a pane padded with blank rows', () => {
     const frame = `Do you want to proceed?\n❯ 1. Yes\n  2. No${'\n'.repeat(40)}`;
     should(paneShowsPermissionPrompt(frame)).be.true();
+  });
+});
+
+describe('paneBlockingPrompt', () => {
+  it('should name the auto-mode dialog a bypass agent was parked on', () => {
+    should(paneBlockingPrompt(AUTO_NUDGE)).equal('Make auto mode your default permission mode?');
+  });
+
+  it('should name each harness dialog in the words a person is shown for it', () => {
+    // Act
+    const actual = [
+      'Switch your default effort to medium?\n❯ Yes, use medium effort by default',
+      'Try the new fullscreen renderer?\n  Yes, try it   Not now',
+      'Quick safety check: is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder',
+      'Do you trust the contents of this directory?\n› 1. Yes, continue',
+      'Choose the text style that looks best with your terminal',
+      'Detected a custom API key\nDo you want to use this API key?',
+      '❯ 1. Resume from summary (recommended)\n  2. Resume full session as-is',
+    ].map(paneBlockingPrompt);
+
+    // Assert
+    should(actual).deepEqual([
+      'Switch your default effort level?',
+      'Try the new fullscreen renderer?',
+      'Do you trust this folder?',
+      'Do you trust this folder?',
+      'Choose a text style (first-run setup)',
+      'Use the custom API key it detected?',
+      'Resume from a summary, or the full session?',
+    ]);
+  });
+
+  it('should name nothing for an idle prompt, a working turn or a permission prompt', () => {
+    should(paneBlockingPrompt('  ? for shortcuts\n│ > ')).be.undefined();
+    should(paneBlockingPrompt('✽ Pontificating… (3s · esc to interrupt)')).be.undefined();
+    should(paneBlockingPrompt('Do you want to proceed?\n❯ 1. Yes\n  2. No')).be.undefined();
+  });
+
+  it('should ignore a dialog that has scrolled out of the bottom of the frame', () => {
+    should(paneBlockingPrompt([AUTO_NUDGE, ...Array.from({ length: 30 }, () => 'output')].join('\n'))).be.undefined();
+  });
+
+  it('should never read the auto-mode dialog as a ready prompt, though its cursor row looks like one', () => {
+    // The `❯ Yes, set auto mode…` row matches the prompt shape, and the daemon used to type into it.
+    should(promptIsReady(AUTO_NUDGE)).be.false();
+    should(promptIsReady(AUTO_NUDGE, 4, 3)).be.false();
   });
 });

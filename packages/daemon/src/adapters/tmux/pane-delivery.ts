@@ -17,12 +17,13 @@ import {
   classifySubmit,
   composerEvidence,
   composerTransport,
-  landingEvidence,
-  nextReadinessStep,
-  retryDelays,
   type DeliveryFrame,
   type InjectionOutcome,
   type LandingEvidence,
+  landingEvidence,
+  nextReadinessStep,
+  paneBlockingPrompt,
+  retryDelays,
   type StartupDialogAction,
   type StartupDialogOptions,
   type TmuxController,
@@ -90,8 +91,11 @@ export class TmuxPaneDelivery {
     // Backoff rather than a fixed interval: a harness that is slow to draw is usually slow because
     // the box is loaded, and polling it hardest exactly then is the wrong shape.
     const delays = retryDelays(this.settings.readinessAttempts);
+    let blocked: string | undefined;
     for (let attempt = 0; attempt < delays.length; ) {
-      const step = nextReadinessStep(await this.frame(session), attemptsByKind, options);
+      const frame = await this.frame(session);
+      blocked = paneBlockingPrompt(frame.visible);
+      const step = nextReadinessStep(frame, attemptsByKind, options);
       if (step.kind === 'ready') return;
       if (step.kind === 'exited' || step.kind === 'stuck')
         throw new PaneDeliveryError(`${step.reason}; tmux session ${session}`);
@@ -104,7 +108,12 @@ export class TmuxPaneDelivery {
       await this.sleep(delays[attempt]!);
       attempt++;
     }
-    throw new PaneDeliveryError(`tmux session ${session} did not become ready to accept a turn`);
+    // Name the dialog when one is why: "not ready" sent the reader to the transcript, which was fine.
+    throw new PaneDeliveryError(
+      blocked === undefined
+        ? `tmux session ${session} did not become ready to accept a turn`
+        : `tmux session ${session} is blocked by a prompt on screen: "${blocked}" — answer it in the terminal`,
+    );
   }
 
   /**

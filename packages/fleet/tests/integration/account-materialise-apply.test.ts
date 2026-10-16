@@ -162,7 +162,9 @@ describe('materialising the account model onto disk', () => {
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.claude.json'), 'utf8'))).eql({
       mcpServers: { notes: { type: 'stdio', command: 'notes-server', args: [] } },
     });
+    // The overlay names the mode as well: a flag-settings mode keeps the auto-default dialog away.
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'fixed.json'), 'utf8'))).eql({
+      permissions: { defaultMode: 'bypassPermissions' },
       skipDangerousModePermissionPrompt: true,
     });
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'))).eql({

@@ -92,6 +92,18 @@ describe('send ledger read model', () => {
     expect(sparse?.replyExpected).toBeUndefined();
   });
 
+  it('keeps a send blocked by a dialog on screen, and drops a reason it does not know', () => {
+    const blocked = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      fate: 'unaccounted',
+      unaccountedReason: 'blocked_by_prompt',
+    });
+    const unknown = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), unaccountedReason: 'gremlins' });
+    expect(blocked?.unaccountedReason).toBe('blocked_by_prompt');
+    expect(Object.hasOwn(unknown ?? {}, 'unaccountedReason')).toBe(false);
+  });
+
   it('drops a citation with no key but keeps the fate the daemon decided', () => {
     const parsed = parseLedgerSendRecord({
       sendId: 's',
