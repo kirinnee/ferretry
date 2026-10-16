@@ -1,28 +1,26 @@
 /**
- * The fleet configuration as text — `config.yaml` read in and written out (docs/design/account-model.md
- * §5.3).
+ * What is left of the single-file fleet configuration: the sentence that refuses it.
  *
- * This is the one place `config.yaml` text becomes an {@link AccountModel} and the one place a model
- * becomes that text, so every surface that reads or writes the file agrees on both directions.
+ * The machine's configuration used to be ONE `fleet/config.yaml`. It is now a file per building block
+ * under `config/` (docs/config-files.md, `../config-files/`), and a `config.yaml` that is still there is
+ * REFUSED with {@link RetiredFleetConfigError} — never converted and never read alongside the files —
+ * so a machine cannot run on a configuration nobody edits any more. The caller's file is left exactly
+ * where it is, and the sentence tells the person how to set the machine up again.
  *
- * A document from the retired account format — no `version` key, `version: 1`, an empty document or
- * `{}` — is REFUSED with {@link RetiredFleetConfigError}, never converted and never treated as an
- * empty machine: the caller's file is left exactly where it is, and the sentence tells the person how
- * to set the machine up again. A missing file is not a document at all and stays the caller's to
- * decide.
- *
- * Pure: the caller reads and writes the file.
+ * Pure: the caller decides whether the file exists.
  */
-import { type AccountModel, parseAccountModel } from './schema.ts';
+
+/** Where the retired single file lived, relative to the fleet directory. */
+export const RETIRED_FLEET_CONFIG_FILE = 'config.yaml' as const;
 
 /**
- * What a person is told about a `config.yaml` at `path` still written in the retired format: where it
- * is, that it is no longer read, and how to get a working machine back.
+ * What a person is told about a retired `config.yaml` at `path`: where it is, that it is no longer
+ * read, and how to get a working machine back.
  */
 export const RETIRED_FLEET_CONFIG_SENTENCE = (path: string): string =>
-  `${path} uses the old account format, which this Ferretry no longer reads. Move it aside (for example rename it to config.yaml.old), then set this machine up again from the app or with \`fy daemon setup\`.`;
+  `${path} is the old single-file configuration, which this Ferretry no longer reads: each login, component, profile and runtime is now its own file under config/ in the state home. Move it aside (for example rename it to config.yaml.old), then set this machine up again from the app or with \`fy daemon setup\`.`;
 
-/** A `config.yaml` written in the retired account format; its message is {@link RETIRED_FLEET_CONFIG_SENTENCE}. */
+/** A retired `config.yaml`; its message is {@link RETIRED_FLEET_CONFIG_SENTENCE}. */
 export class RetiredFleetConfigError extends Error {
   readonly path: string;
 
@@ -31,29 +29,6 @@ export class RetiredFleetConfigError extends Error {
     this.name = 'RetiredFleetConfigError';
     this.path = path;
   }
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/**
- * Parse `config.yaml` text found at `path`.
- *
- * Throws {@link RetiredFleetConfigError} for a document with no `version` (including an empty one and
- * `{}`) or `version: 1`; every other document is checked as version 2, so a broken version-2 file
- * throws the `ZodError` that names what is wrong, and a YAML syntax error throws as the parser does.
- */
-export function parseAccountConfigText(text: string, path: string): AccountModel {
-  const raw: unknown = Bun.YAML.parse(text);
-  if (!isRecord(raw) || raw.version === undefined || raw.version === 1) {
-    throw new RetiredFleetConfigError(path);
-  }
-  return parseAccountModel(raw);
-}
-
-/** The version-2 `config.yaml`, as written. */
-export function renderConfig(model: AccountModel): string {
-  return `${Bun.YAML.stringify(model, null, 2).replace(/\n*$/u, '')}\n`;
 }
 
 const NAME_LIMIT = 64;

@@ -129,7 +129,12 @@ export function ProjectsHub({
   };
 
   return (
-    <section className="grid gap-panel p-panel" aria-labelledby="projects-heading">
+    // Its own scroller: the page host gives it a fixed height and clips, so a phone could not reach the
+    // discoveries below the fold.
+    <section
+      className="grid h-full min-h-0 content-start gap-panel overflow-y-auto p-panel"
+      aria-labelledby="projects-heading"
+    >
       <div className="kt-panel grid gap-panel p-panel">
         <div className="flex flex-wrap items-start justify-between gap-md">
           <div className="grid min-w-0 gap-xs">

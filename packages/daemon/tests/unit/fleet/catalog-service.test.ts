@@ -39,6 +39,7 @@ import {
   machineAuthority,
 } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
+import { configReading } from '../../support/config-reading.ts';
 
 const LAYOUT: FleetLayout = {
   stateHome: '/state',
@@ -132,7 +133,7 @@ function world(overrides: Partial<FleetCatalogServiceDeps> = {}): World {
   const applied: World['applied'] = [];
   let ids = 0;
   const state: World['state'] = {
-    reading: { format: 'version-2', model: MODEL(), revision: 'rev-1' },
+    reading: configReading(MODEL(), 'rev-1'),
     statuses: ['running', 'completed', 'thinking'],
     credentials: async () => [credentialRow('codex-slot')],
     signOut: async id => ({ outcome: 'signed-out', credential: credentialRow(id) }),
@@ -379,7 +380,7 @@ describe('staging a change', () => {
     should(view.preview.kind).equal('apply');
     if (view.preview.kind !== 'apply') return;
     should(view.preview.documents.map(document => document.path)).deepEqual([
-      '/state/fleet/config.yaml',
+      '/state/config/components/instructions/extra.yaml',
       '/state/fleet/assets/components/instructions/extra.md',
     ]);
     should(view.preview.documents[1]?.bytes).equal(16);
@@ -507,9 +508,23 @@ describe('applying a change', () => {
     // Assert
     should(outcome.outcome).equal('applied');
     should(applied).have.length(1);
-    should(applied[0]?.documents.map(document => document.expect)).deepEqual(['rev-1', 'absent']);
-    should(applied[0]?.documents[0]?.content).match(/extra: *\n\s+file: components\/instructions\/extra\.md/u);
+    should(applied[0]?.documents.map(document => document.expect)).deepEqual(['absent', 'absent']);
+    should(applied[0]?.documents[0]?.content).match(/^file: components\/instructions\/extra\.md$/mu);
     should(again.code).equal('fleet_change_consumed');
+  });
+
+  it('should write only the configuration files a change moves, removing the one it drops, each expecting the etag it read', async () => {
+    // Arrange
+    const { service, applied } = world();
+    const staged = await service.propose({ kind: 'runtime.remove', name: 'codex-default' });
+
+    // Act
+    await service.apply(staged.id, governance);
+
+    // Assert — the runtime's own file is removed; no other configuration file is touched.
+    should(applied[0]?.documents.map(({ path, expect, remove }) => ({ path, expect, remove }))).deepEqual([
+      { path: '/state/config/runtimes/codex-default.yaml', expect: 'etag:runtimes/codex-default.yaml', remove: true },
+    ]);
   });
 
   it('should put a change back when the configuration moved after it was staged', async () => {
@@ -704,7 +719,10 @@ describe('applying machine.settings that turns "what agents may control" back on
   /** The model starts with `terminals` off, so a change can turn exactly that back on. */
   const offModel = (): AccountModel => ({
     ...MODEL(),
-    machine: { ...MODEL().machine, agentControl: { terminals: false, browsers: true, files: true } },
+    machine: {
+      ...MODEL().machine,
+      agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false },
+    },
   });
 
   const stageOff = async (service: FleetCatalogService, overrides: Partial<Record<string, boolean>> = {}) =>
@@ -726,7 +744,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should apply turning a control OFF remotely with no step-up at all', async () => {
     // Arrange
     const { service, state } = world();
-    state.reading = { ...state.reading, model: { ...MODEL(), machine: { ...MODEL().machine } } };
+    state.reading = configReading({ ...MODEL(), machine: { ...MODEL().machine } }, 'rev-1');
     const staged = await stageOff(service);
 
     // Act
@@ -739,7 +757,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should refuse turning a control back ON remotely with no step-up, naming the act', async () => {
     // Arrange
     const { service, state } = world();
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const staged = await stageOn(service);
 
     // Act
@@ -756,7 +774,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should refuse the same way with no freshStepUp context at all, never trusting an absent one', async () => {
     // Arrange
     const { service, state } = world();
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const staged = await stageOn(service);
 
     // Act
@@ -772,7 +790,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should allow turning a control back ON remotely with a fresh step-up, and spend it once', async () => {
     // Arrange
     const { service, state } = world();
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const staged = await stageOn(service);
     let spent = 0;
 
@@ -792,7 +810,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should refuse a reused or stale step-up on the next widening act', async () => {
     // Arrange — the first act spends the proof; a real StepUpRegistry would now answer `false`.
     const { service, state } = world();
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const first = await stageOn(service);
     let fresh = true;
     const freshStepUp = {
@@ -804,7 +822,7 @@ describe('applying machine.settings that turns "what agents may control" back on
     await service.apply(first.id, remote, freshStepUp);
 
     // Act — the device's unlock is still live (`stepUp: true`), but its fresh proof was just spent.
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const second = await stageOn(service);
     const error = await service
       .apply(second.id, remote, {
@@ -825,7 +843,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should let the machine itself turn a control back on with nothing extra', async () => {
     // Arrange
     const { service, state } = world();
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const staged = await stageOn(service);
 
     // Act
@@ -838,7 +856,7 @@ describe('applying machine.settings that turns "what agents may control" back on
   it('should need no step-up when a single write turns some controls on and the step-up covers it, but refuse without one', async () => {
     // Arrange — files on (narrowed to unchanged — already true) and terminals on (widened): the ON half rules.
     const { service, state } = world();
-    state.reading = { ...state.reading, model: offModel() };
+    state.reading = configReading(offModel(), 'rev-1');
     const staged = await service.propose({
       kind: 'machine.settings',
       agentPermissions: 'auto',
@@ -854,6 +872,35 @@ describe('applying machine.settings that turns "what agents may control" back on
 
     // Assert — the ON half (terminals) demands the step-up even though browsers also moved OFF in the same write.
     should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
+  });
+
+  it('should count turning Ferretry settings on as a widening that needs a fresh step-up from a remote device', async () => {
+    // Arrange — every other control already on; only the config tools move.
+    const { service, state } = world();
+    state.reading = configReading(MODEL(), 'rev-1');
+    const staged = await stageOn(service, { ferretrySettings: true });
+
+    // Act
+    const error = await service.apply(staged.id, remote).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
+  });
+
+  it('should not count a write that leaves Ferretry settings out as turning it on', async () => {
+    // Arrange — a client that predates the switch sends only the three it knows.
+    const { service, state } = world();
+    state.reading = configReading(MODEL(), 'rev-1');
+    const staged = await stageOff(service, { terminals: true });
+
+    // Act
+    const outcome = await service.apply(staged.id, remote);
+
+    // Assert
+    should(FleetAccountChangeOutcomeSchema.parse(outcome).outcome).equal('applied');
   });
 });
 

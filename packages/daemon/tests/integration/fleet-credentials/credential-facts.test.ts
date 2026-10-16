@@ -1,7 +1,7 @@
 /**
  * The credentials surface's host reads, against a real temporary filesystem and real children.
  *
- * Every file here is one the harness or Ferretry writes — a `config.yaml`, a `.claude.json`, a Codex
+ * Every file here is one the harness or Ferretry writes — a `.claude.json`, a Codex
  * `auth.json`, a rollout — so what is proved is that each reader finds the one display fact it keeps
  * and nothing else, and that a missing or damaged file is "nothing to show" rather than a failure.
  * Every path is under a temporary directory; no real harness home is read.
@@ -10,13 +10,12 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type CredentialMaterial, RetiredFleetConfigError } from '@ferretry/fleet';
+import type { CredentialMaterial } from '@ferretry/fleet';
 import should from 'should';
 import {
   CredentialEmailReader,
   codexEmail,
   ensurePrivateDirectory,
-  readAccountModelFile,
   rolloutFiles,
   runCredentialHarness,
 } from '../../../src/adapters/fleet-credentials/credential-facts.ts';
@@ -48,53 +47,6 @@ const CODEX_RESOLUTION = {
   store: 'ferretry',
   canonicalFile: '/fy/credentials/team/auth.json',
 } as const;
-
-describe('readAccountModelFile', () => {
-  it('should answer nothing for a machine with no fleet configuration yet', async () => {
-    // Arrange
-    const root = await scratch();
-
-    // Act / Assert
-    should(await readAccountModelFile(join(root, 'config.yaml'))).be.undefined();
-  });
-
-  it('should read a version-2 document as the model', async () => {
-    // Arrange
-    const path = join(await scratch(), 'config.yaml');
-    await writeFile(path, 'version: 2\ncredentials:\n  claude-you:\n    harness: claude\n    store: host\n');
-
-    // Act
-    const actual = await readAccountModelFile(path);
-
-    // Assert
-    should(actual?.version).equal(2);
-    should(actual?.credentials['claude-you']?.store).equal('host');
-  });
-
-  it('should refuse a document in the old account format, naming the file, and leave it as it is', async () => {
-    // Arrange
-    const path = join(await scratch(), 'config.yaml');
-    const old = 'agents:\n  - name: kirin\n    kind: claude\n';
-    await writeFile(path, old);
-
-    // Act
-    const raised = await readAccountModelFile(path).catch((error: unknown) => error);
-
-    // Assert
-    should(raised).be.instanceOf(RetiredFleetConfigError);
-    should((raised as Error).message).containEql(path);
-    should(await Bun.file(path).text()).equal(old);
-  });
-
-  it('should let a read failure other than absence through', async () => {
-    // Arrange — a directory where the file should be.
-    const path = join(await scratch(), 'config.yaml');
-    await mkdir(path);
-
-    // Act / Assert
-    await should(readAccountModelFile(path)).be.rejected();
-  });
-});
 
 describe('ensurePrivateDirectory', () => {
   it('should create the directory and its parents readable by this user only', async () => {

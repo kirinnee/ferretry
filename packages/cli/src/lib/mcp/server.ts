@@ -1,6 +1,9 @@
 import {
   AGENT_TOOL_DEFAULT_WAIT_MS,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
+  type AgentConfigToolCall,
+  AgentConfigToolCallSchema,
+  type AgentConfigToolResult,
   type AgentToolCall,
   AgentToolCallSchema,
   type AgentToolResult,
@@ -8,7 +11,7 @@ import {
 import { z } from 'zod';
 import type { TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';
-import { MCP_TOOLS } from './tools.ts';
+import { MCP_CONFIG_TOOLS, MCP_TOOLS } from './tools.ts';
 
 /**
  * THE FERRETRY TOOLS AS AN MCP SERVER — JSON-RPC 2.0 over stdio, written out by hand.
@@ -36,11 +39,18 @@ const MCP_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as cons
 export interface McpToolsPort {
   call(call: AgentToolCall): Promise<AgentToolResult>;
   wait(wait: TerminalWait): Promise<AgentToolResult>;
+  /** One `config.*` call, as the agent (docs/config-files.md). */
+  config(call: AgentConfigToolCall): Promise<AgentConfigToolResult>;
 }
 
 export interface McpServerInfo {
   readonly name: string;
   readonly version: string;
+  /**
+   * What every agent is told about these tools when it connects (MCP `initialize` instructions): the
+   * built-in "Set up Ferretry" skill, so any agent can set the machine up from its files.
+   */
+  readonly instructions?: string;
 }
 
 type JsonRpcId = string | number | null;
@@ -101,6 +111,21 @@ function refusal(error: z.ZodError): string {
   return issue.path.length === 0 ? issue.message : `${issue.path.join('.')}: ${issue.message}`;
 }
 
+/** A config tool's answer as MCP content: the sentence, the file, then each located problem. */
+function configContent(result: AgentConfigToolResult) {
+  const parts = [
+    result.summary,
+    ...(result.etag === undefined ? [] : [`etag: ${result.etag}`]),
+    ...(result.files ?? []).map(file => `${file.path} (${file.state})`),
+    ...(result.issues ?? []).map(
+      issue =>
+        `${issue.path}${issue.line === undefined ? '' : `:${String(issue.line)}:${String(issue.column)}`} ${issue.severity}: ${issue.message} — fix: ${issue.fix}`,
+    ),
+    ...(result.text === undefined ? [] : [result.text]),
+  ];
+  return { content: [{ type: 'text', text: parts.join('\n') }] };
+}
+
 /** A tool's answer as MCP content: the words, then the picture when there is one. */
 function content(result: AgentToolResult) {
   return {
@@ -149,7 +174,11 @@ export class McpServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: MCP_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+            tools: [...MCP_TOOLS, ...MCP_CONFIG_TOOLS].map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              inputSchema,
+            })),
           },
         };
       case 'tools/call':
@@ -167,6 +196,7 @@ export class McpServer {
       protocolVersion,
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: this.info.name, version: this.info.version },
+      ...(this.info.instructions === undefined ? {} : { instructions: this.info.instructions }),
     };
   }
 
@@ -174,9 +204,11 @@ export class McpServer {
     const parsed = CallParamsSchema.safeParse(params);
     if (!parsed.success)
       return failure(id, JSON_RPC_ERRORS.invalidParams, 'tools/call needs a tool name and its arguments');
+    const args = parsed.data.arguments ?? {};
+    const configTool = MCP_CONFIG_TOOLS.find(candidate => candidate.name === parsed.data.name);
+    if (configTool !== undefined) return await this.config(id, configTool.configTool, args);
     const tool = MCP_TOOLS.find(candidate => candidate.name === parsed.data.name);
     if (tool === undefined) return failure(id, JSON_RPC_ERRORS.invalidParams, `there is no tool ${parsed.data.name}`);
-    const args = parsed.data.arguments ?? {};
     try {
       if (tool.tool === 'terminal.wait') {
         const wait = WaitArgumentsSchema.safeParse(args);
@@ -192,6 +224,20 @@ export class McpServer {
       const call = AgentToolCallSchema.safeParse({ ...args, tool: tool.tool });
       if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
       return { jsonrpc: '2.0', id, result: content(await this.tools.call(call.data)) };
+    } catch (error) {
+      return { jsonrpc: '2.0', id, result: toolError(error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  private async config(
+    id: string | number,
+    tool: AgentConfigToolCall['tool'],
+    args: Record<string, unknown>,
+  ): Promise<JsonRpcResponse> {
+    const call = AgentConfigToolCallSchema.safeParse({ ...args, tool });
+    if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
+    try {
+      return { jsonrpc: '2.0', id, result: configContent(await this.tools.config(call.data)) };
     } catch (error) {
       return { jsonrpc: '2.0', id, result: toolError(error instanceof Error ? error.message : String(error)) };
     }

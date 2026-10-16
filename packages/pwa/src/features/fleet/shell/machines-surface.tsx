@@ -207,6 +207,7 @@ export function MachinesSurface({
         onSelect={next => onOpen(daemonId, next)}
         label={`${name} views`}
         marker="data-machine-tab"
+        className="kt-utabs--stack"
       />
 
       {reach.kind === 'offline' ? (

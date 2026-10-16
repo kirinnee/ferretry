@@ -474,20 +474,25 @@ describe('the agent tools, through the production composition root', () => {
     );
     const pages = await result(await tool(hadiCapability, { tool: 'browser.list' }));
 
-    // The machine's switch, turned off in its real configuration document, refuses the agent on the very
-    // next call — on the tools and on the ordinary terminal route alike — and never the person.
-    await mkdir(join(daemon.home, 'fleet'), { recursive: true });
-    await writeFile(
-      join(daemon.home, 'fleet', 'config.yaml'),
-      'version: 2\nmachine:\n  agentControl:\n    terminals: false\n',
-    );
+    // The machine's switch, turned off in its real configuration file, refuses the agent on the very
+    // next call — on the tools and on the ordinary terminal route alike — and never the person. Turning
+    // it off tightens, so it is in effect the moment it is saved.
+    await mkdir(join(daemon.home, 'config'), { recursive: true });
+    await writeFile(join(daemon.home, 'config', 'machine.yaml'), 'agentControl:\n  terminals: false\n');
     const switchedOff = await tool(hadiCapability, { tool: 'terminal.list' });
     const browserStillOn = await tool(hadiCapability, { tool: 'browser.list' });
     const peerRoute = await fetch(`${daemon.base}/v1/sessions/${hadi}/terminals`, {
       headers: { ...daemon.human, 'x-ferretry-session-id': hadi },
     });
     const personRoute = await fetch(`${daemon.base}/v1/sessions/${hadi}/terminals`, { headers: daemon.human });
-    await rm(join(daemon.home, 'fleet', 'config.yaml'));
+    // Deleting the file turns it back ON, which loosens: held until the owner confirms it from this machine.
+    await rm(join(daemon.home, 'config', 'machine.yaml'));
+    const stillOff = await tool(hadiCapability, { tool: 'terminal.list' });
+    const confirmed = await fetch(`${daemon.base}/v1/config/confirm`, {
+      method: 'POST',
+      headers: daemon.human,
+      body: JSON.stringify({ path: 'machine.yaml', etag: 'absent' }),
+    });
     const switchedOn = await tool(hadiCapability, { tool: 'terminal.list' });
 
     // Marin's session ends: its credential proves nothing any more, and its pages close.
@@ -563,6 +568,8 @@ describe('the agent tools, through the production composition root', () => {
     should(browserStillOn.status).equal(200);
     should(peerRoute.status).equal(403);
     should(personRoute.status).equal(200);
+    should(stillOff.status).equal(403);
+    should(await confirmed.json()).deepEqual({ path: 'machine.yaml', confirmed: true });
     should(switchedOn.status).equal(200);
 
     // A stopped session.

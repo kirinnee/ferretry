@@ -1052,6 +1052,9 @@ export function SessionChatPage({
                   <ComposerRuntime
                     busy={runtimeSwitchBusy}
                     canControl={canControl}
+                    // A phone keeps the thumb-reach sheet; anything with a pointer and room
+                    // gets a small menu at the chip instead of a window-wide panel.
+                    presentation={formFactor === 'phone' ? 'sheet' : 'popover'}
                     renderEffortControls={lifecycle => (
                       <RuntimeEffortControls
                         api={runtimeApi}
@@ -1091,8 +1094,10 @@ export function SessionChatPage({
     // workspace and whatever a later item renders here — reads references through this one surface.
     <ReferenceSurfaceProvider surface={references}>
       <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+      {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
+          composer could scroll the whole session sideways and leave the header off the left edge. */}
       <main
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
         data-daemon={connection.daemonId}
         data-session={session.config.id}
       >

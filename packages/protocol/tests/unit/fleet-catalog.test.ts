@@ -153,7 +153,7 @@ const cases: readonly SchemaCase[] = [
       setUp: false,
       agentPermissions: 'skip',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' }],
       runtimeCount: 0,
       runningSessions: 2,
@@ -168,7 +168,7 @@ const cases: readonly SchemaCase[] = [
   {
     name: 'FleetAgentControlSchema',
     schema: catalog.FleetAgentControlSchema,
-    value: { terminals: true, browsers: false, files: true },
+    value: { terminals: true, browsers: false, files: true, ferretrySettings: true },
   },
   { name: 'FleetEnvEntrySchema', schema: catalog.FleetEnvEntrySchema, value: { name: 'API_KEY', hidden: true } },
   { name: 'FleetComponentDetailSchema', schema: catalog.FleetComponentDetailSchema, value: component.detail },
@@ -310,6 +310,12 @@ describe('the account-model catalogue wire contract', () => {
         kind: 'machine.settings',
         agentPermissions: 'auto',
         defaultRuntime: 'claude-default',
+        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      },
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
         agentControl: { terminals: true, browsers: true, files: true },
       },
       { kind: 'setup.import', acceptedUpdates: ['instructions/main'], addDuplicates: true },
@@ -328,6 +334,33 @@ describe('the account-model catalogue wire contract', () => {
 
     // Assert
     should(parsed).deepEqual(changes.map(() => true));
+  });
+
+  it('should require ferretrySettings in what a machine reports, and leave it optional in what a client sends', () => {
+    // Arrange
+    const sent = { kind: 'machine.settings', agentPermissions: 'auto', defaultRuntime: null };
+    const control = { terminals: true, browsers: true, files: true };
+
+    // Act
+    const withoutOnSend = catalog.FleetAccountChangeSchema.safeParse({ ...sent, agentControl: control });
+    const withOnSend = catalog.FleetAccountChangeSchema.safeParse({
+      ...sent,
+      agentControl: { ...control, ferretrySettings: true },
+    });
+
+    // Assert — a client that predates the switch leaves it as it is; a machine always states it.
+    should(withoutOnSend.success).be.true();
+    should(withoutOnSend.success && 'agentControl' in withoutOnSend.data && withoutOnSend.data.agentControl).deepEqual(
+      control,
+    );
+    should(withOnSend.success).be.true();
+    assertRejects([
+      rejects('a machine report that omits ferretrySettings', catalog.FleetAgentControlSchema, control),
+      rejects('a send that makes ferretrySettings a string', catalog.FleetAccountChangeSchema, {
+        ...sent,
+        agentControl: { ...control, ferretrySettings: 'yes' },
+      }),
+    ]);
   });
 
   it('should refuse a component name with a slash, a file path in a change, and an unknown field', () => {

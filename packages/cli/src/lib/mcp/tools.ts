@@ -2,6 +2,7 @@ import {
   AGENT_TOOL_DEFAULT_WAIT_MS,
   AGENT_TOOL_MAX_READ_LINES,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
+  type AgentConfigToolName,
   type AgentToolName,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
@@ -176,5 +177,52 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     tool: 'browser.close',
     description: 'Close a page.',
     inputSchema: object({ name: NAME }, ['name']),
+  },
+];
+
+const CONFIG_PATH = {
+  type: 'string',
+  description:
+    'A file, relative to the configuration directory: machine.yaml, warden.yaml, learning.yaml, voice.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml.',
+};
+const CONFIG_TEXT = {
+  type: 'string',
+  description:
+    'The whole file, as YAML. Never a secret value: write ${secret:NAME} and ask the owner to store the value.',
+};
+
+/**
+ * The `config.*` tools (docs/config-files.md): this machine's configuration files, read, checked and
+ * written. Refused unless the owner turned on "What agents may control › Ferretry settings"; even then a
+ * write that loosens what the machine allows waits for the owner's confirmation.
+ */
+export const MCP_CONFIG_TOOLS: readonly (McpToolDefinition & { readonly configTool: AgentConfigToolName })[] = [
+  {
+    name: 'config_read',
+    configTool: 'config.read',
+    description:
+      'Read this machine’s Ferretry configuration: with no path, every file and every problem; with a path, that file’s text and its etag (pass the etag back to config_write).',
+    inputSchema: object({ path: CONFIG_PATH }),
+  },
+  {
+    name: 'config_validate',
+    configTool: 'config.validate',
+    description:
+      'Check a configuration file’s text as if it were written, without writing it. Answers each problem with its line and the fix.',
+    inputSchema: object({ path: CONFIG_PATH, text: CONFIG_TEXT }, ['path', 'text']),
+  },
+  {
+    name: 'config_write',
+    configTool: 'config.write',
+    description:
+      'Write a configuration file. Refused unless it checks. A change that loosens what the machine may spend or what agents may do is written but waits for the owner to confirm it; tell the owner.',
+    inputSchema: object(
+      {
+        path: CONFIG_PATH,
+        text: CONFIG_TEXT,
+        etag: { type: 'string', description: 'The etag config_read gave you, so a newer edit is never overwritten.' },
+      },
+      ['path', 'text'],
+    ),
   },
 ];

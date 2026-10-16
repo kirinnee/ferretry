@@ -166,6 +166,7 @@ describe('shared settings catalog', () => {
       warden: '/d/daemon-beta/settings#warden',
       security: '/d/daemon-beta/settings#security',
       'resource-limits': '/d/daemon-beta/settings#resource-limits',
+      files: '/d/daemon-beta/settings#files',
     });
     for (const href of Object.values(hrefs)) expect(href).not.toContain('#daemons');
   });

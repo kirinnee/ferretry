@@ -33,7 +33,8 @@ import {
   HealthViewSchema,
   type ProjectInfo,
   type SessionStatus,
-  type WardenVerdictsView,
+  type WardenAttentionView,
+  type WardenStatusView,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 // `chooseConnection` is aliased so the relay's carrier choice reads as what it is here: a
@@ -73,6 +74,7 @@ import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
+import { attentionItem, wardenAttention, wardenInvestigation, wardenStatus } from '../support/warden.ts';
 
 /*
  * REAL FINGERPRINTS, because every daemon request rides a session now and a session is checked
@@ -375,8 +377,10 @@ interface ShellOptions {
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
   /** Complete Attention board returned by this daemon/session route. */
   readonly attention?: (sessionId: string) => AttentionSnapshot;
-  /** The recent Warden-report index, deliberately supplied by the paired daemon. */
-  readonly wardenVerdicts?: () => Promise<WardenVerdictsView>;
+  /** The Warden status this daemon answers; the default is a quiet, freshly swept one. */
+  readonly wardenStatus?: () => Promise<WardenStatusView>;
+  /** The "who needs you" feed this daemon answers; the default is a clean sweep. */
+  readonly wardenAttention?: () => Promise<WardenAttentionView>;
   /** The durable project registry this daemon answers `/v1/projects` with. */
   readonly projects?: readonly ProjectInfo[];
   /** The runtimes `GET /v1/fleet/runtimes` answers with. */
@@ -560,9 +564,20 @@ const appStore = async (
             signal?.addEventListener('abort', finish(resolve), { once: true });
           });
         },
-        wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
-        wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
-        wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,
+        wardenStatus: async () =>
+          options.wardenStatus === undefined
+            ? wardenStatus({ fingerprint: 'alpha-fingerprint' })
+            : await options.wardenStatus(),
+        wardenVerdicts: async () => [],
+        wardenAttention: async () =>
+          options.wardenAttention === undefined ? wardenAttention() : await options.wardenAttention(),
+        wardenRun: async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [] }),
+        wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
+          sessionId,
+          state: 'queued' as const,
+          message: 'Queued for an investigation.',
+        }),
+        wardenReport: async (reportPath: string) => `# Evidence from ${reportPath} on ${connection.daemonId}`,
         foreignHistory: async () => ({ conversations: [], skipped: [] }),
         foreignHistoryConversation: async () => ({
           conversation: {
@@ -712,7 +727,7 @@ const SET_UP_SHELL: ShellOptions = {
       setUp: true,
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
       runtimeCount: 1,
       runningSessions: 0,
@@ -731,7 +746,7 @@ const NOT_SET_UP = {
     setUp: false,
     agentPermissions: 'auto',
     defaultRuntime: null,
-    agentControl: { terminals: true, browsers: true, files: true },
+    agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
     tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
     runtimeCount: 0,
     runningSessions: 0,
@@ -2247,7 +2262,45 @@ describe('AppShell', () => {
     });
   });
 
-  it('keeps Warden evidence daemon-bound, opens the complete report, and calls a failed refresh stale', async () => {
+  it('opens a finished investigation’s complete report through the daemon that ran it', async () => {
+    // Arrange
+    const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], {
+      wardenStatus: async () =>
+        wardenStatus({
+          lastSweepAt: '2026-07-31T11:59:00.000Z',
+          investigations: [
+            wardenInvestigation({
+              id: 'warden-a',
+              state: 'done',
+              targetSession: 'session-a',
+              verdict: 'needs_human',
+              reportPath: '/state/warden/reports/session-a.md',
+            }),
+          ],
+        }),
+    });
+    try {
+      await settle();
+      const report = must(
+        [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+          button => button.textContent === 'Report',
+        ),
+        'the investigation’s Report button',
+      );
+
+      // Act
+      await interact(() => report.click());
+      await settle();
+
+      // Assert
+      expect(view.container.textContent).toContain(`Evidence from /state/warden/reports/session-a.md on ${ALPHA}`);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('keeps who needs you after a failed refresh, but calls it stale rather than an all-clear', async () => {
+    // Arrange
     let reads = 0;
     // EVERY half-minute refresh on the page, run together: the sessions bar keeps its own list fresh on
     // an interval too, and which of the Warden page's own timers registers last is a mount-order detail
@@ -2261,51 +2314,34 @@ describe('AppShell', () => {
       return 1;
     });
     const restoreClearInterval = patchGlobal(globalThis, 'clearInterval', () => {});
-    const verdicts = async (): Promise<WardenVerdictsView> => {
+    const attention = async (): Promise<WardenAttentionView> => {
       reads += 1;
-      if (reads > 1) throw new Error('report index is temporarily unavailable');
-      return [
-        {
-          at: '2026-07-31T11:58:00.000Z',
-          targetSession: 'session-a',
-          verdict: 'needs_human',
-          reportPath: '/state/warden/reports/session-a.md',
-        },
-      ];
+      if (reads > 1) throw new Error('the feed is temporarily unavailable');
+      return wardenAttention({ outcome: 'items', items: [attentionItem({ sessionId: 'session-a' })] });
     };
 
     try {
-      const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], { wardenVerdicts: verdicts });
-      await settle();
+      const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], { wardenAttention: attention });
+      try {
+        await settle();
+        expect(view.container.textContent).toContain('Which relay? — Waiting for your answer.');
 
-      const open = must(
-        view.container.querySelector<HTMLButtonElement>('button[aria-label="Open Warden report for session-a"]'),
-        'the Warden report row',
-      );
-      await interact(() => open.click());
-      await settle();
-      expect(view.container.textContent).toContain('Evidence from /state/warden/reports/session-a.md');
+        // Act
+        await interact(() => poll());
+        await settle();
 
-      await interact(() => poll());
-      await settle();
-      expect(view.container.textContent).toContain('The latest report check failed; showing the last verified index.');
-      await view.unmount();
+        // Assert
+        expect(view.container.textContent).toContain(
+          'Can’t refresh who needs you (the feed is temporarily unavailable)',
+        );
+        expect(view.container.textContent).toContain('Which relay? — Waiting for your answer.');
+        expect(view.container.textContent).not.toContain('Nothing is waiting on you right now.');
+      } finally {
+        await view.unmount();
+      }
     } finally {
       restoreClearInterval();
       restoreInterval();
-    }
-  });
-
-  it('calls an unreadable Warden index unavailable rather than presenting a healthy empty history', async () => {
-    const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], {
-      wardenVerdicts: async () => await Promise.reject(new Error('report index is unreadable')),
-    });
-    try {
-      await settle();
-      expect(view.container.textContent).toContain('Recent verdicts unavailable');
-      expect(view.container.textContent).toContain('will not present an empty history as evidence');
-    } finally {
-      await view.unmount();
     }
   });
 });
@@ -3838,7 +3874,7 @@ describe('the full-screen machine setup route', () => {
   });
 });
 
-/** The Warden page's verdict refresh cadence. */
+/** The Warden page's refresh cadence. */
 const WARDEN_REFRESH_MS = 30_000;
 
 describe('the sessions bar', () => {

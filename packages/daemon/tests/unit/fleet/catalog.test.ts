@@ -404,7 +404,7 @@ describe('machineView', () => {
       setUp: true,
       agentPermissions: 'skip',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       tools: [
         { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
         { harness: 'codex', label: 'Codex', installed: true, command: '/usr/local/bin/codex' },

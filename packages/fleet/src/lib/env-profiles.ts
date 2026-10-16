@@ -9,7 +9,7 @@
  * - **No function here returns a credential to a caller that shows it.** {@link resolveSecretEnvironment}
  *   builds the map that goes straight into one child's environment and is handed to nothing else;
  *   every other function answers in names and origins.
- * - **The configuration holds a reference, never a value.** A `config.yaml` copied to another machine
+ * - **The configuration holds a reference, never a value.** A configuration file copied to another machine
  *   names `WORK_KEY`; it does not carry it.
  *
  * If that makes some surface awkward, the surface is what changes. A getter added so a screen could

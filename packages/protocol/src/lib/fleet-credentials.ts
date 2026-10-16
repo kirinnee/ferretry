@@ -148,7 +148,7 @@ export type FleetCredentialView = z.infer<typeof FleetCredentialViewSchema>;
  * Every credential on this machine.
  *
  * `format` is the config document's version, which is always the account model: a machine whose
- * config.yaml is still the old account format is refused as unreadable rather than listed.
+ * retired single-file config.yaml is still there is refused as unreadable rather than listed.
  */
 export const FleetCredentialListSchema = z.strictObject({
   format: z.literal(2),

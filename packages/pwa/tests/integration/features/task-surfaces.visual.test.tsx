@@ -15,6 +15,9 @@
  * attributes and the fieldset/ul elements that carry them). Those carry no
  * rendered box, and where the element itself differs the port adds the reset
  * that keeps the box identical — which is exactly what this test proves.
+ *
+ * The fleet-checks strip (`WardenStrip`) was pinned here too until the owner retired that pin with the
+ * Warden redesign: it now speaks the Warden page's vocabulary, so it no longer looks like kteam's.
  */
 
 import { afterAll, beforeAll, describe, it } from 'bun:test';
@@ -22,9 +25,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { ShieldAlert } from 'lucide-react';
 import { Bot, FileText, GitPullRequest } from 'lucide-react';
-import type { TaskLive, TaskStatus, TaskSummary, WardenStatusView } from '@ferretry/protocol';
+import type { TaskLive, TaskStatus, TaskSummary } from '@ferretry/protocol';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
@@ -33,19 +35,10 @@ import { TaskRow, TaskQuickSummary } from '../../../src/features/tasks/task-row.
 import { TASK_BOARD_LANE_META, taskBoardLane, taskReference } from '../../../src/features/tasks/task-board-model.ts';
 import { TASK_STATUS_META, taskStatusCounts } from '../../../src/features/tasks/task-presentation.ts';
 import { TaskStatusFilter } from '../../../src/features/tasks/task-status-filter.tsx';
-import { WardenStrip } from '../../../src/features/warden/warden-strip.tsx';
-import {
-  wardenAccountLabel,
-  wardenAccountTitle,
-  wardenAnomalyCountLabel,
-  wardenAnomalyDigest,
-} from '../../../src/features/warden/warden-status-model.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
-import { relativeTime } from '../../../src/lib/session-screens.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
 const packageDir = resolve(import.meta.dir, '../../..');
-const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const alpha = daemonId('daemon-alpha');
 
 // ─── fixtures ────────────────────────────────────────────────────────────────
@@ -118,44 +111,6 @@ const blockedTask = task({
 const TASKS = [working, blockedTask, task({ id: 'C3', kind: 'chore', phase: 'done', status: 'done' })];
 const COUNTS = taskStatusCounts(TASKS);
 const SELECTED: ReadonlySet<TaskStatus> = new Set<TaskStatus>(['blocked']);
-
-const warden: WardenStatusView = {
-  config: {
-    enabled: true,
-    accounts: [{ agent: 'claude-auto-loge' }],
-    failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-    providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 40 },
-    intervalMinutes: 5,
-    unattendedMinutes: 20,
-    minSpawnGapMinutes: 10,
-    susThinkingSeconds: 600,
-    susSubprocessSeconds: 900,
-    maxAssignedWardens: 2,
-    assignedCooldownMinutes: 15,
-    blessMinutes: 30,
-  },
-  lastSweepAt: '2026-07-31T11:57:00.000Z',
-  anomalies: [
-    { kind: 'sus_thinking', sessionId: 'sess-1', status: 'thinking', detail: 'thinking for 14m', teammate: 'ms-98' },
-  ],
-  fingerprint: 'visual',
-  liveWarden: 'sess-9',
-  failover: {
-    policy: 'fallback',
-    failureThreshold: 3,
-    cooldownMinutes: 30,
-    accounts: [
-      { agent: 'claude-auto-loge', eligible: true },
-      { agent: 'codex-auto-terra', eligible: false, reason: 'at limit' },
-    ],
-    lastSelection: {
-      agent: 'claude-auto-loge',
-      policy: 'fallback',
-      at: '2026-07-31T11:00:00.000Z',
-      reason: 'first eligible',
-    },
-  },
-};
 
 // ─── verbatim kteam references ───────────────────────────────────────────────
 
@@ -317,48 +272,6 @@ function OriginalQuickSummary({ entry }: { entry: TaskSummary }) {
   );
 }
 
-/** `ui/src/components/WardenStrip.tsx`, transcribed. */
-function OriginalWardenStrip() {
-  const digest = wardenAnomalyDigest(warden.anomalies);
-  const accounts = warden.failover?.accounts ?? [];
-  return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-soft bg-surface-2 px-3 py-2 text-[12px]">
-      <span className="inline-flex items-center gap-1.5 font-medium text-fg-soft">
-        <ShieldAlert size={14} className="text-warn" aria-hidden="true" />
-        Fleet checks
-      </span>
-      <span className="text-border">·</span>
-      <span className="mono text-muted">last sweep {relativeTime(warden.lastSweepAt, NOW)}</span>
-      <span className="text-border">·</span>
-      <span className="mono font-medium text-warn">{wardenAnomalyCountLabel(digest.count)}</span>
-      <span className="text-border">·</span>
-      <span className="mono text-faint">every {warden.config.intervalMinutes}m</span>
-      <span className="text-border">·</span>
-      <span className="mono text-accent">warden live</span>
-      <span className="text-border">·</span>
-      <span className="inline-flex flex-wrap items-center gap-1">
-        {accounts.map(account => (
-          <span
-            key={account.agent}
-            title={wardenAccountTitle(account)}
-            className={
-              account.eligible
-                ? 'mono rounded-control bg-ok/10 px-1.5 py-0.5 text-ok'
-                : 'mono rounded-control bg-warn/10 px-1.5 py-0.5 text-warn'
-            }
-          >
-            {wardenAccountLabel(account)}
-            {account.agent === warden.failover?.lastSelection?.agent ? ' ●' : ''}
-          </span>
-        ))}
-      </span>
-      <span className="mono ml-auto min-w-0 truncate text-faint" title={digest.detail}>
-        {digest.summary}
-      </span>
-    </div>
-  );
-}
-
 // ─── page assembly ───────────────────────────────────────────────────────────
 
 function Port() {
@@ -369,7 +282,6 @@ function Port() {
         <TaskRow daemonId={alpha} key={entry.id} onOpen={() => {}} task={entry} />
       ))}
       <TaskQuickSummary task={blockedTask} />
-      <WardenStrip now={NOW} status={warden} />
     </>
   );
 }
@@ -382,7 +294,6 @@ function Reference() {
         <OriginalTaskRow entry={entry} key={entry.id} />
       ))}
       <OriginalQuickSummary entry={blockedTask} />
-      <OriginalWardenStrip />
     </>
   );
 }

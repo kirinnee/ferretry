@@ -24,22 +24,25 @@
  *
  * ## One document
  *
- * The machine's `config.yaml` names its credentials and their stores directly. One still in the old
- * account format is refused as unreadable, with the sentence that says how to set the machine up again.
+ * The machine's configuration files name its credentials and their stores directly. A retired
+ * single-file `fleet/config.yaml` is refused as unreadable, with the sentence that says how to set the
+ * machine up again.
  */
+
+import { dirname, join } from 'node:path';
 import {
   type AccountModel,
-  type CodexStoreResolution,
-  CREDENTIAL_STATUS_LABELS,
-  type ClaudeStoreResolution,
   CLAUDE_SECURE_STORAGE_VARIABLE,
+  type ClaudeStoreResolution,
   CODEX_CREDENTIAL_STORE_FILE,
   CODEX_CREDENTIAL_STORE_KEY,
+  type CodexStoreResolution,
+  CREDENTIAL_STATUS_LABELS,
   type Credential,
   type CredentialStatusReason,
   type CredentialStatusView,
-  type CredentialStoreResolution,
   type CredentialStorePaths,
+  type CredentialStoreResolution,
   type CredentialSubject,
   type CredentialUsage,
   type FleetUsageWindow,
@@ -59,7 +62,6 @@ import {
   type FleetCredentialView,
   FleetCredentialViewSchema,
 } from '@ferretry/protocol';
-import { dirname, join } from 'node:path';
 import type { CallerGovernance } from '../api/capability.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────

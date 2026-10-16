@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { setUpFerretrySkill } from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
-import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
+import { type AnalyticsResponse, CONFIG_DIRECTORY_NAME, type IFyApiClient, type SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -12,6 +13,8 @@ import root from '../../../package.json' with { type: 'json' };
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
+import { FileConfigFiles } from '../src/adapters/config/files';
+import { StdinConfigText } from '../src/adapters/config/stdin';
 import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
@@ -62,6 +65,9 @@ import {
   registerTerminalCommands,
 } from '../src/lib/agent-tools';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { registerConfigCommands } from '../src/lib/config/commands';
+import { ConfigController } from '../src/lib/config/controller';
+import { ProtocolConfigGateway } from '../src/lib/config/gateway';
 import { McpServer, registerMcpCommands } from '../src/lib/mcp';
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
@@ -642,7 +648,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     // whose credential is in its environment. Stdout carries nothing but protocol.
     registerMcpCommands(program, async () => {
       await serveMcpOverStdio(
-        new McpServer(toolsClient, { name: PRODUCT_NAME, version: assertSemver(pkg.version) }),
+        new McpServer(toolsClient, {
+          name: PRODUCT_NAME,
+          version: assertSemver(pkg.version),
+          instructions: setUpFerretrySkill(BINARY_NAME),
+        }),
         Bun.stdin.stream(),
         line => {
           process.stdout.write(line);
@@ -654,6 +664,22 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
   ({ program, world, client }) =>
     registerSttCommands(program, new SttController(new ProtocolSttGateway(client), world.io)),
+  // `fy config` (docs/config-files.md): check, find and confirm the configuration files. `check`,
+  // `path`, `schema` and `guide` read the files directly, so they work with the daemon stopped.
+  ({ program, world, client }) => {
+    const stateHome = resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME);
+    registerConfigCommands(
+      program,
+      new ConfigController(
+        new FileConfigFiles(join(stateHome, CONFIG_DIRECTORY_NAME), join(stateHome, 'state')),
+        new ProtocolConfigGateway(client),
+        world.io,
+        BINARY_NAME,
+        text => new Bun.CryptoHasher('sha256').update(text).digest('hex'),
+        new StdinConfigText(),
+      ),
+    );
+  },
   ({ program, world, client }) =>
     registerWorktreeCommands(
       program,

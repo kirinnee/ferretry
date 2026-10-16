@@ -113,7 +113,7 @@ describe('InfoUsage — Tokens', () => {
     });
     const root = await show({ analytics: { kind: 'ready', response: aggregateResponse([full]) } });
     const tokens = must(root.querySelector('[data-info-row="Tokens"]'), 'tokens row');
-    expect(tokens.textContent).toContain('in 12.4k · out 800 · cache 3.1M');
+    expect(tokens.textContent).toContain('in 12.4K · out 800 · cache 3.1M');
   });
 });
 

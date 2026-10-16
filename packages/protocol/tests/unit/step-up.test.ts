@@ -207,6 +207,24 @@ describe('the passkey step-up wire', () => {
     ]);
   });
 
+  it('should accept every act a step-up can be proved for, loosening a configuration file included', () => {
+    // Arrange
+    const acts = Object.values(stepUp.STEP_UP_ACTS);
+
+    // Act
+    const actual = acts.map(
+      act => stepUp.StepUpDemandSchema.safeParse({ capability: 'fleet', axis: 'configure', act }).success,
+    );
+
+    // Assert
+    should(acts).containEql('loosen-config');
+    should(stepUp.STEP_UP_ACTS.loosenConfig).equal('loosen-config');
+    should(actual).deepEqual(acts.map(() => true));
+    should(
+      stepUp.StepUpDemandSchema.safeParse({ capability: 'fleet', axis: 'configure', act: 'loosen-everything' }).success,
+    ).be.false();
+  });
+
   it('should spell a refusal code per reason, and the grant refusal the way the grant layer does', () => {
     should(stepUp.STEP_UP_REFUSALS.map(stepUp.stepUpRefusalCode)).deepEqual([
       'step_up_not_a_device',

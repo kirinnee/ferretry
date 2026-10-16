@@ -15,11 +15,12 @@
 import { afterEach, describe, it } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildFleetManifest } from '@ferretry/fleet';
+import { buildFleetManifest, parseAccountModel } from '@ferretry/fleet';
 import { SecretListSchema } from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
+import { writeModelFiles } from '../fleet/config-files-fixture.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const ACCOUNT = '00000000-0000-4000-8000-0000000000f1';
@@ -105,32 +106,18 @@ async function seedProfiledFleet(home: string): Promise<string> {
     { mode: 0o600 },
   );
 
-  await writeFile(
-    join(home, 'fleet', 'config.yaml'),
-    [
-      'version: 2',
-      'credentials:',
-      '  work:',
-      '    harness: claude',
-      '    store: environment',
-      '    env:',
-      '      ANTHROPIC_API_KEY: "${secret:WORK_KEY}"',
-      'components:',
-      '  modelSets:',
-      '    opus:',
-      '      models: [claude-opus-5]',
-      '      default: claude-opus-5',
-      'profiles:',
-      '  default:',
-      '    layers: [modelSets/opus]',
-      'runtimes:',
-      `  ${WRAPPER}:`,
-      '    credential: work',
-      '    profile: default',
-      '    agent: true',
-      '',
-    ].join('\n'),
-    { mode: 0o600 },
+  // The configuration, as its per-file layout under config/ (docs/config-files.md).
+  await writeModelFiles(
+    join(home, 'config'),
+    parseAccountModel({
+      version: 2,
+      credentials: {
+        work: { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } },
+      },
+      components: { modelSets: { opus: { models: ['claude-opus-5'], default: 'claude-opus-5' } } },
+      profiles: { default: { layers: ['modelSets/opus'] } },
+      runtimes: { [WRAPPER]: { credential: 'work', profile: 'default', agent: true } },
+    }),
   );
   return executable;
 }

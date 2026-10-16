@@ -1554,6 +1554,104 @@ describe('FileFleetProvisioner rollback', () => {
     should(await readFile(document, 'utf8')).equal('be brief\n');
   });
 
+  it('should delete a document whose write says remove, whatever its content says', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const document = path.join(root, 'fleet', 'config', 'profiles', 'old.yaml');
+    const kept = path.join(root, 'fleet', 'config', 'profiles', 'kept.yaml');
+    await mkdir(path.dirname(document), { recursive: true });
+    await writeFile(document, 'contents: []\n');
+    await writeFile(kept, 'contents: []\n');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply(plan, [{ path: document, content: 'ignored: true\n', mode: 0o600, remove: true }]);
+
+    // Assert
+    should(await Bun.file(document).exists()).be.false();
+    should(await readFile(kept, 'utf8')).equal('contents: []\n');
+    await assertNoResidue(root);
+  });
+
+  it('should delete a document only when it still has the digest the removal was composed against', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const document = path.join(root, 'fleet', 'config', 'runtimes', 'work.yaml');
+    const text = 'credential: you\nprofile: default\n';
+    await mkdir(path.dirname(document), { recursive: true });
+    await writeFile(document, text);
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+    const subject = new FileFleetProvisioner([root]);
+    const digest = new Bun.CryptoHasher('sha256').update(text).digest('hex');
+
+    // Act
+    const refused = await failureOf(
+      subject.apply(plan, [{ path: document, content: '', mode: 0o600, remove: true, expect: 'a-stale-digest' }]),
+    );
+    const afterRefusal = await readFile(document, 'utf8');
+    await subject.apply(plan, [{ path: document, content: '', mode: 0o600, remove: true, expect: digest }]);
+
+    // Assert — a stale removal leaves the edited file alone; the current digest removes it.
+    should(refused.kind).equal('rolled-back');
+    should(refused.kind === 'rolled-back' && refused.reason).match(/not what this change was composed against/u);
+    should(afterRefusal).equal(text);
+    should(await Bun.file(document).exists()).be.false();
+  });
+
+  it('should treat removing a document that is already gone as nothing to do', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const document = path.join(root, 'fleet', 'config', 'profiles', 'gone.yaml');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply(plan, [{ path: document, content: '', mode: 0o600, remove: true, expect: 'absent' }]);
+
+    // Assert
+    should(await Bun.file(document).exists()).be.false();
+    await assertNoResidue(root);
+  });
+
+  it('should put a removed document back, byte for byte, when a later step of the apply fails', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const document = path.join(root, 'fleet', 'config', 'logins', 'work.yaml');
+    const blocker = path.join(root, 'blocker');
+    const original = '# my login\nharness: claude\nstore: host # shared\n';
+    await mkdir(path.dirname(document), { recursive: true });
+    await writeFile(document, original, { mode: 0o640 });
+    await writeFile(blocker, 'blocker\n');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [poisonAfter(blocker)],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    const actual = await failureOf(subject.apply(plan, [{ path: document, content: '', mode: 0o600, remove: true }]));
+
+    // Assert — a removal is rolled back with the fleet it was part of.
+    should(actual.kind).equal('rolled-back');
+    should(await readFile(document, 'utf8')).equal(original);
+    should((await stat(document)).mode & 0o7777).equal(0o640);
+    await assertNoResidue(root);
+  });
+
   it('should refuse to overwrite a destination that changed after this apply wrote it', async () => {
     // Arrange
     const root = await temporaryDirectory();

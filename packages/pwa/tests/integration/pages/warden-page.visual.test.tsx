@@ -1,17 +1,11 @@
 import { describe, it } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { ShieldCheck } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import {
-  type WardenConfigurationProps,
-  WardenPage,
-  type WardenPageSlots,
-  type WardenSurfaceProps,
-} from '../../../src/lib/pages/warden-page.tsx';
+import { WardenPage, type WardenSurfaceProps } from '../../../src/lib/pages/warden-page.tsx';
 import { sharedChromium } from '../support/chromium.ts';
 
 const fixtureCss = String.raw`
@@ -34,6 +28,9 @@ const fixtureCss = String.raw`
   }
   * { box-sizing: border-box; }
   html, body, #root { width: 100%; height: 100%; margin: 0; }
+  #root { display: flex; flex-direction: column; }
+  .flex-1 { flex: 1 1 0%; }
+  .overscroll-contain { overscroll-behavior: contain; }
   body {
     overflow: hidden;
     background: var(--bg);
@@ -121,88 +118,40 @@ const connection = daemonConnection({
   deviceId: 'visual-only-token',
 });
 
-function AttentionSurface(_: WardenSurfaceProps) {
+/**
+ * A deterministic stand-in for the overview: the real body is proved in the unit suites. What this
+ * file proves is the page SHELL — one labelled scroll region that owns vertical scrolling, never a
+ * sideways scroll, a keyboard order that follows the reading order, and 44px touch targets on a phone.
+ */
+function OverviewSurface(_: WardenSurfaceProps) {
   return (
-    <section className="fixture-card">
-      <h2>Who needs you</h2>
-      <p>One agent needs a decision before it can continue.</p>
-      <div className="fixture-actions">
-        <button type="button" data-focus="attention">
-          Review request
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function StatusSurface(_: WardenSurfaceProps) {
-  return (
-    <section className="fixture-card">
-      <h2>Sweeps</h2>
-      <p>Last sweep completed just now · no stalled sessions.</p>
-      <div className="fixture-actions">
-        <button type="button" data-focus="refresh">
-          Run sweep
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function ConfigurationSurface({ id }: WardenConfigurationProps) {
-  return (
-    <section id={id} className="fixture-card">
-      <h2>Failover configuration</h2>
-      <p>Choose the account used when an agent reaches its quota.</p>
-      <div className="fixture-actions">
-        <input aria-label="Fallback account" data-focus="account" defaultValue="claude-auto-loge5" />
-        <button type="button" data-focus="save">
-          Save configuration
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function VerdictsSurface(_: WardenSurfaceProps) {
-  return (
-    <section className="fixture-card">
-      <h2>Recent verdicts</h2>
-      <p>LEAVE · healthy progress confirmed · 2 minutes ago.</p>
-      <div className="fixture-actions">
-        <a href="#config" data-focus="verdict">
-          View configuration
-        </a>
-      </div>
-    </section>
-  );
-}
-
-const slots: WardenPageSlots = {
-  Attention: AttentionSurface,
-  Status: StatusSurface,
-  Configuration: ConfigurationSurface,
-  Verdicts: VerdictsSurface,
-};
-
-/** Verbatim route-shell structure from the legacy Warden page, with deterministic surfaces. */
-function OriginalWardenReference() {
-  return (
-    <div className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-4">
-      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 py-2">
-        <div className="min-w-0">
-          <h1 className="m-0 flex items-center gap-sm font-display text-display font-bold tracking-display">
-            <ShieldCheck size={20} className="text-accent" aria-hidden="true" />
-            Warden
-          </h1>
-          <p className="mt-0.5 text-ui text-muted">Who needs you, then sweeps, accounts, and recent verdicts.</p>
+    <>
+      <section className="fixture-card">
+        <h2>Warden</h2>
+        <p>Jev guard ≥0.85 · every 2 min · swept 1 min ago</p>
+        <div className="fixture-actions">
+          <button type="button" data-focus="sweep">
+            Sweep now
+          </button>
+          <a href="#settings" data-focus="settings">
+            Settings
+          </a>
         </div>
-        <AttentionSurface connection={connection} />
-        <StatusSurface connection={connection} />
-        <ConfigurationSurface id="config" connection={connection} />
-        <VerdictsSurface connection={connection} />
-      </div>
-    </div>
+      </section>
+      <section className="fixture-card">
+        <h2>Needs you</h2>
+        <p>Maryah asked which relay fallback to use and is waiting for your answer.</p>
+        <div className="fixture-actions">
+          <input aria-label="Note for the investigation" data-focus="note" defaultValue="look at the pane" />
+          <button type="button" data-focus="investigate">
+            Investigate
+          </button>
+          <a href="#report" data-focus="report">
+            Report
+          </a>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -212,22 +161,19 @@ const documentFor = (body: string): string => `<!doctype html>
   <body><div id="root">${body}</div></body>
 </html>`;
 
-const targetDocument = documentFor(renderToStaticMarkup(<WardenPage connection={connection} slots={slots} />));
-const referenceDocument = documentFor(renderToStaticMarkup(<OriginalWardenReference />));
+const targetDocument = documentFor(
+  renderToStaticMarkup(<WardenPage connection={connection} slots={{ Overview: OverviewSurface }} />),
+);
 
 describe('Warden page visual contract', () => {
-  it('should match the original shell at mobile and desktop viewports', async () => {
+  it('should scroll in its own region, never sideways, in reading order and with phone-sized targets', async () => {
     const artifactDirectory = resolve(import.meta.dir, '../../../.artifacts/visual');
     await mkdir(artifactDirectory, { recursive: true });
     const browser = await sharedChromium();
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
-      fetch(request) {
-        const path = new URL(request.url).pathname;
-        const body = path === '/reference' ? referenceDocument : targetDocument;
-        return new Response(body, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-      },
+      fetch: () => new Response(targetDocument, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
     });
     try {
       for (const viewport of [
@@ -249,25 +195,28 @@ describe('Warden page visual contract', () => {
             await route.continue();
           });
           const page = await context.newPage();
-          await page.goto(new URL('/target', server.url).toString());
+          await page.goto(server.url.toString());
           const metrics = await page.evaluate<{
             innerWidth: number;
             scrollWidth: number;
             bodyOverflow: string;
             pageOverflowY: string;
+            label: string | null;
           }>(
             `({
               innerWidth: window.innerWidth,
               scrollWidth: document.documentElement.scrollWidth,
               bodyOverflow: getComputedStyle(document.body).overflow,
-              pageOverflowY: getComputedStyle(document.querySelector('#root > div')).overflowY,
+              pageOverflowY: getComputedStyle(document.querySelector('#root > main')).overflowY,
+              label: document.querySelector('#root > main').getAttribute('aria-label'),
             })`,
           );
           should(metrics.scrollWidth).be.belowOrEqual(metrics.innerWidth);
           should(metrics.bodyOverflow).equal('hidden');
           should(metrics.pageOverflowY).equal('auto');
+          should(metrics.label).equal('Warden');
 
-          const target = await page.screenshot({
+          await page.screenshot({
             path: resolve(artifactDirectory, `warden-target-${viewport.name}.png`),
             animations: 'disabled',
           });
@@ -277,7 +226,7 @@ describe('Warden page visual contract', () => {
             await page.keyboard.press('Tab');
             focusOrder.push(await page.locator(':focus').getAttribute('data-focus'));
           }
-          should(focusOrder).deepEqual(['attention', 'refresh', 'account', 'save', 'verdict']);
+          should(focusOrder).deepEqual(['sweep', 'settings', 'note', 'investigate', 'report']);
 
           if (viewport.name === 'mobile') {
             const controls = page.locator('button, input, a[data-focus]');
@@ -287,21 +236,14 @@ describe('Warden page visual contract', () => {
               should(box.height).be.aboveOrEqual(44);
             }
           } else {
-            const save = page.locator('[data-focus="save"]');
-            const saveBackground = `getComputedStyle(document.querySelector('[data-focus="save"]')).backgroundColor`;
-            const before = await page.evaluate<string>(saveBackground);
-            await save.hover();
-            await page.waitForFunction(`${saveBackground} !== ${JSON.stringify(before)}`);
-            const after = await page.evaluate<string>(saveBackground);
+            const sweep = page.locator('[data-focus="sweep"]');
+            const sweepBackground = `getComputedStyle(document.querySelector('[data-focus="sweep"]')).backgroundColor`;
+            const before = await page.evaluate<string>(sweepBackground);
+            await sweep.hover();
+            await page.waitForFunction(`${sweepBackground} !== ${JSON.stringify(before)}`);
+            const after = await page.evaluate<string>(sweepBackground);
             should(after).not.equal(before);
           }
-
-          await page.goto(new URL('/reference', server.url).toString());
-          const reference = await page.screenshot({
-            path: resolve(artifactDirectory, `warden-reference-${viewport.name}.png`),
-            animations: 'disabled',
-          });
-          should(target.equals(reference)).be.true();
         } finally {
           await context.close();
         }

@@ -1,12 +1,12 @@
 import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { DEFAULT_WARDEN_CONFIG } from '@ferretry/protocol';
 import should from 'should';
 import {
-  FileWardenConfigStore,
+  ConfigFileWardenConfigStore,
   FileWardenStateStore,
   NodeWardenReportFileSystem,
-  WARDEN_CONFIG_FILENAME,
   WARDEN_STATE_FILENAME,
 } from '../../../src/adapters/warden/index.ts';
 import {
@@ -16,6 +16,7 @@ import {
   parseWardenRuntimeState,
   type WardenRuntimeState,
 } from '../../../src/lib/warden/index.ts';
+import { configHome } from '../fleet/config-files-fixture.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /** A throwaway state home with nothing in it yet — the first-boot situation. */
@@ -120,53 +121,103 @@ describe('the durable warden state document', () => {
   });
 });
 
-describe('the warden configuration document', () => {
-  it('should read as absent on a state home that has never been configured', async () => {
+describe('the warden settings file', () => {
+  /** The configuration service, with every `writeOwn` counted. */
+  async function settings(label: string) {
+    const home = await configHome(await tempDirectory(label));
+    const writes: string[] = [];
+    const store = new ConfigFileWardenConfigStore({
+      load: async () => await home.service.load(),
+      writeOwn: async (file, text) => {
+        writes.push(file);
+        await home.service.writeOwn(file, text);
+      },
+    });
+    return { home, store, writes, file: path.join(home.paths.config, 'warden.yaml') };
+  }
+
+  it('should read the defaults on a state home that has never been configured, and write nothing', async () => {
     // Arrange
-    const { root, files } = await wardenHome('warden-config-absent');
+    const { store, writes, file } = await settings('warden-config-absent');
 
     // Act
-    const actual = await new FileWardenConfigStore(files, root).read();
+    const actual = await store.read();
+    await store.write(defaultWardenConfig);
 
     // Assert
+    should(actual).deepEqual(DEFAULT_WARDEN_CONFIG);
     should(parseStoredWardenConfig(actual)).deepEqual({ config: defaultWardenConfig, warnings: [] });
+    should(writes).deepEqual([]);
+    should(await Bun.file(file).exists()).be.false();
   });
 
-  it('should round-trip a configuration an operator changed', async () => {
+  it('should round-trip a configuration the owner changed, in effect at once even though it loosens', async () => {
     // Arrange
-    const { root, files } = await wardenHome('warden-config-roundtrip');
-    const store = new FileWardenConfigStore(files, root);
-    const configured = { ...defaultWardenConfig, enabled: true, intervalMinutes: 11 };
+    const { home, store, file } = await settings('warden-config-roundtrip');
+    const configured = { ...defaultWardenConfig, triage: 'llm' as const, intervalMinutes: 10 as const };
+
+    // Act
+    await store.write(configured);
+
+    // Assert — the owner's own act is acknowledged, never held as an unconfirmed loosening.
+    should(parseStoredWardenConfig(await store.read())).deepEqual({ config: configured, warnings: [] });
+    should((await home.service.load()).evaluation.pending).deepEqual([]);
+    should((await stat(file)).mode & 0o777).equal(0o600);
+  });
+
+  it('should read the version in effect, not the file: a hand edit that loosens is held', async () => {
+    // Arrange
+    const { home, store, file } = await settings('warden-config-held');
+    await writeFile(file, 'triage: llm\n', 'utf8');
+
+    // Act
+    const actual = await store.read();
+
+    // Assert
+    should(actual).deepEqual(DEFAULT_WARDEN_CONFIG);
+    should((await home.service.load()).evaluation.pending).match([{ path: 'warden.yaml' }]);
+  });
+
+  it('should keep the last good settings while the file is broken', async () => {
+    // Arrange
+    const { store, file } = await settings('warden-config-broken');
+    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const });
+    await writeFile(file, 'intervalMinutes: [not, a, number\n', 'utf8');
+
+    // Act
+    const actual = await store.read();
+
+    // Assert
+    should(actual).match({ intervalMinutes: 10 });
+  });
+
+  it("should change only the keys that moved, keeping the owner's comments", async () => {
+    // Arrange
+    const { store, file } = await settings('warden-config-comments');
+    await writeFile(file, '# how often the Warden looks\nintervalMinutes: 5\n', 'utf8');
+
+    // Act
+    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const });
+
+    // Assert
+    const text = await readFile(file, 'utf8');
+    should(text).containEql('# how often the Warden looks');
+    should(text).match(/intervalMinutes: 10/);
+    should(await store.read()).match({ intervalMinutes: 10 });
+  });
+
+  it('should write nothing when the settings did not change', async () => {
+    // Arrange
+    const { store, writes, file } = await settings('warden-config-unchanged');
+    const configured = { ...defaultWardenConfig, intervalMinutes: 10 as const };
+    await store.write(configured);
+    const before = await readFile(file, 'utf8');
 
     // Act
     await store.write(configured);
 
     // Assert
-    should(parseStoredWardenConfig(await store.read())).deepEqual({ config: configured, warnings: [] });
-  });
-
-  it('should live beside the state rather than inside the daemon configuration', async () => {
-    // Arrange
-    const { root, files } = await wardenHome('warden-config-location');
-
-    // Act
-    await new FileWardenConfigStore(files, root).write(defaultWardenConfig);
-
-    // Assert
-    should((await stat(path.join(root, WARDEN_CONFIG_FILENAME))).isFile()).be.true();
-  });
-
-  it('should surface a hand-edited document to the domain, which falls back and says so', async () => {
-    // Arrange
-    const { root, files } = await wardenHome('warden-config-invalid');
-    await mkdir(root, { recursive: true, mode: 0o700 });
-    await writeFile(path.join(root, WARDEN_CONFIG_FILENAME), JSON.stringify({ enabled: true }), 'utf8');
-
-    // Act
-    const actual = parseStoredWardenConfig(await new FileWardenConfigStore(files, root).read());
-
-    // Assert
-    should(actual.config.enabled).be.false();
-    should(actual.warnings).have.length(1);
+    should(writes).deepEqual(['warden.yaml']);
+    should(await readFile(file, 'utf8')).equal(before);
   });
 });

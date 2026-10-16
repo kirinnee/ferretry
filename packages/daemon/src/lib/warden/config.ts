@@ -3,23 +3,25 @@
  * anomaly, which accounts it may run a check on, and whether it may escalate to
  * an LLM at all.
  *
- * WHERE IT LIVES. In its own document inside the state home (`warden/config.json`),
- * not in `config/daemon.json`. kteam kept it in the one daemon config file and
- * paid for it: `updateWardenConfig` had to read-modify-write a document holding
- * every unrelated subsystem's settings, so a torn write to a warden field could
- * lose a host binding. Ferretry already keeps a document per subject — the
- * self-restart stamp, the health event log, the pin store — and this is one more.
+ * WHERE IT LIVES. In its own human-editable file, `config/warden.yaml`
+ * (docs/config-files.md), not in `config/daemon.json`. kteam kept it in the one
+ * daemon config file and paid for it: `updateWardenConfig` had to
+ * read-modify-write a document holding every unrelated subsystem's settings, so
+ * a torn write to a warden field could lose a host binding. The file holds only
+ * what the owner changed; the rest is {@link defaultWardenConfig}. An edit to it
+ * that turns spending on is held until the owner confirms it.
  *
- * WHAT `enabled` GATES. Only the LLM escalation. Detection is always on: the
- * anomaly list, the fingerprint and the failover status are deterministic and
- * cost nothing but a fleet read, so an operator who has not opted into spending
- * agent sessions still gets the evidence. That split is kteam's and it is the
- * reason the default is `false` — a fresh daemon must not start spending tokens
- * on its own.
+ * WHAT `enabled` AND `triage` GATE. Detection is always on: the anomaly list,
+ * the fingerprint and the failover status are deterministic and cost nothing but
+ * a fleet read. `enabled` is the owner's On/Off for everything after that, and
+ * `triage` decides whether a flag may cost anything at all: `rules` — the
+ * default — never spends, so a fresh daemon is on and watching without spending
+ * a token. Jev and LLM triage are each an explicit opt-in with a daily cap
+ * (`triage.ts`).
  *
  * TOLERANT ON READ, STRICT ON WRITE. A stored document that no longer validates
  * falls back to the defaults and SAYS SO in a warning, because the defaults are
- * the safe direction: `enabled: false` means a configuration the daemon cannot
+ * the safe direction: `triage: rules` means a configuration the daemon cannot
  * understand can never authorise a spawn. A PATCH is parsed strictly instead —
  * an operator naming a field that does not exist has made a mistake worth
  * refusing, not worth silently dropping.
@@ -28,29 +30,17 @@
  */
 
 import {
-  WardenConfigPatchSchema,
-  WardenConfigSchema,
+  DEFAULT_WARDEN_CONFIG,
+  mergeWardenConfig,
   type WardenConfig,
   type WardenConfigPatch,
+  WardenConfigPatchSchema,
+  WardenConfigSchema,
 } from '@ferretry/protocol';
 import type { WardenDetectOptions } from './detect.ts';
 import { normalizeWardenAccounts, type WardenAccount } from './failover.ts';
 
 export type { WardenConfig, WardenConfigPatch };
-
-/**
- * The account a warden runs on when nothing is configured.
- *
- * A warden JUDGES: it reads a suspect session's transcript and returns one
- * verdict. That is triage-tier work, so the default is the cheap mechanical
- * account rather than an expensive one — one Opus-class session per sweep is how
- * supervision becomes more expensive than the fleet it supervises.
- *
- * `model` is deliberately left UNSET on the default account. That wrapper
- * resolves the model aliases through its own environment, and pinning a raw
- * model id here would send an id its provider rejects.
- */
-export const DEFAULT_WARDEN_ACCOUNT = 'claude-auto-glm52a';
 
 /**
  * Floors applied when deriving milliseconds from configured minutes.
@@ -64,32 +54,9 @@ export const MINIMUM_SWEEP_INTERVAL_MS = 60_000;
 export const MINIMUM_UNATTENDED_MS = 60_000;
 export const MINIMUM_SUS_SECONDS = 60;
 
-/** The configuration a state home with no warden document behaves as. */
-export const defaultWardenConfig: WardenConfig = {
-  // OFF: detection still runs and the evidence is still served. Only the spend
-  // is opt-in.
-  enabled: false,
-  accounts: [{ agent: DEFAULT_WARDEN_ACCOUNT }],
-  failover: {
-    policy: 'fallback',
-    // Two, not the failover module's three: the usage feed corroborates quota
-    // and auth at the source, so the threshold only governs raw launch errors,
-    // and kteam settled on two for those.
-    failureThreshold: 2,
-    cooldownMinutes: 30,
-  },
-  providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 24 },
-  intervalMinutes: 5,
-  unattendedMinutes: 30,
-  minSpawnGapMinutes: 15,
-  susThinkingSeconds: 900,
-  susSubprocessSeconds: 900,
-  // ONE warden fleet-wide by default, counting the sweep warden. See
-  // `concurrency.ts`: both spawn sites draw down this single budget.
-  maxAssignedWardens: 1,
-  assignedCooldownMinutes: 30,
-  blessMinutes: 15,
-};
+/** The configuration a state home with no `warden.yaml` behaves as: escalation OFF, so a fresh
+ *  daemon never starts spending on its own. Detection still runs and the evidence is still served. */
+export const defaultWardenConfig: WardenConfig = DEFAULT_WARDEN_CONFIG;
 
 export interface StoredWardenConfig {
   readonly config: WardenConfig;
@@ -136,21 +103,17 @@ function issueSummary(issues: readonly { readonly path: readonly PropertyKey[]; 
 /**
  * Apply an operator patch, nested sections merged rather than replaced.
  *
- * `failover` and `providerOutage` merge one level deeper because both are
- * declared `.partial()` on the wire: an operator switching the policy must not
- * thereby reset the strike threshold to whatever a fresh object would carry.
+ * Every nested section — the guard, the caps, what the Warden may do alone, the
+ * events, the investigation, `failover` and `providerOutage` — merges one level
+ * deeper, because each is `.partial()` on the wire: an owner ticking one box must
+ * not thereby reset its siblings to whatever a fresh object would carry.
  *
  * The result is re-parsed through the full schema, so a merge cannot produce a
  * document the loader would later refuse — the bounds hold on the way out, not
  * only on the way in.
  */
 export function applyWardenConfigPatch(config: WardenConfig, patch: WardenConfigPatch): WardenConfig {
-  return WardenConfigSchema.parse({
-    ...config,
-    ...patch,
-    failover: { ...config.failover, ...(patch.failover ?? {}) },
-    providerOutage: { ...config.providerOutage, ...(patch.providerOutage ?? {}) },
-  });
+  return mergeWardenConfig(config, patch);
 }
 
 /** Parses a patch as an operator stated it, refusing unknown fields. */
@@ -180,7 +143,7 @@ export function wardenConfigWarnings(config: WardenConfig, installedAgents: read
       warnings.push('every configured warden account is missing from this host, so no check can run');
   }
   if (!config.enabled)
-    warnings.push('escalation is disabled (enabled=false); detection still runs and reports evidence');
+    warnings.push('the Warden is off (enabled=false); detection still runs, but nothing is triaged or acted on');
   return warnings;
 }
 

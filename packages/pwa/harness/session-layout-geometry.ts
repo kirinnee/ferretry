@@ -15,6 +15,11 @@
  *      chat — its text, its composer, its scroller — ends at the agent pane's right edge, and the pane
  *      itself overflows nothing. A centred surface sized to its content used to stay ~280px wide in a
  *      237px pane and draw the conversation underneath the terminal beside it.
+ *   4. A PHONE WITH WIDE CONTENT. At 390px, with a code block, a table, a long URL and a tool result in the
+ *      transcript, the chat column, the composer and every one of its buttons (Send among them) sit inside
+ *      the viewport, nothing scrolls sideways, and focusing the composer scrolls nothing sideways either.
+ *      The surface used to grow to its content (768-880px), which put Send at x=650 — no way to send a
+ *      message — and focusing the editor slid the whole session 81px off the left edge.
  *
  * Every theme family is measured for the two layout-shape checks (1 at Compact, 2 and 3), because a
  * family changes strokes, radii, paddings and type — exactly what moves an edge. The width arithmetic
@@ -40,8 +45,8 @@ const COLUMN_CAP: Readonly<Record<ChatWidth, number>> = {
 /** Sub-pixel rounding between two boxes laid out in one pass. */
 const EPSILON = 1;
 
-/** Per family: Compact at 1440 (width + tabs), and the split at 1100 (overlap + tabs). Plus four in Studio. */
-export const SESSION_LAYOUT_GEOMETRY_CHECKS = THEME_FAMILIES.length * 4 + 4;
+/** Per family: Compact at 1440 (width + tabs), the split at 1100 (overlap + tabs) and the wide phone. Plus four in Studio. */
+export const SESSION_LAYOUT_GEOMETRY_CHECKS = THEME_FAMILIES.length * 5 + 4;
 
 const DESKTOP = { width: 1_440, height: 900 } as const;
 /** Wide enough that 1200px and Full are different widths beside the sessions column. */
@@ -233,7 +238,70 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
     checks += 1;
   };
 
+  /**
+   * 4. Wide content on a phone stays inside its own boxes. Read twice: as laid out, and again after the
+   * composer takes focus, because a focus scrolls any `overflow: hidden` ancestor that has room to move.
+   */
+  const assertPhoneFits = async (page: Page, where: string): Promise<void> => {
+    const readPhone = async () =>
+      await page.evaluate(() => {
+        const surface = document.querySelector('.kt-chat-surface');
+        if (surface === null) throw new Error('no .kt-chat-surface on the session page');
+        const box = (element: Element) => {
+          const r = element.getBoundingClientRect();
+          return { left: r.left, right: r.right };
+        };
+        const named = (element: Element): string =>
+          element.getAttribute('aria-label') ?? element.textContent?.trim().slice(0, 24) ?? element.tagName;
+        const scrolled: string[] = [];
+        for (let node: Element | null = surface; node !== null; node = node.parentElement)
+          if (node.scrollLeft !== 0) scrolled.push(`${node.tagName.toLowerCase()} scrollLeft=${node.scrollLeft}`);
+        const wide = [...surface.querySelectorAll('pre, table')];
+        return {
+          width: window.innerWidth,
+          documentWidth: document.documentElement.scrollWidth,
+          parts: [
+            ['chat column', box(surface)],
+            ['transcript', box(surface.querySelector('.fy-transcript-content') ?? surface)],
+            ['composer', box(surface.querySelector('[data-session-input] form') ?? surface)],
+            ...[...surface.querySelectorAll('[data-session-input] form button')].map(
+              button => [`composer button "${named(button)}"`, box(button)] as const,
+            ),
+            ...wide.map(element => [`${element.tagName.toLowerCase()} block`, box(element)] as const),
+          ] as [string, { left: number; right: number }][],
+          wideBlocks: wide.length,
+          buttons: surface.querySelectorAll('[data-session-input] form button').length,
+          scrolled,
+        };
+      });
+    const check = (reading: Awaited<ReturnType<typeof readPhone>>, when: string): void => {
+      if (reading.wideBlocks < 2)
+        fail(`${where}: the wide transcript has ${reading.wideBlocks} code/table blocks, not 2`);
+      if (reading.buttons === 0) fail(`${where}: the composer has no buttons to measure`);
+      if (reading.documentWidth > reading.width)
+        fail(`${where} ${when}: the page scrolls sideways (${reading.documentWidth}px in ${reading.width}px)`);
+      for (const [name, part] of reading.parts)
+        if (part.left < -EPSILON || part.right > reading.width + EPSILON)
+          fail(
+            `${where} ${when}: the ${name} spans [${part.left}, ${part.right}], outside the ${reading.width}px phone`,
+          );
+      if (reading.scrolled.length > 0)
+        fail(`${where} ${when}: the chat's ancestors are scrolled sideways: ${reading.scrolled.join(', ')}`);
+    };
+    check(await readPhone(), 'at rest');
+    await page.locator('[data-session-input] textarea, [data-session-input] [contenteditable="true"]').first().focus();
+    await page.evaluate(
+      async () => await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    check(await readPhone(), 'with the composer focused');
+    process.stdout.write(
+      `   session layout ${where}: chat, composer and its buttons inside the phone, no sideways scroll\n`,
+    );
+    checks += 1;
+  };
+
   for (const { id: family } of THEME_FAMILIES) {
+    await open('phone', family, 'wide&chat-width=readable', assertPhoneFits);
     await open(DESKTOP, family, 'chat-width=readable', async (page, where) => {
       await assertColumn(page, where, 'readable');
       await assertTabs(page, where);

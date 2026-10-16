@@ -3,27 +3,16 @@
  * screen before it is a session that dies at start.
  */
 import { describe, it } from 'bun:test';
+import { type AccountModel, parseAccountModel } from '@ferretry/fleet';
 import should from 'should';
-import { type AccountModel, parseAccountConfigText } from '@ferretry/fleet';
 import { FleetSecretReferences } from '../../../src/lib/fleet/secret-references.ts';
 
-const PATH = '/state/fleet/config.yaml';
-
 const declared = (env: Record<string, string>): AccountModel =>
-  parseAccountConfigText(
-    [
-      'version: 2',
-      'machine: {}',
-      'credentials:',
-      '  claude-work:',
-      '    harness: claude',
-      '    store: environment',
-      '    env:',
-      ...Object.entries(env).map(([name, value]) => `      ${name}: ${JSON.stringify(value)}`),
-      '',
-    ].join('\n'),
-    PATH,
-  );
+  parseAccountModel({
+    version: 2,
+    machine: {},
+    credentials: { 'claude-work': { harness: 'claude', store: 'environment', env } },
+  });
 
 describe('FleetSecretReferences', () => {
   it('should name each login that reaches for a secret, and the variable that does', async () => {

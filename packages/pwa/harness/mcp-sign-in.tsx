@@ -87,7 +87,7 @@ const answer = (frame: McpSignInFrame, path: string, init?: RequestInit): unknow
       setUp: true,
       agentPermissions: 'auto',
       defaultRuntime: 'claude-default',
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       tools: [],
       runtimeCount: 5,
       runningSessions: 0,

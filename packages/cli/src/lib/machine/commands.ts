@@ -21,9 +21,20 @@ import {
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
 import { HARNESS_LABEL, indent } from '../fleet/account-render.ts';
 
-/** "What agents may control", in the order `machine set agent-control` names it. */
+/** "What agents may control", by the word `machine set agent-control` takes, in the order it names them. */
+const AGENT_CONTROL_FIELDS = {
+  terminals: 'terminals',
+  browsers: 'browsers',
+  files: 'files',
+  // The `config.*` tools: an agent editing this machine's configuration files (docs/config-files.md).
+  settings: 'ferretrySettings',
+} as const satisfies Record<string, keyof FleetAgentControl>;
+type AgentControlWord = keyof typeof AGENT_CONTROL_FIELDS;
+
 const AGENT_CONTROL_WORDS = (control: FleetAgentControl): string =>
-  (['terminals', 'browsers', 'files'] as const).map(kind => `${kind} ${control[kind] ? 'on' : 'off'}`).join(', ');
+  (Object.entries(AGENT_CONTROL_FIELDS) as [AgentControlWord, keyof FleetAgentControl][])
+    .map(([word, field]) => `${word} ${control[field] ? 'on' : 'off'}`)
+    .join(', ');
 
 /** The machine's facts: its tools, its Agent permissions, and whether it is set up yet. */
 export function renderMachine(machine: FleetMachineView, binaryName: string): string {
@@ -146,13 +157,14 @@ function machineSettingsEdit(
   }
   if (setting === 'agent-control') {
     const [kind, state] = value;
-    if (kind !== 'terminals' && kind !== 'browsers' && kind !== 'files') {
+    if (kind === undefined || !Object.hasOwn(AGENT_CONTROL_FIELDS, kind)) {
       throw new AccountCommandError(
-        `"${kind}" is not one of terminals, browsers, files. Try: ${binaryName} machine set agent-control terminals on`,
+        `"${kind}" is not one of ${Object.keys(AGENT_CONTROL_FIELDS).join(', ')}. Try: ${binaryName} machine set agent-control terminals on`,
       );
     }
     if (state !== 'on' && state !== 'off') throw new AccountCommandError('Say on or off.');
-    return { ...base, agentControl: { ...base.agentControl, [kind]: state === 'on' } };
+    const field = AGENT_CONTROL_FIELDS[kind as AgentControlWord];
+    return { ...base, agentControl: { ...base.agentControl, [field]: state === 'on' } };
   }
   throw new AccountCommandError(
     `"${setting}" is not a machine setting. Try: ${binaryName} machine set agent-permissions auto`,
@@ -173,7 +185,7 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
     machine
       .command('set')
       .description(
-        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files on|off',
+        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings on|off',
       )
       .argument('<setting>', 'agent-permissions, default-runtime, or agent-control')
       .argument('<value...>', 'the new value — two words for agent-control'),

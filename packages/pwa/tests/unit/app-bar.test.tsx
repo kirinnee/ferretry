@@ -8,6 +8,7 @@ import {
   AppTabBar,
   type AppTabBarProps,
   appBarDestinationForRoute,
+  appBarTitle,
   crumbTrail,
   MORE_PLACES,
   mobileDestinationMenuOpen,
@@ -319,7 +320,7 @@ describe('AppBar command palette entry', () => {
 });
 
 describe('AppBar current-session search seam', () => {
-  it('reserves a centred, empty slot without rendering a fake search', async () => {
+  it('reserves a centred slot without rendering a fake search', async () => {
     setViewport(DESKTOP);
     const mounted = await mount(bar());
     const primary = mounted.container.querySelector('[data-app-bar-primary]') as HTMLElement;
@@ -328,10 +329,24 @@ describe('AppBar current-session search seam', () => {
     expect(primary.className).toContain('md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)]');
     expect(primary.className).toContain('py-md');
     expect(slot.className).toContain('justify-center');
-    expect(slot.children).toHaveLength(0);
+    // Only the phone's page title, which the stylesheet hides wherever the breadcrumb shows.
+    expect([...slot.children].map(child => child.getAttribute('data-app-bar-title'))).toEqual(['']);
     expect(slot.querySelector('button, input')).toBeNull();
 
     await mounted.unmount();
+  });
+
+  it("names the page in the slot below 480px, where the breadcrumb is hidden: the trail's last crumb", async () => {
+    setViewport(PHONE);
+    const mounted = await mount(bar());
+    const title = mounted.container.querySelector('[data-app-bar-title]') as HTMLElement;
+    expect(title.textContent).toBe('Fix flaky test');
+    expect(title.className).toContain('min-[480px]:hidden');
+    await mounted.unmount();
+
+    const bare = await mount(bar({ crumbs: [] }));
+    expect(bare.container.querySelector('[data-app-bar-title]')).toBeNull();
+    await bare.unmount();
   });
 
   it('mounts item 6 in the reserved slot without moving app destinations', async () => {
@@ -541,6 +556,27 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
+  it('leaves the screen to the keyboard: the bar hides and its More sheet closes', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar());
+    const nav = mounted.container.querySelector('[data-app-tab-bar]') as HTMLElement;
+    const more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+    // The stylesheet hides `data-kb-hide` while <html data-keyboard="open">.
+    expect(nav.hasAttribute('data-kb-hide')).toBe(true);
+
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+
+    try {
+      await interact(() => document.documentElement.setAttribute('data-keyboard', 'open'));
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+    } finally {
+      document.documentElement.removeAttribute('data-keyboard');
+    }
+
+    await mounted.unmount();
+  });
+
   it('opens the palette from Find', async () => {
     setViewport(PHONE);
     let opened = 0;
@@ -671,5 +707,42 @@ describe('SidebarDrawerTrigger', () => {
     expect(mounted.container.textContent).toContain('0');
 
     await mounted.unmount();
+  });
+});
+
+describe('AppBar phone title', () => {
+  it('names Insights for the three views under More, and nothing elsewhere', () => {
+    expect(MORE_PLACES.map(appBarTitle)).toEqual(['Insights', 'Insights', 'Insights']);
+    expect(appBarTitle('settings')).toBeNull();
+    expect(appBarTitle(null)).toBeNull();
+  });
+
+  it('gives a phone one page title: "Insights" for its views, the last crumb everywhere else', async () => {
+    setViewport(PHONE);
+    const titles = (container: HTMLElement) =>
+      [...container.querySelectorAll('[data-app-bar-title]')].map(title => title.textContent);
+    const phone = await mount(
+      bar({
+        active: 'warden',
+        crumbs: [{ label: 'Warden' }],
+        onOpenSidebar: () => {},
+        sessionCount: 7,
+        tabBarShown: true,
+      }),
+    );
+    expect(titles(phone.container)).toEqual(['Insights']);
+    await phone.unmount();
+    const elsewhere = await mount(bar({ active: 'settings', crumbs: [{ label: 'Settings' }], tabBarShown: true }));
+    expect(titles(elsewhere.container)).toEqual(['Settings']);
+    await elsewhere.unmount();
+    const uncrumbed = await mount(bar({ active: 'learning', crumbs: [] }));
+    expect(titles(uncrumbed.container)).toEqual(['Insights']);
+    await uncrumbed.unmount();
+    // A desktop shows the breadcrumb, and the stylesheet hides the title from 480px up.
+    setViewport(DESKTOP);
+    const desktop = await mount(bar({ active: 'analytics' }));
+    const title = desktop.container.querySelector('[data-app-bar-title]') as HTMLElement;
+    expect(title.className).toContain('min-[480px]:hidden');
+    await desktop.unmount();
   });
 });

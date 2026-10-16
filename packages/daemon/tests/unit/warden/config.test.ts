@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
+import { DEFAULT_WARDEN_ACCOUNT } from '@ferretry/protocol';
 import should from 'should';
 import {
   applyWardenConfigPatch,
   assignedCooldownMs,
-  DEFAULT_WARDEN_ACCOUNT,
   defaultWardenConfig,
   MINIMUM_SUS_SECONDS,
   MINIMUM_SWEEP_INTERVAL_MS,
@@ -13,18 +13,20 @@ import {
   spawnGapMs,
   sweepIntervalMs,
   unattendedWindowMs,
+  type WardenConfig,
   wardenAccountsOf,
   wardenConfigWarnings,
   wardenDetectOptions,
-  type WardenConfig,
 } from '../../../src/lib/warden/index.ts';
 
 const config = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({ ...defaultWardenConfig, ...overrides });
 
 describe('the shipped warden defaults', () => {
-  it('should leave escalation off so a fresh daemon never spends agent sessions on its own', () => {
+  it('should watch with rules only, so a fresh daemon never spends on its own', () => {
     // Arrange / Act / Assert
-    should(defaultWardenConfig.enabled).be.false();
+    should(defaultWardenConfig.enabled).be.true();
+    should(defaultWardenConfig.triage).equal('rules');
+    should(defaultWardenConfig.mayActAlone.stop).be.false();
   });
 
   it('should configure exactly one triage-tier account with no pinned model', () => {
@@ -60,7 +62,7 @@ describe('reading a persisted warden configuration', () => {
 
   it('should return a valid document verbatim', () => {
     // Arrange
-    const stored = config({ enabled: true, intervalMinutes: 11 });
+    const stored = config({ enabled: true, intervalMinutes: 10 });
 
     // Act
     const actual = parseStoredWardenConfig(stored);
@@ -82,12 +84,12 @@ describe('reading a persisted warden configuration', () => {
     should(actual.warnings[0]).match(/intervalMinutes/u);
   });
 
-  it('should disable escalation when it falls back, so an unreadable document can never authorise a spawn', () => {
+  it('should fall back to rules, so an unreadable document can never authorise a spawn', () => {
     // Arrange / Act
-    const actual = parseStoredWardenConfig({ enabled: true });
+    const actual = parseStoredWardenConfig({ triage: 'llm' });
 
     // Assert
-    should(actual.config.enabled).be.false();
+    should(actual.config.triage).equal('rules');
   });
 
   it('should name the whole document when the failure has no field path', () => {
@@ -153,12 +155,12 @@ describe('applying an operator patch', () => {
 });
 
 describe('what an operator is warned about', () => {
-  it('should warn that escalation is off while detection still runs', () => {
+  it('should warn that the Warden is off while detection still runs', () => {
     // Arrange / Act
-    const actual = wardenConfigWarnings(config(), [DEFAULT_WARDEN_ACCOUNT]);
+    const actual = wardenConfigWarnings(config({ enabled: false }), [DEFAULT_WARDEN_ACCOUNT]);
 
     // Assert
-    should(actual).matchAny(/escalation is disabled/u);
+    should(actual).matchAny(/the Warden is off/u);
   });
 
   it('should say nothing when an enabled configuration names an installed account', () => {

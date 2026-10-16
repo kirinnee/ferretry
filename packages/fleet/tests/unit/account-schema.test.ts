@@ -1,7 +1,9 @@
 import { describe, it } from 'bun:test';
+import { CONFIG_COMPONENT_KINDS } from '@ferretry/protocol';
 import should from 'should';
 import {
   AccountModelSchema,
+  COMPONENT_KINDS,
   isRuntimeName,
   type LayeredProfile,
   layerReferenceText,
@@ -41,7 +43,7 @@ describe('AccountModelSchema', () => {
     // Assert
     should(actual.machine).deepEqual({
       agentPermissions: 'auto',
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
     });
     should(actual.runtimes['claude-default']).deepEqual({ credential: 'claude-you', profile: 'default', agent: false });
     should(actual.components.mcp).deepEqual({});
@@ -649,5 +651,45 @@ describe('resolveDefaultRuntime', () => {
 
     // Assert
     should(actual).be.undefined();
+  });
+});
+
+describe('the agent-control switches', () => {
+  it('should leave agents without the Ferretry settings switch until the owner turns it on', () => {
+    // Arrange
+    const input = documentWith({ machine: { agentControl: { terminals: false } } });
+
+    // Act
+    const actual = parseAccountModel(input).machine.agentControl;
+
+    // Assert — the three older switches default on; this one is a kill switch that defaults off.
+    should(actual).deepEqual({ terminals: false, browsers: true, files: true, ferretrySettings: false });
+  });
+
+  it('should keep the Ferretry settings switch when the owner sets it', () => {
+    // Arrange
+    const input = documentWith({ machine: { agentControl: { ferretrySettings: true } } });
+
+    // Act
+    const actual = parseAccountModel(input).machine.agentControl.ferretrySettings;
+
+    // Assert
+    should(actual).be.true();
+  });
+
+  it('should refuse a switch that is not a boolean', () => {
+    // Act
+    const actual = messagesOf(documentWith({ machine: { agentControl: { ferretrySettings: 'yes' } } }));
+
+    // Assert
+    should(actual.some(message => message.startsWith('machine.agentControl.ferretrySettings'))).be.true();
+  });
+});
+
+describe('the component kinds', () => {
+  it("should be the protocol's list, so a directory and a profile entry spell a kind the same way", () => {
+    // Assert
+    should([...COMPONENT_KINDS]).deepEqual([...CONFIG_COMPONENT_KINDS]);
+    should([...COMPONENT_KINDS]).deepEqual(['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelSets']);
   });
 });

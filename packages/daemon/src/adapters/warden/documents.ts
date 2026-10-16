@@ -1,4 +1,7 @@
 import { join } from 'node:path';
+import { renderConfigFile } from '@ferretry/fleet';
+import { type ConfigFileAddress, configFilePath } from '@ferretry/protocol';
+import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type {
   WardenConfig,
   WardenConfigStore,
@@ -8,24 +11,25 @@ import type {
 } from '../../lib/warden/index.ts';
 
 /**
- * The two documents warden supervision owns inside the state home.
+ * The documents warden supervision reads and writes: its own state inside the state home, and the
+ * owner's `config/warden.yaml`.
  *
- * BOTH READ AS `undefined` RATHER THAN THROWING, and both hand the raw parsed JSON
- * up rather than a typed value. The parsing belongs to the domain: `src/lib`
- * decides what a corrupt state document or an invalid configuration MEANS, and
- * those decisions are not the same — a bad configuration falls back to defaults and
- * warns, while a bad state document is salvaged section by section. An adapter that
- * parsed would have to duplicate both policies, and the copy would drift.
+ * THE STATE DOCUMENT READS AS `undefined` RATHER THAN THROWING, and hands the raw
+ * parsed JSON up rather than a typed value: `src/lib` decides what a corrupt state
+ * document MEANS — it is salvaged section by section — and an adapter that parsed
+ * would duplicate that policy. The settings file is the configuration files' own:
+ * last good wins there, so what is read is always a configuration that checked.
  *
- * BOTH WRITE ATOMICALLY, through the same filesystem port the reports use, which
- * creates the warden directory with owner-only permissions on first use. The state
+ * THE STATE DOCUMENT WRITES ATOMICALLY, through the same filesystem port the reports
+ * use, which creates the warden directory with owner-only permissions on first use. The state
  * document is rewritten several times inside one sweep — after detection, after the
  * assignments, after the escalation — and a torn write would lose the spawn gap or
  * the failover strikes that stop the next sweep repeating an expensive mistake.
  */
 
 export const WARDEN_STATE_FILENAME = 'state.json';
-export const WARDEN_CONFIG_FILENAME = 'config.json';
+
+const WARDEN_FILE: ConfigFileAddress = { kind: 'warden' };
 
 /** Reads and writes JSON in the warden's own directory, tolerating absence. */
 class WardenDocument {
@@ -69,20 +73,25 @@ export class FileWardenStateStore implements WardenStateStore {
   }
 }
 
-/** The operator's warden configuration, in its own document rather than folded
- *  into `config/daemon.json` — see `lib/warden/config.ts` for why. */
-export class FileWardenConfigStore implements WardenConfigStore {
-  private readonly document: WardenDocument;
-
-  constructor(files: WardenReportFileSystem, wardenRoot: string) {
-    this.document = new WardenDocument(files, join(wardenRoot, WARDEN_CONFIG_FILENAME));
-  }
+/**
+ * The operator's Warden settings, as `config/warden.yaml` (docs/config-files.md): read as the
+ * version IN EFFECT — the last good one, and the tighter one while a loosening edit waits for the
+ * owner — and written key by key, so the owner's comments survive a save from the app.
+ *
+ * A write from here is the owner's own act (`PATCH /v1/warden/config` is `warden.configure`), so it is
+ * acknowledged and in effect at once rather than held.
+ */
+export class ConfigFileWardenConfigStore implements WardenConfigStore {
+  constructor(private readonly config: Pick<ConfigFilesService, 'load' | 'writeOwn'>) {}
 
   async read(): Promise<unknown> {
-    return await this.document.read();
+    return (await this.config.load()).evaluation.effective.warden;
   }
 
   async write(config: WardenConfig): Promise<void> {
-    await this.document.write(config);
+    const path = configFilePath(WARDEN_FILE);
+    const { files } = await this.config.load();
+    const text = renderConfigFile(path, WARDEN_FILE, config, files.get(path)?.text);
+    if (text !== undefined) await this.config.writeOwn(path, text);
   }
 }

@@ -37,14 +37,19 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
   const bin = deps.binaryName;
 
   readOptions(
-    program.command('credentials').description('the logins on this machine, with their status and usage'),
+    program
+      .command('credentials')
+      .alias('logins')
+      .description('the logins on this machine, with their status and usage'),
   ).action(async (options: { json?: boolean }) => {
     const list = await deps.gateway.credentials();
     deps.out.report(options.json ? JSON.stringify(list, null, 2) : renderCredentialList(list, bin));
   });
 
+  // `login` is the product's word for a credential (docs/config-files.md: `logins/<id>.yaml`).
   const credential = program
     .command('credential')
+    .alias('login')
     .description('add, check, sign in, sign out, label or remove a login');
 
   writeOptions(

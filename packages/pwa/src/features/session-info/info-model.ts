@@ -133,18 +133,3 @@ export const lineage = (
   const children = (sessions ?? []).filter(session => session.config.parent === view.config.id);
   return { parent, children };
 };
-
-/** A token count the way a person reads one: 812, 12.4k, 3.1M. */
-export const formatTokens = (count: number): string =>
-  count >= 1_000_000
-    ? `${(count / 1_000_000).toFixed(1)}M`
-    : count >= 1_000
-      ? `${(count / 1_000).toFixed(1)}k`
-      : String(Math.round(count));
-
-/** Micro-dollars as a price: $0.42, $12.30, <$0.01. */
-export const formatUsd = (micros: number): string => {
-  const dollars = micros / 1_000_000;
-  if (dollars > 0 && dollars < 0.01) return '<$0.01';
-  return `$${dollars.toFixed(2)}`;
-};

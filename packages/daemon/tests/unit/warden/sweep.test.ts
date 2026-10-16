@@ -2,237 +2,26 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   collapseUnsupervisedMonitors,
-  defaultWardenConfig,
   UNSUPERVISED_FLEET_KEY,
   WARDEN_LABEL,
   wardenEscalationSourceRef,
-  WardenSweepService,
   type WardenAnomaly,
-  type WardenAnomalyKind,
-  type WardenAttentionWrite,
   type WardenConfig,
-  type WardenEscalationBoardItem,
-  type WardenEscalationBoardResolution,
-  type WardenEscalationRaise,
+  defaultWardenConfig,
   type WardenEscalationVerdict,
   type WardenFleetSession,
-  type WardenRuntimeState,
-  type WardenSpawnFacts,
-  type WardenSpawnProvenance,
-  type WardenSpawnRequest,
-  type WardenSweepPorts,
-  type WardenSweepSettings,
 } from '../../../src/lib/warden/index.ts';
-
-const NOW = Date.parse('2026-07-31T12:00:00.000Z');
-const at = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
-
-const settings = (overrides: Partial<WardenSweepSettings> = {}): WardenSweepSettings => ({
-  clientName: 'fy',
-  wardenCwd: '/state',
-  supervisesMonitors: true,
-  mayAct: false,
-  ...overrides,
-});
-
-const session = (overrides: {
-  readonly id: string;
-  readonly status?: WardenFleetSession['state']['status'];
-  readonly label?: string;
-  readonly mode?: 'auto' | 'interactive';
-  readonly state?: Partial<WardenFleetSession['state']>;
-  readonly hasLiveMonitor?: boolean;
-}): WardenFleetSession => ({
-  config: {
-    id: overrides.id,
-    mode: overrides.mode ?? 'auto',
-    agent: 'claude-auto-a',
-    intervalSeconds: 30,
-    ...(overrides.label === undefined ? {} : { label: overrides.label }),
-  },
-  state: { status: overrides.status ?? 'running', ...overrides.state },
-  directory: `/state/sessions/${overrides.id}`,
-  cwd: '/home/dev/repo',
-  turn: 1,
-  hasLiveMonitor: overrides.hasLiveMonitor ?? true,
-});
-
-/** A session the detector will flag as an unanswered question: waiting, idle, no declared wait. */
-const unattended = (id: string): WardenFleetSession =>
-  session({ id, status: 'awaiting_user', state: { lastActivityAt: at(-600) } });
-
-/**
- * A session the detector will flag for the shared fleet triage rather than an assigned warden.
- *
- * A rate-limited session whose reset time has passed and which was never resumed. It is used instead
- * of the more obvious `abandoned_wreckage` because that class is unreachable from a sweep in both
- * this daemon and kteam: the sweep scans only `WARDEN_SCANNABLE_STATUSES`, which excludes the very
- * `failed` and `stalled` statuses wreckage is made of.
- */
-const triageable = (id: string): WardenFleetSession =>
-  session({ id, status: 'rate_limited', state: { quota: { resetAt: NOW - 60_000 } } });
-
-interface Harness {
-  readonly service: WardenSweepService;
-  readonly journal: { readonly type: string; readonly data: Record<string, unknown> }[];
-  readonly spawns: WardenSpawnRequest[];
-  readonly provenance: Map<string, WardenSpawnProvenance>;
-  /** Every escalation write the sweep attempted, in order. */
-  readonly raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[];
-  readonly resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[];
-  /** The live rows of one node's board, as the fake store now holds them. */
-  board(sessionId: string): readonly WardenEscalationBoardItem[];
-  seedBoard(sessionId: string, items: readonly WardenEscalationBoardItem[]): void;
-  seedResolved(sessionId: string, entries: readonly WardenEscalationBoardResolution[]): void;
-  state(): WardenRuntimeState;
-  setState(value: unknown): void;
-  setFleet(fleet: readonly WardenFleetSession[]): void;
-  storedConfig(): unknown;
-}
-
-/** A live warden escalation already on a node's board. */
-const escalated = (kind: WardenAnomalyKind): WardenEscalationBoardItem => ({
-  source: 'agent-raised',
-  sourceRef: wardenEscalationSourceRef(kind),
-  raisedBy: 'daemon',
-});
-
-function harness(
-  options: {
-    readonly config?: unknown;
-    readonly state?: unknown;
-    readonly fleet?: readonly WardenFleetSession[];
-    readonly settings?: Partial<WardenSweepSettings>;
-    readonly installed?: () => Promise<readonly string[]>;
-    readonly usage?: () => Promise<readonly { readonly agent: string; readonly atLimit?: boolean }[]>;
-    readonly spawn?: (request: WardenSpawnRequest, call: number) => Promise<WardenSpawnFacts>;
-    readonly reports?: Readonly<Record<string, string | undefined>>;
-    readonly latest?: () => Promise<{ readonly reportId: string; readonly head: string } | undefined>;
-    readonly writeProvenance?: () => Promise<void>;
-    readonly verdicts?: () => Promise<readonly WardenEscalationVerdict[] | undefined>;
-    /** Nodes whose attention board cannot be read this sweep. */
-    readonly unreadableBoards?: readonly string[];
-    /** Force every raise to one outcome, for the paths a real store reaches rarely. */
-    readonly raiseWrite?: WardenAttentionWrite;
-  } = {},
-): Harness {
-  let configDocument: unknown = options.config ?? defaultWardenConfig;
-  let stateDocument: unknown = options.state ?? {};
-  let fleet: readonly WardenFleetSession[] = options.fleet ?? [];
-  const journal: { readonly type: string; readonly data: Record<string, unknown> }[] = [];
-  const spawns: WardenSpawnRequest[] = [];
-  const provenance = new Map<string, WardenSpawnProvenance>();
-  const boards = new Map<string, readonly WardenEscalationBoardItem[]>();
-  const resolutions = new Map<string, readonly WardenEscalationBoardResolution[]>();
-  const raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[] = [];
-  const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
-  let spawnCall = 0;
-  let capability = 0;
-
-  const ports: WardenSweepPorts = {
-    fleet: { fleet: async () => fleet },
-    spawner: {
-      spawn: async request => {
-        spawns.push(request);
-        const call = spawnCall;
-        spawnCall += 1;
-        return await (options.spawn?.(request, call) ??
-          Promise.resolve({
-            sessionId: `w${call}`,
-            createdAt: at(0),
-            agent: request.agent,
-            harness: 'claude' as const,
-            model: request.model ?? 'glm-5.2',
-            modelSource: 'configured' as const,
-          }));
-      },
-    },
-    artifacts: {
-      writeProvenance: async (path, value) => {
-        if (options.writeProvenance !== undefined) return await options.writeProvenance();
-        provenance.set(path, value);
-      },
-      readReport: async path => (options.reports ?? {})[path],
-      latest: async () => await (options.latest?.() ?? Promise.resolve(undefined)),
-      reportPath: (instant, targetId) =>
-        `/state/warden/reports/${instant.replaceAll(/[:.]/gu, '-')}${targetId === undefined ? '' : `-${targetId}`}.md`,
-    },
-    state: {
-      read: async () => stateDocument,
-      write: async value => {
-        stateDocument = JSON.parse(JSON.stringify(value));
-      },
-    },
-    config: {
-      read: async () => configDocument,
-      write: async value => {
-        configDocument = JSON.parse(JSON.stringify(value));
-      },
-    },
-    agents: { installed: async () => await (options.installed?.() ?? Promise.resolve(['claude-auto-glm52a'])) },
-    usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
-    verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
-    attention: {
-      board: async sessionId => {
-        if (options.unreadableBoards?.includes(sessionId) === true) return undefined;
-        return { sessionId, items: boards.get(sessionId) ?? [], resolved: resolutions.get(sessionId) ?? [] };
-      },
-      raise: async (sessionId, request) => {
-        raises.push({ sessionId, request });
-        if (options.raiseWrite !== undefined) return options.raiseWrite;
-        const existing = boards.get(sessionId) ?? [];
-        if (existing.some(item => item.sourceRef === request.sourceRef)) return 'unchanged';
-        boards.set(sessionId, [
-          ...existing,
-          { source: request.source, sourceRef: request.sourceRef, raisedBy: 'daemon' as const },
-        ]);
-        return 'created';
-      },
-      resolveSource: async (sessionId, _source, sourceRef, note) => {
-        resolved.push({ sessionId, sourceRef, note });
-        const existing = boards.get(sessionId) ?? [];
-        const remaining = existing.filter(item => item.sourceRef !== sourceRef);
-        boards.set(sessionId, remaining);
-        return remaining.length !== existing.length;
-      },
-    },
-    journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
-    nowMs: () => NOW,
-    capabilities: () => {
-      capability += 1;
-      return `capability-${capability}`;
-    },
-  };
-
-  return {
-    service: new WardenSweepService(ports, settings(options.settings)),
-    journal,
-    spawns,
-    provenance,
-    raises,
-    resolved,
-    board: sessionId => boards.get(sessionId) ?? [],
-    seedBoard: (sessionId, items) => void boards.set(sessionId, items),
-    seedResolved: (sessionId, entries) => void resolutions.set(sessionId, entries),
-    state: () => stateDocument as WardenRuntimeState,
-    setState: value => {
-      stateDocument = value;
-    },
-    setFleet: value => {
-      fleet = value;
-    },
-    storedConfig: () => configDocument,
-  };
-}
-
-const enabled = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({
-  ...defaultWardenConfig,
-  enabled: true,
-  minSpawnGapMinutes: 0,
-  ...overrides,
-});
-
-const journalTypes = (subject: Harness): string[] => subject.journal.map(entry => entry.type);
+import {
+  at,
+  enabled,
+  escalated,
+  type Harness,
+  harness,
+  journalTypes,
+  session,
+  triageable,
+  unattended,
+} from './sweep-harness.ts';
 
 describe('collapsing an unwatched fleet into one fault', () => {
   const dead = (id: string): WardenAnomaly => ({
@@ -357,10 +146,10 @@ describe('changing the warden configuration', () => {
     const subject = harness({ config: enabled({ intervalMinutes: 5 }) });
 
     // Act
-    await subject.service.updateConfig({ intervalMinutes: 9 });
+    await subject.service.updateConfig({ intervalMinutes: 10 });
 
     // Assert
-    should((subject.storedConfig() as WardenConfig).intervalMinutes).equal(9);
+    should((subject.storedConfig() as WardenConfig).intervalMinutes).equal(10);
   });
 
   it('should compose two successive single-field patches', async () => {
@@ -656,15 +445,15 @@ describe('one sweep', () => {
 });
 
 describe('escalating to a fleet warden', () => {
-  it('should refuse while escalation is disabled', async () => {
+  it('should refuse while the Warden is off', async () => {
     // Arrange
-    const subject = harness({ fleet: [triageable('s1')] });
+    const subject = harness({ config: enabled({ enabled: false }), fleet: [triageable('s1')] });
 
     // Act
     const actual = await subject.service.run({ force: false });
 
     // Assert
-    should(actual.message).equal('escalation disabled (enabled=false)');
+    should(actual.message).equal('the Warden is off (enabled=false)');
     should(subject.spawns).be.empty();
   });
 
@@ -1309,7 +1098,7 @@ describe('choosing the account a warden runs on', () => {
 describe('what the daemon asks the sweep about itself', () => {
   it('should report the cadence its timer should fire on', async () => {
     // Arrange / Act / Assert
-    should(await harness({ config: enabled({ intervalMinutes: 7 }) }).service.intervalMs()).equal(7 * 60_000);
+    should(await harness({ config: enabled({ intervalMinutes: 10 }) }).service.intervalMs()).equal(10 * 60_000);
   });
 
   it('should report no last sweep until one has completed', async () => {

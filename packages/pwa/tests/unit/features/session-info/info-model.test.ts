@@ -2,8 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import type { ManagedWorktreeView } from '@ferretry/protocol';
 import {
   effortLabel,
-  formatTokens,
-  formatUsd,
   harnessLabel,
   INFO_HINT,
   INFO_TAB_LABEL,
@@ -196,22 +194,5 @@ describe('lineage', () => {
 
   it('has no children when no sessions were handed in at all', () => {
     expect(lineage(sessionView('solo'), undefined)).toEqual({ parent: null, children: [] });
-  });
-});
-
-describe('formatTokens', () => {
-  it('reads small counts as themselves, thousands as k, millions as M', () => {
-    expect(formatTokens(812)).toBe('812');
-    expect(formatTokens(12_400)).toBe('12.4k');
-    expect(formatTokens(3_100_000)).toBe('3.1M');
-  });
-});
-
-describe('formatUsd', () => {
-  it('rounds to cents, and never shows a penny-sized total as a bald zero', () => {
-    expect(formatUsd(420_000)).toBe('$0.42');
-    expect(formatUsd(12_300_000)).toBe('$12.30');
-    expect(formatUsd(4_000)).toBe('<$0.01');
-    expect(formatUsd(0)).toBe('$0.00');
   });
 });

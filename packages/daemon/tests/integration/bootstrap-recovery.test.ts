@@ -161,7 +161,7 @@ describe('interrupted bootstrap recovery', () => {
     should(abandonedRoot).deepEqual(root);
     should(abandonedState).deepEqual(state);
     should(recovered.layout.created).be.true();
-    should(await readFile(paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await readFile(paths.layoutVersion, 'utf8')).equal('2\n');
     should(await entriesOf(home)).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'logs', 'state']);
     should(await entriesOf(paths.state)).deepEqual(['index', 'sessions', 'tmp']);
   });
@@ -181,7 +181,7 @@ describe('interrupted bootstrap recovery', () => {
     // Assert
     should(String(failure)).containEql('injected marker write failure');
     should(recovered.layout.created).be.true();
-    should(await readFile(paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await readFile(paths.layoutVersion, 'utf8')).equal('2\n');
     should(await exists(scratch)).be.false();
   });
 
@@ -254,7 +254,7 @@ describe('pre-bootstrap state home', () => {
 
     // Assert — the daemon must reach a bootstrapped home, not refuse its own log directory.
     should(opened.layout.created).be.true();
-    should(await readFile(paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await readFile(paths.layoutVersion, 'utf8')).equal('2\n');
     should(await entriesOf(paths.logs)).deepEqual([...logs].sort());
   });
 

@@ -1,29 +1,26 @@
 /**
  * Warden fixtures. The shapes are the protocol's own, so a wire change breaks
- * these at compile time rather than at a reader's dashboard.
+ * these at compile time rather than at a reader's dashboard. The settings are
+ * the daemon's own defaults (`DEFAULT_WARDEN_CONFIG`), so a test states only
+ * what it is about.
  */
 
-import type {
-  WardenAnomaly,
-  WardenConfig,
-  WardenFailoverAccountView,
-  WardenFailoverStatus,
-  WardenStatusView,
+import {
+  DEFAULT_WARDEN_CONFIG,
+  type FleetAttentionItem,
+  type WardenAction,
+  type WardenAnomaly,
+  type WardenAttentionView,
+  type WardenConfig,
+  type WardenFailoverAccountView,
+  type WardenFailoverStatus,
+  type WardenInvestigation,
+  type WardenStatusView,
 } from '@ferretry/protocol';
 
-const wardenConfig = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({
-  enabled: true,
+export const wardenConfig = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({
+  ...DEFAULT_WARDEN_CONFIG,
   accounts: [{ agent: 'claude-auto-loge' }],
-  failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-  providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 40 },
-  intervalMinutes: 5,
-  unattendedMinutes: 20,
-  minSpawnGapMinutes: 10,
-  susThinkingSeconds: 600,
-  susSubprocessSeconds: 900,
-  maxAssignedWardens: 2,
-  assignedCooldownMinutes: 15,
-  blessMinutes: 30,
   ...overrides,
 });
 
@@ -49,9 +46,67 @@ export const wardenFailover = (overrides: Partial<WardenFailoverStatus> = {}): W
   ...overrides,
 });
 
-export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView => ({
-  config: wardenConfig(overrides.config),
-  anomalies: [],
-  fingerprint: 'fp-1',
+export const wardenInvestigation = (overrides: Partial<WardenInvestigation> = {}): WardenInvestigation => ({
+  id: 'warden-1',
+  state: 'running',
+  scope: 'session',
+  origin: 'sweep',
+  targetSession: 'sess-1',
+  ...overrides,
+});
+
+export const wardenAction = (overrides: Partial<WardenAction> = {}): WardenAction => ({
+  at: '2026-07-31T11:50:00.000Z',
+  sessionId: 'sess-1',
+  action: 'nudge',
+  outcome: 'done',
+  by: 'warden',
+  detail: 'Asked it to report its blocker.',
+  ...overrides,
+});
+
+export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView => {
+  const config = wardenConfig(overrides.config);
+  return {
+    config,
+    anomalies: [],
+    fingerprint: 'fp-1',
+    triage: { configured: config.triage, effective: config.triage, reason: 'configured' },
+    spend: {
+      day: '2026-07-31',
+      jevUsd: 0,
+      jevCapUsd: config.caps.jevUsdPerDay,
+      investigationUsd: 0,
+      investigationCapUsd: config.caps.investigationUsdPerDay,
+      pendingInvestigations: 0,
+      investigationsLastHour: 0,
+      maxInvestigationsPerHour: config.caps.maxInvestigationsPerHour,
+    },
+    savings: { day: '2026-07-31', flags: 0, jevDecisions: 0, jevSkips: 0, investigations: 0 },
+    investigations: [],
+    actions: [],
+    blessings: [],
+    ...overrides,
+  };
+};
+
+export const attentionItem = (overrides: Partial<FleetAttentionItem> = {}): FleetAttentionItem => ({
+  sessionId: 'sess-1',
+  id: 'item-1',
+  source: 'question',
+  subject: 'Which relay?',
+  why: 'Waiting for your answer.',
+  waitingSince: '2026-07-31T11:30:00.000Z',
+  howToResolve: 'Answer it.',
+  ...overrides,
+});
+
+export const wardenAttention = (overrides: Partial<WardenAttentionView> = {}): WardenAttentionView => ({
+  generatedAt: '2026-07-31T11:59:00.000Z',
+  lastSweepAt: '2026-07-31T11:59:00.000Z',
+  outcome: 'clean-sweep',
+  items: [],
+  boardsWithParseErrors: [],
+  verdictCoverage: { limit: 50, truncated: false },
   ...overrides,
 });

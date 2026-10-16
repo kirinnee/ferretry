@@ -202,7 +202,8 @@ describe('layout decisions', () => {
     { marker: `${CURRENT_LAYOUT_VERSION}\n`, entries: ['layout-version'], expected: 'proceed' },
     { marker: undefined, entries: ['config'], expected: 'refuse' },
     { marker: 'garbage', entries: ['layout-version'], expected: 'refuse' },
-    { marker: '2', entries: ['layout-version'], expected: 'refuse' },
+    { marker: '1', entries: ['layout-version'], expected: 'upgrade' },
+    { marker: '3', entries: ['layout-version'], expected: 'refuse' },
     { marker: '0', entries: ['layout-version'], expected: 'refuse' },
   ])('should choose $expected for marker $marker', ({ marker, entries, recoverable, expected }) => {
     // Act
@@ -257,7 +258,7 @@ describe('layout decisions', () => {
     // Arrange
     const paths = createFoundationPaths(resolveStateHome({ fyHome: '/tmp/fy-home', homeDirectory: '/unused' }));
     const missing = decideLayout(undefined, ['config']);
-    const unsupported = decideLayout('2', ['layout-version']);
+    const unsupported = decideLayout('3', ['layout-version']);
     if (missing.kind !== 'refuse' || unsupported.kind !== 'refuse') throw new Error('test decisions must refuse');
 
     // Act
@@ -271,14 +272,14 @@ describe('layout decisions', () => {
       'state home /tmp/fy-home is non-empty but has no layout-version marker; ' +
         'if this home was created by Ferretry, run `fy daemon adopt` to inspect it and claim it',
     );
-    should(unsupportedError.message).equal('state home /tmp/fy-home has layout version "2"; expected 1');
+    should(unsupportedError.message).equal('state home /tmp/fy-home has layout version "3"; expected 2');
   });
 
   it('should not offer to adopt a home whose version this release cannot serve', () => {
     // Arrange — adopting is only ever the answer to "unclaimed"; claiming over a version we do not
     // understand would silently downgrade a newer release's home rather than repair anything.
     const paths = createFoundationPaths(resolveStateHome({ fyHome: '/tmp/fy-home', homeDirectory: '/unused' }));
-    const unsupported = decideLayout('2', ['layout-version']);
+    const unsupported = decideLayout('3', ['layout-version']);
     if (unsupported.kind !== 'refuse') throw new Error('test decision must refuse');
 
     // Act + Assert

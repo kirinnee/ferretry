@@ -19,6 +19,7 @@ import { type DaemonProjectsPort, DaemonProjectsStore } from '../../src/lib/proj
 import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
+import { wardenConfig, wardenStatus } from '../support/warden.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.invalid', deviceId: 'alpha-token' });
 const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.invalid', deviceId: 'beta-token' });
@@ -172,25 +173,11 @@ const projectsFor = (connection: DaemonConnection): readonly FleetProject[] => [
   { name: `${connection.daemonId} repo`, path: `/${connection.daemonId}/repo` },
 ];
 
-const warden: WardenStatusView = {
-  config: {
-    enabled: true,
-    accounts: [],
-    failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-    providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 40 },
-    intervalMinutes: 5,
-    unattendedMinutes: 20,
-    minSpawnGapMinutes: 10,
-    susThinkingSeconds: 600,
-    susSubprocessSeconds: 900,
-    maxAssignedWardens: 2,
-    assignedCooldownMinutes: 15,
-    blessMinutes: 30,
-  },
+const warden: WardenStatusView = wardenStatus({
+  config: wardenConfig({ intervalMinutes: 5 }),
   lastSweepAt: '2026-08-01T11:58:00.000Z',
-  anomalies: [],
   fingerprint: 'test',
-};
+});
 
 const settle = async (): Promise<void> => {
   await interact(async () => {

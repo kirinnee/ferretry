@@ -150,3 +150,39 @@ describe('AgentToolsClient — two authorities', () => {
     should(person.sent.map(sent => sent.path)).deepEqual(['/v1/sessions/s1/surfaces/terminals/tools']);
   });
 });
+
+describe('AgentToolsClient — config tools', () => {
+  it('should dial POST /v1/agent/config as the agent, with the session capability and never the person gateway', async () => {
+    // Arrange
+    const agent = gateway([{ summary: 'Read 1 file.', etag: 'e1' }]);
+    const person = gateway();
+    const client = new AgentToolsClient({ agent, person }, { capability: 'cap-1', ownSessionId: 's1' });
+
+    // Act
+    const result = await client.config({ tool: 'config.write', path: 'voice.yaml', text: '', etag: 'e0' });
+
+    // Assert
+    should(result).deepEqual({ summary: 'Read 1 file.', etag: 'e1' });
+    should(agent.sent[0]).match({ path: '/v1/agent/config', timeoutMs: 60_000, init: { method: 'POST' } });
+    should(JSON.parse(String(agent.sent[0]?.init?.body))).deepEqual({
+      tool: 'config.write',
+      path: 'voice.yaml',
+      text: '',
+      etag: 'e0',
+    });
+    should(headers(agent.sent[0])).deepEqual({
+      'content-type': 'application/json',
+      'x-fy-session-capability': 'cap-1',
+    });
+    should(person.sent).be.empty();
+  });
+
+  it('should refuse with no capability, naming the way out', async () => {
+    const agent = gateway();
+    const client = new AgentToolsClient({ agent, person: gateway() }, { capability: ' ' });
+    const error = await client.config({ tool: 'config.read' }).catch((failure: unknown) => failure);
+    should(error).be.instanceOf(AgentToolsCommandError);
+    should((error as Error).message).containEql('pass --session <id>');
+    should(agent.sent).be.empty();
+  });
+});

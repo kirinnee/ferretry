@@ -12,13 +12,13 @@ let
     pname = "ferretry-bun-deps";
     # This fixed-output derivation's name is part of its cache identity. Keep it paired with the
     # pinned outputHash; release-facing fy/fyd metadata derives from VERSION below.
-    version = "0.107.0";
+    version = "0.108.0";
     inherit src;
 
     nativeBuildInputs = [ pkgs.bun ];
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-dnexLakLHvEhEw1n2yCePx9T0O+JIdKfR8ZkEd+ggz0=";
+    outputHash = "sha256-ub4r2csFfVqcMUHqrmJMvitKT570W/INHwd6UpKC9yg=";
     dontFixup = true;
 
     buildPhase = ''

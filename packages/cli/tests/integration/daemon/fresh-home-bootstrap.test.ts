@@ -164,7 +164,7 @@ describe('first-run daemon bootstrap across the package seam', () => {
     should(afterTheCli).deepEqual(['layout-version', 'logs']);
     should(await entriesOf(join(stateHome, 'logs'))).deepEqual(['fyd.log']);
     should(layout.created).be.false();
-    should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('1\n');
+    should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('2\n');
   });
 
   it('should bootstrap when logs already holds the log of a previous failed attempt', async () => {

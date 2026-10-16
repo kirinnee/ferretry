@@ -21,7 +21,7 @@ const rawEquivalentCost = (row: AnalyticsRawSession): string => {
   const value = row.equivalentApiCostUsdMicros;
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? formatUsdMicros(BigInt(value))
-    : 'Cost unknown';
+    : 'Unpriced';
 };
 
 /**
@@ -32,7 +32,7 @@ const rawEquivalentCost = (row: AnalyticsRawSession): string => {
 export function AnalyticsResponseView({ response }: { readonly response: AnalyticsResponse }) {
   const scope = (
     <p className="m-0 text-meta text-muted">
-      {response.scope.matched} matched · {response.scope.indexed} indexed
+      {response.scope.matched} of {response.scope.indexed} session{response.scope.indexed === 1 ? '' : 's'} matched
     </p>
   );
   if (response.kind === 'aggregate') {

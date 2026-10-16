@@ -12,7 +12,8 @@ import type { AnalyticsAggregateResult, AnalyticsResponse, SessionView } from '@
 import { BarChart3 } from 'lucide-react';
 import type { ResolvedQuota } from '../../lib/usage.ts';
 import { quotaResetsIn } from '../../shell/quota-readout.tsx';
-import { formatTokens, formatUsd, INFO_HINT } from './info-model.ts';
+import { formatTokens, formatUsd } from '../analytics/analytics-overview.ts';
+import { INFO_HINT } from './info-model.ts';
 import { InfoMeter, InfoRow, InfoSection } from './info-parts.tsx';
 
 export type InfoAnalyticsRead =

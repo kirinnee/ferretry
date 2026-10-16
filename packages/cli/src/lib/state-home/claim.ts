@@ -205,7 +205,9 @@ export class StateHomeClaimService {
     // Created even when the decision is `proceed`: `ensureDirectory` is how the mode is asserted, and
     // a home that exists with the wrong mode is one an earlier release or an operator's `mkdir` left.
     await this.files.ensureDirectory(home, STATE_HOME_MODE);
-    if (decision.kind === 'proceed') return { kind: 'already-claimed', home };
+    // An older layout is the daemon's to upgrade: it owns the home's contents, and the client never
+    // rewrites a marker over a layout it did not create.
+    if (decision.kind === 'proceed' || decision.kind === 'upgrade') return { kind: 'already-claimed', home };
     await this.files.writeMarkerAtomic(this.#markerPath(home), layoutVersionContent(), LAYOUT_VERSION_MODE);
     return { kind: 'claimed', home };
   }

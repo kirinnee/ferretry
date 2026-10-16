@@ -15,6 +15,7 @@ export * from './account/schema.ts';
 export * from './account/scope.ts';
 export * from './assets.ts';
 export * from './config.ts';
+export * from './config-files/index.ts';
 export * from './defaults.ts';
 export * from './env-profiles.ts';
 export * from './harness.ts';

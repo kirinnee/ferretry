@@ -27,7 +27,7 @@ describe('claiming a state home before writing into it', () => {
     // Assert
     should(claim).deepEqual({ kind: 'claimed', home: HOME });
     should(store.created).deepEqual([{ path: HOME, mode: STATE_HOME_MODE }]);
-    should(store.writes).deepEqual([{ path: MARKER, contents: '1\n', mode: 0o600 }]);
+    should(store.writes).deepEqual([{ path: MARKER, contents: '2\n', mode: 0o600 }]);
   });
 
   it('should claim a home that exists but is empty', async () => {
@@ -45,7 +45,7 @@ describe('claiming a state home before writing into it', () => {
 
   it('should change nothing on a home that already carries our marker', async () => {
     // Arrange
-    const { store, claims } = service(files('layout-version'), '1\n');
+    const { store, claims } = service(files('layout-version'), '2\n');
 
     // Act
     const claim = await claims.claim(HOME);
@@ -54,6 +54,20 @@ describe('claiming a state home before writing into it', () => {
     // deciding for itself when a claim applies.
     should(claim).deepEqual({ kind: 'already-claimed', home: HOME });
     should(store.writes).be.empty();
+  });
+
+  it('should leave a version-1 home to the daemon to upgrade, never rewriting its marker', async () => {
+    // Arrange — an older layout the daemon upgrades in place; the client must not stamp over it.
+    const { store, claims } = service(files('layout-version'), '1\n');
+
+    // Act
+    const claim = await claims.claim(HOME);
+
+    // Assert
+    should(claim).deepEqual({ kind: 'already-claimed', home: HOME });
+    should(store.writes).be.empty();
+    should(store.marker).equal('1\n');
+    should(store.created).deepEqual([{ path: HOME, mode: STATE_HOME_MODE }]);
   });
 
   it('should tolerate a marker written with trailing whitespace', async () => {
@@ -157,7 +171,7 @@ describe('claiming a state home before writing into it', () => {
 
   it('should refuse a home whose layout version this release cannot serve', async () => {
     // Arrange — a newer release's home. Writing our marker over it would silently downgrade it.
-    const { store, claims } = service(files('layout-version'), '2\n');
+    const { store, claims } = service(files('layout-version'), '3\n');
 
     // Act
     const failure = await claims.claim(HOME).then(
@@ -167,7 +181,7 @@ describe('claiming a state home before writing into it', () => {
 
     // Assert — and this refusal does NOT offer adoption, because adopting cannot repair it.
     should(failure).be.instanceOf(StateHomeClaimRefusedError);
-    should((failure as Error).message).containEql('"2"');
+    should((failure as Error).message).containEql('"3"');
     should((failure as Error).message).not.containEql('adopt');
     should(store.writes).be.empty();
   });
@@ -253,7 +267,7 @@ describe('adopting a home Ferretry created before claims existed', () => {
 
     // Assert
     should(adoption).deepEqual({ kind: 'adopted', home: HOME, entries: ['fleet', 'logs'] });
-    should(store.writes).deepEqual([{ path: MARKER, contents: '1\n', mode: 0o600 }]);
+    should(store.writes).deepEqual([{ path: MARKER, contents: '2\n', mode: 0o600 }]);
   });
 
   it('should report a home that is already claimed and change nothing', async () => {
@@ -339,7 +353,7 @@ describe('inspecting a state home without claiming it', () => {
     // Arrange — a reset asks this before it deletes, so asking must never stamp our marker on a
     // stranger's directory first.
     const absent = service(undefined);
-    const claimed = service(files('layout-version'), '1\n');
+    const claimed = service(files('layout-version'), '2\n');
     const stranger = service(files('taxes.pdf'));
 
     // Act

@@ -46,10 +46,20 @@ import {
   ScratchSweepViewSchema,
   type UsageFeedView,
   UsageFeedViewSchema,
+} from '../lib/service.ts';
+import {
+  WARDEN_ATTENTION_PATH,
+  WARDEN_INVESTIGATE_PATH,
+  type WardenAttentionView,
+  WardenAttentionViewSchema,
   type WardenConfigPatch,
   WardenConfigPatchSchema,
   type WardenConfigView,
   WardenConfigViewSchema,
+  type WardenInvestigateRequest,
+  WardenInvestigateRequestSchema,
+  type WardenInvestigateView,
+  WardenInvestigateViewSchema,
   WardenRunRequestSchema,
   type WardenRunView,
   WardenRunViewSchema,
@@ -57,7 +67,7 @@ import {
   WardenStatusViewSchema,
   type WardenVerdictsView,
   WardenVerdictsViewSchema,
-} from '../lib/service.ts';
+} from '../lib/warden.ts';
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
@@ -166,6 +176,12 @@ export class FyHttpError extends Error {
     message: string,
     readonly status: number,
     readonly code: string | undefined,
+    /**
+     * The whole error body as the daemon sent it, for a refusal that carries more than a sentence —
+     * a `422 config_invalid` names every located issue (docs/config-files.md). Parsed by the caller
+     * that knows its shape; never trusted as anything but data.
+     */
+    readonly body?: unknown,
   ) {
     super(message);
   }
@@ -394,7 +410,12 @@ export class FyApiClient implements IFyApiClient {
           payload.code,
         );
       }
-      throw new FyHttpError(payload?.error ?? `fyd returned HTTP ${response.status}`, response.status, payload?.code);
+      throw new FyHttpError(
+        payload?.error ?? `fyd returned HTTP ${response.status}`,
+        response.status,
+        payload?.code,
+        candidate,
+      );
     }
 
     let payload: unknown;
@@ -437,6 +458,18 @@ export class FyApiClient implements IFyApiClient {
       '/v1/warden/config',
       WardenConfigViewSchema,
       jsonRequest('PATCH', WardenConfigPatchSchema, patch),
+    );
+  }
+
+  wardenAttention(): Promise<WardenAttentionView> {
+    return this.request(WARDEN_ATTENTION_PATH, WardenAttentionViewSchema);
+  }
+
+  wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView> {
+    return this.request(
+      WARDEN_INVESTIGATE_PATH,
+      WardenInvestigateViewSchema,
+      jsonRequest('POST', WardenInvestigateRequestSchema, request),
     );
   }
 
