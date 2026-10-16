@@ -473,17 +473,37 @@ describe('session screen components', () => {
     expect(failing.root.findByProps({ role: 'alert' }).children).toContain('offline');
   });
 
-  test('renders the composer quota as a fixed, daemon-supplied context token', () => {
-    expect(composerQuotaPercent(undefined)).toBe('—');
-    expect(composerQuotaPercent(Number.NaN)).toBe('—');
+  test('renders the composer quota as a daemon-supplied context token, never a dash', () => {
     expect(composerQuotaPercent(-3)).toBe('0%');
     expect(composerQuotaPercent(12.6)).toBe('13%');
-    expect(composerQuotaSpoken(null)).toContain('5-hour window unknown');
+    expect(composerQuotaPercent(140)).toBe('100%');
+    expect(composerQuotaSpoken(null)).toBe('Account usage unknown: the daemon has no reading for this account yet.');
+    expect(composerQuotaSpoken({ weeklyPercent: 40 })).toBe(
+      'Account usage: 5-hour window unknown; weekly window 40% used.',
+    );
+    expect(composerQuotaSpoken({ fiveHourPercent: 12 })).toBe(
+      'Account usage: 5-hour window 12% used; weekly window unknown.',
+    );
 
-    const unknown = render(<ComposerQuota />);
-    expect(JSON.stringify(unknown.toJSON())).toContain('5h ');
-    expect(JSON.stringify(unknown.toJSON())).toContain('wk ');
-    expect(JSON.stringify(unknown.toJSON())).toContain('—');
+    // Nothing known: said in words, with no window label and no dash.
+    for (const quota of [undefined, null, {}, { fiveHourPercent: Number.NaN }]) {
+      const unknown = render(<ComposerQuota quota={quota} />);
+      const token = unknown.root.findByProps({ className: 'fy-composer-quota' });
+      expect(token.props['data-quota']).toBe('unknown');
+      expect(findText(token, 'usage unknown')).toHaveLength(1);
+      expect(JSON.stringify(unknown.toJSON())).not.toContain('—');
+      expect(JSON.stringify(unknown.toJSON())).not.toContain('5h');
+    }
+    const limited = render(<ComposerQuota quota={{ atLimit: true }} />);
+    expect(findText(limited.root, 'at limit')).toHaveLength(1);
+    expect(limited.root.findAllByProps({ className: 'fy-quota-error' })).toHaveLength(1);
+    expect(composerQuotaSpoken({ atLimit: true })).toContain('Account is at limit');
+
+    // One window known: only that one is drawn.
+    const weekOnly = render(<ComposerQuota quota={{ weeklyPercent: 40 }} />);
+    expect(findText(weekOnly.root, 'wk 40%')).toHaveLength(1);
+    expect(JSON.stringify(weekOnly.toJSON())).not.toContain('5h');
+    expect(weekOnly.root.findAllByProps({ className: 'fy-quota-divider' })).toHaveLength(0);
 
     const auth = render(<ComposerQuota quota={{ authOk: false }} />);
     expect(findText(auth.root, 'quota auth!')).toHaveLength(1);
@@ -501,10 +521,10 @@ describe('session screen components', () => {
     );
     const quota = composer.root.findByProps({ className: 'fy-composer-quota' });
     expect(quota.props.title).toContain('Account is at limit');
-    expect(findText(quota, '5h ')).toHaveLength(1);
-    expect(findText(quota, '75%')).toHaveLength(1);
-    expect(findText(quota, 'wk ')).toHaveLength(1);
-    expect(findText(quota, '92%')).toHaveLength(1);
+    expect(quota.props['data-quota']).toBe('known');
+    expect(findText(quota, '5h 75%')).toHaveLength(1);
+    expect(findText(quota, 'wk 92%')).toHaveLength(1);
+    expect(quota.findAllByProps({ className: 'fy-quota-divider' })).toHaveLength(1);
     expect(composer.root.findAllByProps({ className: ' fy-quota-error' })).toHaveLength(2);
   });
 

@@ -94,6 +94,38 @@ export function paneShowsActiveWork(pane: string): boolean {
   return SPINNER_PHRASE.test(pane) || SPINNER_MARK.test(pane);
 }
 
+/**
+ * The questions both harnesses ask before a tool runs — Claude's `Do you want to proceed?` /
+ * `Do you want to make this edit to …`, Codex's `Would you like to run the following command?` /
+ * `Allow command?`. Only ever read together with a numbered choice list, so prose that merely
+ * contains one of these words never reads as a prompt.
+ */
+const PERMISSION_QUESTIONS = ['do you want to', 'would you like to', 'allow command', 'approve this'];
+
+/** One numbered choice of a selector, cursor or not: `❯ 1. Yes`, `  2. No`, `› 1. Yes, proceed`. */
+const NUMBERED_CHOICE = /^\s*[│|]?\s*(?:[>›❯»▌]\s*)?[1-9][.)]\s+\S/u;
+
+/** How far up from the bottom of the frame a live permission prompt may sit. */
+const PERMISSION_WINDOW_LINES = 25;
+
+/**
+ * A permission (or other choice) prompt the harness is blocked on, in the VISIBLE pane.
+ *
+ * The agent is not working and it is not the person's ordinary turn either: nothing moves until
+ * somebody picks a choice. Recognition needs both halves — a permission question and at least two
+ * numbered choices — within the bottom of the frame, because a choice list that has scrolled up is
+ * history.
+ */
+export function paneShowsPermissionPrompt(pane: string): boolean {
+  // Trailing blank rows first: a tall pane draws its prompt near the top and pads the rest, and those
+  // rows would otherwise push the live prompt out of the window.
+  const lines = pane.replaceAll('\r\n', '\n').trimEnd().split('\n').slice(-PERMISSION_WINDOW_LINES);
+  const choices = lines.filter(line => NUMBERED_CHOICE.test(line)).length;
+  if (choices < 2) return false;
+  const lower = lines.join('\n').toLowerCase();
+  return PERMISSION_QUESTIONS.some(question => lower.includes(question));
+}
+
 export function promptIsReady(pane: string, cursorY?: number, cursorX?: number): boolean {
   const lower = pane.toLowerCase();
   if (STARTUP_BLOCKERS.some(marker => lower.includes(marker)) || paneShowsActiveWork(pane)) return false;

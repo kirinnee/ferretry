@@ -1,9 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { EnhancementHttpRequest } from '../../../src/lib/index.ts';
-import { FetchEnhancementTransport, PerformanceStopwatch, ProcessSecretReader } from '../../../src/adapters/index.ts';
+import { FetchEnhancementTransport, PerformanceStopwatch } from '../../../src/adapters/index.ts';
 
 const request: EnhancementHttpRequest = {
+  method: 'POST',
   url: 'https://provider.invalid/v1/chat/completions',
   headers: { authorization: 'Bearer sk-test-secret', 'content-type': 'application/json' },
   body: JSON.stringify({ model: 'stub', messages: [] }),
@@ -263,24 +264,29 @@ describe('fetch enhancement transport', () => {
   });
 });
 
-describe('process secret reader', () => {
-  it('should read a named secret from the injected environment only', () => {
+describe('fetch enhancement transport verbs', () => {
+  it('should send a GET with no body when the request carries none', async () => {
     // Arrange
-    const reader = new ProcessSecretReader({ GROQ_API_KEY: 'sk-injected' });
+    const transport = new FetchEnhancementTransport();
+    const seen: { method: string; body: string }[] = [];
+    const { body: _body, ...bodiless } = request;
 
     // Act
-    const actual = { present: reader.read('GROQ_API_KEY'), absent: reader.read('NOT_SET_ANYWHERE') };
+    await withServer(
+      async incoming => {
+        seen.push({ method: incoming.method, body: await incoming.text() });
+        return Response.json({ data: [] });
+      },
+      async url => {
+        const actual = await transport.send({ ...bodiless, method: 'GET', url });
+
+        // Assert
+        should(actual).deepEqual({ kind: 'completion', payload: { data: [] } });
+      },
+    );
 
     // Assert
-    should(actual).deepEqual({ present: 'sk-injected', absent: undefined });
-  });
-
-  it('should default to the daemon process environment', () => {
-    // Act
-    const actual = new ProcessSecretReader().read('FY_STT_TRANSPORT_TEST_ABSENT');
-
-    // Assert
-    should(actual).be.undefined();
+    should(seen).deepEqual([{ method: 'GET', body: '' }]);
   });
 });
 

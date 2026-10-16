@@ -134,6 +134,7 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
+  FileSpeedupTestLedger,
   foreignHistoryRoots,
   HostedRelayDirectory,
   HttpUsageSource,
@@ -151,7 +152,6 @@ import {
   PaneProcessInventory,
   PerformanceStopwatch,
   ProcCgroupPlacements,
-  ProcessSecretReader,
   quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
@@ -202,6 +202,7 @@ import {
 } from '../src/adapters/session/filesystem/index.ts';
 import {
   CodexAppServerCatalog,
+  readPersistedReasoningEffort,
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
 } from '../src/adapters/session/harness/index.ts';
@@ -231,6 +232,7 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
+import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
@@ -323,7 +325,7 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
-import { type AgentControlPolicy, AccountModelAgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
+import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -365,20 +367,19 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
-  CredentialAgentIdentities,
   advertisesForeignAddress,
+  agentSpokenName,
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
   type BootNoticePort,
   type BootRefusal,
   type BrowserLoginLifecycle,
-  BrowserSessionService,
   type BrowserSessionLauncher,
+  BrowserSessionService,
   type BrowserViewerHost,
-  type BrowserWorkerProgram,
   BrowserViewerStream,
-  selectBrowserWorker,
+  type BrowserWorkerProgram,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -390,9 +391,11 @@ import {
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
+  CredentialAgentIdentities,
   CredentialUsageSource,
   childGrantRequester,
   chooseRelayCarrierSources,
+  claimStartName,
   combinedReferences,
   configuredAt,
   contextWindowForSession,
@@ -457,7 +460,9 @@ import {
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isTaskBoardError,
+  JevTriageGuard,
   jsonObject,
+  launchReasoningEffort,
   type LearningSubsystem,
   LiveDeviceConnections,
   type LogLevel,
@@ -473,9 +478,6 @@ import {
   mayTrustDirectLoopback,
   messageWithAttachments,
   type NameAllocationErrorCode,
-  claimStartName,
-  sessionNameClaim,
-  agentSpokenName,
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
@@ -486,6 +488,7 @@ import {
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
   OperatorReadService,
+  OutboundProviderAuthorizer,
   observedRuntimeStatePatch,
   overriddenBy,
   PairedPushDevices,
@@ -585,10 +588,14 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
+  SessionTurnWatcher,
   SessionPlanner,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
   SessionReadError,
+  SessionRenameError,
+  SessionRenameService,
+  type SessionRenameSubsystem,
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
@@ -599,9 +606,6 @@ import {
   SessionSendService,
   type SessionSendSubsystem,
   SessionSignalError,
-  SessionRenameError,
-  SessionRenameService,
-  type SessionRenameSubsystem,
   SessionSignalService,
   type SessionSignalSubsystem,
   type SessionTranscriptMessageTokenCodec,
@@ -610,6 +614,7 @@ import {
   type SessionTranscriptTail,
   SignalRefused,
   type SocketRoute,
+  SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   StepUpRegistry,
   StepUpService,
@@ -619,10 +624,14 @@ import {
   StructuredQuestionService,
   SttEnhancementService,
   type SttEnhancementSubsystem,
+  SurfaceControl,
   searchTranscript,
+  secretsMatch,
   selectableAutoAccounts,
+  selectBrowserWorker,
   sendRecordView,
   sessionHealthSettingsAt,
+  sessionNameClaim,
   sessionScopedAttachments,
   structuredQuestionStatePatch,
   supersededCarrierKeys,
@@ -648,8 +657,6 @@ import {
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
-  SurfaceControl,
-  secretsMatch,
   transcriptKey,
   tryParseSessionId,
   UnknownPeerRefused,
@@ -1782,6 +1789,12 @@ function createSessionControlSubsystem(
         ...startupModelArguments(plan.model),
         ...(request.harnessFlags ?? []),
       ];
+      // The level this launch starts on, so a session that has said nothing yet still shows one. A
+      // single local file read: no harness is started and no provider is asked.
+      const launchEffort = launchReasoningEffort(
+        request.effort,
+        await readPersistedReasoningEffort(account.kind, transcript.provenance?.home),
+      );
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
@@ -1797,6 +1810,7 @@ function createSessionControlSubsystem(
         // hint is evidence about the request and the model is the decision.
         modelHint: request.model ?? account.defaultModel ?? '',
         model: plan.model,
+        ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         remoteControl: request.remoteControl === true,
         harnessFlags: [...(request.harnessFlags ?? [])],
         /**
@@ -3267,13 +3281,16 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     );
     const from = config.agent;
     const generation = config.runtimeGeneration + 1;
+    // The previous account's level described the previous runtime; the target's own settings decide.
+    const launchEffort = await readPersistedReasoningEffort(account.kind, relaunchTranscript.provenance?.home);
     await parts.storage.updateConfig(id, current => {
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
       // silently keep the old harness's file under the new harness's name.
-      const { transcript: _replaced, ...retained } = jsonObject(current) ?? {};
+      const { transcript: _replaced, launchReasoningEffort: _previousEffort, ...retained } = jsonObject(current) ?? {};
       return {
         ...retained,
+        ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         agent: account.agent,
         harness: account.kind,
         model: plan.model,
@@ -4688,6 +4705,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const secretDocuments = new FileSecretDocumentStore(paths, stateFiles);
   const secretCipher = new WebCryptoSecretCipher(new FileSecretKey(secretDocuments.keyFile, stateFiles));
   const secretVault = new SecretVault(secretDocuments, secretCipher);
+  // THE FIFTH HOLDER of the vault (see `docs/secrets.md`): it puts one named provider key on one HTTPS
+  // request to a host that key may reach, and hands back only the reply. Dictation clean-up, the Jev
+  // guard and the Speed-ups Test all spend keys through it; none of them is ever handed a value.
+  const outboundAuthorizer = new OutboundProviderAuthorizer(secretVault, new FetchEnhancementTransport());
+  const speedupStopwatch = new PerformanceStopwatch();
   const secrets: SecretSubsystem = {
     directory: new SecretDirectory(secretDocuments, secretCipher, clock),
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
@@ -6648,6 +6670,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
+        // Whose turn it is, from the transcript and the live pane — read through the SAME tmux server
+        // the launch path addresses, and the same proved transcript file every other read uses.
+        turns: new SessionTurnWatcher(
+          new StorageTurnPorts(
+            storage,
+            createSessionTranscriptTail(storage),
+            (() => {
+              const resolver = createTranscriptFileResolver(storage);
+              return async (id: SessionId) => await resolver.file(id);
+            })(),
+            launchTmux,
+            clock,
+          ),
+        ),
         sessionMigrate,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
@@ -6697,6 +6733,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         recommend: createRecommendSubsystem(advisorOver, usage),
         sttEnhancement,
+        // Names-only status over the store's listing, and a Test that spends a key once through the
+        // outbound holder above. Jev's Test goes through the same guard the Warden will use.
+        speedups: new SpeedupsService({
+          authorizer: outboundAuthorizer,
+          secrets: secrets.directory,
+          ledger: new FileSpeedupTestLedger(stateFiles, join(paths.state, 'speedups.json')),
+          clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
+          guard: new JevTriageGuard(outboundAuthorizer, speedupStopwatch),
+        }),
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
@@ -6825,11 +6870,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
-    sttEnhancement: new SttEnhancementService(
-      new FetchEnhancementTransport(),
-      new ProcessSecretReader(),
-      new PerformanceStopwatch(),
-    ),
+    sttEnhancement: new SttEnhancementService(outboundAuthorizer, speedupStopwatch),
     untilShutdown: untilTerminated,
   };
 }
@@ -7279,6 +7320,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   subsystems.monitor.arm();
   await subsystems.monitor.run();
   const waitTicks = setInterval(() => void subsystems.monitor.run(), subsystems.monitor.intervalMs);
+  // Whose turn it is: a local pane capture and a transcript stat per live session, every couple of
+  // seconds, so a finished turn reads as finished — and notifies — within seconds. Spends no tokens.
+  void subsystems.turns.run();
+  const turnTicks = setInterval(() => void subsystems.turns.run(), subsystems.turns.intervalMs);
+  cleanups.push(() => clearInterval(turnTicks));
   cleanups.push(async () => {
     clearInterval(waitTicks);
     await subsystems.monitor.close();

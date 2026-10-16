@@ -13,10 +13,16 @@
  *     in-session command that persists to the account's settings; Codex reasoning
  *     is not a string command at all — its levels are advertised per model and the
  *     daemon drives the native picker.
- *   - Only harness-OBSERVED truth is shown. The model and (Codex) reasoning
- *     readouts go stale-until-evidence after a switch; Claude effort is shown as
- *     the level last SENT this session (a confirmed persisted write), never as an
- *     observed running value, because Claude does not echo it back.
+ *   - Harness-OBSERVED truth wins. The model and (Codex) reasoning readouts go
+ *     stale-until-evidence after a switch; Claude effort is shown as the level
+ *     last SENT this session (a confirmed persisted write), because Claude does
+ *     not echo it back.
+ *   - BEFORE THE HARNESS HAS SAID ANYTHING the readouts fall back to the runtime
+ *     the session was LAUNCHED with: the model on its launch argv and the level
+ *     the start request or the runtime's settings file named, else the harness
+ *     default. A brand-new session has no transcript, and "model unavailable"
+ *     beside an empty effort chip was answering a question the launch already
+ *     answered. The spoken label says which of the two it is.
  *   - The IN-PLACE switches here are deliberately kept apart from the destructive
  *     "move account + relaunch", which stays in the details sheet only.
  *
@@ -95,15 +101,58 @@ export const runtimeSwitchDisabledReason = (
   return undefined;
 };
 
+const present = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
+};
+
+/**
+ * The model the session was LAUNCHED on. The daemon puts the resolved model on
+ * the argv and appends the operator's own flags after it, so a `--model` (or
+ * Codex's `-m`) among those flags is the one the harness actually started on.
+ */
+export const launchedModel = (config: SessionView['config']): string | undefined => {
+  // A hand-built view (a fixture, a harness frame) may omit the flags; the wire never does.
+  const flags: readonly string[] = config.harnessFlags ?? [];
+  let flagged: string | undefined;
+  flags.forEach((flag, index) => {
+    if (flag === '--model' || flag === '-m') flagged = present(flags[index + 1]) ?? flagged;
+    else if (flag.startsWith('--model=')) flagged = present(flag.slice('--model='.length)) ?? flagged;
+  });
+  return flagged ?? present(config.model) ?? present(config.modelHint);
+};
+
 /**
  * The model chip's readout: the observed runtime model, going STALE (not wrong)
- * after a switch until fresh evidence lands. A configured launch request is not
- * evidence of the model actually in use, so it is deliberately never displayed.
+ * after a switch until fresh evidence lands — else, before the harness has
+ * reported one, the model it was launched on.
  */
-export const runtimeModelChipLabel = (view: SessionView): string => {
-  const observed = view.state.observedModel?.trim();
-  if (observed) return observed;
-  return 'model unavailable';
+export const runtimeModelChipLabel = (view: SessionView): string =>
+  present(view.state.observedModel) ?? launchedModel(view.config) ?? 'model unavailable';
+
+/** What the reasoning chip prints, and what it says aloud about where that came from. */
+export interface RuntimeEffortReadout {
+  readonly label: string;
+  readonly aria: string;
+}
+
+/**
+ * The reasoning chip: what the harness reported (Codex) or what was last sent
+ * this session (Claude), else the level the session was launched on, else the
+ * harness's own default — said as `default`, never left blank.
+ */
+export const runtimeEffortReadout = (view: SessionView, sentClaudeEffort: string | undefined): RuntimeEffortReadout => {
+  const codex = view.config.harness === 'codex';
+  const verb = codex ? 'Set reasoning level' : 'Set reasoning effort';
+  const current = codex ? present(view.state.observedReasoningEffort) : present(sentClaudeEffort);
+  if (current !== undefined)
+    return {
+      label: current,
+      aria: codex ? `${verb} — currently ${current}` : `${verb} — last set to ${current} this session`,
+    };
+  const launched = present(view.config.launchReasoningEffort);
+  if (launched !== undefined) return { label: launched, aria: `${verb} — launched with ${launched}` };
+  return { label: 'default', aria: `${verb} — the harness default` };
 };
 
 /** The callbacks a sheet body drives so the bar's readouts stay honest. */
@@ -343,14 +392,11 @@ export function ComposerRuntimeWithKeyboard({
   const disabled = disabledReason !== undefined;
 
   const modelLabel = runtimeModelChipLabel(view);
-  // The reasoning chip's readout: Codex shows its observed level; Claude shows the
-  // level it last sent, else a neutral verb. Never an unverified claim.
-  const effortLabel = codex ? observedReasoning || 'reasoning' : sentClaudeEffort || 'effort';
-  const effortAria = codex
-    ? `Set reasoning level — currently ${observedReasoning || 'unknown'}`
-    : sentClaudeEffort
-      ? `Set reasoning effort — last set to ${sentClaudeEffort} this session`
-      : 'Set reasoning effort';
+  const modelAria =
+    present(state.observedModel) === undefined && launchedModel(config) !== undefined
+      ? `Switch model — launched on ${modelLabel}`
+      : `Switch model — currently ${modelLabel}`;
+  const { label: effortLabel, aria: effortAria } = runtimeEffortReadout(view, sentClaudeEffort);
 
   const modelLifecycle: RuntimeSwitchLifecycle = {
     open: modelOpen,
@@ -369,7 +415,7 @@ export function ComposerRuntimeWithKeyboard({
     <>
       <div className="fy-composer__runtime-row inline-flex min-w-0 items-center gap-xs" data-kb-hide>
         <RuntimeChip
-          ariaLabel={`Switch model — currently ${modelLabel}`}
+          ariaLabel={modelAria}
           disabled={disabled}
           disabledReason={disabledReason}
           id={modelTriggerId}

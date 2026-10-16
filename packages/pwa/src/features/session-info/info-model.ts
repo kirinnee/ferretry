@@ -12,6 +12,7 @@
  */
 
 import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
+import { launchedModel } from '../../components/composer-runtime.tsx';
 
 export type InfoTab = 'overview' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
 
@@ -68,12 +69,13 @@ export interface ModelFacts {
 const modelStem = (model: string): string => model.replace(/\[.*\]$/u, '').trim().toLocaleLowerCase();
 
 /**
- * Requested vs observed, with a mismatch flagged only when both are known and genuinely differ: an
+ * Requested (the model it was LAUNCHED on: an operator --model flag, else the resolved model — the
+ * composer chip's own rule) vs observed, with a mismatch flagged only when both are known and genuinely differ: an
  * observed `claude-opus-4-5-20251101` matches a requested `opus` alias, because the alias is
  * contained in it.
  */
 export const modelFacts = (view: SessionView): ModelFacts => {
-  const requested = view.config.model ?? (view.config.modelHint.trim() === '' ? null : view.config.modelHint);
+  const requested = launchedModel(view.config) ?? null;
   const observed = view.state.observedModel ?? null;
   if (requested === null || observed === null) return { requested, observed, mismatch: false };
   const asked = modelStem(requested);
@@ -81,8 +83,9 @@ export const modelFacts = (view: SessionView): ModelFacts => {
   return { requested, observed, mismatch: !(seen.includes(asked) || asked.includes(seen)) };
 };
 
-/** The effort the CLI reports, else nothing known. */
-export const effortLabel = (view: SessionView): string => view.state.observedReasoningEffort ?? 'default';
+/** The effort the CLI reports, else the level it was launched with, else the CLI's own default. */
+export const effortLabel = (view: SessionView): string =>
+  view.state.observedReasoningEffort ?? view.config.launchReasoningEffort ?? 'default';
 
 export type WorktreeFact =
   | { readonly kind: 'unknown' }

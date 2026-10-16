@@ -1,0 +1,169 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  isTurnStatus,
+  observeTurn,
+  settleTurnState,
+  type TurnEvidence,
+  type TurnPaneEvidence,
+  transcriptTurnPhase,
+  turnStatePatch,
+} from '../../../../src/lib/session/turn/policy.ts';
+import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
+
+/**
+ * Whose turn it is, from evidence. The cases that matter most are the ones that must NOT end a turn:
+ * a single idle frame against a transcript still mid-turn, and a status word standing in for proof.
+ */
+
+const turn = (state: 'started' | 'completed' | 'aborted', harness: 'claude' | 'codex' = 'codex'): TranscriptEvent => ({
+  harness,
+  role: 'system',
+  kind: 'turn',
+  state,
+});
+const said = (role: 'user' | 'assistant'): TranscriptEvent => ({ harness: 'claude', role, kind: 'message', text: 'x' });
+const usage: TranscriptEvent = { harness: 'claude', role: 'assistant', kind: 'usage', usage: { model: 'm' } };
+const note: TranscriptEvent = { harness: 'codex', role: 'developer', kind: 'message', text: 'instructions' };
+
+const IDLE: TurnPaneEvidence = { working: false, atPrompt: true, permission: false };
+const BUSY: TurnPaneEvidence = { working: true, atPrompt: false, permission: false };
+const ASKING: TurnPaneEvidence = { working: false, atPrompt: false, permission: true };
+const BLANK: TurnPaneEvidence = { working: false, atPrompt: false, permission: false };
+
+const evidence = (overrides: Partial<TurnEvidence> & { status?: TurnEvidence['state']['status'] }): TurnEvidence => ({
+  state: { status: overrides.status ?? 'running', turn: 2, ...(overrides.state ?? {}) },
+  transcript: overrides.transcript ?? 'unknown',
+  pane: overrides.pane,
+});
+
+describe('transcriptTurnPhase', () => {
+  it('should read the newest turn boundary', () => {
+    should(transcriptTurnPhase([turn('started')])).equal('working');
+    should(transcriptTurnPhase([turn('started'), turn('completed')])).equal('ended');
+    should(transcriptTurnPhase([turn('started'), turn('aborted')])).equal('ended');
+  });
+
+  it('should call a Claude turn ended at its end_turn record, and working once anyone speaks after it', () => {
+    should(transcriptTurnPhase([said('user'), said('assistant'), turn('completed', 'claude'), usage])).equal('ended');
+    should(transcriptTurnPhase([said('assistant'), turn('completed', 'claude'), said('user')])).equal('working');
+  });
+
+  it('should ignore bookkeeping and system notes after a boundary', () => {
+    const settings: TranscriptEvent = { harness: 'codex', role: 'system', kind: 'settings', settings: {} };
+    const attachment: TranscriptEvent = {
+      harness: 'claude',
+      role: 'user',
+      kind: 'attachment',
+      attachment: { kind: 'remote-control', url: 'https://x.test' },
+    };
+    const error: TranscriptEvent = {
+      harness: 'codex',
+      role: 'assistant',
+      kind: 'error',
+      error: { message: 'x', recoverable: true },
+    };
+    should(transcriptTurnPhase([turn('completed'), usage, settings, attachment, error, note])).equal('ended');
+  });
+
+  it('should know nothing from an empty or bookkeeping-only tail', () => {
+    should(transcriptTurnPhase([])).equal('unknown');
+    should(transcriptTurnPhase([usage, note])).equal('unknown');
+  });
+});
+
+describe('observeTurn', () => {
+  it('should describe only a live session', () => {
+    for (const status of ['created', 'starting', 'waiting', 'completed', 'failed', 'stopped', 'stalled'] as const)
+      should(observeTurn(evidence({ status, pane: IDLE }))).be.undefined();
+    should(isTurnStatus('running')).be.true();
+    should(isTurnStatus('stopped')).be.false();
+  });
+
+  it('should call a question or a permission prompt needs-input, on sight', () => {
+    should(observeTurn(evidence({ status: 'awaiting_question' }))).deepEqual({ state: 'needs-input', confirmed: true });
+    should(
+      observeTurn(
+        evidence({
+          state: { status: 'running', turn: 2, pendingQuestion: { toolUseId: 't', questions: [{ question: 'q' }] } },
+        }),
+      ),
+    ).deepEqual({ state: 'needs-input', confirmed: true });
+    should(observeTurn(evidence({ pane: ASKING, transcript: 'working' }))).deepEqual({
+      state: 'needs-input',
+      confirmed: true,
+    });
+  });
+
+  it('should believe a pane showing work over a transcript that says the turn ended', () => {
+    should(observeTurn(evidence({ pane: BUSY, transcript: 'ended' }))).deepEqual({ state: 'working', confirmed: true });
+  });
+
+  it('should confirm your-turn at once when the pane and transcript agree, and not when they disagree', () => {
+    should(observeTurn(evidence({ pane: IDLE, transcript: 'ended' }))).deepEqual({
+      state: 'your-turn',
+      confirmed: true,
+    });
+    should(observeTurn(evidence({ pane: IDLE }))).deepEqual({ state: 'your-turn', confirmed: true });
+    // An interrupted Claude turn writes no end: the pane is the only witness, so it needs two frames.
+    should(observeTurn(evidence({ pane: IDLE, transcript: 'working' }))).deepEqual({
+      state: 'your-turn',
+      confirmed: false,
+    });
+  });
+
+  it('should fall back to the transcript when the pane shows neither', () => {
+    should(observeTurn(evidence({ pane: BLANK, transcript: 'working' }))).deepEqual({
+      state: 'working',
+      confirmed: true,
+    });
+    should(observeTurn(evidence({ transcript: 'ended' }))).deepEqual({ state: 'your-turn', confirmed: false });
+  });
+
+  it('should take the status word only when nothing else speaks', () => {
+    should(observeTurn(evidence({ status: 'awaiting_user' }))).deepEqual({ state: 'your-turn', confirmed: true });
+    should(observeTurn(evidence({ status: 'interrupted' }))).deepEqual({ state: 'your-turn', confirmed: true });
+    should(observeTurn(evidence({ state: { status: 'running', turn: 0 } }))).deepEqual({
+      state: 'your-turn',
+      confirmed: true,
+    });
+    should(observeTurn(evidence({}))).be.undefined();
+  });
+});
+
+describe('settleTurnState', () => {
+  const working = { state: 'working', confirmed: true } as const;
+  const idleWeak = { state: 'your-turn', confirmed: false } as const;
+
+  it('should clear the record of a session that is no longer live', () => {
+    should(settleTurnState('working', working, undefined, false)).be.undefined();
+  });
+
+  it('should keep the record when there is no evidence', () => {
+    should(settleTurnState('working', undefined, working, true)).equal('working');
+  });
+
+  it('should record a confirmed observation at once', () => {
+    should(settleTurnState('your-turn', working, undefined, true)).equal('working');
+  });
+
+  it('should end a turn on weak evidence only when it is seen twice', () => {
+    should(settleTurnState('working', idleWeak, working, true)).equal('working');
+    should(settleTurnState('working', idleWeak, idleWeak, true)).equal('your-turn');
+    should(settleTurnState('working', idleWeak, undefined, true)).equal('working');
+  });
+});
+
+describe('turnStatePatch', () => {
+  it('should write nothing when the value is already recorded, so the instant only moves on a change', () => {
+    should(turnStatePatch({ turnState: 'working', turnStateAt: 'a' }, 'working', 'b')).be.undefined();
+    should(turnStatePatch({ turnState: 'working', turnStateAt: 'a' }, 'your-turn', 'b')).deepEqual({
+      turnState: 'your-turn',
+      turnStateAt: 'b',
+    });
+    should(turnStatePatch({ turnState: 'working' }, undefined, 'b')).deepEqual({
+      turnState: undefined,
+      turnStateAt: undefined,
+    });
+  });
+});

@@ -26,6 +26,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import {
   type AttentionSnapshot,
+  DAEMON_CAPABILITIES,
   DoctorReportSchema,
   type FyEvent,
   type FyEventStreamIdle,
@@ -55,17 +56,17 @@ import {
   updateOffer,
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
-import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
+import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
+import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
@@ -3276,9 +3277,12 @@ describe('the settings route composition', () => {
     // its own suite proves that is the ONLY thing it reads, so dropping it here hides nothing else.
     // Settings also asks every paired machine once whether it answers (`/v1/fleet/machine`), so the
     // sidebar can show each one's status, and a machine's tabs read its setup (`/v1/fleet/...`). Those are
-    // the account model's reads, proved in their own suites; this test is about the health probe.
+    // the account model's reads, proved in their own suites; this test is about the health probe. The
+    // shell also asks the machine on screen whether it may offer "Pair a phone" (`/v1/grants`).
     const probes = () =>
-      healthReads.filter(read => read.path !== '/v1/pair/devices' && !read.path.startsWith('/v1/fleet/'));
+      healthReads.filter(
+        read => read.path !== '/v1/pair/devices' && read.path !== '/v1/grants' && !read.path.startsWith('/v1/fleet/'),
+      );
 
     // A daemon tab does not read another daemon merely by being visible. Opening
     // Host checks is the explicit request, and it travels through the same typed
@@ -3981,6 +3985,97 @@ describe('the phone tab bar', () => {
       expect(view.container.querySelector('[data-app-tab-bar]')).toBeNull();
     } finally {
       await view.unmount();
+    }
+  });
+});
+
+describe('pairing a phone from the machine menu and the finder', () => {
+  /** This machine says the reader may pair a device once they confirm with a passkey. */
+  const PAIRING_OPEN = {
+    '/v1/grants': {
+      capabilities: DAEMON_CAPABILITIES.map(capability => ({
+        capability,
+        use: capability !== 'pairing',
+        configure: false,
+        granted: { use: true, configure: false },
+        mayGrant: false,
+        useRefusal: capability === 'pairing' ? 'step-up-required' : 'granted',
+        configureRefusal: 'not-granted',
+        origin: 'default',
+      })),
+      governed: true,
+      hostLocal: false,
+      steppedUp: false,
+    },
+    '/v1/pair/devices': { devices: [], hostLocal: false, mayWiden: {} },
+  } as const;
+
+  const pairItem = (): HTMLButtonElement =>
+    must(
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item =>
+        item.textContent?.startsWith('Pair a phone with '),
+      ),
+      'Pair a phone',
+    );
+
+  it('opens the Add-a-device surface in a dialog from the switcher and from the finder', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PAIRING_OPEN });
+    try {
+      await settle();
+      const machine = must(view.container.querySelector<HTMLButtonElement>('[data-sbar-machine]'), 'machine');
+      await interact(() => machine.click());
+      await interact(() => pairItem().click());
+      await settle();
+      const dialog = must(document.querySelector('[data-pair-phone="dialog"] [role="dialog"]'), 'the dialog');
+      expect(dialog.textContent).toContain('No paired device can reach');
+      await interact(() => pressKey(dialog, 'Escape'));
+      expect(document.querySelector('[data-pair-phone]')).toBeNull();
+      expect(document.activeElement).toBe(machine);
+
+      // The finder offers the same act, and opens the same dialog.
+      await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+      await interact(() =>
+        must(document.getElementById('fy-palette-option-command-pair-phone'), 'the finder row').dispatchEvent(
+          new Event('pointerdown', { bubbles: true, cancelable: true }),
+        ),
+      );
+      await interact(() =>
+        must(document.getElementById('fy-palette-option-command-pair-phone'), 'the finder row').dispatchEvent(
+          new Event('pointerup', { bubbles: true, cancelable: true }),
+        ),
+      );
+      await settle();
+      expect(document.querySelector('[data-pair-phone="dialog"]')).not.toBeNull();
+      await interact(() => must(document.querySelector<HTMLButtonElement>('[data-pair-phone-close]'), 'Close').click());
+      expect(document.querySelector('[data-pair-phone]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens it as a bottom sheet on a phone, over the sessions drawer', async () => {
+    const restore = patchGlobal(window, 'innerWidth', 390);
+    try {
+      const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { fleet: PAIRING_OPEN });
+      try {
+        await settle();
+        await interact(() =>
+          must(
+            view.container.querySelector<HTMLButtonElement>('button[aria-label="Open the fleet sidebar"]'),
+            'the drawer opener',
+          ).click(),
+        );
+        const drawer = must(view.container.querySelector('[data-sessions-bar="drawer"]'), 'the drawer');
+        await interact(() => must(drawer.querySelector<HTMLButtonElement>('[data-sbar-machine]'), 'machine').click());
+        await interact(() => pairItem().click());
+        await settle();
+        expect(document.querySelector('[data-bottom-sheet="pair-phone"] [data-pair-phone-body]')).not.toBeNull();
+        expect(view.container.querySelector('[data-sessions-bar="drawer"]')).not.toBeNull();
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      restore();
     }
   });
 });

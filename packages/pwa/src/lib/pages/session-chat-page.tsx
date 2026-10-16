@@ -53,7 +53,6 @@ import { useInfoPlacement } from '../../features/session-info/use-info-placement
 import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
-import { useInfoQuota } from '../../features/session-info/use-info-quota.ts';
 import { daemonSessionPath } from './routes.ts';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
@@ -68,6 +67,7 @@ import { browserPageForKey, useSessionBrowser } from '../../features/browser/use
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
+import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
@@ -87,6 +87,7 @@ import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts'
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
+import { sessionTurn } from '../session-activity.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
@@ -591,17 +592,27 @@ export function SessionChatPage({
     () => sessionActionSpecs(session, canControl).filter(spec => spec.action !== 'rename'),
     [canControl, session],
   );
-  const busy = statusMark(session).klass === 'active';
-  // The harness's own status line, read off its pane while — and only while — the session works.
+  // LIVE is not WORKING. `running` means the agent's terminal is up — a brand-new session is
+  // `running` before anything is sent. Whose turn it is comes from the daemon's turn watcher
+  // (`state.turnState`, read through `lib/session-activity.ts`), the same field the status dots and
+  // the notifications read. The pane is read only to print the harness's own working line — and, for
+  // a daemon that sends no `turnState`, as the fallback evidence.
+  const working = session.state.turnState === 'working';
+  const legacyLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
   const readActivityFrame = useCallback<PaneFrameReader>(
     async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true),
     [connection, referenceFetch, scope],
   );
-  const paneActivity = usePaneActivity(readActivityFrame, busy);
+  const pane = usePaneActivity(readActivityFrame, working || legacyLive);
+  const turn = sessionTurn(session, pane);
+  const busy = turn === 'working' || (turn === null && legacyLive);
+  // The account's quota for this session, from the daemon's passive usage feed. The session document
+  // itself never carries one, so reading `state.quota` showed "—" for every window, always.
+  const quota = useOptionalSessionQuota(usage, connection, session);
   /**
    * THE RUNTIME CHIPS ASK A DIFFERENT QUESTION THAN THE TRANSCRIPT DOES.
    *
-   * `busy` above is session LIVENESS — is there work happening — and that is the
+   * `busy` above is whether work is HAPPENING — and that is the
    * right fact for a transcript tail and for a composer that keeps accepting
    * text while a turn runs. A runtime switch is not about liveness at all: the
    * daemon refuses one unless the harness is sitting at an idle prompt
@@ -884,7 +895,6 @@ export function SessionChatPage({
       },
     };
   }, [contextDependencies, connection, scope, skills.load, referenceFetch, openFile, agentName, runtime, routedClient]);
-  const quota = useInfoQuota(usage, connection.daemonId, session);
   const infoSlot: SessionInfoSlot | undefined =
     infoPorts === undefined
       ? undefined
@@ -938,6 +948,7 @@ export function SessionChatPage({
     <>
       <SessionTopBar
         actions={lifecycleActions}
+        turn={turn}
         compact={compact}
         infoOpen={info.open}
         menu={actionsMenu}
@@ -970,7 +981,7 @@ export function SessionChatPage({
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
       <div className="fy-chat-log">
         <Transcript
-          activity={paneActivity}
+          activity={pane.activity}
           activityFallback={session.state.activity ?? null}
           agentName={agentName}
           busy={busy}
@@ -1031,7 +1042,7 @@ export function SessionChatPage({
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               onSent={onSent}
-              quota={session.state.quota}
+              quota={quota}
               sessionId={session.config.id}
               {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
               // The model and effort chips ride the composer's own status line, so the

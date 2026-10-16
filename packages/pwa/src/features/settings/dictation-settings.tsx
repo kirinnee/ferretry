@@ -16,8 +16,10 @@
  *      online service, so this screen says that plainly instead of claiming all
  *      target browsers recognise offline.
  *   3. ENHANCEMENT IS SEPARATE. Local word correction stays in this browser;
- *      optional Groq correction legitimately sends recognised TEXT through the
- *      paired daemon that owns the live session and its credential. Either
+ *      optional Groq or Cerebras clean-up legitimately sends recognised TEXT
+ *      through the paired daemon that owns the live session, which spends the
+ *      provider key from its own secret store (Settings › This machine ›
+ *      Speed-ups). Audio is never part of that: recognition stays here. Either
  *      provider first READS that session's recent messages for vocabulary, so
  *      the local copy discloses that request rather than promising silence.
  *
@@ -33,7 +35,10 @@ import { cn } from '../../lib/class-names.ts';
 import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../lib/stt/browser-recognition.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import {
+  DEFAULT_ENHANCEMENT_MODELS,
   ENHANCEMENT_PROVIDERS,
+  type EnhancementProviderId,
+  isRemoteEnhancementProvider,
   MAX_ENHANCEMENT_MODEL_CHARS,
   MAX_USER_CONTEXT_CHARS,
   type SttSettings,
@@ -64,7 +69,7 @@ export const ENHANCEMENT_EXPLANATION =
   'WORDS ONLY. It can swap a whole word for one you actually use — “ferretry”, “tmux”, “Parakeet” — and nothing else. It cannot add, remove or reorder words, change punctuation or spacing, or rewrite a sentence. A separate check compares the result against the raw transcript and discards the whole thing if anything else moved.';
 
 export const ENHANCEMENT_TOGGLE_EXPLANATION =
-  'Optional correction runs once after transcription. Choose instant on-device word correction or hosted Groq cleanup below. They cannot send a message for you.';
+  'Optional correction runs once after transcription. Choose instant on-device word correction, or hosted Groq or Cerebras clean-up below. They cannot send a message for you.';
 
 /**
  * Where enhancement's vocabulary comes from, in the order it is trusted.
@@ -86,6 +91,36 @@ export const LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE =
 
 export const GROQ_ENHANCEMENT_EXPLANATION =
   'Groq runs only after dictation stops. It is instructed to preserve your wording while correcting recognition errors, spelling, capitalization and punctuation. The daemon holds the Groq API key and sends Groq the raw transcript, your dictionary and bounded context; the key is never stored in this browser. A timeout or provider error keeps your raw words and shows the real reason instead of silently falling back.';
+
+export const CEREBRAS_ENHANCEMENT_EXPLANATION =
+  'Cerebras runs only after dictation stops, with the same instructions as Groq: keep your wording, fix recognition errors, spelling, capitalization and punctuation. The daemon holds the Cerebras API key and sends Cerebras the raw transcript, your dictionary and bounded context; the key is never stored in this browser. A timeout or provider error keeps your raw words.';
+
+/** Where the hosted providers' keys are set, said next to the choice that needs one. */
+export const SPEEDUP_KEY_HINT =
+  'The key lives on the machine, not in this browser: paste it under Settings › This machine › Speed-ups, where Test checks it works. Audio never leaves this device — only the recognised text is sent.';
+
+/**
+ * Using one of the machine's own logins for clean-up needs a login that can answer a plain chat
+ * request, which arrives with environment-based logins. Shown, disabled, so the choice is not a
+ * surprise when it lands — and so nobody picks an option that would fail every time.
+ */
+export const LOGIN_CLEANUP_UNAVAILABLE = 'One of your logins (not available yet)';
+
+const REMOTE_EXPLANATIONS: Readonly<Record<'groq' | 'cerebras', string>> = {
+  groq: GROQ_ENHANCEMENT_EXPLANATION,
+  cerebras: CEREBRAS_ENHANCEMENT_EXPLANATION,
+};
+
+/**
+ * The patch a provider choice makes. Switching to a hosted provider resets the model to THAT
+ * provider's default: a Groq model name sent to Cerebras is a refusal on every dictation.
+ */
+export function providerChoicePatch(current: SttSettings, chosen: string): SttSettingsPatch {
+  const provider: EnhancementProviderId = ENHANCEMENT_PROVIDERS.find(entry => entry.id === chosen)?.id ?? 'local';
+  if (!isRemoteEnhancementProvider(provider) || provider === current.enhancementProvider)
+    return { enhancementProvider: provider };
+  return { enhancementProvider: provider, enhancementModel: DEFAULT_ENHANCEMENT_MODELS[provider] };
+}
 
 /**
  * Above the free-text context field. It has to establish two things fast: paste
@@ -201,18 +236,21 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
                   id="stt-enhancement-provider"
                   className="kt-input min-h-[44px]"
                   value={settings.enhancementProvider}
-                  onChange={event => update({ enhancementProvider: event.target.value === 'groq' ? 'groq' : 'local' })}
+                  onChange={event => update(providerChoicePatch(settings, event.target.value))}
                 >
                   {ENHANCEMENT_PROVIDERS.map(provider => (
                     <option key={provider.id} value={provider.id}>
                       {provider.label}
                     </option>
                   ))}
+                  <option value="login" disabled>
+                    {LOGIN_CLEANUP_UNAVAILABLE}
+                  </option>
                 </select>
-                {settings.enhancementProvider === 'groq' ? (
+                {isRemoteEnhancementProvider(settings.enhancementProvider) ? (
                   <>
                     <label htmlFor="stt-enhancement-model" className="text-ui font-semibold">
-                      Groq model
+                      {settings.enhancementProvider === 'groq' ? 'Groq' : 'Cerebras'} model
                     </label>
                     <input
                       id="stt-enhancement-model"
@@ -221,9 +259,13 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
                       spellCheck={false}
                       maxLength={MAX_ENHANCEMENT_MODEL_CHARS}
                       value={settings.enhancementModel}
+                      placeholder={DEFAULT_ENHANCEMENT_MODELS[settings.enhancementProvider]}
                       onChange={event => update({ enhancementModel: event.target.value })}
                     />
-                    <p className="text-meta leading-base text-muted">{GROQ_ENHANCEMENT_EXPLANATION}</p>
+                    <p className="text-meta leading-base text-muted">
+                      {REMOTE_EXPLANATIONS[settings.enhancementProvider]}
+                    </p>
+                    <p className="text-meta leading-base text-faint">{SPEEDUP_KEY_HINT}</p>
                   </>
                 ) : (
                   <>

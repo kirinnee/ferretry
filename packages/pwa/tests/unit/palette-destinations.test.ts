@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { QrCode } from 'lucide-react';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../src/lib/pages/routes.ts';
 import { APP_BAR_DESTINATIONS } from '../../src/shell/app-bar.tsx';
@@ -6,8 +7,11 @@ import {
   type AppBarDestinationLike,
   destinationExists,
   destinationPaletteEntries,
+  PAIR_PHONE_SEARCH_TERMS,
+  pairPhonePaletteCommand,
   SHELL_DESTINATIONS,
 } from '../../src/shell/palette-destinations.ts';
+import { matchesPaletteCommand } from '../../src/shell/palette-model.ts';
 
 const alpha = daemonId('alpha');
 const beta = daemonId('beta');
@@ -156,5 +160,23 @@ describe('SHELL_DESTINATIONS', () => {
   it('carries the two routes the top bar deliberately does not', () => {
     expect(SHELL_DESTINATIONS.map(destination => destination.id)).toEqual(['sessions', 'new-session']);
     expect(SHELL_DESTINATIONS.map(destination => destination.path(alpha))).toEqual(['/d/alpha', '/d/alpha/new']);
+  });
+});
+
+describe('pairPhonePaletteCommand', () => {
+  it('is an act, not a page, found by the words a reader reaches for', () => {
+    let ran = 0;
+    const command = pairPhonePaletteCommand('Pair a phone with alpha', 'Show a QR code', QrCode, () => (ran += 1));
+    expect(command).toMatchObject({
+      id: 'pair-phone',
+      label: 'Pair a phone with alpha',
+      description: 'Show a QR code',
+      searchTerms: PAIR_PHONE_SEARCH_TERMS,
+      Icon: QrCode,
+    });
+    for (const word of ['pair', 'phone', 'qr', 'scan', 'device'])
+      expect(matchesPaletteCommand(command, word)).toBe(true);
+    command.run();
+    expect(ran).toBe(1);
   });
 });

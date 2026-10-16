@@ -28,6 +28,7 @@ import type { ReactNode } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
+import type { SessionTurn } from '../lib/session-activity.ts';
 
 /**
  * The name a person calls this session by: its callsign, else whatever the session was labelled,
@@ -36,6 +37,13 @@ import { StatusMark } from '../shell/status-mark.tsx';
 export const sessionDisplayName = (session: SessionView): string => {
   const { config } = session;
   return displayCallsign(config.teammate) || config.label || config.name || config.id;
+};
+
+/** The status word for each turn: the person's words, not the daemon's. */
+const TURN_WORD: Readonly<Record<SessionTurn, string>> = {
+  working: 'working',
+  'your-turn': 'your turn',
+  'needs-input': 'needs input',
 };
 
 export interface SessionTopBarProps {
@@ -48,6 +56,12 @@ export interface SessionTopBarProps {
   readonly actions: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
+  /**
+   * Whose turn it is (`lib/session-activity.ts`), or `null` for a session that is not live. The
+   * daemon's `running` only says the terminal is live, so without this an idle session read as
+   * Running.
+   */
+  readonly turn?: SessionTurn | null;
   /** Whether Info is open. */
   readonly infoOpen?: boolean;
   /** The ⓘ that opens or closes Info. Absent: this host shows no Info, and draws no ⓘ. */
@@ -64,6 +78,7 @@ export function SessionTopBar({
   compact,
   actions,
   status,
+  turn = null,
   infoOpen = false,
   onToggleInfo,
   menu,
@@ -88,10 +103,14 @@ export function SessionTopBar({
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
-        <span className="fy-session-bar__status" data-session-status={session.state.status}>
-          <StatusMark view={session} />
+        <span
+          className="fy-session-bar__status"
+          data-session-activity={turn ?? undefined}
+          data-session-status={session.state.status}
+        >
+          <StatusMark ready={turn === 'your-turn' && session.state.turnState === undefined} view={session} />
           <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>
-            {sessionStatusLabel(session.state.status)}
+            {turn === null ? sessionStatusLabel(session.state.status) : TURN_WORD[turn]}
           </span>
           {status}
         </span>

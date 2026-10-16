@@ -1,4 +1,5 @@
 import {
+  type SecretName,
   type SttEnhancementErrorCode,
   type SttEnhancementErrorView,
   type SttEnhancementProvider,
@@ -6,15 +7,17 @@ import {
   SttEnhancementRequestSchema,
   type SttEnhancementResult,
 } from '@ferretry/protocol';
+import { CEREBRAS_HOST, GROQ_HOST, SPEEDUP_CATALOG } from '../speedups/catalog.ts';
+import type { AuthorizedOutcome } from '../speedups/ports.ts';
 import { SttEnhancementError } from './errors.ts';
 
 /**
  * Post-dictation enhancement: after the local recognizer returns raw text, a
  * hosted chat model repairs recognition mistakes without rewriting the speaker.
  *
- * Everything in this module is a decision. The network call, the secret read
- * and the clock live in the adapter, which feeds their outcomes back here to be
- * classified. The invariants this file is responsible for:
+ * Everything in this module is a decision. The network call and the clock live
+ * behind ports and the credential stays with the outbound holder; what they
+ * observe comes back here to be classified. The invariants this file is responsible for:
  *
  * - The provider credential is never part of a request, a result, or an error.
  * - Text, context, dictionary and model id are bounded before a request is built.
@@ -68,14 +71,17 @@ export function enhancementErrorView(error: SttEnhancementError): SttEnhancement
 
 /**
  * One provider entry. Every provider speaks the OpenAI-compatible chat
- * completions contract, so only the endpoint, secret name and default model
- * vary; a new provider is one frozen entry plus a member on the protocol union.
+ * completions contract, so only the endpoint, secret name, allowed hosts and
+ * default model vary; a new provider is one frozen entry plus a member on the
+ * protocol union.
  */
 export interface EnhancementProviderDefinition {
   readonly id: SttEnhancementProvider;
   readonly label: string;
-  /** Name of the daemon environment variable holding the API key. */
-  readonly secretName: string;
+  /** Name of the secret-store entry holding the API key. The value is never read here. */
+  readonly secretName: SecretName;
+  /** The only hosts that key may be sent to. */
+  readonly hosts: readonly string[];
   readonly endpoint: string;
   readonly defaultModel: string;
 }
@@ -86,9 +92,18 @@ export const DEFAULT_ENHANCEMENT_PROVIDERS: EnhancementProviderTable = Object.fr
   groq: Object.freeze({
     id: 'groq',
     label: 'Groq',
-    secretName: 'GROQ_API_KEY',
-    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    secretName: SPEEDUP_CATALOG.groq.secretName,
+    hosts: SPEEDUP_CATALOG.groq.hosts,
+    endpoint: `https://${GROQ_HOST}/openai/v1/chat/completions`,
     defaultModel: 'llama-3.1-8b-instant',
+  }),
+  cerebras: Object.freeze({
+    id: 'cerebras',
+    label: 'Cerebras',
+    secretName: SPEEDUP_CATALOG.cerebras.secretName,
+    hosts: SPEEDUP_CATALOG.cerebras.hosts,
+    endpoint: `https://${CEREBRAS_HOST}/v1/chat/completions`,
+    defaultModel: 'gpt-oss-120b',
   }),
 });
 
@@ -280,30 +295,11 @@ export function buildEnhancementBody(request: NormalizedEnhancement): ChatComple
   };
 }
 
-export function enhancementHeaders(secret: string): Readonly<Record<string, string>> {
-  return {
-    authorization: `Bearer ${secret}`,
-    'content-type': 'application/json',
-    accept: 'application/json',
-  };
-}
-
-/** The credential must come from the daemon environment and nowhere else. */
-export function requireEnhancementSecret(secret: string | undefined): string {
-  if (secret === undefined || secret.trim().length === 0) {
-    throw new SttEnhancementError('secret_missing', 'enhancement provider is not configured');
-  }
-  return secret.trim();
-}
-
-/** What the HTTP adapter reports back; the body is only read on success. */
-export type EnhancementOutcome =
-  | { readonly kind: 'completion'; readonly payload: unknown }
-  | { readonly kind: 'oversized' }
-  | { readonly kind: 'unreadable' }
-  | { readonly kind: 'status'; readonly status: number; readonly retryAfterSeconds?: number }
-  | { readonly kind: 'timeout' }
-  | { readonly kind: 'unreachable'; readonly cause?: unknown };
+/** The request headers. There is no credential among them: the outbound holder adds it. */
+export const ENHANCEMENT_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  'content-type': 'application/json',
+  accept: 'application/json',
+});
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -341,10 +337,19 @@ export function enhancementErrorForStatus(status: number, retryAfterSeconds?: nu
 
 /** Turn a transport outcome into the result, or into the one error that fits it. */
 export function classifyEnhancementOutcome(
-  outcome: EnhancementOutcome,
+  outcome: AuthorizedOutcome,
   request: NormalizedEnhancement,
   latencyMs: number,
 ): SttEnhancementResult {
+  if (outcome.kind === 'secret_missing') {
+    throw new SttEnhancementError('secret_missing', 'enhancement provider is not configured');
+  }
+  if (outcome.kind === 'vault_damaged') {
+    throw new SttEnhancementError('secret_missing', 'the secret store holding the enhancement key cannot be read');
+  }
+  if (outcome.kind === 'refused') {
+    throw new SttEnhancementError('provider_error', 'enhancement provider endpoint is not allowed for its key');
+  }
   if (outcome.kind === 'timeout') throw new SttEnhancementError('timeout', 'enhancement request timed out');
   if (outcome.kind === 'unreachable') {
     throw new SttEnhancementError('provider_unreachable', 'enhancement provider is unreachable', undefined, {

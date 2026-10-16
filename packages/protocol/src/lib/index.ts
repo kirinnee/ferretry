@@ -42,6 +42,7 @@ export * from './session-transfer.ts';
 export * from './state-home-layout.ts';
 export * from './security.ts';
 export * from './step-up.ts';
+export * from './speedups.ts';
 export * from './stt.ts';
 export * from './surface.ts';
 export * from './task-boards.ts';
