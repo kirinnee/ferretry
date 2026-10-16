@@ -52,6 +52,19 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/analytics/pricing/sync/preview': 'a read with a body: previews a price sync',
   'POST /v1/analytics/pricing/sync/apply': 'the cost table for usage reports; reaches nobody',
   'POST /v1/sessions/:sessionId/terminals/:terminalId': 'renames a terminal; opening and attaching are audited',
+  // The agent tools are audited MORE finely than this table can: a route rule may read a path parameter
+  // and response names, never the body, and what matters here — which tool, on which named surface,
+  // how much was typed — is in the body. `AgentToolService` writes one `agent.tool` record per call and
+  // one `surface.control` record per takeover or hand back itself, refusals included.
+  'POST /v1/agent/tools': 'audited per call by the agent-tools service: tool, surface name and lengths',
+  'POST /v1/sessions/:sessionId/surfaces/terminals/tools':
+    'audited per call by the agent-tools service: tool, surface name and lengths',
+  'POST /v1/sessions/:sessionId/surfaces/browser/tools':
+    'audited per call by the agent-tools service: tool, surface name and lengths',
+  'POST /v1/sessions/:sessionId/surfaces/terminals/control':
+    'audited per takeover and hand back by the agent-tools service',
+  'POST /v1/sessions/:sessionId/surfaces/browser/control':
+    'audited per takeover and hand back by the agent-tools service',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId':
     'closes a terminal, which removes access rather than adding it',
   'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',

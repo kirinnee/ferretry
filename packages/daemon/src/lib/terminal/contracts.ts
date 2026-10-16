@@ -14,6 +14,8 @@ export interface TerminalRecord extends TerminalSize {
    * read — and it travels to the wire as an absent field rather than a default.
    */
   readonly openedBy?: SurfaceOpener;
+  /** The terminal's human name, when it was opened with one. Unique within its session. */
+  readonly name?: string;
 }
 
 export interface TerminalSession {
@@ -35,11 +37,16 @@ export interface TerminalRuntimePort {
     readonly size: TerminalSize;
     /** Omitted when nothing about the caller could be attested. */
     readonly openedBy?: SurfaceOpener;
+    readonly name?: string;
   }): Promise<TerminalRecord>;
   rename(record: TerminalRecord, title: string): Promise<void>;
   resize(record: TerminalRecord, size: TerminalSize): Promise<void>;
   write(record: TerminalRecord, bytes: Uint8Array): Promise<void>;
   capture(record: TerminalRecord): Promise<Uint8Array>;
+  /** The last `lines` lines as plain text. */
+  text(record: TerminalRecord, lines: number): Promise<string>;
+  /** The foreground program's name. */
+  foreground(record: TerminalRecord): Promise<string>;
   kill(record: TerminalRecord): Promise<void>;
 }
 

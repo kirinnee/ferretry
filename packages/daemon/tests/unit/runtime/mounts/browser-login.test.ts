@@ -251,6 +251,15 @@ class FakeBrowser implements BrowserMountedSubsystem {
   async dispatchHumanInput(): Promise<void> {
     throw new Error('human input arrives on the socket, not through this mount');
   }
+  async openPage(): Promise<never> {
+    throw new Error('named pages are the agent tools’ mount, not this one');
+  }
+  async actOnPage(): Promise<never> {
+    throw new Error('named pages are the agent tools’ mount, not this one');
+  }
+  async closePage(): Promise<never> {
+    throw new Error('named pages are the agent tools’ mount, not this one');
+  }
   async closeAll(): Promise<void> {
     this.calls.push('close-all');
   }

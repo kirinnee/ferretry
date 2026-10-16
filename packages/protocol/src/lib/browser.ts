@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { SurfaceNameSchema } from './agent-tools.ts';
 
 export const BROWSER_MAX_INSTANCES = 3;
 export const BROWSER_MIN_WIDTH = 320;
@@ -98,6 +99,8 @@ export const BrowserPageSummarySchema = z.object({
   id: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH),
   url: z.url(),
   title: z.string(),
+  /** The page's human name — `app` in `%browser:app` — when it was opened with one. */
+  name: SurfaceNameSchema.optional(),
 });
 export type BrowserPageSummary = z.infer<typeof BrowserPageSummarySchema>;
 
@@ -197,6 +200,8 @@ export const BrowserActionSchema = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('read'),
     selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH).optional(),
+    /** `text` (the default) is the visible text; `a11y` is the accessibility tree as YAML. */
+    mode: z.enum(['text', 'a11y']).optional(),
   }),
   z.strictObject({ action: z.literal('screenshot') }),
   z.strictObject({ action: z.literal('back') }),

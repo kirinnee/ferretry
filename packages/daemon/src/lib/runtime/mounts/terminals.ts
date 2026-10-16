@@ -50,10 +50,20 @@ export interface TerminalSubsystem {
    * asked for. The request's `agentSessionId` never reaches the service; it is an
    * input to that derivation and nothing more.
    */
-  create(sessionId: string, input: CreateTerminalRequest, openedBy?: SurfaceOpener): Promise<TerminalView>;
+  create(
+    sessionId: string,
+    input: CreateTerminalRequest & { readonly folder?: string },
+    openedBy?: SurfaceOpener,
+  ): Promise<TerminalView>;
   get(sessionId: string, terminalId: string): Promise<TerminalView>;
   rename(sessionId: string, terminalId: string, title: string): Promise<TerminalView>;
   close(sessionId: string, terminalId: string): Promise<void>;
+  /** Types bytes into the terminal, exactly as a viewer's keystrokes would arrive. */
+  write(sessionId: string, terminalId: string, bytes: Uint8Array): Promise<void>;
+  /** The terminal's last `lines` lines as plain text. */
+  text(sessionId: string, terminalId: string, lines: number): Promise<string>;
+  /** The name of the program in the terminal's foreground — its shell when nothing is running. */
+  foreground(sessionId: string, terminalId: string): Promise<string>;
   /**
    * Attaches one viewer socket to a terminal the caller has ALREADY been authorized for.
    *
@@ -95,6 +105,7 @@ const TERMINAL_ERROR_STATUS: Readonly<Record<TerminalErrorCode, number>> = {
   forbidden: 403,
   not_found: 404,
   capacity: 409,
+  conflict: 409,
   unavailable: 503,
   upstream_failed: 502,
 };

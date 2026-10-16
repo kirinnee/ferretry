@@ -25,6 +25,9 @@ import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { attentionRoutes, type DirectNotificationSubsystem } from './attention.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
+import type { AgentToolService } from '../../agent-tools/service.ts';
+import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
+import { agentToolRoutes } from './agent-tools.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
@@ -257,6 +260,9 @@ export interface MountedSubsystems {
   readonly browserLogin: BrowserLoginLifecycle;
   /** One browser host per daemon, owning the real worker, page projection and viewer socket. */
   readonly browser: BrowserMountedSubsystem;
+  /** Terminals and browser pages driven by name — by an agent through its own session credential, and
+   *  by a person through the CLI or the app — with take over / hand back. */
+  readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -446,6 +452,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...taskBoardRoutes(subsystems.taskBoards),
     ...analyticsRoutes(subsystems.analytics),
     ...analyticsPricingRoutes(subsystems.analyticsPricing),
+    // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
+    // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
+    ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
     ...terminalRoutes(subsystems.terminals),
     // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
     // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the

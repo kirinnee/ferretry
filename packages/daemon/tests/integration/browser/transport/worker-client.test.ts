@@ -222,12 +222,15 @@ describe('browser worker client — requests', () => {
     // Act
     const read = await client.read('#article');
     const readWithoutSelector = await client.read();
+    const tree = await client.read('main', 'a11y');
     const shot = await client.screenshot();
 
     // Assert
     should(read.text).equal('page text');
     should(reportedParams(read.url)).deepEqual({ selector: '#article' });
     should(reportedParams(readWithoutSelector.url)).deepEqual({});
+    // The accessibility tree is asked for by mode, on the same request.
+    should(reportedParams(tree.url)).deepEqual({ selector: 'main', mode: 'a11y' });
     should(shot.screenshotBase64).equal('AAAA');
   });
 

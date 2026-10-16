@@ -33,6 +33,7 @@ class FakeRuntime implements TerminalRuntimePort {
       root: input.cwd,
       ...input.size,
       ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
+      ...(input.name === undefined ? {} : { name: input.name }),
     };
     this.records.set(record.id, record);
     return record;
@@ -51,6 +52,14 @@ class FakeRuntime implements TerminalRuntimePort {
   async capture(_record: TerminalRecord): Promise<Uint8Array> {
     this.calls.push('capture');
     return Uint8Array.of(27);
+  }
+  async text(_record: TerminalRecord, lines: number): Promise<string> {
+    this.calls.push(`text:${String(lines)}`);
+    return 'ready $';
+  }
+  async foreground(_record: TerminalRecord): Promise<string> {
+    this.calls.push('foreground');
+    return 'sleep';
   }
   async kill(record: TerminalRecord): Promise<void> {
     this.calls.push('kill');
@@ -174,5 +183,87 @@ describe('ManagedTerminalService', () => {
     // Act + Assert
     await should(service.create('session-a')).be.rejectedWith(TerminalServiceError);
     await should(relative.list('session-a')).be.rejectedWith(TerminalServiceError);
+  });
+});
+
+describe('ManagedTerminalService names, folders and agent reads', () => {
+  const named = (isDirectory?: (path: string) => Promise<boolean>) => {
+    const runtime = new FakeRuntime();
+    let minted = 0;
+    const next = (): string => {
+      minted += 1;
+      return `abcdef01234${String(minted)}`;
+    };
+    const service = new ManagedTerminalService(
+      runtime,
+      sessions,
+      { now: () => 2_000 },
+      { next },
+      { maximumPerSession: 4, ...(isDirectory === undefined ? {} : { isDirectory }) },
+    );
+    return { runtime, service };
+  };
+
+  it('should keep a name on the terminal and refuse a second terminal with the same name', async () => {
+    // Arrange
+    const { service } = named();
+
+    // Act
+    const dev = await service.create('session-a', { name: 'dev' });
+    const listed = await service.list('session-a');
+
+    // Assert
+    should(dev.name).equal('dev');
+    should(listed.terminals.map(terminal => terminal.name)).deepEqual(['dev']);
+    should(await service.create('session-a', { name: 'dev' }).catch((error: unknown) => error))
+      .be.instanceOf(TerminalServiceError)
+      .and.have.property('code', 'conflict');
+    should(await service.create('session-a')).not.have.property('name');
+  });
+
+  it('should open a terminal in a folder that exists, relative to the session or absolute', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const { runtime, service } = named(async path => {
+      asked.push(path);
+      return path !== '/tmp/worktree/missing';
+    });
+
+    // Act
+    const relative = await service.create('session-a', { name: 'web', folder: 'web/../app' });
+    const absolute = await service.create('session-a', { name: 'logs', folder: '/var/log/' });
+
+    // Assert
+    should(asked).deepEqual(['/tmp/worktree/app', '/var/log']);
+    should(runtime.records.get(relative.id)?.root).equal('/tmp/worktree/app');
+    should(runtime.records.get(absolute.id)?.root).equal('/var/log');
+    should(await service.create('session-a', { folder: 'missing' }).catch((error: unknown) => error)).match({
+      code: 'bad_request',
+      message: 'there is no folder /tmp/worktree/missing to open a terminal in',
+    });
+  });
+
+  it('should refuse a folder when it has no way to prove one exists', async () => {
+    // tmux would silently start the shell in the daemon's own folder instead, which is a shell
+    // somewhere nobody asked for.
+    const { service } = named();
+    should(await service.create('session-a', { folder: '/tmp' }).catch((error: unknown) => error)).match({
+      code: 'bad_request',
+    });
+  });
+
+  it('should read a terminal as text and name its foreground program', async () => {
+    // Arrange
+    const { runtime, service } = named();
+    const dev = await service.create('session-a', { name: 'dev' });
+
+    // Act
+    const text = await service.text('session-a', dev.id, 120);
+    const foreground = await service.foreground('session-a', dev.id);
+
+    // Assert
+    should(text).equal('ready $');
+    should(foreground).equal('sleep');
+    should(runtime.calls).containDeep(['text:120', 'foreground']);
   });
 });

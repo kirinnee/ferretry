@@ -341,9 +341,14 @@ async function run(request: Request): Promise<Record<string, unknown>> {
     case 'read': {
       const page = await active();
       const selector = typeof params.selector === 'string' && params.selector ? params.selector : 'body';
-      return await action(page, {
-        text: (await page.locator(selector).first().innerText({ timeout: 30_000 })).slice(0, MAX_TEXT_CHARS),
-      });
+      const target = page.locator(selector).first();
+      // The accessibility tree names what can be clicked and typed into, which is what an agent needs
+      // to choose a selector; the visible text is what a person reads.
+      const read =
+        params.mode === 'a11y'
+          ? await target.ariaSnapshot({ timeout: 30_000 })
+          : await target.innerText({ timeout: 30_000 });
+      return await action(page, { text: read.slice(0, MAX_TEXT_CHARS) });
     }
     case 'screenshot': {
       const page = await active();

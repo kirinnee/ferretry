@@ -1,0 +1,308 @@
+import { z } from 'zod';
+import { InstantSchema } from './common.ts';
+
+/**
+ * AGENT TOOLS — the wire an agent (and a script, and a person) drives terminals and browser pages
+ * through, by NAME.
+ *
+ * Every terminal and browser page an agent works with carries a short human name — `dev`, `app` —
+ * that the agent and the person share: the person writes `%terminal:dev`, the agent calls
+ * `terminal.send` with `name: "dev"`, and both mean the same shell. The daemon stores the name beside
+ * the surface it names and keeps it unique within the session.
+ *
+ * WHO MAY CALL WHAT. Two routes carry the same call body (`AgentToolCallSchema`):
+ *
+ * - `POST /v1/agent/tools` is the AGENT's. It names no session: the daemon derives the session from the
+ *   session credential the caller presents on the `x-fy-session-capability` header, which the daemon
+ *   minted into that session's own environment and keeps only a hash of. It is served to the host's
+ *   own admin token arriving over loopback and nothing else, so an agent reaches only surfaces of its
+ *   own session on its own machine.
+ * - `POST /v1/sessions/:sessionId/surfaces/terminals/tools` and `…/surfaces/browser/tools` are a PERSON's (the CLI, the
+ *   app), and accept only that kind's tools. They name the session in the path, are governed by the `terminal` / `browser` grants like
+ *   every other surface route, and refuse an agent that identifies itself.
+ *
+ * WHAT IS BOUNDED. Every text field below has a ceiling, the wait has a ceiling under the daemon's
+ * own idle timeout, and a read is clipped to {@link AGENT_TOOL_MAX_OUTPUT_CHARS}. The audit log
+ * records each call by tool and surface name with lengths only — never the typed text.
+ */
+
+/** The longest text one `terminal.send` or `browser.type` carries. */
+export const AGENT_TOOL_MAX_TEXT_CHARS = 16_384;
+/** The most named keys one `terminal.send` carries. */
+export const AGENT_TOOL_MAX_KEYS = 64;
+/** How many lines `terminal.read` returns when asked for none, and the most it returns. */
+export const AGENT_TOOL_DEFAULT_READ_LINES = 200;
+export const AGENT_TOOL_MAX_READ_LINES = 2_000;
+/** The most text one read or wait hands back. The tail is kept: the newest output is what matters. */
+export const AGENT_TOOL_MAX_OUTPUT_CHARS = 65_536;
+/**
+ * The longest one daemon-side wait may last, and its default. Under the HTTP server's own 30 s idle
+ * timeout on purpose: a longer wait would be cut by the server and read as a failure. A client that
+ * wants longer waits again — `fy` and the MCP server both loop up to {@link AGENT_TOOL_MAX_TOTAL_WAIT_MS}.
+ */
+export const AGENT_TOOL_MAX_WAIT_MS = 25_000;
+export const AGENT_TOOL_DEFAULT_WAIT_MS = 10_000;
+/** The longest a client may ask one `terminal.wait` tool call to last in total. */
+export const AGENT_TOOL_MAX_TOTAL_WAIT_MS = 120_000;
+/** The longest URL an agent may navigate to. */
+export const AGENT_TOOL_MAX_URL_CHARS = 2_048;
+/** The longest selector an agent may click, type into or read. */
+export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
+/** The longest folder a terminal may be opened in. */
+export const AGENT_TOOL_MAX_FOLDER_CHARS = 1_024;
+
+/**
+ * A surface's human name: a lowercase letter, then up to 31 lowercase letters, digits or dashes.
+ *
+ * NEVER TWELVE HEX CHARACTERS, because that is what a terminal ID looks like, and `%terminal:<key>`
+ * accepts either: a name that could also be an id would make one reference mean two shells.
+ */
+export const SURFACE_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/u;
+const TERMINAL_ID_SHAPE = /^[a-f0-9]{12}$/u;
+
+export const SurfaceNameSchema = z
+  .string()
+  .regex(SURFACE_NAME_PATTERN, 'a name is a lowercase letter, then up to 31 lowercase letters, digits or dashes')
+  .refine(value => !TERMINAL_ID_SHAPE.test(value), 'a name may not look like a terminal id (twelve hex characters)');
+export type SurfaceName = z.infer<typeof SurfaceNameSchema>;
+
+/**
+ * How a call names an EXISTING surface: its name, or the id the daemon minted for it (`%terminal:`
+ * references written before names existed still work). A `%terminal:` / `%browser:` prefix is
+ * accepted and dropped, so an agent can pass a reference exactly as a person wrote it.
+ */
+export const SurfaceKeySchema = z
+  .string()
+  .trim()
+  .transform(value => value.replace(/^%(?:terminal|browser):/u, ''))
+  .pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u, 'not a surface name or id'));
+
+export const SurfaceKindSchema = z.enum(['terminal', 'browser']);
+export type SurfaceKind = z.infer<typeof SurfaceKindSchema>;
+
+/**
+ * The keys `terminal.send` can press, by name. A closed list rather than raw escape sequences: the
+ * agent says what it means, and the daemon owns the bytes.
+ */
+export const TERMINAL_KEYS = [
+  'enter',
+  'tab',
+  'escape',
+  'backspace',
+  'delete',
+  'space',
+  'up',
+  'down',
+  'left',
+  'right',
+  'home',
+  'end',
+  'page-up',
+  'page-down',
+  'ctrl-a',
+  'ctrl-c',
+  'ctrl-d',
+  'ctrl-e',
+  'ctrl-k',
+  'ctrl-l',
+  'ctrl-r',
+  'ctrl-u',
+  'ctrl-w',
+  'ctrl-z',
+] as const;
+export const TerminalKeySchema = z.enum(TERMINAL_KEYS);
+export type TerminalKey = z.infer<typeof TerminalKeySchema>;
+
+const TextSchema = z.string().min(1).max(AGENT_TOOL_MAX_TEXT_CHARS);
+
+/** Only web pages: an agent has no business opening `file:`, `javascript:` or `chrome:` URLs. */
+export const AgentUrlSchema = z
+  .string()
+  .max(AGENT_TOOL_MAX_URL_CHARS)
+  .refine(value => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'only http and https URLs can be opened');
+
+const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHARS);
+
+export const AgentToolCallSchema = z.discriminatedUnion('tool', [
+  z.strictObject({ tool: z.literal('terminal.list') }),
+  z.strictObject({
+    tool: z.literal('terminal.open'),
+    name: SurfaceNameSchema,
+    /** Where the shell starts: absolute, or relative to the session's own folder. */
+    folder: z.string().trim().min(1).max(AGENT_TOOL_MAX_FOLDER_CHARS).optional(),
+    /** Typed into the new shell and run, as if sent with `enter`. */
+    command: TextSchema.optional(),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('terminal.send'),
+      name: SurfaceKeySchema,
+      /** Typed as-is; a newline in it is Enter. */
+      text: TextSchema.optional(),
+      /** Pressed after the text, in order. */
+      keys: z.array(TerminalKeySchema).min(1).max(AGENT_TOOL_MAX_KEYS).optional(),
+    })
+    .refine(call => call.text !== undefined || call.keys !== undefined, 'send needs text, keys, or both'),
+  z.strictObject({
+    tool: z.literal('terminal.read'),
+    name: SurfaceKeySchema,
+    lines: z.number().int().min(1).max(AGENT_TOOL_MAX_READ_LINES).optional(),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('terminal.wait'),
+      name: SurfaceKeySchema,
+      /** Wait until this text appears in the terminal's recent output. */
+      text: z.string().min(1).max(1_024).optional(),
+      /** Wait until the running command ends and the shell is back at its prompt. */
+      exit: z.literal(true).optional(),
+      timeoutMs: z.number().int().min(100).max(AGENT_TOOL_MAX_WAIT_MS).optional(),
+    })
+    .refine(call => (call.text === undefined) !== (call.exit === undefined), 'wait for text or for exit, not both'),
+  z.strictObject({ tool: z.literal('terminal.close'), name: SurfaceKeySchema }),
+  z.strictObject({ tool: z.literal('browser.list') }),
+  z.strictObject({ tool: z.literal('browser.open'), name: SurfaceNameSchema, url: AgentUrlSchema.optional() }),
+  z.strictObject({ tool: z.literal('browser.navigate'), name: SurfaceKeySchema, url: AgentUrlSchema }),
+  z.strictObject({ tool: z.literal('browser.click'), name: SurfaceKeySchema, selector: SelectorSchema }),
+  z.strictObject({
+    tool: z.literal('browser.type'),
+    name: SurfaceKeySchema,
+    selector: SelectorSchema,
+    text: z.string().max(AGENT_TOOL_MAX_TEXT_CHARS),
+  }),
+  z.strictObject({
+    tool: z.literal('browser.read'),
+    name: SurfaceKeySchema,
+    /** `text` is the visible text; `a11y` is the accessibility tree, which names what can be clicked. */
+    mode: z.enum(['text', 'a11y']).optional(),
+    selector: SelectorSchema.optional(),
+  }),
+  z.strictObject({ tool: z.literal('browser.screenshot'), name: SurfaceKeySchema }),
+  z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
+]);
+export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
+export type AgentToolName = AgentToolCall['tool'];
+
+/** Every tool, in the order an agent is shown them. */
+export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
+  'terminal.list',
+  'terminal.open',
+  'terminal.send',
+  'terminal.read',
+  'terminal.wait',
+  'terminal.close',
+  'browser.list',
+  'browser.open',
+  'browser.navigate',
+  'browser.click',
+  'browser.type',
+  'browser.read',
+  'browser.screenshot',
+  'browser.close',
+];
+
+/** One surface as a list call shows it. An unnamed surface is still listed, by id. */
+export const AgentSurfaceSchema = z.strictObject({
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  title: z.string().max(512),
+  url: z
+    .string()
+    .max(AGENT_TOOL_MAX_URL_CHARS * 4)
+    .optional(),
+});
+export type AgentSurface = z.infer<typeof AgentSurfaceSchema>;
+
+/**
+ * What one call answers. `summary` is always a plain sentence an agent can read; the rest depends on
+ * the tool — output for a read or a wait, a PNG for a screenshot, a listing for a list.
+ */
+export const AgentToolResultSchema = z.strictObject({
+  summary: z.string().min(1),
+  output: z.string().max(AGENT_TOOL_MAX_OUTPUT_CHARS).optional(),
+  /** `terminal.wait` only: whether what it waited for happened before the timeout. */
+  matched: z.boolean().optional(),
+  screenshotBase64: z.string().min(1).optional(),
+  surfaces: z.array(AgentSurfaceSchema).optional(),
+});
+export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;
+
+/**
+ * An agent driving a surface right now — the "AGENT · Hadi is typing here" marker.
+ *
+ * `until` is when the marker lapses unless the agent acts again: the daemon republishes before it
+ * does, so a reader shows the marker while `now < until` and needs no second event to clear it.
+ */
+export const SurfaceDrivingSchema = z.strictObject({
+  surface: SurfaceKindSchema,
+  /** The terminal id or browser page id — stable for the surface's life. */
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  agentSessionId: z.string().min(1).max(128),
+  agentName: z.string().min(1).max(128).optional(),
+  since: InstantSchema,
+  until: InstantSchema,
+});
+export type SurfaceDriving = z.infer<typeof SurfaceDrivingSchema>;
+
+/** Who took a surface over: a paired device (a person holding it), or somebody at this machine. */
+export const SurfaceControllerSchema = z.discriminatedUnion('by', [
+  z.strictObject({ by: z.literal('human'), deviceId: z.string().min(1).max(128) }),
+  z.strictObject({ by: z.literal('local') }),
+]);
+export type SurfaceController = z.infer<typeof SurfaceControllerSchema>;
+
+/** A person holding a surface: agent tool calls on it are refused until they hand it back. */
+export const SurfaceTakeoverSchema = z.strictObject({
+  surface: SurfaceKindSchema,
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  by: SurfaceControllerSchema,
+  since: InstantSchema,
+});
+export type SurfaceTakeover = z.infer<typeof SurfaceTakeoverSchema>;
+
+/** `GET /v1/sessions/:sessionId/surfaces/control` and the answer to every control change. */
+export const SurfaceControlViewSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  driving: z.array(SurfaceDrivingSchema),
+  takeovers: z.array(SurfaceTakeoverSchema),
+});
+export type SurfaceControlView = z.infer<typeof SurfaceControlViewSchema>;
+
+/**
+ * `POST /v1/sessions/:sessionId/surfaces/terminals/control` and `…/surfaces/browser/control`: a person takes a surface
+ * over from the agent, or hands it back. The answer is the session's {@link SurfaceControlViewSchema}.
+ */
+export const SurfaceControlRequestSchema = z.strictObject({
+  action: z.enum(['takeover', 'handback']),
+  /** The surface's name or id. */
+  key: SurfaceKeySchema,
+});
+export type SurfaceControlRequest = z.infer<typeof SurfaceControlRequestSchema>;
+
+/**
+ * The session-journal events control changes are published as, on the existing `/v1/events` feed.
+ * `surface.driving` carries {@link SurfaceDrivingSchema}; `surface.takeover` carries
+ * {@link SurfaceTakeoverSchema}; `surface.handback` carries {@link SurfaceHandbackSchema}.
+ */
+export const SURFACE_EVENT_TYPES = {
+  driving: 'surface.driving',
+  takeover: 'surface.takeover',
+  handback: 'surface.handback',
+} as const;
+
+export const SurfaceHandbackSchema = z.strictObject({
+  surface: SurfaceKindSchema,
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  at: InstantSchema,
+});
+export type SurfaceHandback = z.infer<typeof SurfaceHandbackSchema>;

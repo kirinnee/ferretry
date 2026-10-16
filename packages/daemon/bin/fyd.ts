@@ -332,6 +332,8 @@ import {
 } from '../src/lib/fork/index.ts';
 import {
   type AccountInventoryPort,
+  AgentToolService,
+  ALLOW_ALL_AGENT_CONTROL,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -353,6 +355,7 @@ import {
   AuditedPairingService,
   AUDIT_FOLD_WINDOW_MS,
   AuditLog,
+  CredentialAgentIdentities,
   advertisesForeignAddress,
   answerArguments,
   attachmentDirectory,
@@ -361,6 +364,7 @@ import {
   type BootRefusal,
   type BrowserLoginLifecycle,
   BrowserSessionService,
+  type BrowserSessionLauncher,
   type BrowserViewerHost,
   BrowserViewerStream,
   CALLSIGN_WINDOW_MS,
@@ -620,6 +624,8 @@ import {
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   TEST_TIMINGS_VARIABLE,
+  SurfaceControl,
+  secretsMatch,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -963,6 +969,9 @@ export interface DaemonWorld {
    * the session resolver over real storage — exactly as production builds them.
    */
   readonly terminalRuntime: TerminalRuntimePort;
+  /** What starts a session's browser: a Chrome and the browser worker. A world field for the reason
+   *  `terminalRuntime` is one. */
+  readonly browserLauncher: BrowserSessionLauncher;
   /**
    * The OTHER carriers this daemon can be reached over: outbound sockets to rendezvous.
    *
@@ -1092,6 +1101,12 @@ export interface DaemonWorld {
      * resolution the boot milestone reported rather than a second one built from its own reading.
      */
     harnessDiscovery: HarnessDiscoveryPolicy,
+    /**
+     * What starts a session's browser, passed IN for the same reason the terminal runtime is: the real
+     * one puts a Chrome and a browser worker on the machine, so a test substitutes this and keeps the
+     * browser service, the agent tools and the routes exactly as production builds them.
+     */
+    browserLauncher: BrowserSessionLauncher,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -3652,6 +3667,55 @@ const terminalScheduler: TerminalStreamScheduler = {
  * `cwd`, and a session the index does not hold resolves to nothing rather than to the daemon's own
  * working directory.
  */
+/**
+ * The agent tools: terminals and browser pages driven by name, over the SAME terminal and browser
+ * subsystems the person's routes serve, so a shell an agent opens is the shell a person sees.
+ *
+ * The agent is identified by its session credential — hashed and matched against the live sessions'
+ * stored hashes through the same directory the task boards authenticate with. Control changes are
+ * published to the session's own journal, which `/v1/events` streams to every viewer.
+ *
+ * "What agents may control" is the machine settings' switch; until that store is composed here every
+ * kind is allowed, which is the shipped behaviour of a machine nobody has configured.
+ */
+function createAgentToolsSubsystem(input: {
+  readonly storage: DaemonStorage;
+  readonly terminals: TerminalSubsystem;
+  readonly browser: MountedSubsystems['browser'];
+  readonly audit: AuditLog;
+}): MountedSubsystems['agentTools'] {
+  const clock = { now: () => Date.now() };
+  const control = new SurfaceControl(
+    {
+      publish: async (sessionId, type, data) => {
+        const id = tryParseSessionId(sessionId);
+        if (id !== undefined) await input.storage.append(id, type, data);
+      },
+    },
+    clock,
+  );
+  return {
+    service: new AgentToolService({
+      terminals: input.terminals,
+      browser: input.browser,
+      control,
+      policy: ALLOW_ALL_AGENT_CONTROL,
+      audit: input.audit,
+      clock,
+      sleep: async milliseconds => await Bun.sleep(milliseconds),
+    }),
+    identities: new CredentialAgentIdentities(
+      new StorageTaskBoardSessionDirectory({
+        sessionIds: () => input.storage.listSessions().map(session => session.id),
+        readConfig: async id => await input.storage.readConfig(id as SessionId),
+        readState: async id => await input.storage.readState(id as SessionId),
+      }),
+      capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
+      secretsMatch,
+    ),
+  };
+}
+
 function createTerminalSubsystem(
   storage: DaemonStorage,
   runtime: TerminalRuntimePort,
@@ -3676,6 +3740,13 @@ function createTerminalSubsystem(
       maximumPerSession: TERMINAL_MAX_PER_SESSION,
       maximumGlobal: TERMINAL_MAX_GLOBAL,
       idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
+      isDirectory: async path => {
+        try {
+          return statSync(path).isDirectory();
+        } catch {
+          return false;
+        }
+      },
     },
   );
   /** Adapter refusals, restated in the protocol's vocabulary so the mount can answer them. */
@@ -3695,12 +3766,17 @@ function createTerminalSubsystem(
           title: input.title,
           cols: input.cols,
           rows: input.rows,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.folder === undefined ? {} : { folder: input.folder }),
           ...(openedBy === undefined ? {} : { openedBy }),
         })
         .catch(translate),
     get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
     rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
     close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
+    write: async (sessionId, terminalId, bytes) => await service.write(sessionId, terminalId, bytes).catch(translate),
+    text: async (sessionId, terminalId, lines) => await service.text(sessionId, terminalId, lines).catch(translate),
+    foreground: async (sessionId, terminalId) => await service.foreground(sessionId, terminalId).catch(translate),
     /**
      * One viewer socket, over the SAME lifecycle service the routes use.
      *
@@ -5484,6 +5560,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    browserLauncher: new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(paths.home),
+      browserWorkerProgram().entry,
+      // Bun 1.3's WebSocket client can resolve Chrome's CDP endpoint but times out during the upgrade.
+      // Node's worker-compatible TypeScript loader and WebSocket stack both work here, including when
+      // this daemon is itself a compiled Bun binary.
+      Bun.which('node') ?? process.execPath,
+      process.env,
+      browserTransport.connectWorker,
+      browserWorkerProgram().executable,
+    ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
@@ -5564,6 +5651,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       security,
       carriers,
       harnessDiscovery,
+      browserLauncher,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -6128,6 +6216,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
       );
       credentialList = async () => await fleetCredentials.list();
+      const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
+      const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now());
+      closeAgentBrowsers = async () => await browserService.closeAll();
+      const browserHost: MountedSubsystems['browser'] = {
+        ...browserService,
+        status: browserService.status.bind(browserService),
+        act: browserService.act.bind(browserService),
+        attachViewer: browserService.attachViewer.bind(browserService),
+        dispatchHumanInput: browserService.dispatchHumanInput.bind(browserService),
+        openPage: browserService.openPage.bind(browserService),
+        actOnPage: browserService.actOnPage.bind(browserService),
+        closePage: browserService.closePage.bind(browserService),
+        closeAll: browserService.closeAll.bind(browserService),
+        stream: async (sessionId, downstream) => {
+          let viewer: BrowserViewerStream | undefined;
+          return {
+            open: async () => {
+              viewer = await BrowserViewerStream.connect(browserService, sessionId, downstream, new SystemFrameClock());
+            },
+            fromClient: frame => viewer?.fromClient(frame),
+            close: () => viewer?.close(),
+          };
+        },
+      };
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -6326,44 +6438,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         analytics: createAnalyticsSubsystem(analyticsIngestion),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,
-        terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
+        terminals: terminalSubsystem,
         browserLogin,
-        browser: (() => {
-          const service = new BrowserSessionService(
-            sessions,
-            new NodeSessionBrowserLauncher(
-              new BrowserProfileStore(paths.home),
-              browserWorkerProgram().entry,
-              // Bun 1.3's WebSocket client can resolve Chrome's CDP endpoint but times out during
-              // the upgrade. Node's worker-compatible TypeScript loader and WebSocket stack both
-              // work here, including when this daemon is itself a compiled Bun binary.
-              Bun.which('node') ?? process.execPath,
-              process.env,
-              browserTransport.connectWorker,
-              browserWorkerProgram().executable,
-            ),
-            () => Date.now(),
-          );
-          closeAgentBrowsers = async () => await service.closeAll();
-          return {
-            ...service,
-            status: service.status.bind(service),
-            act: service.act.bind(service),
-            attachViewer: service.attachViewer.bind(service),
-            dispatchHumanInput: service.dispatchHumanInput.bind(service),
-            closeAll: service.closeAll.bind(service),
-            stream: async (sessionId, downstream) => {
-              let viewer: BrowserViewerStream | undefined;
-              return {
-                open: async () => {
-                  viewer = await BrowserViewerStream.connect(service, sessionId, downstream, new SystemFrameClock());
-                },
-                fromClient: frame => viewer?.fromClient(frame),
-                close: () => viewer?.close(),
-              };
-            },
-          };
-        })(),
+        browser: browserHost,
+        agentTools: createAgentToolsSubsystem({
+          storage,
+          terminals: terminalSubsystem,
+          browser: browserHost,
+          audit: auditLog,
+        }),
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(
           paths,
@@ -6739,6 +6822,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.security,
     carriers,
     harnessDiscovery,
+    world.browserLauncher,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must

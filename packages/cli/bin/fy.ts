@@ -53,6 +53,12 @@ import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
+import {
+  AgentToolsClient,
+  AgentToolsController,
+  registerBrowserPageCommands,
+  registerTerminalCommands,
+} from '../src/lib/agent-tools';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
@@ -615,6 +621,22 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
       }),
     ),
+  // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
+  // the browser group, because `browser page` mounts onto it.
+  ({ program, world, client, ownSessionId }) => {
+    const tools = new AgentToolsController(
+      new AgentToolsClient(client, {
+        ...(world.environment.FY_SESSION_BOARD_CAPABILITY === undefined
+          ? {}
+          : { capability: world.environment.FY_SESSION_BOARD_CAPABILITY }),
+        ...(ownSessionId === undefined ? {} : { ownSessionId }),
+      }),
+      world.io,
+      new FileScreenshotWriter(),
+    );
+    registerTerminalCommands(program, tools);
+    registerBrowserPageCommands(program, tools);
+  },
   ({ program, world, client }) =>
     registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
   ({ program, world, client }) =>

@@ -201,8 +201,14 @@ export class BrowserWorkerClient implements BrowserAutomation {
     return this.action('type', { selector, text });
   }
 
-  async read(selector?: string): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
-    const raw = await this.request('read', selector === undefined ? {} : { selector });
+  async read(
+    selector?: string,
+    mode?: 'text' | 'a11y',
+  ): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
+    const raw = await this.request('read', {
+      ...(selector === undefined ? {} : { selector }),
+      ...(mode === undefined ? {} : { mode }),
+    });
     return { ...unwrap(normalizeWorkerActionSnapshot(raw)), text: boundedReadText(raw) };
   }
 

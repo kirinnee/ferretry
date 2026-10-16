@@ -30,7 +30,7 @@ import { createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
-import { createSurfaceReferenceResolver } from '../lib/surface-references.ts';
+import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
 import {
   openSidePaneFileTab,
@@ -167,7 +167,8 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       // proved at all on this daemon (there is no worker and no page listing), so
       // this arm is unreachable for one today — and it refuses rather than
       // guessing a destination if that ever changes before the pane does.
-      if (reference.surface === 'terminal') openSidePaneTerminalTab(scope, reference.key);
+      if (reference.surface === 'terminal')
+        openSidePaneTerminalTab(scope, terminalIdForSurfaceKey(terminals, reference.key) ?? reference.key);
     },
   };
 }

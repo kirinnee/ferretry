@@ -100,7 +100,7 @@ class LeasedBrowser implements BrowserAutomation {
   navigate = (url: string) => this.worker.navigate(url);
   click = (selector: string) => this.worker.click(selector);
   type = (selector: string, text: string) => this.worker.type(selector, text);
-  read = (selector?: string) => this.worker.read(selector);
+  read = (selector?: string, mode?: 'text' | 'a11y') => this.worker.read(selector, mode);
   screenshot = () => this.worker.screenshot();
   back = () => this.worker.back();
   forward = () => this.worker.forward();

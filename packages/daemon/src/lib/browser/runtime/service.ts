@@ -5,6 +5,7 @@ import {
   type BrowserInputEvent,
   type BrowserPageActionSnapshot,
   type BrowserPageSnapshot,
+  type BrowserPageSummary,
   type BrowserScreencastFrame,
   type BrowserStatus,
   type BrowserViewport,
@@ -16,7 +17,7 @@ export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 
 
 export class BrowserSessionError extends Error {
   constructor(
-    readonly code: 'not_found' | 'capacity' | 'not_running' | 'launch_failed' | 'upstream_failed',
+    readonly code: 'not_found' | 'capacity' | 'conflict' | 'not_running' | 'launch_failed' | 'upstream_failed',
     message: string,
   ) {
     super(message);
@@ -32,9 +33,25 @@ export interface BrowserSessionDirectory {
   get(sessionId: string): Promise<unknown | undefined>;
 }
 
+/** What can be done to ONE named page: the agent tools' browser verbs. */
+export type BrowserPageAction = Extract<
+  BrowserAction,
+  { readonly action: 'navigate' | 'click' | 'type' | 'read' | 'screenshot' }
+>;
+
 export interface BrowserSubsystem extends BrowserViewerHost {
   status(sessionId: string): Promise<BrowserStatus>;
   act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult>;
+  /**
+   * Opens a page with a human NAME, starting the browser when it is not running. The first page of a
+   * browser this call started is the blank tab Chrome opened with, so it is named rather than left
+   * beside the new one. A name already in use in this session is refused.
+   */
+  openPage(sessionId: string, name: string, url?: string): Promise<BrowserPageSummary>;
+  /** Acts on the page with this name (or id), making it the active tab first. */
+  actOnPage(sessionId: string, key: string, action: BrowserPageAction): Promise<BrowserActionResult>;
+  /** Closes the page with this name (or id). */
+  closePage(sessionId: string, key: string): Promise<void>;
   closeAll(): Promise<void>;
 }
 
@@ -51,6 +68,11 @@ interface Running {
   readonly viewers: Set<Viewer>;
   snapshot: BrowserPageSnapshot;
   closed: boolean;
+  /**
+   * Page id → human name. In memory, because a page does not outlive the browser process that holds
+   * it: when the browser stops, its pages and their names go together.
+   */
+  readonly names: Map<string, string>;
 }
 
 /**
@@ -92,6 +114,47 @@ export class BrowserSessionService implements BrowserSubsystem {
       const result = await this.perform(run, action);
       run.snapshot = result;
       return { status: this.project(run), result };
+    });
+  }
+
+  async openPage(sessionId: string, name: string, url?: string): Promise<BrowserPageSummary> {
+    await this.requireSession(sessionId);
+    return await this.exclusive(sessionId, async () => {
+      const fresh = !this.running.has(sessionId);
+      const run = await this.ensure(sessionId);
+      if (this.page(run, name) !== undefined)
+        throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
+      const blank = fresh ? run.snapshot.pages[0] : undefined;
+      if (blank === undefined) {
+        run.snapshot = await run.driver.newPage(url);
+        run.names.set(run.snapshot.activePageId, name);
+      } else {
+        run.names.set(blank.id, name);
+        if (url !== undefined) run.snapshot = await run.driver.navigate(url);
+      }
+      return this.named(run, run.snapshot.activePageId);
+    });
+  }
+
+  async actOnPage(sessionId: string, key: string, action: BrowserPageAction): Promise<BrowserActionResult> {
+    await this.requireSession(sessionId);
+    return await this.exclusive(sessionId, async () => {
+      const run = this.requireRunning(sessionId);
+      const page = this.requirePage(run, key);
+      if (run.snapshot.activePageId !== page.id) run.snapshot = await run.driver.activatePage(page.id);
+      const result = await this.perform(run, action);
+      run.snapshot = result;
+      return { status: this.project(run), result };
+    });
+  }
+
+  async closePage(sessionId: string, key: string): Promise<void> {
+    await this.requireSession(sessionId);
+    await this.exclusive(sessionId, async () => {
+      const run = this.requireRunning(sessionId);
+      const page = this.requirePage(run, key);
+      run.snapshot = await run.driver.closePage(page.id);
+      run.names.delete(page.id);
     });
   }
 
@@ -160,6 +223,7 @@ export class BrowserSessionService implements BrowserSubsystem {
         viewers: new Set(),
         snapshot,
         closed: false,
+        names: new Map(),
       };
       this.running.set(sessionId, run);
       void driver.unexpectedExit.then(() => this.ended(run));
@@ -183,7 +247,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       case 'type':
         return await run.driver.type(action.selector, action.text);
       case 'read':
-        return await run.driver.read(action.selector);
+        return await run.driver.read(action.selector, action.mode);
       case 'screenshot':
         return await run.driver.screenshot();
       case 'back':
@@ -226,9 +290,34 @@ export class BrowserSessionService implements BrowserSubsystem {
     run.viewers.clear();
   }
 
+  /** The page this name or id addresses, among the pages the browser reported last. */
+  private page(run: Running, key: string): BrowserPageSummary | undefined {
+    return run.snapshot.pages.find(page => page.id === key || run.names.get(page.id) === key);
+  }
+
+  private requirePage(run: Running, key: string): BrowserPageSummary {
+    const page = this.page(run, key);
+    if (page === undefined) throw new BrowserSessionError('not_found', `there is no browser page named ${key}`);
+    return page;
+  }
+
+  private requireRunning(sessionId: string): Running {
+    const run = this.running.get(sessionId);
+    if (!run) throw new BrowserSessionError('not_running', 'the session browser is not running');
+    return run;
+  }
+
+  /** One page as the wire shows it, carrying its name when it has one. */
+  private named(run: Running, pageId: string): BrowserPageSummary {
+    const page = this.requirePage(run, pageId);
+    const name = run.names.get(page.id);
+    return name === undefined ? page : { ...page, name };
+  }
+
   private project(run: Running): BrowserStatus {
     return {
       ...run.snapshot,
+      pages: run.snapshot.pages.map(page => this.named(run, page.id)),
       state: 'running',
       sessionId: run.sessionId,
       viewport: run.viewport,

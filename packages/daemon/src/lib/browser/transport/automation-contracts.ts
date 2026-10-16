@@ -19,7 +19,8 @@ export interface BrowserAutomation {
   navigate(url: string): Promise<BrowserPageActionSnapshot>;
   click(selector: string): Promise<BrowserPageActionSnapshot>;
   type(selector: string, text: string): Promise<BrowserPageActionSnapshot>;
-  read(selector?: string): Promise<BrowserPageActionSnapshot & { readonly text: string }>;
+  /** `mode: 'a11y'` answers the accessibility tree (YAML) instead of the visible text. */
+  read(selector?: string, mode?: 'text' | 'a11y'): Promise<BrowserPageActionSnapshot & { readonly text: string }>;
   screenshot(): Promise<BrowserPageActionSnapshot & { readonly screenshotBase64: string }>;
   back(): Promise<BrowserPageActionSnapshot>;
   forward(): Promise<BrowserPageActionSnapshot>;
