@@ -92,7 +92,11 @@ const applyPreview = {
   capability: 'filesystem',
   notes: [],
 };
-const scanRequest = { scope: { kind: 'sessions', sessionIds: ['session-1'] }, agent: 'claude', model: 'claude-haiku-5-5' };
+const scanRequest = {
+  scope: { kind: 'sessions', sessionIds: ['session-1'] },
+  agent: 'claude',
+  model: 'claude-haiku-5-5',
+};
 const scanEstimate = {
   sessions: 2,
   sessionIds: ['session-1', 'session-2'],
@@ -171,7 +175,12 @@ describe('learning schemas', () => {
     const kinds = ['correction', 'roadblock', 'preference', 'recurring_task', 'tooling_failure', 'suggestion'] as const;
     const sources = ['human', 'teammate'] as const;
     const states = ['pending', 'accepted', 'applied', 'rejected'] as const;
-    const targetKinds = ['global-agent-guidance', 'automation-guidance', 'global-instructions', 'repo-instructions'] as const;
+    const targetKinds = [
+      'global-agent-guidance',
+      'automation-guidance',
+      'global-instructions',
+      'repo-instructions',
+    ] as const;
     const actors = ['miner', 'user', 'ferret'] as const;
 
     // Act + Assert
@@ -185,7 +194,8 @@ describe('learning schemas', () => {
     for (const kind of kinds) should(learning.EvidenceViewSchema.parse({ ...evidence, kind }).kind).equal(kind);
     should(learning.ProposalCategorySchema.parse('global')).equal('global');
     should(learning.ProposalCategorySchema.parse('repo')).equal('repo');
-    for (const source of ['passive', 'scan'] as const) should(learning.ProposalSourceSchema.parse(source)).equal(source);
+    for (const source of ['passive', 'scan'] as const)
+      should(learning.ProposalSourceSchema.parse(source)).equal(source);
   });
 
   it('should resolve every learning action member and default the run request', () => {

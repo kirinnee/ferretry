@@ -91,8 +91,8 @@ export function LearningSettingsSurface({ connection, sessions = null, fetcher }
             </h3>
             <p className="m-0 mt-1 text-meta leading-base text-muted">
               Only controls whether new ferrets are INSTRUCTED to learn: their fixed instructions include{' '}
-              <span className="mono">fy lesson suggest "…" --scope global|repo</span>. The ferret picks Global or
-              Repo; you can change it in the Learning hub.
+              <span className="mono">fy lesson suggest "…" --scope global|repo</span>. The ferret picks Global or Repo;
+              you can change it in the Learning hub.
             </p>
           </div>
           <button

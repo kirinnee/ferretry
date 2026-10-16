@@ -12,7 +12,15 @@ import {
   unifiedDiff,
   type ScanRecord,
 } from '../../../src/lib/learning/index.ts';
-import { AT, LEARNING_CONFIG, LESSON_MINER_LABEL, lessonFacts, lessonsWorld, observation, proposal } from '../runtime/mounts/support.ts';
+import {
+  AT,
+  LEARNING_CONFIG,
+  LESSON_MINER_LABEL,
+  lessonFacts,
+  lessonsWorld,
+  observation,
+  proposal,
+} from '../runtime/mounts/support.ts';
 
 /**
  * `LessonsService` over the in-memory ports: the passive switch, a ferret's own `suggest`, Apply, the
@@ -207,7 +215,11 @@ describe('LessonsService', () => {
       // Arrange
       const world = lessonsWorld();
       world.sessions.sessions = [lessonFacts({ sessionId: 's1' })];
-      world.sessions.owner.set('s1', { text: 'Run task test, not bun test directly.', at: '2024-05-01T09:00:00.000Z', turn: 3 });
+      world.sessions.owner.set('s1', {
+        text: 'Run task test, not bun test directly.',
+        at: '2024-05-01T09:00:00.000Z',
+        turn: 3,
+      });
 
       // Act
       await world.service.suggest('s1', 'Run task test rather than the test runner directly.', 'global');
@@ -281,7 +293,14 @@ describe('LessonsService', () => {
       const world = lessonsWorld();
       world.sessions.sessions = [lessonFacts({ sessionId: 's2' })];
       world.store.proposals = [
-        proposal({ id: 'lesson_seed', category: 'global', state: 'pending', ruleText: rule, observationIds: ['obs_seed'], count: 1 }),
+        proposal({
+          id: 'lesson_seed',
+          category: 'global',
+          state: 'pending',
+          ruleText: rule,
+          observationIds: ['obs_seed'],
+          count: 1,
+        }),
       ];
 
       // Act
@@ -416,7 +435,9 @@ describe('LessonsService', () => {
     it("should fall back to the filing session's own harness when neither file exists: codex writes AGENTS.md", async () => {
       // Arrange
       const world = lessonsWorld();
-      world.store.proposals = [proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['obs1'] })];
+      world.store.proposals = [
+        proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['obs1'] }),
+      ];
       world.store.observations = [observation({ id: 'obs1', sessionId: 'codex-sess' })];
       world.sessions.sessions = [lessonFacts({ sessionId: 'codex-sess', harness: 'codex' })];
 
@@ -430,7 +451,9 @@ describe('LessonsService', () => {
     it("should fall back to the filing session's own harness when neither file exists: claude writes CLAUDE.md", async () => {
       // Arrange
       const world = lessonsWorld();
-      world.store.proposals = [proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['obs1'] })];
+      world.store.proposals = [
+        proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['obs1'] }),
+      ];
       world.store.observations = [observation({ id: 'obs1', sessionId: 'claude-sess' })];
       world.sessions.sessions = [lessonFacts({ sessionId: 'claude-sess', harness: 'claude' })];
 
@@ -444,7 +467,9 @@ describe('LessonsService', () => {
     it('should fall back to claude when the filing observation is unknown', async () => {
       // Arrange
       const world = lessonsWorld();
-      world.store.proposals = [proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['missing-obs'] })];
+      world.store.proposals = [
+        proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['missing-obs'] }),
+      ];
 
       // Act
       const preview = await world.service.applyPreview('p1');
@@ -456,7 +481,9 @@ describe('LessonsService', () => {
     it('should fall back to claude when the filing session itself is unknown', async () => {
       // Arrange
       const world = lessonsWorld();
-      world.store.proposals = [proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['obs1'] })];
+      world.store.proposals = [
+        proposal({ id: 'p1', category: 'repo', state: 'accepted', project: '/proj', observationIds: ['obs1'] }),
+      ];
       world.store.observations = [observation({ id: 'obs1', sessionId: 'ghost-sess' })];
 
       // Act
@@ -471,7 +498,13 @@ describe('LessonsService', () => {
       const world = lessonsWorld();
       world.store.proposals = [
         proposal({ id: 'absent', category: 'repo', state: 'accepted', project: '/proj' }),
-        proposal({ id: 'present', category: 'repo', state: 'accepted', project: '/other', ruleText: 'Use direnv exec.' }),
+        proposal({
+          id: 'present',
+          category: 'repo',
+          state: 'accepted',
+          project: '/other',
+          ruleText: 'Use direnv exec.',
+        }),
       ];
       world.files.texts.set('/other/CLAUDE.md', '# notes\n');
 
@@ -482,11 +515,15 @@ describe('LessonsService', () => {
       // Assert
       should(absentPreview.exists).be.false();
       should(absentPreview.etag).equal(LEARNING_ABSENT_FILE_ETAG);
-      should(absentPreview.diff).equal(unifiedDiff('/proj/CLAUDE.md', undefined, insertLesson(undefined, proposal({ id: 'absent' }).ruleText)));
+      should(absentPreview.diff).equal(
+        unifiedDiff('/proj/CLAUDE.md', undefined, insertLesson(undefined, proposal({ id: 'absent' }).ruleText)),
+      );
 
       should(presentPreview.exists).be.true();
       should(presentPreview.etag).equal(lessonFileEtag('# notes\n'));
-      should(presentPreview.diff).equal(unifiedDiff('/other/CLAUDE.md', '# notes\n', insertLesson('# notes\n', 'Use direnv exec.')));
+      should(presentPreview.diff).equal(
+        unifiedDiff('/other/CLAUDE.md', '# notes\n', insertLesson('# notes\n', 'Use direnv exec.')),
+      );
     });
 
     it('should answer the capability a repo apply needs as filesystem', async () => {
@@ -516,7 +553,10 @@ describe('LessonsService', () => {
       // Arrange
       const world = lessonsWorld();
       const other = proposal({ id: 'other', state: 'pending' });
-      world.store.proposals = [proposal({ id: 'p1', category: 'global', state: 'accepted', ruleText: 'Use direnv exec.' }), other];
+      world.store.proposals = [
+        proposal({ id: 'p1', category: 'global', state: 'accepted', ruleText: 'Use direnv exec.' }),
+        other,
+      ];
       const preview = await world.service.applyPreview('p1');
 
       // Act
@@ -529,7 +569,12 @@ describe('LessonsService', () => {
       should(world.global.ensured).equal(1);
       should(applied.state).equal('applied');
       should(applied.applied).deepEqual({ at: AT, path: '/fleet/assets/instructions/lessons.md' });
-      should(applied.history.at(-1)).deepEqual({ at: AT, event: 'applied', by: 'user', note: '/fleet/assets/instructions/lessons.md' });
+      should(applied.history.at(-1)).deepEqual({
+        at: AT,
+        event: 'applied',
+        by: 'user',
+        note: '/fleet/assets/instructions/lessons.md',
+      });
       should(world.store.proposals).containEql(other);
       should(world.store.proposals.find(entry => entry.id === 'p1')).deepEqual(applied);
     });
@@ -759,7 +804,9 @@ describe('LessonsService', () => {
       world.store.state = { scan: scanRecord({ runId: 'scan-already', state: 'running' }) };
 
       // Act / Assert
-      await should(world.service.startScan({ scope: { kind: 'not-passive' } })).be.rejectedWith({ reason: 'scan-running' });
+      await should(world.service.startScan({ scope: { kind: 'not-passive' } })).be.rejectedWith({
+        reason: 'scan-running',
+      });
     });
 
     it('should finish immediately with a message when nothing is in scope', async () => {
@@ -779,7 +826,10 @@ describe('LessonsService', () => {
     it('should start no miner for a batch whose sessions have no digest, and count it done', async () => {
       // Arrange
       const world = lessonsWorld();
-      world.sessions.sessions = [lessonFacts({ sessionId: 's1' }), lessonFacts({ sessionId: 's2', createdAt: '2024-05-01T09:30:00.000Z' })];
+      world.sessions.sessions = [
+        lessonFacts({ sessionId: 's1' }),
+        lessonFacts({ sessionId: 's2', createdAt: '2024-05-01T09:30:00.000Z' }),
+      ];
 
       // Act
       const progress = await world.service.startScan({ scope: { kind: 'not-passive' } });
@@ -824,10 +874,7 @@ describe('LessonsService', () => {
       await world.service.startScan({ scope: { kind: 'not-passive' } });
 
       // Assert
-      should(world.miner.starts.map(start => start.sessionIds)).deepEqual([
-        ['s1', 's2'],
-        ['s3'],
-      ]);
+      should(world.miner.starts.map(start => start.sessionIds)).deepEqual([['s1', 's2'], ['s3']]);
     });
 
     it('should mint a runId from the current instant, with : and . replaced', async () => {
@@ -887,7 +934,11 @@ describe('LessonsService', () => {
       // Arrange
       const world = lessonsWorld();
       world.store.state = {
-        scan: scanRecord({ state: 'running', sessionIds: ['s1'], batches: [{ minerSessionId: 'miner-0', sessionIds: ['s1'] }] }),
+        scan: scanRecord({
+          state: 'running',
+          sessionIds: ['s1'],
+          batches: [{ minerSessionId: 'miner-0', sessionIds: ['s1'] }],
+        }),
       };
 
       // Act
@@ -979,7 +1030,13 @@ describe('LessonsService', () => {
       // Arrange
       const world = lessonsWorld();
       world.store.state = {
-        scan: scanRecord({ state: 'finished', sessionIds: ['s1'], done: 1, finishedAt: AT, batches: [{ minerSessionId: 'miner-0', sessionIds: ['s1'] }] }),
+        scan: scanRecord({
+          state: 'finished',
+          sessionIds: ['s1'],
+          done: 1,
+          finishedAt: AT,
+          batches: [{ minerSessionId: 'miner-0', sessionIds: ['s1'] }],
+        }),
       };
 
       // Act

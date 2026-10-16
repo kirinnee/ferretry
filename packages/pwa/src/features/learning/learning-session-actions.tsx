@@ -114,7 +114,12 @@ export function useLearningSessionActions({
           className="fixed inset-x-4 top-[calc(env(safe-area-inset-top,0px)+3.5rem)] z-[55] mx-auto flex max-w-[480px] items-center gap-2 rounded-control border border-accent-border bg-surface-1 px-3 py-1 text-ui text-fg shadow-popover"
         >
           <span className="min-w-0 flex-1">{note}</span>
-          <button type="button" className="kt-btn h-11 w-11 shrink-0 p-0" aria-label="Dismiss" onClick={() => setNote(null)}>
+          <button
+            type="button"
+            className="kt-btn h-11 w-11 shrink-0 p-0"
+            aria-label="Dismiss"
+            onClick={() => setNote(null)}
+          >
             <X size={14} aria-hidden="true" />
           </button>
         </div>

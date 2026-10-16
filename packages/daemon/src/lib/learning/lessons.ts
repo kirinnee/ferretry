@@ -229,24 +229,20 @@ export class LessonsService {
       this.deps.files.projectRoot(facts.cwd),
     ]);
     const at = this.deps.now();
-    const result = fileSuggestion(
-      await this.deps.store.loadProposals(),
-      await this.deps.store.loadTombstones(),
-      {
-        rule,
-        scope,
-        sessionId,
-        teammate: facts.teammate,
-        mode: facts.mode,
-        cwd: facts.cwd,
-        project,
-        evidence:
-          owner === undefined
-            ? { quote: rule, source: 'teammate', at }
-            : { quote: owner.text, source: 'human', at: owner.at, turn: owner.turn },
-        at,
-      },
-    );
+    const result = fileSuggestion(await this.deps.store.loadProposals(), await this.deps.store.loadTombstones(), {
+      rule,
+      scope,
+      sessionId,
+      teammate: facts.teammate,
+      mode: facts.mode,
+      cwd: facts.cwd,
+      project,
+      evidence:
+        owner === undefined
+          ? { quote: rule, source: 'teammate', at }
+          : { quote: owner.text, source: 'human', at: owner.at, turn: owner.turn },
+      at,
+    });
     if (result.outcome === 'previously-rejected') {
       return {
         outcome: 'previously-rejected',
@@ -301,7 +297,10 @@ export class LessonsService {
     const proposal = (await this.deps.store.loadProposals()).find(entry => entry.id === id || entry.identity === id);
     if (proposal === undefined) throw new LessonsError('not-found', `no lesson ${id}`);
     if (proposal.state !== 'accepted')
-      throw new LessonsError('not-accepted', `lesson ${proposal.id} is ${proposal.state}; accept it before applying it`);
+      throw new LessonsError(
+        'not-accepted',
+        `lesson ${proposal.id} is ${proposal.state}; accept it before applying it`,
+      );
     return proposal;
   }
 
@@ -336,7 +335,10 @@ export class LessonsService {
     const target = await this.target(proposal);
     const before = await this.deps.files.read(target.path);
     if (lessonFileEtag(before) !== etag)
-      throw new LessonsError('conflict', `${target.path} changed since the preview; look at the new diff and apply again`);
+      throw new LessonsError(
+        'conflict',
+        `${target.path} changed since the preview; look at the new diff and apply again`,
+      );
     if (proposal.category === 'global') await this.deps.global.ensureComponent();
     await this.deps.files.write(target.path, insertLesson(before, proposal.ruleText));
     const at = this.deps.now();
@@ -363,10 +365,7 @@ export class LessonsService {
   // ── Scan ───────────────────────────────────────────────────────────────────────────────────────
 
   private async selection(request: LearningScanRequest) {
-    const [facts, learning] = await Promise.all([
-      this.deps.sessions.list(),
-      this.deps.store.loadSessionLearning(),
-    ]);
+    const [facts, learning] = await Promise.all([this.deps.sessions.list(), this.deps.store.loadSessionLearning()]);
     const passive = new Set(learning.filter(entry => entry.passive).map(entry => entry.sessionId));
     const selected = selectScanSessions(
       facts.map(fact => ({
@@ -437,7 +436,9 @@ export class LessonsService {
       started.push({ ...(miner === undefined ? {} : { minerSessionId: miner }), sessionIds: [...sessionIds] });
     }
     // A batch with nothing to mine started no miner, so it is read already.
-    const done = started.filter(batch => batch.minerSessionId === undefined).reduce((n, b) => n + b.sessionIds.length, 0);
+    const done = started
+      .filter(batch => batch.minerSessionId === undefined)
+      .reduce((n, b) => n + b.sessionIds.length, 0);
     const finished = started.every(batch => batch.minerSessionId === undefined);
     const record: ScanRecord = {
       runId,

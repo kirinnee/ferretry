@@ -26,8 +26,10 @@ import type { TranscriptEvent } from '../../lib/transcript/types.ts';
  */
 export function normalizedRecord(event: TranscriptEvent): NormalizedRecordLike {
   const timestamp = event.timestamp === undefined ? {} : { timestamp: event.timestamp };
-  if (event.kind === 'message' && event.role === 'user') return { type: 'chat.user', ...timestamp, data: { text: event.text } };
-  if (event.kind === 'tool-result') return { type: 'tool.result', ...timestamp, data: { isError: event.result.isError } };
+  if (event.kind === 'message' && event.role === 'user')
+    return { type: 'chat.user', ...timestamp, data: { text: event.text } };
+  if (event.kind === 'tool-result')
+    return { type: 'tool.result', ...timestamp, data: { isError: event.result.isError } };
   return { type: event.kind, ...timestamp };
 }
 

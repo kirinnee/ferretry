@@ -114,9 +114,9 @@ describe('the scan dialog', () => {
     expect(started.started).toEqual([{ scope: { kind: 'not-passive' } }]);
     const panel = must(view.container.querySelector('[role="dialog"]'), 'dialog');
     expect(panel.getAttribute('aria-modal')).toBe('true');
-    expect(must(document.getElementById(must(panel.getAttribute('aria-labelledby'), 'label')), 'title').textContent).toBe(
-      'Scan for lessons',
-    );
+    expect(
+      must(document.getElementById(must(panel.getAttribute('aria-labelledby'), 'label')), 'title').textContent,
+    ).toBe('Scan for lessons');
     await view.unmount();
   });
 
@@ -269,9 +269,9 @@ describe('the scan dialog', () => {
       />,
     );
     await waitForText(view.container, 'Scan cancelled.');
-    expect(must(view.container.querySelector('[role="dialog"]'), 'dialog').getAttribute('data-learning-scan-dialog')).toBe(
-      'finished',
-    );
+    expect(
+      must(view.container.querySelector('[role="dialog"]'), 'dialog').getAttribute('data-learning-scan-dialog'),
+    ).toBe('finished');
     await click(byText(view.container, 'button', 'Close'));
     await click(byText(view.container, 'button', 'View in Learning'));
     expect(closed).toEqual(['close', 'close', 'view']);
@@ -280,9 +280,9 @@ describe('the scan dialog', () => {
 
   it('shows the form for a scan that ended before the dialog opened, and closes on Escape or the scrim', async () => {
     const { view, closed } = await dialog({ control: control(progress({ state: 'finished' })) });
-    expect(must(view.container.querySelector('[role="dialog"]'), 'dialog').getAttribute('data-learning-scan-dialog')).toBe(
-      'form',
-    );
+    expect(
+      must(view.container.querySelector('[role="dialog"]'), 'dialog').getAttribute('data-learning-scan-dialog'),
+    ).toBe('form');
     await interact(() => pressKey(document, 'Escape'));
     await click(must(view.container.querySelector('button[tabindex="-1"]'), 'scrim'));
     await click(must(view.container.querySelector('header button[aria-label="Close"]'), 'close'));

@@ -8,9 +8,9 @@ instruction file every later ferret reads. This page is the contract; the code i
 
 ## Two producers, one inbox
 
-| Source      | How a lesson is made                                                                                                                                                        |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Passive** | A ferret that is instructed to learn runs `fy lesson suggest "<rule>" --scope global\|repo` (or the `lessons_suggest` MCP tool) when the owner corrects it.                 |
+| Source      | How a lesson is made                                                                                                                                                          |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Passive** | A ferret that is instructed to learn runs `fy lesson suggest "<rule>" --scope global\|repo` (or the `lessons_suggest` MCP tool) when the owner corrects it.                   |
 | **Scan**    | The owner asks for an estimate, sees it, and starts a scan; a miner ferret reads older transcripts and proposes lessons whose every quote is verified against the transcript. |
 
 Both land in the Learning hub (Insights › Learning) as **To review**. A lesson carries its **type** —
@@ -54,9 +54,9 @@ Accept, Edit, Reject, a type change and Back to review change only the daemon's 
 2. `POST /v1/learning/proposals/:id/apply {etag}` writes exactly that change, only if the file still has
    that etag; otherwise `409 apply_conflict` and the owner looks at the new diff.
 
-| Type   | Target                                                                                                                                     | Grant                                                           |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| Global | the fleet's `instructions/lessons` component: `<FY_HOME>/fleet/assets/instructions/lessons.md` (the component file is created on first use) | `fleet.configure`                                               |
+| Type   | Target                                                                                                                                              | Grant                                                        |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Global | the fleet's `instructions/lessons` component: `<FY_HOME>/fleet/assets/instructions/lessons.md` (the component file is created on first use)         | `fleet.configure`                                            |
 | Repo   | the project root's `AGENTS.md` if present, else `CLAUDE.md` if present, else the one the ferret's CLI reads (Claude → CLAUDE.md, Codex → AGENTS.md) | `filesystem.configure`, and a remote device proves a passkey |
 
 The lesson is appended as a bullet under a `## Lessons` heading (created when absent); nothing else in the
@@ -77,15 +77,15 @@ landed stays. Results carry the **scan** source chip and the same Global/Repo ty
 
 ## Routes
 
-| Route                                                | Who                                       |
-| ---------------------------------------------------- | ----------------------------------------- |
-| `GET /v1/learning/status`, `config`, `proposals`     | operator                                  |
-| `PATCH /v1/learning/config`                          | operator, `fleet.configure`               |
-| `POST /v1/learning/proposals/:id`                    | operator                                  |
-| `GET /v1/learning/proposals/:id/apply-preview`       | operator                                  |
-| `POST /v1/learning/proposals/:id/apply`              | operator; the target's grant (above)      |
-| `GET /v1/learning/sessions`                          | operator                                  |
-| `PATCH /v1/sessions/:sessionId/learning`             | operator                                  |
-| `POST /v1/learning/scan/estimate`, `scan`, `cancel`  | operator                                  |
-| `GET /v1/learning/scan`                              | operator                                  |
-| `POST /v1/agent/lessons`                             | a ferret, by its session credential only  |
+| Route                                               | Who                                      |
+| --------------------------------------------------- | ---------------------------------------- |
+| `GET /v1/learning/status`, `config`, `proposals`    | operator                                 |
+| `PATCH /v1/learning/config`                         | operator, `fleet.configure`              |
+| `POST /v1/learning/proposals/:id`                   | operator                                 |
+| `GET /v1/learning/proposals/:id/apply-preview`      | operator                                 |
+| `POST /v1/learning/proposals/:id/apply`             | operator; the target's grant (above)     |
+| `GET /v1/learning/sessions`                         | operator                                 |
+| `PATCH /v1/sessions/:sessionId/learning`            | operator                                 |
+| `POST /v1/learning/scan/estimate`, `scan`, `cancel` | operator                                 |
+| `GET /v1/learning/scan`                             | operator                                 |
+| `POST /v1/agent/lessons`                            | a ferret, by its session credential only |

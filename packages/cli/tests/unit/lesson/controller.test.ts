@@ -17,7 +17,9 @@ class CapturingOutput implements ILessonOutput {
 /** A fake, not a mock: the controller's decisions are asserted through the call it sent and the text it printed. */
 class RecordingLessonGateway implements ILessonGateway {
   readonly calls: AgentLessonToolCall[] = [];
-  constructor(private readonly result: AgentLessonToolResult = { summary: 'filed as a new lesson', outcome: 'filed' }) {}
+  constructor(
+    private readonly result: AgentLessonToolResult = { summary: 'filed as a new lesson', outcome: 'filed' },
+  ) {}
   lessons(call: AgentLessonToolCall): Promise<AgentLessonToolResult> {
     this.calls.push(call);
     return Promise.resolve(this.result);
@@ -84,12 +86,20 @@ describe('LessonController', () => {
 
   it('should emit the protocol payload verbatim under --json', async () => {
     // Arrange
-    const { subject, out } = harness({ summary: 'merged into an existing lesson (now 3×)', outcome: 'merged', count: 3 });
+    const { subject, out } = harness({
+      summary: 'merged into an existing lesson (now 3×)',
+      outcome: 'merged',
+      count: 3,
+    });
 
     // Act
     await subject.suggest('a rule', 'global', { json: true });
 
     // Assert
-    should(JSON.parse(out.text)).eql({ summary: 'merged into an existing lesson (now 3×)', outcome: 'merged', count: 3 });
+    should(JSON.parse(out.text)).eql({
+      summary: 'merged into an existing lesson (now 3×)',
+      outcome: 'merged',
+      count: 3,
+    });
   });
 });

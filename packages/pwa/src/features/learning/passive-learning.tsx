@@ -60,18 +60,14 @@ export function usePassiveLearning(
     async (sessionId: string, passive: boolean) => {
       const result = await patchSessionLearning(connection, sessionId, passive, fetcher);
       if (alive.current)
-        setSessions(current => [
-          ...(current ?? []).filter(entry => entry.sessionId !== sessionId),
-          result.learning,
-        ]);
+        setSessions(current => [...(current ?? []).filter(entry => entry.sessionId !== sessionId), result.learning]);
       return result;
     },
     [connection, fetcher],
   );
 
   const passive = useMemo(
-    () =>
-      sessions === null ? NOBODY : new Set(sessions.filter(entry => entry.passive).map(entry => entry.sessionId)),
+    () => (sessions === null ? NOBODY : new Set(sessions.filter(entry => entry.passive).map(entry => entry.sessionId))),
     [sessions],
   );
   return { sessions, passive, refresh, set };
@@ -90,4 +86,3 @@ export function PassiveLearningChip() {
     </span>
   );
 }
-

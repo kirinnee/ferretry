@@ -18,7 +18,16 @@ import {
   startLearningScan,
 } from '../../src/lib/learning-api.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
-import { AT, config, estimate, fakeLearningDaemon, learningDaemon, lesson, preview, progress } from '../support/learning.ts';
+import {
+  AT,
+  config,
+  estimate,
+  fakeLearningDaemon,
+  learningDaemon,
+  lesson,
+  preview,
+  progress,
+} from '../support/learning.ts';
 
 describe('learning transport', () => {
   it('dials every learning route on the paired daemon with the stated verb and body', async () => {
@@ -117,6 +126,8 @@ describe('learning transport', () => {
   it('rejects an answer that is not the contract', async () => {
     const daemon = fakeLearningDaemon();
     daemon.once('POST /v1/learning/scan/estimate', { body: { sessions: -1 } });
-    await expect(estimateLearningScan(learningDaemon, { scope: { kind: 'not-passive' } }, daemon.fetch)).rejects.toThrow();
+    await expect(
+      estimateLearningScan(learningDaemon, { scope: { kind: 'not-passive' } }, daemon.fetch),
+    ).rejects.toThrow();
   });
 });

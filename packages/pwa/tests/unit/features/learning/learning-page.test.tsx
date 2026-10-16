@@ -30,7 +30,12 @@ const LESSONS = [
     evidence: [evidence({ observationId: 'o-9', sessionId: 'session-kofi', turn: undefined })],
   }),
   lesson({ id: 'tf', ruleText: 'Check the apply job first.', state: 'accepted' }),
-  lesson({ id: 'bun', ruleText: 'Prefer bun.', state: 'applied', applied: { at: lesson().lastSeen, path: '/fy/g.md' } }),
+  lesson({
+    id: 'bun',
+    ruleText: 'Prefer bun.',
+    state: 'applied',
+    applied: { at: lesson().lastSeen, path: '/fy/g.md' },
+  }),
   lesson({ id: 'bare', ruleText: 'Bare applied.', state: 'applied' }),
   lesson({ id: 'tabs', ruleText: 'Indent with tabs.', state: 'rejected' }),
 ];
@@ -310,9 +315,13 @@ describe('the Learning hub', () => {
     const again = await hub(daemon);
     await waitFor(() => again.container.querySelector('[data-learning-scan-inline]') !== null, 'the inline scan');
     daemon.once('POST /v1/learning/scan/cancel', { status: 500, body: { error: 'cannot cancel' } });
-    await click(byText(must(again.container.querySelector('[data-learning-scan-inline]'), 'inline'), 'button', 'Cancel'));
+    await click(
+      byText(must(again.container.querySelector('[data-learning-scan-inline]'), 'inline'), 'button', 'Cancel'),
+    );
     await waitForText(again.container, 'cannot cancel');
-    await click(byText(must(again.container.querySelector('[data-learning-scan-inline]'), 'inline'), 'button', 'Cancel'));
+    await click(
+      byText(must(again.container.querySelector('[data-learning-scan-inline]'), 'inline'), 'button', 'Cancel'),
+    );
     await waitForText(again.container, 'Scan cancelled.');
     await again.unmount();
   });
@@ -327,9 +336,9 @@ describe('the Learning hub', () => {
     await click(byText(view.container, 'button', 'Hide'));
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
     await click(byText(view.container, 'button', 'Details'));
-    expect(must(view.container.querySelector('[role="dialog"]'), 'dialog').getAttribute('data-learning-scan-dialog')).toBe(
-      'progress',
-    );
+    expect(
+      must(view.container.querySelector('[role="dialog"]'), 'dialog').getAttribute('data-learning-scan-dialog'),
+    ).toBe('progress');
     daemon.state.lessons = [...daemon.state.lessons, lesson({ id: 'scanned', source: 'scan', ruleText: 'Scanned.' })];
     daemon.state.scan = progress({ state: 'finished', done: 4, added: 1 });
     await waitForText(view.container, 'Added 1 lesson to To review.');
@@ -337,7 +346,9 @@ describe('the Learning hub', () => {
     await click(byText(view.container, 'button', 'View in Learning'));
     expect(view.container.querySelector('[role="dialog"]')).toBeNull();
     expect(tab(view.container, 'To review').getAttribute('aria-selected')).toBe('true');
-    expect(must(view.container.querySelector<HTMLInputElement>('input[value="scan"]'), 'scan filter').checked).toBe(true);
+    expect(must(view.container.querySelector<HTMLInputElement>('input[value="scan"]'), 'scan filter').checked).toBe(
+      true,
+    );
     expect(view.container.querySelector('[data-lesson="scanned"]')).not.toBeNull();
     await view.unmount();
   });

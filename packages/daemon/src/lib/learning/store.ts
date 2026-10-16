@@ -1,12 +1,5 @@
 import type { ClockPort } from '../ports.ts';
-import type {
-  LearningState,
-  Observation,
-  Proposal,
-  RunManifest,
-  StoredSessionLearning,
-  Tombstone,
-} from './types.ts';
+import type { LearningState, Observation, Proposal, RunManifest, StoredSessionLearning, Tombstone } from './types.ts';
 
 /** Persistence boundary for the learning subsystem. Implemented only by adapters. */
 export interface LearningStorePort {

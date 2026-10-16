@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from '../../../../src/features/learning/learning-settings.tsx';
+import {
+  LEARNING_SETTINGS_TAB,
+  LearningSettingsSurface,
+} from '../../../../src/features/learning/learning-settings.tsx';
 import { mount, must } from '../../../support/dom.ts';
 import { AT, fakeLearningDaemon, learningDaemon } from '../../../support/learning.ts';
 import { byText, click, textOf, waitForText } from '../../../support/learning-dom.ts';
@@ -14,7 +17,9 @@ describe('Settings › Learning', () => {
       { sessionId: 'session-hadi', passive: true, since: AT, setBy: 'default' },
       { sessionId: 'session-kofi-long-id', passive: false, since: AT, setBy: 'owner' },
     ];
-    const view = await mount(<LearningSettingsSurface connection={learningDaemon} sessions={SESSIONS} fetcher={daemon.fetch} />);
+    const view = await mount(
+      <LearningSettingsSurface connection={learningDaemon} sessions={SESSIONS} fetcher={daemon.fetch} />,
+    );
     await waitForText(view.container, 'On');
     const toggle = must(view.container.querySelector<HTMLButtonElement>('[role="switch"]'), 'switch');
     await waitForText(view.container, 'Hadi');
@@ -33,7 +38,10 @@ describe('Settings › Learning', () => {
     await click(byText(kofi, 'button', 'Turn on'));
     await waitForText(view.container, 'Re-instructed; it costs one turn.');
     expect(daemon.calls.at(-1)).toMatchObject({ method: 'PATCH', body: { passive: true } });
-    await waitForText(must(view.container.querySelector('[data-learning-ferret="session-kofi-long-id"]'), 'row'), 'Turn off');
+    await waitForText(
+      must(view.container.querySelector('[data-learning-ferret="session-kofi-long-id"]'), 'row'),
+      'Turn off',
+    );
 
     daemon.once('PATCH /v1/sessions/session-hadi/learning', { status: 403, body: { error: 'fleet.use is closed' } });
     await click(byText(view.container, '[data-learning-ferret="session-hadi"] button', 'Turn off'));

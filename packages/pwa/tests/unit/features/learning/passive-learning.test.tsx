@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
-import { PassiveLearningChip, type PassiveLearningState, usePassiveLearning } from '../../../../src/features/learning/passive-learning.tsx';
+import {
+  PassiveLearningChip,
+  type PassiveLearningState,
+  usePassiveLearning,
+} from '../../../../src/features/learning/passive-learning.tsx';
 import { interact, mount } from '../../../support/dom.ts';
 import { AT, fakeLearningDaemon, learningDaemon } from '../../../support/learning.ts';
 import { textOf, waitFor } from '../../../support/learning-dom.ts';
@@ -49,5 +53,4 @@ describe('passive learning per ferret', () => {
     expect(textOf(view.container)).toBe('Learning: passive');
     await view.unmount();
   });
-
 });

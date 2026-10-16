@@ -40,9 +40,7 @@ function harness(
       },
       lessons: async call => {
         lessonCalls.push(call);
-        return await (options.lessons ?? (async () => ({ summary: 'filed as a new lesson', outcome: 'filed' })))(
-          call,
-        );
+        return await (options.lessons ?? (async () => ({ summary: 'filed as a new lesson', outcome: 'filed' })))(call);
       },
     },
     {
@@ -404,7 +402,11 @@ describe('McpServer — the lessons tool', () => {
     // Act
     await request(
       'tools/call',
-      toolCall('lessons_suggest', { rule: 'Run bun install inside the target package.', scope: 'global', tool: 'config.read' }),
+      toolCall('lessons_suggest', {
+        rule: 'Run bun install inside the target package.',
+        scope: 'global',
+        tool: 'config.read',
+      }),
     );
 
     // Assert
@@ -458,7 +460,9 @@ describe('McpServer — the lessons tool', () => {
     });
 
     // Act + Assert
-    should(await refused.request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'global' }))).deepEqual({
+    should(
+      await refused.request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'global' })),
+    ).deepEqual({
       jsonrpc: '2.0',
       id: 1,
       result: { content: [{ type: 'text', text: 'no agent session credential here' }], isError: true },

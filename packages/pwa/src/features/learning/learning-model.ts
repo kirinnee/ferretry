@@ -69,11 +69,7 @@ export const typeLabel = (category: ProposalCategory, project: string | undefine
   category === 'global' ? 'Global' : project === undefined ? 'Repo' : `Repo · ${basename(project)}`;
 
 /** How the hub names a session: its ferret's name, else the name the evidence carries, else a short id. */
-export const sessionName = (
-  sessionId: string,
-  sessions: ReadonlyMap<string, SessionView>,
-  teammate?: string,
-): string =>
+export const sessionName = (sessionId: string, sessions: ReadonlyMap<string, SessionView>, teammate?: string): string =>
   displayCallsign(sessions.get(sessionId)?.config.teammate) || displayCallsign(teammate) || shortSessionId(sessionId);
 
 /** The evidence the lesson was first filed with: the ferret that suggested it. */
@@ -221,12 +217,8 @@ export const estimateParts = (estimate: LearningScanEstimate): readonly string[]
 ];
 
 export const estimateNotes = (estimate: LearningScanEstimate): readonly string[] => [
-  ...(estimate.skipped > 0
-    ? [`${estimate.skipped} skipped: no transcript to read.`]
-    : []),
-  ...(estimate.beyondLimit > 0
-    ? [`${estimate.beyondLimit} more beyond this scan’s limit — scan again for them.`]
-    : []),
+  ...(estimate.skipped > 0 ? [`${estimate.skipped} skipped: no transcript to read.`] : []),
+  ...(estimate.beyondLimit > 0 ? [`${estimate.beyondLimit} more beyond this scan’s limit — scan again for them.`] : []),
 ];
 
 export const scanPercent = (progress: LearningScanProgress): number =>

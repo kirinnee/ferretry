@@ -1416,7 +1416,10 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
     () => store.fleet.getSnapshot(),
   );
   return (
-    <LearningSettingsSurface connection={connection} sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null} />
+    <LearningSettingsSurface
+      connection={connection}
+      sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
+    />
   );
 }
 

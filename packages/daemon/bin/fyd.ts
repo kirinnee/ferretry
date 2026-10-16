@@ -4353,7 +4353,16 @@ function createLearningSubsystem(parts: LearningSubsystemParts): LearningSubsyst
   const { paths, files, clock, config } = parts;
   const store = new FileLearningStore(paths, files, clock);
   const now = () => clock.now();
-  const miner = new LearningMiner(paths, files, store, parts.sessions, parts.transcripts, parts.sessionControl, config, now);
+  const miner = new LearningMiner(
+    paths,
+    files,
+    store,
+    parts.sessions,
+    parts.transcripts,
+    parts.sessionControl,
+    config,
+    now,
+  );
   const settings = new ConfigFileLearningSettings(parts.configFiles);
   const lessons = new LessonsService({
     store,

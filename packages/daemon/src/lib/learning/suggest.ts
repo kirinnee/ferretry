@@ -1,4 +1,9 @@
-import type { ObservationSource, Proposal, ProposalCategory, ProposalTarget } from '../../../../protocol/src/lib/learning.ts';
+import type {
+  ObservationSource,
+  Proposal,
+  ProposalCategory,
+  ProposalTarget,
+} from '../../../../protocol/src/lib/learning.ts';
 import { matchesTombstone, observationId, sameRule, slugify } from './policy.ts';
 import type { Observation, Tombstone } from './types.ts';
 

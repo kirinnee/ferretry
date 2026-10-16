@@ -10,8 +10,8 @@ describe('renderLessonSuggestion', () => {
     should(
       renderLessonSuggestion({ summary: 'merged into an existing lesson (now 9×)', outcome: 'merged', count: 9 }),
     ).equal('merged into an existing lesson (now 9×)');
-    should(renderLessonSuggestion({ summary: 'previously rejected; not filed again', outcome: 'previously-rejected' })).equal(
-      'previously rejected; not filed again',
-    );
+    should(
+      renderLessonSuggestion({ summary: 'previously rejected; not filed again', outcome: 'previously-rejected' }),
+    ).equal('previously rejected; not filed again');
   });
 });

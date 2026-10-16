@@ -9,12 +9,7 @@
  * panel to the bottom edge until `sm`.
  */
 
-import type {
-  LearningScanEstimate,
-  LearningScanRequest,
-  LearningScanScope,
-  SessionView,
-} from '@ferretry/protocol';
+import type { LearningScanEstimate, LearningScanRequest, LearningScanScope, SessionView } from '@ferretry/protocol';
 import { ScanSearch, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
@@ -96,7 +91,8 @@ export function ScanDialog(props: ScanDialogProps) {
   }, [running, scan]);
 
   const phase = running ? 'progress' : scan !== null && watching === scan.runId ? 'finished' : 'form';
-  const title = phase === 'progress' ? 'Scanning for lessons' : phase === 'finished' ? 'Scan finished' : 'Scan for lessons';
+  const title =
+    phase === 'progress' ? 'Scanning for lessons' : phase === 'finished' ? 'Scan finished' : 'Scan for lessons';
 
   return (
     <div
@@ -175,7 +171,9 @@ function ScanProgressBody({
         <p className="m-0 text-ui">
           {sentence} <span className="text-faint">{percent}%</span>
         </p>
-        <p className="m-0 text-meta text-muted">You can close this; the scan keeps going and the Learning page shows it.</p>
+        <p className="m-0 text-meta text-muted">
+          You can close this; the scan keeps going and the Learning page shows it.
+        </p>
         {error !== null && (
           <p role="alert" className="m-0 text-meta text-err">
             {error}
@@ -396,9 +394,7 @@ function ScanForm({
               value={draft.model}
               onChange={event => update({ model: event.target.value })}
             >
-              <option value="">
-                Login’s default{login?.defaultModel ? ` (${login.defaultModel})` : ''}
-              </option>
+              <option value="">Login’s default{login?.defaultModel ? ` (${login.defaultModel})` : ''}</option>
               {models.map(model => (
                 <option key={model.id} value={model.id}>
                   {model.id}

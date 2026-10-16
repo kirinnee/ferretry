@@ -328,23 +328,23 @@ export function LessonRow({
           )}
           {/* While Apply is reading or showing its diff, its own two buttons are the only acts. */}
           {(applyStep.step === 'idle' || applyStep.step === 'conflict') && (
-          <LessonActionsBar
-            proposal={proposal}
-            editing={editing}
-            busy={busy}
-            timeZone={timeZone}
-            draftEmpty={draft.trim() === ''}
-            onAccept={() => void run({ action: 'accept' })}
-            onReject={() => void run({ action: 'reject' })}
-            onReopen={() => void run({ action: 'reopen' })}
-            onEdit={() => {
-              setDraft(proposal.ruleText);
-              setEditing(true);
-            }}
-            onSaveEdit={() => void saveEdit()}
-            onCancelEdit={() => setEditing(false)}
-            onApply={() => void startApply()}
-          />
+            <LessonActionsBar
+              proposal={proposal}
+              editing={editing}
+              busy={busy}
+              timeZone={timeZone}
+              draftEmpty={draft.trim() === ''}
+              onAccept={() => void run({ action: 'accept' })}
+              onReject={() => void run({ action: 'reject' })}
+              onReopen={() => void run({ action: 'reopen' })}
+              onEdit={() => {
+                setDraft(proposal.ruleText);
+                setEditing(true);
+              }}
+              onSaveEdit={() => void saveEdit()}
+              onCancelEdit={() => setEditing(false)}
+              onApply={() => void startApply()}
+            />
           )}
         </div>
       )}
