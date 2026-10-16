@@ -119,14 +119,10 @@ const TextSchema = z.string().min(1).max(AGENT_TOOL_MAX_TEXT_CHARS);
 export const AgentUrlSchema = z
   .string()
   .max(AGENT_TOOL_MAX_URL_CHARS)
-  .refine(value => {
-    try {
-      const protocol = new URL(value).protocol;
-      return protocol === 'http:' || protocol === 'https:';
-    } catch {
-      return false;
-    }
-  }, 'only http and https URLs can be opened');
+  .refine(
+    value => URL.canParse(value) && ['http:', 'https:'].includes(new URL(value).protocol),
+    'only http and https URLs can be opened',
+  );
 
 const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHARS);
 

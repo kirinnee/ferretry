@@ -134,6 +134,7 @@ describe('agent tool schemas', () => {
       { name: 'file', schema: tools.AgentUrlSchema, value: 'file:///etc/passwd' },
       { name: 'script', schema: tools.AgentUrlSchema, value: 'javascript:alert(1)' },
       { name: 'not a url', schema: tools.AgentUrlSchema, value: 'localhost:3000' },
+      { name: 'not even a scheme', schema: tools.AgentUrlSchema, value: '::nonsense' },
       { name: 'too long', schema: tools.AgentUrlSchema, value: `https://e.test/${'a'.repeat(2_048)}` },
     ]);
     should(tools.AgentUrlSchema.parse('http://127.0.0.1:3000/')).equal('http://127.0.0.1:3000/');

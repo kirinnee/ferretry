@@ -167,6 +167,17 @@ describe('the agent tools route', () => {
   });
 });
 
+describe('a genuine defect', () => {
+  it('should surface as the 500 it is rather than as a refusal', async () => {
+    const { world, dispatch } = served();
+    world.terminals.list = async () => {
+      throw new Error('disk on fire');
+    };
+    const failed = await dispatch.dispatch(agentCall({ tool: 'terminal.list' }));
+    should(failed.status).equal(500);
+  });
+});
+
 describe('a person’s tool routes', () => {
   it('should let the CLI and a paired device drive a session they name', async () => {
     // Arrange
