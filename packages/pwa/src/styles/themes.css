@@ -2221,6 +2221,11 @@
   --code-bg: color-mix(in srgb, var(--surface) 92%, var(--fg));
   --code-border: var(--border);
   --code-fg: var(--fg);
+  /* The human's own message bubble, which fell back to Studio LIGHT's near-white and painted light
+     ink on white in every dark mode of these families. */
+  --user-bg: color-mix(in srgb, var(--surface) 90%, var(--accent));
+  --user-border: var(--accent);
+  --user-rail: color-mix(in srgb, var(--accent) 40%, var(--surface));
 }
 :root[data-theme='phosphor-dark'],
 :root[data-theme='blueprint-dark'],
