@@ -11,7 +11,9 @@ export interface SessionAttachSubsystem {
   resolve(sessionId: string): Promise<SessionAttachTarget>;
 }
 
-const REFUSALS: Readonly<Record<SessionAttachFailure, { readonly status: number; readonly code: string }>> = {
+export const ATTACH_REFUSALS: Readonly<
+  Record<SessionAttachFailure, { readonly status: number; readonly code: string }>
+> = {
   missing_registration: { status: 409, code: 'attach_registration_missing' },
   pane_unavailable: { status: 409, code: 'attach_pane_unavailable' },
   identity_mismatch: { status: 409, code: 'attach_identity_mismatch' },
@@ -29,7 +31,7 @@ function sessionId(context: RouteContext): string {
 
 function refuse(error: unknown): never {
   if (error instanceof SessionAttachError) {
-    const refusal = REFUSALS[error.failure];
+    const refusal = ATTACH_REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
   throw error;

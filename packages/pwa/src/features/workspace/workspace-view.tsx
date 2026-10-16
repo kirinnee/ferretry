@@ -15,9 +15,16 @@
  * ⫼ toggle hides those bodies instead of tearing them down. A file body is a
  * cheap re-fetch and unmounts when deselected. (Moving a tab to another pane
  * does remount its body.)
+ *
+ * CLOSING A TERMINAL TAB ASKS WHICH CLOSE IS MEANT. A tab is a view of a shell, not the shell: closing
+ * it can mean "get this out of my way" or "stop that process", and guessing either way loses something
+ * — a build the reader still wanted, or a shell left running that they thought was gone. When the host
+ * can end shells (`onEndTerminal`), ✕ and Delete on a terminal tab open the shared context menu at
+ * the tab with both: Close tab, which keeps the shell running and reachable from the terminal list, and
+ * End shell. A menu rather than `window.confirm`, which some embedding contexts block outright.
  */
 
-import { type CSSProperties, type ReactNode, useId, useState } from 'react';
+import { type CSSProperties, type ReactNode, useId, useRef, useState } from 'react';
 import {
   activateWorkspaceTab,
   AGENT_PANE_ID,
@@ -42,6 +49,7 @@ import {
   type WorkspaceTabKind,
   workspacePanes,
 } from '../../lib/workspace-layout.ts';
+import { ContextMenu, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { SplitDivider } from './split-divider.tsx';
 import {
   type WorkspaceNewTabKind,
@@ -62,6 +70,11 @@ export interface WorkspaceViewProps {
   readonly onNewTab: (kind: WorkspaceNewTabKind, paneId: string) => void;
   /** A workspace tab was closed, so its terminal / page may be disposed. */
   readonly onTabClosed?: (tab: WorkspaceTab) => void;
+  /**
+   * Ends a terminal tab's shell. Present, a terminal tab's close asks Close tab or End shell; absent,
+   * a close only closes the tab, as it always did.
+   */
+  readonly onEndTerminal?: (tab: WorkspaceTab) => void;
   readonly drivenTabIds?: ReadonlySet<WorkspaceTabId>;
   readonly maxPanes?: number;
   /** Smallest share either side of a divider may shrink to. */
@@ -75,6 +88,8 @@ interface ViewContext extends WorkspaceViewProps {
   readonly preview: { readonly splitId: string; readonly ratio: number } | null;
   readonly setPreview: (preview: { readonly splitId: string; readonly ratio: number } | null) => void;
   readonly change: (next: WorkspaceLayout) => void;
+  /** Closes a tab — or, for a terminal the host can end, asks how. */
+  readonly requestClose: (tabId: WorkspaceTabId) => void;
 }
 
 const otherPaneId = (layout: WorkspaceLayout, paneId: string): string | null => {
@@ -142,12 +157,7 @@ function PaneView({ context, pane }: { readonly context: ViewContext; readonly p
         draggingTabId={context.dragging}
         {...(agentPane ? {} : { layoutControls: layoutControls(context, pane) })}
         onActivate={tabId => change(activateWorkspaceTab(layout, tabId))}
-        onClose={tabId => {
-          const next = closeWorkspaceTab(layout, tabId);
-          if (next === layout) return;
-          change(next);
-          context.onTabClosed?.(layout.tabs[tabId] as WorkspaceTab);
-        }}
+        onClose={context.requestClose}
         onDragTab={context.setDragging}
         onDropTab={(tabId, index) => change(moveWorkspaceTab(layout, tabId, pane.id, index))}
         onToggleWorkspace={() => change(toggleWorkspacePane(layout))}
@@ -236,7 +246,30 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const idPrefix = `fy-ws${useId().replaceAll(':', '')}`;
   const [dragging, setDragging] = useState<WorkspaceTabId | null>(null);
   const [preview, setPreview] = useState<ViewContext['preview']>(null);
-  const { layout, onLayoutChange } = props;
+  const [closing, setClosing] = useState<{ readonly tab: WorkspaceTab; readonly anchor: MenuAnchor } | null>(null);
+  const closingTrigger = useRef<HTMLElement | null>(null);
+  const { layout, onLayoutChange, onEndTerminal } = props;
+  const change = (next: WorkspaceLayout): void => {
+    if (next !== layout) onLayoutChange(next);
+  };
+  const closeTab = (tabId: WorkspaceTabId): void => {
+    const next = closeWorkspaceTab(layout, tabId);
+    if (next === layout) return;
+    change(next);
+    props.onTabClosed?.(layout.tabs[tabId] as WorkspaceTab);
+  };
+  const requestClose = (tabId: WorkspaceTabId): void => {
+    const tab = layout.tabs[tabId];
+    if (tab === undefined || tab.kind !== 'terminal' || onEndTerminal === undefined) {
+      closeTab(tabId);
+      return;
+    }
+    // Opened under the tab itself, whichever of ✕ or Delete asked, so the choice reads as being about it.
+    const element = document.getElementById(workspaceTabElementId(idPrefix, tabId));
+    closingTrigger.current = element;
+    const rect = element?.getBoundingClientRect();
+    setClosing({ tab, anchor: { x: rect?.left ?? 0, y: rect?.bottom ?? 0 } });
+  };
   const context: ViewContext = {
     ...props,
     idPrefix,
@@ -244,9 +277,8 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     setDragging,
     preview,
     setPreview,
-    change: next => {
-      if (next !== layout) onLayoutChange(next);
-    },
+    change,
+    requestClose,
   };
   const root = layout.root;
   // The agent pane and the workspace subtree render in fixed positions whether
@@ -264,6 +296,35 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         first={agent}
         second={workspace}
         secondHidden={root.type !== 'split'}
+      />
+      <ContextMenu
+        anchor={closing?.anchor ?? { x: 0, y: 0 }}
+        ariaLabel={closing === null ? 'Close terminal tab' : `Close ${closing.tab.label}`}
+        items={
+          closing === null
+            ? []
+            : [
+                {
+                  key: 'close-tab',
+                  label: 'Close tab',
+                  detail: 'the shell keeps running',
+                  onSelect: () => closeTab(closing.tab.id),
+                },
+                {
+                  key: 'end-shell',
+                  label: 'End shell',
+                  detail: 'stops its process',
+                  danger: true,
+                  onSelect: () => {
+                    closeTab(closing.tab.id);
+                    onEndTerminal?.(closing.tab);
+                  },
+                },
+              ]
+        }
+        onClose={() => setClosing(null)}
+        open={closing !== null}
+        triggerRef={closingTrigger}
       />
     </div>
   );

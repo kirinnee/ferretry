@@ -142,6 +142,62 @@ describe('WorkspaceView', () => {
     await view.unmount();
   });
 
+  it('asks Close tab or End shell for a terminal when the host can end shells', async () => {
+    const ended: string[] = [];
+    const view = await host(withTabs(dev, app, readme), { onEndTerminal: tab => ended.push(tab.id) });
+    const menuItem = (label: string) =>
+      must(
+        [...view.container.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(node =>
+          node.textContent?.startsWith(label),
+        ),
+        label,
+      );
+
+    // ✕ on the terminal opens the choice at the tab; nothing is closed yet.
+    await interact(() => view.q(`[data-tab-id="${dev.id}"] [data-tab-close]`).click());
+    expect(view.q('[role="menu"]').getAttribute('aria-label')).toBe(`Close ${dev.label}`);
+    expect(menuItem('Close tab').textContent).toContain('the shell keeps running');
+    expect(menuItem('End shell').textContent).toContain('stops its process');
+    expect(view.recorder.closed).toEqual([]);
+
+    // Close tab: the tab goes, the shell is left running.
+    await interact(() => menuItem('Close tab').click());
+    expect(view.recorder.closed).toEqual([dev.id]);
+    expect(ended).toEqual([]);
+    expect(view.container.querySelector('[role="menu"]')).toBeNull();
+
+    // Delete on a fresh terminal asks too, and End shell closes the tab AND ends the shell.
+    const shell = workspaceTab('terminal', 'shell');
+    await view.unmount();
+    const again = await host(withTabs(shell, readme), { onEndTerminal: tab => ended.push(tab.id) });
+    await interact(() => pressKey(again.q(`[data-tab-id="${shell.id}"]`), 'Delete'));
+    await interact(() =>
+      must(
+        [...again.container.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node =>
+          node.textContent?.startsWith('End shell'),
+        ),
+        'End shell',
+      ).click(),
+    );
+    expect(again.recorder.closed).toEqual([shell.id]);
+    expect(ended).toEqual([shell.id]);
+
+    // A file closes at once: only a terminal has a process behind it.
+    await interact(() => pressKey(again.q(`[data-tab-id="${readme.id}"]`), 'Delete'));
+    expect(again.recorder.closed).toEqual([shell.id, readme.id]);
+    expect(again.container.querySelector('[role="menu"]')).toBeNull();
+    await again.unmount();
+  });
+
+  it('dismisses the close choice with Escape and closes nothing', async () => {
+    const view = await host(withTabs(dev), { onEndTerminal: () => undefined });
+    await interact(() => pressKey(view.q(`[data-tab-id="${dev.id}"]`), 'Delete'));
+    await interact(() => pressKey(view.q('[role="menu"]'), 'Escape'));
+    expect(view.container.querySelector('[role="menu"]')).toBeNull();
+    expect(view.recorder.closed).toEqual([]);
+    await view.unmount();
+  });
+
   it('asks the host for a new tab in the right pane', async () => {
     const view = await host(withTabs(dev));
     await view.openMenuItem('pane-1', 'New terminal');

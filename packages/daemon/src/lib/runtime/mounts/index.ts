@@ -50,6 +50,7 @@ import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
+import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
@@ -281,6 +282,8 @@ export interface MountedSubsystems {
   readonly sessionReads: OperatorReadService;
   /** A short-lived, freshly validated tmux identity for a local human attach. */
   readonly sessionAttach: SessionAttachSubsystem;
+  /** Typing into a session's own pane — the Console — governed as a session terminal is. */
+  readonly sessionConsole: SessionConsoleSubsystem;
   /** This daemon's bounded recent event tail followed by its own live journal appends. */
   readonly fleetEvents: FleetEventStreamSubsystem;
   /**
@@ -465,6 +468,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
     // transcript it authorizes a local process action, and its mount revalidates the pane identity.
     ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
+    // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
+    // `console/input` no other route uses, so it can neither shadow nor be shadowed.
+    ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
     // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
     // only the request/response table carries — the socket table's `/v1/events` matches GET on one
     // segment less — so the two cannot shadow each other and a POST here is never an upgrade.

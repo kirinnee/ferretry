@@ -97,6 +97,7 @@ import { SessionTaskKanban, SessionTaskList } from '../src/components/session-ta
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
+import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
@@ -2609,9 +2610,19 @@ const HARNESS_LOOPBACK_LINK: BrowserDestination = {
   scope: 'device-loopback',
 };
 
+/** What the Console has been typed in this page, echoed onto the harness pane as a shell would. */
+let harnessConsoleLine = '';
+/** The Console's typing, kept in the page: Enter ends the line, Backspace takes a character back. */
+const HARNESS_CONSOLE_TYPER: ConsoleTyper = async (_daemon, _scope, data) => {
+  for (const character of data) {
+    if (character === '\r') harnessConsoleLine = '';
+    else if (character === '\x7f') harnessConsoleLine = harnessConsoleLine.slice(0, -1);
+    else if (character >= ' ') harnessConsoleLine += character;
+  }
+};
 /** A tmux pane the harness owns outright: the terminal tab never polls a daemon here. */
 const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
-  [
+  `${[
     '$ direnv exec . task test',
     '🧪 Running unit tests with coverage...',
     'bun test v1.3.13 (bf2e2cec)',
@@ -2623,8 +2634,7 @@ const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
     ' 7 pass',
     ' 0 fail',
     '✅ Coverage artifact matches the complete unit production ledger',
-    '$ ',
-  ].join('\n');
+  ].join('\n')}\n$ ${harnessConsoleLine}`;
 
 /** Two terminals the harness owns outright, so the addressing card renders its
  *  rows — reference, viewer count, ownership — with no daemon in reach. */
@@ -6998,6 +7008,7 @@ function SessionWorkspaceHarness() {
           presentation={presentation}
           project="ferretry"
           readSnapshot={HARNESS_PANE_SNAPSHOT}
+          typeIntoConsole={HARNESS_CONSOLE_TYPER}
           session={session}
           deck={WORKSPACE_TERMINAL_DECK}
           browser={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}

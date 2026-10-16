@@ -40,8 +40,8 @@ export interface PhoneWorkspaceProps extends PhoneNewTabActions {
   /** Focus a terminal-like tab's input so the phone keyboard opens. */
   readonly onFocusTerminal: (tabId: string) => void;
   /**
-   * False while the Console cannot take typed keys (no daemon route types into the agent's own pane
-   * yet), so it gets no key bar that would send nowhere. Terminals always get one.
+   * False for a host whose Console cannot take typed keys, so it gets no key bar that would send
+   * nowhere. The session page's Console types through `/console/input`; terminals always get one.
    */
   readonly consoleTakesKeys?: boolean;
 }

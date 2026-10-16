@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  type CapabilityGrants,
   DEFAULT_SECURITY_SETTINGS,
   FY_REQUEST_ID_HEADER,
   SECURITY_WIDEN_REFUSED_CODE,
@@ -12,8 +13,10 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher } from '../../../../src/lib/api/socket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import { tunnelApiRequest } from '../../../../src/lib/relay/tunnel.ts';
 import { mcpOAuthRoutes, type McpOAuthSubsystem } from '../../../../src/lib/runtime/mounts/mcp-oauth.ts';
 import { securityRoutes } from '../../../../src/lib/runtime/mounts/security.ts';
+import { sessionConsoleRoutes } from '../../../../src/lib/runtime/mounts/session-console-input.ts';
 import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
 import { stepUpRoutes } from '../../../../src/lib/runtime/mounts/step-up.ts';
 import { terminalRoutes, terminalSocketRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
@@ -27,7 +30,15 @@ import {
   type StoredPasskey,
 } from '../../../../src/lib/step-up/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { FakeSessionControl, FakeTerminals, grantSubsystem } from './support.ts';
+import {
+  consoleSubsystem,
+  consoleTmux,
+  FakeSessionControl,
+  FakeTerminals,
+  grantSubsystem,
+  sessionDirectory,
+  sessionView,
+} from './support.ts';
 
 /**
  * THE UNLOCK GATE, END TO END (`docs/design/zero-trust.md` B6, owner decision 2026-10-14).
@@ -98,7 +109,7 @@ const assertionBody = json({
 });
 
 /** The machine: a security settings service feeding a step-up service feeding both dispatchers. */
-async function machine(initial: Partial<SecuritySettings> = {}) {
+async function machine(initial: Partial<SecuritySettings> = {}, granted: CapabilityGrants = DEFAULT_CAPABILITY_GRANTS) {
   const clock = { now: T0 };
   const stored: SecuritySettings = { ...DEFAULT_SECURITY_SETTINGS, ...initial };
   const security = new SecuritySettingsService({
@@ -129,10 +140,12 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     settings: () => security.current(),
     audit: { record: async () => {} },
   });
-  const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
+  const grants = grantSubsystem({ grants: granted });
   await grants.refresh();
   const terminals = new FakeTerminals();
   const control = new FakeSessionControl();
+  /** Every tmux command the Console ran: an empty list is "refused before the pane was touched". */
+  const consoleKeys = consoleTmux();
   /** The MCP sign-in, recording every call that reached it — so "refused at the door" is a fact. */
   const mcpCalls: string[] = [];
   const mcp: McpOAuthSubsystem = {
@@ -160,6 +173,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
       ...mcpOAuthRoutes(mcp),
       ...terminalRoutes(terminals),
       ...sessionControlRoutes(control, { guard: grants, knownRoots: async () => [PROJECT] }),
+      ...sessionConsoleRoutes(consoleSubsystem({}, consoleKeys), sessionDirectory([sessionView('s1')])),
     ]),
     credentials,
     grants,
@@ -200,6 +214,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     });
   };
   const openTerminal = () => ask('POST', '/v1/sessions/s1/terminals', json({}));
+  const typeConsole = () => ask('POST', '/v1/sessions/s1/console/input', json({ data: 'y\r' }));
   const upgrade = (terminalId: string) =>
     sockets.upgrade(
       request({ path: `/v1/sessions/s1/terminals/${terminalId}/stream`, device: phone, loopback: false }),
@@ -215,6 +230,8 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     startSession,
     startWith,
     openTerminal,
+    typeConsole,
+    consoleKeys,
     upgrade,
     sockets,
     control,
@@ -534,6 +551,133 @@ describe('changing the settings from a device inside an unlock', () => {
 
     // Assert
     refusedAs(change, 401, UNLOCK_REQUIRED_CODE);
+  });
+});
+
+describe('typing into the Console, governed exactly as a session terminal (docs/grants.md)', () => {
+  const consoleBody = json({ data: 'y\r' });
+
+  it('should refuse a locked device 401 unlock_required, before the pane is touched', async () => {
+    // Arrange
+    const world = await machine();
+
+    // Act
+    const response = await world.typeConsole();
+
+    // Assert
+    refusedAs(response, 401, UNLOCK_REQUIRED_CODE);
+    should(world.consoleKeys.commands).deepEqual([]);
+  });
+
+  it('should type for an unlocked device with no per-act step-up left, as a terminal open is', async () => {
+    // Arrange
+    const world = await machine();
+    await world.unlock();
+    world.registry.forgetDevice(deviceId);
+
+    // Act
+    const response = await world.typeConsole();
+
+    // Assert
+    should([response.status, jsonBody(response)]).deepEqual([200, { written: 2 }]);
+    should(world.consoleKeys.commands).have.length(1);
+  });
+
+  it('should type for a caller at the machine, locked or not, because loopback is ungoverned', async () => {
+    // Arrange — no device, no unlock, and `terminal` switched off for everybody who is governed.
+    const world = await machine({}, { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } });
+
+    // Act
+    const response = await world.http.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/console/input',
+        headers: { authorization: 'Bearer admin-secret', 'x-ferretry-client': 'cli' },
+        loopback: true,
+        body: consoleBody,
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(world.consoleKeys.commands).have.length(1);
+  });
+
+  it('should refuse an unlocked device when the operator has not granted terminal use', async () => {
+    // Arrange
+    const world = await machine({}, { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } });
+    await world.unlock();
+
+    // Act
+    const response = await world.typeConsole();
+
+    // Assert — an unlock buys what the grants allow and nothing more.
+    should(response.status).equal(403);
+    should(String(jsonBody(response).error)).match(/has not granted the UI the use of session terminals/u);
+    should(world.consoleKeys.commands).deepEqual([]);
+  });
+
+  it('should treat a RELAYED request as remote, refusing it locked and serving it unlocked', async () => {
+    // Arrange — a relay terminates on this host, so the request looks local in every way but one.
+    const world = await machine();
+    const relayed = () =>
+      world.http.dispatch(
+        tunnelApiRequest(
+          {
+            method: 'POST',
+            path: '/v1/sessions/s1/console/input',
+            headers: { host: '127.0.0.1:7432', 'x-forwarded-for': '127.0.0.1' },
+            body: consoleBody,
+          },
+          phone,
+          'rendezvous-session',
+        ),
+      );
+
+    // Act
+    const locked = await relayed();
+    await world.unlock();
+    const unlocked = await relayed();
+
+    // Assert
+    refusedAs(locked, 401, UNLOCK_REQUIRED_CODE);
+    should(unlocked.status).equal(200);
+    should(world.consoleKeys.commands).have.length(1);
+  });
+
+  it('should fail closed when this machine cannot say what it granted', async () => {
+    // Arrange — an unreadable grant document, with the device unlocked.
+    const world = await machine();
+    await world.unlock();
+    const undetermined = new ApiDispatcher(
+      new ApiRouter(
+        sessionConsoleRoutes(consoleSubsystem({}, world.consoleKeys), sessionDirectory([sessionView('s1')])),
+      ),
+      {
+        admin: 'admin-secret',
+        warden: 'warden-secret',
+        devices: { has: (id: string) => id === deviceId, grants: () => DEFAULT_CAPABILITY_GRANTS },
+      },
+      grantSubsystem({ broken: true }),
+      undefined,
+      world.service,
+    );
+
+    // Act
+    const response = await undetermined.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/console/input',
+        device: phone,
+        loopback: false,
+        body: consoleBody,
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response)).have.property('code', 'grant_undetermined');
+    should(world.consoleKeys.commands).deepEqual([]);
   });
 });
 

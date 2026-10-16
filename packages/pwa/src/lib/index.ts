@@ -367,3 +367,7 @@ export * from './web-terminals.ts';
 export * from './workspace-layout.ts';
 export * from './workspace-layout-store.ts';
 export * from './workspace-rail-preferences.ts';
+export * from '../components/terminal-font-loader.ts';
+export * from './terminal-font.ts';
+export * from '../features/workspace/console-keys.ts';
+export * from '../features/workspace/console-surface.tsx';

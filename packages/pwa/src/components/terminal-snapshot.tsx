@@ -42,6 +42,12 @@ export interface TerminalSnapshotViewProps {
   /** Overridable so a test can drive the clock instead of waiting on it. */
   now?: () => number;
   readSnapshot?: PaneSnapshotReader;
+  /** Changing this captures the pane now rather than at the next poll — the Console bumps it after a write. */
+  refreshKey?: number;
+  /** The pane's font, when the host draws it with something other than the theme's monospace stack. */
+  fontFamily?: string;
+  /** The reader is a live capture rather than the stored frame, so the header says "live", not "cached". */
+  live?: boolean;
 }
 
 export const TerminalSnapshotView = ({
@@ -50,6 +56,9 @@ export const TerminalSnapshotView = ({
   tmuxSession,
   now = Date.now,
   readSnapshot: injectedReader,
+  refreshKey = 0,
+  fontFamily,
+  live = false,
 }: TerminalSnapshotViewProps) => {
   // Through the carrier router by default: a paired device has no bearer value of its own to read with.
   const fetcher = useDaemonFetch();
@@ -134,6 +143,11 @@ export const TerminalSnapshotView = ({
     };
   }, [poll]);
 
+  // A write just landed: show what it did now, not up to a poll interval later.
+  useEffect(() => {
+    if (refreshKey > 0) void poll();
+  }, [poll, refreshKey]);
+
   // One re-render a second keeps "updated <n>s ago" honest without touching
   // the daemon.
   useEffect(() => {
@@ -173,7 +187,7 @@ export const TerminalSnapshotView = ({
             </span>
           ) : (
             <span className="text-muted" title={absolute}>
-              cached · updated {age} ago
+              {live ? 'live' : 'cached'} · updated {age} ago
             </span>
           )}
         </span>
@@ -184,7 +198,10 @@ export const TerminalSnapshotView = ({
         className="min-h-0 flex-1 overflow-auto bg-code-bg text-fg-soft"
         data-testid="terminal-snapshot-scroller"
       >
-        <pre className="mono m-0 min-w-max whitespace-pre px-3 py-2 text-[12px] leading-[1.5]">
+        <pre
+          className="mono m-0 min-w-max whitespace-pre px-3 py-2 text-[12px] leading-[1.5]"
+          {...(fontFamily === undefined ? {} : { style: { fontFamily } })}
+        >
           {text || '(no snapshot yet)'}
         </pre>
       </div>

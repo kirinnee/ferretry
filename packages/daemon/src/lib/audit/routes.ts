@@ -165,6 +165,15 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'install-tool' },
   },
   { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
+  // Typing into the session's own pane from the Console: counted on the session and folded per window,
+  // exactly as a terminal socket's keystrokes are — the request body is never read.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/console/input',
+    event: 'terminal.input',
+    subject: 'sessionId',
+    detail: { mode: 'console' },
+  },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
   {
     method: 'POST',

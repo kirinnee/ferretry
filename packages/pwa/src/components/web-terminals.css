@@ -305,11 +305,21 @@
   display: none;
 }
 
+/* THE EMULATOR TAKES NO TYPOGRAPHY FROM THE PAGE. xterm sizes a cell from a hidden `W` measured
+   inside this element and then pads every glyph to that cell, so anything inherited here — a theme's
+   label tracking, an uppercase transform, ligatures that merge two cells into one glyph — is either
+   measured into every cell or drawn across them. Reset, not left to chance, in every theme family. */
 .kt-webterm__xterm {
   width: 100%;
   overflow: hidden;
   padding: 8px 6px 5px 8px;
   background: var(--code-bg);
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-transform: none;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
 }
 
 .kt-webterm__xterm .xterm {

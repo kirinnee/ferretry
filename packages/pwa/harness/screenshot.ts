@@ -41,6 +41,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
+import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -174,6 +175,14 @@ const SETTINGS_SIDEWAYS_CHECKS = 148;
  * edits this, and the pull request says which frames the gate covers.
  */
 const MACHINES_GEOMETRY_CHECKS = 107;
+
+/**
+ * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
+ * theme family, at each viewport, in the run's own scheme — CI runs both schemes, so every family is
+ * measured light and dark. Same tripwire as the two numbers above: a family added to the catalogue, or
+ * a loop that stops early, changes the count rather than quietly measuring less.
+ */
+const TERMINAL_GEOMETRY_CHECKS = THEME_FAMILIES.length * 2;
 
 /** The theme families the profile-scope frames are also captured in, beside the run's own scheme. */
 const PROFILE_SCOPE_THEMES = ['blueprint-dark', 'phosphor-light', 'broadsheet-light'] as const;
@@ -656,6 +665,95 @@ const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> 
  * Counted and asserted like the sideways checks, against `MACHINES_GEOMETRY_CHECKS`.
  */
 let machinesGeometryChecks = 0;
+
+/**
+ * A TERMINAL DRAWS ITS TEXT ONE CELL PER CHARACTER — measured, in every theme family.
+ *
+ * The defect this exists for shipped in screenshots: `$ bun dev` drawn as `$  b u n  d e v`. xterm
+ * sizes a cell from one `W` and pads every glyph to it, so a proportional face (what `monospace`
+ * resolves to on a host with no monospace font installed) or tracking inherited from a theme spreads
+ * every narrow letter across a wide cell. Nothing but a real browser rendering a real emulator can see
+ * that, so it is measured here rather than asserted on markup:
+ *
+ *   - the terminal's resolved face is MONOSPACE: `iiiiiiiiii` and `WWWWWWWWWW` set in it are the same
+ *     width — a proportional face fails by roughly half;
+ *   - a rendered row of N characters spans N cells: its width is N × the face's own advance, within half
+ *     a pixel a character — padding added between glyphs fails by the padding;
+ *   - nothing typographic leaks into the emulator: no letter or word spacing, no text transform.
+ *
+ * Counted against `TERMINAL_GEOMETRY_CHECKS`.
+ */
+let terminalGeometryChecks = 0;
+
+const assertTerminalGeometry = async (page: Page, rootUrl: string, family: string, where: string): Promise<void> => {
+  await page.evaluate(
+    ([id, scheme]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode: scheme })),
+    [family, SCHEME] as const,
+  );
+  // A query per family, so every family is a full load: `pre-paint.js` resolves the theme only then,
+  // and a hash-only change to the same URL would keep the previous family on screen.
+  await page.goto(`${rootUrl}?split&family=${family}#session-workspace`);
+  await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+  const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  if (theme !== `${family}-${SCHEME}`)
+    fail(`the terminal geometry pass asked for ${family}-${SCHEME} and got ${theme}`);
+  const row = page.locator('[data-workspace-terminal] .xterm-rows > div', { hasText: 'GET /login 200 18ms' });
+  // A phone shows one tab at a time; the terminal is a chip away from the Chat it opens on.
+  if (!(await row.first().isVisible())) await page.getByRole('tab', { name: /^dev/u }).first().click();
+  await row.first().waitFor({ state: 'visible' });
+  const measured = await row.first().evaluate(element => {
+    const rows = element.parentElement as HTMLElement;
+    const style = getComputedStyle(rows);
+    const probe = (text: string): number => {
+      const span = document.createElement('span');
+      span.style.cssText = `font-family:${style.fontFamily};font-size:${style.fontSize};letter-spacing:0;white-space:pre;position:absolute;visibility:hidden`;
+      span.textContent = text;
+      rows.append(span);
+      const width = span.getBoundingClientRect().width;
+      span.remove();
+      return width;
+    };
+    const text = (element.textContent ?? '').trimEnd();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const spans = [...element.querySelectorAll('span')];
+    const host = rows.closest('.xterm') as HTMLElement;
+    const hostStyle = getComputedStyle(host);
+    return {
+      text,
+      family: style.fontFamily,
+      narrow: probe('iiiiiiiiii'),
+      wide: probe('WWWWWWWWWW'),
+      advance: probe('0123456789') / 10,
+      rendered:
+        Math.max(...spans.map(span => span.getBoundingClientRect().right)) - element.getBoundingClientRect().left,
+      letterSpacing: hostStyle.letterSpacing,
+      wordSpacing: hostStyle.wordSpacing,
+      textTransform: hostStyle.textTransform,
+    };
+  });
+  const label = `the ${family}-${SCHEME} terminal at ${where}`;
+  process.stdout.write(
+    `   terminal geometry ${family}-${SCHEME} ${where}: "${measured.text}" ${measured.rendered.toFixed(1)}px for ` +
+      `${measured.text.length} cells of ${measured.advance.toFixed(2)}px; i×10=${measured.narrow.toFixed(1)} ` +
+      `W×10=${measured.wide.toFixed(1)} in ${measured.family}\n`,
+  );
+  if (Math.abs(measured.narrow - measured.wide) > 1)
+    fail(
+      `${label} resolved a proportional face (i×10 ${measured.narrow}px, W×10 ${measured.wide}px) from ${measured.family}`,
+    );
+  if (Math.abs(measured.rendered - measured.text.length * measured.advance) > measured.text.length * 0.5)
+    fail(
+      `${label} spreads its text: "${measured.text}" spans ${measured.rendered}px, not ` +
+        `${measured.text.length} × ${measured.advance}px`,
+    );
+  if (measured.letterSpacing !== 'normal' || measured.wordSpacing !== '0px' || measured.textTransform !== 'none')
+    fail(
+      `${label} inherits typography: letter-spacing ${measured.letterSpacing}, word-spacing ` +
+        `${measured.wordSpacing}, text-transform ${measured.textTransform}`,
+    );
+  terminalGeometryChecks += 1;
+};
 
 const settleTransitions = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
@@ -2641,6 +2739,12 @@ try {
           process.stdout.write(`📸 unlock screen ${viewport.name} -> ${unlockPromptTarget}\n`);
           await page.goto(settingsUrl.toString());
 
+          // EVERY THEME FAMILY'S TERMINAL, measured: one cell per character, in a monospace face.
+          for (const family of THEME_FAMILIES)
+            await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name);
+          await page.evaluate(() => localStorage.removeItem('fy-theme-v1'));
+          await page.goto(settingsUrl.toString());
+
           // The rest of this pass belongs to the full gallery.
           if (SETTINGS_ONLY) continue;
           await page.goto(server.url.toString());
@@ -3418,9 +3522,19 @@ try {
       process.stdout.write(
         `✅ settings sideways-scroll checks: ${sidewaysChecks}/${SETTINGS_SIDEWAYS_CHECKS} in ${SCHEME}\n`,
       );
+    const owedTerminal = WALKS_SETTINGS ? TERMINAL_GEOMETRY_CHECKS : 0;
+    if (terminalGeometryChecks !== owedTerminal)
+      fail(
+        `the run made ${terminalGeometryChecks} terminal geometry checks instead of the ${owedTerminal} this mode ` +
+          `owes — a theme family was skipped or the loop ended early`,
+      );
     if (WALKS_SETTINGS)
       process.stdout.write(
         `✅ machines geometry checks: ${machinesGeometryChecks}/${MACHINES_GEOMETRY_CHECKS} in ${SCHEME}\n`,
+      );
+    if (WALKS_SETTINGS)
+      process.stdout.write(
+        `✅ terminal geometry checks: ${terminalGeometryChecks}/${TERMINAL_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     if (trustedTypesViolations.length > 0)
       fail(`Trusted Types refused ${trustedTypesViolations.length} write(s):\n${trustedTypesViolations.join('\n')}`);
