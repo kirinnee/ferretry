@@ -23,6 +23,10 @@ export interface FakeProviderOptions {
   readonly legacy?: boolean;
   /** Return a client secret on registration. */
   readonly confidential?: boolean;
+  /** Advertise RFC 9207 `authorization_response_iss_parameter_supported`. */
+  readonly issParameterSupported?: boolean;
+  /** Leave `iss` off the authorization response. */
+  readonly omitIss?: boolean;
 }
 
 interface Pending {
@@ -87,7 +91,7 @@ export class FakeProvider {
     const url = new URL(request.url);
     const path = url.pathname;
     const prefix = this.options.legacy === true ? '' : '/auth';
-    if (path === '/mcp') return this.mcp(request);
+    if (path === '/mcp' || path.startsWith('/mcp/')) return this.mcp(request);
     if (path === '/.well-known/oauth-protected-resource/mcp' && this.options.legacy !== true)
       return json(200, {
         resource: this.serverUrl,
@@ -106,6 +110,9 @@ export class FakeProvider {
         ...(this.options.noRegistration === true ? {} : { registration_endpoint: `${this.origin}${prefix}/register` }),
         revocation_endpoint: `${this.origin}${prefix}/revoke`,
         ...(this.options.noPkce === true ? {} : { code_challenge_methods_supported: ['S256'] }),
+        ...(this.options.issParameterSupported === true
+          ? { authorization_response_iss_parameter_supported: true }
+          : {}),
       });
     if (path === `${prefix}/register` && request.method === 'POST') return this.register(request);
     if (path === `${prefix}/authorize`) return this.authorize(url);
@@ -166,7 +173,7 @@ export class FakeProvider {
     const back = new URL(redirectUri);
     back.searchParams.set('code', code);
     back.searchParams.set('state', query.get('state') ?? '');
-    back.searchParams.set('iss', this.issuer);
+    if (this.options.omitIss !== true) back.searchParams.set('iss', this.issuer);
     return new Response(null, { status: 302, headers: { location: back.toString() } });
   }
 

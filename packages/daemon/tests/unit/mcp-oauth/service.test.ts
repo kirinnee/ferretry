@@ -1,10 +1,20 @@
 import { describe, it } from 'bun:test';
-import { MCP_OAUTH_LOOPBACK_REDIRECT, mcpOAuthSecretNames } from '@ferretry/protocol';
+import { mcpOAuthRedirectPath, mcpOAuthSecretNames } from '@ferretry/protocol';
 import should from 'should';
-import { MCP_OAUTH_FLOW_TTL_MS, McpOAuthRefusal, type McpOAuthRefusalCode } from '../../../src/lib/mcp-oauth/index.ts';
+import {
+  MAX_REGISTRATIONS_PER_COMPONENT,
+  MCP_OAUTH_FLOW_TTL_MS,
+  McpOAuthRefusal,
+  type McpOAuthRefusalCode,
+} from '../../../src/lib/mcp-oauth/index.ts';
 import { leaks, PWA_REDIRECT, world } from './support.ts';
 
-const NAMES = mcpOAuthSecretNames('linear');
+const SERVER = 'http://127.0.0.1:4100/mcp';
+const NAMES = mcpOAuthSecretNames('linear', SERVER);
+/** The PWA redirect a flow with the fake provider gets: the base plus that provider's own path. */
+const FLOW_REDIRECT = `https://ferretry.example.test${mcpOAuthRedirectPath('http://127.0.0.1:4100/auth')}`;
+/** A loopback redirect at the fake provider's own path, on any ephemeral port. */
+const LOOPBACK = /^http:\/\/127\.0\.0\.1:(49[1-9]\d\d|[5-6]\d{4})\/oauth\/mcp-callback\/[0-9a-f]{16}$/u;
 
 async function refusalOf(work: Promise<unknown>): Promise<McpOAuthRefusal> {
   try {
@@ -46,13 +56,13 @@ describe('McpOAuthService', () => {
       should(url.searchParams.get('code_challenge')).match(/^[A-Za-z0-9_-]{43}$/u);
       should(url.searchParams.get('state')).match(/^[A-Za-z0-9_-]{43}$/u);
       should(url.searchParams.get('resource')).equal(w.provider.serverUrl);
-      should(url.searchParams.get('redirect_uri')).equal(PWA_REDIRECT);
+      should(url.searchParams.get('redirect_uri')).equal(FLOW_REDIRECT);
       should(url.searchParams.get('scope')).equal('mcp:tools');
       should(url.searchParams.get('client_id')).equal(w.provider.registrations[0]?.clientId);
       should(flow).containEql({
         mode: 'pwa',
         component: 'linear',
-        redirectUri: PWA_REDIRECT,
+        redirectUri: FLOW_REDIRECT,
         issuer: '127.0.0.1:4100',
       });
       should(Date.parse(flow.expiresAt) - w.clock.at).equal(MCP_OAUTH_FLOW_TTL_MS);
@@ -82,7 +92,8 @@ describe('McpOAuthService', () => {
       const flow = await w.service.start('linear', {});
 
       // Assert
-      should(flow).containEql({ mode: 'paste', redirectUri: MCP_OAUTH_LOOPBACK_REDIRECT });
+      should(flow.mode).equal('paste');
+      should(flow.redirectUri).match(LOOPBACK);
     });
 
     it('should fall back to the paste address, and say why, when the provider refuses the PWA address', async () => {
@@ -94,7 +105,7 @@ describe('McpOAuthService', () => {
 
       // Assert
       should(flow.mode).equal('paste');
-      should(flow.redirectUri).equal(MCP_OAUTH_LOOPBACK_REDIRECT);
+      should(flow.redirectUri).match(LOOPBACK);
       should(flow.note).match(/paste an address/u);
     });
 
@@ -230,9 +241,11 @@ describe('McpOAuthService', () => {
       should(completion.component).equal('linear');
       should(completion.connection).containEql({ state: 'signed-in', renewable: true, issuer: '127.0.0.1:4100' });
       should(completion.connection.expiresAt).equal('2026-10-16T01:00:00.000Z');
-      should(completion.connection.secrets).deepEqual([NAMES.access, NAMES.refresh]);
+      should(completion.connection.secrets).deepEqual([NAMES.access]);
       should(w.secrets.entries.get(NAMES.access)).equal(w.provider.issued[0]);
-      should(w.secrets.entries.get(NAMES.refresh)).equal(w.provider.issued[1]);
+      // The refresh token is daemon-internal: never in the ordinary store, where `use` could spend it.
+      should(w.internal.entries.get(NAMES.refresh)).equal(w.provider.issued[1]);
+      should([...w.secrets.entries.keys()]).deepEqual([NAMES.access]);
       // NO TOKEN in the answer or the state document.
       should(leaks(w.provider, completion, w.state.document)).deepEqual([]);
       // The token request carried the verifier and the resource (RFC 7636, RFC 8707).
@@ -322,13 +335,13 @@ describe('McpOAuthService', () => {
     it('should drop a stale refresh token when the provider issues none', async () => {
       // Arrange
       const w = world({ noRefresh: true });
-      await w.secrets.put(NAMES.refresh, 'an-old-refresh-token');
+      await w.internal.put(NAMES.refresh, 'an-old-refresh-token');
 
       // Act
       const { completion } = await signIn(w);
 
       // Assert
-      should(w.secrets.entries.has(NAMES.refresh)).be.false();
+      should(w.internal.entries.has(NAMES.refresh)).be.false();
       should(completion.connection).containEql({ renewable: false, state: 'signed-in' });
       should(completion.connection).not.have.property('expiresAt');
     });
@@ -339,15 +352,15 @@ describe('McpOAuthService', () => {
 
       // Act
       const { completion } = await signIn(w);
-      const filed = w.secrets.entries.get(NAMES.client);
       await w.service.start('linear', {});
 
-      // Assert
-      should(filed).equal(w.provider.issued[0]);
+      // Assert — each registration's secret is kept apart, and only in the internal store.
       should(w.provider.tokenRequests[0]?.get('client_secret')).equal(w.provider.issued[0]);
-      should(completion.connection.secrets).containEql(NAMES.client);
-      // The second registration replaced the secret, so the first registration was forgotten.
-      should(w.state.document.registrations.linear).have.length(1);
+      should(completion.connection.secrets).deepEqual([NAMES.access]);
+      should([...w.internal.entries.values()]).containEql(w.provider.issued[0]);
+      should([...w.internal.entries.values()]).containEql(w.provider.issued[3]);
+      should([...w.secrets.entries.values()]).deepEqual([w.provider.issued[1]]);
+      should(w.state.document.registrations.linear).have.length(2);
       should(leaks(w.provider, completion, w.state.document)).deepEqual([]);
     });
   });
@@ -407,7 +420,7 @@ describe('McpOAuthService', () => {
       should(w.provider.tokenRequests[1]?.get('grant_type')).equal('refresh_token');
       should(w.secrets.entries.get(NAMES.access)).not.equal(before);
       should(w.secrets.entries.get(NAMES.access)).equal(w.provider.issued[2]);
-      should(w.secrets.entries.get(NAMES.refresh)).equal(w.provider.issued[3]);
+      should(w.internal.entries.get(NAMES.refresh)).equal(w.provider.issued[3]);
       should(w.state.document.connections.linear?.expiresAt).equal('2026-10-16T01:59:30.000Z');
       should(leaks(w.provider, w.state.document)).deepEqual([]);
     });
@@ -461,7 +474,7 @@ describe('McpOAuthService', () => {
       // Arrange
       const w = world({ expiresIn: 10 });
       await signIn(w);
-      await w.secrets.remove(NAMES.refresh);
+      await w.internal.remove(NAMES.refresh);
       w.clock.at += 20_000;
 
       // Act
@@ -563,6 +576,7 @@ describe('McpOAuthService', () => {
       const empty = world();
       await signIn(empty);
       empty.secrets.entries.clear();
+      empty.internal.entries.clear();
       should(await empty.service.signOut('linear')).deepEqual({ component: 'linear', removed: true, revoked: false });
     });
   });
@@ -596,5 +610,186 @@ describe('McpOAuthService', () => {
 
     // Assert
     should(flow.mode).equal('paste');
+  });
+});
+
+describe('McpOAuthService — review hardening', () => {
+  it('H1: binds a token to its server, so a moved component names a secret nobody holds and nothing is sent', async () => {
+    // Arrange
+    const w = world({ expiresIn: 10 });
+    await signIn(w);
+    const moved = `${w.provider.origin}/elsewhere/mcp`;
+    w.servers = [{ component: 'linear', url: moved, auth: 'oauth' }];
+    const movedNames = mcpOAuthSecretNames('linear', moved);
+    w.clock.at += 20_000;
+
+    // Act — a launch of the moved component asks for ITS names, which the store does not hold.
+    await w.service.refreshForLaunch([movedNames.access]);
+    const [connection] = await w.service.connections();
+
+    // Assert
+    should(movedNames.access).not.equal(NAMES.access);
+    should(w.secrets.entries.has(movedNames.access)).be.false();
+    should(w.provider.tokenRequests).have.length(1);
+    should(connection).containEql({ state: 'needs-sign-in', secrets: [] });
+  });
+
+  it('H1: a sign-in at the new address removes the old address’s tokens', async () => {
+    // Arrange
+    const w = world();
+    await signIn(w);
+    const moved = `${w.provider.origin}/mcp/v2`;
+    w.servers = [{ component: 'linear', url: moved, auth: 'oauth' }];
+
+    // Act
+    const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+    await w.service.complete(flow.flowId, { callback: await w.provider.approve(flow.authorizeUrl) });
+
+    // Assert
+    const now = mcpOAuthSecretNames('linear', moved);
+    should([...w.secrets.entries.keys()]).deepEqual([now.access]);
+    should([...w.internal.entries.keys()]).deepEqual([now.refresh]);
+  });
+
+  it('M1: a code arriving at another provider’s callback path cannot finish this flow', async () => {
+    // Arrange
+    const w = world();
+    const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+    const callback = new URL(await w.provider.approve(flow.authorizeUrl));
+    callback.pathname = mcpOAuthRedirectPath('https://attacker.example');
+
+    // Act / Assert
+    await refusedWith(w.service.complete(flow.flowId, { callback: callback.toString() }), 'mcp_auth_callback');
+  });
+
+  it('M1: requires iss when the provider says it sends one, and accepts its absence when it does not', async () => {
+    // Arrange
+    const strict = world({ issParameterSupported: true, omitIss: true });
+    const lax = world({ omitIss: true });
+
+    // Act
+    const strictFlow = await strict.service.start('linear', { redirectUri: PWA_REDIRECT });
+    const message = await refusedWith(
+      strict.service.complete(strictFlow.flowId, { callback: await strict.provider.approve(strictFlow.authorizeUrl) }),
+      'mcp_auth_callback',
+    );
+    const { completion } = await signIn(lax);
+
+    // Assert
+    should(message).match(/does not say which sign-in provider/u);
+    should(completion.connection.state).equal('signed-in');
+  });
+
+  it('M2: refuses to sign in to a server reached over plain HTTP on another host', async () => {
+    // Arrange
+    const w = world();
+    w.servers = [{ component: 'linear', url: 'http://mcp.example.com/mcp', auth: 'oauth' }];
+
+    // Act / Assert
+    await refusedWith(w.service.start('linear', {}), 'mcp_auth_insecure_server');
+    should(w.http.requests).have.length(0);
+  });
+
+  it('M5: concurrent launches spend the refresh token once', async () => {
+    // Arrange
+    const w = world({ expiresIn: 120 });
+    await signIn(w);
+    w.clock.at += 100_000;
+
+    // Act
+    await Promise.all(Array.from({ length: 5 }, () => w.service.refreshForLaunch([NAMES.access])));
+    await w.service.refreshForLaunch([NAMES.access]);
+
+    // Assert — one refresh, and the later launch saw the fresh expiry and left it alone.
+    should(w.provider.tokenRequests.filter(form => form.get('grant_type') === 'refresh_token')).have.length(1);
+    should(w.state.document.connections.linear?.needsSignIn).be.undefined();
+  });
+
+  it('L3: keeps at most four registrations per component, forgetting the oldest', async () => {
+    // Arrange
+    const w = world();
+
+    // Act
+    for (let index = 0; index < 6; index += 1)
+      await w.service.start('linear', { redirectUri: `https://pwa-${String(index)}.example/oauth/mcp-callback` });
+
+    // Assert
+    const held = w.state.document.registrations.linear ?? [];
+    should(held).have.length(MAX_REGISTRATIONS_PER_COMPONENT);
+    should(held[0]?.redirectUri.startsWith('https://pwa-2.example/')).be.true();
+  });
+
+  it('L3: forgets a dropped registration’s client secret with it', async () => {
+    // Arrange
+    const w = world({ confidential: true });
+
+    // Act
+    for (let index = 0; index < 5; index += 1)
+      await w.service.start('linear', { redirectUri: `https://pwa-${String(index)}.example/oauth/mcp-callback` });
+
+    // Assert
+    should(w.internal.entries.size).equal(MAX_REGISTRATIONS_PER_COMPONENT);
+    should([...w.internal.entries.values()]).not.containEql(w.provider.issued[0]);
+  });
+
+  it('L4: reuses one loopback registration per provider rather than drawing a new port each time', async () => {
+    // Arrange
+    const w = world();
+
+    // Act
+    const first = await w.service.start('linear', {});
+    const second = await w.service.start('linear', {});
+
+    // Assert
+    should(second.redirectUri).equal(first.redirectUri);
+    should(w.provider.registrations).have.length(1);
+  });
+
+  it('L5: names the host the sign-in page is actually on', async () => {
+    // Arrange — the metadata puts the authorization page on another host than the issuer.
+    const w = world();
+    const original = w.provider.handle;
+    (w.http as unknown as { handler: (request: Request) => Promise<Response> }).handler = async request => {
+      const response = await original(request);
+      if (!new URL(request.url).pathname.startsWith('/.well-known/oauth-authorization-server')) return response;
+      const body = (await response.json()) as Record<string, unknown>;
+      return new Response(JSON.stringify({ ...body, authorization_endpoint: 'https://login.other.example/authorize' }));
+    };
+
+    // Act
+    const flow = await w.service.start('linear', {});
+
+    // Assert
+    should(flow.issuer).equal('login.other.example');
+  });
+
+  it('L7: re-checks a stored endpoint before sending a refresh token or revoking', async () => {
+    // Arrange — somebody edited the state file to point both endpoints elsewhere.
+    const w = world({ expiresIn: 10 });
+    await signIn(w);
+    const record = w.state.document.connections.linear;
+    if (record === undefined) throw new Error('signed in');
+    w.state.document = {
+      ...w.state.document,
+      connections: {
+        linear: {
+          ...record,
+          tokenEndpoint: 'http://evil.example/token',
+          revocationEndpoint: 'http://evil.example/revoke',
+        },
+      },
+    };
+    w.clock.at += 20_000;
+    const before = w.http.requests.length;
+
+    // Act
+    await w.service.refreshForLaunch([NAMES.access]);
+    const marked = w.state.document.connections.linear?.needsSignIn;
+    const signedOut = await w.service.signOut('linear');
+
+    // Assert
+    should(marked).be.true();
+    should(signedOut.revoked).be.false();
+    should(w.http.requests.length).equal(before);
   });
 });

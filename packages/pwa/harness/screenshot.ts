@@ -476,14 +476,14 @@ const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void>
   await page.locator('[data-mcp-sign-in-mode="paste"]').waitFor({ state: 'visible' });
   await page
     .locator('textarea[name="mcp-sign-in-address"]')
-    .fill('http://127.0.0.1/oauth/mcp-callback?code=harness-preview&state=harness-stale');
+    .fill('http://127.0.0.1:51234/oauth/mcp-callback/0123456789abcdef?code=harness-preview&state=harness-stale');
   await page.locator('[data-mcp-sign-in-paste] button[type="submit"]').click();
   await page.locator('[data-mcp-sign-in-refusal]').waitFor({ state: 'visible' });
   if ((await page.locator('textarea[name="mcp-sign-in-address"]').inputValue()) !== '')
     fail('the MCP sign-in sheet kept a pasted address after sending it');
   await shot('sheet-paste-refused');
 
-  const callback = `${server.url}oauth/mcp-callback?code=harness-preview&state=harness-preview`;
+  const callback = `${server.url}oauth/mcp-callback/0123456789abcdef?code=harness-preview&state=harness-preview`;
   await page.goto(callback);
   await page.locator('#callback[data-state="waiting"]').waitFor({ state: 'attached' });
   await shot('callback-waiting');
@@ -492,7 +492,7 @@ const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void>
 
   const ferretryTab = await page.context().newPage();
   try {
-    await ferretryTab.goto(`${server.url}oauth/mcp-callback`);
+    await ferretryTab.goto(`${server.url}oauth/mcp-callback/0123456789abcdef`);
     await ferretryTab.evaluate(() => {
       const channel = new BroadcastChannel('ferretry-mcp-oauth');
       channel.onmessage = event => {
@@ -1600,7 +1600,7 @@ const server = Bun.serve({
     if (path === '/pre-paint.js') return new Response(Bun.file(join(packageDir, 'public/pre-paint.js')));
     // The MCP sign-in callback page, served as Pages serves it: the rewrite `public/_redirects` names, under
     // the site's whole app-wide policy, so its words on screen prove its same-origin script ran.
-    if (path === '/oauth/mcp-callback')
+    if (path.startsWith('/oauth/mcp-callback/'))
       return new Response(Bun.file(join(packageDir, 'public/oauth/mcp-callback.html')), {
         headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': SITE_POLICY },
       });

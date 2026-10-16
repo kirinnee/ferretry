@@ -1,7 +1,8 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, it } from 'bun:test';
-import { mcpOAuthSecretNames } from '@ferretry/protocol';
+import { mcpOAuthRedirectPath, mcpOAuthSecretNames } from '@ferretry/protocol';
+import { MissingFleetSecretsError } from '@ferretry/fleet';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
@@ -12,7 +13,13 @@ import {
   MCP_OAUTH_STATE_DOCUMENT,
   webCryptoMcpOAuth,
 } from '../../../src/adapters/mcp-oauth/index.ts';
-import { FileSecretDocumentStore, FileSecretKey, WebCryptoSecretCipher } from '../../../src/adapters/secrets/index.ts';
+import {
+  BunSecretChildRunner,
+  FileSecretDocumentStore,
+  FileSecretKey,
+  MCP_OAUTH_SECRETS_DOCUMENT,
+  WebCryptoSecretCipher,
+} from '../../../src/adapters/secrets/index.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
@@ -24,6 +31,8 @@ import {
   resolveStateHome,
   SecretDirectory,
   SecretVault,
+  SecretUseService,
+  UnknownSecretError,
 } from '../../../src/lib/index.ts';
 import { mcpOAuthRoutes } from '../../../src/lib/runtime/mounts/mcp-oauth.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
@@ -52,6 +61,8 @@ interface Harness {
   readonly stateDir: string;
   readonly service: McpOAuthService;
   readonly vault: SecretVault;
+  /** The daemon-internal store: refresh tokens and client secrets. */
+  readonly internal: SecretVault;
   readonly clock: { at: number; now: () => number };
   readonly stop: () => void;
 }
@@ -76,6 +87,11 @@ async function harness(options: FakeProviderOptions = {}): Promise<Harness> {
   const documents = new FileSecretDocumentStore(paths, files);
   const cipher = new WebCryptoSecretCipher(new FileSecretKey(documents.keyFile, files));
   const vault = new SecretVault(documents, cipher);
+  const internalDocuments = new FileSecretDocumentStore(paths, files, MCP_OAUTH_SECRETS_DOCUMENT);
+  const internalDirectory = new SecretDirectory(internalDocuments, cipher, {
+    now: () => new Date(clock.at).toISOString(),
+  });
+  const internal = new SecretVault(internalDocuments, cipher);
   const clock = {
     at: Date.now(),
     now(): number {
@@ -92,6 +108,12 @@ async function harness(options: FakeProviderOptions = {}): Promise<Harness> {
     state: new FileMcpOAuthStateStore(paths, files),
     secrets: new SecretDirectory(documents, cipher, { now: () => new Date(clock.at).toISOString() }),
     values: vault,
+    internal: {
+      list: async () => await internalDirectory.list(),
+      put: async (name, value) => await internalDirectory.put(name, value),
+      remove: async name => await internalDirectory.remove(name),
+      values: async () => await internal.values(),
+    },
   });
   const audit: AuditEntry[] = [];
   const routes = auditedRoutes(
@@ -121,6 +143,7 @@ async function harness(options: FakeProviderOptions = {}): Promise<Harness> {
     stateDir: paths.state,
     service,
     vault,
+    internal,
     clock,
     stop: () => server.stop(true),
   };
@@ -160,7 +183,7 @@ describe('signing in to a remote MCP server, end to end', () => {
   it('should sign in through the PWA redirect, refresh on use, sign out — and leak no token anywhere', async () => {
     // Arrange
     const h = await harness({ expiresIn: 120 });
-    const names = mcpOAuthSecretNames('linear');
+    const names = mcpOAuthSecretNames('linear', h.provider.serverUrl);
     const answers: string[] = [];
 
     // Act — the browser starts, the person approves at the provider, the callback page hands back.
@@ -218,7 +241,9 @@ describe('signing in to a remote MCP server, end to end', () => {
 
     // Assert — the journey worked.
     should(flow.mode).equal('pwa');
-    should(new URL(callback).origin + new URL(callback).pathname).equal(PWA_REDIRECT);
+    should(new URL(callback).origin + new URL(callback).pathname).equal(
+      `https://ferretry.example.test${mcpOAuthRedirectPath(h.provider.issuer)}`,
+    );
     should(finished.status).equal(200);
     should(replay.status).equal(404);
     should(firstLaunch[names.variable]).equal(h.provider.issued[0]);
@@ -236,6 +261,7 @@ describe('signing in to a remote MCP server, end to end', () => {
     const stateFile = await readFile(join(h.stateDir, MCP_OAUTH_STATE_DOCUMENT), 'utf8');
     should(found(h.provider, stateFile)).deepEqual([]);
     should(found(h.provider, await readFile(join(h.stateDir, 'secrets.json'), 'utf8'))).deepEqual([]);
+    should(found(h.provider, await readFile(join(h.stateDir, MCP_OAUTH_SECRETS_DOCUMENT), 'utf8'))).deepEqual([]);
     should((await stat(join(h.stateDir, MCP_OAUTH_STATE_DOCUMENT))).mode & 0o777).equal(0o600);
 
     // Assert — the audit log names the component and the flow, and nothing else.
@@ -259,8 +285,9 @@ describe('signing in to a remote MCP server, end to end', () => {
     const finished = await h.api.dispatch(post(`/v1/fleet/mcp-auth/flows/${flow.flowId}`, { callback: failedPage }));
 
     // Assert
-    should(flow).containEql({ mode: 'paste', redirectUri: 'http://127.0.0.1/oauth/mcp-callback' });
-    should(failedPage.startsWith('http://127.0.0.1/oauth/mcp-callback?')).be.true();
+    should(flow.mode).equal('paste');
+    should(flow.redirectUri).match(/^http:\/\/127\.0\.0\.1:\d{5}\/oauth\/mcp-callback\/[0-9a-f]{16}$/u);
+    should(failedPage).match(/^http:\/\/127\.0\.0\.1:\d{5}\/oauth\/mcp-callback\/[0-9a-f]{16}\?/u);
     should(finished.status).equal(200);
     should(found(h.provider, started.body + finished.body + JSON.stringify(h.audit))).deepEqual([]);
   });
@@ -378,5 +405,80 @@ describe('the MCP sign-in adapters', () => {
     should(Buffer.from(await webCryptoMcpOAuth.sha256('abc')).toString('hex')).equal(
       'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
     );
+  });
+});
+
+describe('what the stored tokens can and cannot be used for (review M4, H1)', () => {
+  /** Sign in end to end, and answer the names the tokens rest under. */
+  async function signedIn(h: Harness) {
+    const started = await h.api.dispatch(post('/v1/fleet/mcp-auth/linear', { redirectUri: PWA_REDIRECT }));
+    const flow = jsonBody(started) as { flowId: string; authorizeUrl: string };
+    const callback = await browse(flow.authorizeUrl);
+    const finished = await h.api.dispatch(post(`/v1/fleet/mcp-auth/flows/${flow.flowId}`, { callback }));
+    should(finished.status).equal(200);
+    return mcpOAuthSecretNames('linear', h.provider.serverUrl);
+  }
+
+  /** A launch environment for one account that binds `secretEnv`. */
+  const launchFor = (h: Harness, secretEnv: Record<string, string>) =>
+    new FleetLaunchEnvironment(
+      {
+        accounts: async () => [
+          {
+            id: '00000000-0000-4000-8000-000000000001',
+            kind: 'claude',
+            mode: 'auto',
+            wrapper: '/fleet/bin/claude-auto-x',
+            home: '/fleet/homes/x',
+            displayName: 'x',
+            defaultModel: 'm',
+            models: [{ id: 'm', available: true }],
+            available: true,
+            unavailableReason: null,
+            secretEnv,
+          },
+        ],
+      },
+      h.vault,
+      h.service,
+    );
+
+  it('M4: keeps the refresh token out of the ordinary store, so neither `use` nor ${secret:} can spend it', async () => {
+    // Arrange
+    const h = await harness();
+    const names = await signedIn(h);
+    const use = new SecretUseService(h.vault, new BunSecretChildRunner());
+
+    // Act
+    const ordinary = [...(await h.vault.values()).keys()];
+    const spent = await use
+      .run({ command: ['/bin/sh', '-c', 'true'], cwd: '/', secrets: [names.refresh], env: {}, timeoutMs: 5_000 })
+      .catch((error: unknown) => error);
+    const launched = await launchFor(h, { STOLEN: `\${secret:${names.refresh}}` })
+      .forWrapper('/fleet/bin/claude-auto-x')
+      .catch((error: unknown) => error);
+
+    // Assert — only the access token is an ordinary secret; the refresh token is internal.
+    should(ordinary).deepEqual([names.access]);
+    should([...(await h.internal.values()).keys()]).deepEqual([names.refresh]);
+    should(spent).be.instanceOf(UnknownSecretError);
+    should(launched).be.instanceOf(MissingFleetSecretsError);
+    should(found(h.provider, String(spent) + String(launched))).deepEqual([]);
+  });
+
+  it('H1: refuses the launch of a component moved to another server, sending that server nothing', async () => {
+    // Arrange
+    const h = await harness();
+    await signedIn(h);
+    const moved = mcpOAuthSecretNames('linear', 'https://evil.example/mcp');
+
+    // Act — the materialiser binds the moved component's variable to the moved name.
+    const launched = await launchFor(h, { [moved.variable]: `\${secret:${moved.access}}` })
+      .forWrapper('/fleet/bin/claude-auto-x')
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(launched).be.instanceOf(MissingFleetSecretsError);
+    should(found(h.provider, String(launched))).deepEqual([]);
   });
 });

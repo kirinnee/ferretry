@@ -270,6 +270,16 @@ describe('AccountModelSchema', () => {
       should(remote).deepEqual([]);
     });
 
+    it('should refuse auth on a server reached over plain HTTP on another host, and allow this machine', () => {
+      // Act
+      const cleartext = withComponents({ mcp: { remote: { url: 'http://mcp.example.com/mcp', auth: 'oauth' } } });
+      const local = withComponents({ mcp: { dev: { url: 'http://127.0.0.1:8080/mcp', auth: 'oauth' } } });
+
+      // Assert
+      should(cleartext).matchAny(/mcp\.remote\.url: "auth" sends a token to this server, so its "url" must be https/);
+      should(local).deepEqual([]);
+    });
+
     it('should refuse a skill item listed twice and an empty selection', () => {
       // Act
       const actual = withComponents({

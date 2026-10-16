@@ -196,6 +196,7 @@ describe('MCP sign-in discovery', () => {
         registrationEndpoint: 'https://auth.example.com/tenant/register',
         revocationEndpoint: 'https://auth.example.com/tenant/revoke',
         scopes: ['read'],
+        issParameterSupported: false,
       });
       should(
         authorizationServerFrom(
@@ -207,6 +208,7 @@ describe('MCP sign-in discovery', () => {
         issuer: 'https://auth.example.com/tenant',
         authorizationEndpoint: 'https://auth.example.com/tenant/authorize',
         tokenEndpoint: 'https://auth.example.com/tenant/token',
+        issParameterSupported: false,
       });
     });
 
@@ -242,5 +244,56 @@ describe('MCP sign-in discovery', () => {
       should(requestedScope({}, { resource: SERVER, issuer: 'https://a.example' })).be.undefined();
       should(requestedScope({}, undefined)).be.undefined();
     });
+  });
+});
+
+describe('MCP sign-in discovery — review hardening', () => {
+  it('L1: treats IPv4-mapped IPv6, the unspecified address, shared CGNAT space and site-local as private', () => {
+    for (const host of [
+      '[::ffff:7f00:1]', // 127.0.0.1
+      '[::ffff:a9fe:a9fe]', // 169.254.169.254
+      '[::ffff:a00:1]', // 10.0.0.1
+      '[::]',
+      '[::1]',
+      '100.64.0.1',
+      '100.127.255.255',
+      '127.0.0.53',
+      '[fec0::1]',
+    ])
+      should(isPrivateLiteral(host)).be.true();
+    for (const host of ['100.63.0.1', '100.128.0.1', '[::ffff:808:808]', '[2001:db8::1]', '1.2.3', 'a.b.c.d'])
+      should(isPrivateLiteral(host)).be.false();
+  });
+
+  it('L1: does not let a public server aim the daemon at a mapped or unspecified address', () => {
+    // The URL parser normalises `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]` before the check sees it.
+    for (const endpoint of ['https://[::ffff:127.0.0.1]/t', 'https://[::]/t', 'https://100.100.100.100/t'])
+      should(endpointAllowed(endpoint, SERVER)).be.false();
+  });
+
+  it('L2: matches a resource path by whole segments', () => {
+    const document = (resource: string) =>
+      JSON.stringify({ resource, authorization_servers: ['https://auth.example.com'] });
+    should(refusal(() => protectedResourceFrom(document('https://mcp.example.com/v1/m'), SERVER))).match(
+      /different server/u,
+    );
+    should(
+      refusal(() =>
+        protectedResourceFrom(document('https://mcp.example.com/v1/mcp'), 'https://mcp.example.com/v1/mcp-admin'),
+      ),
+    ).match(/different server/u);
+    should(protectedResourceFrom(document('https://mcp.example.com/v1'), SERVER).resource).equal(
+      'https://mcp.example.com/v1',
+    );
+  });
+
+  it('M1: reads whether the provider promises iss on every authorization response', () => {
+    should(
+      authorizationServerFrom(
+        metadata({ authorization_response_iss_parameter_supported: true }),
+        'https://auth.example.com/tenant',
+        SERVER,
+      ).issParameterSupported,
+    ).be.true();
   });
 });

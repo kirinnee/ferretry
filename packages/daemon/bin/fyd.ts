@@ -127,6 +127,7 @@ import {
   FileRoutingCatalog,
   FileScratchCollector,
   FileSecretDocumentStore,
+  MCP_OAUTH_SECRETS_DOCUMENT,
   FileSecretKey,
   FileSessionSpawnFacts,
   foreignHistoryRoots,
@@ -4570,6 +4571,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     state: new FileMcpOAuthStateStore(paths, stateFiles),
     secrets: secrets.directory,
     values: secretVault,
+    // Refresh tokens and client secrets: sealed under the same key in their own document, held by
+    // nothing but this service — no route lists them, `use` cannot spend them, `${secret:…}` cannot
+    // resolve them.
+    internal: (() => {
+      const documents = new FileSecretDocumentStore(paths, stateFiles, MCP_OAUTH_SECRETS_DOCUMENT);
+      const directory = new SecretDirectory(documents, secretCipher, clock);
+      const vault = new SecretVault(documents, secretCipher);
+      return {
+        list: async () => await directory.list(),
+        put: async (name: string, value: string) => await directory.put(name, value),
+        remove: async (name: string) => await directory.remove(name),
+        values: async () => await vault.values(),
+      };
+    })(),
   });
   const accountLaunchEnvironment = new FleetLaunchEnvironment(accounts, secretVault, mcpOAuth);
   /**

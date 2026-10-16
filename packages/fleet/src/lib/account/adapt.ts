@@ -374,7 +374,7 @@ function adaptMcp(
     // secret the daemon stored it under. The names have one owner, shared with the daemon.
     let bearer: string | undefined;
     if (component.auth === 'oauth') {
-      const names = mcpOAuthSecretNames(layer.name);
+      const names = mcpOAuthSecretNames(layer.name, component.url as string);
       bearer = names.variable;
       launchEnv[bearer] = secretReference(names.access);
     }

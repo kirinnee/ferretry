@@ -73,6 +73,8 @@ export interface McpOAuthSecretValues {
 export interface McpOAuthRegistration {
   readonly issuer: string;
   readonly redirectUri: string;
+  /** A loopback redirect whose address a person pastes back, rather than the PWA's callback page. */
+  readonly paste?: true;
   readonly clientId: string;
   /** Whether registration returned a client secret, which then rests in the store under `_CLIENT`. */
   readonly hasClientSecret: boolean;
@@ -82,6 +84,8 @@ export interface McpOAuthRegistration {
 export interface McpOAuthRecord {
   readonly serverUrl: string;
   readonly issuer: string;
+  /** The redirect the code came back to, which names the registration (and any client secret). */
+  readonly redirectUri: string;
   readonly tokenEndpoint: string;
   readonly revocationEndpoint?: string;
   readonly clientId: string;
@@ -122,6 +126,8 @@ export interface McpOAuthPendingFlow {
   readonly state: string;
   readonly verifier: string;
   readonly issuer: string;
+  /** The provider said it sends `iss` (RFC 9207), so a callback without one is refused. */
+  readonly requireIss: boolean;
   readonly serverUrl: string;
   readonly tokenEndpoint: string;
   readonly revocationEndpoint?: string;

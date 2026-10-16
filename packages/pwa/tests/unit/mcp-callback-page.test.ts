@@ -258,16 +258,21 @@ describe('the MCP callback page — how it is served', () => {
     expect(script).not.toContain('innerHTML');
   });
 
-  it('is what Pages and the service worker answer the callback path with, before the landing fallback', () => {
+  it('is what Pages and the service worker answer every provider’s callback path with, before the landing fallback', () => {
     const rewrites = parseReleaseRewrites(redirects);
     const files = { 'oauth/mcp-callback.html': 'h', 'oauth/mcp-callback.js': 'j', 'index.html': 'i' };
-    expect(releasePathForRequest({ pathname: MCP_OAUTH_CALLBACK_PATH, navigate: true }, files, rewrites)).toBe(
-      'oauth/mcp-callback.html',
-    );
+    // Each authorization server has its own path under the base (docs/mcp-oauth.md, the mix-up defence).
+    expect(
+      releasePathForRequest(
+        { pathname: `${MCP_OAUTH_CALLBACK_PATH}/0123456789abcdef`, navigate: true },
+        files,
+        rewrites,
+      ),
+    ).toBe('oauth/mcp-callback.html');
     expect(releasePathForRequest({ pathname: `${MCP_OAUTH_CALLBACK_PATH}.js`, navigate: false }, files, rewrites)).toBe(
       'oauth/mcp-callback.js',
     );
     const lines = redirects.trim().split('\n');
-    expect(lines.indexOf(`${MCP_OAUTH_CALLBACK_PATH} ${MCP_OAUTH_CALLBACK_PATH}.html 200`)).toBe(lines.length - 2);
+    expect(lines.indexOf(`${MCP_OAUTH_CALLBACK_PATH}/* ${MCP_OAUTH_CALLBACK_PATH}.html 200`)).toBe(lines.length - 2);
   });
 });

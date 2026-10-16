@@ -6,6 +6,7 @@ const EXPECTED = {
   redirectUri: 'https://ferretry.example.test/oauth/mcp-callback',
   state: 'the-flow-state-0123456789abcdef',
   issuer: 'https://auth.example.com/tenant',
+  requireIss: false,
 };
 
 const CODE = 'code-SECRET-VALUE-0123456789';
@@ -123,5 +124,19 @@ describe('the MCP sign-in addresses', () => {
         /no sign-in code/u,
       );
     });
+  });
+});
+
+describe('checkCallback — RFC 9207', () => {
+  const withoutIss = `${EXPECTED.redirectUri}?code=${CODE}&state=${EXPECTED.state}`;
+
+  it('should refuse a missing iss from a provider that said it always sends one', () => {
+    should(reason(checkCallback(withoutIss, { ...EXPECTED, requireIss: true }))).match(
+      /does not say which sign-in provider/u,
+    );
+  });
+
+  it('should accept a missing iss from a provider that never said it sends one', () => {
+    should(checkCallback(withoutIss, EXPECTED)).deepEqual({ kind: 'code', code: CODE });
   });
 });

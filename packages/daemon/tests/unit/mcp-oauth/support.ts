@@ -88,6 +88,7 @@ export interface World {
   readonly http: InProcessHttp;
   readonly state: MemoryState;
   readonly secrets: MemorySecrets;
+  readonly internal: MemorySecrets;
   readonly clock: { now: () => number; at: number };
   servers: McpOAuthServer[];
   readonly service: McpOAuthService;
@@ -98,6 +99,7 @@ export function world(options: FakeProviderOptions = {}): World {
   const http = new InProcessHttp(provider.handle);
   const state = new MemoryState();
   const secrets = new MemorySecrets();
+  const internal = new MemorySecrets();
   const clock = {
     at: Date.parse('2026-10-16T00:00:00.000Z'),
     now(): number {
@@ -109,6 +111,7 @@ export function world(options: FakeProviderOptions = {}): World {
     http,
     state,
     secrets,
+    internal,
     clock,
     servers: [
       { component: 'linear', url: provider.serverUrl, auth: 'oauth' },
@@ -125,6 +128,7 @@ export function world(options: FakeProviderOptions = {}): World {
     state,
     secrets,
     values: secrets,
+    internal,
   });
   return Object.assign(built, { service });
 }

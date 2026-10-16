@@ -1,32 +1,33 @@
 /**
  * Signing in to a remote MCP server, with this daemon as the OAuth client (`docs/mcp-oauth.md`).
  *
- * ## The one property everything else serves
+ * ## The properties everything else serves
  *
- * **A token goes from the provider into the secret store and nowhere else.** This service is given the
- * store's WRITE half (`put`, `remove`, `list`) to file tokens, and its OPEN half only so it can spend a
- * refresh token at the provider that issued it. Nothing it answers has a field a token could occupy —
- * the answers are the protocol's `McpOAuth*` shapes — and every refusal is a sentence chosen here, never
- * text a provider or a pasted address supplied. `docs/secrets.md` lists this as the fourth holder of a
- * vault and says why.
- *
- * ## The flow
- *
- * `start` discovers the server's authorization server (RFC 9728, RFC 8414), registers a public client
- * for the redirect address once (RFC 7591), and answers an authorization URL carrying a PKCE `S256`
- * challenge, a single-use `state` and the RFC 8707 `resource`. The verifier never leaves this object.
- * `complete` checks the address the browser came back to, CONSUMES the flow, and only then redeems the
- * code — so the same address submitted twice is refused the second time.
+ * - **A token goes from the provider into a store and nowhere else.** Nothing this service answers has
+ *   a field a token could occupy — the answers are the protocol's `McpOAuth*` shapes — and every refusal
+ *   is a sentence chosen here, never text a provider or a pasted address supplied.
+ * - **Only the ACCESS token is an ordinary secret.** It goes into the daemon's secret store because the
+ *   launch has to resolve it into the runtime. The REFRESH token and any CLIENT SECRET go into a
+ *   daemon-internal store ({@link McpOAuthServiceDeps.internal}) that no route lists, `use` cannot spend
+ *   and `${secret:…}` cannot resolve: only this service reads them, and only to send them to the
+ *   provider that issued them.
+ * - **A token is bound to the server it was issued for.** Its secret name is derived from the component
+ *   AND the server's canonical address (`mcpOAuthSecretNames`), so a component whose `url` changes names
+ *   a secret nobody holds and its launch is refused — the old server's token is never sent to the new one.
+ * - **A code from one provider can finish only a flow with that provider.** Each authorization server
+ *   gets its own callback path (`mcpOAuthRedirectPath`), and `iss` is REQUIRED when the provider says it
+ *   sends one (RFC 9207).
  *
  * ## No timer
  *
  * A flow that nobody finishes is dropped the next time anything looks at it after it expires, and a
- * token is refreshed only when a launch is about to use it ({@link McpOAuthService.refreshForLaunch}).
- * There is no background loop, so there is nothing to shut down.
+ * token is refreshed only when a launch is about to use it ({@link McpOAuthService.refreshForLaunch}),
+ * once per server however many launches ask at the same moment.
  */
 
 import {
-  MCP_OAUTH_LOOPBACK_REDIRECT,
+  isLoopbackHost,
+  MCP_OAUTH_LOOPBACK_HOST,
   type McpOAuthCompleteRequest,
   type McpOAuthCompletion,
   type McpOAuthConnection,
@@ -34,8 +35,10 @@ import {
   type McpOAuthFlowCancelled,
   type McpOAuthSignedOut,
   type McpOAuthStartRequest,
+  mcpOAuthRedirectPath,
   mcpOAuthSecretNames,
   type SecretName,
+  sha256Hex,
 } from '@ferretry/protocol';
 import { checkCallback, pwaRedirectUri } from './callback.ts';
 import {
@@ -43,10 +46,10 @@ import {
   authorizationServerFrom,
   authorizationServerMetadataUrls,
   bearerChallenge,
+  canonicalResource,
   DiscoveryRefusal,
   endpointAllowed,
   type ProtectedResource,
-  canonicalResource,
   protectedResourceFrom,
   protectedResourceMetadataUrls,
   requestedScope,
@@ -78,6 +81,13 @@ export const MCP_OAUTH_REFRESH_MARGIN_MS = 60 * 1000;
 /** At most this many sign-ins in flight; the oldest is dropped to make room. */
 const MAX_PENDING_FLOWS = 16;
 
+/** At most this many client registrations kept per component; the oldest is forgotten. */
+export const MAX_REGISTRATIONS_PER_COMPONENT = 4;
+
+/** The ephemeral range a loopback redirect's port is drawn from (RFC 8252 §7.3, RFC 6335). */
+const EPHEMERAL_PORT_BASE = 49152;
+const EPHEMERAL_PORT_SPAN = 16384;
+
 /** The name a client registers under. */
 const CLIENT_NAME = 'Ferretry';
 
@@ -85,6 +95,7 @@ const CLIENT_NAME = 'Ferretry';
 export type McpOAuthRefusalCode =
   | 'mcp_auth_unknown_component'
   | 'mcp_auth_not_oauth'
+  | 'mcp_auth_insecure_server'
   | 'mcp_auth_bad_redirect'
   | 'mcp_auth_discovery'
   | 'mcp_auth_registration'
@@ -102,14 +113,21 @@ export class McpOAuthRefusal extends Error {
   }
 }
 
+/** A store this service both writes and reads: the daemon-internal one. */
+export type McpOAuthInternalSecrets = McpOAuthSecretWriter & McpOAuthSecretValues;
+
 export interface McpOAuthServiceDeps {
   readonly servers: McpOAuthServers;
   readonly http: McpOAuthHttp;
   readonly crypto: McpOAuthCrypto;
   readonly clock: McpOAuthClock;
   readonly state: McpOAuthStateStore;
+  /** The daemon's ordinary secret store's write half: the ACCESS token, which a launch resolves. */
   readonly secrets: McpOAuthSecretWriter;
+  /** The ordinary store's open half: read only to revoke an access token at sign-out. */
   readonly values: McpOAuthSecretValues;
+  /** The daemon-internal store: refresh tokens and client secrets, which nothing but this reads. */
+  readonly internal: McpOAuthInternalSecrets;
 }
 
 /** What discovery found for one server. */
@@ -123,12 +141,27 @@ const FORM = { 'content-type': 'application/x-www-form-urlencoded', accept: 'app
 
 const iso = (milliseconds: number): string => new Date(milliseconds).toISOString();
 
-/** An issuer as a person reads it: its host. */
-const hostOf = (issuer: string): string => new URL(issuer).host;
+/** A URL as a person reads it: its host. */
+const hostOf = (url: string): string => new URL(url).host;
+
+/**
+ * The internal name a registration's client secret rests under: bound to the component, the provider and
+ * the redirect it was issued for, so two registrations never share one.
+ */
+const clientSecretName = (component: string, issuer: string, redirectUri: string): SecretName =>
+  `MCP_CLIENT_${sha256Hex(`${component}\n${issuer}\n${redirectUri}`).slice(0, 24).toUpperCase()}`;
+
+/** A server a bearer token may be sent to: HTTPS, or plain HTTP only on this machine. */
+const secureServer = (url: string): boolean => {
+  const parsed = new URL(url);
+  return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname));
+};
 
 export class McpOAuthService {
   private readonly flows = new Map<string, McpOAuthPendingFlow>();
-  /** Every change to the state document and the store is serialised: both are read-modify-write. */
+  /** One refresh per component in flight, so concurrent launches spend a refresh token once. */
+  private readonly refreshing = new Map<string, Promise<void>>();
+  /** Every change to the state document and the stores is serialised: all are read-modify-write. */
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly deps: McpOAuthServiceDeps) {}
@@ -137,12 +170,13 @@ export class McpOAuthService {
 
   /** Every MCP component that signs in, and every stored sign-in, with where each stands. */
   async connections(): Promise<readonly McpOAuthConnection[]> {
-    const [servers, document, stored] = await Promise.all([
+    const [servers, document, stored, internal] = await Promise.all([
       this.deps.servers.list(),
       this.deps.state.read(),
       this.deps.secrets.list(),
+      this.deps.internal.list(),
     ]);
-    const held = new Set(stored.map(summary => summary.name));
+    const held = new Set([...stored, ...internal].map(summary => summary.name));
     const urls = new Map(servers.map(server => [server.component, server.url]));
     const components = new Set([
       ...servers.filter(server => server.url !== undefined && server.auth === 'oauth').map(server => server.component),
@@ -150,24 +184,25 @@ export class McpOAuthService {
     ]);
     return [...components]
       .sort((left, right) => left.localeCompare(right))
-      .map(component => {
-        const record = document.connections[component];
-        const url = urls.get(component);
-        // A token is bound to the server it was issued for (RFC 8707). A component whose address has
-        // changed since needs a new sign-in, and saying so beats a launch that fails to authenticate.
-        const moved = record !== undefined && url !== undefined && url !== record.serverUrl;
-        return this.connectionOf(component, moved ? { ...record, needsSignIn: true } : record, held);
-      });
+      .map(component => this.connectionOf(component, document.connections[component], held, urls.get(component)));
   }
 
+  /**
+   * Where one sign-in stands, for the server the component names NOW. A record for another address
+   * reads as needing a new sign-in — and the materialiser, naming the secret by the current address,
+   * finds none, so nothing is sent.
+   */
   private connectionOf(
     component: string,
     record: McpOAuthRecord | undefined,
     held: ReadonlySet<string>,
+    currentUrl: string | undefined,
   ): McpOAuthConnection {
-    const names = mcpOAuthSecretNames(component);
-    const secrets = [names.access, names.refresh, names.client].filter(name => held.has(name));
-    if (record === undefined || record.needsSignIn === true || !held.has(names.access))
+    const url = currentUrl ?? record?.serverUrl;
+    const names = url === undefined ? undefined : mcpOAuthSecretNames(component, url);
+    const secrets = names === undefined || !held.has(names.access) ? [] : [names.access];
+    const moved = record !== undefined && url !== record.serverUrl;
+    if (record === undefined || names === undefined || moved || record.needsSignIn === true || !held.has(names.access))
       return {
         component,
         state: 'needs-sign-in',
@@ -194,7 +229,7 @@ export class McpOAuthService {
   async start(component: string, request: McpOAuthStartRequest): Promise<McpOAuthFlow> {
     const server = await this.serverOf(component);
     const serverUrl = server.url as string;
-    let redirectUri = MCP_OAUTH_LOOPBACK_REDIRECT;
+    let pwaOrigin: string | undefined;
     if (request.redirectUri !== undefined) {
       const checked = pwaRedirectUri(request.redirectUri);
       if (checked === undefined)
@@ -202,10 +237,15 @@ export class McpOAuthService {
           'mcp_auth_bad_redirect',
           'That return address is not a Ferretry sign-in page, so no sign-in was started.',
         );
-      redirectUri = checked;
+      pwaOrigin = new URL(checked).origin;
     }
     const discovered = await this.discover(serverUrl);
-    const registered = await this.register(component, discovered.server, redirectUri);
+    const path = mcpOAuthRedirectPath(discovered.server.issuer);
+    const registered = await this.register(
+      component,
+      discovered.server,
+      pwaOrigin === undefined ? undefined : `${pwaOrigin}${path}`,
+    );
     const pkce = await pkcePair(this.deps.crypto);
     const state = flowState(this.deps.crypto);
     const authorize = new URL(discovered.server.authorizationEndpoint);
@@ -223,11 +263,12 @@ export class McpOAuthService {
     const flow: McpOAuthPendingFlow = {
       flowId: flowIdentifier(this.deps.crypto),
       component,
-      mode: registered.registration.redirectUri === MCP_OAUTH_LOOPBACK_REDIRECT ? 'paste' : 'pwa',
+      mode: registered.registration.paste === true ? 'paste' : 'pwa',
       redirectUri: registered.registration.redirectUri,
       state,
       verifier: pkce.verifier,
       issuer: discovered.server.issuer,
+      requireIss: discovered.server.issParameterSupported,
       serverUrl,
       tokenEndpoint: discovered.server.tokenEndpoint,
       ...(discovered.server.revocationEndpoint === undefined
@@ -258,6 +299,10 @@ export class McpOAuthService {
     for (const [id, flow] of this.flows) if (flow.expiresAt <= now) this.flows.delete(id);
   }
 
+  /**
+   * The flow as the browser sees it. `issuer` is the host of the page the link actually OPENS, which
+   * may differ from the authorization server's identifier — a person is told where they are going.
+   */
   private flowView(flow: McpOAuthPendingFlow): McpOAuthFlow {
     return {
       flowId: flow.flowId,
@@ -265,7 +310,7 @@ export class McpOAuthService {
       authorizeUrl: flow.authorizeUrl,
       mode: flow.mode,
       redirectUri: flow.redirectUri,
-      issuer: hostOf(flow.issuer),
+      issuer: hostOf(flow.authorizeUrl),
       expiresAt: iso(flow.expiresAt),
       ...(flow.note === undefined ? {} : { note: flow.note }),
     };
@@ -279,6 +324,12 @@ export class McpOAuthService {
       throw new McpOAuthRefusal(
         'mcp_auth_not_oauth',
         `“${component}” is not a remote server that signs in. Turn on “Signs in with OAuth” for it first.`,
+      );
+    // Its token will travel in a header to this address on every launch: never in cleartext.
+    if (!secureServer(server.url))
+      throw new McpOAuthRefusal(
+        'mcp_auth_insecure_server',
+        `“${component}” is reached over plain HTTP, so a sign-in would send its token unencrypted. Use its https:// address.`,
       );
     return server;
   }
@@ -354,28 +405,42 @@ export class McpOAuthService {
 
   // ── Registration ───────────────────────────────────────────────────────────────────────────────
 
+  /** A loopback redirect on a random ephemeral port, at this provider's own path (RFC 8252 §7.3). */
+  private loopbackRedirect(issuer: string): string {
+    const [high, low] = this.deps.crypto.randomBytes(2);
+    const port = EPHEMERAL_PORT_BASE + ((((high as number) << 8) | (low as number)) % EPHEMERAL_PORT_SPAN);
+    return `http://${MCP_OAUTH_LOOPBACK_HOST}:${String(port)}${mcpOAuthRedirectPath(issuer)}`;
+  }
+
   /**
-   * A client registration for this server and redirect: the one already held, or a new one (RFC 7591).
+   * A client registration for this provider: the one already held for this redirect, or a new one
+   * (RFC 7591). `redirectUri` undefined asks for the paste (loopback) way; a held loopback registration
+   * for the provider is reused rather than drawing a new port every time.
    *
-   * A provider that refuses the PWA's address is asked once more with the loopback address, and the
-   * flow becomes a paste flow — the person is told why in `note`.
+   * A provider that refuses the PWA's address is asked once more with a loopback address, and the flow
+   * becomes a paste flow — the person is told why in `note`.
    */
   private async register(
     component: string,
     server: AuthorizationServer,
-    redirectUri: string,
+    redirectUri: string | undefined,
   ): Promise<{ registration: McpOAuthRegistration; note?: string }> {
     const held = (await this.deps.state.read()).registrations[component] ?? [];
-    const existing = held.find(entry => entry.issuer === server.issuer && entry.redirectUri === redirectUri);
+    const existing = held.find(
+      entry =>
+        entry.issuer === server.issuer &&
+        (redirectUri === undefined ? entry.paste === true : entry.redirectUri === redirectUri),
+    );
     if (existing !== undefined) return { registration: existing };
     if (server.registrationEndpoint === undefined)
       throw new McpOAuthRefusal(
         'mcp_auth_registration',
         'This server’s sign-in provider does not let new apps register, so Ferretry cannot sign in to it yet.',
       );
-    const answer = await this.requestRegistration(server.registrationEndpoint, redirectUri);
-    if (answer.kind === 'redirect-refused' && redirectUri !== MCP_OAUTH_LOOPBACK_REDIRECT) {
-      const fallback = await this.register(component, server, MCP_OAUTH_LOOPBACK_REDIRECT);
+    const target = redirectUri ?? this.loopbackRedirect(server.issuer);
+    const answer = await this.requestRegistration(server.registrationEndpoint, target);
+    if (answer.kind === 'redirect-refused' && redirectUri !== undefined) {
+      const fallback = await this.register(component, server, undefined);
       return {
         registration: fallback.registration,
         note: 'This provider does not send you back to Ferretry automatically, so you will paste an address instead.',
@@ -388,22 +453,25 @@ export class McpOAuthService {
       );
     const registration: McpOAuthRegistration = {
       issuer: server.issuer,
-      redirectUri,
+      redirectUri: target,
       clientId: answer.clientId,
       hasClientSecret: answer.clientSecret !== undefined,
+      ...(redirectUri === undefined ? { paste: true as const } : {}),
     };
     await this.exclusive(async () => {
       if (answer.clientSecret !== undefined)
-        await this.deps.secrets.put(mcpOAuthSecretNames(component).client, answer.clientSecret);
+        await this.deps.internal.put(clientSecretName(component, server.issuer, target), answer.clientSecret);
       const document = await this.deps.state.read();
-      // A new client secret replaces the one the store held, so registrations that relied on the old
-      // one are forgotten rather than left pointing at a value that is gone.
-      const kept = (document.registrations[component] ?? []).filter(
-        entry => !(answer.clientSecret !== undefined && entry.hasClientSecret),
-      );
+      const all = [...(document.registrations[component] ?? []), registration];
+      // Bounded: a caller trying many PWA origins cannot grow this file, or the provider's client list,
+      // without limit. A forgotten registration's client secret is forgotten with it.
+      const dropped = all.slice(0, Math.max(0, all.length - MAX_REGISTRATIONS_PER_COMPONENT));
+      for (const entry of dropped)
+        if (entry.hasClientSecret)
+          await this.deps.internal.remove(clientSecretName(component, entry.issuer, entry.redirectUri));
       await this.deps.state.write({
         ...document,
-        registrations: { ...document.registrations, [component]: [...kept, registration] },
+        registrations: { ...document.registrations, [component]: all.slice(dropped.length) },
       });
     });
     return { registration };
@@ -452,7 +520,7 @@ export class McpOAuthService {
     const checked = checkCallback(request.callback, flow);
     if (checked.kind === 'refused') throw new McpOAuthRefusal('mcp_auth_callback', checked.reason);
     this.flows.delete(flowId);
-    const names = mcpOAuthSecretNames(flow.component);
+    const names = mcpOAuthSecretNames(flow.component, flow.serverUrl);
     const form = new URLSearchParams({
       grant_type: 'authorization_code',
       code: checked.code,
@@ -461,12 +529,14 @@ export class McpOAuthService {
       code_verifier: flow.verifier,
       resource: flow.resource,
     });
-    const answer = await this.tokenRequest(flow.tokenEndpoint, form, flow.hasClientSecret ? names.client : undefined);
+    const secret = flow.hasClientSecret ? clientSecretName(flow.component, flow.issuer, flow.redirectUri) : undefined;
+    const answer = await this.tokenRequest(flow.tokenEndpoint, form, secret);
     if (answer.kind === 'error') throw new McpOAuthRefusal('mcp_auth_exchange', tokenRefusal(answer.error));
     const now = this.deps.clock.now();
     const record: McpOAuthRecord = {
       serverUrl: flow.serverUrl,
       issuer: flow.issuer,
+      redirectUri: flow.redirectUri,
       tokenEndpoint: flow.tokenEndpoint,
       ...(flow.revocationEndpoint === undefined ? {} : { revocationEndpoint: flow.revocationEndpoint }),
       clientId: flow.clientId,
@@ -478,14 +548,26 @@ export class McpOAuthService {
       renewable: answer.refreshToken !== undefined,
     };
     await this.exclusive(async () => {
-      await this.deps.secrets.put(names.access, answer.accessToken);
-      if (answer.refreshToken === undefined) await this.deps.secrets.remove(names.refresh);
-      else await this.deps.secrets.put(names.refresh, answer.refreshToken);
       const document = await this.deps.state.read();
+      // A sign-in for the address the component USED to name leaves nothing behind.
+      const previous = document.connections[flow.component];
+      if (previous !== undefined && previous.serverUrl !== flow.serverUrl) {
+        const old = mcpOAuthSecretNames(flow.component, previous.serverUrl);
+        await this.deps.secrets.remove(old.access);
+        await this.deps.internal.remove(old.refresh);
+      }
+      await this.deps.secrets.put(names.access, answer.accessToken);
+      if (answer.refreshToken === undefined) await this.deps.internal.remove(names.refresh);
+      else await this.deps.internal.put(names.refresh, answer.refreshToken);
       await this.deps.state.write({ ...document, connections: { ...document.connections, [flow.component]: record } });
     });
-    const held = new Set((await this.deps.secrets.list()).map(summary => summary.name));
-    return { component: flow.component, connection: this.connectionOf(flow.component, record, held) };
+    const held = new Set(
+      [...(await this.deps.secrets.list()), ...(await this.deps.internal.list())].map(summary => summary.name),
+    );
+    return {
+      component: flow.component,
+      connection: this.connectionOf(flow.component, record, held, flow.serverUrl),
+    };
   }
 
   /** Ends a sign-in nobody will finish. */
@@ -495,7 +577,7 @@ export class McpOAuthService {
 
   /**
    * One POST to a token endpoint. A client secret, when registration returned one, is read out of the
-   * store for this request only (`client_secret_post`).
+   * internal store for this request only (`client_secret_post`).
    */
   private async tokenRequest(
     endpoint: string,
@@ -503,7 +585,7 @@ export class McpOAuthService {
     clientSecret: SecretName | undefined,
   ): Promise<ReturnType<typeof tokenAnswer>> {
     if (clientSecret !== undefined) {
-      const secret = (await this.deps.values.values()).get(clientSecret);
+      const secret = (await this.deps.internal.values()).get(clientSecret);
       if (secret !== undefined) form.set('client_secret', secret);
     }
     try {
@@ -523,7 +605,8 @@ export class McpOAuthService {
 
   /**
    * Make current every access token among `names` that is about to expire, before a launch resolves
-   * them. Called by the launch environment, never by a timer.
+   * them. Called by the launch environment, never by a timer. Servers are refreshed in parallel, and a
+   * server already being refreshed for another launch is waited on, not refreshed again.
    *
    * NEVER THROWS. A refresh that fails leaves the old token where it was and the launch goes ahead —
    * the harness then reports the one server as unauthorised, which is better than an agent that does
@@ -534,21 +617,40 @@ export class McpOAuthService {
     try {
       const wanted = new Set(names);
       const document = await this.deps.state.read();
-      const now = this.deps.clock.now();
-      for (const [component, record] of Object.entries(document.connections)) {
-        if (!wanted.has(mcpOAuthSecretNames(component).access)) continue;
-        if (!record.renewable || record.needsSignIn === true || record.expiresAt === undefined) continue;
-        if (Date.parse(record.expiresAt) - now > MCP_OAUTH_REFRESH_MARGIN_MS) continue;
-        await this.refresh(component, record);
-      }
+      const due = Object.entries(document.connections)
+        .filter(([component, record]) => wanted.has(mcpOAuthSecretNames(component, record.serverUrl).access))
+        .filter(([, record]) => this.due(record))
+        .map(([component]) => component);
+      await Promise.all(due.map(component => this.refreshOnce(component)));
     } catch {
       // A launch is never refused for this; see above.
     }
   }
 
-  private async refresh(component: string, record: McpOAuthRecord): Promise<void> {
-    const names = mcpOAuthSecretNames(component);
-    const refreshToken = (await this.deps.values.values()).get(names.refresh);
+  private due(record: McpOAuthRecord): boolean {
+    if (!record.renewable || record.needsSignIn === true || record.expiresAt === undefined) return false;
+    return Date.parse(record.expiresAt) - this.deps.clock.now() <= MCP_OAUTH_REFRESH_MARGIN_MS;
+  }
+
+  /** Single flight per component: concurrent launches share one refresh and spend the token once. */
+  private async refreshOnce(component: string): Promise<void> {
+    const running = this.refreshing.get(component);
+    if (running !== undefined) return await running;
+    const work = this.refresh(component)
+      .catch(() => undefined)
+      .finally(() => this.refreshing.delete(component));
+    this.refreshing.set(component, work);
+    return await work;
+  }
+
+  private async refresh(component: string): Promise<void> {
+    // Re-read: an earlier launch may have refreshed it between the survey and now.
+    const record = (await this.deps.state.read()).connections[component];
+    if (record === undefined || !this.due(record)) return;
+    // Defence in depth: the endpoint on disk is re-checked before a refresh token is sent to it.
+    if (!endpointAllowed(record.tokenEndpoint, record.serverUrl)) return await this.markNeedsSignIn(component);
+    const names = mcpOAuthSecretNames(component, record.serverUrl);
+    const refreshToken = (await this.deps.internal.values()).get(names.refresh);
     if (refreshToken === undefined) return await this.markNeedsSignIn(component);
     const form = new URLSearchParams({
       grant_type: 'refresh_token',
@@ -556,11 +658,8 @@ export class McpOAuthService {
       client_id: record.clientId,
       resource: record.resource,
     });
-    const answer = await this.tokenRequest(
-      record.tokenEndpoint,
-      form,
-      record.hasClientSecret ? names.client : undefined,
-    );
+    const secret = record.hasClientSecret ? clientSecretName(component, record.issuer, record.redirectUri) : undefined;
+    const answer = await this.tokenRequest(record.tokenEndpoint, form, secret);
     if (answer.kind === 'error') {
       if (answer.error === 'invalid_grant') await this.markNeedsSignIn(component);
       return;
@@ -569,7 +668,7 @@ export class McpOAuthService {
     await this.exclusive(async () => {
       await this.deps.secrets.put(names.access, answer.accessToken);
       // RFC 6749 §6: a provider may rotate the refresh token; one that does not keeps the old one valid.
-      if (answer.refreshToken !== undefined) await this.deps.secrets.put(names.refresh, answer.refreshToken);
+      if (answer.refreshToken !== undefined) await this.deps.internal.put(names.refresh, answer.refreshToken);
       const document = await this.deps.state.read();
       const current = document.connections[component];
       if (current === undefined) return;
@@ -608,17 +707,21 @@ export class McpOAuthService {
    * unreachable still deletes everything here, and says it could not confirm the revocation.
    */
   async signOut(component: string): Promise<McpOAuthSignedOut> {
-    const names = mcpOAuthSecretNames(component);
     const document = await this.deps.state.read();
     const record = document.connections[component];
-    const revoked = record === undefined ? false : await this.revoke(record, names);
+    const revoked = record === undefined ? false : await this.revoke(component, record);
     return await this.exclusive(async () => {
-      const removed = [
-        await this.deps.secrets.remove(names.access),
-        await this.deps.secrets.remove(names.refresh),
-        await this.deps.secrets.remove(names.client),
-      ].some(Boolean);
       const current = await this.deps.state.read();
+      const removals: Promise<boolean>[] = [];
+      const signedIn = current.connections[component];
+      if (signedIn !== undefined) {
+        const names = mcpOAuthSecretNames(component, signedIn.serverUrl);
+        removals.push(this.deps.secrets.remove(names.access), this.deps.internal.remove(names.refresh));
+      }
+      for (const entry of current.registrations[component] ?? [])
+        if (entry.hasClientSecret)
+          removals.push(this.deps.internal.remove(clientSecretName(component, entry.issuer, entry.redirectUri)));
+      const removed = (await Promise.all(removals)).some(Boolean);
       const { [component]: _connection, ...connections } = current.connections;
       const { [component]: _registrations, ...registrations } = current.registrations;
       await this.deps.state.write({ ...current, connections, registrations });
@@ -626,18 +729,22 @@ export class McpOAuthService {
     });
   }
 
-  private async revoke(record: McpOAuthRecord, names: ReturnType<typeof mcpOAuthSecretNames>): Promise<boolean> {
-    if (record.revocationEndpoint === undefined) return false;
+  private async revoke(component: string, record: McpOAuthRecord): Promise<boolean> {
+    if (record.revocationEndpoint === undefined || !endpointAllowed(record.revocationEndpoint, record.serverUrl))
+      return false;
     try {
-      const values = await this.deps.values.values();
-      const token = values.get(names.refresh) ?? values.get(names.access);
+      const names = mcpOAuthSecretNames(component, record.serverUrl);
+      const refresh = (await this.deps.internal.values()).get(names.refresh);
+      const token = refresh ?? (await this.deps.values.values()).get(names.access);
       if (token === undefined) return false;
       const form = new URLSearchParams({
         token,
-        token_type_hint: values.has(names.refresh) ? 'refresh_token' : 'access_token',
+        token_type_hint: refresh === undefined ? 'access_token' : 'refresh_token',
         client_id: record.clientId,
       });
-      const secret = record.hasClientSecret ? values.get(names.client) : undefined;
+      const secret = record.hasClientSecret
+        ? (await this.deps.internal.values()).get(clientSecretName(component, record.issuer, record.redirectUri))
+        : undefined;
       if (secret !== undefined) form.set('client_secret', secret);
       const response = await this.deps.http.request({
         method: 'POST',

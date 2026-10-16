@@ -22,6 +22,7 @@ const Text = z.string().min(1).max(2048);
 const RegistrationSchema = z.strictObject({
   issuer: Text,
   redirectUri: Text,
+  paste: z.literal(true).optional(),
   clientId: Text,
   hasClientSecret: z.boolean(),
 });
@@ -29,6 +30,7 @@ const RegistrationSchema = z.strictObject({
 const RecordSchema = z.strictObject({
   serverUrl: Text,
   issuer: Text,
+  redirectUri: Text,
   tokenEndpoint: Text,
   revocationEndpoint: Text.optional(),
   clientId: Text,

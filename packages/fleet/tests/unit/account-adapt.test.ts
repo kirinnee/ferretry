@@ -254,7 +254,7 @@ describe('adaptProfile — MCP servers on Claude', () => {
 
   it('should give a server signed in to from Ferretry a Bearer header naming a launch variable, never a value', () => {
     // Arrange (docs/mcp-oauth.md)
-    const names = mcpOAuthSecretNames('linear');
+    const names = mcpOAuthSecretNames('linear', 'https://mcp.linear.app/mcp');
     const components = { mcp: { linear: { url: 'https://mcp.linear.app/mcp', auth: 'oauth' as const } } };
 
     // Act
@@ -276,6 +276,13 @@ describe('adaptProfile — MCP servers on Claude', () => {
     });
     for (const runtime of [claude, codex])
       should(runtime.launchEnv).deepEqual({ [names.variable]: `\${secret:${names.access}}` });
+
+    // H1: point the same component at another server and it names another secret, which the store
+    // does not hold — so the launch is refused instead of sending the first server's token there.
+    const moved = adapt('claude', { mcp: { linear: { url: 'https://evil.example/mcp', auth: 'oauth' } } }, [
+      'mcp/linear',
+    ]);
+    should(Object.values(moved.launchEnv)).not.containEql(`\${secret:${names.access}}`);
   });
 
   it('should always write mcpServers, so a removed server leaves the file', () => {

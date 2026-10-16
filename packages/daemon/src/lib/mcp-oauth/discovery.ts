@@ -8,7 +8,7 @@
  * an endpoint nothing is sent to.
  */
 
-import { isLoopbackHost } from '@ferretry/protocol';
+import { isLoopbackHost, mcpOAuthServerKey } from '@ferretry/protocol';
 import { z } from 'zod';
 
 /** What a `401`'s `WWW-Authenticate: Bearer …` said, as far as discovery needs it. */
@@ -68,14 +68,40 @@ export function authorizationServerMetadataUrls(issuer: string): readonly string
 
 // ── Where an endpoint may be ─────────────────────────────────────────────────────────────────────
 
-/** An IP LITERAL in a private, link-local or unspecified range. A name that resolves to one is not caught. */
-export const isPrivateLiteral = (hostname: string): boolean =>
-  /^10\./u.test(hostname) ||
-  /^192\.168\./u.test(hostname) ||
-  /^172\.(1[6-9]|2\d|3[01])\./u.test(hostname) ||
-  /^169\.254\./u.test(hostname) ||
-  /^0\./u.test(hostname) ||
-  /^\[(f[cd]|fe80)/iu.test(hostname);
+/** A private, shared, loopback, link-local or unspecified IPv4 address in dotted form. */
+const privateIpv4 = (address: string): boolean => {
+  const octets = address.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet))) return false;
+  const [a, b] = octets as [number, number, number, number];
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10: carrier-grade NAT, Tailscale
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+};
+
+/**
+ * An IP LITERAL that is not on the public internet: private, shared (`100.64/10`), loopback, link-local
+ * or unspecified IPv4; and in IPv6, the unspecified `[::]`, loopback `[::1]`, unique-local `fc00::/7`,
+ * link-local `fe80::/10`, site-local `fec0::/10`, and an IPv4-mapped `[::ffff:…]` whose IPv4 is any of
+ * the above. The URL parser has already normalised the spelling. A NAME that resolves to one of these
+ * is not caught — that is a declared residual risk (docs/mcp-oauth.md).
+ */
+export const isPrivateLiteral = (hostname: string): boolean => {
+  if (!hostname.startsWith('[')) return privateIpv4(hostname);
+  const address = hostname.slice(1, -1).toLowerCase();
+  if (address === '::' || address === '::1') return true;
+  if (/^(f[cd]|fe[89ab]|fe[c-f])/u.test(address)) return true;
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(address);
+  if (mapped === null) return false;
+  const high = Number.parseInt(mapped[1] as string, 16);
+  const low = Number.parseInt(mapped[2] as string, 16);
+  return privateIpv4(`${String(high >> 8)}.${String(high & 0xff)}.${String(low >> 8)}.${String(low & 0xff)}`);
+};
 
 /**
  * Whether the daemon may talk to `endpoint` on behalf of the server at `serverUrl`.
@@ -112,6 +138,7 @@ const AuthorizationServerMetadataSchema = z.looseObject({
   registration_endpoint: z.string().min(1).max(2048).optional(),
   revocation_endpoint: z.string().min(1).max(2048).optional(),
   code_challenge_methods_supported: z.array(z.string()).optional(),
+  authorization_response_iss_parameter_supported: z.boolean().optional(),
   scopes_supported: z.array(z.string().max(256)).optional(),
 });
 
@@ -130,6 +157,8 @@ export interface AuthorizationServer {
   readonly registrationEndpoint?: string;
   readonly revocationEndpoint?: string;
   readonly scopes?: readonly string[];
+  /** RFC 9207: the provider puts `iss` on every authorization response, so one without it is refused. */
+  readonly issParameterSupported: boolean;
 }
 
 /** A metadata document this daemon will not use, and why — in words that quote nothing it said. */
@@ -149,12 +178,7 @@ const parseJson = (text: string): unknown => {
 };
 
 /** The server's canonical address (MCP spec "canonical server URI"): no fragment, no trailing slash. */
-export function canonicalResource(serverUrl: string): string {
-  const url = new URL(serverUrl);
-  url.hash = '';
-  const text = url.toString();
-  return url.search === '' && url.pathname !== '/' ? text.replace(/\/+$/u, '') : text;
-}
+export const canonicalResource = (serverUrl: string): string => mcpOAuthServerKey(serverUrl);
 
 /**
  * RFC 9728 metadata, checked against the server it was fetched for.
@@ -170,7 +194,10 @@ export function protectedResourceFrom(text: string, serverUrl: string): Protecte
   const resource = parsed.data.resource ?? canonicalResource(serverUrl);
   if (!URL.canParse(resource)) throw new DiscoveryRefusal('The server’s sign-in description names no usable resource.');
   const named = new URL(resource);
-  if (named.origin !== server.origin || !server.pathname.startsWith(named.pathname.replace(/\/+$/u, '')))
+  const prefix = named.pathname.replace(/\/+$/u, '');
+  // Segment-aware: `/mcp` names `/mcp` and `/mcp/x`, never `/mcp-admin`; `/m` names neither.
+  const covers = prefix === '' || server.pathname === prefix || server.pathname.startsWith(`${prefix}/`);
+  if (named.origin !== server.origin || !covers)
     throw new DiscoveryRefusal('The server’s sign-in description is for a different server.');
   const issuer = parsed.data.authorization_servers[0] as string;
   if (!endpointAllowed(issuer, serverUrl))
@@ -214,6 +241,7 @@ export function authorizationServerFrom(text: string, issuer: string, serverUrl:
     issuer: metadata.issuer,
     authorizationEndpoint: metadata.authorization_endpoint,
     tokenEndpoint: metadata.token_endpoint,
+    issParameterSupported: metadata.authorization_response_iss_parameter_supported === true,
     ...(metadata.registration_endpoint === undefined ? {} : { registrationEndpoint: metadata.registration_endpoint }),
     ...(metadata.revocation_endpoint === undefined ? {} : { revocationEndpoint: metadata.revocation_endpoint }),
     ...(metadata.scopes_supported === undefined ? {} : { scopes: metadata.scopes_supported }),

@@ -34,6 +34,8 @@ export interface CallbackExpectation {
   readonly redirectUri: string;
   readonly state: string;
   readonly issuer: string;
+  /** The provider advertised `authorization_response_iss_parameter_supported`: `iss` must be present. */
+  readonly requireIss: boolean;
 }
 
 /** What became of a callback address: the code to redeem, or why not — never the address. */
@@ -97,6 +99,9 @@ export function checkCallback(pasted: string, expected: CallbackExpectation): Ca
     return refused('That address has parts a sign-in never has. Copy it again, exactly as the browser shows it.');
   }
   const issuer = url.searchParams.get('iss');
+  if (issuer === null && expected.requireIss) {
+    return refused('That address does not say which sign-in provider sent it, so it cannot be trusted. Start again.');
+  }
   if (issuer !== null && issuer.replace(/\/+$/u, '') !== expected.issuer.replace(/\/+$/u, '')) {
     return refused('That address came back from a different sign-in provider. Start again.');
   }
