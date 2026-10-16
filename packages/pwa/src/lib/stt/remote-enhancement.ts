@@ -3,7 +3,7 @@
  *
  * The browser owns only two non-secrets: provider id and model id. The provider
  * credential is intentionally impossible to pass through this API — the daemon
- * reads it from its own already-loaded environment. Nothing here logs a request
+ * spends it from its own secret store and never returns it. Nothing here logs a request
  * or response body, because both contain dictated text.
  *
  * WHAT CHANGED — survey row #34. kteam posted to the relative path
@@ -20,6 +20,7 @@ import { MAX_STT_DICTIONARY_ENTRIES, MAX_STT_USER_CONTEXT_CHARS } from '@ferretr
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { daemonRequest } from '../daemon-transport.ts';
 import type { DictionaryEntry } from './enhancement.ts';
+import type { RemoteEnhancementProviderId } from './stt-settings.ts';
 
 export const STT_ENHANCE_PATH = '/v1/stt/enhance';
 export const REMOTE_ENHANCEMENT_TIMEOUT_MS = 2_500;
@@ -56,7 +57,7 @@ export class RemoteEnhancementError extends Error {
 export type RemoteEnhancementFetch = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface RemoteEnhancementInput {
-  readonly provider: 'groq';
+  readonly provider: RemoteEnhancementProviderId;
   readonly model: string;
   readonly text: string;
   readonly dictionary: readonly DictionaryEntry[];

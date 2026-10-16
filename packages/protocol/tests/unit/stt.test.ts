@@ -65,7 +65,7 @@ describe('stt schemas', () => {
           'malformed_response',
         ],
       },
-      { schema: stt.SttEnhancementProviderSchema, members: ['groq'] },
+      { schema: stt.SttEnhancementProviderSchema, members: ['groq', 'cerebras'] },
     ];
 
     // Act + Assert

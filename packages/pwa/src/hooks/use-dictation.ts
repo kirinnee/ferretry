@@ -34,7 +34,7 @@ import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/
 import { useDaemonFetch } from '../lib/store.tsx';
 import { enhance } from '../lib/stt/enhancement.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
-import { type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
+import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
 
 /**
@@ -258,11 +258,11 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       const context = await readContext();
       if (!isCurrent(token)) return raw;
 
-      if (active.enhancementProvider === 'groq') {
+      if (isRemoteEnhancementProvider(active.enhancementProvider)) {
         try {
           const signal = controllerRef.current?.signal;
           const result = await requestRemoteEnhancement(current.daemon, {
-            provider: 'groq',
+            provider: active.enhancementProvider,
             model: active.enhancementModel,
             text: raw,
             dictionary: entries,

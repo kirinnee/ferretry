@@ -175,6 +175,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { mode: 'console' },
   },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
+  // A speed-up Test spends one provider key on the operator's account; the secret's NAME is the subject.
+  {
+    method: 'POST',
+    path: '/v1/speedups/:provider/test',
+    event: 'secrets.used',
+    responseNames: 'secretName',
+    detail: { action: 'speedup-test' },
+  },
   {
     method: 'POST',
     path: '/v1/secrets',

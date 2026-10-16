@@ -37,12 +37,13 @@ comes back, scrubbed. There is nothing in the agent's own process to echo into i
 
 **There is no route, command or API that returns a secret value.** Not to an agent, not to `fy`, not
 to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
-route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only four
+route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only five
 things hold a `SecretVault` — the redactor, the use executor, the fleet launch environment that
-resolves a runtime's credential and profile into the pane being started, and the [MCP sign-in](mcp-oauth.md)
+resolves a runtime's credential and profile into the pane being started, the [MCP sign-in](mcp-oauth.md)
 service, which opens an access token only to revoke it at sign-out (and alone holds a second vault over
-its own sealed document of refresh tokens and client secrets) — and none of them returns what it read. A
-getter added "just for testing" would delete the whole property.
+its own sealed document of refresh tokens and client secrets), and the
+[outbound provider authorizer](#speed-up-keys-the-fifth-holder) — and none of them returns what it read.
+A getter added "just for testing" would delete the whole property.
 
 ## Redaction
 
@@ -142,6 +143,36 @@ still there.
   token, which is every agent it runs. Scoping _which_ session may use _which_ secret is a design in
   its own right: it needs a durable grant per session, a way to issue one at start, and a surface to
   review them. Named here so its absence is a decision rather than an oversight.
+
+## Speed-up keys: the fifth holder
+
+Settings › This machine › **Speed-ups** takes three optional keys, stored here like any other secret:
+`JEV_API_KEY` (the Warden's triage guard), and `GROQ_API_KEY` or `CEREBRAS_API_KEY` (cleaning up a
+dictated transcript after the browser has recognised it — audio never leaves the device). The daemon
+spends them itself, on the operator's account, through ONE holder:
+`OutboundProviderAuthorizer.send(secretName, hostAllowlist, request)` in `lib/speedups/authorizer.ts`.
+
+- It puts the ONE named secret on ONE outbound request as a header (`authorization: Bearer …` unless a
+  provider says otherwise) and answers only what came back: a status, a parsed reply, or a refusal.
+  No branch returns the request it built.
+- The URL must be `https:` and its host must be one the caller listed for that secret, compared exactly,
+  or **nothing is sent** — a Groq key can only ever reach `api.groq.com`. Each provider's hosts are
+  written in `lib/speedups/catalog.ts`, so a new destination is a reviewed edit, not a URL in a config file.
+- A request that already carries the credential header is refused, so the only credential on the wire
+  is the one the holder placed.
+- A reply that contains the key (a debugging proxy echoing headers, say) is reported as unreadable rather
+  than handed to a caller that may render it.
+- A damaged vault is reported as damaged, never as "no key".
+
+The dictation clean-up (`POST /v1/stt/enhance`), the Jev guard and the Speed-ups **Test**
+(`POST /v1/speedups/:provider/test`) all go through it; none of them is handed a value. The status read,
+`GET /v1/speedups`, says whether each key is **set** from the store's listing of names — it never opens
+the vault. Both routes are governed as `secrets.use`, and a Test is in the security log as
+`secrets.used` with the secret's name.
+
+What it does NOT protect against: the provider. A key you hand Groq is a key Groq can bill, and the text
+the daemon sends (a transcript, or the Warden's redacted snapshot) is text that provider receives — the
+Speed-ups screen says what leaves the machine for each one.
 
 ## Secrets the daemon files itself
 
