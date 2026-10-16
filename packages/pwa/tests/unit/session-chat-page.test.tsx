@@ -1082,7 +1082,9 @@ describe('SessionChatPage', () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
       expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
-      const input = page.root.findAll(node => node.type === 'input' && node.props.type !== 'file')[0] as NonNullable<ReturnType<typeof page.root.find>>;
+      const input = page.root.findAll(node => node.type === 'input' && node.props.type !== 'file')[0] as NonNullable<
+        ReturnType<typeof page.root.find>
+      >;
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       // The task half is network-bound now. Reading the popup on the very next
       // line would see the file row alone and count 1 — a failure that looks
@@ -1387,7 +1389,11 @@ describe('SessionChatPage', () => {
       // already does.
       const statuses = page.root
         .findAllByProps({ role: 'status' })
-        .filter(node => [node.props.children].flat().some(child => typeof child === 'string' && child.includes('daemon did not answer')));
+        .filter(node =>
+          [node.props.children]
+            .flat()
+            .some(child => typeof child === 'string' && child.includes('daemon did not answer')),
+        );
       expect(statuses).toHaveLength(0);
     } finally {
       run(() => page.unmount());

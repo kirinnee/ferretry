@@ -20,7 +20,7 @@ import { thinkingActivityLabel } from './thinking-indicator.tsx';
 export type PaneFrameReader = (signal: AbortSignal) => Promise<string>;
 
 /** Often enough that the harness's own clock reads as moving, rarely enough to be cheap. */
-export const PANE_ACTIVITY_INTERVAL_MS = 2_500;
+const PANE_ACTIVITY_INTERVAL_MS = 2_500;
 
 const documentHidden = (): boolean => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 

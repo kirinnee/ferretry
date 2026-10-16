@@ -45,8 +45,7 @@ const recordKind = (record: LogRecord): TranscriptEntry['kind'] => {
  * — behind "Show details" — rather than dropped. An `error` is never bookkeeping: a failure that hid
  * behind a toggle would be a bug, not tidiness.
  */
-const isDetailRecord = (record: LogRecord): boolean =>
-  record.kind !== 'error' && recordKind(record) === 'notice';
+const isDetailRecord = (record: LogRecord): boolean => record.kind !== 'error' && recordKind(record) === 'notice';
 
 const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
   const text = record.lines.join('\n');
@@ -110,7 +109,8 @@ const projectRecords = (records: readonly LogRecord[]): readonly TranscriptEntry
         return;
       }
       const waiting = run.calls.find(call => call.result === undefined && call.orphanResult !== true);
-      if (waiting === undefined) run.calls.push({ key, use: { name: 'result' }, result: toolResult(text), orphanResult: true });
+      if (waiting === undefined)
+        run.calls.push({ key, use: { name: 'result' }, result: toolResult(text), orphanResult: true });
       else waiting.result = toolResult(text);
       return;
     }

@@ -265,9 +265,7 @@ describe('SettingsPage sections', () => {
     expect(keys().map(radio => radio.props.checked)).toEqual([false, true, false]);
     expect(controls.snapshot().device.suggestionKeys).toBe('symbols');
     expect(controls.snapshot().device.skillSuggestions).toBe(true);
-    expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([
-      true,
-    ]);
+    expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([true]);
 
     // Vim shares the composer-editing control with Markdown highlighting, and
     // is the second switch there rather than a page of its own.

@@ -2164,7 +2164,10 @@ function createSessionSendSubsystem(
   sessions: SessionDirectorySubsystem,
   service: SessionSendService,
   /** Copies each named attachment out where the agent can open it by path; see `lib/attachments/delivery.ts`. */
-  deliverAttachments: (sessionId: SessionId, attachmentIds: readonly string[]) => Promise<readonly DeliveredAttachment[]>,
+  deliverAttachments: (
+    sessionId: SessionId,
+    attachmentIds: readonly string[],
+  ) => Promise<readonly DeliveredAttachment[]>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);

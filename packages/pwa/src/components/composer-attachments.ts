@@ -33,7 +33,7 @@ const revoke = (entry: PendingAttachment): void => {
   if (entry.objectUrl !== undefined && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(entry.objectUrl);
 };
 
-export interface ComposerAttachments {
+interface ComposerAttachments {
   readonly entries: readonly PendingAttachment[];
   /** Ids of every file the daemon has accepted, in the order they were added. */
   readonly readyIds: readonly string[];

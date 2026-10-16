@@ -903,34 +903,34 @@ export function SessionChatPage({
                   // runtime costs no row of its own above the message box.
                   statusSlot={
                     runtimeApi === null ? null : (
-                    <ComposerRuntime
-                      busy={runtimeSwitchBusy}
-                      canControl={canControl}
-                      renderEffortControls={lifecycle => (
-                        <RuntimeEffortControls
-                          api={runtimeApi}
-                          canControl={canControl}
-                          catalogs={routedRuntimeCatalogs}
-                          daemon={connection}
-                          onOpenTerminal={openTerminalPane}
-                          view={session}
-                          {...lifecycle}
-                        />
-                      )}
-                      renderModelControls={lifecycle => (
-                        <RuntimeModelControls
-                          api={runtimeApi}
-                          canControl={canControl}
-                          catalogs={routedRuntimeCatalogs}
-                          daemon={connection}
-                          onOpenTerminal={openTerminalPane}
-                          view={session}
-                          {...lifecycle}
-                          open={lifecycle.open}
-                        />
-                      )}
-                      view={session}
-                    />
+                      <ComposerRuntime
+                        busy={runtimeSwitchBusy}
+                        canControl={canControl}
+                        renderEffortControls={lifecycle => (
+                          <RuntimeEffortControls
+                            api={runtimeApi}
+                            canControl={canControl}
+                            catalogs={routedRuntimeCatalogs}
+                            daemon={connection}
+                            onOpenTerminal={openTerminalPane}
+                            view={session}
+                            {...lifecycle}
+                          />
+                        )}
+                        renderModelControls={lifecycle => (
+                          <RuntimeModelControls
+                            api={runtimeApi}
+                            canControl={canControl}
+                            catalogs={routedRuntimeCatalogs}
+                            daemon={connection}
+                            onOpenTerminal={openTerminalPane}
+                            view={session}
+                            {...lifecycle}
+                            open={lifecycle.open}
+                          />
+                        )}
+                        view={session}
+                      />
                     )
                   }
                 />

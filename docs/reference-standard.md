@@ -168,11 +168,11 @@ composition ends: a candidate window and a suggestion list must not fight over t
 
 Settings › Behaviour › **Open suggestions with** is a device-local choice (`suggestionKeys`):
 
-| Choice             | Opens a menu                                                     |
-| ------------------ | ---------------------------------------------------------------- |
+| Choice               | Opens a menu                                                    |
+| -------------------- | --------------------------------------------------------------- |
 | `@ ladder` (default) | `@` files, `@@` agents, `@@@` attention; `:` and `!` stay prose |
-| `Symbols`          | `@` files, `:` agents, `!` attention; no `@@` tiers              |
-| `Both`             | every row of the matrix above                                    |
+| `Symbols`            | `@` files, `:` agents, `!` attention; no `@@` tiers             |
+| `Both`               | every row of the matrix above                                   |
 
 A separate switch, `skillSuggestions` (on by default), governs `$` only. `/` and `%` open in every
 mode, so a skill and a live terminal always have a way in.

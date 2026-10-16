@@ -35,7 +35,8 @@ describe('transcriptItems', () => {
 describe('Transcript details', () => {
   test('hides bookkeeping behind a toggle that opens and closes one run', () => {
     const view = render(<Transcript daemonId="d" entries={entries} sessionId="s" />);
-    const toggles = () => view.root.findAll(node => node.type === 'button' && node.props['aria-expanded'] !== undefined);
+    const toggles = () =>
+      view.root.findAll(node => node.type === 'button' && node.props['aria-expanded'] !== undefined);
     expect(toggles().map(button => button.children.join(''))).toEqual([
       'Show details (2 system events)',
       'Show details (1 system event)',

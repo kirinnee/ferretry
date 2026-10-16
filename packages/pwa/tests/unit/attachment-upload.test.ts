@@ -33,7 +33,11 @@ describe('uploadAttachment', () => {
     expect(view).toEqual(attachment);
     expect(calls[0]?.url).toBe('https://up.example.test/v1/sessions/sess%20one/attachments');
     expect(calls[0]?.init?.method).toBe('POST');
-    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ filename: 'hi.txt', mime: 'text/plain', base64: 'aGk=' });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      filename: 'hi.txt',
+      mime: 'text/plain',
+      base64: 'aGk=',
+    });
   });
 
   test('declares an untyped file as octet-stream and lets the daemon sniff it', async () => {

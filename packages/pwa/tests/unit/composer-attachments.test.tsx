@@ -140,7 +140,10 @@ describe('composer attachments', () => {
     run(() =>
       composer.root
         .findByType('textarea')
-        .props.onPaste({ clipboardData: { files: [new File([], 'empty.txt', { type: 'text/plain' }), png()] }, preventDefault() {} }),
+        .props.onPaste({
+          clipboardData: { files: [new File([], 'empty.txt', { type: 'text/plain' }), png()] },
+          preventDefault() {},
+        }),
     );
     expect(strip()?.props.entries[0]).toMatchObject({ status: 'failed', error: 'That file is empty' });
     await settleUntil(() => strip()?.props.entries[1]?.status === 'failed', 'the upload to fail', runAsync);
@@ -161,7 +164,9 @@ describe('composer attachments', () => {
 
   test('a session change forgets the previous session’s files', async () => {
     const { composer, strip } = mountComposer({ upload: async file => view('att_x', file) });
-    run(() => composer.root.findByType('textarea').props.onPaste({ clipboardData: { files: [png()] }, preventDefault() {} }));
+    run(() =>
+      composer.root.findByType('textarea').props.onPaste({ clipboardData: { files: [png()] }, preventDefault() {} }),
+    );
     await settleUntil(() => strip()?.props.entries[0]?.status === 'ready', 'the upload', runAsync);
     run(() =>
       composer.update(
@@ -192,7 +197,9 @@ describe('composer attachments', () => {
         sessionId="carrier"
       />,
     );
-    run(() => composer.root.findByType('textarea').props.onPaste({ clipboardData: { files: [png()] }, preventDefault() {} }));
+    run(() =>
+      composer.root.findByType('textarea').props.onPaste({ clipboardData: { files: [png()] }, preventDefault() {} }),
+    );
     await settleUntil(
       () => composer.root.findAllByType(PendingAttachmentStrip)[0]?.props.entries[0]?.status === 'ready',
       'the carrier upload',

@@ -16,7 +16,7 @@
  * identities.
  */
 
-import type { AttentionItem, SessionView, TaskSummary, TerminalListView } from '@ferretry/protocol';
+import type { AttentionItem, SessionView, TerminalListView } from '@ferretry/protocol';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
@@ -58,7 +58,6 @@ const COMPOSER_BUILTIN_COMMANDS: readonly ComposerBuiltinCommand[] = [
   },
 ];
 
-export type ComposerTaskSummary = Pick<TaskSummary, 'id' | 'title' | 'status'>;
 export type ComposerAttentionItem = Pick<AttentionItem, 'id' | 'subject' | 'source'>;
 
 /** Exactly the facts the daemon's skills route reports. */
@@ -879,11 +878,7 @@ export function createReferencesProvider({
     shouldOpen: match => composerSuggestionsAllow(suggestions, match),
     get snapshotKey() {
       const sessions = getSessions(scope);
-      return track([
-        sessions,
-        getAttentionItems(scope),
-        agentReferenceIdentityKey(scope.daemonId, sessions),
-      ]);
+      return track([sessions, getAttentionItems(scope), agentReferenceIdentityKey(scope.daemonId, sessions)]);
     },
     reset: () => files.reset?.(),
     initialCandidates: context => {

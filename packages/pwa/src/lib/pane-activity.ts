@@ -14,7 +14,7 @@
  * keep their status line — a spinner line that has scrolled up is history, not the present.
  */
 
-export type PaneActivityHarness = 'claude' | 'codex';
+type PaneActivityHarness = 'claude' | 'codex';
 
 export interface PaneActivity {
   readonly harness: PaneActivityHarness;

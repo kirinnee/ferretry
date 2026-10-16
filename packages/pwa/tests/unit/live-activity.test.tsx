@@ -97,7 +97,9 @@ describe('usePaneActivity', () => {
 describe('LiveActivityLine', () => {
   test('prints the harness’s own verb and numbers', () => {
     const view = render(
-      <LiveActivityLine activity={{ harness: 'claude', verb: 'Pontificating…', elapsed: '42s', tokens: '↓ 3.1k tokens' }} />,
+      <LiveActivityLine
+        activity={{ harness: 'claude', verb: 'Pontificating…', elapsed: '42s', tokens: '↓ 3.1k tokens' }}
+      />,
     );
     const status = view.root.findByProps({ role: 'status' });
     expect(status.props['data-activity-harness']).toBe('claude');

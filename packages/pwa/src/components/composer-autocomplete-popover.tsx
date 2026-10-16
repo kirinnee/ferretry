@@ -267,7 +267,9 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
           <div className="fy-ac-head">
             <span className="fy-ac-title">{contextLabel ?? provider?.label}</span>
             {provider?.legend === undefined ? (
-              candidates.length === 0 ? null : <span className="fy-ac-count">{candidates.length}</span>
+              candidates.length === 0 ? null : (
+                <span className="fy-ac-count">{candidates.length}</span>
+              )
             ) : (
               <TierLadder activeTier={match?.referenceTier} legend={provider.legend} />
             )}
@@ -316,7 +318,11 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
             </div>
           )}
           <div className="fy-ac-foot">
-            {autocompleteFooterHint(provider?.legend, match?.referenceTier, ready ? candidates[activeIndex] : undefined)}
+            {autocompleteFooterHint(
+              provider?.legend,
+              match?.referenceTier,
+              ready ? candidates[activeIndex] : undefined,
+            )}
           </div>
         </div>
       ) : null}

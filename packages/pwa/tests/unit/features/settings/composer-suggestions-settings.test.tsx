@@ -51,7 +51,9 @@ describe('ComposerSuggestionsSettings', () => {
     expect(patches).toEqual([{ skillSuggestions: true }]);
     run(() => view.unmount());
 
-    const on = render(<ComposerSuggestionsSettings preferences={preferences()} onChange={patch => patches.push(patch)} />);
+    const on = render(
+      <ComposerSuggestionsSettings preferences={preferences()} onChange={patch => patches.push(patch)} />,
+    );
     run(() => on.root.findByProps({ role: 'switch' }).props.onClick());
     expect(patches.at(-1)).toEqual({ skillSuggestions: false });
     run(() => on.unmount());

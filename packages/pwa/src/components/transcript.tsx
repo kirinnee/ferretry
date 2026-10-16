@@ -6,12 +6,7 @@ import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import {
-  detailsLabel,
-  type TranscriptEntry,
-  transcriptIsFollowing,
-  transcriptItems,
-} from '../lib/session-screens.ts';
+import { detailsLabel, type TranscriptEntry, transcriptIsFollowing, transcriptItems } from '../lib/session-screens.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
 import { TranscriptRow } from './transcript-row.tsx';

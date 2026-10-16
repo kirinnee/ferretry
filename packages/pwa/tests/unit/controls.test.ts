@@ -166,10 +166,18 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
 
   it('reads the suggestion keys and the skills switch, defaulting anything unreadable', () => {
     for (const keys of ['ladder', 'symbols', 'both'] as const)
-      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { suggestionKeys: keys } })).device.suggestionKeys).equal(keys);
-    should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { suggestionKeys: 'all' } })).device.suggestionKeys).equal('ladder');
-    should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { skillSuggestions: false } })).device.skillSuggestions).be.false();
-    should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { skillSuggestions: 'off' } })).device.skillSuggestions).be.true();
+      should(
+        parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { suggestionKeys: keys } })).device.suggestionKeys,
+      ).equal(keys);
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { suggestionKeys: 'all' } })).device.suggestionKeys,
+    ).equal('ladder');
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { skillSuggestions: false } })).device.skillSuggestions,
+    ).be.false();
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { skillSuggestions: 'off' } })).device.skillSuggestions,
+    ).be.true();
 
     // The two switches the choice replaced are left unread: an old "all on" is not a choice of keys.
     const legacy = parseControlsRecord(
