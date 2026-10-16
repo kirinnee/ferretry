@@ -1578,6 +1578,96 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * Agent names, through the real composition root: a start that names nobody is given a first name
+   * from the pool, and a rename CLAIMS the new name through the same ledger — so a name another agent
+   * holds is refused in plain words, and the rename is journalled with the actor that made it.
+   *
+   * WHY THIS TIER. The automatic claim and the rename's ports are wired in `bin/fyd.ts`, which is
+   * excluded from both coverage ledgers; nothing below this proves the assembled daemon does either.
+   */
+  it('should name every new agent and rename one through the mounted route', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-agent-names');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: new RecordingSessionLauncher(),
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'x-ferretry-client': 'cli',
+      'content-type': 'application/json',
+    };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startOne = async (requestId: string, extra: Readonly<Record<string, string>>): Promise<SessionView> =>
+      SessionViewSchema.parse(
+        await (
+          await fetch(sessions, {
+            method: 'POST',
+            headers: { ...headers, 'x-fy-request-id': requestId },
+            body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'do the work', cwd: home, ...extra }),
+          })
+        ).json(),
+      );
+    const rename = async (id: string, body: unknown): Promise<Response> =>
+      await fetch(`${sessions}/${id}/rename`, { method: 'POST', headers, body: JSON.stringify(body) });
+
+    // Act
+    const unnamed = await startOne('req-names-1', { name: 'Fix The Build' });
+    const named = await startOne('req-names-2', { teammate: SEEDED_CALLSIGN });
+    const taken = await rename(unnamed.config.id, { teammate: SEEDED_CALLSIGN });
+    const renamed = await rename(unnamed.config.id, { teammate: 'Mary-Jane', name: 'Ship The Build' });
+    const renamedBody = SessionViewSchema.parse(await renamed.json());
+    const contested = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...headers, 'x-fy-request-id': 'req-names-3' },
+      body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'take it', cwd: home, teammate: 'Mary-Jane' }),
+    });
+    const absent = await rename('ses-absent', { teammate: 'marin' });
+    const journal = await readFile(join(home, 'state', 'sessions', unnamed.config.id, 'events.jsonl'), 'utf8');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // Named from the pool without being asked, and still distinct from the agent that asked for one.
+    should(DEFAULT_CALLSIGN_POOL).containEql(unnamed.config.teammate);
+    should(unnamed.config.teammate).not.equal(SEEDED_CALLSIGN);
+    should(named.config.teammate).equal(SEEDED_CALLSIGN);
+    should(taken.status).equal(409);
+    should((await taken.json()) as { code: string }).have.property('code', 'name_taken');
+    should(renamed.status).equal(200);
+    should(renamedBody.config.teammate).equal('mary-jane');
+    should(renamedBody.config.name).equal('Ship The Build');
+    // The new name is CLAIMED: a later start cannot take it either.
+    should(contested.status).equal(409);
+    should((await contested.json()) as { code: string }).have.property('code', 'callsign_taken');
+    should(absent.status).equal(404);
+    const entry = journal
+      .split('\n')
+      .filter(line => line.includes('session.renamed'))
+      .map(line => JSON.parse(line) as { data: Record<string, unknown> })[0];
+    should(entry?.data).have.properties({
+      actor: 'admin-cli',
+      to: { teammate: 'mary-jane', name: 'Ship The Build' },
+    });
+  });
+
+  /**
    * A start naming a model the account cannot serve, through the real composition root.
    *
    * WHY THIS TIER. The refusal is decided in `bin/fyd.ts`, which is excluded from BOTH coverage

@@ -9,6 +9,7 @@ export * from './ports.ts';
 export * from './presenter.ts';
 export * from './ps-controller.ts';
 export * from './registration.ts';
+export * from './rename-controller.ts';
 export * from './selection.ts';
 export * from './send-controller.ts';
 export * from './send-plan.ts';

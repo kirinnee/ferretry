@@ -370,7 +370,6 @@ import {
   type BrowserViewerHost,
   type BrowserWorkerProgram,
   BrowserViewerStream,
-  CALLSIGN_WINDOW_MS,
   selectBrowserWorker,
   CapabilityGrantService,
   type CatalogSubsystem,
@@ -465,13 +464,15 @@ import {
   mayTrustDirectLoopback,
   messageWithAttachments,
   type NameAllocationErrorCode,
+  claimStartName,
+  sessionNameClaim,
+  agentSpokenName,
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
   NotificationService,
-  normalizeCallsign,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
@@ -586,6 +587,9 @@ import {
   SessionSendService,
   type SessionSendSubsystem,
   SessionSignalError,
+  SessionRenameError,
+  SessionRenameService,
+  type SessionRenameSubsystem,
   SessionSignalService,
   type SessionSignalSubsystem,
   type SessionTranscriptMessageTokenCodec,
@@ -1485,32 +1489,25 @@ const CALLSIGN_REFUSALS: Readonly<Record<NameAllocationErrorCode, SessionControl
 };
 
 /**
- * The callsign this session will answer to, CLAIMED rather than recorded.
+ * The first name this session will answer to, CLAIMED rather than recorded.
  *
  * A start that merely wrote down the requested name would let two sessions answer to one callsign,
  * and a bare callsign then resolves to both — which is the whole reason `NameAllocator` exists. The
  * claim is taken before the session document is written, because the document is what everything else
  * derives ownership from and it does not exist yet.
  *
- * A start that names NO callsign gets none. Allocating automatically would burn a pool name on every
- * session nobody addresses by name, and `teammate` is optional on the wire precisely because a session
- * need not be a teammate.
+ * A start that names NO callsign is given one from the pool, the way kteam names every teammate: the
+ * name is what the list, the header, the picker and the notifications call the agent. Only a REQUESTED
+ * name can refuse a start — see `claimStartName` for why an automatic one never does.
  */
 async function claimCallsign(
   callsigns: CallsignClaims,
   owner: SessionId,
   request: StartSessionRequest,
 ): Promise<string | undefined> {
-  if (request.teammate === undefined) return undefined;
-  const allocated = await callsigns.allocate({
-    ownerId: owner,
-    nowMs: Date.now(),
-    requested: request.teammate,
-    // The caller decides whether a taken name is a refusal or a fallback; the daemon does not guess.
-    ...(request.teammateFallback === true ? { fallback: true } : {}),
-  });
-  if (!allocated.ok) throw new SessionControlError(CALLSIGN_REFUSALS[allocated.error.code], allocated.error.message);
-  return allocated.claim.callsign;
+  const claimed = await claimStartName(callsigns, owner, request, Date.now());
+  if (!claimed.ok) throw new SessionControlError(CALLSIGN_REFUSALS[claimed.error.code], claimed.error.message);
+  return claimed.callsign;
 }
 
 /**
@@ -2595,6 +2592,60 @@ function createSessionSignalSubsystem(
         throw new SessionSignalError(
           'failed',
           `session ${id} recorded its ${request.kind} signal but its documents do not satisfy the protocol`,
+        );
+      return view;
+    },
+  };
+}
+
+/**
+ * Renaming an agent, over the session's own documents and the one name ledger.
+ *
+ * The decision — what may change, which name is free, what the journal says — is
+ * `SessionRenameService`'s. This only reads and writes: the names come from the same reader the list
+ * serves, and the write replaces `teammate` and `name` on the configuration and nothing else.
+ */
+function createSessionRenameSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  claims: CallsignClaims,
+  clock: ClockPort,
+): SessionRenameSubsystem {
+  const service = new SessionRenameService({
+    current: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionRenameError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      const view = await sessions.get(id);
+      return view === undefined
+        ? undefined
+        : { ...(view.config.teammate === undefined ? {} : { teammate: view.config.teammate }), name: view.config.name };
+    },
+    write: async (id, next, at) => {
+      await storage.updateConfig(parseSessionId(id), current => {
+        const { teammate: _replaced, ...retained } = jsonObject(current) ?? {};
+        return {
+          ...retained,
+          ...(next.teammate === undefined ? {} : { teammate: next.teammate }),
+          name: next.name,
+          updatedAt: at,
+        };
+      });
+    },
+    journal: async (id, entry) => {
+      await storage.append(parseSessionId(id), 'session.renamed', entry);
+    },
+    claims,
+    now: () => new Date(clock.now()),
+  });
+  return {
+    rename: async (reference, request, actor) => {
+      await service.rename(reference, request, actor);
+      const view = await sessions.get(parseSessionId(reference));
+      if (view === undefined)
+        throw new SessionRenameError(
+          'failed',
+          `session ${reference} was renamed but its documents do not satisfy the protocol`,
         );
       return view;
     },
@@ -3730,33 +3781,26 @@ function createTerminalSubsystem(
 }
 
 /**
- * Which callsigns the fleet is currently using.
- *
- * `teammate` is the callsign — it is what `--teammate <callsign>` writes — and `name` is the human
- * title, so only the former is read here. A session whose configuration is unreadable or whose
- * teammate is not a well-formed callsign contributes NOTHING rather than a guess: over-reporting a
- * name as taken quietly shrinks the pool, and the failure is invisible.
- *
- * The claim window is the pool policy's own, so a callsign frees up exactly when a bare reference to
- * it stops naming that session.
- */
-/**
- * The callsigns the live fleet is using, derived from each session's own configuration document.
+ * The names the fleet is holding, derived from each session's own configuration document.
  *
  * This is the DURABLE half of "what is taken": a session's `teammate` is what a bare callsign
- * resolves through, so a name a live session answers to is not free however the reservation ledger
- * looks. Shared by the suggestion route and the allocator's claim store so the two cannot disagree
- * about who owns a name.
+ * resolves through, so a name a session holds is not free however the reservation ledger looks. How
+ * long a session holds its name — for as long as it is live, and for the resolution window after it
+ * ends — is `sessionNameClaim`'s decision. Shared by the suggestion route and the allocator's claim
+ * store so the two cannot disagree about who owns a name.
  */
 async function liveCallsigns(storage: DaemonStorage): Promise<readonly NameClaim[]> {
   const sessions = await Promise.all(
     storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
       const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
-      if (!config.success || config.data.teammate === undefined) return undefined;
-      const callsign = normalizeCallsign(config.data.teammate);
-      const claimedAtMs = Date.parse(config.data.createdAt);
-      if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
-      return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
+      if (!config.success) return undefined;
+      return sessionNameClaim({
+        id: session.id,
+        ...(config.data.teammate === undefined ? {} : { teammate: config.data.teammate }),
+        createdAt: config.data.createdAt,
+        updatedAt: config.data.updatedAt,
+        ...(session.status === undefined ? {} : { status: session.status }),
+      });
     }),
   );
   return sessions.filter((claim): claim is NameClaim => claim !== undefined);
@@ -5899,6 +5943,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The instruction a quarantined session shows a human names the CLI they actually type.
         clientName: CLIENT_NAME,
       });
+      // ONE claim surface over the ledger for the start and the rename, so both take names through the
+      // same allocator and the same file.
+      const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
       const sessionControl = releasingAttachmentsOnStop(
         createSessionControlSubsystem(
           storage,
@@ -5909,7 +5956,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           accounts,
           executables,
           sessionIds,
-          createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+          nameClaims,
           payloadDigests,
           // The session's own private directory holds the files, and the extractor over them is the
           // production one: `initialAttachments` is the only mounted route that carries document
@@ -5945,7 +5992,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const view = await sessions.get(id);
             return view === undefined
               ? undefined
-              : { name: view.config.name, interactive: view.config.mode === 'interactive' };
+              : { name: agentSpokenName(view.config), interactive: view.config.mode === 'interactive' };
           },
         },
         push,
@@ -6325,6 +6372,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
+        sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
         sessionRuntime,
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
