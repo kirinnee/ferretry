@@ -30,8 +30,8 @@ import { type ConfigFilesSubsystem, configFilesRoutes } from '../../../../src/li
 import { jsonBody, request } from '../../api/support.ts';
 
 const DIRECTORY = '/home/operator/.fy/config';
-const WARDEN_OFF = 'enabled: false\n';
-const WARDEN_ON = 'enabled: true\n';
+const WARDEN_OFF = 'triage: rules\n';
+const WARDEN_ON = 'triage: llm\n';
 const SESSION_CAPABILITY = 'fy_cap_session_one';
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -229,7 +229,7 @@ const tool = (body: unknown, capability: string | null = SESSION_CAPABILITY): Ca
 
 /** Whether the Warden is on, as every reader of the configuration sees it now. */
 async function wardenInEffect(subject: World): Promise<boolean> {
-  return (await subject.service.load()).evaluation.effective.warden.enabled;
+  return (await subject.service.load()).evaluation.effective.warden.triage === 'llm';
 }
 
 /** Write a loosening that is held, and answer the held edit. */
@@ -317,7 +317,7 @@ describe('the configuration files mount', () => {
 
       // Assert
       should(answer.body).containDeep({ exists: false, etag: 'absent' });
-      should(answer.body.text).match(/enabled: false/u);
+      should(answer.body.text).match(/triage: rules/u);
     });
 
     it('should ask the Warden grant for warden.yaml and the fleet grant for every other file, on the use axis', async () => {

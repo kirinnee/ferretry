@@ -8,6 +8,8 @@
 @import '../features/attention/attention-board.css';
 @import '../features/workspace/workspace.css';
 @import '../shell/sessions-bar.css';
+@import '../features/session-info/session-info.css';
+@import '../features/session-actions/session-actions.css';
 
 /* ============================================================================
    Ferretry UI design system — base elements, shell/layout and component classes.

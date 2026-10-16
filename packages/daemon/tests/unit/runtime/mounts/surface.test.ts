@@ -353,6 +353,23 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  sessionMcp: {
+    list: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    previewProject: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    addProject: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    previewLogin: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    addLogin: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionRuntime: {
     models: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -575,12 +592,15 @@ describe('the mounted daemon surface', () => {
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // an agent's rename: a new first name or task title
+      5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
+      1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 7, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
+    // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
+    should(minima).deepEqual({ none: 7, authenticated: 8, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual([
@@ -728,6 +748,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/rename',
+      'POST /v1/sessions/:sessionId/mcp/project/preview',
+      'POST /v1/sessions/:sessionId/mcp/login/preview',
+      'POST /v1/sessions/:sessionId/mcp/project',
+      'POST /v1/sessions/:sessionId/mcp/login',
+      'GET /v1/sessions/:sessionId/mcp',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
       'GET /v1/sessions/:sessionId/sends',
@@ -827,6 +852,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/warden/verdicts',
       'GET /v1/warden/report',
       'POST /v1/warden/run',
+      'GET /v1/warden/attention',
+      'POST /v1/warden/investigate',
       'GET /v1/warden/config',
       'PATCH /v1/warden/config',
       // The operator reads: the history the daemon recorded, the screen the agent is looking at, and

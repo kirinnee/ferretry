@@ -8,6 +8,7 @@
  */
 
 import type { McpOAuthFlow } from '@ferretry/protocol';
+import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -23,8 +24,10 @@ import {
   contextEmptyCopy,
   type McpChip,
   type McpRowStatus,
+  MCP_SCOPE_LABEL,
   mcpChips,
   mcpRowStatus,
+  mcpScopeTitle,
   visibleMcpServers,
 } from './context-rail-model.ts';
 import { type ContextRead, ContextFailure, ContextFilterBar, ContextNote } from './context-rail-parts.tsx';
@@ -47,6 +50,8 @@ export interface ContextMcpSignInHost {
 export interface ContextMcpPanelProps {
   readonly read: ContextRead<readonly ContextMcpServer[]>;
   readonly signIn?: ContextMcpSignInHost;
+  /** Opens Actions › Add MCP server… — the same form, from the list it adds to. */
+  readonly onAdd?: () => void;
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
   readonly chip: McpChip;
@@ -65,6 +70,7 @@ const DOT: Readonly<Record<McpRowStatus['tone'], string>> = {
 export function ContextMcpPanel({
   read,
   signIn,
+  onAdd,
   query,
   onQueryChange,
   chip,
@@ -114,6 +120,16 @@ export function ContextMcpPanel({
         onChipChange={onChipChange}
         {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })}
       />
+      {onAdd === undefined ? null : (
+        <div className="flex min-w-0 items-center justify-between gap-sm text-meta text-muted">
+          <span>
+            {servers.length} server{servers.length === 1 ? '' : 's'} this agent sees
+          </span>
+          <button className="fy-info-link" data-context-mcp-add="" onClick={onAdd} type="button">
+            <Plus aria-hidden="true" size={12} /> Add…
+          </button>
+        </div>
+      )}
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('mcp', total, query, chipLabel)}</ContextNote>
       ) : (
@@ -122,11 +138,22 @@ export function ContextMcpPanel({
             const status = mcpRowStatus(server, nowMs);
             return (
               <li
-                key={server.name}
+                key={`${server.scope ?? ''}:${server.name}`}
                 className="flex min-h-row min-w-0 flex-wrap items-center gap-x-sm gap-y-xs border-b border-border-soft py-xs"
                 data-context-mcp={server.name}
               >
                 <span className="min-w-0 flex-1 truncate font-mono text-cell text-fg">{server.name}</span>
+                {server.scope === undefined ? null : (
+                  <span
+                    className="fy-info-chip"
+                    data-context-mcp-scope={server.scope}
+                    data-tone={server.scope === 'project' ? 'accent' : 'muted'}
+                    title={mcpScopeTitle(server.scope)}
+                  >
+                    {MCP_SCOPE_LABEL[server.scope]}
+                  </span>
+                )}
+                <span className="text-meta text-faint">{server.transport === 'url' ? 'URL' : 'command'}</span>
                 {status.canSignIn && signIn !== undefined ? (
                   <Button
                     type="button"

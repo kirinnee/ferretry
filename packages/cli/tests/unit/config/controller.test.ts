@@ -67,7 +67,7 @@ describe('rendering', () => {
 describe('fy config check', () => {
   const broken = [
     { path: 'voice.yaml', text: 'token: sk-ant-abcdefghijklmnopqrstuvwxyz0123456789\n' },
-    { path: 'warden.yaml', text: 'enabled: true\n' },
+    { path: 'warden.yaml', text: 'triage: llm\n' },
   ];
 
   it('should print each located issue with its fix, the held edit and the summary, and exit 1 on an error', async () => {

@@ -28,12 +28,16 @@ import { mcpSignInStatus, type McpSignInTone } from '../fleet/components/mcp-sig
 
 // ── The sub-tabs ─────────────────────────────────────────────────────────────────────────────────
 
-export type ContextRailTab = 'signals' | 'mcp' | 'skills' | 'docs';
+export type ContextRailTab = 'signals' | 'files' | 'mcp' | 'skills' | 'docs';
 
 export const CONTEXT_RAIL_TABS: readonly ContextRailTab[] = ['signals', 'mcp', 'skills', 'docs'];
 
+/** Info › Folder's sub-tabs: the folder itself, then what the agent reads and reaches from it. */
+export const FOLDER_TABS: readonly ContextRailTab[] = ['files', 'docs', 'skills', 'mcp'];
+
 export const CONTEXT_RAIL_TAB_LABEL: Readonly<Record<ContextRailTab, string>> = {
   signals: 'Signals',
+  files: 'Files',
   mcp: 'MCP',
   skills: 'Skills',
   docs: 'Docs',
@@ -42,6 +46,7 @@ export const CONTEXT_RAIL_TAB_LABEL: Readonly<Record<ContextRailTab, string>> = 
 /** What the search box says it searches, per sub-tab. */
 export const CONTEXT_RAIL_SEARCH_LABEL: Readonly<Record<ContextRailTab, string>> = {
   signals: 'Search signals',
+  files: 'Search files',
   mcp: 'Search MCP servers',
   skills: 'Search skills',
   docs: 'Search docs',
@@ -149,7 +154,29 @@ export interface ContextMcpServer {
   readonly transport: 'url' | 'command';
   readonly signsIn: boolean;
   readonly connection?: McpOAuthConnection;
+  /**
+   * Where the server is declared, for its scope chip: the repo's `.mcp.json` (Project, shared with
+   * everyone on the repo), the login's profile (Login, every ferret on it), or Ferretry's own tools
+   * server. Absent when the host did not say.
+   */
+  readonly scope?: McpServerScope;
 }
+
+export type McpServerScope = 'project' | 'login' | 'ferretry';
+
+export const MCP_SCOPE_LABEL: Readonly<Record<McpServerScope, string>> = {
+  project: 'Project',
+  login: 'Login',
+  ferretry: 'Ferretry',
+};
+
+/** The scope chip's hover text. */
+export const mcpScopeTitle = (scope: McpServerScope): string =>
+  scope === 'project'
+    ? 'The repo’s .mcp.json, shared with everyone on the repo'
+    : scope === 'login'
+      ? 'The login’s profile: every ferret on it'
+      : 'Ferretry’s built-in tools server';
 
 export interface McpRowStatus {
   readonly label: string;
@@ -201,6 +228,7 @@ export const contextMcpServers = (
         name: component.name,
         transport: detail.url === undefined ? 'command' : 'url',
         signsIn: detail.url !== undefined && detail.auth === 'oauth',
+        scope: 'login',
         ...(connection === undefined ? {} : { connection }),
       });
     }
@@ -328,8 +356,34 @@ export const contextEmptyCopy = (tab: ContextRailTab, total: number, query: stri
   if (total > 0) return `Nothing under ${chipLabel}.`;
   return {
     signals: 'Nothing is waiting on you here.',
+    files: 'This folder is empty.',
     mcp: 'This agent has no MCP servers.',
     skills: 'No skills are installed for this agent.',
     docs: 'No instruction files in this folder.',
   }[tab];
 };
+
+// ── MCP across scopes ────────────────────────────────────────────────────────────────────────────
+
+/** The name of Ferretry's own tools server, as the fleet's fixed layer injects it into every runtime. */
+export const FERRETRY_TOOLS_SERVER = 'ferretry';
+
+/**
+ * Every server one ferret sees, each with its scope: Ferretry's own tools server first, then the
+ * project's `.mcp.json` servers, then the login's. `project` is null when there is no project file a
+ * ferret here reads. A project server that shares a name with a login server is listed under both,
+ * because they are two declarations and the CLI decides which one wins.
+ */
+export const scopedMcpServers = (
+  login: readonly ContextMcpServer[],
+  project: readonly { readonly name: string; readonly transport: 'command' | 'url' }[] | null,
+): ContextMcpServer[] => [
+  { name: FERRETRY_TOOLS_SERVER, transport: 'command', signsIn: false, scope: 'ferretry' },
+  ...(project ?? []).map(server => ({
+    name: server.name,
+    transport: server.transport,
+    signsIn: false,
+    scope: 'project' as const,
+  })),
+  ...login.map(server => ({ ...server, scope: 'login' as const })),
+];

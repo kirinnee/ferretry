@@ -1,0 +1,99 @@
+/**
+ * What an investigation's verdict DOES — the one place a Warden decision turns into an act on a ferret.
+ *
+ * THE RULES, ALL ENFORCED HERE:
+ *
+ * - Only an assigned warden's verdict acts. Jev never reaches this module: its only effect is a
+ *   blessing, which acts on nothing.
+ * - Only the explicit `Verdict:` marker acts. The prose heuristics that index a report for reading
+ *   carry no authority: a report that drifted off the template is shown, never executed.
+ * - Each act is filtered by what the owner let the Warden do alone. An act that is not allowed is not
+ *   dropped: it is HELD, which puts it in front of the owner as "the Warden recommends this".
+ * - Stop is held unless the owner explicitly allowed it. It is never a default.
+ *
+ * Pure: the act itself is the caller's, through {@link WardenRemedyPort}.
+ */
+
+import type { WardenActionKind, WardenMayActAlone } from '@ferretry/protocol';
+import type { WardenRecommendation, WardenVerdictKind } from './verdicts.ts';
+
+/** Carrying out a verdict. Each method throws when the act did not take. */
+export interface WardenRemedyPort {
+  nudge(sessionId: string, message: string): Promise<void>;
+  resume(sessionId: string): Promise<void>;
+  stop(sessionId: string, reason: string): Promise<void>;
+  failover(sessionId: string, agent: string): Promise<void>;
+}
+
+/** The act a verdict asks for, before the owner's permissions are applied. */
+export type WardenVerdictAct =
+  | { readonly action: Exclude<WardenActionKind, 'bless' | 'failover'>; readonly reason: string }
+  | { readonly action: 'failover'; readonly reason: string; readonly agent: string };
+
+const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless'>, string>> = {
+  nudge: 'it looks wedged but recoverable',
+  resume: 'its turn died but the work should continue',
+  stop: 'it is burning time with no progress',
+  failover: 'its login is out of quota',
+};
+
+/**
+ * The act an explicit verdict asks for, or `undefined` for a verdict that asks for none.
+ *
+ * `structured` is the marker's verdict and nothing else. A `MIGRATE (agent)` recommendation is the one
+ * act no verdict word names, so it is read from the recommendation line — but only alongside a marker,
+ * and only when it names the account to move to.
+ */
+export function verdictAct(
+  structured: WardenVerdictKind | undefined,
+  recommendation: WardenRecommendation | undefined,
+): WardenVerdictAct | undefined {
+  if (structured === undefined) return undefined;
+  const reason = (fallback: string): string =>
+    recommendation?.reason !== undefined && recommendation.reason.trim() !== '' ? recommendation.reason : fallback;
+  if (recommendation?.action === 'migrate' && recommendation.agent !== undefined && structured !== 'cleared')
+    return { action: 'failover', agent: recommendation.agent, reason: reason(DEFAULT_REASONS.failover) };
+  switch (structured) {
+    case 'nudged':
+      return { action: 'nudge', reason: reason(DEFAULT_REASONS.nudge) };
+    case 'revived':
+      return { action: 'resume', reason: reason(DEFAULT_REASONS.resume) };
+    case 'killed':
+      return { action: 'stop', reason: reason(DEFAULT_REASONS.stop) };
+    default:
+      return undefined;
+  }
+}
+
+/** Whether the owner let the Warden carry this act out alone. */
+export function mayActAlone(act: WardenVerdictAct, permissions: WardenMayActAlone): boolean {
+  return permissions[act.action];
+}
+
+/** The message a nudge types into the ferret, in the Warden's voice and the investigation's words. */
+export function wardenNudgeMessage(reason: string): string {
+  return `The Warden checked on you: ${reason.trim().replace(/\.$/u, '')}. If you are blocked, say exactly what you need; otherwise carry on and post a short status.`;
+}
+
+const PAST: Readonly<Record<WardenVerdictAct['action'], string>> = {
+  nudge: 'Nudged',
+  resume: 'Resumed',
+  stop: 'Stopped',
+  failover: 'Moved to another login',
+};
+
+const ASKS: Readonly<Record<WardenVerdictAct['action'], string>> = {
+  nudge: 'The Warden recommends a nudge',
+  resume: 'The Warden recommends resuming it',
+  stop: 'The Warden recommends stopping it',
+  failover: 'The Warden recommends moving it to another login',
+};
+
+/** One plain sentence for the actions list: what happened, and why. */
+export function wardenActDetail(act: WardenVerdictAct, outcome: 'done' | 'held' | 'failed', error?: string): string {
+  const why = act.reason.trim().replace(/\.$/u, '');
+  const target = act.action === 'failover' ? ` (${act.agent})` : '';
+  if (outcome === 'done') return `${PAST[act.action]}${target}: ${why}.`;
+  if (outcome === 'held') return `${ASKS[act.action]}${target}: ${why}. It waits for you.`;
+  return `${PAST[act.action]}${target} did not take: ${error ?? 'the daemon refused it'}.`;
+}

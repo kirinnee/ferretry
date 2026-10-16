@@ -161,7 +161,8 @@ describe('warden.yaml', () => {
 
     // Assert
     should(actual).deepEqual(config.DEFAULT_WARDEN_CONFIG);
-    should(actual.enabled).be.false();
+    should(actual.triage).equal('rules');
+    should(actual.mayActAlone.stop).be.false();
   });
 
   it('should override a top-level setting and keep every other default', () => {
@@ -190,6 +191,28 @@ describe('warden.yaml', () => {
     should(actual.providerOutage).deepEqual({ ...config.DEFAULT_WARDEN_CONFIG.providerOutage, tailLines: 50 });
   });
 
+  it('should merge the Jev guard, caps, may-act-alone and event sections key by key', () => {
+    // Arrange
+    const input = config.WardenFileSchema.parse({
+      triage: 'jev',
+      guard: { threshold: 0.9 },
+      caps: { jevUsdPerDay: 1 },
+      mayActAlone: { nudge: false },
+      events: { turnEnd: false },
+      investigation: { effort: 'high' },
+    });
+
+    // Act
+    const actual = config.wardenConfigFromFile(input);
+
+    // Assert
+    should(actual.guard).deepEqual({ ...config.DEFAULT_WARDEN_CONFIG.guard, threshold: 0.9 });
+    should(actual.caps).deepEqual({ ...config.DEFAULT_WARDEN_CONFIG.caps, jevUsdPerDay: 1 });
+    should(actual.mayActAlone).deepEqual({ ...config.DEFAULT_WARDEN_CONFIG.mayActAlone, nudge: false });
+    should(actual.events).deepEqual({ ...config.DEFAULT_WARDEN_CONFIG.events, turnEnd: false });
+    should(actual.investigation).deepEqual({ effort: 'high' });
+  });
+
   it('should replace the account list whole rather than merging it into the default one', () => {
     // Arrange
     const input = config.WardenFileSchema.parse({ accounts: [{ agent: 'claude-work', model: 'm' }] });
@@ -210,6 +233,10 @@ describe('warden.yaml', () => {
     ['a negative gap', { minSpawnGapMinutes: -1 }],
     ['a distinct-session floor below two', { providerOutage: { minDistinctSessions: 1 } }],
     ['a non-boolean enabled', { enabled: 'yes' }],
+    ['an interval nobody can pick', { intervalMinutes: 7 }],
+    ['an unknown triage', { triage: 'ai' }],
+    ['an unknown key inside caps', { caps: { usd: 1 } }],
+    ['a threshold below the floor', { guard: { threshold: 0.5 } }],
   ])('should refuse %s', (_label, input) => {
     // Act
     const actual = config.WardenFileSchema.safeParse(input);

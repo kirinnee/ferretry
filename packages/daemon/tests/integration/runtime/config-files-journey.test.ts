@@ -66,12 +66,14 @@ describe('a loosening edit to warden.yaml on a booted daemon', () => {
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
     const base = `http://127.0.0.1:${port}`;
-    const wardenConfig = async (): Promise<{ readonly enabled: boolean }> =>
+    const wardenConfig = async (): Promise<{ readonly triage: string }> =>
       WardenConfigViewSchema.parse(await (await fetch(`${base}/v1/warden/config`, { headers })).json()).config;
 
     // Act
     // 1. The edit a person makes in their editor: the Warden turned on, which spends.
-    await writeFile(join(home, 'config', 'warden.yaml'), '# turned on by hand\nenabled: true\n', { mode: 0o600 });
+    await writeFile(join(home, 'config', 'warden.yaml'), '# every flag investigated, set by hand\ntriage: llm\n', {
+      mode: 0o600,
+    });
     const heldWarden = await wardenConfig();
     const held = ConfigStatusViewSchema.parse(await (await fetch(`${base}/v1/config/status`, { headers })).json());
     const pending = held.pending.find(item => item.path === 'warden.yaml');
@@ -102,16 +104,16 @@ describe('a loosening edit to warden.yaml on a booted daemon', () => {
 
     // Assert
     // Held: the Warden still reads the tighter version, and the status says what waits and why.
-    should(heldWarden.enabled).be.false();
+    should(heldWarden.triage).equal('rules');
     should(pending).not.be.undefined();
     should(pending?.changes.length).be.above(0);
     should(held.files.find(file => file.path === 'warden.yaml')?.state).equal('pending');
     should(stale).eql({ path: 'warden.yaml', confirmed: false });
-    should(staleWarden.enabled).be.false();
+    should(staleWarden.triage).equal('rules');
     // Confirmed: in effect, and nothing waits any more.
     should(confirmedResponse.status).equal(200);
     should(confirmed).eql({ path: 'warden.yaml', confirmed: true });
-    should(confirmedWarden.enabled).be.true();
+    should(confirmedWarden.triage).equal('llm');
     should(after.pending).eql([]);
     should(after.files.find(file => file.path === 'warden.yaml')?.state).equal('ok');
   });

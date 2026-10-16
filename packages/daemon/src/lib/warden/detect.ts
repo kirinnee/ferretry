@@ -24,7 +24,9 @@ export type WardenAnomalyKind =
   | 'peer_wait_unanswerable'
   | 'sus_thinking'
   | 'sus_subprocess'
-  | 'provider_unavailable';
+  | 'provider_unavailable'
+  /** Never detected: the owner asked the Warden to investigate this ferret. */
+  | 'owner_request';
 
 export interface WardenAnomaly {
   readonly kind: WardenAnomalyKind;
@@ -70,6 +72,7 @@ const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
   sus_thinking: 'Session may be stuck thinking',
   sus_subprocess: 'Session stuck in a subprocess',
   provider_unavailable: 'Provider is unavailable',
+  owner_request: 'You asked for an investigation',
 };
 
 export function wardenAnomalySubject(kind: WardenAnomalyKind): string {

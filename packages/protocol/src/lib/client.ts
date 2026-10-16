@@ -13,11 +13,6 @@ import type {
   ScratchPlanView,
   ScratchSweepView,
   UsageFeedView,
-  WardenConfigPatch,
-  WardenConfigView,
-  WardenRunView,
-  WardenStatusView,
-  WardenVerdictsView,
 } from './service.ts';
 import type {
   FyEvent,
@@ -36,6 +31,16 @@ import type {
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionTranscriptPage } from './session-transcript.ts';
 import type { VersionSkew } from './version-skew.ts';
+import type {
+  WardenAttentionView,
+  WardenConfigPatch,
+  WardenConfigView,
+  WardenInvestigateRequest,
+  WardenInvestigateView,
+  WardenRunView,
+  WardenStatusView,
+  WardenVerdictsView,
+} from './warden.ts';
 
 export const FY_VERSION_HEADER = 'x-fy-version';
 export const FY_REQUEST_ID_HEADER = 'x-fy-request-id';
@@ -77,6 +82,10 @@ export interface IFyApiClient {
   wardenRun(spawn?: boolean): Promise<WardenRunView>;
   wardenConfig(): Promise<WardenConfigView>;
   updateWardenConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
+  /** Every ferret that needs the owner, and why. */
+  wardenAttention(): Promise<WardenAttentionView>;
+  /** Ask for an investigation of one ferret: it skips Jev and waits for a free slot. */
+  wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
   cgroupConfig(): Promise<CgroupConfigView>;
   updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView>;
   pwaConfig(): Promise<PwaConfigView>;

@@ -398,6 +398,7 @@ describe('SettingsPage legacy Daemons addresses', () => {
     'security-log',
     'carrier',
     'host-checks',
+    'files',
   ])('rewrites the old #%s panel anchor to that panel on the Machine tab', async panel => {
     const view = await mount(panelsPage());
     await visit(`#${panel}`);

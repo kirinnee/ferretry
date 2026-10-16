@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  FileCode2,
   Fingerprint,
   Gauge,
   GraduationCap,
@@ -27,14 +28,13 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import { type ComponentType, type ReactNode, useMemo } from 'react';
-import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
+import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
-import { WardenStrip } from '../warden/warden-strip.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from './daemon-settings.tsx';
 import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
@@ -88,6 +88,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   // The measured PATH the traffic is on, which is exactly what a route is.
   carrier: <Route size={16} aria-hidden="true" />,
   'host-checks': <Radar size={16} aria-hidden="true" />,
+  // Source code in a file, because the panel is the YAML files this machine's settings live in.
+  files: <FileCode2 size={16} aria-hidden="true" />,
   // What new ferrets are instructed to learn, and each ferret's own switch.
   learning: <GraduationCap size={16} aria-hidden="true" />,
 };
@@ -105,64 +107,18 @@ const FALLBACK_PANEL_ICON: ReactNode = <SlidersHorizontal size={16} aria-hidden=
 /** One empty list for every render, so a frame given no extra panels does not rebuild (and remount) its own. */
 const NO_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [];
 
-const unavailableWardenStatus: WardenStatusReader = async () => {
-  throw new Error('No Warden status reader was supplied.');
-};
-
-function WardenStatusSurface({
-  connection,
-  readStatus = unavailableWardenStatus,
-}: {
-  readonly connection: DaemonConnection;
-  readonly readStatus?: WardenStatusReader;
-}) {
-  const status = useWardenStatus(connection, readStatus);
-
-  if (status !== null) return <WardenStrip status={status} />;
-  return (
-    <section className="kt-panel p-panel" role="status" aria-label="Warden status unavailable">
-      <h3 className="m-0 text-row font-semibold text-fg">Warden status unavailable</h3>
-      <p className="mb-0 mt-1 text-cell leading-base text-muted">
-        This daemon did not provide a Warden status. Ferretry will not treat a missing read as a clean fleet or a
-        default policy.
-      </p>
-    </section>
-  );
-}
-
-function WardenVerdictsUnavailable() {
-  return (
-    <section className="kt-panel p-panel" aria-labelledby="warden-verdicts-unavailable-heading">
-      <h3 id="warden-verdicts-unavailable-heading" className="m-0 text-row font-semibold text-fg">
-        Recent verdicts unavailable
-      </h3>
-      <p className="mb-0 mt-1 text-cell leading-base text-muted">
-        This daemon does not expose a verdict feed yet, so report provenance is unavailable too. No empty history is
-        presented as evidence that the fleet is healthy.
-      </p>
-    </section>
-  );
-}
-
 function WardenSettingsTab({
   connection,
-  readStatus,
   createWardenClient,
 }: {
   /* These two are the frame's OWN panels rather than `additionalTabs` entries, so they take a
      connection and not the whole `DaemonSettingsTabProps`: neither sends a reader to another panel,
      and typing them by the seam would oblige the arrows below to forward a capability they ignore. */
   readonly connection: DaemonConnection;
-  readonly readStatus?: WardenStatusReader;
   readonly createWardenClient?: WardenClientFactory;
 }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <WardenStatusSurface connection={connection} readStatus={readStatus} />
-      <WardenConfigSurface connection={connection} createClient={createWardenClient} unavailable="message" />
-      <WardenVerdictsUnavailable />
-    </div>
-  );
+  // The Warden's live status is on the Warden page (Insights); Settings holds only its settings.
+  return <WardenConfigSurface connection={connection} createClient={createWardenClient} unavailable="message" />;
 }
 
 export interface DaemonSettingsFrameProps {
@@ -170,6 +126,7 @@ export interface DaemonSettingsFrameProps {
   /** The browser's persisted pairing record; only Host checks needs its local metadata. */
   readonly connectionRecord?: DaemonConnectionRecord;
   readonly name: string;
+  /** @deprecated Unused since the Warden's status moved to its own page; kept so callers still compile. */
   readonly readWardenStatus?: WardenStatusReader;
   /** Test and harness seam; production uses the daemon-bound default client. */
   readonly createWardenClient?: WardenClientFactory;
@@ -206,7 +163,6 @@ export function DaemonSettingsFrame({
   connection,
   connectionRecord,
   name,
-  readWardenStatus,
   createWardenClient,
   createSecretClient,
   createGrantClient,
@@ -229,11 +185,7 @@ export function DaemonSettingsFrame({
         label: 'Warden',
         description: 'Supervision, account failover, and policy for this daemon.',
         Surface: ({ connection: activeConnection }) => (
-          <WardenSettingsTab
-            connection={activeConnection}
-            readStatus={readWardenStatus}
-            createWardenClient={createWardenClient}
-          />
+          <WardenSettingsTab connection={activeConnection} createWardenClient={createWardenClient} />
         ),
       },
       {
@@ -346,7 +298,6 @@ export function DaemonSettingsFrame({
       onRemoveDaemon,
       onRenameDaemon,
       probeDaemon,
-      readWardenStatus,
       relayAdvertised,
     ],
   );

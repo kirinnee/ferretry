@@ -11,7 +11,7 @@
  *      edge, every tab shares one top and one bottom (the strip's), and none is scrolled or clipped out
  *      of the tab list. A negative margin used to drop the selected tab one stroke below its neighbours
  *      and past a scrollport that clips vertically — "Chat sits offset and clipped" in every theme.
- *   3. NOTHING RUNS UNDER A PANE. With a split pane and the context rail open in a 1100px window, the
+ *   3. NOTHING RUNS UNDER A PANE. With a split pane and Info open in a 1100px window, the
  *      chat — its text, its composer, its scroller — ends at the agent pane's right edge, and the pane
  *      itself overflows nothing. A centred surface sized to its content used to stay ~280px wide in a
  *      237px pane and draw the conversation underneath the terminal beside it.
@@ -51,7 +51,7 @@ export const SESSION_LAYOUT_GEOMETRY_CHECKS = THEME_FAMILIES.length * 5 + 4;
 const DESKTOP = { width: 1_440, height: 900 } as const;
 /** Wide enough that 1200px and Full are different widths beside the sessions column. */
 const WIDE = { width: 1_920, height: 1_080 } as const;
-/** Where the overlap reproduced: a split pane and the context rail in a window just wide enough for both. */
+/** Where the overlap reproduced: a split pane and Info in a window just wide enough for both. */
 const NARROW = { width: 1_100, height: 800 } as const;
 
 export interface SessionLayoutRun {
@@ -118,7 +118,7 @@ const read = async (page: Page): Promise<Reading> =>
       input: box(must('.fy-chat-input__column', surface)) as Box,
       composer: box(surface.querySelector('[data-session-input] form')),
       next: neighbour instanceof HTMLElement && !neighbour.hidden ? box(neighbour) : null,
-      rail: box(document.querySelector('[data-context-rail-frame]')),
+      rail: box(document.querySelector('[data-info-frame]')),
       paneOverflow: split === null ? 0 : split.scrollWidth - split.clientWidth,
     };
   });
@@ -217,14 +217,14 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
     checks += 1;
   };
 
-  /** 3. Beside a split pane and the context rail, nothing of the chat crosses the agent pane's edge. */
+  /** 3. Beside a split pane and Info, nothing of the chat crosses the agent pane's edge. */
   const assertNoOverlap = async (page: Page, where: string): Promise<void> => {
     const r = await read(page);
     if (r.next === null) fail(`${where}: no second pane is open beside the chat`);
-    if (r.rail === null) fail(`${where}: the context rail is not open`);
+    if (r.rail === null) fail(`${where}: Info is not open`);
     const edge = r.pane.right;
     if (edge > r.next.left + 0.5) fail(`${where}: the agent pane ends at ${edge}px, inside the next pane`);
-    if (r.next.right > r.rail.left + 0.5) fail(`${where}: the split runs under the context rail`);
+    if (r.next.right > r.rail.left + 0.5) fail(`${where}: the split runs under Info`);
     for (const [name, part] of [
       ['scroller', r.scroller],
       ['text column', r.column],
@@ -306,7 +306,7 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
       await assertColumn(page, where, 'readable');
       await assertTabs(page, where);
     });
-    await open(NARROW, family, 'split&chat-width=readable', async (page, where) => {
+    await open(NARROW, family, 'split&info&chat-width=readable', async (page, where) => {
       await assertNoOverlap(page, where);
       await assertTabs(page, where);
     });
@@ -321,13 +321,13 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
   );
 
   // EVIDENCE ONLY, never counted: the frames a reviewer compares — every width option where they differ,
-  // the split pane with the context rail at a common desktop size, and the phone with a pane open.
+  // the split pane with Info open at a common desktop size, and the phone with a pane open.
   const nothing = async (): Promise<void> => undefined;
   if (run.captureDir !== undefined)
     for (const family of run.captureFamilies ?? []) {
       for (const mode of ['readable', 'balanced', 'full'] as const)
         if (family !== 'studio') await open(WIDE, family, `chat-width=${mode}`, nothing);
-      await open(DESKTOP, family, 'split&chat-width=readable', nothing);
+      await open(DESKTOP, family, 'split&info&chat-width=readable', nothing);
       if (family !== 'studio') await open('phone', family, 'chat-width=readable', nothing);
       await open('phone', family, 'split&chat-width=readable', nothing);
     }

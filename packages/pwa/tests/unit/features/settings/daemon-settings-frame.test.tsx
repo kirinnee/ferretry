@@ -32,7 +32,7 @@ const alpha = daemonConnection({
 const unavailable = async () => Promise.reject(new Error('unavailable in this suite'));
 
 /**
- * The four panels `App.tsx` passes as `additionalTabs`, by the ids it passes them under.
+ * The five panels `App.tsx` passes as `additionalTabs`, by the ids it passes them under.
  *
  * Ids, not the real surfaces: this suite is about the rail, and mounting the production surfaces would
  * open their transports to assert a glyph. The ids are the whole contract — `PANEL_ICONS` is keyed by
@@ -43,6 +43,7 @@ const PRODUCTION_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [
   { id: 'doctor', label: 'Doctor', description: 'Programs this host needs.', Surface: () => null },
   { id: 'model-pricing', label: 'Model pricing', description: 'Model rates and provenance.', Surface: () => null },
   { id: 'security-log', label: 'Security log', description: 'Recent security events.', Surface: () => null },
+  { id: 'files', label: 'Files', description: 'The YAML files this machine’s settings live in.', Surface: () => null },
   { id: 'learning', label: 'Learning', description: 'What new ferrets are taught.', Surface: () => null },
 ];
 
@@ -84,6 +85,7 @@ describe('daemon settings panel rail', () => {
       'doctor',
       'model-pricing',
       'security-log',
+      'files',
       'learning',
       'carrier',
       'host-checks',
@@ -98,7 +100,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(12);
+    expect(glyphs).toHaveLength(13);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
@@ -210,9 +212,14 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'warden', backLabel: 'Alpha' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-back]')?.textContent).toBe('Alpha');
-      // Warden's own panel: the status read is missing, and it says so rather than reading as clean.
-      expect(view.container.querySelector('[aria-label="Warden status unavailable"]')).not.toBeNull();
-      expect(view.container.textContent).toContain('Recent verdicts unavailable');
+      // Warden's own panel holds only its settings now: an unreadable daemon says so, never a default.
+      await interact(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(view.container.querySelector('[aria-label="Warden settings unavailable"]')).not.toBeNull();
+      expect(view.container.textContent).not.toContain('Fleet checks');
+      expect(view.container.textContent).not.toContain('Recent verdicts unavailable');
     } finally {
       await view.unmount();
     }
@@ -222,7 +229,7 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'retired-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
-      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(12);
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(13);
     } finally {
       await view.unmount();
     }

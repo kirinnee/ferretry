@@ -2,12 +2,19 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type LearningConfig, LearningConfigSchema } from './learning.ts';
 import {
+  mergeWardenConfig,
   ProviderOutageConfigSchema,
   WardenAccountSchema,
+  WardenCapsSchema,
   type WardenConfig,
-  WardenConfigSchema,
+  WardenEventTriggersSchema,
   WardenFailoverConfigSchema,
-} from './service.ts';
+  WardenGuardConfigSchema,
+  WardenInvestigationConfigSchema,
+  WardenMayActAloneSchema,
+  WardenSweepIntervalSchema,
+  WardenTriageSchema,
+} from './warden.ts';
 
 /**
  * CONFIGURATION AS FILES — the layout of `$FY_HOME/config/`, the schemas of the files that are not the
@@ -190,15 +197,22 @@ export const DEFAULT_WARDEN_ACCOUNT = 'claude-auto-glm52a';
 /**
  * The Warden settings a state home with no `warden.yaml` behaves as.
  *
- * OFF: detection still runs and the evidence is still served — only the spend is opt-in, so a fresh
- * daemon never starts spending tokens on its own (`docs/config-files.md`).
+ * ON, AND FREE: the sweep runs every two minutes and its flags are shown to the owner, but triage is
+ * `rules`, so nothing is ever spent until the owner picks Jev or LLM triage — each of which has its own
+ * daily cap (`docs/config-files.md`). Stop is never something an investigation may do alone by default.
  */
 export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
-  enabled: false,
+  enabled: true,
+  triage: 'rules',
+  guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 },
+  caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
+  mayActAlone: { nudge: true, resume: true, failover: true, stop: false },
+  events: { turnEnd: true, question: true, paneDied: true },
+  investigation: { effort: 'low' },
   accounts: [{ agent: DEFAULT_WARDEN_ACCOUNT }],
   failover: { policy: 'fallback', failureThreshold: 2, cooldownMinutes: 30 },
   providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 24 },
-  intervalMinutes: 5,
+  intervalMinutes: 2,
   unattendedMinutes: 30,
   minSpawnGapMinutes: 15,
   susThinkingSeconds: 900,
@@ -214,10 +228,16 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
  */
 export const WardenFileSchema = z.strictObject({
   enabled: z.boolean().optional(),
+  triage: WardenTriageSchema.optional(),
+  guard: WardenGuardConfigSchema.strict().partial().optional(),
+  caps: WardenCapsSchema.strict().partial().optional(),
+  mayActAlone: WardenMayActAloneSchema.strict().partial().optional(),
+  events: WardenEventTriggersSchema.strict().partial().optional(),
+  investigation: WardenInvestigationConfigSchema.strict().partial().optional(),
   accounts: z.array(WardenAccountSchema.strict()).min(1).optional(),
   failover: WardenFailoverConfigSchema.strict().partial().optional(),
   providerOutage: ProviderOutageConfigSchema.strict().partial().optional(),
-  intervalMinutes: PositiveIntegerSchema.optional(),
+  intervalMinutes: WardenSweepIntervalSchema.optional(),
   unattendedMinutes: PositiveIntegerSchema.optional(),
   minSpawnGapMinutes: NonNegativeIntegerSchema.optional(),
   susThinkingSeconds: PositiveIntegerSchema.optional(),
@@ -230,12 +250,7 @@ export type WardenFile = z.infer<typeof WardenFileSchema>;
 
 /** The Warden settings a parsed `warden.yaml` means. */
 export function wardenConfigFromFile(file: WardenFile): WardenConfig {
-  return WardenConfigSchema.parse({
-    ...DEFAULT_WARDEN_CONFIG,
-    ...file,
-    failover: { ...DEFAULT_WARDEN_CONFIG.failover, ...file.failover },
-    providerOutage: { ...DEFAULT_WARDEN_CONFIG.providerOutage, ...file.providerOutage },
-  });
+  return mergeWardenConfig(DEFAULT_WARDEN_CONFIG, file);
 }
 
 // ── Learning ─────────────────────────────────────────────────────────────────────────────────────

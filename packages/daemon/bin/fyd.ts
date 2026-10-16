@@ -64,6 +64,7 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   CONFIG_ACCEPTED_FILE,
+  type WardenGuardConfig,
 } from '@ferretry/protocol';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
@@ -83,6 +84,7 @@ import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-at
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
+import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
@@ -673,6 +675,7 @@ import {
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
+  type TriageGuardPort,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -684,9 +687,13 @@ import {
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
+  wardenEventTrigger,
+  wardenTriggerEnabled,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
 import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
+import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
+import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import {
   ConversationLeases,
@@ -2793,6 +2800,9 @@ interface WardenSupervisionState {
  */
 const WARDEN_ESCALATION_ACTOR: AttentionActor = { kind: 'daemon', cause: 'warden-escalation' };
 
+/** How many transcript lines a Jev snapshot carries. The guard bounds them again; this bounds the read. */
+const WARDEN_TRIAGE_TAIL = 12;
+
 /** The collaborators a warden subsystem needs from the rest of the root. */
 interface WardenParts {
   readonly sessions: SessionDirectorySubsystem;
@@ -2816,6 +2826,23 @@ interface WardenParts {
   readonly supervision: WardenSupervisionState;
   /** The configuration files: `warden.yaml` is read and written through them. */
   readonly config: ConfigFilesService;
+  /**
+   * The operator reads — transcript tail and screen — already scrubbed by the vault redactor. The Jev
+   * guard's evidence comes from here, so it is masked the same way every other read of a ferret is.
+   */
+  readonly reads: Pick<OperatorReadService, 'logs' | 'snapshot'>;
+  /** The same redactor, for the strings of a Jev snapshot that are the Warden's own. */
+  readonly redactor: Pick<SecretRedactor, 'redact'>;
+  /** Jev behind the one outbound holder, built for the guard settings in effect. It holds no key. */
+  readonly guard: (settings: WardenGuardConfig) => TriageGuardPort;
+  /** What a verdict may do: the same send, resume, stop and migrate every other caller uses. */
+  readonly sends: Pick<SessionSendService, 'send'>;
+  readonly resume: Pick<SessionResumeService, 'resume'>;
+  readonly migrate: SessionMigrateSubsystem;
+  /** Analytics, for pricing a finished warden from its own transcript. */
+  readonly analytics: Pick<AnalyticsIngestionService, 'read'>;
+  /** The live journal append edge, for the events that bring a sweep forward. */
+  readonly events: (listener: (event: { readonly type: string; readonly data: unknown }) => void) => () => void;
 }
 
 /**
@@ -2842,6 +2869,68 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
   const service = new WardenSweepService(
     {
+      guard: parts.guard,
+      // The tail and the screen as an operator would read them — already masked by the vault redactor.
+      // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
+      evidence: {
+        evidence: async sessionId => {
+          const transcript = await parts.reads.logs(sessionId, WARDEN_TRIAGE_TAIL).catch(() => '');
+          const screen = await parts.reads.snapshot(sessionId).catch(() => undefined);
+          return {
+            recentTurns: transcript
+              .split('\n')
+              .map(line => line.trimEnd())
+              .filter(line => line !== '')
+              .slice(-WARDEN_TRIAGE_TAIL),
+            ...(screen === undefined ? {} : { paneTail: screen }),
+          };
+        },
+      },
+      redactor: parts.redactor,
+      remedies: {
+        nudge: async (sessionId, message) => {
+          await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+        },
+        resume: async sessionId => {
+          await parts.resume.resume({ id: parseSessionId(sessionId), actor: 'warden' });
+        },
+        stop: async (sessionId, reason) => {
+          await parts.control.stop(sessionId, reason);
+        },
+        failover: async (sessionId, agent) => {
+          await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false });
+        },
+      },
+      costs: {
+        costUsd: async wardenSessionId => {
+          const micros = parts.analytics
+            .read()
+            .rows.find(row => row.id === wardenSessionId)?.equivalentApiCostUsdMicros;
+          return micros === null || micros === undefined ? undefined : micros / 1_000_000;
+        },
+      },
+      feed: {
+        board: async sessionId => {
+          const listed = await parts.attention.list(sessionId).catch(() => undefined);
+          if (listed?.ok !== true) return undefined;
+          return {
+            sessionId,
+            parseErrors: 0,
+            items: listed.value.items.map(item => ({
+              id: item.id,
+              source: item.source,
+              subject: item.subject,
+              why: item.why,
+              ...(item.context === null || item.context === undefined ? {} : { context: item.context }),
+              waitingSince: item.waitingSince,
+              howToResolve: item.howToResolve,
+              raisedBy: item.raisedBy,
+              ...(item.raisedByName === null ? {} : { raisedByName: item.raisedByName }),
+              ...(item.sourceRef === null ? {} : { sourceRef: item.sourceRef }),
+            })),
+          };
+        },
+      },
       fleet: {
         fleet: async () =>
           await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view))),
@@ -2858,6 +2947,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             mode: 'auto' as const,
             prompt: request.prompt,
             cwd: request.cwd,
+            ...(request.effort === undefined ? {} : { effort: request.effort }),
             boardAccess: 'none' as const,
           };
           const payload = JSON.stringify(start);
@@ -2971,15 +3061,35 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         const handle = setInterval(tick, intervalMs);
         return () => clearInterval(handle);
       },
+      after: (delayMs, action) => {
+        const handle = setTimeout(action, delayMs);
+        return () => clearTimeout(handle);
+      },
+      nowMs: () => Date.now(),
     },
   );
+  const nextSweepAt = (): string | undefined => {
+    const due = loop.nextDueAtMs();
+    return due === undefined ? undefined : new Date(due).toISOString();
+  };
   return {
-    status: async () => await service.status(),
+    status: async () => await service.status(nextSweepAt()),
     verdicts: async () => await parts.reportsReader.readVerdicts(),
     report: async (reportPath: string) => await parts.reportsReader.readReportAt(reportPath),
     run: async (force: boolean) => await loop.run(force),
     config: async () => await service.view(),
     updateConfig: async (patch: unknown) => await service.updateConfig(parseWardenConfigPatch(patch)),
+    attention: async () => await service.attention(),
+    // Queued inside the sweep chain, then a sweep right behind it: if a slot is free the investigation
+    // starts now, and the answer says whether it did.
+    investigate: async request => {
+      const queued = await loop.exclusive(
+        async () => await service.requestInvestigation(request.sessionId, request.note),
+      );
+      if (queued.state === 'running') return queued;
+      await loop.run(false).catch(() => undefined);
+      return await service.investigationStatus(request.sessionId);
+    },
     lastSweepAt: async () => await service.lastSweepAt(),
     intervalMs: async () => await service.intervalMs(),
     arm: async () => {
@@ -2989,7 +3099,21 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // the deliberate pre-first-sweep window as grace rather than as unknown supervision.
       parts.supervision.armedAtMs = Date.now();
       parts.supervision.armed = true;
+      // A turn ending, a question waiting or a pane dying brings the next sweep forward. The settings are
+      // read per event, so turning a trigger off takes effect at once; a listener must never throw into
+      // the journal's append path.
+      const unsubscribe = parts.events(event => {
+        const trigger = wardenEventTrigger(event.type, event.data);
+        if (trigger === undefined) return;
+        void service
+          .currentConfig()
+          .then(config => {
+            if (config.enabled && wardenTriggerEnabled(trigger, config.events)) loop.trigger();
+          })
+          .catch(() => undefined);
+      });
       return () => {
+        unsubscribe();
         parts.supervision.armed = false;
         parts.supervision.armedAtMs = undefined;
         disarm();
@@ -6589,6 +6713,57 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           };
         },
       };
+      // Hoisted so the Warden reads the same redacted transcript and screen an operator does: the evidence
+      // its Jev guard is shown passes the same scrubbing as every other read of a ferret.
+      // The three operator reads, each over the evidence that actually holds the answer: the durable
+      // journal this storage opened, the pane the lifecycle document names, and the transcript the
+      // start proved is this session's.
+      //
+      // EVERY ONE IS KEYED BY SESSION ID THROUGH THIS DAEMON'S OWN STATE HOME. The journal is a file
+      // under it, the pane address is read from the document beside that file, and the tmux server is
+      // this daemon's private socket — so a session with the same name under another daemon cannot be
+      // captured here, which is the failure a `fy stream` attaching to the wrong pane would be.
+      const operatorReads = new OperatorReadService(
+        {
+          replay: async (sessionId, afterSequence, limit) => {
+            // PARSED, not asserted: an id the layout would not accept must never become a journal path.
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) return [];
+            const page = await storage.replay(id, afterSequence, limit);
+            return page.events.map(event => ({
+              sequence: event.sequence,
+              sessionId: event.sessionId,
+              time: event.time,
+              type: event.type,
+              data: event.data,
+            }));
+          },
+        },
+        {
+          capture: async sessionId => {
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) return undefined;
+            // PARSED for the reason every other terminal address is: a document that no longer
+            // validates must leave the session with no pane rather than address whatever it names.
+            const lifecycle = SessionLifecycleConfigSchema.safeParse(
+              lifecycleConfigDocument(await storage.readConfig(id).catch(() => undefined)),
+            );
+            if (!lifecycle.success) return undefined;
+            const state = await launchTmux.state(lifecycle.data.tmuxSession);
+            // The scrollback, not the visible frame: an operator reading a snapshot is catching up on
+            // what happened, and the visible 24 lines are whatever the harness last redrew.
+            return { alive: state.alive, dead: state.dead, text: state.history };
+          },
+        },
+        createSessionTranscriptTail(storage),
+        createSessionTranscriptMessageSource(storage),
+        sessionTranscriptMessageTokens,
+        lastSnapshots,
+        // The screen, the transcript and the journal are the three places a secret would surface if
+        // a child ever printed one, so all three are scrubbed here rather than at whichever caller
+        // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
+        secretRedactor,
+      );
       // Lessons: the review board, passive suggestions, Apply and the explicit scan. A new ferret's
       // passive default is recorded through it, and a running one is re-instructed with a queued send.
       const learning = createLearningSubsystem({
@@ -6623,7 +6798,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       adoptLearning = async id => {
         await learning.transaction(async () => await learning.lessons.adopt(id));
       };
-      return {
+      const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         health: createHealthSubsystem(health, scratch),
         doctor: {
           report: async () => {
@@ -6909,56 +7084,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           reportsDirectory: wardenPaths.reports,
           supervision: wardenSupervision,
           config: configFiles,
+          reads: operatorReads,
+          redactor: secretRedactor,
+          // The SAME outbound holder and stopwatch the Speed-ups Test uses: the Warden spends the Jev key
+          // only through it, with the endpoint, model and price `warden.yaml` names.
+          guard: settings =>
+            new JevTriageGuard(outboundAuthorizer, speedupStopwatch, {
+              model: settings.model,
+              ...(settings.endpoint === undefined ? {} : { endpoint: settings.endpoint }),
+              usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
+            }),
+          sends,
+          resume,
+          migrate: sessionMigrate,
+          analytics: analyticsIngestion,
+          events: listener => storage.subscribeEvents(listener),
         }),
-        // The three operator reads, each over the evidence that actually holds the answer: the durable
-        // journal this storage opened, the pane the lifecycle document names, and the transcript the
-        // start proved is this session's.
-        //
-        // EVERY ONE IS KEYED BY SESSION ID THROUGH THIS DAEMON'S OWN STATE HOME. The journal is a file
-        // under it, the pane address is read from the document beside that file, and the tmux server is
-        // this daemon's private socket — so a session with the same name under another daemon cannot be
-        // captured here, which is the failure a `fy stream` attaching to the wrong pane would be.
-        sessionReads: new OperatorReadService(
-          {
-            replay: async (sessionId, afterSequence, limit) => {
-              // PARSED, not asserted: an id the layout would not accept must never become a journal path.
-              const id = tryParseSessionId(sessionId);
-              if (id === undefined) return [];
-              const page = await storage.replay(id, afterSequence, limit);
-              return page.events.map(event => ({
-                sequence: event.sequence,
-                sessionId: event.sessionId,
-                time: event.time,
-                type: event.type,
-                data: event.data,
-              }));
-            },
-          },
-          {
-            capture: async sessionId => {
-              const id = tryParseSessionId(sessionId);
-              if (id === undefined) return undefined;
-              // PARSED for the reason every other terminal address is: a document that no longer
-              // validates must leave the session with no pane rather than address whatever it names.
-              const lifecycle = SessionLifecycleConfigSchema.safeParse(
-                lifecycleConfigDocument(await storage.readConfig(id).catch(() => undefined)),
-              );
-              if (!lifecycle.success) return undefined;
-              const state = await launchTmux.state(lifecycle.data.tmuxSession);
-              // The scrollback, not the visible frame: an operator reading a snapshot is catching up on
-              // what happened, and the visible 24 lines are whatever the harness last redrew.
-              return { alive: state.alive, dead: state.dead, text: state.history };
-            },
-          },
-          createSessionTranscriptTail(storage),
-          createSessionTranscriptMessageSource(storage),
-          sessionTranscriptMessageTokens,
-          lastSnapshots,
-          // The screen, the transcript and the journal are the three places a secret would surface if
-          // a child ever printed one, so all three are scrubbed here rather than at whichever caller
-          // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
-          secretRedactor,
-        ),
+        sessionReads: operatorReads,
         sessionAttach,
         // The Console types into the pane the attach proof names, on the same private tmux server.
         sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
@@ -7001,6 +7143,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock: new SystemGrantClock(),
           clientName: CLIENT_NAME,
           changed: () => deviceConnections.recheckAll(),
+        }),
+      };
+      return {
+        ...mounted,
+        // Built after the rest because it reads three of them: the session directory, and the project
+        // catalogue and worktree service that say which folders are KNOWN roots a project write may use.
+        // The fleet half goes through the very catalogue service Settings applies reviewed changes with.
+        sessionMcp: createSessionMcpSubsystem({
+          sessions: mounted.sessions,
+          projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
+          files: new FileMcpProjectFiles(),
+          fleet: mounted.fleetCatalog,
         }),
       };
     },

@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
+  WardenAttentionViewSchema,
   WardenConfigViewSchema,
+  WardenInvestigateViewSchema,
   WardenRunViewSchema,
   WardenStatusViewSchema,
   WardenVerdictsViewSchema,
@@ -9,6 +11,7 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { WardenError, wardenRoutes } from '../../../../src/lib/runtime/mounts/warden.ts';
+import { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, FakeWarden, GRANTED, human } from './support.ts';
 
@@ -244,5 +247,90 @@ describe('restating a warden refusal', () => {
     // Assert
     should(response.status).equal(500);
     should(JSON.parse(response.body).code).not.equal('warden_sweep_failed');
+  });
+});
+
+describe('the "who needs you" feed', () => {
+  it('should answer with a body the client can parse, to a live warden too', async () => {
+    // Arrange
+    const subject = dispatcher();
+
+    // Act
+    const owner = await subject.dispatch(get('/v1/warden/attention'));
+    const live = await subject.dispatch(get('/v1/warden/attention', warden));
+
+    // Assert
+    should(owner.status).equal(200);
+    should(live.status).equal(200);
+    should(() => WardenAttentionViewSchema.parse(JSON.parse(owner.body))).not.throw();
+  });
+
+  it('should restate a refusal from the feed', async () => {
+    // Arrange
+    const subject = dispatcher(new FakeWarden(new WardenError('failed', 'the boards could not be read')));
+
+    // Act
+    const response = await subject.dispatch(get('/v1/warden/attention'));
+
+    // Assert
+    should(response.status).equal(500);
+  });
+});
+
+describe('asking for an investigation', () => {
+  it('should hand the owner’s request to the subsystem and answer where it stands', async () => {
+    // Arrange
+    const subsystem = new FakeWarden();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      send('POST', '/v1/warden/investigate', JSON.stringify({ sessionId: 's1', note: 'CI went red' })),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(subsystem.investigations).deepEqual([{ sessionId: 's1', note: 'CI went red' }]);
+    should(() => WardenInvestigateViewSchema.parse(JSON.parse(response.body))).not.throw();
+  });
+
+  it('should refuse a warden-scoped caller, which must not spend on investigations of its own', async () => {
+    // Arrange
+    const subsystem = new FakeWarden();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      send('POST', '/v1/warden/investigate', JSON.stringify({ sessionId: 's1' }), warden),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+    should(subsystem.investigations).deepEqual([]);
+  });
+
+  it('should refuse a request that names no ferret', async () => {
+    // Act
+    const response = await dispatcher().dispatch(send('POST', '/v1/warden/investigate', JSON.stringify({})));
+
+    // Assert
+    should(response.status).equal(400);
+  });
+
+  it.each([
+    ['off', 409, 'warden_off'],
+    ['not_found', 404, 'not-found'],
+    ['finished', 409, 'session_finished'],
+    ['cap', 409, 'warden_cap_reached'],
+  ] as const)('should answer a %s refusal with %d %s', async (failure, status, code) => {
+    // Arrange
+    const subject = dispatcher(new FakeWarden(new WardenRequestError(failure, `refused: ${failure}`)));
+
+    // Act
+    const response = await subject.dispatch(
+      send('POST', '/v1/warden/investigate', JSON.stringify({ sessionId: 's1' })),
+    );
+
+    // Assert
+    should(response.status).equal(status);
+    should(JSON.parse(response.body)).match({ code, error: `refused: ${failure}` });
   });
 });

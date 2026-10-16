@@ -1,115 +1,164 @@
 import { describe, expect, it } from 'bun:test';
 import { WardenStrip } from '../../../src/features/warden/warden-strip.tsx';
 import { mount } from '../../support/dom.ts';
-import { wardenAccount, wardenAnomaly, wardenFailover, wardenStatus } from '../../support/warden.ts';
+import {
+  wardenAccount,
+  wardenAction,
+  wardenAnomaly,
+  wardenConfig,
+  wardenFailover,
+  wardenStatus,
+} from '../../support/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
+const SWEPT = '2026-07-31T11:58:00.000Z';
 
 describe('WardenStrip', () => {
-  it('renders nothing at all when the status is unknown', async () => {
-    const { container } = await mount(<WardenStrip status={null} />);
+  it('should render nothing at all when the status is unknown', async () => {
+    // Arrange
+    const view = await mount(<WardenStrip status={null} />);
+    try {
+      // Act
+      const html = view.container.innerHTML;
 
-    expect(container.innerHTML).toBe('');
+      // Assert
+      expect(html).toBe('');
+    } finally {
+      await view.unmount();
+    }
   });
 
-  it('reads clean and settled when the last sweep found nothing', async () => {
-    const { container } = await mount(
-      <WardenStrip status={wardenStatus({ lastSweepAt: '2026-07-31T11:58:00.000Z' })} now={NOW} />,
-    );
+  it('should read clean and settled when the last sweep left nobody waiting', async () => {
+    // Arrange
+    const view = await mount(<WardenStrip status={wardenStatus({ lastSweepAt: SWEPT })} now={NOW} />);
+    try {
+      // Act
+      const text = view.container.textContent ?? '';
 
-    expect(container.textContent).toContain('Fleet checks');
-    expect(container.textContent).toContain('last sweep 2m ago');
-    expect(container.textContent).toContain('no anomalies');
-    expect(container.textContent).toContain('every 5m');
+      // Assert
+      expect(text).toContain('Fleet checks');
+      expect(text).toContain('Rules only');
+      expect(text).toContain('swept 2m ago');
+      expect(text).toContain('nobody needs you');
+      expect(view.container.querySelector('.text-ok')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
   });
 
-  it('refuses to call an empty report set healthy', async () => {
-    const { container } = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
+  it('should refuse to call a daemon that never swept healthy', async () => {
+    // Arrange
+    const view = await mount(<WardenStrip status={wardenStatus()} />);
+    try {
+      // Act
+      const text = view.container.textContent ?? '';
 
-    expect(container.textContent).toContain('not reporting');
-    expect(container.textContent).toContain('no evidence');
-    expect(container.querySelector('.text-ok')).toBeNull();
-    expect(container.querySelector('.text-warn')).not.toBeNull();
+      // Assert
+      expect(text).toContain('not swept yet');
+      expect(text).toContain('no evidence yet');
+      expect(view.container.querySelector('.text-ok')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
   });
 
-  it('switches the shield and the tone once anomalies exist', async () => {
-    const clean = await mount(
-      <WardenStrip status={wardenStatus({ lastSweepAt: '2026-07-31T11:58:00.000Z' })} now={NOW} />,
-    );
-    const dirty = await mount(
-      <WardenStrip status={wardenStatus({ anomalies: [wardenAnomaly({ teammate: 'ms-98' })] })} now={NOW} />,
-    );
+  it('should count who needs you and name anomalies as plain chips with the who on hover', async () => {
+    // Arrange
+    const status = wardenStatus({
+      lastSweepAt: SWEPT,
+      anomalies: [wardenAnomaly({ teammate: 'ms-98', kind: 'sus_thinking' })],
+      actions: [wardenAction({ sessionId: 'sess-2', action: 'stop', outcome: 'held' })],
+    });
+    const view = await mount(<WardenStrip status={status} now={NOW} />);
+    try {
+      // Act
+      const glance = [...view.container.querySelectorAll('span')].find(span => span.getAttribute('title') !== null);
 
-    expect(clean.container.querySelector('.text-ok')).not.toBeNull();
-    expect(dirty.container.querySelector('.text-warn')).not.toBeNull();
-    expect(dirty.container.textContent).toContain('1 anomaly');
+      // Assert
+      expect(view.container.textContent).toContain('2 need you');
+      expect(view.container.textContent).not.toContain('sus_thinking');
+      expect(glance?.textContent).toBe('long think');
+      expect(glance?.getAttribute('title')).toBe('long think: Ms-98');
+    } finally {
+      await view.unmount();
+    }
   });
 
-  it('summarises the anomaly kinds and keeps the who in the hover title', async () => {
-    const { container } = await mount(
-      <WardenStrip
-        status={wardenStatus({ anomalies: [wardenAnomaly({ teammate: 'ms-98', kind: 'sus_thinking' })] })}
-        now={NOW}
-      />,
-    );
-    const glance = container.querySelector('.ml-auto');
+  it('should say the Warden is off and that it is investigating, without link styling', async () => {
+    // Arrange
+    const status = wardenStatus({ config: wardenConfig({ enabled: false }), liveWarden: 'sess-9' });
+    const view = await mount(<WardenStrip status={status} now={NOW} />);
+    try {
+      // Act
+      const text = view.container.textContent ?? '';
 
-    expect(glance?.textContent).toBe('sus_thinking');
-    expect(glance?.getAttribute('title')).toBe('sus_thinking: Ms-98');
+      // Assert
+      expect(text).toContain('Off');
+      expect(text).toContain('investigating');
+      expect(text).not.toContain('warden live');
+      expect(view.container.querySelector('.text-accent')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
   });
 
-  it('says nothing about a live warden unless one is live', async () => {
-    const idle = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
-    const live = await mount(<WardenStrip status={wardenStatus({ liveWarden: 'sess-9' })} now={NOW} />);
-
-    expect(idle.container.textContent).not.toContain('warden live');
-    expect(live.container.textContent).toContain('warden live');
-  });
-
-  it('chips each failover account by health and marks the one last selected', async () => {
+  it('should chip each failover account by health and mark the one in use', async () => {
+    // Arrange
     const failover = wardenFailover({
       accounts: [
         wardenAccount({ agent: 'claude-auto-loge' }),
         wardenAccount({ agent: 'codex-auto-terra', eligible: false, reason: 'at limit' }),
       ],
-      lastSelection: {
-        agent: 'claude-auto-loge',
-        policy: 'fallback',
-        at: '2026-07-31T11:00:00.000Z',
-        reason: 'first eligible',
-      },
+      lastSelection: { agent: 'claude-auto-loge', policy: 'fallback', at: SWEPT, reason: 'first eligible' },
     });
-    const { container } = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
-    const group = container.querySelector('[aria-label="Warden accounts"]') as HTMLElement;
-    const chips = [...group.querySelectorAll('li')];
+    const view = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
+    try {
+      // Act
+      const chips = [...view.container.querySelectorAll('[aria-label="Warden accounts"] li')];
 
-    expect(chips.map(chip => chip.textContent)).toEqual(['loge ●', 'terra']);
-    expect(chips[0]?.className).toContain('text-ok');
-    expect(chips[1]?.className).toContain('text-warn');
-    expect(chips[1]?.getAttribute('title')).toBe('at limit');
+      // Assert
+      expect(chips.map(chip => chip.textContent)).toEqual(['loge · in use', 'terra']);
+      expect(chips[0]?.className).toContain('text-ok');
+      expect(chips[1]?.className).toContain('text-warn');
+      expect(chips[1]?.getAttribute('title')).toBe('at limit');
+    } finally {
+      await view.unmount();
+    }
   });
 
-  it('omits the account group entirely when failover reports none', async () => {
-    const { container } = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
-
-    expect(container.querySelector('[aria-label="Warden accounts"]')).toBeNull();
-  });
-
-  it('names an exhaustion the reader has to act on', async () => {
+  it('should omit the account group when failover reports none, and name an exhaustion', async () => {
+    // Arrange
     const failover = wardenFailover({
       exhaustedSince: '2026-07-31T10:00:00.000Z',
       accounts: [wardenAccount({ eligible: false, quota: { authOk: false } })],
     });
-    const { container } = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
+    const none = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
+    const exhausted = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
+    try {
+      // Act
+      const group = none.container.querySelector('[aria-label="Warden accounts"]');
 
-    expect(container.textContent).toContain('no warden credentials!');
+      // Assert
+      expect(group).toBeNull();
+      expect(exhausted.container.textContent).toContain('no warden credentials!');
+    } finally {
+      await none.unmount();
+      await exhausted.unmount();
+    }
   });
 
-  it('hides the decorative separators from assistive tech', async () => {
-    const { container } = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
-    const separators = [...container.querySelectorAll('span')].filter(span => span.textContent === '·');
+  it('should hide the decorative separators from assistive tech', async () => {
+    // Arrange
+    const view = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
+    try {
+      // Act
+      const separators = [...view.container.querySelectorAll('span')].filter(span => span.textContent === '·');
 
-    expect(separators.length).toBeGreaterThan(0);
-    for (const separator of separators) expect(separator.getAttribute('aria-hidden')).toBe('true');
+      // Assert
+      expect(separators.length).toBeGreaterThan(0);
+      for (const separator of separators) expect(separator.getAttribute('aria-hidden')).toBe('true');
+    } finally {
+      await view.unmount();
+    }
   });
 });

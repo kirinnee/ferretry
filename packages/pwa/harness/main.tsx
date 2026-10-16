@@ -86,6 +86,7 @@ import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/c
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
+import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
@@ -145,6 +146,7 @@ import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { ConfigFilesSurface } from '../src/features/config-files/config-files-settings.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -176,8 +178,13 @@ import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
-import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
-import { type WardenClientFactory, WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import {
+  type WardenClientFactory,
+  WardenConfigCard,
+  WardenConfigSurface,
+} from '../src/features/warden/warden-config-card.tsx';
+import { WardenOverview } from '../src/features/warden/warden-overview.tsx';
+import { WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
@@ -203,6 +210,7 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.t
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
+import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
@@ -237,7 +245,7 @@ import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from '../src/shell/command-palette.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
-import { InsightsFrame } from '../src/shell/insights-frame.tsx';
+import { INSIGHTS_COLUMN_CLASS, InsightsFrame } from '../src/shell/insights-frame.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
@@ -265,6 +273,14 @@ import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
 import { LEARNING_PASSIVE, LearningHubHarness, LearningSettingsHarness } from './learning-hub.tsx';
+import { harnessConfigFilesClient } from './config-files-fixture.ts';
+import {
+  WARDEN_FIXTURE_ATTENTION,
+  WARDEN_FIXTURE_CONFIG,
+  WARDEN_FIXTURE_NOW,
+  WARDEN_FIXTURE_STATUS,
+  wardenFixtureRequest,
+} from './warden-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -730,6 +746,9 @@ const harnessCgroupClient = async (connection: DaemonConnection) => {
   };
 };
 
+/** The Files panel's in-memory daemon (`config-files-fixture.ts`). */
+const HARNESS_CONFIG_FILES_CLIENT = harnessConfigFilesClient(unreachableDaemon.daemonId);
+
 /**
  * The panels the composition root supplies, in the order it supplies them (production also
  * supplies Model pricing, which this fixture leaves out).
@@ -775,6 +794,18 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
     description: 'Recent pairings, removals, refused attempts and other security events on this machine.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
       <SecurityLogSurface connection={connection} createClient={harnessSecurityClient} />
+    ),
+  },
+  {
+    id: 'files',
+    label: 'Files',
+    description: 'The YAML files this machine’s settings live in.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <ConfigFilesSurface
+        key={connection.daemonId}
+        connection={connection}
+        createClient={HARNESS_CONFIG_FILES_CLIENT}
+      />
     ),
   },
 ];
@@ -1049,6 +1080,14 @@ function AppChromeHarness({ active }: { readonly active: string }) {
       <main className="min-h-0 flex-1 overflow-y-auto p-panel" aria-label="Settings › Learning">
         <h1 className="m-0 mb-3 font-display text-display font-bold tracking-display">Learning</h1>
         <LearningSettingsHarness connection={daemon} sessions={WORKSPACE_FLEET} />
+      </main>
+    ) : destination === 'warden' ? (
+      <WardenPage connection={daemon} slots={{ Overview: HarnessWardenOverview }} />
+    ) : active === 'warden-settings' ? (
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5" data-harness="warden-settings">
+        <div className={INSIGHTS_COLUMN_CLASS}>
+          <WardenConfigSurface connection={daemon} createClient={HARNESS_WARDEN_CLIENT} unavailable="message" />
+        </div>
       </main>
     ) : (
       <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
@@ -1339,43 +1378,7 @@ const TASKS: readonly TaskSummary[] = [
 ];
 const TASK_DAG = taskDag(TASKS);
 
-const WARDEN: WardenStatusView = {
-  config: {
-    enabled: true,
-    accounts: [{ agent: 'claude-auto-loge' }],
-    failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-    providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 40 },
-    intervalMinutes: 5,
-    unattendedMinutes: 20,
-    minSpawnGapMinutes: 10,
-    susThinkingSeconds: 600,
-    susSubprocessSeconds: 900,
-    maxAssignedWardens: 2,
-    assignedCooldownMinutes: 15,
-    blessMinutes: 30,
-  },
-  lastSweepAt: '2026-07-31T11:57:00.000Z',
-  anomalies: [
-    { kind: 'sus_thinking', sessionId: 'sess-1', status: 'thinking', detail: 'thinking for 14m', teammate: 'ms-98' },
-  ],
-  fingerprint: 'harness',
-  liveWarden: 'sess-9',
-  failover: {
-    policy: 'fallback',
-    failureThreshold: 3,
-    cooldownMinutes: 30,
-    accounts: [
-      { agent: 'claude-auto-loge', eligible: true },
-      { agent: 'codex-auto-terra', eligible: false, reason: 'at limit' },
-    ],
-    lastSelection: {
-      agent: 'claude-auto-loge',
-      policy: 'fallback',
-      at: '2026-07-31T11:00:00.000Z',
-      reason: 'first eligible',
-    },
-  },
-};
+const WARDEN: WardenStatusView = WARDEN_FIXTURE_STATUS;
 
 /** A daemon that has its configuration but has never produced a report. */
 const WARDEN_NOT_REPORTING: WardenStatusView = {
@@ -1386,11 +1389,7 @@ const WARDEN_NOT_REPORTING: WardenStatusView = {
   liveWarden: undefined,
 };
 
-const WARDEN_CONFIG: WardenConfigView = {
-  config: WARDEN.config,
-  accounts: WARDEN.config.accounts,
-  warnings: ['Account order takes effect on the next sweep.'],
-};
+const WARDEN_CONFIG: WardenConfigView = WARDEN_FIXTURE_CONFIG;
 
 /** One concrete host diagnosis keeps the Doctor tab reviewable without a daemon. */
 const HARNESS_DOCTOR: DoctorReport = {
@@ -1898,8 +1897,51 @@ const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
     wardenConfig: async () => WARDEN_CONFIG,
     wardenStatus: async () => WARDEN,
     updateWardenConfig: async () => WARDEN_CONFIG,
+    request: wardenFixtureRequest,
   };
 };
+
+/** The Warden page's reads, answered from the fixture day; a sweep or investigate request answers in words. */
+const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
+  wardenStatus: async () => WARDEN_FIXTURE_STATUS,
+  wardenAttention: async () => WARDEN_FIXTURE_ATTENTION,
+  wardenRun: async () => ({ sweptAt: new Date(WARDEN_FIXTURE_NOW).toISOString(), anomalies: [] }),
+  wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
+    sessionId,
+    state: 'queued' as const,
+    position: 1,
+    message: 'Queued: next in line for an investigation.',
+  }),
+  wardenReport: async (reportPath: string) => `# Verdict: KILL\n\nEvidence from ${reportPath}.`,
+});
+
+/** The Warden page as the app mounts it, on the fixture day. */
+function HarnessWardenOverview({ connection }: { readonly connection: DaemonConnection }) {
+  return (
+    <WardenOverviewSurface
+      connection={connection}
+      sessions={WORKSPACE_FLEET}
+      createClient={HARNESS_WARDEN_OVERVIEW_CLIENT}
+      now={() => WARDEN_FIXTURE_NOW}
+    />
+  );
+}
+
+/** Settings › Warden, controlled the way Settings holds it, without a daemon. */
+function HarnessWardenConfig() {
+  const [draft, setDraft] = useState(WARDEN_CONFIG.config);
+  return (
+    <WardenConfigCard
+      view={WARDEN_CONFIG}
+      draft={draft}
+      onChange={setDraft}
+      jevKey={{ state: 'missing', keyUrl: 'https://typesafe.ai/keys' }}
+      loginOptions={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
+      speedupsHref="#speedups"
+      onSave={() => {}}
+    />
+  );
+}
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -2635,6 +2677,128 @@ const HARNESS_LIVE_PANE = [
 ].join('\n');
 
 /**
+ * INFO AND ACTIONS, ANSWERED IN THE PAGE. The workspace session works in a managed worktree with
+ * uncommitted changes; the Warden nudged it once; its analytics are priced; its project `.mcp.json`
+ * declares `playwright`, and an Add MCP server preview answers with the diff the daemon would make.
+ */
+const HARNESS_MCP_PROJECT_FILE = '/work/ferretry/.mcp.json';
+const harnessInfoAnswer = (method: string, url: URL, body: string): unknown => {
+  const path = url.pathname;
+  if (method === 'GET' && path === '/v1/worktrees')
+    return {
+      worktrees: [
+        {
+          path: '/work/ferretry',
+          branch: 'feat/session-workspace',
+          repositoryRoot: '/work/ferretry',
+          commonDirectory: '/work/ferretry/.git',
+          relativeCwd: '',
+          createdAt: '2026-07-31T09:00:00.000Z',
+          initialHead: 'a'.repeat(40),
+          branchPreexisted: false,
+          ownerActive: true,
+          sharedWith: [],
+          live: {
+            branch: 'feat/session-workspace',
+            detached: false,
+            undetermined: [],
+            status: {
+              staged: false,
+              unstaged: true,
+              untracked: false,
+              ignored: false,
+              conflicted: false,
+              dirtySubmodule: false,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    };
+  if (method === 'GET' && path === '/v1/warden/verdicts')
+    return [
+      {
+        at: '2026-07-31T11:40:00.000Z',
+        targetSession: HARNESS_WORKSPACE_SESSION,
+        teammate: 'hadi',
+        anomalyKind: 'unattended_question',
+        verdict: 'nudged',
+        reason: 'It asked which account to use and nobody had answered for 20 minutes.',
+        reportPath: 'warden/reports/harness-workspace-1.md',
+      },
+    ];
+  if (method === 'GET' && path === '/v1/analytics') {
+    const measure = (value: number | null) => ({ value, known: value === null ? 0 : 12, total: 12 });
+    return {
+      ...ANALYTICS,
+      query: 'sum {id="harness-workspace"}',
+      results: [
+        {
+          labels: {},
+          sessions: 1,
+          rates: { stall: 0, failure: 0, completion: 100 },
+          tokens: measure(1_482_300),
+          inputTokens: measure(1_204_100),
+          outputTokens: measure(96_200),
+          cachedInputTokens: measure(182_000),
+          cacheWriteInputTokens: measure(24_000),
+          cacheWrite5mInputTokens: measure(24_000),
+          cacheWrite1hInputTokens: measure(0),
+          reasoningTokens: measure(0),
+          equivalentApiCostUsdMicros: measure(4_210_000),
+          turns: measure(12),
+          durationMs: measure(2_640_000),
+          timeToFirstOutputMs: measure(2_100),
+          contextEndPercent: measure(61),
+        },
+      ],
+    };
+  }
+  if (method === 'GET' && path === '/v1/fleet/components') return harnessCatalogAnswer(path);
+  if (method === 'GET' && path === '/v1/fleet/mcp-auth') return { connections: [] };
+  const route = harnessSessionRoute(path);
+  if (route?.sessionId !== HARNESS_WORKSPACE_SESSION) return null;
+  if (method === 'GET' && route.rest === 'mcp')
+    return {
+      project: {
+        path: HARNESS_MCP_PROJECT_FILE,
+        etag: 'b'.repeat(64),
+        servers: [{ name: 'playwright', transport: 'command' }],
+      },
+    };
+  const request = JSON.parse(body) as { name?: string };
+  const name = request.name ?? 'server';
+  if (method === 'POST' && route.rest === 'mcp/project/preview')
+    return {
+      scope: 'project',
+      path: HARNESS_MCP_PROJECT_FILE,
+      etag: 'b'.repeat(64),
+      replaces: false,
+      diff: [
+        { kind: 'context', text: '{' },
+        { kind: 'context', text: '  "mcpServers": {' },
+        { kind: 'context', text: '    "playwright": {' },
+        { kind: 'context', text: '…' },
+        { kind: 'remove', text: '    }' },
+        { kind: 'add', text: '    },' },
+        { kind: 'add', text: `    "${name}": {` },
+        { kind: 'add', text: '      "command": "npx",' },
+        { kind: 'add', text: '      "args": ["-y", "@sentry/mcp-server"],' },
+        { kind: 'add', text: `      "env": { "SENTRY_TOKEN": "${'$'}{SENTRY_TOKEN}" }` },
+        { kind: 'add', text: '    }' },
+        { kind: 'context', text: '  }' },
+        { kind: 'context', text: '}' },
+      ],
+    };
+  if (method === 'POST' && route.rest === 'mcp/login/preview')
+    return { scope: 'login', runtime: 'claude-default', profile: 'Default', replaces: false, ferrets: 3 };
+  if (method === 'POST' && route.rest === 'mcp/project')
+    return { scope: 'project', name, path: HARNESS_MCP_PROJECT_FILE, etag: 'c'.repeat(64) };
+  if (method === 'POST' && route.rest === 'mcp/login')
+    return { scope: 'login', name, runtime: 'claude-default', profile: 'Default' };
+  return null;
+};
+/**
  * A BRAND-NEW SESSION nobody has asked anything yet: launched, on turn zero, its harness sitting at
  * its prompt. `#session-new` renders it; `?harness=codex` swaps the runtime. The pane each harness
  * paints at an idle prompt carries no status line, which is what makes the page read it as ready.
@@ -2669,6 +2833,65 @@ const HARNESS_IDLE_PANES: Readonly<Record<'claude' | 'codex', string>> = {
   ].join('\n'),
 };
 
+/**
+ * The runtime-model catalog each harness's account advertises for the new session, so the composer's model
+ * and reasoning pickers open onto real choices — descriptions included — rather than a catalog failure.
+ */
+const NEW_SESSION_RUNTIME_MODELS: Readonly<Record<'claude' | 'codex', unknown>> = {
+  claude: {
+    harness: 'claude',
+    source: 'wrapper-inventory',
+    choices: [
+      {
+        value: 'claude-opus-5[1m]',
+        label: 'Opus 5 (1M context)',
+        description: 'The deepest model, with the long context window.',
+        isDefault: true,
+        reasoningEfforts: [],
+      },
+      {
+        value: 'claude-opus-5',
+        label: 'Opus 5',
+        description: 'The deepest model this account advertises.',
+        reasoningEfforts: [],
+      },
+      {
+        value: 'claude-sonnet-5',
+        label: 'Sonnet 5',
+        description: 'Fast and capable for everyday work.',
+        reasoningEfforts: [],
+      },
+      { value: 'claude-haiku-5', label: 'Haiku 5', reasoningEfforts: [] },
+    ],
+  },
+  codex: {
+    harness: 'codex',
+    source: 'codex-app-server',
+    choices: [
+      {
+        value: 'gpt-5.6-codex',
+        label: 'GPT-5.6 Codex',
+        description: 'Tuned for long agentic coding runs.',
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        reasoningEfforts: [
+          { value: 'low', description: 'Fast responses with lighter reasoning.' },
+          { value: 'medium', description: 'Balances speed and reasoning depth.' },
+          { value: 'high', description: 'Greater reasoning depth for complex problems.' },
+          { value: 'xhigh', description: 'Extra high reasoning depth for the hardest problems.' },
+        ],
+      },
+      {
+        value: 'gpt-5.6',
+        label: 'GPT-5.6',
+        description: 'The general model.',
+        defaultReasoningEffort: 'medium',
+        reasoningEfforts: [{ value: 'medium' }, { value: 'high' }],
+      },
+    ],
+  },
+};
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
@@ -2695,6 +2918,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
           : HARNESS_LIVE_PANE,
       { headers: { 'content-type': 'text/plain; charset=utf-8' } },
     );
+  if (method === 'GET' && sessionRoute?.sessionId === NEW_SESSION_ID && sessionRoute.rest === 'runtime-models')
+    return harnessJson(NEW_SESSION_RUNTIME_MODELS[NEW_SESSION_HARNESS]);
   // An attachment upload answers with the daemon's own view of the file it now holds.
   if (method === 'POST' && sessionRoute?.rest === 'attachments') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };
@@ -2724,7 +2949,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname.includes('/fs')) {
     const path = url.searchParams.get('path') ?? '';
     if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
-    if (!url.pathname.endsWith('/fs/file')) return harnessJson(HARNESS_FS_LISTINGS[path] ?? { entries: [] });
+    if (!url.pathname.endsWith('/fs/file'))
+      return harnessJson({ root: '/work/ferretry', path, ...(HARNESS_FS_LISTINGS[path] ?? { entries: [] }) });
     if (url.searchParams.get('format') === 'base64') return harnessJson(HARNESS_FS_PREVIEWS[path] ?? { path });
     const driven = HARNESS_DRIVEN_READS[path];
     if (driven !== undefined) {
@@ -2747,6 +2973,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // purpose: this page keeps no store, so inventing a receipt for one would show
   // a saved secret that nothing holds. Anything else still leaves, where the
   // driver's abort of non-loopback traffic remains the real guarantee.
+  // Info and Actions on the workspace session: its worktree, the Warden's verdicts, its analytics and
+  // the session MCP routes (Info › Folder › MCP and Actions › Add MCP server), all in the page.
+  const infoAnswer = harnessInfoAnswer(method, url, String(init?.body ?? '{}'));
+  if (infoAnswer !== null) return harnessJson(infoAnswer);
   const read = method === 'GET' ? HARNESS_DAEMON_READS[url.pathname] : undefined;
   if (read !== undefined) return harnessJson(read);
   return await harnessFetch(input, init);
@@ -4894,35 +5124,21 @@ function Shell() {
       ),
     },
     {
-      label: 'Warden attention',
+      label: 'Warden page',
       render: () => (
-        <WardenAttention
-          connection={daemon}
-          now={HARNESS_NOW}
-          state={{
-            status: 'ready',
-            view: {
-              lastSweepAt: '2026-07-31T11:57:00.000Z',
-              items: [
-                {
-                  id: 'A3',
-                  sessionId: 'sess-1',
-                  teammate: 'ms-98',
-                  sessionStatus: 'awaiting_user',
-                  subject: 'Approve this browser pairing request',
-                  why: 'The device needs permission before it can read this daemon’s session ledger.',
-                  context: 'The pairing link identifies this daemon at runtime; its credential is never bundled.',
-                  waitingSince: '2026-07-31T11:30:00.000Z',
-                  judgement: { state: 'pending', reportPath: 'warden/2026-07-31T11-58.md' },
-                  recommendation: { action: 'nudge', reason: 'Ask the session to report its exact blocker.' },
-                },
-              ],
-            },
-          }}
-          onOpenSession={() => {}}
-          onOpenReport={() => {}}
-          onRunAction={() => {}}
-        />
+        <div data-harness="warden-overview">
+          <WardenOverview
+            connection={daemon}
+            now={WARDEN_FIXTURE_NOW}
+            status={{ status: 'ready', view: WARDEN_FIXTURE_STATUS }}
+            attention={{ status: 'ready', view: WARDEN_FIXTURE_ATTENTION }}
+            sessions={WORKSPACE_FLEET}
+            settingsHref="#warden"
+            onSweep={() => {}}
+            onInvestigate={() => {}}
+            onOpenReport={() => {}}
+          />
+        </div>
       ),
     },
     {
@@ -5449,15 +5665,7 @@ function Shell() {
     },
     {
       label: 'Warden configuration',
-      render: () => (
-        <WardenConfigCard
-          connection={daemon}
-          view={WARDEN_CONFIG}
-          failover={WARDEN.failover}
-          availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
-          onSave={() => {}}
-        />
-      ),
+      render: () => <HarnessWardenConfig />,
     },
     {
       label: 'Analytics cost chart',
@@ -6823,17 +7031,21 @@ const WORKSPACE_SESSION = {
     label: 'Assemble the session workspace',
     model: 'claude-opus-5',
     modelHint: 'opus-5',
-    agent: 'claude',
+    agent: 'claude-default',
     harness: 'claude',
     mode: 'auto',
     cwd: '/work/ferretry',
+    createdAt: '2026-07-31T09:00:00.000Z',
     updatedAt: '2026-07-31T10:00:00.000Z',
   },
   state: {
     id: 'harness-workspace',
     status: 'running',
     turn: 12,
+    startedAt: '2026-07-31T09:00:05.000Z',
     lastActivityAt: '2026-07-31T10:00:00.000Z',
+    observedModel: 'claude-opus-5-20260915',
+    observedReasoningEffort: 'high',
     contextPercent: 61,
     activity: 'Editing session-chat-page.tsx',
   },
@@ -7226,6 +7438,12 @@ const WORKSPACE_CHAT_WIDTH: ChatWidthPreference = (() => {
   return asked === 'balanced' || asked === 'full' ? asked : 'readable';
 })();
 
+/** `?info` opens Info on Overview, `?info=usage` on that tab — the frames Info's screenshots need. */
+const WORKSPACE_INFO: InfoTab | undefined = (() => {
+  const asked = new URLSearchParams(window.location.search).get('info');
+  if (asked === null) return undefined;
+  return (INFO_TABS as readonly string[]).includes(asked) ? (asked as InfoTab) : 'overview';
+})();
 /**
  * The account usage the composer reads, from the same passive feed the app polls: the session
  * document carries none. `isHidden` pinned true, so one read and no 60s poll behind a screenshot.
@@ -7248,7 +7466,7 @@ const harnessUsage = (accounts: readonly { readonly agent: string; readonly five
     } satisfies DaemonUsagePort,
     { isHidden: () => true },
   );
-const WORKSPACE_USAGE = harnessUsage([{ agent: 'claude', five: 23, week: 41 }]);
+const WORKSPACE_USAGE = harnessUsage([{ agent: 'claude-default', five: 23, week: 41 }]);
 
 function SessionWorkspaceHarness() {
   useAppViewport();
@@ -7303,6 +7521,7 @@ function SessionWorkspaceHarness() {
           deck={WORKSPACE_TERMINAL_DECK}
           browser={HARNESS_WORKSPACE_BROWSER_DEPENDENCIES}
           workspaceLayouts={WORKSPACE_LAYOUTS}
+          {...(WORKSPACE_INFO === undefined ? {} : { initialInfo: WORKSPACE_INFO })}
           context={{
             attention: WORKSPACE_ATTENTION,
             createFleetClient: harnessDaemonClient,

@@ -1,10 +1,10 @@
 /**
  * THE SESSION PAGE BODY: the agent's Chat and Console, the workspace's terminals, browsers and files,
- * and the "This folder" context — laid out for the screen it is on.
+ * and Info about the ferret — laid out for the screen it is on.
  *
- *   desktop       the split tree (`WorkspaceView`) beside a resizable context rail
- *   tablet-split  the split tree, with the context as a bottom sheet behind ◧ in the session bar
- *   phone         one tab at a time (`PhoneWorkspace`), the same sheet behind ◧
+ *   desktop       the split tree (`WorkspaceView`) beside Info, a resizable right panel when it is open
+ *   tablet-split  the split tree, with Info as a bottom sheet (half or full height)
+ *   phone         one tab at a time (`PhoneWorkspace`), Info in the same sheet
  *
  * WHAT THIS FILE OWNS is the mapping from a tab to the surface that already exists for it; it builds
  * no surface of its own. Chat is the page's own transcript and composer, handed in untouched. Console
@@ -16,7 +16,7 @@
  */
 
 import type { BrowserPageSummary, SessionView } from '@ferretry/protocol';
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import type { FilesMarkdownContext } from '../../components/files-views.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
@@ -45,12 +45,9 @@ import { remoteBrowserPage } from '../browser/remote-browser-chrome.tsx';
 import { rememberBrowserEngine } from '../browser/unified-browser-model.ts';
 import { UnifiedBrowserSurface, type UnifiedBrowserDependencies } from '../browser/unified-browser-surface.tsx';
 import { browserPageForKey, type SessionBrowser } from '../browser/use-session-browser.ts';
-import { ContextRail } from '../context-rail/context-rail.tsx';
-import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
-import type { ContextRailTab } from '../context-rail/context-rail-model.ts';
 import { AgentControlMarker } from './agent-control-marker.tsx';
 import { ConsoleSurface, type ConsoleTyper } from './console-surface.tsx';
-import { ContextSheet, ContextSheetButton } from './phone/context-sheet.tsx';
+import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { PhoneWorkspace } from './phone/phone-workspace.tsx';
 import type { PhoneTab, WorkspaceFormFactor } from './phone/phone-tab.ts';
 import { RailDivider } from './split-divider.tsx';
@@ -60,54 +57,42 @@ import type { SurfaceDriving } from './use-surface-driving.ts';
 import type { WorkspaceNewTabKind } from './workspace-tab-strip.tsx';
 import { WorkspaceView } from './workspace-view.tsx';
 
-/** The context rail's data, as the page binds it; the shown sub-tab is this file's to keep. */
-export type SessionContextRailProps = Omit<ContextRailBodyProps, 'tab' | 'onTabChange'>;
-
-/** Where the "This folder" context stands: which sub-tab, and whether it is out. */
-export interface SessionContextPlacement {
-  readonly tab: ContextRailTab;
-  readonly setTab: (tab: ContextRailTab) => void;
-  /** Desktop: the rail is folded to its 40px strip. */
-  readonly railCollapsed: boolean;
-  readonly setRailCollapsed: (collapsed: boolean) => void;
-  /** Phone and tablet: the bottom sheet is open. */
-  readonly sheetOpen: boolean;
-  readonly setSheetOpen: (open: boolean) => void;
-  /** Brings `tab` into view wherever the context lives on this screen. */
-  readonly reveal: (tab: ContextRailTab) => void;
+/**
+ * Info, as the page binds it: whether it is open, the phone sheet's height, and the panel itself. The
+ * frame is this file's — a resizable right panel on a desktop, a half/full bottom sheet elsewhere — and
+ * the content is the page's, so the two can never disagree about what Info shows.
+ */
+export interface SessionInfoSlot {
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly sheetSize: 'half' | 'full';
+  /** The panel, told whether it is drawn as a desktop panel or in a sheet. */
+  readonly render: (presentation: 'panel' | 'sheet', titleId: string) => ReactNode;
 }
 
-/** One placement per page, so a `/skill` chip and the ◧ button move the same context. */
-export function useContextPlacement(formFactor: WorkspaceFormFactor): SessionContextPlacement {
-  const [tab, setTab] = useState<ContextRailTab>('signals');
-  const [railCollapsed, setRailCollapsed] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
-  const reveal = useCallback(
-    (next: ContextRailTab): void => {
-      setTab(next);
-      if (formFactor === 'desktop') setRailCollapsed(false);
-      else setSheetOpen(true);
-    },
-    [formFactor],
-  );
-  return { tab, setTab, railCollapsed, setRailCollapsed, sheetOpen, setSheetOpen, reveal };
-}
+/** The narrowest Info panel: six tabs and a label column beside a value. */
+const INFO_MIN_WIDTH = 360;
+
+/** The sheet's two heights: half the screen, or all of it but a strip to see the page is still there. */
+const INFO_SHEET_HEIGHT: Readonly<Record<SessionInfoSlot['sheetSize'], string>> = {
+  half: 'min(56dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))',
+  full: 'calc(var(--app-h, 100dvh) - 28px)',
+};
 
 export interface SessionWorkspaceProps {
   readonly connection: DaemonConnection;
   readonly session: SessionView;
   readonly workspace: SessionWorkspaceController;
   readonly formFactor: WorkspaceFormFactor;
-  /** The session bar. `contextButton` is the ◧ that opens the context sheet, or null beside a rail. */
-  readonly renderHeader: (contextButton: ReactNode) => ReactNode;
+  /** The session bar. */
+  readonly renderHeader: () => ReactNode;
   /** The page's transcript and composer, rendered as they are. */
   readonly chat: ReactNode;
   /** Proof and navigation for Markdown a file view renders: the transcript's own surface. */
   readonly references: FilesMarkdownContext;
   readonly driving: SurfaceDriving;
-  readonly context: SessionContextPlacement;
-  /** The rail's data. Absent: this host has no context to show, so neither rail nor ◧ appears. */
-  readonly rail?: SessionContextRailProps;
+  /** Info. Absent: this host has none to show. */
+  readonly info?: SessionInfoSlot;
   readonly rails: WorkspaceRailPreferenceStore;
   /** The co-controlled terminals. Absent: terminal tabs say so, and ＋ offers none. */
   readonly deck?: TerminalDeckDependencies;
@@ -162,8 +147,7 @@ export function SessionWorkspace({
   chat,
   references,
   driving,
-  context,
-  rail,
+  info,
   rails,
   deck,
   readSnapshot,
@@ -357,16 +341,19 @@ export function SessionWorkspace({
     );
 
   const sheet =
-    rail === undefined || formFactor === 'desktop' ? null : (
-      <ContextSheet
-        onClose={() => context.setSheetOpen(false)}
-        open={context.sheetOpen}
-        renderBody={() => <ContextRailBody {...rail} onTabChange={context.setTab} tab={context.tab} />}
-      />
-    );
-  const sheetButton =
-    rail === undefined || formFactor === 'desktop' ? null : (
-      <ContextSheetButton onOpen={() => context.setSheetOpen(true)} open={context.sheetOpen} />
+    info === undefined || formFactor === 'desktop' ? null : (
+      <BottomSheet
+        closeLabel="Close Info"
+        height={INFO_SHEET_HEIGHT[info.sheetSize]}
+        id={`${titleId}-info`}
+        labelledBy={`${titleId}-info-title`}
+        maxHeight="calc(var(--app-h, 100dvh) - 28px)"
+        onClose={info.onClose}
+        open={info.open}
+        panelClassName="bg-surface"
+      >
+        {info.open ? info.render('sheet', `${titleId}-info-title`) : null}
+      </BottomSheet>
     );
 
   if (formFactor === 'phone') {
@@ -385,7 +372,7 @@ export function SessionWorkspace({
           activeId={focusedWorkspaceTab(layout)}
           header={
             <>
-              {renderHeader(sheetButton)}
+              {renderHeader()}
               {noticeLine}
             </>
           }
@@ -428,17 +415,16 @@ export function SessionWorkspace({
           })}
     />
   );
-  const railWidth = railPreview ?? railWidths.right;
+  // Info needs room for its six tabs: it never draws narrower than INFO_MIN_WIDTH, whatever the rail was.
+  const railWidth = Math.max(railPreview ?? railWidths.right, INFO_MIN_WIDTH);
   return (
     <div className="flex h-full min-h-0 min-w-0" data-session-workspace={formFactor}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {renderHeader(sheetButton)}
+        {renderHeader()}
         {noticeLine}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{view}</div>
       </div>
-      {rail === undefined || formFactor !== 'desktop' ? null : context.railCollapsed ? (
-        <ContextRail {...rail} collapsed onCollapsedChange={context.setRailCollapsed} />
-      ) : (
+      {info === undefined || formFactor !== 'desktop' || !info.open ? null : (
         <>
           <RailDivider
             onCommit={width => {
@@ -449,19 +435,14 @@ export function SessionWorkspace({
             side="right"
             width={railWidth}
           />
-          <div
-            className="flex min-h-0 shrink-0 flex-col"
-            data-context-rail-frame=""
+          <aside
+            aria-labelledby={`${titleId}-info-title`}
+            className="flex min-h-0 shrink-0 flex-col border-l border-border-soft bg-surface"
+            data-info-frame=""
             style={{ width: `${railWidth}px` }}
           >
-            <ContextRail
-              {...rail}
-              collapsed={false}
-              onCollapsedChange={context.setRailCollapsed}
-              onTabChange={context.setTab}
-              tab={context.tab}
-            />
-          </div>
+            {info.render('panel', `${titleId}-info-title`)}
+          </aside>
         </>
       )}
       {sheet}
