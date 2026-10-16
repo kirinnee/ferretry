@@ -2390,7 +2390,7 @@ try {
           await openMachineTab(unreachableMachine);
           const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
           await openDaemonPanel(unavailableWardenFrame, 'warden');
-          await unavailableWardenFrame.getByLabel('Warden status unavailable').waitFor({ state: 'visible' });
+          await unavailableWardenFrame.getByLabel('Warden settings unavailable').waitFor({ state: 'visible' });
           // A FAILURE STATE IS A LAYOUT, not an absence of one. These two frames explain why a panel
           // could not be read, and the sentences that do the explaining are the longest unbroken text
           // in Settings — an unwrapped URL or daemon id in one of them widens the page exactly as a
@@ -2909,13 +2909,9 @@ try {
           });
 
           await capturePairingFailures(page, viewport.name);
-          const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
-          await captureElement(
-            page,
-            page.locator('[aria-labelledby="warden-attention-heading"]'),
-            wardenAttentionTarget,
-          );
-          process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
+          const wardenOverviewTarget = join(outDir, `warden-overview-${viewport.name}.png`);
+          await captureElement(page, page.locator('[data-harness="warden-overview"]'), wardenOverviewTarget);
+          process.stdout.write(`📸 Warden page -> ${wardenOverviewTarget}\n`);
           const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
           await captureElement(page, page.locator('[data-harness="warden-strip"]'), wardenStripTarget);
           process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
@@ -3211,7 +3207,7 @@ try {
 
           // THE SESSION BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves the bar's share of
           // the viewport; this tighter image makes its spacing legible. It is ONE row now — the agent's
-          // name, project and status, the lifecycle buttons and ⋯ — and the height is printed so a
+          // name, project and status, the lifecycle buttons, ⓘ Info and Actions ▾ — and the height is printed so a
           // regression back to two rows of chrome is a number, not an impression.
           const sessionBar = page.locator('[data-session-bar]');
           const sessionBarTarget = join(outDir, `session-bar-${viewport.name}.png`);
@@ -3266,12 +3262,11 @@ try {
             fail(`the composer sits below the viewport at ${viewport.name}`);
           }
 
-          // THEN the Console — the agent's own pane — shown through the page's own ⋯ › Console, the
+          // THEN the Console — the agent's own pane — shown through the agent pane's own Console tab, the
           // control a reader clicks. It resolves entirely from the harness snapshot reader, so the
           // capture is the agent pane's second tab rather than a network error.
           const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
-          await page.locator('[data-session-more]').click();
-          await page.getByRole('menuitem', { name: 'Console', exact: true }).click();
+          await page.getByRole('tab', { name: 'Console' }).first().click();
           await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
           await page.screenshot({ path: workspacePaneTarget });
           process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);

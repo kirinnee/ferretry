@@ -1,316 +1,114 @@
 /**
- * Warden account failover editor, ported from kteam's WardenConfigCard.
+ * Settings › Warden: the form, its Save, and the daemon's answer.
  *
- * The old UI read an ambient API singleton.  This version accepts a paired
- * connection and creates a client only for that connection.  Its local draft
- * is stamped with `daemonId`, so changing paired daemons can never briefly
- * render or save the previous daemon's account order.
+ * The loader takes ONE paired connection and makes a client only for it. Its draft is stamped with the
+ * daemon id, so switching paired daemons can never briefly render — or save — the previous daemon's
+ * settings, and a late answer from the daemon just left is dropped.
+ *
+ * A SAVE IS THE OWNER'S OWN ACT. The PATCH carries only what changed, and it is in effect at once. The
+ * daemon may still answer with `warnings` — that a loosening change was noted, that an account is
+ * unknown — and those are shown verbatim, because the daemon is the one that knows.
  */
 
 import type {
   IFyApiClient,
+  SpeedupsView,
   WardenAccount,
+  WardenConfig,
   WardenConfigPatch,
   WardenConfigView,
-  WardenFailoverPolicy,
-  WardenFailoverStatus,
 } from '@ferretry/protocol';
-import { ArrowDown, ArrowUp, Plus, ShieldCheck, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { useDaemonClient } from '../../lib/store.tsx';
-import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
+import { readSpeedups } from '../speedups/speedups-api.ts';
+import { WardenSettingsForm } from './warden-settings-form.tsx';
+import {
+  hasWardenFormErrors,
+  type JevKeyStatus,
+  wardenConfigPatchFrom,
+  wardenFormErrors,
+} from './warden-settings-model.ts';
 
-const POLICY_OPTIONS: ReadonlyArray<{
-  readonly id: WardenFailoverPolicy;
-  readonly label: string;
-  readonly description: string;
-}> = [
-  { id: 'fallback', label: 'Fallback', description: 'Always prefer the first healthy account, in order.' },
-  { id: 'round_robin', label: 'Round-robin', description: 'Rotate spawns across healthy accounts.' },
-];
-
-export interface WardenConfigDraft {
-  readonly enabled: boolean;
-  readonly accounts: readonly WardenAccount[];
-  readonly policy: WardenFailoverPolicy;
-  readonly failureThreshold: number;
-  readonly cooldownMinutes: number;
-}
-
-export const editableWardenConfig = (view: WardenConfigView): WardenConfigDraft => ({
-  enabled: view.config.enabled,
-  accounts: view.accounts.map(account => ({ ...account })),
-  policy: view.config.failover.policy,
-  failureThreshold: view.config.failover.failureThreshold,
-  cooldownMinutes: view.config.failover.cooldownMinutes,
-});
-
-export const wardenConfigPatch = (draft: WardenConfigDraft): WardenConfigPatch => ({
-  enabled: draft.enabled,
-  accounts: draft.accounts.map(account => ({ ...account })),
-  failover: {
-    policy: draft.policy,
-    failureThreshold: Math.max(1, Math.trunc(draft.failureThreshold) || 1),
-    cooldownMinutes: Math.max(1, Math.trunc(draft.cooldownMinutes) || 1),
-  },
-});
-
-export const wardenAccountHealth = (
-  account: WardenAccount,
-  failover: WardenFailoverStatus | undefined,
-): { readonly label: string; readonly tone: 'ok' | 'warn' | 'muted' } => {
-  const live = failover?.accounts.find(candidate => candidate.agent === account.agent);
-  if (!live) return { label: 'health unknown', tone: 'muted' };
-  if (live.eligible) {
-    const quota = live.quota;
-    const detail =
-      quota?.fiveHourPercent !== undefined || quota?.weeklyPercent !== undefined
-        ? ` · 5h ${quota.fiveHourPercent ?? '—'}% wk ${quota.weeklyPercent ?? '—'}%`
-        : '';
-    return { label: `healthy${detail}`, tone: 'ok' };
-  }
-  return { label: live.reason ?? 'ineligible', tone: 'warn' };
+/** What the Speed-ups read says about the Jev key. A read that failed is `unknown`, never "missing". */
+export const jevKeyStatus = (view: SpeedupsView | null): JevKeyStatus => {
+  const jev = view?.providers.find(provider => provider.provider === 'jev');
+  if (view === null || jev === undefined) return { state: 'unknown' };
+  const keyUrl = { keyUrl: jev.keyUrl };
+  if (view.vault === 'damaged') return { state: 'unknown', ...keyUrl };
+  return { state: jev.set ? 'set' : 'missing', ...keyUrl };
 };
 
 export interface WardenConfigCardProps {
-  readonly connection: DaemonConnection;
   readonly view: WardenConfigView;
-  readonly failover?: WardenFailoverStatus;
-  /** The host's daemon-scoped account catalogue. The protocol does not expose
-   * wrapper discovery yet, so an empty catalogue simply disables adding. */
-  readonly availableAccounts?: readonly WardenAccount[];
+  readonly draft: WardenConfig;
+  readonly onChange: (next: WardenConfig) => void;
+  readonly jevKey: JevKeyStatus;
+  readonly loginOptions?: readonly WardenAccount[];
+  readonly speedupsHref?: string;
+  readonly onNavigate?: (to: string) => void;
   readonly saving?: boolean;
   readonly error?: string | null;
   readonly saved?: boolean;
-  readonly onSave: (patch: WardenConfigPatch) => void | Promise<void>;
+  readonly onSave: (patch: WardenConfigPatch) => void;
 }
 
 export function WardenConfigCard({
-  connection,
   view,
-  failover,
-  availableAccounts = [],
+  draft,
+  onChange,
+  jevKey,
+  loginOptions = [],
+  speedupsHref,
+  onNavigate,
   saving = false,
   error = null,
   saved = false,
   onSave,
 }: WardenConfigCardProps) {
-  const [draftState, setDraftState] = useState(() => ({
-    daemonId: connection.daemonId,
-    draft: editableWardenConfig(view),
-  }));
-  const [picker, setPicker] = useState('');
-  const [dirty, setDirty] = useState(false);
-  const draft = draftState.daemonId === connection.daemonId ? draftState.draft : editableWardenConfig(view);
-
-  useEffect(() => {
-    setDraftState({ daemonId: connection.daemonId, draft: editableWardenConfig(view) });
-    setPicker('');
-    setDirty(false);
-  }, [connection.daemonId, view]);
-
-  const pickable = useMemo(
-    () => availableAccounts.filter(candidate => !draft.accounts.some(account => account.agent === candidate.agent)),
-    [availableAccounts, draft.accounts],
-  );
-  const update = (next: WardenConfigDraft) => {
-    setDraftState({ daemonId: connection.daemonId, draft: next });
-    setDirty(true);
-  };
-  const move = (index: number, delta: -1 | 1) => {
-    const accounts = [...draft.accounts];
-    const target = index + delta;
-    if (target < 0 || target >= accounts.length) return;
-    const [account] = accounts.splice(index, 1);
-    if (!account) return;
-    accounts.splice(target, 0, account);
-    update({ ...draft, accounts });
-  };
-
+  const errors = wardenFormErrors(draft);
+  const patch = wardenConfigPatchFrom(view.config, draft);
+  const dirty = Object.keys(patch).length > 0;
   return (
-    <section
-      aria-labelledby="warden-config-heading"
-      className="kt-panel flex flex-col gap-3 p-panel"
-      data-testid="warden-config-card"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 id="warden-config-heading" className="m-0 flex items-center gap-1.5 text-row font-semibold text-fg">
-          <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
-          Warden accounts &amp; failover
-        </h2>
-        {failover?.exhaustedSince && (
-          <span className="rounded-control bg-warn/15 px-2 py-0.5 text-meta font-medium text-warn">
-            all accounts unhealthy
-          </span>
-        )}
-      </div>
-      <p className="m-0 text-cell leading-base text-muted">
-        Ordered warden account list. Changes apply live — no daemon restart. Under Fallback the first healthy account
-        wins.
-      </p>
-
-      <fieldset aria-label="Failover policy" className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-        {POLICY_OPTIONS.map(option => {
-          const checked = draft.policy === option.id;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={checked}
-              onClick={() => update({ ...draft, policy: option.id })}
-              className={cn(
-                'flex min-h-[44px] min-w-0 flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
-                checked
-                  ? 'border-accent bg-accent-soft text-accent'
-                  : 'border-border bg-surface-2 text-fg hover:border-accent',
-              )}
-            >
-              <span className="text-ui font-semibold">{option.label}</span>
-              <span className="text-meta leading-tight text-muted">{option.description}</span>
-            </button>
-          );
-        })}
-      </fieldset>
-
-      <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Warden accounts">
-        {draft.accounts.map((account, index) => {
-          const health = wardenAccountHealth(account, failover);
-          return (
-            <li
-              key={account.agent}
-              className="flex flex-wrap items-center gap-2 rounded-control border border-border-strong bg-surface-2 px-3 py-2"
-            >
-              <span className="mono text-ui font-medium text-fg">
-                {index + 1}. {account.agent}
-              </span>
-              {account.model && <span className="mono text-meta text-muted">model={account.model}</span>}
-              {account.agent === failover?.lastSelection?.agent && (
-                <span className="rounded-control bg-accent-soft px-1.5 py-0.5 text-meta font-medium text-accent">
-                  active
-                </span>
-              )}
-              <span
-                className={cn(
-                  'text-meta',
-                  health.tone === 'ok' ? 'text-ok' : health.tone === 'warn' ? 'text-warn' : 'text-faint',
-                )}
-              >
-                {health.label}
-              </span>
-              <span className="ml-auto inline-flex items-center gap-1">
-                <button
-                  type="button"
-                  className="kt-btn kt-btn--sm"
-                  aria-label={`Move ${account.agent} up`}
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                >
-                  <ArrowUp size={14} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="kt-btn kt-btn--sm"
-                  aria-label={`Move ${account.agent} down`}
-                  disabled={index === draft.accounts.length - 1}
-                  onClick={() => move(index, 1)}
-                >
-                  <ArrowDown size={14} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="kt-btn kt-btn--sm"
-                  aria-label={`Remove ${account.agent}`}
-                  disabled={draft.accounts.length <= 1}
-                  onClick={() =>
-                    update({ ...draft, accounts: draft.accounts.filter((_, itemIndex) => itemIndex !== index) })
-                  }
-                >
-                  <X size={14} aria-hidden="true" />
-                </button>
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-ui text-fg">
-          <span className="text-muted">Add account</span>
-          <select
-            aria-label="Add warden account"
-            className="kt-input min-h-[36px] rounded-control border border-border bg-surface-2 px-2 text-ui"
-            value={picker}
-            onChange={event => setPicker(event.target.value)}
-          >
-            <option value="">choose an account…</option>
-            {pickable.map(account => (
-              <option key={account.agent} value={account.agent}>
-                {account.agent}
-              </option>
-            ))}
-          </select>
-        </label>
+    <section aria-label="Warden settings" className="flex min-w-0 flex-col gap-3" data-testid="warden-config-card">
+      <WardenSettingsForm
+        value={draft}
+        onChange={onChange}
+        jevKey={jevKey}
+        errors={errors}
+        loginOptions={loginOptions}
+        {...(speedupsHref === undefined ? {} : { speedupsHref })}
+        {...(onNavigate === undefined ? {} : { onNavigate })}
+      />
+      <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          aria-label="Add selected warden account"
-          className="kt-btn inline-flex items-center gap-1"
-          disabled={!picker}
-          onClick={() => {
-            const account = pickable.find(candidate => candidate.agent === picker);
-            if (!account) return;
-            update({ ...draft, accounts: [...draft.accounts, { ...account }] });
-            setPicker('');
-          }}
-        >
-          <Plus size={14} aria-hidden="true" /> Add
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-cell font-medium text-fg">
-          Failure threshold
-          <input
-            type="number"
-            min={1}
-            aria-label="Failure threshold"
-            className="kt-input w-24 min-h-[36px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-            value={draft.failureThreshold}
-            onChange={event => update({ ...draft, failureThreshold: Number(event.target.value) })}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-cell font-medium text-fg">
-          Cooldown (minutes)
-          <input
-            type="number"
-            min={1}
-            aria-label="Cooldown minutes"
-            className="kt-input w-24 min-h-[36px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-            value={draft.cooldownMinutes}
-            onChange={event => update({ ...draft, cooldownMinutes: Number(event.target.value) })}
-          />
-        </label>
-        <label className="flex min-h-[44px] items-center gap-2 text-ui text-fg">
-          <input
-            type="checkbox"
-            aria-label="Enable LLM escalation"
-            checked={draft.enabled}
-            onChange={event => update({ ...draft, enabled: event.target.checked })}
-          />
-          LLM escalation enabled
-        </label>
-        <button
-          type="button"
-          className="kt-btn ml-auto min-h-[44px]"
+          className="kt-btn min-h-[44px]"
           data-variant="primary"
-          disabled={!dirty || saving || draft.accounts.length === 0}
-          onClick={() => void onSave(wardenConfigPatch(draft))}
+          disabled={!dirty || saving || hasWardenFormErrors(errors)}
+          onClick={() => onSave(patch)}
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
+        {dirty && !saving && (
+          <button
+            type="button"
+            className="kt-btn min-h-[44px]"
+            data-variant="ghost"
+            onClick={() => onChange(view.config)}
+          >
+            Discard changes
+          </button>
+        )}
+        {saved && !dirty && error === null && (
+          <span role="status" className="text-meta text-ok">
+            Saved — in effect now.
+          </span>
+        )}
       </div>
-      {error && (
+      {error !== null && (
         <p role="alert" className="m-0 text-ui text-err">
           {error}
         </p>
@@ -320,107 +118,106 @@ export function WardenConfigCard({
           {warning}
         </p>
       ))}
-      {saved && !dirty && !error && (
-        <p role="status" className="m-0 text-meta text-ok">
-          Saved — the next sweep uses this configuration.
-        </p>
-      )}
     </section>
   );
 }
 
-type WardenClient = Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig'>;
+type WardenClient = Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig' | 'request'>;
 export type WardenClientFactory = (connection: DaemonConnection) => Promise<WardenClient>;
 
-/** Live, daemon-bound loader used by the Warden route.  It intentionally owns
- * no module cache: config from daemon A must not be reusable for daemon B. */
+interface Loaded {
+  readonly daemonId: DaemonConnection['daemonId'];
+  readonly client: WardenClient;
+  readonly view: WardenConfigView;
+  readonly draft: WardenConfig;
+  readonly jevKey: JevKeyStatus;
+  readonly loginOptions: readonly WardenAccount[];
+}
+
+const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
+
+/** Live, daemon-bound loader used by Settings. It owns no module cache: daemon A's settings never reach B. */
 export function WardenConfigSurface({
   connection,
   createClient: injectedClient,
   unavailable = 'hide',
+  onNavigate,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: WardenClientFactory;
-  /** Dedicated Warden routes may stay quiet on older daemons; the Settings
-   * frame instead needs an explicit unavailable state to avoid a false empty
-   * configuration. */
+  /** Settings needs an explicit unavailable state, so a failed read never looks like a default policy. */
   readonly unavailable?: 'hide' | 'message';
+  readonly onNavigate?: (to: string) => void;
 }) {
   // The carrier-routed client unless a test or the harness hands one in: a plain-network client
   // reaches no daemon at all, because a paired browser is answered only inside its own session.
   const routedClient = useDaemonClient();
   const createClient = injectedClient ?? routedClient;
-  const [client, setClient] = useState<WardenClient | null>(null);
-  const [loaded, setLoaded] = useState<{
-    readonly daemonId: DaemonConnection['daemonId'];
-    readonly view: WardenConfigView;
-    readonly failover?: WardenFailoverStatus;
-  } | null>(null);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [loadFailure, setLoadFailure] = useState<{
-    readonly daemonId: DaemonConnection['daemonId'];
-    readonly reason: string;
-  } | null>(null);
+  const [loadFailure, setLoadFailure] = useState<DaemonConnection['daemonId'] | null>(null);
 
   useEffect(() => {
     let current = true;
-    setClient(null);
     setLoaded(null);
     setError(null);
     setSaved(false);
     setLoadFailure(null);
     void createClient(connection)
-      .then(async nextClient => {
-        const [view, status] = await Promise.all([
-          nextClient.wardenConfig(),
-          nextClient.wardenStatus().catch(() => null),
+      .then(async client => {
+        const [view, status, speedups] = await Promise.all([
+          client.wardenConfig(),
+          client.wardenStatus().catch(() => null),
+          readSpeedups(client).catch(() => null),
         ]);
         if (!current) return;
-        setClient(nextClient);
-        setLoaded({ daemonId: connection.daemonId, view, ...(status?.failover ? { failover: status.failover } : {}) });
+        setLoaded({
+          daemonId: connection.daemonId,
+          client,
+          view,
+          draft: view.config,
+          jevKey: jevKeyStatus(speedups),
+          loginOptions: (status?.failover?.accounts ?? []).map(account => ({ agent: account.agent })),
+        });
       })
-      .catch(cause => {
-        // The legacy component hid on old daemons rather than rendering a dead editor.
-        if (current)
-          setLoadFailure({
-            daemonId: connection.daemonId,
-            reason: cause instanceof Error ? cause.message : String(cause),
-          });
+      .catch(() => {
+        if (current) setLoadFailure(connection.daemonId);
       });
     return () => {
       current = false;
     };
   }, [connection, createClient]);
 
-  const save = useCallback(
-    async (patch: WardenConfigPatch) => {
-      if (!client || loaded?.daemonId !== connection.daemonId) return;
-      setSaving(true);
-      setError(null);
-      try {
-        const view = await client.updateWardenConfig(patch);
-        const status = await client.wardenStatus().catch(() => null);
-        setLoaded({ daemonId: connection.daemonId, view, ...(status?.failover ? { failover: status.failover } : {}) });
-        setSaved(true);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      } finally {
-        setSaving(false);
-      }
-    },
-    [client, connection.daemonId, loaded?.daemonId],
-  );
+  // The daemon on screen now. A save answered after the reader switched daemon belongs to the one
+  // left, so neither its "Saved" nor its error may appear on this one.
+  const showing = useRef(connection.daemonId);
+  showing.current = connection.daemonId;
+
+  const save = useCallback(async (state: Loaded, patch: WardenConfigPatch) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const view = await state.client.updateWardenConfig(patch);
+      if (showing.current !== state.daemonId) return;
+      setLoaded({ ...state, view, draft: view.config });
+      setSaved(true);
+    } catch (cause) {
+      if (showing.current === state.daemonId) setError(reasonOf(cause));
+    } finally {
+      setSaving(false);
+    }
+  }, []);
 
   if (loaded === null || loaded.daemonId !== connection.daemonId) {
-    if (unavailable === 'message' && loadFailure?.daemonId === connection.daemonId)
+    if (unavailable === 'message' && loadFailure === connection.daemonId)
       return (
-        <section className="kt-panel p-panel" role="status" aria-label="Warden policy unavailable">
-          <h3 className="m-0 text-row font-semibold text-fg">Warden policy unavailable</h3>
+        <section className="kt-panel p-panel" role="status" aria-label="Warden settings unavailable">
+          <h3 className="m-0 text-row font-semibold text-fg">Warden settings unavailable</h3>
           <p className="mb-0 mt-1 text-cell leading-base text-muted">
-            This daemon did not provide an editable Warden policy. No controls are shown because a change cannot be
-            confirmed here.
+            This daemon did not provide its Warden settings. No controls are shown because a change cannot be confirmed
+            here.
           </p>
         </section>
       );
@@ -428,13 +225,20 @@ export function WardenConfigSurface({
   }
   return (
     <WardenConfigCard
-      connection={connection}
       view={loaded.view}
-      failover={loaded.failover}
+      draft={loaded.draft}
+      onChange={draft => {
+        setLoaded({ ...loaded, draft });
+        setSaved(false);
+      }}
+      jevKey={loaded.jevKey}
+      loginOptions={loaded.loginOptions}
+      speedupsHref={`${daemonSettingsPath(connection.daemonId)}#speedups`}
+      {...(onNavigate === undefined ? {} : { onNavigate })}
       saving={saving}
       error={error}
       saved={saved}
-      onSave={save}
+      onSave={patch => void save(loaded, patch)}
     />
   );
 }

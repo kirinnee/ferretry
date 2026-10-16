@@ -182,9 +182,51 @@ function machineLoosening(before: MachineFileValue, after: MachineFileValue): re
   ];
 }
 
+/** How much a triage may spend, cheapest first: rules never, Jev on a guard, LLM on every flag. */
+const TRIAGE_SPEND: Readonly<Record<WardenConfig['triage'], number>> = { rules: 0, jev: 1, llm: 2 };
+
+/** The Warden spends only when it is on AND its triage is not rules. */
+const triageSpend = (config: WardenConfig): number => (config.enabled ? TRIAGE_SPEND[config.triage] : 0);
+
+const WARDEN_ACT_WORDS: Readonly<Record<keyof WardenConfig['mayActAlone'], string>> = {
+  nudge: 'nudge a ferret',
+  resume: 'resume a ferret',
+  failover: 'move a ferret to another login',
+  stop: 'stop a ferret',
+};
+
 function wardenLoosening(before: WardenConfig, after: WardenConfig): readonly string[] {
   return [
-    ...switchedOn(before.enabled, after.enabled, 'the Warden may now spend on AI investigations'),
+    ...(triageSpend(after) > triageSpend(before)
+      ? [
+          after.triage === 'jev'
+            ? 'the Warden may now spend on Jev decisions and AI investigations'
+            : 'the Warden may now spend on an AI investigation of every flag',
+        ]
+      : []),
+    ...(Object.keys(WARDEN_ACT_WORDS) as (keyof WardenConfig['mayActAlone'])[]).flatMap(act =>
+      switchedOn(
+        before.mayActAlone[act],
+        after.mayActAlone[act],
+        `the Warden may now ${WARDEN_ACT_WORDS[act]} on its own`,
+      ),
+    ),
+    ...raised(before.caps.jevUsdPerDay, after.caps.jevUsdPerDay, 'the daily Jev cap in dollars'),
+    ...raised(
+      before.caps.investigationUsdPerDay,
+      after.caps.investigationUsdPerDay,
+      'the daily investigation cap in dollars',
+    ),
+    ...raised(
+      before.caps.maxInvestigationsPerHour,
+      after.caps.maxInvestigationsPerHour,
+      'the investigations allowed per hour',
+    ),
+    ...lowered(
+      before.guard.usdPerMillionInputTokens,
+      after.guard.usdPerMillionInputTokens,
+      'the Jev price the cap counts with',
+    ),
     ...raised(before.maxAssignedWardens, after.maxAssignedWardens, 'the number of wardens that may run at once'),
     ...lowered(before.intervalMinutes, after.intervalMinutes, 'the minutes between Warden sweeps'),
     ...lowered(before.minSpawnGapMinutes, after.minSpawnGapMinutes, 'the minutes between two Warden investigations'),
@@ -258,7 +300,8 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
   profile: '# A profile: its contents in order; a later entry overrides an earlier one.\ncontents: []\n',
   runtime:
     '# A runtime: one login and one profile, launched under this file name.\ncredential: my-login\nprofile: my-profile\nagent: true\n',
-  warden: '# The Warden. Turning it on lets it spend on AI investigations.\nenabled: false\n',
+  warden:
+    '# The Warden. Triage `rules` shows flags to you and spends nothing; `jev` and `llm` spend, under daily caps.\nenabled: true\ntriage: rules\n',
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
   voice:
     '# Voice. Transcription is on-device; this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',

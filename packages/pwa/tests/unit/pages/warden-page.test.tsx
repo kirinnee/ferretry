@@ -1,18 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import {
-  type WardenConfigurationProps,
-  WardenPage,
-  type WardenPageSlots,
-  type WardenSurfaceProps,
-} from '../../../src/lib/pages/warden-page.tsx';
+import { WardenPage, type WardenSurfaceProps } from '../../../src/lib/pages/warden-page.tsx';
 
 describe('WardenPage', () => {
-  it('should compose the daemon-bound surfaces in outcome-first order', () => {
+  it('should mount the daemon-bound overview inside one labelled scroll region', () => {
     // Arrange
     const connection = daemonConnection({
       daemonId: 'daemon-a',
@@ -20,39 +14,20 @@ describe('WardenPage', () => {
       deviceId: 'device-secret',
     });
     const received: DaemonConnection[] = [];
-    const surface = (name: string): ComponentType<WardenSurfaceProps> =>
-      function Surface({ connection: actual }) {
-        received.push(actual);
-        return <div data-surface={name}>{name}</div>;
-      };
-    const Configuration = ({ connection: actual, id }: WardenConfigurationProps) => {
+    const Overview = ({ connection: actual }: WardenSurfaceProps) => {
       received.push(actual);
-      return (
-        <div id={id} data-surface="configuration">
-          configuration
-        </div>
-      );
-    };
-    const slots: WardenPageSlots = {
-      Attention: surface('attention'),
-      Status: surface('status'),
-      Configuration,
-      Verdicts: surface('verdicts'),
+      return <div data-surface="overview">overview</div>;
     };
 
     // Act
-    const html = renderToStaticMarkup(<WardenPage connection={connection} slots={slots} />);
+    const html = renderToStaticMarkup(<WardenPage connection={connection} slots={{ Overview }} />);
 
     // Assert
-    should(html).containEql('>Warden</h1>');
-    should(html).containEql('class="lucide lucide-shield-check text-accent"');
-    should(html).containEql('Who needs you, then sweeps, accounts, and recent verdicts.');
-    should(html).containEql('id="config"');
-    should(html.indexOf('data-surface="status"')).be.above(html.indexOf('data-surface="attention"'));
-    should(html.indexOf('data-surface="configuration"')).be.above(html.indexOf('data-surface="status"'));
-    should(html.indexOf('data-surface="verdicts"')).be.above(html.indexOf('data-surface="configuration"'));
-    should(received).have.length(4);
-    for (const actual of received) should(actual).equal(connection);
+    should(html).startWith('<main aria-label="Warden"');
+    should(html).containEql('overflow-y-auto');
+    should(html).containEql('data-surface="overview"');
+    should(received).have.length(1);
+    should(received[0]).equal(connection);
     should(html).not.containEql('device-secret');
     should(html).not.containEql('daemon-a');
   });

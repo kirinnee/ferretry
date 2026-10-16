@@ -154,7 +154,7 @@ describe('the warden settings file', () => {
   it('should round-trip a configuration the owner changed, in effect at once even though it loosens', async () => {
     // Arrange
     const { home, store, file } = await settings('warden-config-roundtrip');
-    const configured = { ...defaultWardenConfig, enabled: true, intervalMinutes: 11 };
+    const configured = { ...defaultWardenConfig, triage: 'llm' as const, intervalMinutes: 10 as const };
 
     // Act
     await store.write(configured);
@@ -168,7 +168,7 @@ describe('the warden settings file', () => {
   it('should read the version in effect, not the file: a hand edit that loosens is held', async () => {
     // Arrange
     const { home, store, file } = await settings('warden-config-held');
-    await writeFile(file, 'enabled: true\n', 'utf8');
+    await writeFile(file, 'triage: llm\n', 'utf8');
 
     // Act
     const actual = await store.read();
@@ -181,14 +181,14 @@ describe('the warden settings file', () => {
   it('should keep the last good settings while the file is broken', async () => {
     // Arrange
     const { store, file } = await settings('warden-config-broken');
-    await store.write({ ...defaultWardenConfig, intervalMinutes: 11 });
+    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const });
     await writeFile(file, 'intervalMinutes: [not, a, number\n', 'utf8');
 
     // Act
     const actual = await store.read();
 
     // Assert
-    should(actual).match({ intervalMinutes: 11 });
+    should(actual).match({ intervalMinutes: 10 });
   });
 
   it("should change only the keys that moved, keeping the owner's comments", async () => {
@@ -197,19 +197,19 @@ describe('the warden settings file', () => {
     await writeFile(file, '# how often the Warden looks\nintervalMinutes: 5\n', 'utf8');
 
     // Act
-    await store.write({ ...defaultWardenConfig, intervalMinutes: 11 });
+    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const });
 
     // Assert
     const text = await readFile(file, 'utf8');
     should(text).containEql('# how often the Warden looks');
-    should(text).match(/intervalMinutes: 11/);
-    should(await store.read()).match({ intervalMinutes: 11 });
+    should(text).match(/intervalMinutes: 10/);
+    should(await store.read()).match({ intervalMinutes: 10 });
   });
 
   it('should write nothing when the settings did not change', async () => {
     // Arrange
     const { store, writes, file } = await settings('warden-config-unchanged');
-    const configured = { ...defaultWardenConfig, intervalMinutes: 11 };
+    const configured = { ...defaultWardenConfig, intervalMinutes: 10 as const };
     await store.write(configured);
     const before = await readFile(file, 'utf8');
 

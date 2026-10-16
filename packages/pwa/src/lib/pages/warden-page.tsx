@@ -1,4 +1,3 @@
-import { ShieldCheck } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 import type { DaemonConnection } from '../daemon-connection.ts';
@@ -7,15 +6,9 @@ export interface WardenSurfaceProps {
   readonly connection: DaemonConnection;
 }
 
-export interface WardenConfigurationProps extends WardenSurfaceProps {
-  readonly id: 'config';
-}
-
 export interface WardenPageSlots {
-  readonly Attention: ComponentType<WardenSurfaceProps>;
-  readonly Status: ComponentType<WardenSurfaceProps>;
-  readonly Configuration: ComponentType<WardenConfigurationProps>;
-  readonly Verdicts: ComponentType<WardenSurfaceProps>;
+  /** The whole page body: status line, groups and histories, bound to one daemon. */
+  readonly Overview: ComponentType<WardenSurfaceProps>;
 }
 
 export interface WardenPageProps extends WardenSurfaceProps {
@@ -23,29 +16,19 @@ export interface WardenPageProps extends WardenSurfaceProps {
 }
 
 /**
- * Route-level Warden composition. The concrete surfaces are supplied by the
- * component layer, while this shell owns their outcome-first order and keeps
- * one runtime daemon connection explicit at every boundary.
+ * Route-level Warden composition, inside the Insights frame. The concrete surface is supplied by the
+ * component layer; this shell owns the scroll region and keeps the one daemon connection explicit at
+ * the boundary. Settings live in Settings › Warden, not here.
  */
 export function WardenPage({ connection, slots }: WardenPageProps) {
-  const { Attention, Status, Configuration, Verdicts } = slots;
-
+  const { Overview } = slots;
   return (
-    <div className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-4">
-      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 py-2">
-        <div className="min-w-0">
-          <h1 className="m-0 flex items-center gap-sm font-display text-display font-bold tracking-display">
-            <ShieldCheck size={20} className="text-accent" aria-hidden="true" />
-            Warden
-          </h1>
-          <p className="mt-0.5 text-ui text-muted">Who needs you, then sweeps, accounts, and recent verdicts.</p>
-        </div>
-
-        <Attention connection={connection} />
-        <Status connection={connection} />
-        <Configuration id="config" connection={connection} />
-        <Verdicts connection={connection} />
-      </div>
-    </div>
+    <main
+      aria-label="Warden"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-thin"
+      data-warden-page=""
+    >
+      <Overview connection={connection} />
+    </main>
   );
 }

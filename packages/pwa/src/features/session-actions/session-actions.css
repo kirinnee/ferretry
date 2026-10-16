@@ -1,0 +1,346 @@
+/* ============================================================================
+   Actions ▾ — the session header's DO half: a grouped dropdown, inline confirms, and the small forms
+   its "…" rows open (a popover on a desktop, the app's bottom sheet on a phone). Theme tokens only.
+   ========================================================================== */
+
+.fy-actions-trigger {
+  gap: 4px;
+}
+.fy-actions-trigger--compact {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-color: transparent;
+}
+
+.fy-actions-menu,
+.fy-action-popover {
+  position: fixed;
+  z-index: 35;
+  max-width: calc(100vw - 32px);
+  border: var(--stroke-panel, 1px) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--fg);
+  font-family: var(--font-ui);
+}
+.fy-actions-menu {
+  width: 300px;
+  max-height: min(560px, 70vh);
+  overflow-y: auto;
+  padding: 4px;
+}
+.fy-actions-menu__section + .fy-actions-menu__section {
+  margin-top: 4px;
+  border-top: var(--divider-width, 1px) solid var(--border-soft);
+}
+.fy-actions-menu__group {
+  padding: 7px 10px 2px;
+  color: var(--faint);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.fy-actions-menu__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.fy-actions-menu[data-compact] .fy-actions-menu__row {
+  min-height: 44px;
+}
+.fy-actions-menu__row:hover,
+.fy-actions-menu__row:focus-visible {
+  outline: none;
+  background: var(--nav-sel-bg, var(--accent-soft));
+  color: var(--nav-sel-fg, var(--accent));
+}
+.fy-actions-menu__row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus-color, var(--accent));
+}
+.fy-actions-menu__row[data-danger] {
+  color: var(--err);
+}
+.fy-actions-menu__row[aria-disabled='true'] {
+  color: var(--faint);
+  cursor: not-allowed;
+}
+.fy-actions-menu__row[aria-disabled='true']:hover {
+  background: transparent;
+  color: var(--faint);
+}
+.fy-actions-menu__label {
+  flex: 1;
+  min-width: 0;
+}
+.fy-actions-menu__detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-actions-switch {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 14px;
+  border-radius: 9999px;
+  background: var(--border-strong);
+}
+.fy-actions-switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--surface);
+  content: '';
+}
+.fy-actions-switch[data-on] {
+  background: var(--accent);
+}
+.fy-actions-switch[data-on]::after {
+  left: 14px;
+}
+.fy-actions-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0;
+  padding: 8px 10px;
+  border: var(--stroke) solid var(--err-border);
+  border-radius: var(--radius-control);
+  background: var(--err-bg);
+  font-size: var(--text-sm);
+}
+.fy-actions-confirm__text {
+  margin: 0;
+}
+.fy-actions-confirm__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fy-actions-confirm__buttons > .kt-btn {
+  flex: 1;
+}
+.fy-actions-menu[data-compact] .fy-actions-confirm__buttons > .kt-btn {
+  min-height: 44px;
+}
+
+/* the forms */
+.fy-action-popover {
+  display: flex;
+  flex-direction: column;
+  width: 400px;
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+}
+.fy-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 14px 14px;
+}
+.fy-action-form__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  text-transform: var(--display-transform, none);
+}
+.fy-action-form__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.fy-action-form__field,
+.fy-action-form__fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fy-action-form__label {
+  padding: 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-action-form__help,
+.fy-action-form__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-action-form__error,
+.fy-action-form__failure {
+  margin: 0;
+  color: var(--err);
+  font-size: var(--text-xs);
+}
+.fy-action-form__failure {
+  padding: 6px 8px;
+  border: var(--stroke) solid var(--err-border);
+  border-radius: var(--radius-control);
+  background: var(--err-bg);
+}
+.fy-action-form__ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: var(--stroke) solid var(--ok-border);
+  border-radius: var(--radius-control);
+  background: var(--ok-bg);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.fy-action-form__ok > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ok);
+}
+.fy-action-form__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.fy-action-form__check > input {
+  margin-top: 3px;
+}
+.fy-action-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fy-action-form__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+.fy-choice-cards {
+  display: grid;
+  gap: 6px;
+}
+.fy-choice-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  cursor: pointer;
+}
+.fy-choice-card:has(input:checked) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.fy-choice-card--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.fy-choice-card > input {
+  margin-top: 3px;
+}
+.fy-choice-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-sm);
+}
+.fy-choice-card__text small {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fy-segmented__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fy-segmented__option:has(input:checked) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-diff {
+  overflow: hidden;
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--code-bg, var(--surface-2));
+}
+.fy-diff__file {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: var(--stroke) solid var(--border);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.fy-diff__body {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.fy-diff__line {
+  display: block;
+  padding: 0 8px;
+  white-space: pre;
+}
+.fy-diff__line[data-kind='add'] {
+  background: var(--ok-bg);
+  color: var(--syn-addition, var(--ok));
+}
+.fy-diff__line[data-kind='remove'] {
+  background: var(--err-bg);
+  color: var(--syn-deletion, var(--err));
+}

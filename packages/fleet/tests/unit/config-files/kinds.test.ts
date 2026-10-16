@@ -272,9 +272,30 @@ describe('configLoosening: warden', () => {
   const wardenWith = (changes: Partial<WardenConfig>): WardenConfig => ({ ...DEFAULT_WARDEN_CONFIG, ...changes });
 
   it.each([
-    [{ enabled: true }, ['the Warden may now spend on AI investigations']],
+    [{ triage: 'llm' }, ['the Warden may now spend on an AI investigation of every flag']],
+    [{ triage: 'jev' }, ['the Warden may now spend on Jev decisions and AI investigations']],
+    [
+      { mayActAlone: { ...DEFAULT_WARDEN_CONFIG.mayActAlone, stop: true } },
+      ['the Warden may now stop a ferret on its own'],
+    ],
+    [
+      { caps: { ...DEFAULT_WARDEN_CONFIG.caps, jevUsdPerDay: 3 } },
+      ['the daily Jev cap in dollars goes up from 0.5 to 3'],
+    ],
+    [
+      { caps: { ...DEFAULT_WARDEN_CONFIG.caps, investigationUsdPerDay: 5 } },
+      ['the daily investigation cap in dollars goes up from 2 to 5'],
+    ],
+    [
+      { caps: { ...DEFAULT_WARDEN_CONFIG.caps, maxInvestigationsPerHour: 9 } },
+      ['the investigations allowed per hour goes up from 6 to 9'],
+    ],
+    [
+      { guard: { ...DEFAULT_WARDEN_CONFIG.guard, usdPerMillionInputTokens: 0.5 } },
+      ['the Jev price the cap counts with goes down from 2 to 0.5'],
+    ],
     [{ maxAssignedWardens: 3 }, ['the number of wardens that may run at once goes up from 1 to 3']],
-    [{ intervalMinutes: 1 }, ['the minutes between Warden sweeps goes down from 5 to 1']],
+    [{ intervalMinutes: 1 }, ['the minutes between Warden sweeps goes down from 2 to 1']],
     [{ minSpawnGapMinutes: 0 }, ['the minutes between two Warden investigations goes down from 15 to 0']],
   ] as const)('should hold %j, saying %j', (changes, expected) => {
     // Act
@@ -285,9 +306,10 @@ describe('configLoosening: warden', () => {
   });
 
   it.each([
-    [{ enabled: false }, { enabled: true }],
+    [{ triage: 'rules' }, { triage: 'llm' }],
+    [{ triage: 'jev' }, { triage: 'llm' }],
     [{ maxAssignedWardens: 1 }, { maxAssignedWardens: 3 }],
-    [{ intervalMinutes: 5 }, { intervalMinutes: 1 }],
+    [{ intervalMinutes: 2 }, { intervalMinutes: 1 }],
     [{ minSpawnGapMinutes: 15 }, { minSpawnGapMinutes: 0 }],
   ] as const)('should apply the opposite edit (%j to %j) at once', (tighter, looser) => {
     // Act
@@ -295,6 +317,20 @@ describe('configLoosening: warden', () => {
 
     // Assert
     should(actual).deepEqual([]);
+  });
+
+  it('should hold turning the Warden on when its triage already spends, and not when it is rules', () => {
+    // Act
+    const spending = configLoosening(
+      'warden',
+      wardenWith({ enabled: false, triage: 'llm' }),
+      wardenWith({ enabled: true, triage: 'llm' }),
+    );
+    const free = configLoosening('warden', wardenWith({ enabled: false }), wardenWith({ enabled: true }));
+
+    // Assert
+    should(spending).deepEqual(['the Warden may now spend on an AI investigation of every flag']);
+    should(free).deepEqual([]);
   });
 
   it('should not hold a setting that does not spend: the accounts, thresholds and failover', () => {

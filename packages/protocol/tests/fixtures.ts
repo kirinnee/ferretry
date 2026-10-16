@@ -14,8 +14,10 @@ import type {
   SessionView,
   TaskBoardGrantRequestView,
   UsageFeedView,
+  WardenAttentionView,
   WardenConfig,
   WardenConfigView,
+  WardenInvestigateView,
   WardenRunView,
   WardenStatusView,
 } from '../src/lib/index.ts';
@@ -150,6 +152,12 @@ export const healthView = {
 
 export const wardenConfig = {
   enabled: true,
+  triage: 'jev',
+  guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 },
+  caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
+  mayActAlone: { nudge: true, resume: true, failover: true, stop: false },
+  events: { turnEnd: true, question: true, paneDied: true },
+  investigation: { effort: 'low' },
   accounts: [{ agent: 'codex-auto-loge', model: 'gpt-5.6-sol' }],
   failover: { policy: 'fallback', failureThreshold: 2, cooldownMinutes: 10 },
   providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 20 },
@@ -167,7 +175,51 @@ export const wardenStatusView = {
   config: wardenConfig,
   anomalies: [],
   fingerprint: 'none',
+  triage: { configured: 'jev', effective: 'jev', reason: 'configured' },
+  spend: {
+    day: '2026-10-16',
+    jevUsd: 0.03,
+    jevCapUsd: 0.5,
+    investigationUsd: 1.2,
+    investigationCapUsd: 2,
+    pendingInvestigations: 0,
+    investigationsLastHour: 1,
+    maxInvestigationsPerHour: 6,
+  },
+  savings: { day: '2026-10-16', flags: 41, jevDecisions: 37, jevSkips: 37, investigations: 4 },
+  investigations: [],
+  actions: [],
+  blessings: [],
 } satisfies WardenStatusView;
+
+export const wardenAttentionView = {
+  generatedAt: INSTANT,
+  lastSweepAt: INSTANT,
+  outcome: 'items',
+  items: [
+    {
+      sessionId: 'session-1',
+      id: 'anomaly:unattended_question:session-1',
+      source: 'warden-anomaly',
+      subject: 'Question unanswered',
+      why: 'waiting 18 minutes',
+      waitingSince: INSTANT,
+      howToResolve: 'Open the session and decide what to do.',
+      fromAnomaly: true,
+      anomalyKind: 'unattended_question',
+      judgement: { state: 'none', reason: 'No matching warden judgement yet.' },
+    },
+  ],
+  boardsWithParseErrors: [],
+  verdictCoverage: { limit: 100, truncated: false },
+} satisfies WardenAttentionView;
+
+export const wardenInvestigateView = {
+  sessionId: 'session-1',
+  state: 'queued',
+  position: 1,
+  message: 'Queued: one investigation runs at a time.',
+} satisfies WardenInvestigateView;
 
 export const wardenRunView = {
   sweptAt: INSTANT,

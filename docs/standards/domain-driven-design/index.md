@@ -66,6 +66,12 @@ names unambiguous:
   domain terms. They are named here only to fix the vocabulary — this document does **not** define
   their schemas, lifecycles, or features, and none should be inferred from their appearance in
   this list.
+- Within the **warden**: a **flag** is what the free sweep finds; **triage** decides what a flag
+  leads to (`rules`, `llm` or `jev`); the **Jev guard** only ever answers _skip_ or _investigate_;
+  a **blessing** is a skip or a cleared verdict holding one anomaly kind quiet for a while; an
+  **investigation** is the assigned warden whose **verdict** is the only thing that acts, and an act
+  the owner has not allowed is **held**. UI copy may call a session a **ferret**; its id stays a
+  session id.
 
 A name that carries no pre-existing baggage removes ambiguity: when a word has exactly one meaning
 in the codebase, misunderstanding disappears.

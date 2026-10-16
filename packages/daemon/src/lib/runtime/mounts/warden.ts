@@ -1,11 +1,16 @@
 import {
+  type WardenAttentionView,
   WardenConfigPatchSchema,
   type WardenConfigView,
+  type WardenInvestigateRequest,
+  WardenInvestigateRequestSchema,
+  type WardenInvestigateView,
   WardenRunRequestSchema,
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
 } from '@ferretry/protocol';
+import { type WardenRequestFailure, WardenRequestError } from '../../warden/sweep.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, queryValue } from '../../api/http.ts';
@@ -13,7 +18,8 @@ import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
- * Warden supervision: `/v1/warden/status`, `/v1/warden/run` and `/v1/warden/config`.
+ * Warden supervision: `/v1/warden/status`, `/v1/warden/run`, `/v1/warden/config`, the "who needs you"
+ * feed at `/v1/warden/attention` and the owner's own request at `/v1/warden/investigate`.
  *
  * THIS MOUNT IS WHY SIX MODULES ARE PRODUCTION CODE. `packages/daemon/src/lib/warden/` held the
  * anomaly detector, the sus classifiers, the fleet-wide concurrency gate, the blessing store, the
@@ -80,6 +86,13 @@ export interface WardenSubsystem {
   run(force: boolean): Promise<WardenRunView>;
   config(): Promise<WardenConfigView>;
   updateConfig(patch: unknown): Promise<WardenConfigView>;
+  /** Every ferret that needs the owner, and why. */
+  attention(): Promise<WardenAttentionView>;
+  /**
+   * The owner asks for an investigation of one ferret: it skips Jev, queues, and a sweep runs at once so
+   * it starts if a slot is free. Refusals are {@link WardenRequestError}s.
+   */
+  investigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
   /** Arms the sweep timer and returns the disarm. */
   arm(): Promise<() => void>;
   /** The last completed sweep, for the daemon's own health report. `undefined` means no sweep has
@@ -95,10 +108,22 @@ const REFUSALS: Readonly<Record<WardenFailure, { readonly status: number; readon
   failed: { status: 500, code: 'warden_sweep_failed' },
 };
 
+/** An owner's request the Warden would not take: the ferret is missing (404), or it may not be investigated now (409). */
+const REQUEST_REFUSALS: Readonly<Record<WardenRequestFailure, { readonly status: number; readonly code: string }>> = {
+  off: { status: 409, code: 'warden_off' },
+  not_found: { status: 404, code: 'not-found' },
+  finished: { status: 409, code: 'session_finished' },
+  cap: { status: 409, code: 'warden_cap_reached' },
+};
+
 /** Restates a warden refusal in the HTTP vocabulary. */
 function refuse(error: unknown): never {
   if (error instanceof WardenError) {
     const refusal = REFUSALS[error.failure];
+    throw new ApiError(refusal.status, error.message, refusal.code);
+  }
+  if (error instanceof WardenRequestError) {
+    const refusal = REQUEST_REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
   throw error;
@@ -126,6 +151,15 @@ async function run(subsystem: WardenSubsystem, context: RouteContext): Promise<A
 async function patchConfig(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
   const patch = await parseBody(context.request, WardenConfigPatchSchema);
   return jsonResponse(await subsystem.updateConfig(patch).catch(refuse));
+}
+
+/**
+ * The owner asks for an investigation. The body is REQUIRED: it names the ferret, and there is no ferret
+ * a missing body could safely mean.
+ */
+async function investigate(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const request = await parseBody(context.request, WardenInvestigateRequestSchema);
+  return jsonResponse(await subsystem.investigate(request).catch(refuse));
 }
 
 async function report(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
@@ -179,6 +213,22 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async context => await run(subsystem, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/warden/attention',
+      minimum: 'authenticated',
+      capability: { capability: 'warden', axis: 'use' },
+      noStore: true,
+      handle: async () => jsonResponse(await subsystem.attention().catch(refuse)),
+    },
+    {
+      method: 'POST',
+      path: '/v1/warden/investigate',
+      minimum: 'operator',
+      capability: { capability: 'warden', axis: 'use' },
+      noStore: true,
+      handle: async context => await investigate(subsystem, context),
     },
     {
       method: 'GET',

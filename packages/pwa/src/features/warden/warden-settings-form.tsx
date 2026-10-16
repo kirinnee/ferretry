@@ -1,0 +1,560 @@
+/**
+ * Settings › Warden: the controlled form, exported so the new-machine onboarding can set the Warden up
+ * with exactly the same controls.
+ *
+ * It owns no state and reads nothing: the caller hands it a whole `WardenConfig`, the Jev key's status
+ * and the errors, and gets the next config back on every change. Saving, and what the daemon answers,
+ * are the caller's business (`warden-config-card.tsx` here).
+ *
+ * WHAT LEAVES THE MACHINE is said under the triage choice, every time, in words a person can check:
+ * Rules only sends nothing; an investigation runs on the owner's own login and reads the transcript,
+ * pane, diffs and CI; Jev triage sends TypeSafe AI a short, redacted summary with every stored secret
+ * masked. The Jev key itself is not entered here — it lives in Settings › Speed-ups, which is the one
+ * place a key is pasted, tested and replaced.
+ */
+
+import {
+  WARDEN_GUARD_THRESHOLD_RANGE,
+  WARDEN_SWEEP_INTERVALS,
+  type WardenAccount,
+  type WardenConfig,
+  type WardenEffort,
+  type WardenEventTrigger,
+  type WardenMayActAlone,
+  type WardenTriage,
+} from '@ferretry/protocol';
+import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
+import { type ReactNode, useId } from 'react';
+
+import { cn } from '../../lib/class-names.ts';
+import { Badge } from '../../shell/primitives.tsx';
+import { RouteLink } from '../../shell/route-link.tsx';
+import {
+  type JevKeyStatus,
+  movedAccount,
+  WARDEN_FORM_LIMITS,
+  type WardenFormErrors,
+  wardenSummary,
+  withLogin,
+} from './warden-settings-model.ts';
+
+export interface WardenSettingsFormProps {
+  readonly value: WardenConfig;
+  readonly onChange: (next: WardenConfig) => void;
+  readonly jevKey: JevKeyStatus;
+  readonly errors: WardenFormErrors;
+  /** Logins the owner may pick for investigations, beyond those already in the failover order. */
+  readonly loginOptions?: readonly WardenAccount[];
+  /** Settings › Speed-ups, where the Jev key is added. */
+  readonly speedupsHref?: string;
+  readonly onNavigate?: (to: string) => void;
+}
+
+const TRIAGE_OPTIONS: readonly { readonly id: WardenTriage; readonly label: string; readonly detail: string }[] = [
+  {
+    id: 'jev',
+    label: 'Jev guard',
+    detail:
+      'Recommended. Jev, a fast typed decision model, looks at each flag and answers only “skip” (healthy: bless it) or “investigate”. It never acts on a ferret, and when it is unsure it counts as investigate.',
+  },
+  { id: 'llm', label: 'LLM only', detail: 'The kteam behaviour: every flag gets a full investigation.' },
+  { id: 'rules', label: 'Rules only', detail: 'Flags are shown to you. No AI and no spend.' },
+];
+
+const EFFORTS: readonly WardenEffort[] = ['low', 'medium', 'high'];
+
+const EVENTS: readonly { readonly id: WardenEventTrigger; readonly label: string }[] = [
+  { id: 'turnEnd', label: 'Turn end' },
+  { id: 'question', label: 'Question asked' },
+  { id: 'paneDied', label: 'Pane died' },
+];
+
+const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label: string; readonly detail: string }[] =
+  [
+    { id: 'nudge', label: 'Nudge', detail: 'Sends a short “still there?” message.' },
+    { id: 'resume', label: 'Resume or revive', detail: 'Restarts the CLI in its pane with resume.' },
+    { id: 'failover', label: 'Fail over', detail: 'Moves to the next login in the failover order when quota is out.' },
+    { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: a KILL verdict asks you first.' },
+  ];
+
+/** The privacy sentence for each triage: what leaves this machine, and to whom. */
+export const wardenPrivacyNote = (triage: WardenTriage, login: string): string => {
+  if (triage === 'rules') return 'What leaves this machine: nothing. Rules only sends nothing anywhere.';
+  const investigation = `Investigations run on your own login (${login}) and read the transcript, pane, diffs and CI.`;
+  if (triage === 'llm') return `What leaves this machine: ${investigation}`;
+  return `What leaves this machine: a short, redacted summary of a flagged ferret — its recent turns and screen tail, with every stored secret masked — is sent to TypeSafe AI (Jev). ${investigation}`;
+};
+
+const KEY_PILL: Readonly<
+  Record<JevKeyStatus['state'], { readonly label: string; readonly tone: 'ok' | 'warn' | 'pend' }>
+> = {
+  set: { label: 'key set', tone: 'ok' },
+  missing: { label: 'needs Jev key', tone: 'warn' },
+  unknown: { label: 'key status unknown', tone: 'pend' },
+};
+
+/** A cleared number field is `NaN` until fixed; the model reports it rather than a silent zero. */
+const numberFrom = (raw: string): number => (raw.trim() === '' ? Number.NaN : Number(raw));
+
+function Card({
+  title,
+  note,
+  children,
+}: {
+  readonly title?: string;
+  readonly note?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel">
+      {title !== undefined && <h3 className="m-0 text-row font-semibold text-fg">{title}</h3>}
+      {children}
+      {note !== undefined && <p className="m-0 text-meta leading-base text-muted">{note}</p>}
+    </section>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  error,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: number;
+  readonly error: string | undefined;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly onChange: (next: number) => void;
+}) {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+      {label}
+      <input
+        id={id}
+        type="number"
+        inputMode="decimal"
+        min={min}
+        max={max}
+        step={step}
+        aria-invalid={error === undefined ? undefined : true}
+        className="kt-input min-h-[44px] w-full max-w-[12rem] rounded-control border border-border bg-surface-2 px-2 text-fg"
+        value={Number.isFinite(value) ? value : ''}
+        onChange={event => onChange(numberFrom(event.target.value))}
+      />
+      {error !== undefined && <span className="text-meta font-normal text-err">{error}</span>}
+    </label>
+  );
+}
+
+function Check({
+  checked,
+  label,
+  detail,
+  onChange,
+}: {
+  readonly checked: boolean;
+  readonly label: string;
+  readonly detail?: string;
+  readonly onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="flex min-h-[44px] cursor-pointer items-start gap-3 py-1">
+      <input
+        type="checkbox"
+        className="mt-1 accent-[var(--accent)]"
+        checked={checked}
+        onChange={event => onChange(event.target.checked)}
+      />
+      <span className="min-w-0">
+        <span className="block text-ui font-medium text-fg">{label}</span>
+        {detail !== undefined && <span className="block text-meta leading-base text-muted">{detail}</span>}
+      </span>
+    </label>
+  );
+}
+
+function Segments<T extends string | number>({
+  label,
+  name,
+  options,
+  value,
+  format,
+  onChange,
+}: {
+  readonly label: string;
+  readonly name: string;
+  readonly options: readonly T[];
+  readonly value: T;
+  readonly format: (option: T) => string;
+  readonly onChange: (next: T) => void;
+}) {
+  return (
+    <fieldset className="m-0 flex min-w-0 flex-col gap-1 border-0 p-0">
+      <legend className="mb-1 text-cell font-medium text-fg">{label}</legend>
+      <div className="flex flex-wrap gap-xs">
+        {options.map(option => (
+          <label
+            key={option}
+            className={cn(
+              'flex min-h-[44px] min-w-[44px] cursor-pointer items-center gap-xs rounded-control border px-control-x text-ui',
+              option === value ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
+            )}
+          >
+            <input
+              type="radio"
+              name={name}
+              className="accent-[var(--accent)]"
+              checked={option === value}
+              onChange={() => onChange(option)}
+            />
+            {format(option)}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+export function WardenSettingsForm({
+  value,
+  onChange,
+  jevKey,
+  errors,
+  loginOptions = [],
+  speedupsHref,
+  onNavigate,
+}: WardenSettingsFormProps) {
+  const name = useId();
+  const ai = value.triage !== 'rules';
+  const head = value.accounts[0];
+  const logins = [
+    ...value.accounts,
+    ...loginOptions.filter(option => !value.accounts.some(account => account.agent === option.agent)),
+  ];
+  const keyPill = KEY_PILL[jevKey.state];
+  const set = (patch: Partial<WardenConfig>) => onChange({ ...value, ...patch });
+
+  return (
+    <div className="flex min-w-0 flex-col gap-3" data-warden-form="">
+      <section className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel">
+        <div className="min-w-0">
+          <h3 className="m-0 text-row font-semibold text-fg">The Warden</h3>
+          <p className="m-0 text-meta leading-base text-muted">
+            A supervisor that watches every ferret and steps in when one is stuck.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={value.enabled}
+          aria-label="Warden on"
+          onClick={() => set({ enabled: !value.enabled })}
+          className="flex min-h-[44px] items-center gap-sm rounded-control px-control-x text-ui font-semibold text-fg"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+              value.enabled ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+            )}
+          >
+            <span
+              className={cn(
+                'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
+                value.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]',
+              )}
+            />
+          </span>
+          {value.enabled ? 'On' : 'Off'}
+        </button>
+      </section>
+
+      <fieldset disabled={!value.enabled} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0 disabled:opacity-60">
+        <Card>
+          <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+            <legend className="mb-1 text-row font-semibold text-fg">Triage</legend>
+            <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-3">
+              {TRIAGE_OPTIONS.map(option => {
+                const checked = value.triage === option.id;
+                return (
+                  <label
+                    key={option.id}
+                    className={cn(
+                      'flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
+                      checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name={`${name}-triage`}
+                      className="mt-1 accent-[var(--accent)]"
+                      checked={checked}
+                      onChange={() => set({ triage: option.id })}
+                    />
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-xs text-ui font-semibold text-fg">
+                        {option.label}
+                        {option.id === 'jev' && <Badge tone={keyPill.tone}>{keyPill.label}</Badge>}
+                        {option.id === 'rules' && <Badge tone="ok">free</Badge>}
+                      </span>
+                      <span className="mt-0.5 block text-meta leading-base text-muted">{option.detail}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+          {value.triage === 'jev' && jevKey.state !== 'set' && (
+            <div className="rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-meta leading-base text-warn">
+              <p className="m-0 font-semibold">
+                {jevKey.state === 'missing' ? 'No Jev key yet.' : 'Could not check the Jev key.'}
+              </p>
+              <p className="m-0 mt-xs text-fg-soft">
+                Without a key, every flag goes to an investigation (the kteam behaviour). Add it in{' '}
+                {speedupsHref === undefined ? (
+                  'Settings › Speed-ups'
+                ) : (
+                  <RouteLink
+                    to={speedupsHref}
+                    {...(onNavigate === undefined ? {} : { onNavigate })}
+                    className="font-semibold text-accent"
+                  >
+                    Settings › Speed-ups
+                  </RouteLink>
+                )}
+                .
+              </p>
+              {jevKey.keyUrl !== undefined && (
+                <p className="m-0 mt-xs break-all text-fg-soft">
+                  Get a key: {jevKey.keyUrl}{' '}
+                  <a
+                    href={jevKey.keyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-accent"
+                  >
+                    Get a key
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </a>
+                </p>
+              )}
+            </div>
+          )}
+          {value.triage === 'jev' && (
+            <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+              Skip threshold: Jev skips only when it is at least this sure the ferret is healthy
+              <span className="flex items-center gap-sm">
+                <input
+                  type="range"
+                  min={WARDEN_GUARD_THRESHOLD_RANGE.min}
+                  max={WARDEN_GUARD_THRESHOLD_RANGE.max}
+                  step={0.01}
+                  aria-valuetext={`${Math.round(value.guard.threshold * 100)}%`}
+                  className="min-h-[44px] min-w-0 flex-1 accent-[var(--accent)]"
+                  value={value.guard.threshold}
+                  onChange={event => set({ guard: { ...value.guard, threshold: Number(event.target.value) } })}
+                />
+                <output className="mono w-12 text-right text-ui">{value.guard.threshold.toFixed(2)}</output>
+              </span>
+              <span className="text-meta font-normal leading-base text-muted">
+                Lower: more skipped and cheaper. Higher: more investigated and safer. Below the threshold, Jev’s answer
+                counts as investigate.
+              </span>
+            </label>
+          )}
+          <p className="m-0 text-meta leading-base text-muted" data-warden-privacy="">
+            {wardenPrivacyNote(value.triage, head?.agent ?? 'no login')}
+          </p>
+        </Card>
+
+        {ai && (
+          <Card
+            title="Investigation (the assigned warden)"
+            note="A blessing stops re-flagging the same anomaly for this long, and is cancelled when the ferret’s status changes."
+          >
+            <p className="m-0 text-meta leading-base text-muted">
+              A read-only LLM ferret that reads the transcript, pane, diffs and CI, then writes a report with a verdict:
+              leave · nudge · resume · stop · needs you. Only this verdict ever acts. Every verdict records who ran it
+              and with which model.
+            </p>
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+                Login
+                <select
+                  className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
+                  value={head?.agent ?? ''}
+                  onChange={event => {
+                    const picked = logins.find(account => account.agent === event.target.value);
+                    if (picked !== undefined) onChange(withLogin(value, picked));
+                  }}
+                >
+                  {logins.map(account => (
+                    <option key={account.agent} value={account.agent}>
+                      {account.agent}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+                Model
+                <input
+                  type="text"
+                  placeholder="the login’s default"
+                  className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
+                  value={head?.model ?? ''}
+                  onChange={event => {
+                    const model = event.target.value.trim();
+                    const { model: _old, ...agent } = head ?? { agent: '' };
+                    onChange(withLogin(value, model === '' ? agent : { ...agent, model }));
+                  }}
+                />
+              </label>
+            </div>
+            <Segments
+              label="Effort"
+              name={`${name}-effort`}
+              options={EFFORTS}
+              value={value.investigation.effort}
+              format={effort => effort}
+              onChange={effort => set({ investigation: { ...value.investigation, effort } })}
+            />
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-cell font-medium text-fg">
+                Failover order for the warden’s own login (strikes and cooldowns)
+              </span>
+              <ol className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Failover order">
+                {value.accounts.map((account, index) => (
+                  <li
+                    key={account.agent}
+                    className="flex min-w-0 items-center gap-sm rounded-control border border-border-strong bg-surface-2 px-cell-x py-1"
+                  >
+                    <span className="mono text-meta text-faint">{index + 1}</span>
+                    <span className="mono min-w-0 flex-1 break-all text-ui text-fg">{account.agent}</span>
+                    <button
+                      type="button"
+                      className="kt-btn kt-btn--sm min-h-[44px] min-w-[44px]"
+                      aria-label={`Move ${account.agent} up`}
+                      disabled={index === 0}
+                      onClick={() => onChange(movedAccount(value, index, -1))}
+                    >
+                      <ArrowUp size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className="kt-btn kt-btn--sm min-h-[44px] min-w-[44px]"
+                      aria-label={`Move ${account.agent} down`}
+                      disabled={index === value.accounts.length - 1}
+                      onClick={() => onChange(movedAccount(value, index, 1))}
+                    >
+                      <ArrowDown size={14} aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              <NumberField
+                label="Investigations at a time"
+                value={value.maxAssignedWardens}
+                error={errors.maxAssignedWardens}
+                {...WARDEN_FORM_LIMITS.atATime}
+                step={1}
+                onChange={maxAssignedWardens => set({ maxAssignedWardens })}
+              />
+              <NumberField
+                label="Blessing lasts (min)"
+                value={value.blessMinutes}
+                error={errors.blessMinutes}
+                {...WARDEN_FORM_LIMITS.blessMinutes}
+                step={1}
+                onChange={blessMinutes => set({ blessMinutes })}
+              />
+            </div>
+          </Card>
+        )}
+
+        <Card note="It also reacts to events, so a stuck ferret is noticed sooner. The sweep itself is free.">
+          <Segments
+            label="How often the sweep runs"
+            name={`${name}-interval`}
+            options={WARDEN_SWEEP_INTERVALS}
+            value={value.intervalMinutes}
+            format={minutes => `${minutes} min`}
+            onChange={intervalMinutes => set({ intervalMinutes })}
+          />
+          <fieldset className="m-0 flex min-w-0 flex-wrap gap-x-4 border-0 p-0">
+            <legend className="mb-1 text-cell font-medium text-fg">Also sweep on</legend>
+            {EVENTS.map(event => (
+              <Check
+                key={event.id}
+                label={event.label}
+                checked={value.events[event.id]}
+                onChange={checked => set({ events: { ...value.events, [event.id]: checked } })}
+              />
+            ))}
+          </fieldset>
+        </Card>
+
+        {ai && (
+          <Card
+            title="Daily caps"
+            note="When a cap is hit, the Warden falls back to rules only until midnight UTC and says so."
+          >
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
+              {value.triage === 'jev' && (
+                <NumberField
+                  label="Jev ($/day)"
+                  value={value.caps.jevUsdPerDay}
+                  error={errors.jevUsdPerDay}
+                  {...WARDEN_FORM_LIMITS.capUsd}
+                  step={0.1}
+                  onChange={jevUsdPerDay => set({ caps: { ...value.caps, jevUsdPerDay } })}
+                />
+              )}
+              <NumberField
+                label="Investigations ($/day)"
+                value={value.caps.investigationUsdPerDay}
+                error={errors.investigationUsdPerDay}
+                {...WARDEN_FORM_LIMITS.capUsd}
+                step={0.5}
+                onChange={investigationUsdPerDay => set({ caps: { ...value.caps, investigationUsdPerDay } })}
+              />
+              <NumberField
+                label="Max investigations per hour"
+                value={value.caps.maxInvestigationsPerHour}
+                error={errors.maxInvestigationsPerHour}
+                {...WARDEN_FORM_LIMITS.perHour}
+                step={1}
+                onChange={maxInvestigationsPerHour => set({ caps: { ...value.caps, maxInvestigationsPerHour } })}
+              />
+            </div>
+          </Card>
+        )}
+
+        {ai && (
+          <Card title="May act alone on a verdict">
+            {ACT_ALONE.map(action => (
+              <Check
+                key={action.id}
+                label={action.label}
+                detail={action.detail}
+                checked={value.mayActAlone[action.id]}
+                onChange={checked => set({ mayActAlone: { ...value.mayActAlone, [action.id]: checked } })}
+              />
+            ))}
+          </Card>
+        )}
+      </fieldset>
+
+      <p aria-live="polite" className="m-0 text-ui leading-base text-fg-soft" data-warden-summary="">
+        {wardenSummary(value, jevKey.state === 'set')}
+      </p>
+    </div>
+  );
+}

@@ -104,7 +104,7 @@ describe('fleetMcpLoader', () => {
       factoryFor(answers, calls),
       'claude-default',
     )(new AbortController().signal);
-    expect(servers).toEqual([{ name: 'notion', transport: 'url', signsIn: true }]);
+    expect(servers).toEqual([{ name: 'notion', transport: 'url', signsIn: true, scope: 'login' }]);
     expect(calls.map(call => call.path).sort()).toEqual(['/v1/fleet/components', MCP_OAUTH_PATH]);
 
     const every = await fleetMcpLoader(daemon, factoryFor(answers))(new AbortController().signal);

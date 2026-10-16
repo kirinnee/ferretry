@@ -1,3 +1,10 @@
+/**
+ * `ContextRailBody` and its MCP sub-tab (`ContextMcpPanel`), driven directly as Info › Folder draws
+ * them — there is no `ContextRail` wrapper left (deleted with the desktop rail chrome), so this is the
+ * only place these two render at all. Also covers `useContextRead` (`context-rail-parts.tsx`), the
+ * lazy read every sub-tab shares.
+ */
+
 import { afterEach, describe, expect, it } from 'bun:test';
 import { MCP_OAUTH_PATH } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
@@ -8,7 +15,6 @@ import {
 import type { ContextDoc, ContextMcpServer } from '../../../../src/features/context-rail/context-rail-model.ts';
 import { loadFailureReason, useContextRead } from '../../../../src/features/context-rail/context-rail-parts.tsx';
 import type { ContextLoader } from '../../../../src/features/context-rail/context-rail-ports.ts';
-import { ContextRail } from '../../../../src/features/context-rail/context-rail.tsx';
 import type { SkillsCatalog } from '../../../../src/features/skills/skills-catalog.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
@@ -190,6 +196,11 @@ describe('ContextRailBody — MCP', () => {
     expect(text(root, '[data-context-mcp="linear"] [data-context-mcp-status]')).toContain('Signed in');
     // No sign-in host: the row says where it stands and offers nothing.
     expect(text(root, '[data-context-mcp="notion"] [data-context-mcp-status]')).toBe('Needs sign-in');
+    // Every server here has no scope (the fixture), so no row shows a scope chip.
+    expect(root.querySelector('[data-context-mcp-scope]')).toBeNull();
+    // The transport word reads plainly: a command server says "command", a URL one says "URL".
+    expect(text(root, '[data-context-mcp="github"] .text-faint')).toBe('command');
+    expect(text(root, '[data-context-mcp="linear"] .text-faint')).toBe('URL');
 
     await click(root, '[data-context-chip="needs-sign-in"]');
     expect(rows(root, 'data-context-mcp')).toEqual(['notion']);
@@ -199,6 +210,36 @@ describe('ContextRailBody — MCP', () => {
     await tab(root, 'MCP');
     expect(loadMcp.calls).toBe(1);
     expect(rows(root, 'data-context-mcp')).toEqual(['notion']);
+  });
+
+  it('shows each server’s scope chip, titled with what the scope means', async () => {
+    const scoped: readonly ContextMcpServer[] = [
+      { name: 'ferretry', transport: 'command', signsIn: false, scope: 'ferretry' },
+      { name: 'repo-tools', transport: 'command', signsIn: false, scope: 'project' },
+      { name: 'github', transport: 'command', signsIn: false, scope: 'login' },
+    ];
+    const { root } = await body({ loadMcp: async () => scoped, tab: 'mcp' });
+    expect(text(root, '[data-context-mcp="ferretry"] [data-context-mcp-scope]')).toBe('Ferretry');
+    expect(text(root, '[data-context-mcp="repo-tools"] [data-context-mcp-scope]')).toBe('Project');
+    expect(text(root, '[data-context-mcp="github"] [data-context-mcp-scope]')).toBe('Login');
+    const project = must(root.querySelector('[data-context-mcp="repo-tools"] [data-context-mcp-scope]'), 'the chip');
+    expect(project.getAttribute('data-tone')).toBe('accent');
+    expect(project.getAttribute('title')).toBe('The repo’s .mcp.json, shared with everyone on the repo');
+    const login = must(root.querySelector('[data-context-mcp="github"] [data-context-mcp-scope]'), 'the chip');
+    expect(login.getAttribute('data-tone')).toBe('muted');
+  });
+
+  it('offers Add… only when the host hands onAddMcp, and opens it from the list it adds to', async () => {
+    const added: boolean[] = [];
+    const { root } = await body({ tab: 'mcp' });
+    expect(root.querySelector('[data-context-mcp-add]')).toBeNull();
+
+    await mounted?.unmount();
+    mounted = undefined;
+    const withAdd = await body({ tab: 'mcp', onAddMcp: () => added.push(true) });
+    expect(withAdd.root.textContent).toContain('3 servers this agent sees');
+    await click(withAdd.root, '[data-context-mcp-add]');
+    expect(added).toEqual([true]);
   });
 
   it('signs in with the Components tab’s sheet and reads again once signed in', async () => {
@@ -344,6 +385,30 @@ describe('ContextRailBody — Docs', () => {
   });
 });
 
+describe('ContextRailBody — tabs, label and Files', () => {
+  it('draws Info › Folder’s own tab set and label, opening on the first of them', async () => {
+    const { root } = await body({ tabs: ['files', 'docs', 'skills', 'mcp'], label: 'Folder sections' });
+    expect(root.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe('Folder sections');
+    expect([...root.querySelectorAll('[role="tab"]')].map(button => button.textContent)).toEqual([
+      'Files',
+      'Docs',
+      'Skills',
+      'MCP',
+    ]);
+    expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Files');
+  });
+
+  it('renders the host’s Files body on the Files sub-tab, and nothing when the host gave none', async () => {
+    const { root } = await body({ tabs: ['files', 'docs'], tab: 'files', renderFiles: () => <p>a file tree</p> });
+    expect(root.textContent).toContain('a file tree');
+
+    await mounted?.unmount();
+    mounted = undefined;
+    const empty = await body({ tabs: ['files', 'docs'], tab: 'files' });
+    expect(empty.root.querySelector('[data-context-panel="files"]')?.textContent).toBe('');
+  });
+});
+
 describe('useContextRead', () => {
   it('blanks the old rows when the loader is another agent’s', async () => {
     const seen: string[] = [];
@@ -362,49 +427,5 @@ describe('useContextRead', () => {
   it('says why a read failed', () => {
     expect(loadFailureReason(new Error('gone'))).toBe('gone');
     expect(loadFailureReason('a string')).toBe('The daemon did not answer.');
-  });
-});
-
-describe('ContextRail', () => {
-  const rail = async (collapsed: boolean, signals = fakeSignals(snapshot())) => {
-    const changes: boolean[] = [];
-    mounted = await mountSettled(
-      <ContextRail
-        collapsed={collapsed}
-        onCollapsedChange={next => changes.push(next)}
-        agentName="Hadi"
-        signals={signals}
-        loadMcp={async () => MCP}
-        loadSkills={async () => SKILLS}
-        loadDocs={async () => DOCS}
-        onInsertSkill={() => undefined}
-        onOpenFile={() => undefined}
-        now={() => NOW}
-      />,
-    );
-    return { root: mounted.container, changes };
-  };
-
-  it('is titled This folder and collapses to a strip', async () => {
-    const { root, changes } = await rail(false);
-    expect(root.querySelector('aside')?.getAttribute('aria-label')).toBe('This folder');
-    expect(text(root, 'h2')).toBe('This folder');
-    expect(root.querySelector('[data-context-rail-body]')).not.toBeNull();
-    await click(root, '[data-context-rail-toggle]');
-    expect(changes).toEqual([true]);
-  });
-
-  it('keeps the open count on the collapsed strip and expands from it', async () => {
-    const { root, changes } = await rail(true);
-    expect(root.querySelector('[data-context-rail]')?.getAttribute('data-context-rail')).toBe('collapsed');
-    expect(root.querySelector('[data-context-rail-body]')).toBeNull();
-    expect(text(root, '[data-context-rail-count]')).toBe('1');
-    await click(root, '[data-context-rail-toggle]');
-    expect(changes).toEqual([false]);
-
-    await mounted?.unmount();
-    mounted = undefined;
-    const quiet = await rail(true, fakeSignals(snapshot([], [])));
-    expect(quiet.root.querySelector('[data-context-rail-count]')).toBeNull();
   });
 });

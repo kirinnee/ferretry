@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { matchesSessionSearchQuery, type SessionView, sessionSearchTaskHaystack } from '@ferretry/protocol';
+import {
+  MCP_OAUTH_PATH,
+  matchesSessionSearchQuery,
+  type SessionView,
+  sessionSearchTaskHaystack,
+} from '@ferretry/protocol';
+import { Copy } from 'lucide-react';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
@@ -9,15 +15,19 @@ import { FilesTab } from '../../src/components/files-tab.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
-import { RenameSheet } from '../../src/components/rename-sheet.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
-import { SessionSurfaceReferences } from '../../src/components/session-surface-references.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
-import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
-import { ContextRail } from '../../src/features/context-rail/context-rail.tsx';
+import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
+import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
+import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
+import type { CoreActionContext } from '../../src/features/session-actions/core-actions.ts';
+import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
+import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
+import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
+import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
 import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
@@ -36,9 +46,11 @@ import { WorkspaceLayoutStore } from '../../src/lib/workspace-layout-store.ts';
 import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
 import { createSurfaceEventHub } from '../../src/lib/surface-control.ts';
 import { DaemonClientProvider } from '../../src/lib/store.tsx';
+import { daemonSessionPath } from '../../src/lib/pages/routes.ts';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
+import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -77,6 +89,8 @@ const route = (input: string | URL | Request): Response => {
   const sessionId = sessionIdOf(url);
   if (url.pathname.endsWith('/fs/index'))
     return Response.json({ v: 1, sessionId, root: `/work/${sessionId}`, files: [], coverage: 'complete', skipped: [] });
+  if (url.pathname.endsWith('/mcp'))
+    return Response.json({ project: { path: `/work/${sessionId}/.mcp.json`, etag: null, servers: [] } });
   if (url.pathname.includes('/v1/sessions/') && url.pathname.endsWith('/tasks'))
     return Response.json({ v: 1, sessionId, tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' });
   return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
@@ -98,16 +112,19 @@ const withSessionSearch = (page: ReactElement<ComponentProps<typeof SessionChatP
  * can never leak into the next, and a desktop form factor unless the case asks for another — the
  * window size a test runner reports is not a screen anybody chose.
  */
-const renderSessionChatPage = (page: ReactElement<ComponentProps<typeof SessionChatPage>>) =>
-  render(
-    withSessionSearch(
-      cloneElement(page, {
-        workspaceLayouts: page.props.workspaceLayouts ?? new WorkspaceLayoutStore(NO_STORAGE),
-        workspaceRails: page.props.workspaceRails ?? new WorkspaceRailPreferenceStore(NO_STORAGE),
-        formFactor: page.props.formFactor ?? (page.props.presentation === 'sheet' ? 'phone' : 'desktop'),
-      }),
-    ),
+const renderSessionChatPage = (
+  page: ReactElement<ComponentProps<typeof SessionChatPage>>,
+  daemon?: (connection: unknown) => Promise<FyApiClient>,
+) => {
+  const tree = withSessionSearch(
+    cloneElement(page, {
+      workspaceLayouts: page.props.workspaceLayouts ?? new WorkspaceLayoutStore(NO_STORAGE),
+      workspaceRails: page.props.workspaceRails ?? new WorkspaceRailPreferenceStore(NO_STORAGE),
+      formFactor: page.props.formFactor ?? (page.props.presentation === 'sheet' ? 'phone' : 'desktop'),
+    }),
   );
+  return render(daemon === undefined ? tree : <DaemonClientProvider client={daemon}>{tree}</DaemonClientProvider>);
+};
 
 beforeEach(() => {
   globalThis.fetch = (async (input: string | URL | Request) => route(input)) as typeof fetch;
@@ -142,21 +159,44 @@ const barAction = (root: ReactTestInstance, label: string): ReactTestInstance =>
 const hasBarAction = (root: ReactTestInstance, label: string): boolean =>
   root.findAllByType('button').some(candidate => candidate.props['aria-label'] === label);
 
-/** The ⋯ menu's rows, as the bar was handed them. */
-const menuLabels = (root: ReactTestInstance): readonly string[] =>
-  (root.findByType(SessionTopBar).props.menuItems as readonly { label: string }[]).map(item => item.label);
-
-const selectMenu = (root: ReactTestInstance, label: string): void => {
-  const item = (
-    root.findByType(SessionTopBar).props.menuItems as readonly { label: string; onSelect: () => void }[]
-  ).find(candidate => candidate.label === label);
-  if (item === undefined) throw new Error(`missing ${label} in the session menu`);
-  run(() => item.onSelect());
-};
-
 /** The text a node renders, read from the tree rather than by serialising props that may hold elements. */
 const textOf = (node: ReactTestInstance): string =>
   node.children.map(child => (typeof child === 'string' ? child : textOf(child))).join('');
+
+/** Actions ▾, the header's one place for doing things. */
+const actionsTrigger = (root: ReactTestInstance): ReactTestInstance =>
+  root.findByProps({ 'data-session-actions-trigger': '' });
+
+const openActions = (root: ReactTestInstance): void => {
+  if (actionsTrigger(root).props['aria-expanded'] !== true) run(() => actionsTrigger(root).props.onClick());
+};
+
+const actionRows = (root: ReactTestInstance): readonly ReactTestInstance[] =>
+  root.findAll(node => node.type === 'button' && node.props['data-session-action-item'] !== undefined);
+
+/** The rows Actions ▾ offers, by their label, read with the menu open and left as it was found. */
+const actionLabels = (root: ReactTestInstance): readonly string[] => {
+  const wasOpen = actionsTrigger(root).props['aria-expanded'] === true;
+  openActions(root);
+  const labels = actionRows(root).map(row => textOf(row.findByProps({ className: 'fy-actions-menu__label' })));
+  if (!wasOpen) run(() => actionsTrigger(root).props.onClick());
+  return labels;
+};
+
+/** Opens Actions ▾ and chooses one row by its action id. */
+const chooseAction = (root: ReactTestInstance, id: string): void => {
+  openActions(root);
+  const row = actionRows(root).find(candidate => candidate.props['data-session-action-item'] === id);
+  if (row === undefined) throw new Error(`missing ${id} in Actions`);
+  run(() => row.props.onClick());
+};
+
+/** Lets every queued promise in a chain of daemon calls settle. */
+const flush = async (turns = 8): Promise<void> => {
+  await runAsync(async () => {
+    for (let turn = 0; turn < turns; turn += 1) await Promise.resolve();
+  });
+};
 
 /** The "needs you" button the status carries while the session has unanswered Attention. */
 const needsYouButtons = (root: ReactTestInstance): readonly ReactTestInstance[] =>
@@ -223,6 +263,59 @@ class ReceiverBoundChatClient {
   }
 }
 
+/**
+ * What Info reads through, beyond the page: the Attention ledger (refused here, so Signals is honest
+ * about an unread board) and a fleet whose MCP catalogue is empty.
+ */
+const contextDependencies = (): NonNullable<ComponentProps<typeof SessionChatPage>['context']> => ({
+  attention: new DaemonAttentionClient(undefined, async () => Response.json({}, { status: 503 })),
+  createFleetClient: factoryFor({
+    'GET /v1/fleet/components': { format: 'version-2', kinds: [] },
+    [`GET ${MCP_OAUTH_PATH}`]: { connections: [] },
+  }),
+  machineName: 'alpha box',
+});
+
+/**
+ * The carrier-routed typed client the page reaches for rename, fork, migrate, worktrees and the
+ * Warden's verdicts — recording each call in a line a test can read. Any other route refuses.
+ */
+const fakeDaemon = (options: { readonly migrate?: Error } = {}) => {
+  const calls: string[] = [];
+  const api = {
+    rename: async (id: string, name?: string, teammate?: string, clearParent?: boolean) => {
+      calls.push(`rename:${id}:${name}:${teammate}:${clearParent}`);
+      return sessionView(id, { config: { label: name ?? 'renamed' } });
+    },
+    migrate: async (id: string, agent: string, account: unknown, force: unknown, requestId: string) => {
+      if (options.migrate !== undefined) throw options.migrate;
+      calls.push(
+        `migrate:${id}:${agent}:${String(account)}:${String(force)}:${requestId.startsWith(`restart-${id}-`)}`,
+      );
+      return sessionView(id, { state: { status: 'running' } });
+    },
+    messages: async (id: string) => {
+      calls.push(`messages:${id}`);
+      return { messages: [{ point: 'point-9', selectionBinding: 'binding-9' }], nextCursor: null };
+    },
+    fork: async (id: string, request: { readonly through: string; readonly agent: string }) => {
+      calls.push(`fork:${id}:${request.through}:${request.agent}`);
+      return { session: { id: 'forked' }, plan: {} };
+    },
+    // The page's own surface hooks ask for the browser and control views too; those are not recorded.
+    request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+      if (path !== '/v1/worktrees') throw new Error(`no ${path} here`);
+      calls.push(`request:${path}`);
+      return schema.parse({ worktrees: [] });
+    },
+    wardenVerdicts: async () => {
+      calls.push('verdicts');
+      return [];
+    },
+  };
+  return { calls, factory: async () => api as unknown as FyApiClient };
+};
+
 describe('SessionChatPage', () => {
   test('threads the daemon account and cached usage stores into migration', () => {
     const accountPicker = new DaemonAccountPickerStore({
@@ -269,17 +362,27 @@ describe('SessionChatPage', () => {
     expect(page.root.findByType(Transcript).props.daemonId).toBe('alpha');
     expect(page.root.findByType(Transcript).props.entries[0].text).toBe('The daemon answered.');
     expect(page.root.findByProps({ className: 'fy-composer' })).toBeDefined();
-    expect(menuLabels(page.root)).toEqual([
-      'Files',
-      'Console',
-      'Tasks',
-      'Terminal references',
-      'Lineage',
-      'Analytics for this session',
-      'Move to another login…',
+    // DO is Actions ▾, grouped; the old ⋯ menu is gone.
+    expect(page.root.findAllByProps({ 'data-session-more': '' })).toHaveLength(0);
+    expect(actionLabels(page.root)).toEqual([
+      'Rename…',
+      'Fork into a new ferret…',
       'Copy session id',
-      'Session details',
+      'Move to another login…',
+      'Move to another machine',
+      'Add MCP server…',
+      'Restart CLI',
+      'Stop ferret…',
     ]);
+    // Moving to another machine exists but cannot be done here yet: it is dimmed, with the reason.
+    openActions(page.root);
+    const dimmed = actionRows(page.root).find(row => row.props['data-session-action-item'] === 'move-machine');
+    expect(dimmed?.props['aria-disabled']).toBe(true);
+    expect(dimmed?.props.title).toBe('later');
+    run(() => dimmed?.props.onClick());
+    expect(actionsTrigger(page.root).props['aria-expanded']).toBe(true);
+    // LOOK is Info, and a host with nothing to show draws no ⓘ.
+    expect(page.root.findByType(SessionTopBar).props.onToggleInfo).toBeUndefined();
     expect(barAction(page.root, 'Interrupt turn').children.join('')).toBe('Interrupt');
     expect(barAction(page.root, 'Stop session').children.join('')).toBe('Stop');
     run(() => page.unmount());
@@ -710,7 +813,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('keeps Interrupt on a phone bar and moves Stop into the menu, still behind its confirmation', async () => {
+  test('keeps Interrupt on a phone bar and moves Stop into Actions, behind an inline confirmation', async () => {
     const calls: string[] = [];
     let opened = 0;
     const page = renderSessionChatPage(
@@ -729,21 +832,35 @@ describe('SessionChatPage', () => {
     try {
       expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
       expect(hasBarAction(page.root, 'Stop session')).toBe(false);
-      expect(menuLabels(page.root).at(-1)).toBe('Stop session');
+      expect(actionLabels(page.root).at(-1)).toBe('Stop ferret…');
+      // On a phone the trigger is an icon, named for a screen reader.
+      expect(actionsTrigger(page.root).props['aria-label']).toBe('Actions');
       run(() => page.root.findByType(SessionTopBar).props.onOpenSessions());
       expect(opened).toBe(1);
 
-      selectMenu(page.root, 'Stop session');
+      // The row turns into its question in place; nothing is stopped until it is confirmed.
+      chooseAction(page.root, 'stop');
       expect(calls).toEqual([]);
-      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(false);
-      run(() => buttonNamed(page.root, 'Cancel').props.onClick());
+      const confirm = () => page.root.findByProps({ 'data-menu-confirm': 'stop' });
+      expect(textOf(confirm())).toContain(`Stop ${sessionDisplayName(sessionView('shared'))}?`);
+      run(() => buttonNamed(confirm(), 'Cancel').props.onClick());
+      expect(page.root.findAllByProps({ 'data-menu-confirm': 'stop' })).toHaveLength(0);
+      expect(calls).toEqual([]);
+
+      chooseAction(page.root, 'stop');
+      await runAsync(async () => {
+        page.root.findByProps({ 'data-menu-confirm-yes': '' }).props.onClick();
+        await Promise.resolve();
+      });
+      await flush();
+      expect(calls).toEqual(['stop:shared:stopped from the PWA session workspace']);
       expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
     } finally {
       run(() => page.unmount());
     }
   });
 
-  test('copies the session id from the menu and says so when the clipboard refuses', async () => {
+  test('copies the session id from Actions and says so when the clipboard refuses', async () => {
     const copied: string[] = [];
     const page = renderSessionChatPage(
       <SessionChatPage
@@ -759,7 +876,7 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      selectMenu(page.root, 'Copy session id');
+      chooseAction(page.root, 'copy-id');
       await runAsync(async () => await Promise.resolve());
       expect(copied).toEqual(['shared']);
       expect(JSON.stringify(page.toJSON())).not.toContain('could not copy');
@@ -779,7 +896,7 @@ describe('SessionChatPage', () => {
           ),
         ),
       );
-      selectMenu(page.root, 'Copy session id');
+      chooseAction(page.root, 'copy-id');
       await runAsync(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -808,12 +925,12 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      selectMenu(page.root, 'Copy session id');
+      chooseAction(page.root, 'copy-id');
       await runAsync(async () => await Promise.resolve());
       expect(written).toEqual(['shared']);
 
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-      selectMenu(page.root, 'Copy session id');
+      chooseAction(page.root, 'copy-id');
       await runAsync(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -1007,23 +1124,14 @@ describe('SessionChatPage', () => {
     });
     expect(calls).toEqual(['interrupt:shared', 'stop:shared:stopped from the PWA session workspace']);
 
-    // RENAME IS NOT OFFERED: `/rename` is not mounted, so an action that could
-    // only open a sheet whose submit fails is not presented as working at all.
+    // The bar's own Rename is gone: renaming is a form in Actions now (see the Actions suite).
     expect(page.root.findAllByType('button').some(node => node.children.join('').startsWith('Rename'))).toBe(false);
-    expect(page.root.findAllByType(RenameSheet)).toHaveLength(0);
 
-    // Migrate's route IS mounted, so it stays exactly as it was.
-    selectMenu(page.root, 'Move to another login…');
+    // Move to another login opens the migration sheet; its route is mounted.
+    chooseAction(page.root, 'move-login');
     expect(page.root.findByType(MigrateSheet).props.open).toBe(true);
     run(() => page.root.findByType(MigrateSheet).props.onClose());
     expect(page.root.findByType(MigrateSheet).props.open).toBe(false);
-
-    selectMenu(page.root, 'Session details');
-    expect(
-      page.root
-        .findAllByType(BottomSheet)
-        .some(sheet => sheet.props.ariaLabel === 'Session details' && sheet.props.open === true),
-    ).toBe(true);
     run(() => page.unmount());
   });
 
@@ -1150,16 +1258,18 @@ describe('SessionChatPage', () => {
       expect(seen.filter(row => row.method === 'GET' && /\/tasks\/[^/]+$/u.test(row.pathname))).toHaveLength(0);
       expect(seen.filter(row => row.pathname.endsWith('/fs'))).toHaveLength(0);
 
-      selectMenu(page.root, 'Files');
+      const workspace = () => page.root.findByType(SessionWorkspace).props.workspace;
+      run(() => workspace().openFilePicker());
       expect(page.root.findAllByType(FilesTab)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
 
-      selectMenu(page.root, 'Console');
+      run(() => workspace().showAgentTab('console'));
       expect(page.root.findAllByProps({ 'data-workspace-console': '' })).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
       expect(JSON.stringify(page.toJSON())).toContain('paired snapshot');
 
-      selectMenu(page.root, 'Tasks');
+      // A `&task` reference opens this ferret's tasks in their sheet.
+      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F6'));
       expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
       await runAsync(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
@@ -1204,43 +1314,43 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('mounts the real lineage and session-scoped analytics utility bodies', () => {
+  test('Info opens the real session-scoped tasks and analytics sheets', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const current = sessionView('shared');
-    const sessions: readonly SessionView[] = [current, sessionView('child')];
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], current)}
         connection={alpha}
-        daemonSessions={sessions}
+        context={contextDependencies()}
         entries={[]}
-        onNavigate={() => undefined}
+        initialInfo="usage"
         onSessionChange={() => undefined}
         presentation="pane"
         session={current}
       />,
+      fakeDaemon().factory,
     );
     try {
-      expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
-      selectMenu(page.root, 'Lineage');
-      const lineage = page.root.findByType(LineageSurfaceContent);
-      expect(lineage.props.daemonId).toBe('alpha');
-      expect(lineage.props.sessionId).toBe('shared');
-      expect(lineage.props.sessions).toBe(sessions);
-
-      selectMenu(page.root, 'Terminal references');
-      expect(page.root.findAllByType(SessionSurfaceReferences)).toHaveLength(1);
-      selectMenu(page.root, 'Analytics for this session');
-      expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
+      await flush();
+      run(() => page.root.findByType(SessionInfo).props.onOpenAnalytics());
       const analytics = page.root.findByType(SessionAnalyticsSurface);
       expect(analytics.props.connection).toBe(alpha);
       expect(analytics.props.scope).toEqual(scope);
+      const sheet = () => page.root.findAll(node => node.type === BottomSheet && node.props.closeLabel === 'Close')[0];
+      expect(sheet()?.props.ariaLabel).toBe('Analytics for this session');
+      run(() => page.root.findByType(SessionInfo).props.onOpenTasks());
+      expect(page.root.findAllByType(SessionAnalyticsSurface)).toHaveLength(0);
+      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
+      expect(sheet()?.props.ariaLabel).toBe('Tasks');
+      run(() => sheet()?.props.onClose());
+      expect(sheet()?.props.open).toBe(false);
+      expect(sheet()?.props.ariaLabel).toBe('Session tool');
     } finally {
       run(() => page.unmount());
     }
   });
 
-  test('shows Skills in the context rail on ONE catalog read and proves that catalog in the transcript', async () => {
+  test('a /skill reference opens Info › Folder › Skills on ONE catalog read, and proves that catalog', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const asked: string[] = [];
     const requested: string[] = [];
@@ -1274,11 +1384,7 @@ describe('SessionChatPage', () => {
       <SessionChatPage
         client={sharedClient}
         connection={alpha}
-        context={{
-          attention: new DaemonAttentionClient(undefined, async () => Response.json({}, { status: 503 })),
-          createFleetClient: async () => ({ request: async () => Promise.reject(new Error('no fleet here')) }),
-          machineName: 'alpha box',
-        }}
+        context={contextDependencies()}
         entries={[]}
         onSessionChange={() => undefined}
         presentation="pane"
@@ -1290,13 +1396,16 @@ describe('SessionChatPage', () => {
         for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
       });
 
-      // A `/skill` reference opens the rail on its Skills tab, listing the page's own catalog.
-      const rail = () => page.root.findByType(ContextRail);
-      expect(rail().props.tab).toBe('signals');
+      // Info starts shut: looking is something a person asks for.
+      expect(page.root.findAllByType(SessionInfo)).toHaveLength(0);
+      // A `/skill` reference opens Info on Folder › Skills, listing the page's own catalog.
       run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onSkillOpen?.('floop'));
       await runAsync(async () => {
         for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
       });
+      expect(page.root.findByType(SessionTopBar).props.infoOpen).toBe(true);
+      expect(page.root.findByType(SessionInfo).props.placement.tab).toBe('folder');
+      const rail = () => page.root.findByType(ContextRailBody);
       expect(rail().props.tab).toBe('skills');
       expect(rail().props.agentName).toBe(sessionDisplayName(sessionView('shared')));
       expect(JSON.stringify(page.toJSON())).toContain('floop');
@@ -1322,26 +1431,6 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('keeps unread lineage distinct from an empty daemon slice', () => {
-    const page = renderSessionChatPage(
-      <SessionChatPage
-        client={client([], sessionView('shared'))}
-        connection={alpha}
-        entries={[]}
-        onSessionChange={() => undefined}
-        presentation="pane"
-        session={sessionView('shared')}
-      />,
-    );
-    try {
-      selectMenu(page.root, 'Lineage');
-      expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
-      expect(JSON.stringify(page.toJSON())).toContain('Loading lineage');
-    } finally {
-      run(() => page.unmount());
-    }
-  });
-
   test('lays the page out as the split workspace on a desktop and one tab at a time on a phone', () => {
     const desktop = renderSessionChatPage(
       <SessionChatPage
@@ -1358,8 +1447,9 @@ describe('SessionChatPage', () => {
       expect(desktop.root.findAllByType(WorkspaceView)).toHaveLength(1);
       // The chat is the agent pane's first tab, rendered as it always was.
       expect(desktop.root.findByType(WorkspaceView).findAllByType(Transcript)).toHaveLength(1);
-      // No context dependencies: no rail, and no ◧ that could only open an empty sheet.
-      expect(desktop.root.findAllByType(ContextRail)).toHaveLength(0);
+      // No context dependencies: no Info, and no ⓘ that could only open an empty panel.
+      expect(desktop.root.findByType(SessionWorkspace).props.info).toBeUndefined();
+      expect(desktop.root.findByType(SessionTopBar).props.onToggleInfo).toBeUndefined();
     } finally {
       run(() => desktop.unmount());
     }
@@ -1721,10 +1811,6 @@ describe('SessionChatPage', () => {
 
         expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
         expect(needsYouButtons(page.root)[0]?.props['aria-expanded']).toBe(true);
-        // The board is also one menu row away, whether or not anything is waiting.
-        run(() => page.root.findByType(AttentionActionModal).props.onClose());
-        selectMenu(page.root, 'Attention');
-        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
       } finally {
         run(() => page.unmount());
       }
@@ -1737,7 +1823,7 @@ describe('SessionChatPage', () => {
         // Absence, not an empty badge: a "0" here would be a claim this build
         // cannot make, because nothing has read the ledger.
         expect(needsYouButtons(page.root)).toHaveLength(0);
-        expect(menuLabels(page.root)).not.toContain('Attention');
+        expect(actionLabels(page.root)).not.toContain('Attention');
         expect(page.root.findAllByType(AttentionActionModal)).toHaveLength(0);
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
         expect(surface.attentionReferenceResolver).toBeUndefined();
@@ -2108,3 +2194,386 @@ const must = <T,>(value: T | undefined): T => {
   if (value === undefined) throw new Error('expected a value');
   return value;
 };
+
+describe('SessionChatPage Info and Actions', () => {
+  const chatPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) => (
+    <SessionChatPage
+      client={client([], sessionView('shared'))}
+      connection={alpha}
+      context={contextDependencies()}
+      entries={[]}
+      onSessionChange={() => undefined}
+      presentation="pane"
+      session={sessionView('shared')}
+      {...props}
+    />
+  );
+
+  test('ⓘ opens Info beside the split on a desktop, at the remembered width and never under 360px', async () => {
+    const rails = new WorkspaceRailPreferenceStore(NO_STORAGE);
+    rails.setWidth('right', 420);
+    const page = renderSessionChatPage(chatPage({ workspaceRails: rails }), fakeDaemon().factory);
+    try {
+      const bar = () => page.root.findByType(SessionTopBar);
+      expect(bar().props.infoOpen).toBe(false);
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+
+      run(() => bar().props.onToggleInfo());
+      await flush();
+      expect(bar().props.infoOpen).toBe(true);
+      const frame = page.root.findByProps({ 'data-info-frame': '' });
+      expect(frame.props.style.width).toBe('420px');
+      expect(frame.findByType(SessionInfo).props.presentation).toBe('panel');
+      // A desktop draws no Info sheet at all.
+      expect(
+        page.root.findAll(node => node.type === BottomSheet && node.props.closeLabel === 'Close Info'),
+      ).toHaveLength(0);
+
+      run(() => bar().props.onToggleInfo());
+      expect(bar().props.infoOpen).toBe(false);
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+
+    // A rail remembered narrower than Info's floor still opens Info at 360px.
+    const narrow = new WorkspaceRailPreferenceStore(NO_STORAGE);
+    const second = renderSessionChatPage(
+      chatPage({ initialInfo: 'overview', workspaceRails: narrow }),
+      fakeDaemon().factory,
+    );
+    try {
+      expect(second.root.findByProps({ 'data-info-frame': '' }).props.style.width).toBe('360px');
+    } finally {
+      run(() => second.unmount());
+    }
+  });
+
+  test('on a phone Info is a bottom sheet at half height, and its header toggles full height', async () => {
+    const page = renderSessionChatPage(chatPage({ presentation: 'sheet' }), fakeDaemon().factory);
+    try {
+      const sheet = () => page.root.find(node => node.type === BottomSheet && node.props.closeLabel === 'Close Info');
+      expect(sheet().props.open).toBe(false);
+      run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
+      await flush();
+      expect(sheet().props.open).toBe(true);
+      expect(sheet().props.height).toContain('56dvh');
+      expect(sheet().findByType(SessionInfo).props.presentation).toBe('sheet');
+      expect(page.root.findAllByProps({ 'data-info-frame': '' })).toHaveLength(0);
+
+      run(() => page.root.findByProps({ 'data-info-size': 'half' }).props.onClick());
+      expect(sheet().props.height).toBe('calc(var(--app-h, 100dvh) - 28px)');
+      run(() => page.root.findByProps({ 'data-info-size': 'full' }).props.onClick());
+      expect(sheet().props.height).toContain('56dvh');
+
+      run(() => page.root.findByProps({ 'data-info-close': '' }).props.onClick());
+      expect(page.root.findByType(SessionTopBar).props.infoOpen).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test("Rename renames through the daemon client, and Info's pencil opens the same form", async () => {
+    const daemon = fakeDaemon();
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(chatPage({ onSessionChange: view => published.push(view) }), daemon.factory);
+    try {
+      chooseAction(page.root, 'rename');
+      expect(page.root.findByType(ActionsMenu).props.form).toBe('rename');
+      // A form closes the menu and opens in a popover under Actions on a desktop.
+      expect(actionsTrigger(page.root).props['aria-expanded']).toBe(false);
+      expect(page.root.findAllByProps({ 'data-session-action-popover': '' })).toHaveLength(1);
+      const form = page.root.findByType(RenameForm);
+      await runAsync(async () => {
+        await form.props.rename({ name: 'Sign-in fix' });
+      });
+      expect(daemon.calls).toEqual(['rename:shared:Sign-in fix:undefined:undefined']);
+      expect(published.at(-1)?.config.label).toBe('Sign-in fix');
+      run(() => page.root.findByType(ActionsMenu).props.onFormChange(null));
+      expect(page.root.findAllByType(RenameForm)).toHaveLength(0);
+
+      run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
+      await flush();
+      run(() => page.root.findByProps({ 'data-info-rename': '' }).props.onClick());
+      expect(page.root.findByType(ActionsMenu).props.form).toBe('rename');
+      expect(page.root.findAllByType(RenameForm)).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a read-only connection is offered only Copy session id, and no rename pencil', async () => {
+    const page = renderSessionChatPage(chatPage({ canControl: false, initialInfo: 'overview' }), fakeDaemon().factory);
+    try {
+      await flush();
+      expect(actionLabels(page.root)).toEqual(['Copy session id']);
+      expect(page.root.findByType(SessionInfo).props.onRename).toBeUndefined();
+      expect(page.root.findAllByProps({ 'data-info-rename': '' })).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Fork forks through the latest message on the same login, names the fork and opens it', async () => {
+    const daemon = fakeDaemon();
+    const navigated: string[] = [];
+    const page = renderSessionChatPage(chatPage({ onNavigate: to => navigated.push(to) }), daemon.factory);
+    try {
+      chooseAction(page.root, 'fork');
+      const form = page.root.findByType(ForkForm);
+      let outcome: unknown;
+      await runAsync(async () => {
+        outcome = await form.props.fork('Kit');
+      });
+      expect(daemon.calls).toEqual([
+        'messages:shared',
+        `fork:shared:point-9:${sessionView('shared').config.agent}`,
+        'rename:forked:undefined:kit:undefined',
+      ]);
+      run(() => form.props.onForked(outcome));
+      expect(navigated).toEqual([daemonSessionPath(alpha.daemonId, 'forked')]);
+    } finally {
+      run(() => page.unmount());
+    }
+
+    // Without a navigator the fork still lands; there is just nowhere to take the reader.
+    const quiet = renderSessionChatPage(chatPage(), fakeDaemon().factory);
+    try {
+      chooseAction(quiet.root, 'fork');
+      expect(() =>
+        quiet.root.findByType(ForkForm).props.onForked({ session: { id: 'forked' }, plan: {} }),
+      ).not.toThrow();
+    } finally {
+      run(() => quiet.unmount());
+    }
+  });
+
+  test('Restart CLI asks inline, then migrates to the same login with resume and publishes the view', async () => {
+    const daemon = fakeDaemon();
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(chatPage({ onSessionChange: view => published.push(view) }), daemon.factory);
+    try {
+      chooseAction(page.root, 'restart');
+      expect(daemon.calls).toEqual([]);
+      expect(textOf(page.root.findByProps({ 'data-menu-confirm': 'restart' }))).toContain('resumes the conversation');
+      await runAsync(async () => {
+        page.root.findByProps({ 'data-menu-confirm-yes': '' }).props.onClick();
+        await Promise.resolve();
+      });
+      await flush();
+      const agent = sessionView('shared').config.agent;
+      expect(daemon.calls).toEqual([`migrate:shared:${agent}:undefined:false:true`]);
+      expect(published.at(-1)?.config.id).toBe('shared');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a failed action is said on the page’s one alert line', async () => {
+    const daemon = fakeDaemon({ migrate: new Error('in-flight work would be lost') });
+    const page = renderSessionChatPage(chatPage(), daemon.factory);
+    try {
+      chooseAction(page.root, 'restart');
+      await runAsync(async () => {
+        page.root.findByProps({ 'data-menu-confirm-yes': '' }).props.onClick();
+        await Promise.resolve();
+      });
+      await flush();
+      expect(JSON.stringify(page.toJSON())).toContain(
+        'Session action failed: Restart CLI failed: in-flight work would be lost',
+      );
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Stop and Resume run through the page client from Actions', async () => {
+    const calls: string[] = [];
+    const page = renderSessionChatPage(
+      chatPage({
+        client: client(calls, sessionView('shared')),
+        session: sessionView('shared', { state: { status: 'completed' } }),
+      }),
+    );
+    try {
+      // A finished ferret is resumed, not restarted or stopped.
+      expect(actionLabels(page.root)).toContain('Resume ferret');
+      expect(actionLabels(page.root)).not.toContain('Restart CLI');
+      chooseAction(page.root, 'resume');
+      await flush();
+      expect(calls).toEqual(['resume:shared']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Add MCP server reads, previews and adds through the session MCP routes, and reloads ferrets on that login', async () => {
+    const daemon = fakeDaemon();
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      seen.push(`${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`);
+      return route(input);
+    }) as typeof fetch;
+    const current = sessionView('shared');
+    const agent = current.config.agent;
+    const sessions = [
+      current,
+      sessionView('peer'),
+      sessionView('stranger', { config: { agent: 'codex-other' } }),
+      sessionView('done', { state: { status: 'completed' } }),
+    ];
+    const page = renderSessionChatPage(chatPage({ daemonSessions: sessions, project: 'ferretry' }), daemon.factory);
+    try {
+      chooseAction(page.root, 'add-mcp');
+      const form = page.root.findByType(AddMcpForm);
+      expect(form.props).toMatchObject({ login: agent, project: 'ferretry' });
+      const ports = form.props.ports;
+      expect(ports.signIn.machineName).toBe('alpha box');
+      expect((await ports.listing(new AbortController().signal)).project.path).toBe('/work/shared/.mcp.json');
+      const request = { name: 'acme', server: { transport: 'command', command: 'npx', args: ['acme'], env: {} } };
+      await ports.preview('project', request).catch(() => null);
+      await ports.add('project', request).catch(() => null);
+      expect(seen.filter(line => line.includes('/v1/sessions/shared/mcp')).length).toBeGreaterThanOrEqual(3);
+      expect(seen.some(line => line.startsWith('POST /v1/sessions/shared/mcp'))).toBe(true);
+
+      await runAsync(async () => await ports.reload());
+      await runAsync(async () => await ports.reloadOthers());
+      // Only the live ferrets on the same login are relaunched: never a stranger or a finished one.
+      expect(daemon.calls).toEqual([
+        `migrate:shared:${agent}:undefined:false:true`,
+        `migrate:peer:${agent}:undefined:false:true`,
+      ]);
+    } finally {
+      run(() => page.unmount());
+    }
+
+    // No fleet read and no MCP sign-in host: the form offers neither reload-others nor sign-in.
+    const bare = renderSessionChatPage(chatPage({ context: undefined }), fakeDaemon().factory);
+    try {
+      chooseAction(bare.root, 'add-mcp');
+      expect(bare.root.findByType(AddMcpForm).props.ports.reloadOthers).toBeUndefined();
+      expect(bare.root.findByType(AddMcpForm).props.ports.signIn).toBeUndefined();
+    } finally {
+      run(() => bare.unmount());
+    }
+  });
+
+  test('actionContributions add a row to its group, built against the same context as the core rows', () => {
+    const ran: string[] = [];
+    const warden: SessionActionContribution<CoreActionContext> = {
+      group: 'warden',
+      order: 10,
+      build: context => ({
+        kind: 'run',
+        id: 'ask-warden',
+        label: 'Ask the Warden to investigate',
+        icon: Copy,
+        run: () => {
+          ran.push(context.view.config.id);
+        },
+      }),
+    };
+    const page = renderSessionChatPage(chatPage({ actionContributions: [warden] }));
+    try {
+      const labels = actionLabels(page.root);
+      expect(labels.indexOf('Ask the Warden to investigate')).toBe(labels.indexOf('Restart CLI') - 1);
+      openActions(page.root);
+      const group = page.root.find(node => node.props.role === 'group' && node.props['aria-label'] === 'Warden');
+      expect(group.findAllByProps({ 'data-session-action-item': 'ask-warden' })).toHaveLength(1);
+      chooseAction(page.root, 'ask-warden');
+      expect(ran).toEqual(['shared']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Info reads through the page ports, and every Info link opens where the page keeps it', async () => {
+    const daemon = fakeDaemon();
+    const layouts = new WorkspaceLayoutStore(NO_STORAGE);
+    const scope = daemonSessionScope(alpha, 'shared');
+    const navigated: string[] = [];
+    const current = sessionView('shared');
+    const sessions = [current, sessionView('child')];
+    const page = renderSessionChatPage(
+      chatPage({
+        daemonSessions: sessions,
+        infoRuntimeControls: <span data-runtime-slot="">pickers</span>,
+        initialInfo: 'overview',
+        onNavigate: to => navigated.push(to),
+        workspaceLayouts: layouts,
+      }),
+      daemon.factory,
+    );
+    try {
+      await flush();
+      const info = () => page.root.findByType(SessionInfo);
+      expect(info().props.sessions).toBe(sessions);
+      // Overview reads the worktrees through the typed client.
+      expect(daemon.calls).toContain('request:/v1/worktrees');
+      const { ports } = info().props;
+      await ports.verdicts(new AbortController().signal);
+      expect(daemon.calls).toContain('verdicts');
+      await ports.analytics(new AbortController().signal).catch(() => null);
+      // The login's catalogue (empty here) and the project file, joined with each server's scope: only
+      // Ferretry's own tools server is left.
+      expect(await ports.folder.loadMcp(new AbortController().signal)).toEqual([
+        { name: 'ferretry', scope: 'ferretry', signsIn: false, transport: 'command' },
+      ]);
+      expect(ports.folder.agentName).toBe(sessionDisplayName(current));
+      expect(ports.folder.mcpSignIn.machineName).toBe('alpha box');
+      run(() => ports.folder.onInsertSkill('/floop'));
+
+      const tabs = () => Object.keys(layouts.snapshot(scope).tabs);
+      run(() => ports.folder.onOpenFile('README.md'));
+      expect(tabs()).toContain('file:README.md');
+      run(() => ports.folder.renderFiles().props.onOpenFile('src/app.ts', { line: 3 }));
+      expect(tabs()).toContain('file:src/app.ts');
+      run(() => info().props.onOpenTerminal('a1b2c3d4e5f6', 'dev'));
+      expect(layouts.snapshot(scope).tabs['terminal:a1b2c3d4e5f6']?.label).toBe('dev');
+      run(() => info().props.onOpenPage({ id: 'PAGE3', url: 'https://example.test/pr', title: 'The PR' }));
+      expect(tabs()).toContain('browser:PAGE3');
+      run(() => info().props.onOpenPage({ id: 'PAGE1', name: 'app', url: 'https://example.test/', title: 'App' }));
+      expect(tabs()).toContain('browser:app');
+      run(() => info().props.onOpenSession('child'));
+      expect(navigated).toEqual([daemonSessionPath(alpha.daemonId, 'child')]);
+
+      // Folder › MCP's "Add…" opens the Add MCP server form.
+      run(() => ports.folder.onAddMcp());
+      expect(page.root.findByType(ActionsMenu).props.form).toBe('add-mcp');
+
+      // Info › Runtime carries the host's model and effort pickers.
+      run(() => info().props.placement.setTab('runtime'));
+      await flush();
+      expect(page.root.findAllByProps({ 'data-runtime-slot': '' })).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a session change clears an open form and the migration sheet', () => {
+    const page = renderSessionChatPage(chatPage());
+    try {
+      chooseAction(page.root, 'rename');
+      expect(page.root.findAllByType(RenameForm)).toHaveLength(1);
+      chooseAction(page.root, 'move-login');
+      expect(page.root.findByType(MigrateSheet).props.open).toBe(true);
+      run(() =>
+        page.update(
+          withSessionSearch(
+            chatPage({
+              formFactor: 'desktop',
+              session: sessionView('other'),
+              workspaceLayouts: new WorkspaceLayoutStore(NO_STORAGE),
+              workspaceRails: new WorkspaceRailPreferenceStore(NO_STORAGE),
+            }),
+          ),
+        ),
+      );
+      expect(page.root.findByType(ActionsMenu).props.form).toBeNull();
+      expect(page.root.findAllByType(RenameForm)).toHaveLength(0);
+      expect(page.root.findByType(MigrateSheet).props.open).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});

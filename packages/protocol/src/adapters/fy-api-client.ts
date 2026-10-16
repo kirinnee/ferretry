@@ -46,10 +46,20 @@ import {
   ScratchSweepViewSchema,
   type UsageFeedView,
   UsageFeedViewSchema,
+} from '../lib/service.ts';
+import {
+  WARDEN_ATTENTION_PATH,
+  WARDEN_INVESTIGATE_PATH,
+  type WardenAttentionView,
+  WardenAttentionViewSchema,
   type WardenConfigPatch,
   WardenConfigPatchSchema,
   type WardenConfigView,
   WardenConfigViewSchema,
+  type WardenInvestigateRequest,
+  WardenInvestigateRequestSchema,
+  type WardenInvestigateView,
+  WardenInvestigateViewSchema,
   WardenRunRequestSchema,
   type WardenRunView,
   WardenRunViewSchema,
@@ -57,7 +67,7 @@ import {
   WardenStatusViewSchema,
   type WardenVerdictsView,
   WardenVerdictsViewSchema,
-} from '../lib/service.ts';
+} from '../lib/warden.ts';
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
@@ -448,6 +458,18 @@ export class FyApiClient implements IFyApiClient {
       '/v1/warden/config',
       WardenConfigViewSchema,
       jsonRequest('PATCH', WardenConfigPatchSchema, patch),
+    );
+  }
+
+  wardenAttention(): Promise<WardenAttentionView> {
+    return this.request(WARDEN_ATTENTION_PATH, WardenAttentionViewSchema);
+  }
+
+  wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView> {
+    return this.request(
+      WARDEN_INVESTIGATE_PATH,
+      WardenInvestigateViewSchema,
+      jsonRequest('POST', WardenInvestigateRequestSchema, request),
     );
   }
 

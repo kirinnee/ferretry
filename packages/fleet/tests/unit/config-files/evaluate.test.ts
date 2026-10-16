@@ -23,7 +23,7 @@ const evaluate = (
 const withText = (files: readonly ConfigFileText[], path: string, text: string): ConfigFileText[] =>
   files.map(entry => (entry.path === path ? file(path, text) : entry));
 
-const WARDEN_ON = 'enabled: true\n';
+const WARDEN_ON = 'triage: llm\n';
 const MACHINE_FERRETRY = 'agentControl:\n  ferretrySettings: true\n';
 const LEARNING_OFF = 'enabled: false\n';
 
@@ -102,7 +102,7 @@ describe('evaluateConfigFiles: files that check', () => {
   it('should put the Warden, Learning and Voice files in effect without counting them as the fleet', () => {
     // Arrange
     const input = [
-      file('warden.yaml', 'intervalMinutes: 20\n'),
+      file('warden.yaml', 'intervalMinutes: 10\n'),
       file('learning.yaml', 'batchSize: 5\n'),
       file('voice.yaml', 'postProcessing:\n  provider: off\n'),
     ];
@@ -111,7 +111,7 @@ describe('evaluateConfigFiles: files that check', () => {
     const actual = evaluate(input);
 
     // Assert
-    should(actual.effective.warden.intervalMinutes).equal(20);
+    should(actual.effective.warden.intervalMinutes).equal(10);
     should(actual.effective.learning.batchSize).equal(5);
     should(actual.effective.voice).deepEqual(DEFAULT_VOICE_CONFIG);
     should(actual.fleetFiles).equal(0);
@@ -158,13 +158,13 @@ describe('evaluateConfigFiles: last good wins', () => {
 
   it('should keep the previously accepted text in effect while the file does not parse', () => {
     // Arrange
-    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 20\n')]);
+    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 10\n')]);
 
     // Act
     const actual = evaluate([file('warden.yaml', BROKEN)], accepted);
 
     // Assert
-    should(actual.effective.warden.intervalMinutes).equal(20);
+    should(actual.effective.warden.intervalMinutes).equal(10);
     should(actual.accepted).deepEqual(accepted);
     should(actual.files).deepEqual([{ path: 'warden.yaml', kind: 'warden', schema: 'warden', state: 'invalid' }]);
     should(actual.issues.some(issue => issue.severity === 'error' && issue.path === 'warden.yaml')).be.true();
@@ -173,13 +173,13 @@ describe('evaluateConfigFiles: last good wins', () => {
 
   it('should keep the previous version for a file that parses but breaks its schema', () => {
     // Arrange
-    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 20\n')]);
+    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 10\n')]);
 
     // Act
     const actual = evaluate([file('warden.yaml', 'bogus: 1\n')], accepted);
 
     // Assert
-    should(actual.effective.warden.intervalMinutes).equal(20);
+    should(actual.effective.warden.intervalMinutes).equal(10);
     should(actual.files[0]?.state).equal('invalid');
     should(actual.issues[0]?.line).equal(1);
   });
@@ -246,21 +246,21 @@ describe('evaluateConfigFiles: last good wins', () => {
 
   it('should put the file in effect again as soon as it is fixed', () => {
     // Arrange
-    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 20\n')]);
+    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 10\n')]);
 
     // Act
-    const actual = evaluate([file('warden.yaml', 'intervalMinutes: 30\n')], accepted);
+    const actual = evaluate([file('warden.yaml', 'intervalMinutes: 15\n')], accepted);
 
     // Assert
-    should(actual.effective.warden.intervalMinutes).equal(30);
-    should(actual.accepted['warden.yaml']?.etag).equal(digest('intervalMinutes: 30\n'));
+    should(actual.effective.warden.intervalMinutes).equal(15);
+    should(actual.accepted['warden.yaml']?.etag).equal(digest('intervalMinutes: 15\n'));
     should(actual.files[0]?.state).equal('ok');
   });
 });
 
 describe('evaluateConfigFiles: loosening waits', () => {
   it.each([
-    ['warden.yaml', WARDEN_ON, 'the Warden may now spend on AI investigations'],
+    ['warden.yaml', WARDEN_ON, 'the Warden may now spend on an AI investigation of every flag'],
     ['machine.yaml', MACHINE_FERRETRY, 'agents may now control Ferretry settings'],
     ['machine.yaml', 'agentPermissions: skip\n', 'agents now skip every permission prompt'],
     ['learning.yaml', 'maxMinersPerRun: 9\n', 'the lesson miners one run may start goes up from 2 to 9'],
@@ -279,14 +279,14 @@ describe('evaluateConfigFiles: loosening waits', () => {
 
   it('should keep the tighter version in effect while the edit is held', () => {
     // Arrange
-    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 20\n')]);
+    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 10\n')]);
 
     // Act
-    const actual = evaluate([file('warden.yaml', 'enabled: true\nintervalMinutes: 20\n')], accepted);
+    const actual = evaluate([file('warden.yaml', 'triage: llm\nintervalMinutes: 10\n')], accepted);
 
     // Assert
-    should(actual.effective.warden.enabled).be.false();
-    should(actual.effective.warden.intervalMinutes).equal(20);
+    should(actual.effective.warden.triage).equal('rules');
+    should(actual.effective.warden.intervalMinutes).equal(10);
     should(actual.accepted).deepEqual(accepted);
   });
 
@@ -320,16 +320,16 @@ describe('evaluateConfigFiles: loosening waits', () => {
 
     // Act
     const actual = evaluate(
-      [file('warden.yaml', 'enabled: false\n'), file('machine.yaml', 'agentPermissions: auto\n')],
+      [file('warden.yaml', 'triage: rules\n'), file('machine.yaml', 'agentPermissions: auto\n')],
       accepted,
     );
 
     // Assert
-    should(actual.effective.warden.enabled).be.false();
+    should(actual.effective.warden.triage).equal('rules');
     should(actual.effective.model.machine.agentPermissions).equal('auto');
     should(actual.pending).deepEqual([]);
     should(actual.files.map(entry => entry.state)).deepEqual(['ok', 'ok']);
-    should(actual.accepted['warden.yaml']?.etag).equal(digest('enabled: false\n'));
+    should(actual.accepted['warden.yaml']?.etag).equal(digest('triage: rules\n'));
   });
 
   it('should put a confirmed loosening in effect: its text is already the accepted one', () => {
@@ -341,7 +341,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
     const actual = evaluate([file('warden.yaml', WARDEN_ON)], confirmed);
 
     // Assert
-    should(actual.effective.warden.enabled).be.true();
+    should(actual.effective.warden.triage).equal('llm');
     should(actual.pending).deepEqual([]);
     should(actual.files[0]?.state).equal('ok');
     should(actual.accepted).deepEqual(confirmed);
@@ -368,7 +368,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
 
     // Assert
     should(second.pending).deepEqual(first.pending);
-    should(second.effective.warden.enabled).be.false();
+    should(second.effective.warden.triage).equal('rules');
   });
 
   it('should hold a NEW edit over a confirmed one: confirming names one etag only', () => {
@@ -382,7 +382,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
     // Assert
     should(actual.pending[0]?.etag).equal(digest(edited));
     should(actual.pending[0]?.changes).deepEqual(['the number of wardens that may run at once goes up from 1 to 4']);
-    should(actual.effective.warden.enabled).be.true();
+    should(actual.effective.warden.triage).equal('llm');
     should(actual.effective.warden.maxAssignedWardens).equal(1);
   });
 });
@@ -450,14 +450,14 @@ describe('evaluateConfigFiles: a file that is gone', () => {
 
   it('should not read a file that is unreadable as a deletion', () => {
     // Arrange
-    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 20\n')]);
+    const accepted = acceptedOf([file('warden.yaml', 'intervalMinutes: 10\n')]);
 
     // Act
     const actual = evaluate([], accepted, ['warden.yaml']);
 
     // Assert
     should(actual.pending).deepEqual([]);
-    should(actual.effective.warden.intervalMinutes).equal(20);
+    should(actual.effective.warden.intervalMinutes).equal(10);
   });
 });
 

@@ -164,6 +164,26 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     event: 'fleet.configured',
     detail: { action: 'install-tool' },
   },
+  // Adding an MCP server for one ferret (`mounts/session-mcp.ts`): the session and the server's NAME, never
+  // its command, address or environment. Both change what agents launch with, the project file for
+  // everyone on the repository and the login for every ferret on it, so both are recorded as fleet
+  // configuration, told apart by `scope`.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/mcp/project',
+    event: 'fleet.configured',
+    subject: 'sessionId',
+    responseNames: 'name',
+    detail: { action: 'mcp-add', scope: 'project' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/mcp/login',
+    event: 'fleet.configured',
+    subject: 'sessionId',
+    responseNames: 'name',
+    detail: { action: 'mcp-add', scope: 'login' },
+  },
   { method: 'POST', path: '/v1/sessions/:sessionId/terminals', event: 'terminal.opened', subject: 'sessionId' },
   // Typing into the session's own pane from the Console: counted on the session and folded per window,
   // exactly as a terminal socket's keystrokes are — the request body is never read.
@@ -244,6 +264,8 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'answer' },
   },
   { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },
+  // An owner's request spends an investigation, so it is recorded as a run of its own kind.
+  { method: 'POST', path: '/v1/warden/investigate', event: 'warden.ran', detail: { action: 'investigate' } },
   { method: 'PATCH', path: '/v1/warden/config', event: 'warden.configured' },
   // The configuration files (docs/config-files.md). Nothing from the body — no path, no text — is
   // recorded: which file changed is the file's own business, and its text may be what was wrong.
