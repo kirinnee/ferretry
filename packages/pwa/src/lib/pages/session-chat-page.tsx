@@ -881,8 +881,10 @@ export function SessionChatPage({
     // workspace and whatever a later item renders here — reads references through this one surface.
     <ReferenceSurfaceProvider surface={references}>
       <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+      {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
+          composer could scroll the whole session sideways and leave the header off the left edge. */}
       <main
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
         data-daemon={connection.daemonId}
         data-session={session.config.id}
       >

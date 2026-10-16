@@ -326,7 +326,7 @@ export function CommandPalette({
               setActive(0);
             }}
             onKeyDown={onInputKeyDown}
-            placeholder="Search app destinations, commands, settings, and sessions…"
+            placeholder="Search places, settings, sessions…"
             // Not `.kt-input`: the panel already draws the edge, and a second
             // bordered control inside it reads as a box in a box. Type size and
             // colour still come from tokens.
@@ -427,7 +427,8 @@ export function CommandPalette({
           )}
         </div>
 
-        <Footer shortcutAvailable={shortcutAvailable} />
+        {/* Key hints are for a keyboard: a touch reader opened this with a tap and has no ↑↓, ↵ or esc. */}
+        {latchedTouch.current ? null : <Footer shortcutAvailable={shortcutAvailable} />}
 
         {/* Spoken, never shown. `sr-only` and not `hidden`, which would take it
             straight back out of the accessibility tree. */}

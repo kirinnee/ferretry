@@ -116,7 +116,7 @@ describe('the resting palette', () => {
 
     const input = document.getElementById('fy-palette-input');
     expect(input?.getAttribute('aria-label')).toBe('Search app destinations, commands, settings, and sessions');
-    expect(input?.getAttribute('placeholder')).toBe('Search app destinations, commands, settings, and sessions…');
+    expect(input?.getAttribute('placeholder')).toBe('Search places, settings, sessions…');
   });
 
   it('names each group by what it offers rather than by what matched', async () => {
@@ -153,6 +153,16 @@ describe('the resting palette', () => {
     await open({ touchAffected: true });
 
     expect(document.activeElement).not.toBe(input());
+  });
+
+  it('shows the key hints to a keyboard reader', async () => {
+    await open();
+    expect(document.body.textContent).toContain('outside text fields');
+  });
+
+  it('drops the key hints on touch, which has no arrows, return or esc', async () => {
+    await open({ touchAffected: true });
+    expect(document.body.textContent).not.toContain('outside text fields');
   });
 });
 

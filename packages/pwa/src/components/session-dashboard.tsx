@@ -116,7 +116,11 @@ export function SessionDashboard({
   };
 
   return (
-    <main aria-labelledby={headingId} className="flex h-full min-h-0 w-full flex-col pb-2" data-density={density}>
+    <main
+      aria-labelledby={headingId}
+      className="flex h-full min-h-0 w-full flex-col px-3 pb-2 sm:px-0"
+      data-density={density}
+    >
       <div
         className={cn(
           'mt-0.5 mb-1 flex items-center justify-between gap-2 sm:mt-2 sm:mb-2',

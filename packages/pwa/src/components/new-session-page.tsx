@@ -278,7 +278,7 @@ export function NewSessionPage({
   return (
     <main
       aria-labelledby="new-session-heading"
-      className="mx-auto flex min-h-0 w-full max-w-[720px] flex-1 flex-col overflow-y-auto pb-3"
+      className="mx-auto flex h-full min-h-0 w-full max-w-[720px] flex-1 flex-col overflow-y-auto px-3 pb-3 sm:px-0"
     >
       <div className="mb-3 mt-3 flex items-center gap-2.5">
         <button className="text-meta text-muted hover:text-fg" onClick={() => onNavigate(sessionsPath)} type="button">

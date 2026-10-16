@@ -6861,6 +6861,57 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
 ];
 
 /**
+ * `?wide` appends what made a phone's chat column grow past the screen (the mobile audit's L1): a fenced
+ * block of long lines, a table, a long unbroken URL and a tool result of long lines. Each must scroll or
+ * wrap inside its own box; none may widen the column, the composer or the page.
+ */
+const WIDE_ENTRIES: readonly TranscriptEntry[] = [
+  {
+    id: 'workspace-wide-assistant',
+    kind: 'assistant',
+    label: 'hadi',
+    text: [
+      '| File | Line | Problem | Severity |',
+      '| --- | --- | --- | --- |',
+      '| `packages/pwa/src/hooks/use-app-viewport.ts` | 88 | reads `visualViewport` without a null guard | high |',
+      '| `packages/pwa/src/components/composer.tsx` | 412 | `position: sticky` inside a scroller with `overflow: hidden` | high |',
+      '',
+      '```ts',
+      "export function useAppViewport(target: VisualViewport | null = window.visualViewport, write = (height: number) => document.documentElement.style.setProperty('--app-height', String(height) + 'px')): void {",
+      '  useLayoutEffect(() => { if (target === null) return; target.addEventListener("resize", () => write(Math.round(target.height))); }, [target]);',
+      '}',
+      '```',
+      '',
+      'A long unbroken token like https://example.invalid/a/really/long/path/that/never/breaks/because/it/has/no/spaces/at/all/and/keeps/going/forever.tsx must wrap.',
+    ].join('\n'),
+  },
+  {
+    id: 'workspace-wide-tools',
+    kind: 'tool',
+    text: 'ran 1 tool',
+    tools: [
+      {
+        key: 'workspace-wide-bash',
+        use: {
+          name: 'Bash',
+          input: { command: 'rg -n "visualViewport" packages/pwa/src --glob "*.ts" --glob "*.tsx" --max-columns 400' },
+        },
+        result: {
+          text: Array.from(
+            { length: 6 },
+            (_, line) =>
+              `packages/pwa/src/hooks/use-app-viewport.ts:${88 + line}:  const height = window.visualViewport?.height ?? window.innerHeight; // a line far wider than any phone`,
+          ).join('\n'),
+        },
+      },
+    ],
+  },
+];
+const SESSION_ENTRIES: readonly TranscriptEntry[] = new URLSearchParams(window.location.search).has('wide')
+  ? [...WORKSPACE_ENTRIES, ...WIDE_ENTRIES]
+  : WORKSPACE_ENTRIES;
+
+/**
  * The whole daemon surface this page can reach, answered locally.
  *
  * Nothing here touches the network: the screenshot driver aborts every
@@ -7037,7 +7088,7 @@ function SessionWorkspaceHarness() {
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
-          entries={WORKSPACE_ENTRIES}
+          entries={SESSION_ENTRIES}
           onSessionChange={setSession}
           {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}
