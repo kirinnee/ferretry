@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { LearningController } from '../../../src/lib/learning/controller';
-import { CapturingOutput, proposal, RecordingLearningGateway } from './fixtures';
+import { applyPreview, CapturingOutput, proposal, RecordingLearningGateway } from './fixtures';
 
 function controller(gateway = new RecordingLearningGateway()): {
   subject: LearningController;
@@ -9,7 +9,7 @@ function controller(gateway = new RecordingLearningGateway()): {
   out: CapturingOutput;
 } {
   const out = new CapturingOutput();
-  return { subject: new LearningController(gateway, out), gateway, out };
+  return { subject: new LearningController(gateway, out, 'fy'), gateway, out };
 }
 
 describe('learning listing', () => {
@@ -44,7 +44,7 @@ describe('learning listing', () => {
 
     // Act + Assert
     await should(subject.list({ state: 'pendign' })).be.rejectedWith(
-      '--state must be one of pending, accepted, rejected, not "pendign"',
+      '--state must be one of pending, accepted, applied, rejected, not "pendign"',
     );
     should(gateway.listed).be.empty();
   });
@@ -167,6 +167,132 @@ describe('learning judgements', () => {
 
     // Act + Assert
     await should(subject.edit('p1', ['  '], {})).be.rejectedWith('edit needs the replacement rule text');
+  });
+
+  it('should change where a lesson goes', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller();
+
+    // Act
+    await subject.categorize('p1', 'repo', {});
+
+    // Assert
+    should(gateway.acted).eql([{ id: 'p1', request: { action: 'categorize', category: 'repo' } }]);
+    should(out.text).containEql('categorized p1');
+  });
+
+  it('should refuse a category the protocol does not define', async () => {
+    // Arrange
+    const { subject, gateway } = controller();
+
+    // Act + Assert
+    await should(subject.categorize('p1', 'project', {})).be.rejectedWith(
+      'category must be one of global, repo, not "project"',
+    );
+    should(gateway.acted).be.empty();
+  });
+
+  it('should reopen a judged lesson', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller();
+
+    // Act
+    await subject.reopen('p1', {});
+
+    // Assert
+    should(gateway.acted).eql([{ id: 'p1', request: { action: 'reopen' } }]);
+    should(out.text).containEql('reopened p1');
+  });
+});
+
+describe('learning apply', () => {
+  it('should show the preview and write nothing without --yes', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller();
+
+    // Act
+    await subject.apply('p1', {});
+
+    // Assert
+    should(gateway.previewed).eql(['p1']);
+    should(gateway.applied).be.empty();
+    should(out.text).containEql('nothing written yet');
+    should(out.text).containEql('fy learning apply p1 --yes');
+  });
+
+  it('should apply with the previewed etag only under --yes', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller(
+      new RecordingLearningGateway(
+        [proposal('p1')],
+        proposal('p1'),
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        applyPreview({ etag: 'etag-9' }),
+        proposal('p1', { state: 'applied' }),
+      ),
+    );
+
+    // Act
+    await subject.apply('p1', { yes: true });
+
+    // Assert
+    should(gateway.previewed).eql(['p1']);
+    should(gateway.applied).eql([{ id: 'p1', etag: 'etag-9' }]);
+    should(out.text).containEql('applied p1 — now applied');
+  });
+});
+
+describe('learning scan', () => {
+  it('should estimate by default, scoped to every ferret not instructed to learn', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller();
+
+    // Act
+    await subject.scan({});
+
+    // Assert
+    should(gateway.estimated).eql([{ scope: { kind: 'not-passive' } }]);
+    should(gateway.scanned).be.empty();
+    should(out.text).containEql('re-run with --start');
+  });
+
+  it('should narrow the scope to the named sessions, trimmed and de-blanked', async () => {
+    // Arrange
+    const { subject, gateway } = controller();
+
+    // Act
+    await subject.scan({ sessions: ' s1 , s2,, s3 ', agent: ' miner ', model: ' opus ' });
+
+    // Assert
+    should(gateway.estimated).eql([
+      { scope: { kind: 'sessions', sessionIds: ['s1', 's2', 's3'] }, agent: 'miner', model: 'opus' },
+    ]);
+  });
+
+  it('should actually scan only under --start', async () => {
+    // Arrange
+    const { subject, gateway, out } = controller();
+
+    // Act
+    await subject.scan({ start: true });
+
+    // Assert
+    should(gateway.scanned).eql([{ scope: { kind: 'not-passive' } }]);
+    should(gateway.estimated).be.empty();
+    should(out.text).containEql('scan scan-1');
+  });
+
+  it('should refuse --estimate and --start together', async () => {
+    // Arrange
+    const { subject } = controller();
+
+    // Act + Assert
+    await should(subject.scan({ estimate: true, start: true })).be.rejectedWith(
+      'scan once: pass --estimate or --start, not both',
+    );
   });
 });
 

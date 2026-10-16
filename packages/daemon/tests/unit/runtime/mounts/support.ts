@@ -63,13 +63,23 @@ import {
   type GrantAuditEntry,
 } from '../../../../src/lib/grants/index.ts';
 import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
-import type {
-  LearningState,
-  LearningStorePort,
-  Observation,
-  Proposal,
-  RunManifest,
-  Tombstone,
+import {
+  type GlobalLessonsPort,
+  type LearningState,
+  type LearningStorePort,
+  type LessonFilesPort,
+  type LessonSessionFacts,
+  type LessonSessionsPort,
+  LessonsService,
+  type Observation,
+  type OwnerMessage,
+  type PassiveChannelPort,
+  type PricePort,
+  type Proposal,
+  type RunManifest,
+  type ScanMinerPort,
+  type StoredSessionLearning,
+  type Tombstone,
 } from '../../../../src/lib/learning/index.ts';
 import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
 import { type PinRepository, PinService, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
@@ -678,6 +688,208 @@ export class FakeLearningStore implements LearningStorePort {
     this.patches.push({ id, contents });
     return `/patches/${id}.md`;
   }
+
+  /** Which ferrets are instructed to learn, as the switch last left them. */
+  sessionLearning: readonly StoredSessionLearning[] = [];
+
+  async loadSessionLearning(): Promise<readonly StoredSessionLearning[]> {
+    return this.sessionLearning;
+  }
+
+  async saveSessionLearning(records: readonly StoredSessionLearning[]): Promise<void> {
+    this.sessionLearning = records;
+  }
+}
+
+// ── Lessons: in-memory ports for `LessonsService` ─────────────────────────────────────────────────
+
+/** One ferret as lessons see it, with only the fields a case cares about spelled out. */
+export function lessonFacts(
+  overrides: Partial<LessonSessionFacts> & { readonly sessionId: string },
+): LessonSessionFacts {
+  return {
+    cwd: '/work/ferretry/packages/cli',
+    harness: 'claude',
+    mode: 'interactive',
+    createdAt: AT,
+    running: true,
+    hasTranscript: true,
+    ...overrides,
+  };
+}
+
+/** The daemon's sessions, and the owner's latest message in each. */
+class MemoryLessonSessions implements LessonSessionsPort {
+  readonly owner = new Map<string, OwnerMessage>();
+
+  constructor(public sessions: readonly LessonSessionFacts[] = []) {}
+
+  async facts(sessionId: string): Promise<LessonSessionFacts | undefined> {
+    return this.sessions.find(entry => entry.sessionId === sessionId);
+  }
+
+  async list(): Promise<readonly LessonSessionFacts[]> {
+    return this.sessions;
+  }
+
+  async latestOwnerMessage(sessionId: string): Promise<OwnerMessage | undefined> {
+    return this.owner.get(sessionId);
+  }
+}
+
+/** Instruction files as a map of path to text; a cwd's project is its entry in `roots`, else itself. */
+class MemoryLessonFiles implements LessonFilesPort {
+  readonly texts = new Map<string, string>();
+  readonly roots = new Map<string, string>();
+  readonly writes: Array<{ readonly path: string; readonly text: string }> = [];
+
+  async projectRoot(cwd: string): Promise<string> {
+    return this.roots.get(cwd) ?? cwd;
+  }
+
+  async read(path: string): Promise<string | undefined> {
+    return this.texts.get(path);
+  }
+
+  async write(path: string, text: string): Promise<void> {
+    this.writes.push({ path, text });
+    this.texts.set(path, text);
+  }
+
+  join(directory: string, name: string): string {
+    return `${directory}/${name}`;
+  }
+}
+
+/** The fleet's global lessons document. */
+class MemoryGlobalLessons implements GlobalLessonsPort {
+  ensured = 0;
+
+  constructor(
+    readonly path = '/fleet/assets/instructions/lessons.md',
+    readonly notes: readonly string[] = ['No profile includes instructions/lessons yet.'],
+  ) {}
+
+  async locate(): Promise<{ readonly path: string; readonly notes: readonly string[] }> {
+    return { path: this.path, notes: this.notes };
+  }
+
+  async ensureComponent(): Promise<void> {
+    this.ensured += 1;
+  }
+}
+
+/** A ferret's launch environment and queue, recorded. */
+class MemoryPassiveChannel implements PassiveChannelPort {
+  readonly environment: Array<{ readonly sessionId: string; readonly passive: boolean }> = [];
+  readonly sends: Array<{ readonly sessionId: string; readonly message: string }> = [];
+
+  async setEnvironment(sessionId: string, passive: boolean): Promise<void> {
+    this.environment.push({ sessionId, passive });
+  }
+
+  async reinstruct(sessionId: string, message: string): Promise<string> {
+    this.sends.push({ sessionId, message });
+    return `send-${String(this.sends.length)}`;
+  }
+}
+
+type Collected = Awaited<ReturnType<ScanMinerPort['collect']>>;
+
+/**
+ * A miner. A ferret with an entry in `digests` has something to mine; a batch none of whose ferrets
+ * has one starts no miner. `outcomes` answers `collect` per batch index, `pending` when unset.
+ */
+class MemoryScanMiner implements ScanMinerPort {
+  readonly digests = new Map<string, number>();
+  readonly outcomes = new Map<number, Collected>();
+  readonly starts: Array<{
+    readonly runId: string;
+    readonly batch: number;
+    readonly sessionIds: readonly string[];
+    readonly agent: string;
+    readonly model: string | undefined;
+  }> = [];
+  readonly stopped: string[] = [];
+
+  async digestCharacters(sessionId: string): Promise<number | undefined> {
+    return this.digests.get(sessionId);
+  }
+
+  async start(
+    runId: string,
+    batch: number,
+    sessionIds: readonly string[],
+    agent: string,
+    model: string | undefined,
+  ): Promise<string | undefined> {
+    this.starts.push({ runId, batch, sessionIds, agent, model });
+    return sessionIds.some(id => this.digests.has(id)) ? `miner-${String(batch)}` : undefined;
+  }
+
+  async collect(_runId: string, batch: number): Promise<Collected> {
+    return this.outcomes.get(batch) ?? 'pending';
+  }
+
+  async stop(minerSessionId: string): Promise<void> {
+    this.stopped.push(minerSessionId);
+  }
+}
+
+/** A price list in USD per million tokens, input and output alike; a model not in it is unpriced. */
+class MemoryPrices implements PricePort {
+  readonly asked: Array<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> = [];
+
+  constructor(readonly perMillion: ReadonlyMap<string, number> = new Map([['opus', 10]])) {}
+
+  async usd(model: string, inputTokens: number, outputTokens: number): Promise<number | undefined> {
+    this.asked.push({ model, inputTokens, outputTokens });
+    const rate = this.perMillion.get(model);
+    return rate === undefined ? undefined : ((inputTokens + outputTokens) * rate) / 1_000_000;
+  }
+}
+
+/** Every port `LessonsService` reads, in memory, and the service over them. */
+export interface LessonsWorld {
+  readonly store: FakeLearningStore;
+  readonly sessions: MemoryLessonSessions;
+  readonly files: MemoryLessonFiles;
+  readonly global: MemoryGlobalLessons;
+  readonly passive: MemoryPassiveChannel;
+  readonly miner: MemoryScanMiner;
+  readonly prices: MemoryPrices;
+  config: LearningConfig;
+  readonly service: LessonsService;
+}
+
+/** The miner's own label in these fixtures. */
+export const LESSON_MINER_LABEL = 'ferretry-learning';
+
+export function lessonsWorld(store: FakeLearningStore = new FakeLearningStore()): LessonsWorld {
+  const world = {
+    store,
+    sessions: new MemoryLessonSessions(),
+    files: new MemoryLessonFiles(),
+    global: new MemoryGlobalLessons(),
+    passive: new MemoryPassiveChannel(),
+    miner: new MemoryScanMiner(),
+    prices: new MemoryPrices(),
+    config: LEARNING_CONFIG,
+  } as Omit<LessonsWorld, 'service'> & { service?: LessonsService };
+  world.service = new LessonsService({
+    store: world.store,
+    sessions: world.sessions,
+    files: world.files,
+    global: world.global,
+    passive: world.passive,
+    miner: world.miner,
+    prices: world.prices,
+    config: () => world.config,
+    now: () => AT,
+    binaryName: 'fy',
+    minerLabel: LESSON_MINER_LABEL,
+  });
+  return world as LessonsWorld;
 }
 
 /** The learning schedule the fixtures report. Mining is off for the same reason production reports
@@ -690,14 +902,31 @@ export const LEARNING_CONFIG: LearningConfig = {
   maxMinersPerRun: 2,
   maxSessionsPerRun: 40,
   minSpawnGapMinutes: 30,
+  passiveDefault: false,
 };
 
+/** The session credential the fixtures' one ferret presents, and the session it proves. */
+export const LESSON_CAPABILITY = 'fy_cap_lesson_ferret';
+export const LESSON_SESSION = 'ferret-1';
+
 /** A learning subsystem over an in-memory store. The transaction is real serialization — a promise
- *  chain — so a case can prove two concurrent verdicts do not lose one. */
-export function learningSubsystem(store: FakeLearningStore = new FakeLearningStore()): LearningSubsystem {
+ *  chain — so a case can prove two concurrent verdicts do not lose one. The lessons service is the
+ *  REAL one over `world`'s in-memory ports. */
+export function learningSubsystem(
+  store: FakeLearningStore = new FakeLearningStore(),
+  world: LessonsWorld = lessonsWorld(store),
+): LearningSubsystem {
   let tail: Promise<unknown> = Promise.resolve();
   return {
     store,
+    lessons: world.service,
+    identities: {
+      resolve: async capability => (capability === LESSON_CAPABILITY ? { sessionId: LESSON_SESSION } : undefined),
+    },
+    writeConfig: async patch => {
+      world.config = { ...world.config, ...patch };
+      return world.config;
+    },
     transaction: work => {
       const result = tail.then(work);
       tail = result.then(
@@ -761,6 +990,8 @@ export function proposal(overrides: Partial<Proposal> & { readonly id: string })
     lastSeen: AT,
     identity: 'always-run-the-repo-task-surface',
     history: [{ at: AT, event: 'proposed:run-1', by: 'miner' }],
+    source: 'scan',
+    count: 1,
     ...overrides,
   };
 }

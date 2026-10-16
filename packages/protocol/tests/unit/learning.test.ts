@@ -13,6 +13,7 @@ const config = {
   maxMinersPerRun: 2,
   maxSessionsPerRun: 50,
   minSpawnGapMinutes: 0,
+  passiveDefault: true,
 };
 
 const target = { kind: 'global-agent-guidance', path: 'AGENTS.md', anchor: '#shell-commands' };
@@ -32,6 +33,8 @@ const proposal = {
   lastSeen: LATER_INSTANT,
   identity: 'direnv-exec',
   history: [historyEntry],
+  source: 'scan',
+  count: 2,
 };
 
 const evidence = {
@@ -74,6 +77,43 @@ const status = {
   totals: { observations: 9, proposals: 3, tombstones: 1 },
   running: false,
   lastRun: runManifest,
+  passiveDefault: true,
+};
+
+const applied = { at: LATER_INSTANT, path: '/repo/AGENTS.md' };
+const sessionLearning = { sessionId: 'session-1', passive: true, since: INSTANT, setBy: 'owner' };
+const applyPreview = {
+  proposalId: 'proposal-1',
+  category: 'repo',
+  path: '/repo/AGENTS.md',
+  exists: true,
+  etag: 'abc',
+  diff: '--- a/AGENTS.md\n+++ b/AGENTS.md\n',
+  capability: 'filesystem',
+  notes: [],
+};
+const scanRequest = { scope: { kind: 'sessions', sessionIds: ['session-1'] }, agent: 'claude', model: 'claude-haiku-5-5' };
+const scanEstimate = {
+  sessions: 2,
+  sessionIds: ['session-1', 'session-2'],
+  skipped: 1,
+  beyondLimit: 0,
+  tokens: 9000,
+  usd: 0.04,
+  miners: 1,
+  agent: 'claude',
+  model: 'claude-haiku-5-5',
+};
+const scanProgress = {
+  runId: 'scan-1',
+  state: 'finished',
+  total: 2,
+  done: 2,
+  startedAt: INSTANT,
+  finishedAt: LATER_INSTANT,
+  added: 1,
+  merged: 1,
+  message: 'done',
 };
 
 const learningCases: SchemaCase[] = [
@@ -96,6 +136,24 @@ const learningCases: SchemaCase[] = [
     schema: learning.LearningPatchResponseSchema,
     value: { path: 'AGENTS.md', contents: '# Agents\n' },
   },
+  { name: 'proposal source', schema: learning.ProposalSourceSchema, value: 'passive' },
+  { name: 'proposal applied', schema: learning.ProposalAppliedSchema, value: applied },
+  { name: 'learning config patch', schema: learning.LearningConfigPatchSchema, value: { passiveDefault: false } },
+  { name: 'session learning', schema: learning.SessionLearningSchema, value: sessionLearning },
+  { name: 'session learning patch', schema: learning.SessionLearningPatchSchema, value: { passive: true } },
+  {
+    name: 'session learning patch result',
+    schema: learning.SessionLearningPatchResultSchema,
+    value: { learning: sessionLearning, reinstructed: true, sendId: 'learning-1', note: 'Re-instructed.' },
+  },
+  { name: 'apply preview', schema: learning.LearningApplyPreviewSchema, value: applyPreview },
+  { name: 'apply request', schema: learning.LearningApplyRequestSchema, value: { etag: 'abc' } },
+  { name: 'scan scope', schema: learning.LearningScanScopeSchema, value: { kind: 'not-passive' } },
+  { name: 'scan request', schema: learning.LearningScanRequestSchema, value: scanRequest },
+  { name: 'scan estimate', schema: learning.LearningScanEstimateSchema, value: scanEstimate },
+  { name: 'scan state', schema: learning.LearningScanStateSchema, value: 'running' },
+  { name: 'scan progress', schema: learning.LearningScanProgressSchema, value: scanProgress },
+  { name: 'scan view', schema: learning.LearningScanViewSchema, value: { scan: scanProgress } },
 ];
 
 describe('learning schemas', () => {
@@ -110,11 +168,11 @@ describe('learning schemas', () => {
 
   it('should resolve every observation, proposal, and target enumeration', () => {
     // Arrange
-    const kinds = ['correction', 'roadblock', 'preference', 'recurring_task', 'tooling_failure'] as const;
+    const kinds = ['correction', 'roadblock', 'preference', 'recurring_task', 'tooling_failure', 'suggestion'] as const;
     const sources = ['human', 'teammate'] as const;
-    const states = ['pending', 'accepted', 'rejected'] as const;
-    const targetKinds = ['global-agent-guidance', 'automation-guidance'] as const;
-    const actors = ['miner', 'user'] as const;
+    const states = ['pending', 'accepted', 'applied', 'rejected'] as const;
+    const targetKinds = ['global-agent-guidance', 'automation-guidance', 'global-instructions', 'repo-instructions'] as const;
+    const actors = ['miner', 'user', 'ferret'] as const;
 
     // Act + Assert
     for (const kind of kinds) should(learning.ObservationKindSchema.parse(kind)).equal(kind);
@@ -126,6 +184,8 @@ describe('learning schemas', () => {
     for (const by of actors) should(learning.ProposalHistoryEntrySchema.parse({ ...historyEntry, by }).by).equal(by);
     for (const kind of kinds) should(learning.EvidenceViewSchema.parse({ ...evidence, kind }).kind).equal(kind);
     should(learning.ProposalCategorySchema.parse('global')).equal('global');
+    should(learning.ProposalCategorySchema.parse('repo')).equal('repo');
+    for (const source of ['passive', 'scan'] as const) should(learning.ProposalSourceSchema.parse(source)).equal(source);
   });
 
   it('should resolve every learning action member and default the run request', () => {
@@ -135,6 +195,8 @@ describe('learning schemas', () => {
       { action: 'reject' },
       { action: 'reject', note: 'Too narrow to generalise.' },
       { action: 'edit', ruleText: 'Run every command through direnv exec.' },
+      { action: 'categorize', category: 'repo' },
+      { action: 'reopen' },
     ];
 
     // Act
@@ -179,6 +241,7 @@ describe('learning schemas', () => {
           pending: { total: 0, strong: 0, weak: 0 },
           totals: { observations: 0, proposals: 0, tombstones: 0 },
           running: false,
+          passiveDefault: false,
         },
       },
     ];
@@ -201,6 +264,7 @@ describe('learning schemas', () => {
           maxMinersPerRun: 1,
           maxSessionsPerRun: 1,
           minSpawnGapMinutes: 0,
+          passiveDefault: false,
         },
       },
       {
@@ -276,7 +340,9 @@ describe('learning schemas', () => {
         schema: learning.ProposalViewSchema,
         value: { ...proposalView, firstSeen: LATER_INSTANT, lastSeen: INSTANT },
       },
-      { name: 'non-global category', schema: learning.ProposalSchema, value: { ...proposal, category: 'repo' } },
+      { name: 'unknown category', schema: learning.ProposalSchema, value: { ...proposal, category: 'login' } },
+      { name: 'unknown source', schema: learning.ProposalSchema, value: { ...proposal, source: 'miner' } },
+      { name: 'zero count', schema: learning.ProposalSchema, value: { ...proposal, count: 0 } },
       { name: 'unknown proposal state', schema: learning.ProposalSchema, value: { ...proposal, state: 'archived' } },
       { name: 'no observations', schema: learning.ProposalSchema, value: { ...proposal, observationIds: [] } },
       { name: 'empty observation id', schema: learning.ProposalSchema, value: { ...proposal, observationIds: [''] } },
@@ -421,5 +487,62 @@ describe('learning schemas', () => {
 
     // Act + Assert
     assertRejects(cases);
+  });
+});
+
+describe('lessons schemas', () => {
+  it('should accept a passive Repo lesson that was applied', () => {
+    // Arrange
+    const lesson = {
+      ...proposal,
+      category: 'repo',
+      state: 'applied',
+      source: 'passive',
+      project: '/repo',
+      suggestedCategory: 'global',
+      applied,
+    };
+
+    // Act
+    const parsed = learning.ProposalSchema.parse(lesson);
+
+    // Assert
+    should(parsed.applied).deepEqual(applied);
+    should(parsed.suggestedCategory).equal('global');
+  });
+
+  it('should resolve every scan scope and refuse an empty selection', () => {
+    // Arrange
+    const scopes = [
+      { kind: 'not-passive' },
+      { kind: 'range', from: INSTANT, to: LATER_INSTANT },
+      { kind: 'projects', projects: ['/repo'] },
+      { kind: 'sessions', sessionIds: ['session-1'] },
+    ];
+
+    // Act + Assert
+    for (const scope of scopes) should(learning.LearningScanScopeSchema.parse(scope)).deepEqual(scope);
+    assertRejects([
+      { name: 'no projects', schema: learning.LearningScanScopeSchema, value: { kind: 'projects', projects: [] } },
+      { name: 'no sessions', schema: learning.LearningScanScopeSchema, value: { kind: 'sessions', sessionIds: [] } },
+    ]);
+  });
+
+  it('should accept an unpriced estimate and a scan view with no scan yet', () => {
+    // Arrange
+    const { usd: _usd, model: _model, ...unpriced } = scanEstimate;
+
+    // Act + Assert
+    assertRoundTrips([
+      { name: 'unpriced estimate', schema: learning.LearningScanEstimateSchema, value: unpriced },
+      { name: 'no scan', schema: learning.LearningScanViewSchema, value: {} },
+      {
+        name: 'switched without a send',
+        schema: learning.SessionLearningPatchResultSchema,
+        value: { learning: { ...sessionLearning, setBy: 'default' }, reinstructed: false, note: 'Not running.' },
+      },
+    ]);
+    should(learning.LEARNING_ABSENT_FILE_ETAG).equal('absent');
+    should(learning.LEARNING_APPLY_CONFLICT_CODE).equal('apply_conflict');
   });
 });

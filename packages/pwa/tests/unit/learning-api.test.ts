@@ -1,124 +1,122 @@
 import { describe, expect, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, type LearningStatus, type ProposalView } from '@ferretry/protocol';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import {
   actOnLearningProposal,
-  fetchLearningPatch,
+  applyLearningProposal,
+  cancelLearningScan,
+  estimateLearningScan,
+  fetchApplyPreview,
+  fetchLearningConfig,
   fetchLearningProposals,
+  fetchLearningScan,
   fetchLearningStatus,
-  runLearningScan,
+  fetchSessionLearning,
+  isApplyConflict,
+  learningErrorMessage,
+  patchLearningConfig,
+  patchSessionLearning,
+  startLearningScan,
 } from '../../src/lib/learning-api.ts';
-
-const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const status = {
-  enabled: true,
-  intervalMinutes: 10,
-  lastRunAt: '2026-07-31T12:00:00.000Z',
-  pending: { total: 1, strong: 1, weak: 0 },
-  totals: { observations: 2, proposals: 1, tombstones: 0 },
-  running: false,
-} satisfies LearningStatus;
-const proposal = {
-  id: 'proposal/a',
-  category: 'global',
-  state: 'pending',
-  title: 'Use the paired daemon',
-  ruleText: 'Always pair first.',
-  target: { kind: 'global-agent-guidance', path: 'AGENTS.md' },
-  observationIds: ['o1'],
-  occurrences: 5,
-  crossRepoCount: 1,
-  firstSeen: '2026-07-30T12:00:00.000Z',
-  lastSeen: '2026-07-31T12:00:00.000Z',
-  identity: 'paired-daemon',
-  history: [{ at: '2026-07-31T12:00:00.000Z', event: 'created', by: 'miner' }],
-  evidence: [
-    {
-      observationId: 'o1',
-      sessionId: 'session/a',
-      repo: 'ferretry',
-      at: '2026-07-31T12:00:00.000Z',
-      quote: 'pair it',
-      source: 'human',
-      kind: 'correction',
-    },
-  ],
-} satisfies ProposalView;
-const manifest = {
-  runId: 'run-a',
-  startedAt: '2026-07-31T12:00:00.000Z',
-  sessionsScanned: 1,
-  sessionsWithSignal: 1,
-  minerSessions: [],
-  observationsProposed: 1,
-  observationsVerified: 1,
-  rejectedQuotes: 0,
-  malformedFiles: 0,
-  proposalsCreated: 1,
-  proposalsStrengthened: 0,
-  proposalsSuppressedByTombstone: 0,
-  perHarness: { claude: 0, codex: 1 },
-};
-const response = (body: unknown, code = 200) => new Response(JSON.stringify(body), { status: code });
+import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { AT, config, estimate, fakeLearningDaemon, learningDaemon, lesson, preview, progress } from '../support/learning.ts';
 
 describe('learning transport', () => {
-  it('uses the paired daemon for every learning endpoint and validates responses', async () => {
-    const calls: { url: string; init?: RequestInit }[] = [];
-    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: String(url), init });
-      return response(
-        [status, [proposal], proposal, { path: 'AGENTS.md', contents: 'rule' }, manifest][calls.length - 1],
-      );
+  it('dials every learning route on the paired daemon with the stated verb and body', async () => {
+    const daemon = fakeLearningDaemon();
+    daemon.state.sessions = [{ sessionId: 's', passive: true, since: AT, setBy: 'owner' }];
+    const status = {
+      enabled: true,
+      intervalMinutes: 60,
+      pending: { total: 0, strong: 0, weak: 0 },
+      totals: { observations: 0, proposals: 0, tombstones: 0 },
+      running: false,
+      passiveDefault: true,
     };
-    expect(await fetchLearningStatus(daemon, fetcher)).toEqual(status);
-    expect(await fetchLearningProposals(daemon, 'pending', fetcher)).toEqual([proposal]);
-    expect(await actOnLearningProposal(daemon, 'proposal/a', { action: 'edit', ruleText: 'better' }, fetcher)).toEqual(
-      proposal,
+    daemon.once('GET /v1/learning/status', { body: status });
+    const fetcher = daemon.fetch;
+
+    expect(await fetchLearningStatus(learningDaemon, fetcher)).toEqual(status);
+    expect(await fetchLearningConfig(learningDaemon, fetcher)).toEqual(config());
+    expect((await patchLearningConfig(learningDaemon, { passiveDefault: false }, fetcher)).passiveDefault).toBe(false);
+    expect(await fetchLearningProposals(learningDaemon, fetcher)).toEqual([lesson()]);
+    expect(await fetchLearningProposals(learningDaemon, fetcher, 'applied')).toEqual([lesson()]);
+    expect((await actOnLearningProposal(learningDaemon, 'lesson-a', { action: 'accept' }, fetcher)).state).toBe(
+      'accepted',
     );
-    expect(await fetchLearningPatch(daemon, 'proposal/a', fetcher)).toEqual({ path: 'AGENTS.md', contents: 'rule' });
-    expect(await runLearningScan(daemon, true, fetcher)).toEqual(manifest);
-    expect(calls.map(call => call.url)).toEqual([
-      'https://a.example.test/v1/learning/status',
-      'https://a.example.test/v1/learning/proposals?state=pending',
-      'https://a.example.test/v1/learning/proposals/proposal%2Fa',
-      'https://a.example.test/v1/learning/proposals/proposal%2Fa/patch',
-      'https://a.example.test/v1/learning/run',
+    expect(await fetchApplyPreview(learningDaemon, 'lesson-a', fetcher)).toEqual(preview());
+    expect((await applyLearningProposal(learningDaemon, 'lesson-a', 'etag-1', fetcher)).state).toBe('applied');
+    expect(await fetchSessionLearning(learningDaemon, fetcher)).toEqual(daemon.state.sessions);
+    expect((await patchSessionLearning(learningDaemon, 'a/b', true, fetcher)).learning.sessionId).toBe('a/b');
+    const request = { scope: { kind: 'not-passive' } } as const;
+    expect(await estimateLearningScan(learningDaemon, request, fetcher)).toEqual(estimate());
+    expect(await startLearningScan(learningDaemon, request, fetcher)).toEqual(progress());
+    expect(await fetchLearningScan(learningDaemon, fetcher)).toEqual({ scan: progress() });
+    expect((await cancelLearningScan(learningDaemon, fetcher)).state).toBe('cancelled');
+
+    expect(daemon.calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'GET /v1/learning/status',
+      'GET /v1/learning/config',
+      'PATCH /v1/learning/config',
+      'GET /v1/learning/proposals',
+      'GET /v1/learning/proposals?state=applied',
+      'POST /v1/learning/proposals/lesson-a',
+      'GET /v1/learning/proposals/lesson-a/apply-preview',
+      'POST /v1/learning/proposals/lesson-a/apply',
+      'GET /v1/learning/sessions',
+      'PATCH /v1/sessions/a%2Fb/learning',
+      'POST /v1/learning/scan/estimate',
+      'POST /v1/learning/scan',
+      'GET /v1/learning/scan',
+      'POST /v1/learning/scan/cancel',
     ]);
-    expect(new Headers(calls[2]?.init?.headers).has('authorization')).toBe(false);
-    expect(JSON.parse(String(calls[4]?.init?.body))).toEqual({ spawn: true });
+    expect(daemon.calls.map(call => call.body)).toContainEqual({ etag: 'etag-1' });
+    expect(daemon.calls.map(call => call.body)).toContainEqual({ passive: true });
+    expect(daemon.calls.map(call => call.body)).toContainEqual(request);
   });
 
-  it('retains daemon errors and refuses malformed views', async () => {
-    await expect(
-      fetchLearningStatus(daemon, async () => response({ error: 'offline', code: 'gone' }, 503)),
-    ).rejects.toMatchObject({ status: 503, code: 'gone' });
-    await expect(fetchLearningProposals(daemon, undefined, async () => response([{ nope: true }]))).rejects.toThrow();
-  });
-
-  it('stamps the protocol request id on mutations only and never the obsolete header', async () => {
-    const calls: { url: string; init?: RequestInit }[] = [];
-    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: String(url), init });
-      return response(
-        [status, [proposal], proposal, { path: 'AGENTS.md', contents: 'rule' }, manifest][calls.length - 1],
-      );
+  it('stamps every write with a fresh request id and a JSON content type', async () => {
+    const seen: Headers[] = [];
+    const fetcher = async (_input: string | URL | Request, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers));
+      return new Response(JSON.stringify(progress()));
     };
-    await fetchLearningStatus(daemon, fetcher);
-    await fetchLearningProposals(daemon, undefined, fetcher);
-    await actOnLearningProposal(daemon, 'proposal/a', { action: 'edit', ruleText: 'better' }, fetcher);
-    await fetchLearningPatch(daemon, 'proposal/a', fetcher);
-    await runLearningScan(daemon, true, fetcher);
+    await cancelLearningScan(learningDaemon, fetcher);
+    await cancelLearningScan(learningDaemon, fetcher);
+    expect(seen.map(headers => headers.get('content-type'))).toEqual(['application/json', 'application/json']);
+    const [first, second] = seen.map(headers => headers.get(FY_REQUEST_ID_HEADER));
+    expect(first).toBeTruthy();
+    expect(first).not.toBe(second);
+  });
 
-    const headers = (index: number) => new Headers(calls[index]?.init?.headers);
-    // GETs never carry a request id of any kind.
-    expect(headers(0).get(FY_REQUEST_ID_HEADER)).toBeNull();
-    expect(headers(1).get(FY_REQUEST_ID_HEADER)).toBeNull();
-    // Mutations use the protocol header, and the obsolete literal is gone.
-    for (const index of [2, 3, 4]) {
-      expect(headers(index).get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
-      expect(headers(index).get('x-kteam-request-id')).toBeNull();
-    }
+  it('turns a refusal into a typed error and recognises an apply conflict', async () => {
+    const daemon = fakeLearningDaemon();
+    daemon.once('POST /v1/learning/proposals/lesson-a/apply', {
+      status: 409,
+      body: { error: 'the file changed', code: 'apply_conflict' },
+    });
+    const conflict = await applyLearningProposal(learningDaemon, 'lesson-a', 'etag-1', daemon.fetch).catch(
+      (reason: unknown) => reason,
+    );
+    expect(conflict).toBeInstanceOf(DaemonResponseError);
+    expect(isApplyConflict(conflict)).toBe(true);
+    expect(learningErrorMessage(conflict)).toBe('the file changed');
+
+    daemon.once('GET /v1/learning/config', { status: 500, body: 'not json at all' });
+    const plain = await fetchLearningConfig(learningDaemon, daemon.fetch).catch((reason: unknown) => reason);
+    expect(plain).toBeInstanceOf(DaemonResponseError);
+    expect((plain as DaemonResponseError).message).toBe('HTTP 500');
+    expect(isApplyConflict(plain)).toBe(false);
+    expect(isApplyConflict(new DaemonResponseError(409, 'scan running', 'scan_running'))).toBe(false);
+    expect(isApplyConflict(new Error('x'))).toBe(false);
+    expect(learningErrorMessage('nope')).toBe('Learning is unavailable on this daemon.');
+
+    const broken = async () => new Response('{', { status: 502 });
+    expect(((await fetchLearningConfig(learningDaemon, broken).catch(e => e)) as Error).message).toBe('HTTP 502');
+  });
+
+  it('rejects an answer that is not the contract', async () => {
+    const daemon = fakeLearningDaemon();
+    daemon.once('POST /v1/learning/scan/estimate', { body: { sessions: -1 } });
+    await expect(estimateLearningScan(learningDaemon, { scope: { kind: 'not-passive' } }, daemon.fetch)).rejects.toThrow();
   });
 });
-
-export { proposal, status };

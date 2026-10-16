@@ -21,6 +21,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
 import { type ReactNode, useRef, useState, useSyncExternalStore } from 'react';
+import { PassiveLearningChip } from '../features/learning/passive-learning.tsx';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
@@ -115,6 +116,8 @@ export interface SessionsBarProps {
    * machine (`pairing.use` is closed), and then the switcher does not offer it.
    */
   readonly onPairPhone?: () => void;
+  /** Sessions instructed to file lessons, which carry a "Learning: passive" chip. */
+  readonly learningPassive?: ReadonlySet<string>;
   /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
   readonly rails?: WorkspaceRailPreferenceStore;
 }
@@ -123,11 +126,13 @@ function SessionRow({
   view,
   daemonId,
   active,
+  learningPassive,
   onNavigate,
 }: {
   readonly view: SessionView;
   readonly daemonId: DaemonId;
   readonly active: boolean;
+  readonly learningPassive: boolean;
   readonly onNavigate: (to: string) => void;
 }) {
   const name = displayCallsign(view.config.teammate) || view.config.label || view.config.id;
@@ -150,6 +155,8 @@ function SessionRow({
           <span className="fy-sbar__badge" data-sbar-needs-you="">
             needs you
           </span>
+        ) : learningPassive ? (
+          <PassiveLearningChip />
         ) : null}
         {task === view.config.cwd ? null : <span className="fy-sbar__sub">{task}</span>}
         {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
@@ -359,6 +366,7 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
                     active={row.config.id === activeSessionId}
                     daemonId={daemonId}
                     key={row.config.id}
+                    learningPassive={props.learningPassive?.has(row.config.id) === true}
                     onNavigate={navigate}
                     view={row}
                   />

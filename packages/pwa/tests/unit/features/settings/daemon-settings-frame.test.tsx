@@ -43,6 +43,7 @@ const PRODUCTION_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [
   { id: 'doctor', label: 'Doctor', description: 'Programs this host needs.', Surface: () => null },
   { id: 'model-pricing', label: 'Model pricing', description: 'Model rates and provenance.', Surface: () => null },
   { id: 'security-log', label: 'Security log', description: 'Recent security events.', Surface: () => null },
+  { id: 'learning', label: 'Learning', description: 'What new ferrets are taught.', Surface: () => null },
 ];
 
 /** The glyph a panel gets when the table does not name its id. Present here means an entry is missing. */
@@ -83,6 +84,7 @@ describe('daemon settings panel rail', () => {
       'doctor',
       'model-pricing',
       'security-log',
+      'learning',
       'carrier',
       'host-checks',
     ]);
@@ -96,7 +98,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(11);
+    expect(glyphs).toHaveLength(12);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
@@ -220,7 +222,7 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'retired-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
-      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(11);
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(12);
     } finally {
       await view.unmount();
     }

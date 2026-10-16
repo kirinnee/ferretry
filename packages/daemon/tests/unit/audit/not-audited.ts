@@ -71,6 +71,12 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'closes a terminal, which removes access rather than adding it',
   'POST /v1/learning/proposals/:id': 'accepts or declines a learning suggestion for a skill file; reaches nobody',
   'POST /v1/learning/run': 'starts a learning pass over transcripts the daemon already holds',
+  'PATCH /v1/sessions/:sessionId/learning':
+    'switches whether one ferret files lessons; changes no access, and its re-instruction is in its transcript',
+  'POST /v1/learning/scan/estimate': 'a read with a body: counts what a scan would read and cost',
+  'POST /v1/learning/scan': 'starts miners over transcripts the daemon already holds; reaches nobody',
+  'POST /v1/learning/scan/cancel': 'stops the miners a scan started; removes work rather than adding access',
+  'POST /v1/agent/lessons': 'a ferret filing a lesson into the inbox for the owner to review; reaches nobody',
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',
   'POST /v1/stt/enhance': 'a read with a body: tidies dictated text',
 };

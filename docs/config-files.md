@@ -17,7 +17,7 @@ wire).
 | `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one     |
 | `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                     |
 | `warden.yaml`                   | the Warden's settings; anything left out is the default (off)                                     |
-| `learning.yaml`                 | lesson mining                                                                                     |
+| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))         |
 | `voice.yaml`                    | who cleans up dictated text — transcription is Parakeet in the browser and is not configured here |
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at

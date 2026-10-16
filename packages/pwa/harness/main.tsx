@@ -21,13 +21,11 @@ import type {
   DoctorReport,
   GrantRefusal,
   GrantsView,
-  LearningStatus,
   PairedDevicesView,
   PairingCodeMintResponse,
   PasskeysView,
   PinSnapshot,
   ProjectInfo,
-  ProposalView,
   SecretList,
   SecuritySettingsView,
   SessionSearchTask,
@@ -126,8 +124,6 @@ import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
 import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
-import { LearningHeader } from '../src/features/learning/learning-header.tsx';
-import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
@@ -268,6 +264,7 @@ import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
+import { LEARNING_PASSIVE, LearningHubHarness, LearningSettingsHarness } from './learning-hub.tsx';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -1042,6 +1039,17 @@ function AppChromeHarness({ active }: { readonly active: string }) {
         now={() => ANALYTICS_FIXTURE_NOW}
         initialQuery={null}
       />
+    ) : destination === 'learning' ? (
+      <LearningHubHarness
+        connection={daemon}
+        sessions={WORKSPACE_FLEET}
+        scanRunning={new URLSearchParams(window.location.search).has('scan-running')}
+      />
+    ) : destination === 'settings' && new URLSearchParams(window.location.search).has('learning-settings') ? (
+      <main className="min-h-0 flex-1 overflow-y-auto p-panel" aria-label="Settings › Learning">
+        <h1 className="m-0 mb-3 font-display text-display font-bold tracking-display">Learning</h1>
+        <LearningSettingsHarness connection={daemon} sessions={WORKSPACE_FLEET} />
+      </main>
     ) : (
       <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
     );
@@ -1058,6 +1066,7 @@ function AppChromeHarness({ active }: { readonly active: string }) {
           onCollapse={() => {}}
           onNavigate={() => {}}
           onOpenPalette={() => {}}
+          learningPassive={LEARNING_PASSIVE}
           presentation={layout === 'rail' ? 'rail' : 'column'}
           projects={[]}
           sessions={WORKSPACE_FLEET}
@@ -1891,70 +1900,6 @@ const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
     updateWardenConfig: async () => WARDEN_CONFIG,
   };
 };
-
-const LEARNING_STATUS: LearningStatus = {
-  enabled: true,
-  intervalMinutes: 10,
-  lastRunAt: '2026-07-31T11:58:00.000Z',
-  pending: { total: 2, strong: 1, weak: 1 },
-  totals: { observations: 8, proposals: 2, tombstones: 0 },
-  running: false,
-};
-
-const LEARNING_PROPOSALS: readonly ProposalView[] = [
-  {
-    id: 'paired-daemon',
-    category: 'global',
-    state: 'pending',
-    title: 'Pair before opening daemon data',
-    ruleText: 'Use the selected daemon connection for every request and cache key.',
-    target: { kind: 'global-agent-guidance', path: 'AGENTS.md', anchor: 'PWA' },
-    observationIds: ['observe-1'],
-    occurrences: 5,
-    crossRepoCount: 2,
-    firstSeen: '2026-07-30T12:00:00.000Z',
-    lastSeen: '2026-07-31T11:58:00.000Z',
-    identity: 'paired-daemon',
-    history: [{ at: '2026-07-31T11:58:00.000Z', event: 'created', by: 'miner' }],
-    evidence: [
-      {
-        observationId: 'observe-1',
-        sessionId: 'harness-session',
-        repo: 'ferretry',
-        at: '2026-07-31T11:58:00.000Z',
-        quote: 'This data belongs to daemon A.',
-        source: 'human',
-        kind: 'correction',
-      },
-    ],
-  },
-  {
-    id: 'visual-review',
-    category: 'global',
-    state: 'pending',
-    title: 'Open both viewport screenshots',
-    ruleText: 'Compare mobile and desktop captures before claiming UI fidelity.',
-    target: { kind: 'global-agent-guidance', path: 'AGENTS.md' },
-    observationIds: ['observe-2'],
-    occurrences: 1,
-    crossRepoCount: 1,
-    firstSeen: '2026-07-31T11:00:00.000Z',
-    lastSeen: '2026-07-31T11:00:00.000Z',
-    identity: 'visual-review',
-    history: [{ at: '2026-07-31T11:00:00.000Z', event: 'created', by: 'miner' }],
-    evidence: [
-      {
-        observationId: 'observe-2',
-        sessionId: 'harness-session',
-        repo: 'ferretry',
-        at: '2026-07-31T11:00:00.000Z',
-        quote: 'Open the images.',
-        source: 'human',
-        kind: 'correction',
-      },
-    ],
-  },
-];
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -5692,26 +5637,6 @@ function Shell() {
       ),
     },
     {
-      label: 'Learning header',
-      render: () => (
-        <Card aria-label="Learning header">
-          <PanelHeader>
-            <Label>Learning</Label>
-          </PanelHeader>
-          <PanelBody>
-            <LearningHeader
-              busy={false}
-              canRun
-              failed={false}
-              now={HARNESS_NOW}
-              onRunNow={() => {}}
-              status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
-            />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
       label: 'Notification settings',
       render: () => (
         <Card aria-label="Notification settings">
@@ -5940,16 +5865,9 @@ function Shell() {
     {
       label: 'Learning review',
       render: () => (
-        <LearningReview
-          connection={daemon}
-          status={LEARNING_STATUS}
-          proposals={LEARNING_PROPOSALS}
-          error={null}
-          busy={false}
-          now={HARNESS_NOW}
-          onRun={() => {}}
-          onAction={() => {}}
-        />
+        <Card aria-label="Learning proposals" className="min-w-0 p-3">
+          <LearningHubHarness connection={daemon} sessions={WORKSPACE_FLEET} scanRunning={false} />
+        </Card>
       ),
     },
     {
@@ -7353,6 +7271,7 @@ function SessionWorkspaceHarness() {
       onCollapse={() => {}}
       onNavigate={() => {}}
       onOpenPalette={() => {}}
+      learningPassive={LEARNING_PASSIVE}
       presentation={shape}
       projects={[]}
       {...(shape === 'drawer' ? {} : { search: <SessionSearchControl shortcutTarget /> })}

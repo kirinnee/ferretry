@@ -2834,9 +2834,6 @@ try {
           // The rest of this pass belongs to the full gallery.
           if (SETTINGS_ONLY) continue;
           await page.goto(server.url.toString());
-          const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
-          await captureElement(page, page.getByLabel('Learning header'), learningHeaderTarget);
-          process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
           // A four-kind ledger is taller than a phone viewport. Chrome may cull
           // unpainted rows during an element screenshot, so temporarily borrow
           // a tall viewport to capture the full, real phone-width board.

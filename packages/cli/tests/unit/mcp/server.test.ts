@@ -3,23 +3,27 @@ import {
   AGENT_TOOL_NAMES,
   type AgentConfigToolCall,
   type AgentConfigToolResult,
+  type AgentLessonToolCall,
+  type AgentLessonToolResult,
   type AgentToolCall,
   type AgentToolResult,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { TerminalWait } from '../../../src/lib/agent-tools/client';
 import { McpServer } from '../../../src/lib/mcp/server';
-import { MCP_CONFIG_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
+import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
 
 function harness(
   answer: (call: AgentToolCall | TerminalWait) => Promise<AgentToolResult> = async () => ({ summary: 'ok' }),
   options: {
     config?: (call: AgentConfigToolCall) => Promise<AgentConfigToolResult>;
+    lessons?: (call: AgentLessonToolCall) => Promise<AgentLessonToolResult>;
     instructions?: string;
   } = {},
 ) {
   const calls: (AgentToolCall | TerminalWait)[] = [];
   const configCalls: AgentConfigToolCall[] = [];
+  const lessonCalls: AgentLessonToolCall[] = [];
   const server = new McpServer(
     {
       call: async call => {
@@ -34,6 +38,12 @@ function harness(
         configCalls.push(call);
         return await (options.config ?? (async () => ({ summary: 'ok' })))(call);
       },
+      lessons: async call => {
+        lessonCalls.push(call);
+        return await (options.lessons ?? (async () => ({ summary: 'filed as a new lesson', outcome: 'filed' })))(
+          call,
+        );
+      },
     },
     {
       name: 'ferretry',
@@ -43,7 +53,7 @@ function harness(
   );
   const request = async (method: string, params?: unknown, id: number | string = 1) =>
     await server.handle({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
-  return { server, calls, configCalls, request };
+  return { server, calls, configCalls, lessonCalls, request };
 }
 
 const toolCall = (name: string, args?: Record<string, unknown>) => ({
@@ -128,11 +138,13 @@ describe('McpServer — the tools', () => {
       'config_read',
       'config_validate',
       'config_write',
+      'lessons_suggest',
     ]);
     should(names.every(name => /^[a-zA-Z0-9_-]{1,64}$/u.test(name))).be.true();
     should(answer.result.tools.every(tool => tool.inputSchema.type === 'object')).be.true();
     should(MCP_TOOLS.map(tool => tool.tool)).deepEqual([...AGENT_TOOL_NAMES]);
     should(MCP_CONFIG_TOOLS.map(tool => tool.configTool)).deepEqual(['config.read', 'config.validate', 'config.write']);
+    should(MCP_LESSON_TOOLS.map(tool => tool.lessonTool)).deepEqual(['lessons.suggest']);
   });
 
   it('should send each tool as its wire call, and answer with the daemon’s words', async () => {
@@ -379,6 +391,79 @@ describe('McpServer — the config tools', () => {
       },
     });
     should(await odd.request('tools/call', toolCall('config_read'))).match({
+      result: { isError: true, content: [{ text: 'a bare string' }] },
+    });
+  });
+});
+
+describe('McpServer — the lessons tool', () => {
+  it('should route the call to the lessons port as its wire call, whatever an argument claimed', async () => {
+    // Arrange
+    const { calls, lessonCalls, request } = harness();
+
+    // Act
+    await request(
+      'tools/call',
+      toolCall('lessons_suggest', { rule: 'Run bun install inside the target package.', scope: 'global', tool: 'config.read' }),
+    );
+
+    // Assert
+    should(calls).deepEqual([]);
+    should(lessonCalls).deepEqual([
+      { tool: 'lessons.suggest', rule: 'Run bun install inside the target package.', scope: 'global' },
+    ]);
+  });
+
+  it('should answer with the daemon’s own sentence', async () => {
+    const { request } = harness(undefined, {
+      lessons: async () => ({ summary: 'merged into an existing lesson (now 3×)', outcome: 'merged', count: 3 }),
+    });
+    should(await request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'repo' }))).deepEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { content: [{ type: 'text', text: 'merged into an existing lesson (now 3×)' }] },
+    });
+  });
+
+  it('should refuse arguments the call schema refuses before asking the daemon', async () => {
+    // Arrange
+    const { lessonCalls, request } = harness();
+
+    // Act
+    const noScope = await request('tools/call', toolCall('lessons_suggest', { rule: 'a rule' }));
+    const badScope = await request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'everyone' }));
+    const tooLong = await request(
+      'tools/call',
+      toolCall('lessons_suggest', { rule: 'x'.repeat(501), scope: 'global' }),
+    );
+
+    // Assert
+    should(lessonCalls).deepEqual([]);
+    should(noScope).match({ result: { isError: true, content: [{ text: /^scope: /u }] } });
+    should(badScope).match({ result: { isError: true, content: [{ text: /^scope: /u }] } });
+    should(tooLong).match({ result: { isError: true, content: [{ text: /^rule: /u }] } });
+  });
+
+  it('should hand a thrown refusal back as a tool error, not as a protocol error', async () => {
+    // Arrange
+    const refused = harness(undefined, {
+      lessons: async () => {
+        throw new Error('no agent session credential here');
+      },
+    });
+    const odd = harness(undefined, {
+      lessons: async () => {
+        throw 'a bare string';
+      },
+    });
+
+    // Act + Assert
+    should(await refused.request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'global' }))).deepEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { content: [{ type: 'text', text: 'no agent session credential here' }], isError: true },
+    });
+    should(await odd.request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'global' }))).match({
       result: { isError: true, content: [{ text: 'a bare string' }] },
     });
   });

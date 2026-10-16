@@ -3266,6 +3266,17 @@ describe('the settings route composition', () => {
     await view.unmount();
   });
 
+  it('mounts Settings › Learning for the selected machine, reading through its carrier', async () => {
+    const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], SET_UP_SHELL);
+    await settle();
+
+    await openPanel(view, 'learning', 'Learning tab');
+
+    expect(view.container.textContent).toContain('Passive learning for new ferrets');
+    expect(carrierRequests).toContain('https://alpha.example.test/v1/learning/config');
+    await view.unmount();
+  });
+
   it('probes each selected machine’s Host checks through the carrier-aware typed health endpoint, then routes switch and add', async () => {
     const { healthReads, store, view } = await renderShell(
       `/d/${ALPHA}/settings#daemons`,

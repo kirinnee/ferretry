@@ -15,6 +15,7 @@ import {
   CircleDollarSign,
   Fingerprint,
   Gauge,
+  GraduationCap,
   KeyRound,
   Lock,
   Radar,
@@ -87,6 +88,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   // The measured PATH the traffic is on, which is exactly what a route is.
   carrier: <Route size={16} aria-hidden="true" />,
   'host-checks': <Radar size={16} aria-hidden="true" />,
+  // What new ferrets are instructed to learn, and each ferret's own switch.
+  learning: <GraduationCap size={16} aria-hidden="true" />,
 };
 
 /**

@@ -156,7 +156,27 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
   'FY_URL',
   'FY_SESSION_ID',
   'FY_SESSION_BOARD_CAPABILITY',
+  'FY_LEARNING_PASSIVE',
 ];
+
+/**
+ * PASSIVE LEARNING — the one fixed-layer entry that differs per FERRET rather than per runtime.
+ *
+ * A runtime's wrapper is materialised once and serves every ferret launched on it, so the teaching
+ * cannot be a launch argument: it would be on for all of them or none. It rides the tools server the
+ * fixed layer already puts in every agent runtime instead. The daemon sets {@link PASSIVE_LEARNING_ENV}
+ * to `1` in the environment of a ferret that is instructed to learn, and `fy mcp serve` adds
+ * {@link LESSONS_INSTRUCTION} to its MCP `initialize` instructions iff it is set (Codex is handed the
+ * variable through {@link FERRETRY_MCP_ENV_VARS}; Claude hands a stdio server its whole environment).
+ *
+ * That is ALL the switch does: whether this ferret is told to file lessons. A running ferret switched
+ * on or off is told so with a queued, non-interrupting message, because its environment is fixed.
+ */
+export const PASSIVE_LEARNING_ENV = 'FY_LEARNING_PASSIVE';
+
+/** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
+export const LESSONS_INSTRUCTION = (fy: string): string =>
+  `Lessons: when the owner corrects you, or you learn a durable fact about how they want work done, file it as one short imperative rule with \`${fy} lesson suggest "<rule>" --scope global|repo\` (or the lessons_suggest tool). Use --scope repo for a fact about this project and --scope global for one every ferret should follow. File each lesson once; the owner reviews every lesson before it reaches an instruction file.`;
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =

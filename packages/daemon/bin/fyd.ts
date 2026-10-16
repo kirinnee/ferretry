@@ -24,6 +24,7 @@ import {
   runtimeIdsPath,
   sanitizeHarnessEnv,
   configJsonSchemaFiles,
+  PASSIVE_LEARNING_ENV,
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
@@ -46,6 +47,7 @@ import {
   type DaemonCarrier,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
+  type AnalyticsPricingRate,
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
@@ -181,7 +183,17 @@ import {
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index.ts';
+import {
+  CatalogPrices,
+  ConfigFileLearningSettings,
+  DirectoryLessonSessions,
+  FileLearningStore,
+  FleetGlobalLessons,
+  LEARNING_MINER_LABEL,
+  LearningMiner,
+  NodeLessonFiles,
+  SessionPassiveChannel,
+} from '../src/adapters/learning/index.ts';
 import {
   AccountModelMcpServers,
   FetchMcpOAuthHttp,
@@ -466,6 +478,7 @@ import {
   jsonObject,
   launchReasoningEffort,
   type LearningSubsystem,
+  LessonsService,
   LiveDeviceConnections,
   type LogLevel,
   locateHarnessCommand,
@@ -1644,6 +1657,13 @@ function createSessionControlSubsystem(
    * own words.
    */
   defaultAgentName: () => Promise<string | undefined>,
+  /**
+   * Records whether a new ferret is instructed to learn (the machine's passive default) and puts that
+   * in its launch environment — after the record exists and before the pane launches. A miner or a
+   * warden is never instructed. A failure here never fails the start: the ferret is then simply not
+   * instructed, which is what a ferret with no record means.
+   */
+  adoptLearning: (id: SessionId) => Promise<void>,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1868,6 +1888,8 @@ function createSessionControlSubsystem(
           ...(request.parent === undefined ? {} : { parent: request.parent }),
         });
         if (opening.files.length > 0) await storeAttachments(lifecycle, attachments, id, opening.files);
+        if (stamped.label !== LEARNING_MINER_LABEL && !stamped.provenance.wardenLineage)
+          await adoptLearning(id).catch(() => undefined);
         // AFTER the record and BEFORE the launch, which is the only window in which both halves are
         // true: the board's session directory reads the session's own documents, so the target must
         // exist for the grant to name it, and a refusal must not have cost an agent.
@@ -4177,26 +4199,69 @@ function browserWorkerProgram(): BrowserWorkerProgram {
   });
 }
 
-function createLearningSubsystem(
-  paths: FoundationPaths,
-  files: StateFileSystem,
-  clock: SystemClock,
-  serial: TaskBoardSerialExecutor,
-  sessions: SessionDirectorySubsystem,
-  transcripts: SessionTranscriptReader,
-  sessionControl: SessionControlSubsystem,
-  config: () => LearningConfig,
-): LearningSubsystem {
+/** What the learning subsystem is built from, beyond the state home's own learning directory. */
+interface LearningSubsystemParts {
+  readonly paths: FoundationPaths;
+  readonly files: StateFileSystem;
+  readonly clock: SystemClock;
+  readonly serial: TaskBoardSerialExecutor;
+  readonly sessions: SessionDirectorySubsystem;
+  readonly transcripts: SessionTranscriptReader;
+  readonly sessionControl: SessionControlSubsystem;
+  readonly config: () => LearningConfig;
+  readonly configFiles: ConfigFilesService;
+  readonly identities: CredentialAgentIdentities;
+  /** A ferret's launch environment, merged under that session's own lock. */
+  readonly mergeEnvironment: (sessionId: string, variables: Readonly<Record<string, string>>) => Promise<void>;
+  /** A queued, non-interrupting send. */
+  readonly send: (sessionId: string, message: string, sendId: string) => Promise<void>;
+  readonly pricing: () => Promise<readonly AnalyticsPricingRate[]>;
+  readonly userHome: string;
+}
+
+/**
+ * The learning review board, passive lessons, Apply and the explicit scan.
+ *
+ * Apply writes outside the state home — the fleet's global lessons document under the asset tree, or a
+ * project's AGENTS.md / CLAUDE.md — through `NodeLessonFiles`, and only after the route authorized it.
+ */
+function createLearningSubsystem(parts: LearningSubsystemParts): LearningSubsystem {
+  const { paths, files, clock, config } = parts;
   const store = new FileLearningStore(paths, files, clock);
-  const miner = new LearningMiner(paths, files, store, sessions, transcripts, sessionControl, config, () =>
-    clock.now(),
-  );
+  const now = () => clock.now();
+  const miner = new LearningMiner(paths, files, store, parts.sessions, parts.transcripts, parts.sessionControl, config, now);
+  const settings = new ConfigFileLearningSettings(parts.configFiles);
+  const lessons = new LessonsService({
+    store,
+    sessions: new DirectoryLessonSessions(parts.sessions, parts.transcripts),
+    files: new NodeLessonFiles(),
+    global: new FleetGlobalLessons({
+      assetsDirectory: join(paths.fleet, 'assets'),
+      userHome: parts.userHome,
+      model: () => parts.configFiles.current().evaluation.effective.model,
+      writeComponent: async file => await settings.writeLessonsComponent(file),
+    }),
+    passive: new SessionPassiveChannel({
+      variable: PASSIVE_LEARNING_ENV,
+      mergeEnvironment: parts.mergeEnvironment,
+      send: parts.send,
+    }),
+    miner,
+    prices: new CatalogPrices(parts.pricing, now),
+    config,
+    now,
+    binaryName: CLIENT_NAME,
+    minerLabel: LEARNING_MINER_LABEL,
+  });
   return {
     store,
-    transaction: async work => await serial.run('learning', work),
+    transaction: async work => await parts.serial.run('learning', work),
     config,
-    now: () => clock.now(),
+    now,
     run: async spawn => await miner.run(spawn),
+    lessons,
+    identities: parts.identities,
+    writeConfig: async patch => await settings.writePassiveDefault(patch.passiveDefault),
   };
 }
 
@@ -6209,6 +6274,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // A stopped session's browser pages close, and its incognito contexts are discarded. Assigned once
       // the browser service below exists; a stop before then has no pages to close.
       let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
+      // A new ferret's passive-learning default, assigned once the learning subsystem below exists.
+      let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
@@ -6252,6 +6319,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               const model = await declaredAccountModel();
               return model === undefined ? undefined : resolveDefaultRuntime(model);
             },
+            async id => await adoptLearning(id),
           ),
           attachmentStore,
         ),
@@ -6521,6 +6589,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           };
         },
       };
+      // Lessons: the review board, passive suggestions, Apply and the explicit scan. A new ferret's
+      // passive default is recorded through it, and a running one is re-instructed with a queued send.
+      const learning = createLearningSubsystem({
+        paths,
+        files: stateFiles,
+        clock,
+        serial: learningBoard,
+        sessions,
+        transcripts: createTranscriptReader(storage),
+        sessionControl,
+        config: () => configFiles.current().evaluation.effective.learning,
+        configFiles,
+        identities: agentIdentities(storage),
+        mergeEnvironment: async (sessionId, variables) => {
+          const id = tryParseSessionId(sessionId);
+          if (id === undefined) return;
+          await sessionMutations.run(`session:${id}`, async () => {
+            await sessionEnvironments.write(id, { ...(await sessionEnvironments.read(id)), ...variables });
+          });
+        },
+        send: async (sessionId, message, sendId) => {
+          const id = tryParseSessionId(sessionId);
+          if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
+          await sends.send({ id, sendId, message });
+        },
+        userHome,
+        pricing: async () => {
+          const read = await daemonConfigStore.readPricing();
+          return read.kind === 'unavailable' ? [] : read.configuration.catalog;
+        },
+      });
+      adoptLearning = async id => {
+        await learning.transaction(async () => await learning.lessons.adopt(id));
+      };
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -6775,16 +6877,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           notices: bootNotices,
         }),
         names: createNameSubsystem(storage),
-        learning: createLearningSubsystem(
-          paths,
-          stateFiles,
-          clock,
-          learningBoard,
-          sessions,
-          createTranscriptReader(storage),
-          sessionControl,
-          () => configFiles.current().evaluation.effective.learning,
-        ),
+        learning,
         recommend: createRecommendSubsystem(advisorOver, usage),
         sttEnhancement,
         // Names-only status over the store's listing, and a Test that spends a key once through the

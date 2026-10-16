@@ -1,28 +1,44 @@
 import {
+  AgentLessonToolCallSchema,
+  LEARNING_APPLY_CONFLICT_CODE,
   LearningActionRequestSchema,
   type LearningActionRequest,
+  LearningApplyRequestSchema,
   type LearningConfig,
+  LearningConfigPatchSchema,
   LearningRunRequestSchema,
   type LearningPatchResponse,
+  LearningScanRequestSchema,
+  type LearningScanView,
   type LearningStatus,
   type ProposalState,
   type ProposalView,
   RunManifestSchema,
+  STEP_UP_REQUIRED_CODE,
+  SessionLearningPatchSchema,
+  type SessionLearningPatchResult,
+  type StepUpRequiredBody,
 } from '@ferretry/protocol';
+import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
+import { isHumanAdminActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
+import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiRequest, type ApiResponse } from '../../api/http.ts';
+import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   recomputeProposal,
   strengthOf,
   titleHash,
+  LessonsError,
+  type LessonsService,
   type LearningStorePort,
   type Observation,
   type Proposal,
   type Tombstone,
 } from '../../learning/index.ts';
+import { AGENT_SESSION_CAPABILITY_HEADER } from './agent-tools.ts';
 
 /**
  * The learning subsystem's REVIEW surface: what evidence the daemon holds, which rules that evidence
@@ -39,11 +55,19 @@ import {
  * every quote is verified against the saved human corpus. Missing or unresolved provenance is reported
  * in the run manifest and is never treated as an empty conversation.
  *
- * THE OPERATOR'S GUIDANCE FILE. Accepting a proposal does NOT edit it. The daemon writes only inside
- * its own state home: an accepted rule is rendered as a patch DOCUMENT and recorded under
- * `learning/patches/`, and `GET .../patch` hands the same document back for the human to apply
- * themselves. Editing a file outside the state home from a guess at the operator's layout is exactly
- * the mistake this boundary exists to prevent.
+ * THE OPERATOR'S GUIDANCE FILE. Accepting a proposal does NOT edit it: an accepted rule is rendered as a
+ * patch DOCUMENT and recorded under `learning/patches/`, inside the state home. APPLY is the one write
+ * outside it, and it is a separate act with its own guard (docs/learning.md): `GET …/apply-preview`
+ * shows the exact diff and an etag of the file as it is, and `POST …/apply {etag}` writes exactly that,
+ * only if the file has not moved since. A Global lesson goes into the fleet's `instructions/lessons`
+ * component (`fleet.configure`); a Repo lesson into that project's AGENTS.md / CLAUDE.md
+ * (`filesystem.configure`, and a remote device proves a passkey for it). A ferret can never apply one.
+ *
+ * PASSIVE LESSONS. A ferret instructed to learn files `fy lesson suggest` through `POST /v1/agent/lessons`,
+ * authenticated by its session credential alone; the daemon attaches the evidence from that session
+ * itself. `PATCH /v1/sessions/:sessionId/learning` switches the instruction for one ferret and tells a
+ * running one with a queued, non-interrupting message. A SCAN is estimated first and started only by
+ * an explicit request (`/v1/learning/scan/*`).
  *
  * WHY A REVIEW SURFACE OVER A STORE NOTHING FILLS IS STILL A CAPABILITY. The evidence files are the
  * durable contract, and the daemon is not their only writer — the same shape the warden report reader
@@ -75,6 +99,12 @@ export interface LearningSubsystem {
   now(): string;
   /** Runs an ingest pass and, when requested, starts a bounded miner batch. */
   run(spawn: boolean): Promise<import('@ferretry/protocol').RunManifest>;
+  /** Passive lessons, the per-ferret switch, Apply and the explicit scan. */
+  readonly lessons: LessonsService;
+  /** Turns the session credential an agent presents into the session it was minted for. */
+  readonly identities: AgentIdentityResolver;
+  /** Writes `passiveDefault` into `learning.yaml`, keeping the owner's comments; answers what is in effect. */
+  writeConfig(patch: { readonly passiveDefault: boolean }): Promise<LearningConfig>;
 }
 
 /** An instant the response schema will accept, or `undefined`. The state document is decoded from
@@ -85,7 +115,7 @@ function instantOrUndefined(value: unknown): string | undefined {
 
 /** The lifecycle state a list may be narrowed to. An unknown one is refused rather than ignored:
  *  answering a narrowed request with the whole board looks like a board that matched everything. */
-const PROPOSAL_STATES: readonly ProposalState[] = ['pending', 'accepted', 'rejected'];
+const PROPOSAL_STATES: readonly ProposalState[] = ['pending', 'accepted', 'applied', 'rejected'];
 
 function requestedState(request: ApiRequest): ProposalState | undefined {
   for (const [name] of request.query) {
@@ -132,6 +162,7 @@ function proposalView(proposal: Proposal, observations: ReadonlyMap<string, Obse
       quote: observation.quote,
       source: observation.source,
       kind: observation.kind,
+      ...(observation.turn === undefined ? {} : { turn: observation.turn }),
     }));
   return evidence.length === 0 ? undefined : { ...recomputed, evidence };
 }
@@ -167,6 +198,7 @@ async function status(subsystem: LearningSubsystem): Promise<ApiResponse> {
     // point for a scheduler; the manual runner returns a pending manifest until ingestion completes.
     running: state.runningRunId !== undefined,
     ...(lastRun === undefined ? {} : { lastRun }),
+    passiveDefault: config.passiveDefault,
   };
   return jsonResponse(response);
 }
@@ -241,11 +273,15 @@ function decide(
   proposal: Proposal,
   request: LearningActionRequest,
   at: string,
+  lessons: LessonsService,
 ): { readonly next: Proposal; readonly tombstone?: Tombstone } {
   // A verdict is final. Re-judging a rejected rule would resurrect one the human already killed, and
   // the state it is in is the board's answer rather than the caller's mistake — so 409, not 400.
   if (proposal.state === 'rejected')
     throw new ApiError(409, `proposal ${proposal.id} was already rejected`, 'already-rejected');
+  // An applied lesson is in its file: changing it here would make the inbox disagree with the file.
+  if (proposal.state === 'applied')
+    throw new ApiError(409, `lesson ${proposal.id} is already applied; edit its file instead`, 'already-applied');
   const history = (event: string, note?: string) => [
     ...proposal.history,
     { at, event, by: 'user' as const, ...(note === undefined ? {} : { note }) },
@@ -256,6 +292,11 @@ function decide(
       next: { ...proposal, state: 'rejected', history: history('rejected', request.note) },
       tombstone: tombstoneFor(proposal, at, request.note),
     };
+  }
+  if (request.action === 'reopen') return { next: { ...proposal, state: 'pending', history: history('reopened') } };
+  if (request.action === 'categorize') {
+    const moved = refuseLessons(() => lessons.categorize(proposal, request.category));
+    return { next: { ...moved, history: history(`categorized:${request.category}`) } };
   }
   return { next: { ...proposal, ruleText: request.ruleText, history: history('edited') } };
 }
@@ -277,7 +318,7 @@ async function act(subsystem: LearningSubsystem, context: RouteContext): Promise
   const next = await subsystem.transaction(async () => {
     const proposals = await subsystem.store.loadProposals();
     const current = locate(proposals, id);
-    const decision = decide(current, request, at);
+    const decision = decide(current, request, at, subsystem.lessons);
     await subsystem.store.saveProposals(proposals.map(entry => (entry === current ? decision.next : entry)));
     if (decision.tombstone !== undefined) {
       await subsystem.store.saveTombstones([...(await subsystem.store.loadTombstones()), decision.tombstone]);
@@ -292,6 +333,150 @@ async function act(subsystem: LearningSubsystem, context: RouteContext): Promise
   if (view === undefined)
     throw new ApiError(409, `proposal ${next.id} has no surviving evidence to render`, 'evidence-missing');
   return jsonResponse(view);
+}
+
+// ── Lessons: passive suggestions, the per-ferret switch, Apply and the explicit scan ───────────────
+
+/** The HTTP answer to each refusal the lessons domain raises. */
+const LESSONS_REFUSALS: Readonly<Record<LessonsError['reason'], { readonly status: number; readonly code: string }>> = {
+  'not-found': { status: 404, code: 'not-found' },
+  invalid: { status: 400, code: 'invalid_request' },
+  conflict: { status: 409, code: LEARNING_APPLY_CONFLICT_CODE },
+  'not-accepted': { status: 409, code: 'not_accepted' },
+  'scan-running': { status: 409, code: 'scan_running' },
+};
+
+/** Restates a lessons refusal in the HTTP vocabulary; anything else is rethrown untouched. */
+function lessonsRefusal(error: unknown): never {
+  if (error instanceof LessonsError) {
+    const refusal = LESSONS_REFUSALS[error.reason];
+    throw new ApiError(refusal.status, error.message, refusal.code);
+  }
+  throw error;
+}
+
+/** Runs a synchronous lessons decision, restating its refusal. */
+function refuseLessons<T>(work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    return lessonsRefusal(error);
+  }
+}
+
+/** An agent: a caller that identified itself (`peer:`, a warden) rather than a person or the host. */
+const isAgentCaller = (context: RouteContext): boolean =>
+  context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
+
+/**
+ * `POST /v1/agent/lessons` — a ferret files a lesson. Authenticated by the session credential ALONE:
+ * the session is the credential's, and the evidence is read from that session by the daemon, so the
+ * call can name neither.
+ */
+async function agentSuggest(subsystem: LearningSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const capability = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  const identity = capability === '' ? undefined : await subsystem.identities.resolve(capability);
+  if (identity === undefined) {
+    const missing = capability === '';
+    const message =
+      'filing a lesson needs the session credential Ferretry gives each ferret; run it from inside a ferret';
+    throw new ApiError(missing ? 401 : 403, message, missing ? 'missing_capability' : 'forbidden');
+  }
+  const call = await parseBody(context.request, AgentLessonToolCallSchema);
+  const result = await subsystem
+    .transaction(async () => await subsystem.lessons.suggest(identity.sessionId, call.rule, call.scope))
+    .catch(lessonsRefusal);
+  return jsonResponse(result);
+}
+
+/** The session id in a `/v1/sessions/:sessionId/...` path. */
+function pathSessionId(context: RouteContext): string {
+  const decoded = decodeParameter(context.params.get('sessionId') ?? '');
+  if (decoded === undefined || decoded === '')
+    throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
+  return decoded;
+}
+
+/** `PATCH /v1/sessions/:sessionId/learning` — switch one ferret, re-instructing it if it is running. */
+async function setPassive(subsystem: LearningSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const id = pathSessionId(context);
+  const request = await parseBody(context.request, SessionLearningPatchSchema);
+  const result = await subsystem
+    .transaction(async () => await subsystem.lessons.setPassive(id, request.passive))
+    .catch(lessonsRefusal);
+  return jsonResponse(result satisfies SessionLearningPatchResult);
+}
+
+/** The `403 grant_step_up_required` body for a write into a project's own files. */
+function stepUpRefusal(message: string, capability: 'fleet' | 'filesystem'): ApiResponse {
+  return jsonResponse(
+    {
+      error: message,
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability, axis: 'configure' },
+    } satisfies StepUpRequiredBody,
+    403,
+  );
+}
+
+/**
+ * Whether this caller may write where the lesson goes: the fleet's global instructions (`fleet`), or a
+ * project's own AGENTS.md / CLAUDE.md (`filesystem`), on the `configure` axis. A remote device writing
+ * into a project also proves a passkey for it. Answers the refusal, or `undefined` when allowed.
+ */
+function applyRefusal(context: RouteContext, capability: 'fleet' | 'filesystem'): ApiResponse | undefined {
+  const governance = context.governance;
+  if (governance === undefined)
+    return jsonResponse(
+      { error: 'this daemon cannot say whether this caller may write lessons', code: 'forbidden' },
+      403,
+    );
+  const decision = governance.decide({ capability, axis: 'configure' });
+  const where = capability === 'fleet' ? 'the global instructions' : "a project's instruction file";
+  if (!decision.allowed) {
+    if (decision.refusal === 'step-up-required')
+      return stepUpRefusal(`writing a lesson into ${where} from this device needs a passkey confirmation`, capability);
+    return jsonResponse(
+      { error: `this device may not write a lesson into ${where}`, code: grantRefusalCode(decision.refusal) },
+      403,
+    );
+  }
+  if (capability === 'filesystem' && governance.governed && context.presentation?.freshStepUp !== true)
+    return stepUpRefusal(`writing a lesson into ${where} from this device needs a passkey confirmation`, capability);
+  return undefined;
+}
+
+/** `GET …/apply-preview` — the diff and the etag. Reads only. */
+async function applyPreview(subsystem: LearningSubsystem, context: RouteContext): Promise<ApiResponse> {
+  return jsonResponse(await subsystem.lessons.applyPreview(pathProposalId(context)).catch(lessonsRefusal));
+}
+
+/**
+ * `POST …/apply {etag}` — writes the lesson into its file, only if the file is still what the preview
+ * showed. Never for an agent: applying is the owner's act.
+ */
+async function apply(subsystem: LearningSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const id = pathProposalId(context);
+  const request = await parseBody(context.request, LearningApplyRequestSchema);
+  if (isAgentCaller(context))
+    throw new ApiError(403, 'a ferret cannot apply a lesson; the owner applies it', 'forbidden');
+  const capability = await subsystem.lessons.applyCapability(id).catch(lessonsRefusal);
+  const refused = applyRefusal(context, capability);
+  if (refused !== undefined) return refused;
+  const applied = await subsystem
+    .transaction(async () => await subsystem.lessons.apply(id, request.etag))
+    .catch(lessonsRefusal);
+  if (capability === 'filesystem' && context.governance?.governed === true) context.spendFreshStepUp?.();
+  const view = proposalView(applied, await subsystem.store.observationsById());
+  if (view === undefined)
+    throw new ApiError(409, `lesson ${applied.id} has no surviving evidence to render`, 'evidence-missing');
+  return jsonResponse(view);
+}
+
+/** `GET /v1/learning/scan` — the newest scan, after folding in every miner that has finished. */
+async function scanView(subsystem: LearningSubsystem): Promise<ApiResponse> {
+  const scan = await subsystem.transaction(async () => await subsystem.lessons.scanProgress());
+  return jsonResponse((scan === undefined ? {} : { scan }) satisfies LearningScanView);
 }
 
 /**
@@ -351,6 +536,95 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
             async () => await subsystem.run((await parseBody(context.request, LearningRunRequestSchema)).spawn),
           ),
         ),
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/learning/config',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'configure' },
+      noStore: true,
+      handle: async context =>
+        jsonResponse(await subsystem.writeConfig(await parseBody(context.request, LearningConfigPatchSchema))),
+    },
+    {
+      method: 'GET',
+      path: '/v1/learning/proposals/:id/apply-preview',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await applyPreview(subsystem, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/learning/proposals/:id/apply',
+      minimum: 'operator',
+      // Reached as `fleet.use`; the handler then asks for the TARGET's own grant on `configure`.
+      capability: { capability: 'fleet', axis: 'use' },
+      noStore: true,
+      handle: async context => await apply(subsystem, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/learning/sessions',
+      minimum: 'operator',
+      noStore: true,
+      handle: async () => jsonResponse(await subsystem.lessons.sessionLearning()),
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/sessions/:sessionId/learning',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await setPassive(subsystem, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/learning/scan/estimate',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context =>
+        jsonResponse(
+          await subsystem.lessons
+            .estimate(await parseBody(context.request, LearningScanRequestSchema))
+            .catch(lessonsRefusal),
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/v1/learning/scan/cancel',
+      minimum: 'operator',
+      noStore: true,
+      handle: async () =>
+        jsonResponse(
+          await subsystem.transaction(async () => await subsystem.lessons.cancelScan()).catch(lessonsRefusal),
+        ),
+    },
+    {
+      method: 'GET',
+      path: '/v1/learning/scan',
+      minimum: 'operator',
+      noStore: true,
+      handle: async () => await scanView(subsystem),
+    },
+    {
+      method: 'POST',
+      path: '/v1/learning/scan',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, LearningScanRequestSchema);
+        return jsonResponse(
+          await subsystem.transaction(async () => await subsystem.lessons.startScan(request)).catch(lessonsRefusal),
+          201,
+        );
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/agent/lessons',
+      minimum: 'none',
+      privilegedOnly: true,
+      noStore: true,
+      handle: async context => await agentSuggest(subsystem, context),
     },
   ];
 }
