@@ -1,13 +1,27 @@
-import type { SendDisposition } from '@ferretry/protocol';
-import type { ISessionApi, ISessionFiles, SessionEnvironment } from './ports.ts';
+import type { SendDisposition, SendResult } from '@ferretry/protocol';
+import { SessionCommandError } from './errors.ts';
+import type { ISessionApi, ISessionFiles, SendWaitClock, SessionEnvironment } from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
-import { describeDisposition, describePark, planSend, type SendFlags } from './send-plan.ts';
+import {
+  describeDisposition,
+  describeFate,
+  describePark,
+  planSend,
+  SETTLED_SEND_FATES,
+  type SendFlags,
+} from './send-plan.ts';
 
 export interface SendCommandFlags extends Omit<SendFlags, 'fileMessage'> {
   /** Path to a file holding the message; its contents follow the typed message. */
   readonly messageFile?: string;
   readonly json?: boolean;
+  /** Wait until the daemon proves where the message went: delivered, timed out, or unconfirmed. */
+  readonly wait?: boolean;
 }
+
+/** How long a `send --wait` waits, and how often it asks. A send to a busy agent may wait longer. */
+const WAIT_LIMIT_MS = 5 * 60_000;
+const WAIT_INTERVAL_MS = 2_000;
 
 /** Sends a message to a session: `fy send` (and its peer-reply spelling, `fy reply`). */
 export class SendMessageController {
@@ -16,6 +30,7 @@ export class SendMessageController {
     private readonly files: ISessionFiles,
     private readonly presenter: SessionPresenter,
     private readonly environment: SessionEnvironment,
+    private readonly clock: SendWaitClock,
   ) {}
 
   async execute(id: string, flags: SendCommandFlags): Promise<void> {
@@ -40,7 +55,37 @@ export class SendMessageController {
         peerId: result.config.id,
         peerName: result.config.teammate ?? result.config.id,
       });
+    if (flags.wait === true) await this.wait(result);
     this.presenter.view(result, flags.json === true);
+  }
+
+  /**
+   * Polls the send's own ledger row until the daemon has proven where it went.
+   *
+   * A message PROVEN not delivered fails the command, because sending it again is safe and a script
+   * should know to. An UNCONFIRMED one does not: it may have landed, and a script that resent on a
+   * non-zero exit would make the agent read it twice.
+   */
+  private async wait(result: SendResult): Promise<void> {
+    const sendId = result.sendId;
+    if (sendId === undefined) {
+      this.presenter.note('this daemon does not report a send id, so the send cannot be waited on');
+      return;
+    }
+    const deadline = this.clock.nowMs() + WAIT_LIMIT_MS;
+    for (;;) {
+      const record = await this.api.sendStatus(result.config.id, sendId);
+      if (SETTLED_SEND_FATES.has(record.fate)) {
+        if (record.fate === 'timed_out') throw new SessionCommandError(describeFate(record));
+        this.presenter.note(describeFate(record));
+        return;
+      }
+      if (this.clock.nowMs() >= deadline) {
+        this.presenter.note(`still ${describeFate(record)} after ${WAIT_LIMIT_MS / 60_000}m of waiting`);
+        return;
+      }
+      await this.clock.sleep(WAIT_INTERVAL_MS);
+    }
   }
 
   /**

@@ -1,0 +1,263 @@
+import type { SendUnaccountedReason } from '@ferretry/protocol';
+import type { ClockPort, SerialExecutor } from '../../ports.ts';
+import type { SessionId } from '../../session-id.ts';
+import type { ObservedHumanInput } from '../../transcript/types.ts';
+import {
+  attemptsAllowed,
+  deadlineOf,
+  isOpenSend,
+  judgeSends,
+  type SendTrackerSettings,
+  type SendVerdict,
+} from './tracking.ts';
+import {
+  type SendLedger,
+  type SendRecord,
+  type SendRepository,
+  type SendTerminal,
+  type SendTracking,
+  TERMINAL_SEND_STATUSES,
+} from './types.ts';
+
+/**
+ * Where a send WENT — the matcher the send ledger always said belonged to a monitor that did not
+ * exist, so every send stayed `accepted` forever and a reader could not tell a delivered message from
+ * a lost one.
+ *
+ * ONLY PROOF MOVES A FATE. A send becomes `queued` when the harness wrote its own queue record for it,
+ * `delivered` when a user record carrying it appears in the transcript, and nothing else does either.
+ * At a send's deadline the tracker looks at everything that could still be holding it — the
+ * transcript's queue, the composer, the harness's visible queue — and only when ALL of them are
+ * readable and empty is the send proven absent. Absent is safe to type again under the same id, so
+ * the daemon does, a bounded number of times; after the last attempt the send is `timed_out`. When
+ * any of them cannot be read the send is `unaccounted` instead: it may have landed, and saying
+ * otherwise would invite a duplicate.
+ *
+ * EVENT-DRIVEN, NOT A LOOP. Nothing runs while nothing is in flight. A transport asks for one early
+ * look; each look schedules the next only for a send that is still open, at that send's own
+ * deadline; and a reader of the ledger asks for a look before it reads. A daemon restart re-derives
+ * every in-flight send from the transcript at boot rather than re-typing anything.
+ */
+
+/** One read of a session's transcript evidence. `readable: false` means absence cannot be proven. */
+export interface SendEvidenceReading {
+  readonly readable: boolean;
+  readonly inputs: readonly ObservedHumanInput[];
+}
+
+/** The transcript side: what the harness has recorded the agent receiving or holding. */
+export interface SendEvidenceSource {
+  read(id: SessionId): Promise<SendEvidenceReading>;
+}
+
+/** One pending look per session; scheduling again replaces it. */
+export interface SendScheduler {
+  schedule(id: SessionId, delayMs: number, run: () => void): void;
+  cancelAll(): void;
+}
+
+/** Types a send again under its original id. Implemented by the send service. */
+export interface SendReattempter {
+  reattempt(id: SessionId, sendId: string): Promise<SendRecord>;
+}
+
+/** Tells an agent that its message did not arrive. */
+export interface SendFailureNotifier {
+  notify(sender: string, recipient: SessionId, record: SendRecord): Promise<void>;
+}
+
+/** Every session this daemon holds, for the re-derivation a restart owes its in-flight sends. */
+export interface SendRoster {
+  sessions(): readonly SessionId[];
+}
+
+export interface SendTrackerPorts {
+  readonly ledger: Pick<SendLedger, 'list' | 'settle'>;
+  readonly evidence: SendEvidenceSource;
+  readonly terminal: Pick<SendTerminal, 'observe' | 'holds'>;
+  readonly repository: Pick<SendRepository, 'read' | 'journal'>;
+  readonly attempts: SendReattempter;
+  readonly notifier: SendFailureNotifier;
+  readonly scheduler: SendScheduler;
+  readonly roster: SendRoster;
+  /** Its own queue: a look reads a whole transcript and must not hold the send lock while it does. */
+  readonly serial: SerialExecutor;
+  readonly clock: ClockPort;
+}
+
+/** The background half of the tracker, as the composition root arms it. */
+export interface SendTrackingLoop {
+  /** Re-derives every session's in-flight sends, then returns the disarm. */
+  arm(): () => void;
+}
+
+const UNREADABLE: SendEvidenceReading = { readable: false, inputs: [] };
+
+export class SendTracker implements SendTracking, SendTrackingLoop {
+  constructor(
+    private readonly ports: SendTrackerPorts,
+    private readonly settings: SendTrackerSettings,
+  ) {}
+
+  track(id: SessionId): void {
+    this.ports.scheduler.schedule(id, this.settings.firstCheckMs, () => void this.check(id).catch(() => undefined));
+  }
+
+  arm(): () => void {
+    for (const id of this.ports.roster.sessions()) void this.check(id).catch(() => undefined);
+    return () => this.ports.scheduler.cancelAll();
+  }
+
+  /** Looks once at one session's sends, settles what it can prove, and schedules the next look. */
+  async check(id: SessionId): Promise<void> {
+    await this.ports.serial.run(id, async () => await this.checkLocked(id));
+  }
+
+  /** Whether a look at this session could change anything, so a reader knows one is worth taking. */
+  async watching(id: SessionId): Promise<boolean> {
+    const now = Date.parse(this.ports.clock.now());
+    return (await this.ports.ledger.list(id)).some(record => this.watches(record, now));
+  }
+
+  /**
+   * Open sends, and settled-but-unproven ones for a while: one that was unconfirmed may still turn up
+   * in the transcript, and the honest thing then is to say it was delivered after all.
+   */
+  private watches(record: SendRecord, now: number): boolean {
+    if (record.held === true) return false;
+    if (isOpenSend(record)) return true;
+    return (
+      (record.fate === 'unaccounted' || record.fate === 'timed_out') &&
+      now - Date.parse(record.acceptedAt) < this.settings.holdLimitMs
+    );
+  }
+
+  private async checkLocked(id: SessionId): Promise<void> {
+    const records = await this.ports.ledger.list(id);
+    const now = Date.parse(this.ports.clock.now());
+    const watched = records.filter(record => this.watches(record, now));
+    if (watched.length === 0) return;
+    const reading = await this.ports.evidence.read(id).catch(() => UNREADABLE);
+    const claimed = new Set(records.flatMap(record => (record.evidence === undefined ? [] : [record.evidence.key])));
+    const verdicts = reading.readable
+      ? judgeSends(watched, claimed, reading.inputs, this.settings.matchSlackMs)
+      : new Map<string, SendVerdict>();
+    let next: number | undefined;
+    for (const record of watched) {
+      const verdict = verdicts.get(record.sendId);
+      if (verdict?.delivered !== undefined) {
+        await this.deliver(id, record, verdict);
+        continue;
+      }
+      if (!isOpenSend(record)) continue;
+      const current =
+        verdict?.queuedAt !== undefined && record.fate === 'accepted'
+          ? await this.queued(id, record, verdict.queuedAt)
+          : record;
+      const due = deadlineOf(current, this.settings);
+      const after = now < due ? current : await this.expire(id, current, reading, verdict, now);
+      if (!isOpenSend(after)) continue;
+      // A send this look re-typed is looked at again soon, like any fresh transport.
+      const at =
+        after.attempt !== current.attempt ? now + this.settings.firstCheckMs : deadlineOf(after, this.settings);
+      next = next === undefined ? at : Math.min(next, at);
+    }
+    if (next !== undefined)
+      this.ports.scheduler.schedule(id, Math.max(0, next - now), () => void this.check(id).catch(() => undefined));
+  }
+
+  private async deliver(id: SessionId, record: SendRecord, verdict: SendVerdict): Promise<void> {
+    await this.ports.ledger.settle(id, record.sendId, {
+      fate: 'delivered',
+      fateAt: this.ports.clock.now(),
+      evidence: verdict.delivered,
+      deadlineAt: undefined,
+      unaccountedReason: undefined,
+      retryable: undefined,
+    });
+    await this.ports.repository.journal(id, 'control.send_delivered', {
+      sendId: record.sendId,
+      attempt: record.attempt ?? 1,
+    });
+  }
+
+  private async queued(id: SessionId, record: SendRecord, queuedAt: string): Promise<SendRecord> {
+    const next = await this.ports.ledger.settle(id, record.sendId, {
+      fate: 'queued',
+      fateAt: this.ports.clock.now(),
+      queuedAt,
+      queueProof: 'transcript',
+    });
+    await this.ports.repository.journal(id, 'control.send_queued', { sendId: record.sendId, proof: 'transcript' });
+    return next ?? record;
+  }
+
+  /**
+   * A send's deadline passed without proof. Decides, from everything readable, whether it is still
+   * held somewhere, proven absent (re-attempt, or `timed_out` after the last attempt), or unprovable.
+   */
+  private async expire(
+    id: SessionId,
+    record: SendRecord,
+    reading: SendEvidenceReading,
+    verdict: SendVerdict | undefined,
+    now: number,
+  ): Promise<SendRecord> {
+    if (!reading.readable) return await this.settle(id, record, 'unaccounted', 'transcript_unreadable');
+    const target = await this.ports.repository.read(id);
+    if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))
+      return await this.settle(id, record, 'timed_out', 'session_ended');
+    const pane = await this.ports.terminal.observe(id).catch(() => undefined);
+    if (pane === undefined) return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
+    if (!pane.alive || pane.dead) return await this.settle(id, record, 'timed_out', 'session_ended');
+    const inPane = await this.ports.terminal.holds(id, record.matchText ?? record.message).catch(() => undefined);
+    if (inPane === undefined) return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
+    if (verdict?.holding === true || inPane) {
+      // Still held — behind a busy turn, or sitting in the composer. That is waiting, not loss, so
+      // the look is pushed out rather than counted against an attempt, up to a ceiling.
+      if (now - Date.parse(record.acceptedAt) >= this.settings.holdLimitMs)
+        return await this.settle(id, record, 'unaccounted', 'timeout');
+      const extended = await this.ports.ledger.settle(id, record.sendId, {
+        deadlineAt: new Date(now + this.settings.busyExtensionMs).toISOString(),
+      });
+      return extended ?? record;
+    }
+    // PROVEN ABSENT: not in the transcript, not in the harness's queue, not on screen.
+    const reason: SendUnaccountedReason = verdict?.released === true ? 'composer_discarded' : 'not_delivered';
+    if ((record.attempt ?? 1) < attemptsAllowed(record, this.settings)) {
+      const retried = await this.ports.attempts.reattempt(id, record.sendId).catch(() => undefined);
+      if (retried !== undefined) return retried;
+    }
+    return await this.settle(id, record, 'timed_out', reason);
+  }
+
+  /** A final fate, journalled, and handed back to an agent that sent it. */
+  private async settle(
+    id: SessionId,
+    record: SendRecord,
+    fate: 'unaccounted' | 'timed_out',
+    reason: SendUnaccountedReason,
+  ): Promise<SendRecord> {
+    const next =
+      (await this.ports.ledger.settle(id, record.sendId, {
+        fate,
+        fateAt: this.ports.clock.now(),
+        unaccountedReason: reason,
+        // Only a send proven absent from a session that can still take input may be retried as-is.
+        retryable: fate === 'timed_out' && reason !== 'session_ended',
+        deadlineAt: undefined,
+      })) ?? record;
+    await this.ports.repository.journal(
+      id,
+      fate === 'timed_out' ? 'control.send_timed_out' : 'control.send_unaccounted',
+      {
+        sendId: record.sendId,
+        reason,
+        attempt: record.attempt ?? 1,
+      },
+    );
+    if (record.senderKind === 'agent' && record.from !== undefined)
+      await this.ports.notifier.notify(record.from, id, next).catch(() => undefined);
+    return next;
+  }
+}

@@ -17,14 +17,47 @@ export { SessionProvenanceSchema, SessionSpawnOriginSchema, WardenLineageSourceS
 export const InteractionModeSchema = z.enum(['auto', 'interactive']);
 export type InteractionMode = z.infer<typeof InteractionModeSchema>;
 
-export const SendFateSchema = z.enum(['accepted', 'delivered', 'unaccounted']);
+/**
+ * What the daemon KNOWS about one send, and never more.
+ *
+ *   * `accepted`   — a durable record exists; nothing has proved where the message is yet.
+ *   * `queued`     — PROVEN held by the harness's own input queue (a Claude queue record, or the pane
+ *                    still showing the payload held after the queue key). Never inferred from a busy pane.
+ *   * `delivered`  — the message appears as a user turn in the harness transcript (`evidence` cites it).
+ *   * `unaccounted`— the daemon could not prove it either way (`reason` says why); it MAY have landed.
+ *   * `timed_out`  — PROVEN absent after every attempt: not in the transcript, not in the harness queue,
+ *                    not in the composer. Safe to retry under the same id.
+ */
+export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out']);
 export type SendFate = z.infer<typeof SendFateSchema>;
 
 export const SendPathSchema = z.enum(['direct', 'turn-file', 'native-inline', 'native-file', 'revive', 'revive-queue']);
 export type SendPath = z.infer<typeof SendPathSchema>;
 
-export const SendUnaccountedReasonSchema = z.enum(['timeout', 'session_ended', 'composer_discarded']);
+/** Why a send settled without proof of delivery. */
+export const SendUnaccountedReasonSchema = z.enum([
+  /** Still not proven after the final deadline, with the harness never proving it absent either. */
+  'timeout',
+  /** The session ended before the message was proven delivered. */
+  'session_ended',
+  /** The harness took the message out of its queue without it ever reaching the conversation. */
+  'composer_discarded',
+  /** The transcript could not be read, so absence could not be proven. */
+  'transcript_unreadable',
+  /** The pane could not be read, so absence could not be proven. */
+  'pane_unreadable',
+  /** Proven absent after every attempt. */
+  'not_delivered',
+]);
 export type SendUnaccountedReason = z.infer<typeof SendUnaccountedReasonSchema>;
+
+/** Who asked for the message: a person, another agent, or the daemon itself (a failure notice). */
+export const SendSenderKindSchema = z.enum(['human', 'agent', 'daemon']);
+export type SendSenderKind = z.infer<typeof SendSenderKindSchema>;
+
+/** How a `queued` fate was proven. */
+export const SendQueueProofSchema = z.enum(['transcript', 'pane']);
+export type SendQueueProof = z.infer<typeof SendQueueProofSchema>;
 
 export const SendEvidenceSchema = z.object({
   key: z.string().min(1),
@@ -51,13 +84,30 @@ export const SendRecordSchema = z.object({
   attachmentIds: z.array(z.string()),
   from: z.string().optional(),
   fromName: z.string().optional(),
+  /** Who asked for it. A person retries by hand; an agent's sends are retried by the daemon. */
+  senderKind: SendSenderKindSchema.optional(),
   replyExpected: z.boolean().optional(),
   held: z.boolean().optional(),
   withdrawn: z.boolean().optional(),
   fate: SendFateSchema,
   fateAt: InstantSchema.optional(),
   evidence: SendEvidenceSchema.optional(),
+  /** Why an `unaccounted` or `timed_out` send settled where it did. */
   unaccountedReason: SendUnaccountedReasonSchema.optional(),
+  /** When and how a `queued` fate was proven. */
+  queuedAt: InstantSchema.optional(),
+  queueProof: SendQueueProofSchema.optional(),
+  /** 1 for the first transport; each re-attempt under the same id adds one. */
+  attempt: PositiveIntegerSchema.optional(),
+  attemptAt: InstantSchema.optional(),
+  /** When the daemon next re-checks an open send. */
+  deadlineAt: InstantSchema.optional(),
+  /**
+   * The daemon may re-attempt under the SAME id: true only while the message is proven absent
+   * (`timed_out`). An `unaccounted` send may still be re-sent, but only as a deliberate "send again
+   * anyway", because the original may have landed.
+   */
+  retryable: z.boolean().optional(),
   opportunityAt: InstantSchema.optional(),
   unaccountedDeadline: InstantSchema.optional(),
   hardDeadline: InstantSchema.optional(),
@@ -67,6 +117,15 @@ export type SendRecord = z.infer<typeof SendRecordSchema>;
 
 export const SendListResponseSchema = z.object({ sends: z.array(SendRecordSchema) });
 export type SendListResponse = z.infer<typeof SendListResponseSchema>;
+
+/**
+ * Re-attempting one send under its ORIGINAL id.
+ *
+ * `force` is the "send again anyway" path for an `unaccounted` send, whose original may have landed;
+ * without it the daemon only re-attempts a send it has proven absent.
+ */
+export const SendRetryRequestSchema = z.strictObject({ force: z.boolean().optional() });
+export type SendRetryRequest = z.infer<typeof SendRetryRequestSchema>;
 
 export const RuntimeModelOptionSchema = z.object({
   value: z.string().min(1),
@@ -701,11 +760,19 @@ export const RenameSessionRequestSchema = z
   });
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>;
 
-export const SendDispositionSchema = z.enum(['delivered', 'queued', 'revived', 'queued-for-revive']);
+/**
+ * What the transport did, said at the moment the send returns. `sent` is a busy pane that took the
+ * keys without yet proving the harness is holding them: the ledger fate (`fate`) says where it is.
+ */
+export const SendDispositionSchema = z.enum(['delivered', 'queued', 'sent', 'revived', 'queued-for-revive']);
 export type SendDisposition = z.infer<typeof SendDispositionSchema>;
 
 export const SendResultSchema = SessionViewSchema.extend({
   disposition: SendDispositionSchema,
+  /** The ledger id this send is tracked under: the request id the client sent. */
+  sendId: z.string().min(1).optional(),
+  /** The ledger fate as of the answer; read the send later for where it settled. */
+  fate: SendFateSchema.optional(),
 });
 export type SendResult = z.infer<typeof SendResultSchema>;
 

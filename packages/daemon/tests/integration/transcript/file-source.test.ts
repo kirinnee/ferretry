@@ -260,7 +260,8 @@ describe('NodeTranscriptSource follow', () => {
 
       // Assert
       should(removal.events).be.empty();
-      should(removal.observedInputs).be.empty();
+      // A removal is queue BOOKKEEPING — the harness let go of the prompt — never proof it was read.
+      should(removal.observedInputs.map(input => input.proof)).deepEqual(['native-queue-release']);
       should(drained.events).containDeep([{ kind: 'message', text: prompt, inputSource: 'native-queue' }]);
       should(drained.observedInputs).containDeep([
         {

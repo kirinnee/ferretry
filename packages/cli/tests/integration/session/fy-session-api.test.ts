@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type {
   AttachmentView,
   IFyApiClient,
+  SendRecord,
   SendResult,
   SessionView,
   SignalKind,
@@ -17,6 +18,7 @@ import { SessionCommandError } from '../../../src/lib/session/errors.ts';
 const view = { config: { id: 'ses-1' }, state: { id: 'ses-1' }, directory: '/d' } as unknown as SessionView;
 const sendResult = { ...view, disposition: 'delivered' } as SendResult;
 const attachment = { id: 'att-1' } as AttachmentView;
+const sendRecord = { sendId: 'snd-1' } as unknown as SendRecord;
 
 /** Records what the protocol client was asked to do; no socket is ever opened. */
 class SpyClient {
@@ -45,6 +47,10 @@ class SpyClient {
 
   send(...args: unknown[]): Promise<SendResult> {
     return this.record('send', args, sendResult);
+  }
+
+  sendStatus(id: string, sendId: string): Promise<SendRecord> {
+    return this.record('sendStatus', [id, sendId], sendRecord);
   }
 
   answer(...args: unknown[]): Promise<SessionView> {
@@ -91,6 +97,7 @@ describe('FySessionApi', () => {
       await subject.signal('ses-1', 'waiting', undefined, { peer: 'ses-2' }),
       await subject.upload('ses-1', 'shot.png'),
       await subject.rename('ses-1', 'Ship It', 'marin'),
+      await subject.sendStatus('ses-1', 'snd-1'),
     ];
 
     // Assert
@@ -106,6 +113,7 @@ describe('FySessionApi', () => {
       'signal',
       'upload',
       'rename',
+      'sendStatus',
     ]);
     should(client.calls[2]?.args).deepEqual([3]);
     should(client.calls[3]?.args).deepEqual([{ mode: 'auto', prompt: 'go', agent: 'a' }, 'req-1', 'cap-1']);
@@ -114,6 +122,8 @@ describe('FySessionApi', () => {
     should(results[0]).deepEqual([view]);
     should(results[9]).deepEqual(attachment);
     should(client.calls[10]?.args).deepEqual(['ses-1', 'Ship It', 'marin']);
+    should(client.calls[11]?.args).deepEqual(['ses-1', 'snd-1']);
+    should(results[11]).deepEqual(sendRecord);
   });
 
   it('should open one connection however many calls a command makes', async () => {

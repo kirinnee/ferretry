@@ -11,6 +11,7 @@ import {
   pwaConfigView,
   scratchPlanView,
   scratchSweepView,
+  sendRecord,
   sendResult,
   sessionAttachTarget,
   sessionView,
@@ -318,6 +319,50 @@ const CASES: readonly MethodCase[] = [
     body: { message: 'hello', now: true },
     response: () => jsonResponse(sendResult),
     expected: sendResult,
+  },
+  {
+    name: 'send with a caller-supplied request id',
+    invoke: client => client.send(SESSION_ID, { message: 'hello' }, 'send-logical-1'),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/send',
+    body: { message: 'hello' },
+    requestId: 'send-logical-1',
+    response: () => jsonResponse(sendResult),
+    expected: sendResult,
+  },
+  {
+    name: 'sends',
+    invoke: client => client.sends(SESSION_ID),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/sends',
+    response: () => jsonResponse({ sends: [sendRecord] }),
+    expected: [sendRecord],
+  },
+  {
+    name: 'send status with an encoded send id',
+    invoke: client => client.sendStatus(SESSION_ID, 'send 1/a'),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/sends/send%201%2Fa',
+    response: () => jsonResponse(sendRecord),
+    expected: sendRecord,
+  },
+  {
+    name: 'retry send',
+    invoke: client => client.retrySend(SESSION_ID, 'send-1'),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/sends/send-1/retry',
+    body: {},
+    response: () => jsonResponse(sendRecord),
+    expected: sendRecord,
+  },
+  {
+    name: 'retry send anyway',
+    invoke: client => client.retrySend(SESSION_ID, 'send-1', true),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/sends/send-1/retry',
+    body: { force: true },
+    response: () => jsonResponse(sendRecord),
+    expected: sendRecord,
   },
   {
     name: 'answer with labels only',
@@ -786,5 +831,63 @@ describe('FyApiClient typed method input validation', () => {
     // Assert
     for (const error of actual) should(error instanceof z.ZodError).be.true();
     should(transport.calls).have.length(0);
+  });
+});
+
+describe('FyApiClient send retry identity', () => {
+  const failure = (): { throws: unknown } => ({ throws: new Error('connection reset') });
+  const idsOf = (transport: QueuedHttpTransport): (string | null)[] =>
+    transport.calls.map(call => new Headers(call.init.headers).get(FY_REQUEST_ID_HEADER));
+
+  it('should reuse a failed send id for the same message and mint a new one once it succeeds', async () => {
+    // Arrange — every transport failure is retried three times inside request(), so a failed send
+    // consumes three outcomes.
+    let minted = 0;
+    const transport = new QueuedHttpTransport(
+      failure(),
+      failure(),
+      failure(),
+      jsonResponse(sendResult),
+      jsonResponse(sendResult),
+    );
+    const client = await connectClient(transport, { requestId: () => `minted-${++minted}` });
+
+    // Act
+    await captureError(() => client.send(SESSION_ID, { message: 'hello', attachmentIds: ['b', 'a'] }));
+    await client.send(SESSION_ID, { message: 'hello', attachmentIds: ['a', 'b'], now: true });
+    await client.send(SESSION_ID, { message: 'hello', attachmentIds: ['a', 'b'] });
+
+    // Assert — the press after the error is the SAME logical send; the one after a success is not.
+    should(idsOf(transport)).deepEqual(['minted-1', 'minted-1', 'minted-1', 'minted-1', 'minted-2']);
+  });
+
+  it('should forget a failed id after ten minutes and keep at most thirty-two', async () => {
+    // Arrange
+    let now = 0;
+    let minted = 0;
+    const transport = new QueuedHttpTransport();
+    const client = await connectClient(transport, { requestId: () => `minted-${++minted}`, nowMs: () => now });
+    const fail = async (message: string): Promise<void> => {
+      transport.enqueue(failure(), failure(), failure());
+      await captureError(() => client.send(SESSION_ID, { message }));
+    };
+    const succeed = async (message: string): Promise<string | null> => {
+      transport.enqueue(jsonResponse(sendResult));
+      await client.send(SESSION_ID, { message });
+      return idsOf(transport).at(-1) ?? null;
+    };
+
+    // Act
+    await fail('stale');
+    now = 10 * 60_000 + 1;
+    const afterExpiry = await succeed('stale');
+    for (let index = 0; index < 33; index++) await fail(`message-${index}`);
+    const evicted = await succeed('message-0');
+    const kept = await succeed('message-32');
+
+    // Assert
+    should(afterExpiry).equal('minted-2');
+    should(evicted).not.equal('minted-3');
+    should(kept).equal('minted-35');
   });
 });

@@ -92,12 +92,6 @@ import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-deliv
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../src/adapters/fleet-login/login-child.ts';
 import { systemPortHolders } from '../src/adapters/fleet-login/port-holders.ts';
 import {
-  AccountModelMcpServers,
-  FetchMcpOAuthHttp,
-  FileMcpOAuthStateStore,
-  webCryptoMcpOAuth,
-} from '../src/adapters/mcp-oauth/index.ts';
-import {
   FileSessionForkReceiptStore,
   forkOpeningTurnRefusal,
   forkReceiptFile,
@@ -137,7 +131,6 @@ import {
   FileRoutingCatalog,
   FileScratchCollector,
   FileSecretDocumentStore,
-  MCP_OAUTH_SECRETS_DOCUMENT,
   FileSecretKey,
   FileSessionSpawnFacts,
   foreignHistoryRoots,
@@ -147,6 +140,7 @@ import {
   JournalGrantAudit,
   KeyedSerialExecutor,
   ManifestAccountInventory,
+  MCP_OAUTH_SECRETS_DOCUMENT,
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeForeignHistoryFiles,
@@ -186,6 +180,12 @@ import {
   XvfbDisplay,
 } from '../src/adapters/index.ts';
 import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index.ts';
+import {
+  AccountModelMcpServers,
+  FetchMcpOAuthHttp,
+  FileMcpOAuthStateStore,
+  webCryptoMcpOAuth,
+} from '../src/adapters/mcp-oauth/index.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
@@ -251,6 +251,7 @@ import {
   FileSendTurnStore,
   ResumeSendReviver,
   StorageSendRepository,
+  TimerSendScheduler,
   TmuxSendTerminal,
 } from '../src/adapters/session/send/index.ts';
 import {
@@ -340,6 +341,7 @@ import {
 } from '../src/lib/fork/index.ts';
 import {
   type AccountInventoryPort,
+  AgentSendFailureNotifier,
   AgentToolService,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
@@ -408,6 +410,7 @@ import {
   DONE_MARKER_FILENAME,
   decodeInitialAttachments,
   defaultManagedWorktreeRoot,
+  defaultSendTrackerSettings,
   defaultSessionLifecycleSettings,
   defaultSessionMonitorSettings,
   defaultSessionResumeSettings,
@@ -427,7 +430,6 @@ import {
   FleetEventStreamService,
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
-  McpOAuthService,
   FleetManifestUnreadableError,
   FleetRefreshService,
   FleetSecretReferences,
@@ -462,6 +464,7 @@ import {
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
+  McpOAuthService,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
@@ -553,8 +556,10 @@ import {
   SecretVault,
   SecuritySettingsService,
   SelfRestartCoordinator,
+  type SendLedger,
   SendPending,
   SendRefused,
+  SendTracker,
   type SerialExecutor,
   type SessionAncestor,
   SessionAnswerError,
@@ -615,6 +620,7 @@ import {
   type SttEnhancementSubsystem,
   searchTranscript,
   selectableAutoAccounts,
+  sendRecordView,
   sessionHealthSettingsAt,
   sessionScopedAttachments,
   structuredQuestionStatePatch,
@@ -637,6 +643,7 @@ import {
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
+  TranscriptSendEvidence,
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
@@ -2028,6 +2035,7 @@ function createSessionResumeSubsystem(
   sessions: SessionDirectorySubsystem,
   service: SessionResumeService,
   provenance: SessionProvenanceRecorder,
+  held: Pick<SessionSendService, 'releaseHeld'>,
 ): SessionResumeSubsystem {
   return {
     resume: async (reference, actor, message) => {
@@ -2052,6 +2060,13 @@ function createSessionResumeSubsystem(
        * would turn a recoverable gap into a session the operator cannot bring back.
        */
       await recordRelaunchProvenance(provenance, sessions, id).catch(() => undefined);
+      /**
+       * Held sends are delivered once the relaunch is accepted — the promise "kept durably; delivered
+       * when this session is revived" made to their senders. Each is released at most once, keyed by
+       * its own send id, and a failure here leaves it held for the next revive rather than failing
+       * this one.
+       */
+      void held.releaseHeld(id).catch(() => undefined);
       // Read back through the SAME reader the list and the single read serve, so a revive answers with
       // the view those surfaces will show rather than a projection of the resume outcome.
       const view = await sessions.get(id).catch(() => undefined);
@@ -2200,6 +2215,8 @@ function createSessionSendSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
   service: SessionSendService,
+  ledger: Pick<SendLedger, 'list'>,
+  tracker: Pick<SendTracker, 'check' | 'watching'>,
   /** Copies each named attachment out where the agent can open it by path; see `lib/attachments/delivery.ts`. */
   deliverAttachments: (
     sessionId: SessionId,
@@ -2244,12 +2261,41 @@ function createSessionSendSubsystem(
           ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
         })
         .catch((error: unknown) => sendRefusal(error));
-      return { ...(await view(id, 'took the message')), disposition: outcome.disposition };
+      return {
+        ...(await view(id, 'took the message')),
+        disposition: outcome.disposition,
+        sendId: outcome.record.sendId,
+        fate: sendRecordView(outcome.record).fate,
+      };
     },
     interrupt: async reference => {
       const id = require(reference);
       await service.interrupt(id).catch((error: unknown) => sendRefusal(error));
       return await view(id, 'was interrupted');
+    },
+    // A READ IS A LOOK. Asking where a send went is exactly when a fresh answer matters, so the
+    // tracker looks first whenever it has something to look for — which is what keeps a page that is
+    // watching a send live without the daemon polling anything on its own.
+    sends: async reference => {
+      const id = require(reference);
+      if (await tracker.watching(id)) await tracker.check(id).catch(() => undefined);
+      return (await ledger.list(id))
+        .map(sendRecordView)
+        .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
+    },
+    sendStatus: async (reference, sendId) => {
+      const id = require(reference);
+      if (await tracker.watching(id)) await tracker.check(id).catch(() => undefined);
+      const record = (await ledger.list(id)).find(entry => entry.sendId === sendId);
+      if (record === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
+      return sendRecordView(record);
+    },
+    retry: async (reference, sendId, force) => {
+      const id = require(reference);
+      const record = await service
+        .reattempt(id, sendId, { by: 'person', force })
+        .catch((error: unknown) => sendRefusal(error));
+      return sendRecordView(record);
     },
   };
 }
@@ -5895,19 +5941,50 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * arithmetic; this one only reports that a reply arrived. It is reached AFTER the send releases
        * its own lock, so the two per-session queues can never wait on each other.
        */
-      const sends = new SessionSendService(
+      const sendRepository = new StorageSendRepository(storage, clock);
+      const sendLedger = new FileSendLedger(id => createSessionPaths(paths, id).directory, clock);
+      const sendTerminal = new TmuxSendTerminal(
+        launchTmux,
+        // PARSED, not asserted: a send types into a real terminal, so a configuration document
+        // that no longer validates must refuse rather than address whatever pane it names.
+        async id =>
+          SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
+        new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+        new TmuxPaneQueue(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+      );
+      const sendTranscripts = createTranscriptReader(storage);
+      /**
+       * Where each send WENT. Built before the send service, which tells it about every transport, and
+       * handed the service back through two late-bound ports — a re-attempt and a failure notice are
+       * both sends — so neither needs the other at construction.
+       */
+      const sendTracker = new SendTracker(
         {
-          repository: new StorageSendRepository(storage, clock),
-          ledger: new FileSendLedger(id => createSessionPaths(paths, id).directory, clock),
-          terminal: new TmuxSendTerminal(
-            launchTmux,
-            // PARSED, not asserted: a send types into a real terminal, so a configuration document
-            // that no longer validates must refuse rather than address whatever pane it names.
-            async id =>
-              SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
-            new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
-            new TmuxPaneQueue(launchTmux, milliseconds => Bun.sleep(milliseconds)),
-          ),
+          ledger: sendLedger,
+          evidence: new TranscriptSendEvidence(async sessionId => {
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) return undefined;
+            const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+            return config.success ? { sessionId, harness: config.data.harness } : undefined;
+          }, sendTranscripts),
+          terminal: sendTerminal,
+          repository: sendRepository,
+          attempts: { reattempt: async (id, sendId) => await sends.reattempt(id, sendId, { by: 'daemon' }) },
+          notifier: {
+            notify: async (sender, recipient, record) => await sendNotices.notify(sender, recipient, record),
+          },
+          scheduler: new TimerSendScheduler(),
+          roster: { sessions: () => storage.listSessions().map(session => session.id) },
+          serial: new KeyedSerialExecutor(),
+          clock,
+        },
+        defaultSendTrackerSettings,
+      );
+      const sends: SessionSendService = new SessionSendService(
+        {
+          repository: sendRepository,
+          ledger: sendLedger,
+          terminal: sendTerminal,
           turns: new FileSendTurnStore(resumeTurns, id => createSessionPaths(paths, id).directory),
           channel: new FileSendChannel(id => createSessionPaths(paths, id).directory),
           gate: launchGate,
@@ -5917,11 +5994,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // every unrelated document write in the process wait behind a live terminal.
           serial: new KeyedSerialExecutor(),
           clock,
+          tracking: sendTracker,
         },
         // The receiving agent is told the CLI a human types, not this daemon — `fyd send` is not a
         // command, exactly as the harness quirk service already reasons about `fyd resume`.
         { ...defaultSessionSendSettings, clientName: CLIENT_NAME },
       );
+      const sendNotices = new AgentSendFailureNotifier(sends, sendRepository, CLIENT_NAME);
       /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
        *
@@ -6523,22 +6602,32 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new SessionProvenanceRecorder(spawnProvenance, new StorageSessionProvenanceStore(storage), {
             snapshot: async () => await spawnAncestry(storage, sessions),
           }),
+          // A message held while this session could not take input is delivered now that it is back.
+          sends,
         ),
-        sessionSend: createSessionSendSubsystem(storage, sessions, sends, async (sessionId, attachmentIds) => {
-          // Each copy sits beside its stored original, under the file's own name, written once: the
-          // store's download re-verifies the bytes against the manifest digest before they are copied.
-          const delivered: DeliveredAttachment[] = [];
-          for (const attachmentId of attachmentIds) {
-            const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
-            const path = join(attachmentOriginals(sessionId), attachmentId, deliveredFilename(attachment.filename));
-            if (!existsSync(path)) {
-              await Bun.write(path, bytes);
-              chmodSync(path, 0o600);
+        sendTracking: sendTracker,
+        sessionSend: createSessionSendSubsystem(
+          storage,
+          sessions,
+          sends,
+          sendLedger,
+          sendTracker,
+          async (sessionId, attachmentIds) => {
+            // Each copy sits beside its stored original, under the file's own name, written once: the
+            // store's download re-verifies the bytes against the manifest digest before they are copied.
+            const delivered: DeliveredAttachment[] = [];
+            for (const attachmentId of attachmentIds) {
+              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+              const path = join(attachmentOriginals(sessionId), attachmentId, deliveredFilename(attachment.filename));
+              if (!existsSync(path)) {
+                await Bun.write(path, bytes);
+                chmodSync(path, 0o600);
+              }
+              delivered.push({ path, mime: attachment.mime });
             }
-            delivered.push({ path, mime: attachment.mime });
-          }
-          return delivered;
-        }),
+            return delivered;
+          },
+        ),
         sessionAnswer: createSessionAnswerSubsystem(
           storage,
           sessions,
@@ -7295,6 +7384,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  /**
+   * The send tracker, armed after the bind like every loop that can type into a pane: a send proven
+   * absent is re-attempted. Arming re-derives every in-flight send from its transcript — a restart
+   * re-types nothing it cannot prove absent — and the disarm cancels the one pending look per session.
+   */
+  cleanups.push(subsystems.sendTracking.arm());
   // The line an operator greps for. Everything above it is a step that can stall; a log that reaches
   // here and stops is a daemon that is serving, which is a completely different report from one that
   // stops at "state home opened" — and before any of this existed the two were the same empty file.

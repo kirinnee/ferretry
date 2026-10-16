@@ -3,6 +3,7 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
+import type { SendRetry } from '../../components/ledger-message.tsx';
 import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
@@ -144,6 +145,8 @@ export interface SessionChatPageProps {
   readonly composerFetch?: DaemonFetch;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
+  /** Re-sends a send under its original id from its row in the transcript. */
+  readonly onRetry?: SendRetry;
   /** Test seam for the Console's live capture of the agent's pane. */
   readonly readSnapshot?: PaneSnapshotReader;
   /** Test seam for typing into the Console; absent, it types through the daemon's own route. */
@@ -275,6 +278,7 @@ export function SessionChatPage({
   dictationSettings,
   onSessionChange,
   onRefresh,
+  onRetry,
   readSnapshot,
   typeIntoConsole,
   deck,
@@ -769,6 +773,7 @@ export function SessionChatPage({
           busy={busy}
           daemonId={connection.daemonId}
           entries={entries}
+          {...(onRetry === undefined ? {} : { onRetry })}
           sessionId={session.config.id}
         />
       </div>

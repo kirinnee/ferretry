@@ -12,12 +12,15 @@ import {
   type SendLedger,
   type SendPaneObservation,
   SendPending,
+  type SendQueueOutcome,
   type SendRecord,
   SendRefused,
   type SendRepository,
   type SendReviver,
+  type SendSettlement,
   type SendTarget,
   type SendTerminal,
+  type SendTracking,
   type SendTransition,
   type SendTurnStore,
   SendUnavailable,
@@ -90,6 +93,7 @@ class FakeLedger implements SendLedger {
   readonly withdrawn: string[] = [];
   reviseTo: SendRecord | undefined = undefined;
   reviseRefuses = false;
+  settleRefuses = false;
 
   async accept(_id: SessionId, record: SendRecord): Promise<{ record: SendRecord; created: boolean }> {
     const existing = this.records.get(record.sendId);
@@ -119,6 +123,19 @@ class FakeLedger implements SendLedger {
     return record;
   }
 
+  async list(): Promise<readonly SendRecord[]> {
+    return [...this.records.values()];
+  }
+
+  async settle(_id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined> {
+    if (this.settleRefuses) return undefined;
+    const current = this.records.get(sendId);
+    if (current === undefined) return undefined;
+    const next = { ...current, ...patch };
+    this.records.set(sendId, next);
+    return next;
+  }
+
   only(): SendRecord {
     const [record] = [...this.records.values()];
     if (record === undefined) throw new Error('no send was accepted');
@@ -129,6 +146,7 @@ class FakeLedger implements SendLedger {
 class FakeTerminal implements SendTerminal {
   readonly calls: string[] = [];
   readonly typed: string[] = [];
+  queueOutcome: SendQueueOutcome = 'held';
   deliverFailure: Error | undefined;
   observeFailure: Error | undefined;
   /** Which observe call starts failing, so a test can fail the SECOND look at a pane. */
@@ -151,9 +169,14 @@ class FakeTerminal implements SendTerminal {
     if (this.deliverFailure !== undefined) throw this.deliverFailure;
   }
 
-  async queue(_id: SessionId, text: string): Promise<void> {
+  async queue(_id: SessionId, text: string): Promise<SendQueueOutcome> {
     this.calls.push('queue');
     this.typed.push(text);
+    return this.queueOutcome;
+  }
+
+  async holds(): Promise<boolean> {
+    return false;
   }
 
   async stopActiveTurn(): Promise<SendPaneObservation> {
@@ -266,6 +289,7 @@ interface Parts {
   readonly reviver: FakeReviver;
   readonly peerWaits: FakePeerWaits;
   readonly serial: RecordingSerial;
+  readonly tracked: string[];
 }
 
 function parts(
@@ -282,11 +306,13 @@ function parts(
   const reviver = new FakeReviver();
   const peerWaits = new FakePeerWaits();
   const serial = new RecordingSerial();
+  const tracked: string[] = [];
+  const tracking: SendTracking = { track: id => void tracked.push(id) };
   const service = new SessionSendService(
-    { repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, clock },
+    { repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, clock, tracking },
     defaultSessionSendSettings,
   );
-  return { service, repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial };
+  return { service, repository, ledger, terminal, turns, channel, gate, reviver, peerWaits, serial, tracked };
 }
 
 function request(overrides: Partial<Parameters<SessionSendService['send']>[0]> = {}) {
@@ -401,8 +427,22 @@ describe('send to a busy pane', () => {
     should(terminal.calls).eql(['observe', 'observe', 'queue']);
     should(turns.calls).be.empty();
     should(repository.transitions).be.empty();
-    should(ledger.only()).match({ path: 'native-inline', fate: 'accepted' });
+    should(ledger.only()).match({ path: 'native-inline', fate: 'queued', queueProof: 'pane', queuedAt: NOW });
     should(ledger.only().turn).be.undefined();
+  });
+
+  it('says sent, never queued, when the pane took the keys without proving the harness holds them', async () => {
+    const { service, ledger, terminal, repository, tracked } = parts(target({ status: 'thinking' }), [
+      pane({ activeWork: true }),
+    ]);
+    terminal.queueOutcome = 'unproven';
+    const outcome = await service.send(request());
+
+    should(outcome.disposition).equal('sent');
+    should(outcome.record.fate).equal('accepted');
+    should(ledger.only().fate).equal('accepted');
+    should(repository.journal_.find(entry => entry.event === 'control.send_queued')?.data).match({ held: false });
+    should(tracked).eql([ID]);
   });
 
   it('takes the tracked path when the pane went idle between the probe and the lock', async () => {
@@ -684,5 +724,185 @@ describe('serialization', () => {
     const { service, serial } = parts();
     await service.send(request());
     should(serial.keys).eql([ID]);
+  });
+});
+
+describe('who a send is from', () => {
+  it('records a person, an agent, or the daemon, and the attachments it named', async () => {
+    const sender = target({ id: PEER, teammate: 'hadi' });
+    const human = parts();
+    await human.service.send(request({ attachmentIds: ['att_1'] }));
+    const agent = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    await agent.service.send(request({ senderReference: PEER }));
+    const daemon = parts();
+    await daemon.service.send(request({ origin: 'daemon' }));
+
+    should(human.ledger.only()).match({ senderKind: 'human', attachmentIds: ['att_1'], attempt: 1, attemptAt: NOW });
+    should(agent.ledger.only()).match({ senderKind: 'agent', from: PEER, fromName: 'hadi' });
+    should(daemon.ledger.only().senderKind).equal('daemon');
+  });
+
+  it('does not track a duplicate request, which found a send already being watched', async () => {
+    const { service, tracked } = parts();
+    await service.send(request());
+    const again = await service.send(request());
+
+    should(again.record.sendId).equal('send-1');
+    should(tracked).eql([ID]);
+  });
+});
+
+describe('re-attempting a send under its original id', () => {
+  async function settled(
+    fate: SendRecord['fate'],
+    extra: Partial<SendRecord> = {},
+    frames: SendPaneObservation[] = [pane({ promptReady: true })],
+  ) {
+    const built = parts(target(), frames);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate, ...extra });
+    built.terminal.typed.length = 0;
+    built.tracked.length = 0;
+    return built;
+  }
+
+  it('retypes a send proven absent into an idle prompt as attempt two, ledgered first', async () => {
+    const { service, ledger, terminal, repository, tracked } = await settled('timed_out', {
+      retryable: true,
+      unaccountedReason: 'not_delivered',
+      deadlineAt: NOW,
+    });
+    const record = await service.reattempt(ID, 'send-1', { by: 'person' });
+
+    should(record).match({ fate: 'accepted', attempt: 2, attemptAt: NOW });
+    should(ledger.only().unaccountedReason).be.undefined();
+    should(ledger.only().deadlineAt).be.undefined();
+    should(terminal.typed).eql(['ship it']);
+    should(repository.journal_.at(-1)).match({ event: 'control.send_retried', data: { attempt: 2, by: 'person' } });
+    should(tracked).eql([ID]);
+  });
+
+  it('rides the queue when the pane is busy, and records the proof when the harness holds it', async () => {
+    const { service, terminal } = await settled('accepted', {}, [
+      pane({ promptReady: true }),
+      pane({ activeWork: true }),
+    ]);
+    const record = await service.reattempt(ID, 'send-1', { by: 'daemon' });
+
+    should(terminal.calls.at(-1)).equal('queue');
+    should(record).match({ fate: 'queued', attempt: 2 });
+  });
+
+  it('stays accepted when the busy pane did not prove it is holding the retype', async () => {
+    const { service, terminal } = await settled('queued', {}, [
+      pane({ promptReady: true }),
+      pane({ activeWork: true }),
+    ]);
+    terminal.queueOutcome = 'unproven';
+    const record = await service.reattempt(ID, 'send-1', { by: 'daemon' });
+
+    should(record).match({ fate: 'accepted', attempt: 2 });
+  });
+
+  it('needs "send again anyway" for an unconfirmed send, and refuses everything else a person may not retry', async () => {
+    const unconfirmed = await settled('unaccounted', { unaccountedReason: 'transcript_unreadable' });
+    const refusedUnconfirmed = await unconfirmed.service
+      .reattempt(ID, 'send-1', { by: 'person' })
+      .catch((error: unknown) => error);
+    const forced = await unconfirmed.service.reattempt(ID, 'send-1', { by: 'person', force: true });
+    const open = await settled('accepted');
+    const refusedOpen = await open.service.reattempt(ID, 'send-1', { by: 'person' }).catch((error: unknown) => error);
+    const delivered = await settled('delivered');
+    const refusedDelivered = await delivered.service
+      .reattempt(ID, 'send-1', { by: 'daemon' })
+      .catch((error: unknown) => error);
+    const ended = await settled('timed_out', { retryable: false, unaccountedReason: 'session_ended' });
+    const refusedEnded = await ended.service.reattempt(ID, 'send-1', { by: 'person' }).catch((error: unknown) => error);
+    const missing = await open.service.reattempt(ID, 'nope', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(refusedUnconfirmed).be.instanceof(SendRefused);
+    should((refusedUnconfirmed as Error).message).match(/send it again anyway/);
+    should(forced.attempt).equal(2);
+    should(refusedOpen).be.instanceof(SendRefused);
+    should((refusedOpen as Error).message).match(/accepted and cannot be retried/);
+    should((refusedDelivered as Error).message).match(/already delivered/);
+    should(refusedEnded).be.instanceof(SendRefused);
+    should((missing as Error).message).match(/has no send nope/);
+  });
+
+  it('refuses a revive-borne send and a session with no live agent, typing nothing', async () => {
+    const held = await settled('timed_out', { retryable: true, path: 'revive-queue', held: true });
+    const heldRefusal = await held.service.reattempt(ID, 'send-1', { by: 'person' }).catch((error: unknown) => error);
+    const dead = await settled('timed_out', { retryable: true }, [pane({ promptReady: true }), pane({ alive: false })]);
+    const deadRefusal = await dead.service.reattempt(ID, 'send-1', { by: 'person' }).catch((error: unknown) => error);
+    const lost = await settled('timed_out', { retryable: true });
+    lost.ledger.settleRefuses = true;
+    const lostRefusal = await lost.service.reattempt(ID, 'send-1', { by: 'person' }).catch((error: unknown) => error);
+
+    should((heldRefusal as Error).message).match(/rides a revive/);
+    should((deadRefusal as Error).message).match(/no live agent/);
+    should((lostRefusal as Error).message).match(/could not be re-attempted/);
+    should([...held.terminal.typed, ...dead.terminal.typed, ...lost.terminal.typed]).be.empty();
+  });
+});
+
+describe('delivering held messages after a revive', () => {
+  async function heldParts(frames: SendPaneObservation[]) {
+    const built = parts(target(), frames);
+    built.ledger.records.set('held-1', {
+      sendId: 'held-1',
+      acceptedAt: NOW,
+      acceptedTurn: 3,
+      path: 'revive-queue',
+      message: 'when you are back',
+      held: true,
+      fate: 'accepted',
+      replyExpected: true,
+    });
+    return built;
+  }
+
+  it('types each held message once, as a tracked turn, and clears the hold in the same step', async () => {
+    const { service, ledger, terminal, repository, tracked } = await heldParts([pane({ promptReady: true })]);
+
+    const first = await service.releaseHeld(ID);
+    const second = await service.releaseHeld(ID);
+
+    should(first).equal(1);
+    should(second).equal(0);
+    should(terminal.typed).eql(['when you are back']);
+    should(ledger.only()).match({
+      held: false,
+      path: 'direct',
+      matchText: 'when you are back',
+      turn: 4,
+      fate: 'accepted',
+    });
+    should(repository.events).containEql('control.send_released');
+    should(tracked).eql([ID]);
+  });
+
+  it('queues a held message behind a busy agent, and waits out a launch first', async () => {
+    const { service, ledger, gate } = await heldParts([pane({ activeWork: true })]);
+    gate.inFlight = true;
+
+    should(await service.releaseHeld(ID)).equal(1);
+    should(ledger.only()).match({ held: false, path: 'native-inline', fate: 'queued' });
+  });
+
+  it('keeps holding when there is still no live agent, and when the record moved under it', async () => {
+    const { service, ledger } = await heldParts([pane({ alive: false })]);
+    should(await service.releaseHeld(ID)).equal(0);
+    should(ledger.only().held).be.true();
+
+    const raced = await heldParts([pane({ promptReady: true })]);
+    const list = raced.ledger.list.bind(raced.ledger);
+    let calls = 0;
+    raced.ledger.list = async () => {
+      calls += 1;
+      const records = await list();
+      return calls === 1 ? records : records.map(record => ({ ...record, held: false }));
+    };
+    should(await raced.service.releaseHeld(ID)).equal(0);
   });
 });

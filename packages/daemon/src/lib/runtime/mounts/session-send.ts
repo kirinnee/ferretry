@@ -1,14 +1,16 @@
 import {
   FY_REQUEST_ID_HEADER,
   InterruptSessionRequestSchema,
+  type SendRecord,
   SendRequestSchema,
   type SendResult,
+  SendRetryRequestSchema,
   type SessionView,
 } from '@ferretry/protocol';
 import { PEER_ACTOR_PREFIX } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, headerValue, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
@@ -70,6 +72,12 @@ export class SessionSendError extends Error {
 export interface SessionSendSubsystem {
   send(sessionId: string, request: SendInput): Promise<SendResult>;
   interrupt(sessionId: string): Promise<SessionView>;
+  /** Every send this session's ledger holds, newest first, each with the fate proven so far. */
+  sends(sessionId: string): Promise<readonly SendRecord[]>;
+  /** One send by its id — how a sender learns where its message settled. */
+  sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
+  /** Re-attempts one send under its original id, as a person asked. */
+  retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord>;
 }
 
 /** A send as the route hands it over: the client's body, plus the two facts only the route knows. */
@@ -207,6 +215,53 @@ export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly Api
       minimum: 'operator',
       noStore: true,
       handle: async context => await interrupt(subsystem, context),
+    },
+    ...sendLedgerRoutes(subsystem),
+  ];
+}
+
+/** The send id in the path, decoded. */
+function pathSendId(context: RouteContext): string {
+  const decoded = decodeParameter(context.params.get('sendId') ?? '');
+  if (decoded === undefined || decoded === '')
+    throw new ApiError(400, 'the send id in the path is not usable', 'invalid_send_id');
+  return decoded;
+}
+
+/**
+ * `operator` minimum on the three ledger routes, for the reason the send itself carries it: a send
+ * row is the message text, and a retry types it into a live terminal again.
+ *
+ * `noStore` because every answer is a fate that may change on the next look.
+ */
+function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/sends',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => jsonResponse({ sends: await subsystem.sends(pathSessionId(context)).catch(refuse) }),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/sends/:sendId',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context =>
+        jsonResponse(await subsystem.sendStatus(pathSessionId(context), pathSendId(context)).catch(refuse)),
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/sends/:sendId/retry',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const id = pathSessionId(context);
+        const sendId = pathSendId(context);
+        const request = await parseBody(context.request, SendRetryRequestSchema);
+        return jsonResponse(await subsystem.retry(id, sendId, request.force === true).catch(refuse));
+      },
     },
   ];
 }

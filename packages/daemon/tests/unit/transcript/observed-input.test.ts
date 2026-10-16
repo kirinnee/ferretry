@@ -162,6 +162,48 @@ describe('ClaudeObservedInputObserver', () => {
   });
 });
 
+describe('ClaudeObservedInputObserver queue bookkeeping', () => {
+  it('should report Claude holding a prompt and letting go of it, never as an entry', () => {
+    // Arrange
+    const subject = new ClaudeObservedInputObserver();
+
+    // Act
+    const hold = subject.observe(
+      { type: 'queue-operation', operation: 'enqueue', content: 'held', timestamp: '2026-01-02T03:04:05.000Z' },
+      context(30, 40),
+    );
+    const dequeue = subject.observe({ type: 'queue-operation', operation: 'dequeue', content: 'held' }, context());
+    const remove = subject.observe(removeClaude('held', '2026-01-02T03:04:07.000Z'), context());
+    const ignored = [
+      { type: 'queue-operation', operation: 'popAll', content: 'held' },
+      { type: 'queue-operation', operation: 'enqueue' },
+      { type: 'queue-operation', operation: 'enqueue', content: '  ' },
+    ].flatMap(value => subject.observe(value, context()));
+    const untimed = subject.observe(
+      { type: 'queue-operation', operation: 'enqueue', content: 'held' },
+      {
+        source: '/synthetic/transcript.jsonl',
+      },
+    );
+
+    // Assert
+    should(hold).deepEqual([
+      {
+        harness: 'claude',
+        text: 'held',
+        proof: 'native-queue-hold',
+        observedAt: '2026-01-02T03:04:05.000Z',
+        proofKey: '/synthetic/transcript.jsonl#30#70',
+        shapeVersion: CLAUDE_INPUT_SHAPE_VERSION,
+      },
+    ]);
+    should(dequeue[0]).match({ proof: 'native-queue-release', observedAt: FALLBACK });
+    should(remove[0]).match({ proof: 'native-queue-release', observedAt: '2026-01-02T03:04:07.000Z' });
+    should(ignored).be.empty();
+    should(untimed).be.empty();
+  });
+});
+
 describe('CodexObservedInputObserver', () => {
   it('should emit only canonical user text and use payload or cursor proof keys', () => {
     // Arrange

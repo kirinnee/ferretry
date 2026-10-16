@@ -43,8 +43,8 @@ import {
   DAEMON_CAPABILITIES,
   matchesSessionSearchQuery,
   SECRET_SCHEMA_VERSION,
-  secretReference,
   SESSION_FILE_INDEX_VERSION,
+  secretReference,
   sessionSearchTaskHaystack,
   TASK_SCHEMA_VERSION,
 } from '@ferretry/protocol';
@@ -57,8 +57,6 @@ import {
   TranscriptAttachmentGallery,
 } from '../src/components/attachment-gallery.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
-import { UNLOCK_COPY, StepUpDialog } from '../src/features/step-up/step-up-dialog.tsx';
-import { StepUpGate } from '../src/lib/step-up-gate.ts';
 import { Composer } from '../src/components/composer.tsx';
 import {
   type AccountUsageRow,
@@ -122,6 +120,7 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import { type NewDeviceNoticeClients, NewDeviceNotices } from '../src/features/device-notice/new-device-notice.tsx';
 import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
 import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
@@ -139,6 +138,7 @@ import {
   OnboardingProgressStore,
 } from '../src/features/onboarding/onboarding-progress.ts';
 import type { SetupSharePort } from '../src/features/onboarding/setup-handoff-panel.tsx';
+import { DeviceRefusedNotice } from '../src/features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
@@ -148,7 +148,6 @@ import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
-import { NewDeviceNotices, type NewDeviceNoticeClients } from '../src/features/device-notice/new-device-notice.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -158,8 +157,6 @@ import {
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
-import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
-import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
@@ -168,11 +165,14 @@ import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
+import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
+import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
 import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
+import { StepUpDialog, UNLOCK_COPY } from '../src/features/step-up/step-up-dialog.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
 import { TaskName } from '../src/features/tasks/task-name.tsx';
@@ -193,15 +193,13 @@ import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
 import type { PickerAccount, PickerAccountHealth } from '../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/lib/account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
+import { DaemonAttentionClient } from '../src/lib/attention-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
-import { DaemonAttentionClient } from '../src/lib/attention-client.ts';
-import { openWorkspaceTab, activateWorkspaceTab, workspaceTab } from '../src/lib/workspace-layout.ts';
-import { WorkspaceLayoutStore } from '../src/lib/workspace-layout-store.ts';
 import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.ts';
 import { buildLineage } from '../src/lib/lineage.ts';
@@ -212,11 +210,11 @@ import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
-import { DeviceRefusedNotice } from '../src/features/pairing/device-refused-notice.tsx';
+import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
-import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
 import type { StepUpClient } from '../src/lib/step-up-client.ts';
+import { StepUpGate } from '../src/lib/step-up-gate.ts';
 import { DaemonClientProvider } from '../src/lib/store.tsx';
 import {
   BrowserRecognitionError,
@@ -229,9 +227,9 @@ import {
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
+import { activateWorkspaceTab, openWorkspaceTab, workspaceTab } from '../src/lib/workspace-layout.ts';
+import { WorkspaceLayoutStore } from '../src/lib/workspace-layout-store.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
-import { InsightsFrame } from '../src/shell/insights-frame.tsx';
-import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BrandMark } from '../src/shell/brand-mark.tsx';
@@ -241,6 +239,7 @@ import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from '../src/shell/command-palette.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
+import { InsightsFrame } from '../src/shell/insights-frame.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
@@ -248,6 +247,7 @@ import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textar
 import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
 import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
+import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
 import { SidePaneWorkspace } from '../src/shell/side-pane.tsx';
 import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
@@ -1180,9 +1180,6 @@ const harnessChildSession = {
 openSidePaneTab(scope, 'tasks');
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
 openSidePaneFileTab(scope, 'README.md');
-
-/** Fixed reading instant, so ledger badges and timestamps are stable shots. */
-const LEDGER_AS_OF = Date.parse('2026-07-31T10:00:30.000Z');
 
 /** Phone below this width, exactly as the app decides its presentation. */
 const PHONE_MAX = 768;
@@ -4924,9 +4921,20 @@ function Shell() {
             <Transcript
               busy
               daemonId={daemon.daemonId}
-              asOf={LEDGER_AS_OF}
               entries={[
-                { id: 'human', kind: 'user', text: 'Please port the session screen.', label: 'You' },
+                {
+                  id: 'human',
+                  kind: 'user',
+                  text: 'Please port the session screen.',
+                  label: 'You',
+                  send: {
+                    sendId: 'send-port',
+                    acceptedAt: '2026-07-31T09:30:00.000Z',
+                    message: 'Please port the session screen.',
+                    attachmentIds: [],
+                    fate: 'delivered',
+                  },
+                },
                 { id: 'assistant', kind: 'assistant', text: 'I am adding rendered component tests.', label: 'Codex' },
                 {
                   id: 'tools',
@@ -4993,36 +5001,56 @@ function Shell() {
                   ],
                 },
               ]}
-              onResend={async () => true}
+              onRetry={async () => true}
               sessionId="harness-session"
             />
             <section aria-label="Send ledger rows" className="flex flex-col gap-2">
               <LedgerMessage
-                asOf={LEDGER_AS_OF}
+                record={{
+                  sendId: 'send-sending',
+                  acceptedAt: '2026-07-31T10:00:10.000Z',
+                  message: 'Also update the changelog.',
+                  attachmentIds: [],
+                  fate: 'accepted',
+                  path: 'direct',
+                }}
+              />
+              <LedgerMessage
                 record={{
                   sendId: 'send-queued',
                   acceptedAt: '2026-07-31T10:00:00.000Z',
                   message: 'Please run the full gate before pushing.',
                   attachmentIds: [],
-                  fate: 'accepted',
+                  fate: 'queued',
                   path: 'native-inline',
                 }}
               />
               <LedgerMessage
-                asOf={LEDGER_AS_OF}
+                onRetry={async () => true}
+                record={{
+                  sendId: 'send-timed-out',
+                  acceptedAt: '2026-07-31T09:50:00.000Z',
+                  message: 'Rebase onto main when you are done.',
+                  attachmentIds: [],
+                  fate: 'timed_out',
+                  unaccountedReason: 'not_delivered',
+                  attempt: 2,
+                  retryable: true,
+                }}
+              />
+              <LedgerMessage
                 placement="before-loaded"
-                onResend={async () => true}
+                onRetry={async () => true}
                 record={{
                   sendId: 'send-unconfirmed',
                   acceptedAt: '2026-07-31T09:41:00.000Z',
                   message: '[peer message from teammate freddie]\nPARKED until 30m\n\nis CI green on your branch?',
                   attachmentIds: [],
                   fate: 'unaccounted',
-                  unaccountedReason: 'timeout',
+                  unaccountedReason: 'transcript_unreadable',
                 }}
               />
               <LedgerMessage
-                asOf={LEDGER_AS_OF}
                 record={{
                   sendId: 'send-delivered',
                   acceptedAt: '2026-07-31T09:12:00.000Z',

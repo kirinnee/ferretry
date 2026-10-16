@@ -25,13 +25,6 @@ import {
   SessionHandoverRequestSchema,
 } from '../lib/handover.ts';
 import {
-  type ForkSessionOutcome,
-  ForkSessionOutcomeSchema,
-  type ForkSessionRequest,
-  ForkSessionRequestSchema,
-} from '../lib/session-fork.ts';
-import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
-import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
@@ -79,10 +72,14 @@ import {
   ResumeSessionRequestSchema,
   type RuntimeControlRequest,
   RuntimeControlRequestSchema,
+  SendListResponseSchema,
+  type SendRecord,
+  SendRecordSchema,
   type SendRequest,
   SendRequestSchema,
   type SendResult,
   SendResultSchema,
+  SendRetryRequestSchema,
   type SessionAttachTarget,
   SessionAttachTargetSchema,
   SessionListSchema,
@@ -95,6 +92,13 @@ import {
   StartSessionRequestSchema,
   StopSessionRequestSchema,
 } from '../lib/session.ts';
+import {
+  type ForkSessionOutcome,
+  ForkSessionOutcomeSchema,
+  type ForkSessionRequest,
+  ForkSessionRequestSchema,
+} from '../lib/session-fork.ts';
+import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
 import { TaskBoardChildGrantRequestSchema, TaskBoardGrantRequestViewSchema } from '../lib/task-boards.ts';
 import {
   detectVersionSkew,
@@ -228,6 +232,52 @@ export class WebSocketEventTransport implements IFyEventTransport {
   }
 }
 
+/** How long a failed send's id is offered back to an identical retry. */
+const FAILED_SEND_MEMORY_MS = 10 * 60_000;
+/** Bounded, so a client that fails a great many sends cannot grow without limit. */
+const FAILED_SEND_MEMORY_LIMIT = 32;
+
+/**
+ * The idempotency key of a send that failed, so pressing Send again REUSES it.
+ *
+ * A composer that mints a fresh id per press turns "the answer was lost" into "the agent read it
+ * twice": the daemon applied the first request, the browser never saw the reply, and the retry looks
+ * like a new message. Remembering the failed id per (session, message, attachments) — and only for
+ * ten minutes — makes that retry the same logical send, which the daemon's ledger applies once.
+ * `now` is deliberately not part of the key: an interrupt-then-send retry is still the same message.
+ */
+class FailedSendMemory {
+  readonly #entries = new Map<string, { readonly requestId: string; readonly at: number }>();
+
+  constructor(private readonly nowMs: () => number) {}
+
+  recall(key: string): string | undefined {
+    const entry = this.#entries.get(key);
+    if (entry === undefined) return undefined;
+    if (this.nowMs() - entry.at <= FAILED_SEND_MEMORY_MS) return entry.requestId;
+    this.#entries.delete(key);
+    return undefined;
+  }
+
+  remember(key: string, requestId: string): void {
+    this.#entries.delete(key);
+    this.#entries.set(key, { requestId, at: this.nowMs() });
+    for (const oldest of this.#entries.keys()) {
+      if (this.#entries.size <= FAILED_SEND_MEMORY_LIMIT) break;
+      this.#entries.delete(oldest);
+    }
+  }
+
+  forget(key: string): void {
+    this.#entries.delete(key);
+  }
+}
+
+/** One logical message: the session, the exact text, and the attachment set in a stable order. */
+function failedSendKey(id: string, input: SendRequest): string {
+  return JSON.stringify([id, input.message, [...(input.attachmentIds ?? [])].sort()]);
+}
+
 export class FyApiClient implements IFyApiClient {
   readonly #baseUrl: string;
   readonly #token: string;
@@ -239,6 +289,7 @@ export class FyApiClient implements IFyApiClient {
   readonly #requestId: () => string;
   readonly #sleep: (milliseconds: number) => Promise<void>;
   readonly #onVersionSkew: ((skew: VersionSkew) => void) | undefined;
+  readonly #failedSends: FailedSendMemory;
   #reportedVersionSkew = false;
 
   private constructor(options: FyClientOptions) {
@@ -252,6 +303,7 @@ export class FyApiClient implements IFyApiClient {
     this.#requestId = options.requestId ?? defaultRequestId;
     this.#sleep = options.sleep ?? defaultSleep;
     this.#onVersionSkew = options.onVersionSkew;
+    this.#failedSends = new FailedSendMemory(options.nowMs ?? Date.now);
   }
 
   static connect(options: FyClientOptions): Promise<FyApiClient> {
@@ -506,8 +558,46 @@ export class FyApiClient implements IFyApiClient {
     return recovered;
   }
 
-  send(id: string, input: SendRequest): Promise<SendResult> {
-    return this.#post(id, 'send', SendRequestSchema, input, SendResultSchema);
+  async send(id: string, input: SendRequest, requestId?: string): Promise<SendResult> {
+    const key = failedSendKey(id, input);
+    const remembered = this.#failedSends.recall(key);
+    const logical = NonEmptyValueSchema.parse(requestId ?? remembered ?? this.#requestId());
+    try {
+      const result = await this.#post(id, 'send', SendRequestSchema, input, SendResultSchema, logical);
+      this.#failedSends.forget(key);
+      return result;
+    } catch (error) {
+      // ANY failure is remembered, not only a lost answer: a refusal before acceptance left no record,
+      // so reusing its id costs nothing, while a lost answer after acceptance is exactly the case where
+      // a fresh id would make the agent read the message twice.
+      this.#failedSends.remember(key, logical);
+      throw error;
+    }
+  }
+
+  async sends(id: string): Promise<SendRecord[]> {
+    const page = await this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/sends`,
+      SendListResponseSchema,
+    );
+    return page.sends;
+  }
+
+  sendStatus(id: string, sendId: string): Promise<SendRecord> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/sends/${encodeURIComponent(NonEmptyValueSchema.parse(sendId))}`,
+      SendRecordSchema,
+    );
+  }
+
+  retrySend(id: string, sendId: string, force?: boolean): Promise<SendRecord> {
+    return this.#post(
+      id,
+      `sends/${encodeURIComponent(NonEmptyValueSchema.parse(sendId))}/retry`,
+      SendRetryRequestSchema,
+      force === true ? { force: true } : {},
+      SendRecordSchema,
+    );
   }
 
   answer(

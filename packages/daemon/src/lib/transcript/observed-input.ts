@@ -46,14 +46,12 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
     if (record === undefined) return [];
 
     if (record.type === 'queue-operation') {
-      if (record.operation === 'remove') {
-        const content = transcriptString(record.content);
-        if (content !== undefined) {
-          this.removeRing.push({ content, timestamp: transcriptString(record.timestamp) });
-          if (this.removeRing.length > CLAUDE_REMOVE_RING_LIMIT) this.removeRing.shift();
-        }
+      const content = transcriptString(record.content);
+      if (record.operation === 'remove' && content !== undefined) {
+        this.removeRing.push({ content, timestamp: transcriptString(record.timestamp) });
+        if (this.removeRing.length > CLAUDE_REMOVE_RING_LIMIT) this.removeRing.shift();
       }
-      return [];
+      return this.queueBookkeeping(record, content, context);
     }
 
     if (record.type === 'attachment') {
@@ -98,6 +96,37 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
         proof: 'normal-user-record',
         observedAt,
         proofKey: proofKey(transcriptString(record.uuid), context),
+        shapeVersion: CLAUDE_INPUT_SHAPE_VERSION,
+      },
+    ];
+  }
+
+  /**
+   * Claude's own record of its input queue: `enqueue` when it starts HOLDING a prompt typed mid-turn,
+   * and `dequeue`/`remove` when it lets go of one. Emitted as bookkeeping, never as an entry: a held
+   * prompt has not been read, and one let go of is proven delivered only by the record that follows.
+   */
+  private queueBookkeeping(
+    record: Readonly<Record<string, unknown>>,
+    content: string | undefined,
+    context: TranscriptObservationContext,
+  ): readonly ObservedHumanInput[] {
+    const proof =
+      record.operation === 'enqueue'
+        ? 'native-queue-hold'
+        : record.operation === 'dequeue' || record.operation === 'remove'
+          ? 'native-queue-release'
+          : undefined;
+    const observedAt = transcriptString(record.timestamp) ?? context.observedAt;
+    if (proof === undefined || content === undefined || content.trim().length === 0 || observedAt === undefined)
+      return [];
+    return [
+      {
+        harness: this.harness,
+        text: content,
+        proof,
+        observedAt,
+        proofKey: proofKey(undefined, context),
         shapeVersion: CLAUDE_INPUT_SHAPE_VERSION,
       },
     ];

@@ -306,6 +306,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionControl: new FakeSessionControl(),
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
+  sendTracking: { arm: () => () => {} },
   sessionAnswer: {
     answer: async id => sessionView(id),
   },
@@ -535,7 +536,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      108 + // the session table and everything that is not the account model (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      111 + // the session table and everything that is not the account model (three of them the send ledger: its read, one send, and a retry under the same id) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       2 + // the account model's credential list and its Check now
@@ -688,6 +689,9 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/rename',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
+      'GET /v1/sessions/:sessionId/sends',
+      'GET /v1/sessions/:sessionId/sends/:sendId',
+      'POST /v1/sessions/:sessionId/sends/:sendId/retry',
       'POST /v1/sessions/:sessionId/answer',
       'POST /v1/sessions/:sessionId/attachments',
       'GET /v1/sessions/:sessionId/attachments/:attachmentId',

@@ -3,8 +3,6 @@ import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
-import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
-import type { SessionTranscriptPage } from './session-transcript.ts';
 import type {
   AttachmentView,
   CgroupConfigPatch,
@@ -25,6 +23,7 @@ import type {
   FyEvent,
   FyEventStreamIdle,
   RuntimeControlRequest,
+  SendRecord,
   SendRequest,
   SendResult,
   SessionAttachTarget,
@@ -34,6 +33,8 @@ import type {
   StartSessionRequestInput,
   StructuredQuestionAnswer,
 } from './session.ts';
+import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
+import type { SessionTranscriptPage } from './session-transcript.ts';
 import type { VersionSkew } from './version-skew.ts';
 
 export const FY_VERSION_HEADER = 'x-fy-version';
@@ -62,6 +63,8 @@ export interface FyClientOptions {
   fileLoader?: IFyFileLoader;
   requestId?: () => string;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Wall clock in milliseconds; injectable so the failed-send memory's expiry is testable. */
+  nowMs?: () => number;
   onVersionSkew?: (skew: VersionSkew) => void;
 }
 
@@ -90,7 +93,22 @@ export interface IFyApiClient {
   suggestNames(count?: number): Promise<string[]>;
   get(id: string, signal?: AbortSignal): Promise<SessionView>;
   start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
-  send(id: string, input: SendRequest): Promise<SendResult>;
+  /**
+   * `requestId` is the LOGICAL identity of one message — the daemon's send id. Supply the same one to
+   * retry a send whose answer was lost and it is applied once. Omitted, the client reuses the id of
+   * an identical send to the same session that failed in the last ten minutes, so a person pressing
+   * Send again after an error cannot make the agent read the message twice.
+   */
+  send(id: string, input: SendRequest, requestId?: string): Promise<SendResult>;
+  /** Every send this session's ledger holds, newest first, each with the fate the daemon has proven. */
+  sends(id: string): Promise<SendRecord[]>;
+  /** One send, by its id: how a sender learns where its message settled. */
+  sendStatus(id: string, sendId: string): Promise<SendRecord>;
+  /**
+   * Re-attempts one send under its ORIGINAL id. Allowed while the daemon has proven it absent; `force`
+   * re-sends an unconfirmed one, whose original may still have landed.
+   */
+  retrySend(id: string, sendId: string, force?: boolean): Promise<SendRecord>;
   answer(
     id: string,
     toolUseId: string,

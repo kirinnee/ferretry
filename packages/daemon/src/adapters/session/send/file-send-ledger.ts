@@ -1,8 +1,8 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ClockPort } from '../../../lib/ports.ts';
+import type { SendLedger, SendRecord, SendSettlement } from '../../../lib/session/send/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import type { SendLedger, SendRecord } from '../../../lib/session/send/types.ts';
 
 /**
  * The durable send ledger, as an append-only log beside the session it belongs to.
@@ -31,7 +31,9 @@ export class FileSendLedger implements SendLedger {
   async accept(id: SessionId, record: SendRecord): Promise<{ record: SendRecord; created: boolean }> {
     const existing = (await this.all(id)).get(record.sendId);
     // The whole of idempotency: a retried request finds the first record and nothing is typed twice.
-    if (existing !== undefined) return { record: existing, created: false };
+    // A WITHDRAWN record is the one exception — nothing was ever typed for it, so the same id may
+    // honestly start over, which is what the withdrawal promised its caller.
+    if (existing !== undefined && existing.fate !== 'withdrawn') return { record: existing, created: false };
     await this.append(id, record);
     return { record, created: true };
   }
@@ -55,6 +57,22 @@ export class FileSendLedger implements SendLedger {
     if (current === undefined || current.fate !== 'accepted') return undefined;
     const next: SendRecord = { ...current, fate: 'withdrawn' };
     await this.append(id, next, reason);
+    return next;
+  }
+
+  async list(id: SessionId): Promise<readonly SendRecord[]> {
+    return [...(await this.all(id)).values()];
+  }
+
+  async settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined> {
+    const current = (await this.all(id)).get(sendId);
+    if (current === undefined || current.fate === 'withdrawn') return undefined;
+    const merged: Record<string, unknown> = { ...current, ...patch };
+    // `undefined` in a patch CLEARS a field: a re-attempt must not carry the previous attempt's
+    // deadline or reason forward, and JSON would silently keep the old value otherwise.
+    for (const [key, value] of Object.entries(patch)) if (value === undefined) delete merged[key];
+    const next = merged as unknown as SendRecord;
+    await this.append(id, next);
     return next;
   }
 

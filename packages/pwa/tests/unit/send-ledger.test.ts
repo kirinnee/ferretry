@@ -4,11 +4,11 @@ import {
   hasLedgerHardExpired,
   isLedgerUnconfirmed,
   isSendLedgerEvent,
+  type LedgerSendRecord,
   nextLedgerViewDeadline,
   parseLedgerSendRecord,
   parseLedgerSendsResponse,
   RECORD_CLOCK_SLACK_MS,
-  type LedgerSendRecord,
 } from '../../src/lib/send-ledger.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -182,13 +182,45 @@ describe('send ledger read model', () => {
     expect(nextLedgerViewDeadline([], NOW)).toBeUndefined();
   });
 
-  it('refreshes on ledger events and ignores the legacy compat pair', () => {
+  it('refreshes on every fate the daemon proves, and ignores the legacy consumed event', () => {
     expect(isSendLedgerEvent({ type: 'control.send_accepted' })).toBe(true);
     expect(isSendLedgerEvent({ type: 'control.send_delivered' })).toBe(true);
     expect(isSendLedgerEvent({ type: 'control.send_unaccounted' })).toBe(true);
     expect(isSendLedgerEvent({ type: 'control.send_withdrawn' })).toBe(true);
-    expect(isSendLedgerEvent({ type: 'control.send_queued' })).toBe(false);
+    for (const type of [
+      'control.send_queued',
+      'control.send_timed_out',
+      'control.send_retried',
+      'control.send_released',
+    ])
+      expect(isSendLedgerEvent({ type })).toBe(true);
     expect(isSendLedgerEvent({ type: 'control.send_consumed' })).toBe(false);
+  });
+
+  it('reads the tracker fields, and lets a re-attempt move a settled send back to sending', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 'a',
+      acceptedAt: '2026-07-31T10:00:00.000Z',
+      fate: 'timed_out',
+      senderKind: 'agent',
+      queuedAt: '2026-07-31T10:00:01.000Z',
+      attempt: 2,
+      attemptAt: '2026-07-31T10:01:00.000Z',
+      retryable: true,
+      unaccountedReason: 'not_delivered',
+    });
+    expect(parsed).toMatchObject({
+      fate: 'timed_out',
+      senderKind: 'agent',
+      attempt: 2,
+      retryable: true,
+      unaccountedReason: 'not_delivered',
+    });
+    const lost = record({ fate: 'timed_out', attempt: 2 });
+    const again = record({ fate: 'accepted', attempt: 3 });
+    expect(foldLedgerSendRecords([again], [lost])[0]?.fate).toBe('accepted');
+    expect(foldLedgerSendRecords([lost], [again])[0]?.fate).toBe('accepted');
+    expect(foldLedgerSendRecords([record({ fate: 'queued' })], [record({ fate: 'accepted' })])[0]?.fate).toBe('queued');
   });
 
   it('folds out-of-order snapshots without ever walking a fate back down', () => {

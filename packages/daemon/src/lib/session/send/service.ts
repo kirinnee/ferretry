@@ -24,12 +24,14 @@ import {
   type SendLedger,
   type SendPath,
   SendPending,
+  type SendQueueOutcome,
   type SendRecord,
   SendRefused,
   type SendRepository,
   type SendReviver,
   type SendTarget,
   type SendTerminal,
+  type SendTracking,
   type SendTurnStore,
   SendUnavailable,
   TERMINAL_SEND_STATUSES,
@@ -47,6 +49,8 @@ export interface SessionSendPorts {
   /** Serializes every mutation of one session, so two sends cannot both claim the next turn. */
   readonly serial: SerialExecutor;
   readonly clock: ClockPort;
+  /** Told after every transport, so the send's true fate is looked for rather than assumed. */
+  readonly tracking: SendTracking;
 }
 
 export interface SendMessageRequest {
@@ -73,17 +77,47 @@ export interface SendMessageRequest {
    * end somebody else's park.
    */
   readonly senderReference?: string | undefined;
+  /**
+   * The daemon itself is the sender — a failure notice handed back to an agent whose message did not
+   * arrive. Recorded as such so nothing retries it on anybody's behalf, and so it never notifies.
+   */
+  readonly origin?: 'daemon' | undefined;
 }
 
 export interface SendOutcome {
   readonly target: SendTarget;
   readonly disposition: SendDisposition;
+  /** The ledger record as the send left it: its id and the fate proven so far. */
+  readonly record: SendRecord;
+}
+
+/** Options for re-attempting one send under its original id. */
+export interface ReattemptOptions {
+  /** A person or the daemon asked, which decides what the journal says. */
+  readonly by: 'person' | 'daemon';
+  /** Re-send an `unaccounted` message, whose original may have landed. */
+  readonly force?: boolean | undefined;
 }
 
 /** What the locked section decided, before anything that must happen outside the lock. */
 type LockedOutcome =
   | { readonly kind: 'revive' }
-  | { readonly kind: 'settled'; readonly path: SendPath; readonly applied: boolean };
+  | {
+      readonly kind: 'settled';
+      readonly path: SendPath;
+      readonly applied: boolean;
+      readonly record: SendRecord;
+      /** A busy-pane transport that proved the harness is holding the text. */
+      readonly held: boolean;
+    };
+
+/** A held message being delivered after its session came back. */
+interface HeldRelease {
+  readonly record: SendRecord;
+}
+
+/** Fates still being looked for, which only the daemon's tracker may re-attempt. */
+const OPEN_FATES: ReadonlySet<SendRecord['fate']> = new Set(['accepted', 'queued']);
 
 /**
  * Handing a running session its next turn.
@@ -131,9 +165,113 @@ export class SessionSendService {
     const payload = this.payload(request, sender);
     const locked = await this.ports.serial.run(request.id, async () => await this.locked(request, payload, sender));
     const settled = locked.kind === 'revive' ? await this.revive(request, payload, sender) : locked;
+    // Only a NEW transport is tracked: a duplicate request found a send already being watched.
+    if (settled.applied) this.ports.tracking.track(request.id);
     const target = await this.require(request.id);
-    if (sender !== undefined && settled.applied) await this.attribute(target, sender, request, settled.path);
-    return { target, disposition: dispositionOf(settled.path) };
+    if (sender !== undefined && settled.applied) await this.attribute(target, sender, request, settled);
+    return { target, disposition: dispositionOf(settled.path, settled.held), record: settled.record };
+  }
+
+  /**
+   * Types one send AGAIN, under its ORIGINAL id, as attempt N+1.
+   *
+   * WHAT MAKES THIS SAFE is the fate it starts from, and nothing else. A `timed_out` send was proven
+   * absent — not in the transcript, not held by the harness, not in the composer — so typing it again
+   * cannot make the agent read it twice. An `accepted`/`queued` one is re-attempted only by the
+   * daemon's own tracker, which has just proven the same absence. An `unaccounted` one MAY have landed,
+   * so it needs `force`: a person who read "it may still arrive" and chose to send it anyway.
+   *
+   * The attempt is ledgered BEFORE the keys, exactly as the first one was: a crash mid-retype leaves
+   * a record saying an attempt was in flight, not silence.
+   */
+  async reattempt(id: SessionId, sendId: string, options: ReattemptOptions): Promise<SendRecord> {
+    const record = await this.ports.serial.run(id, async () => {
+      const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
+      if (current === undefined) throw new SendRefused(`session ${id} has no send ${sendId}`);
+      if (current.fate === 'delivered') throw new SendRefused(`send ${sendId} is already delivered`);
+      // A PERSON may only retry what the daemon proved absent (or force an unconfirmed one); an open
+      // send is the tracker's alone to retype, because only the tracker has just proven it absent.
+      const permitted =
+        (current.fate === 'timed_out' && current.retryable === true) ||
+        (options.by === 'daemon' && OPEN_FATES.has(current.fate)) ||
+        (options.force === true && current.fate === 'unaccounted');
+      if (!permitted)
+        throw new SendRefused(
+          current.fate === 'unaccounted'
+            ? `send ${sendId} may still have landed; send it again anyway to retry it`
+            : `send ${sendId} is ${current.fate} and cannot be retried`,
+        );
+      if (current.held === true || current.path === 'revive' || current.path === 'revive-queue')
+        throw new SendRefused(`send ${sendId} rides a revive; revive the session to deliver it`);
+      const target = await this.require(id);
+      authorizeSend(target, []);
+      const pane = await this.ports.terminal.observe(id);
+      const routing = routeSend(target, pane);
+      if (routing === 'revive')
+        throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
+      const attempt = (current.attempt ?? 1) + 1;
+      const next = await this.ports.ledger.settle(id, sendId, {
+        fate: 'accepted',
+        attempt,
+        attemptAt: this.ports.clock.now(),
+        fateAt: undefined,
+        deadlineAt: undefined,
+        unaccountedReason: undefined,
+        retryable: undefined,
+        queuedAt: undefined,
+        queueProof: undefined,
+      });
+      if (next === undefined) throw new SendRefused(`send ${sendId} could not be re-attempted`);
+      await this.ports.repository.journal(id, 'control.send_retried', { sendId, attempt, by: options.by });
+      const text = current.matchText ?? current.message;
+      if (routing === 'idle') {
+        await this.ports.terminal.deliver(id, text);
+        return next;
+      }
+      return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
+    });
+    this.ports.tracking.track(id);
+    return record;
+  }
+
+  /**
+   * Delivers every message held for this session's revive, ONCE each, now that it is back.
+   *
+   * A held send was accepted while the session could not take input and the relaunch was refused; the
+   * promise made to its sender was "kept durably; it will be delivered when this session is revived".
+   * This is that delivery. Each record is released under the session's lock and its `held` flag is
+   * cleared in the same step that chooses its transport, so a second revive — or a crash and a
+   * restart — can never type it twice: the flag is the idempotency, keyed by the send's own id.
+   */
+  async releaseHeld(id: SessionId): Promise<number> {
+    if (this.ports.gate.launching(id)) await this.ports.gate.awaitSettled(id, this.settings.controlLaunchWaitMs);
+    const held = (await this.ports.ledger.list(id)).filter(
+      record => record.held === true && record.fate === 'accepted',
+    );
+    let released = 0;
+    for (const record of held) {
+      const outcome = await this.ports.serial.run(id, async () => {
+        const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === record.sendId);
+        if (current?.held !== true || current.fate !== 'accepted') return undefined;
+        const target = await this.require(id);
+        const pane = await this.ports.terminal.observe(id);
+        const routing = routeSend(target, pane);
+        if (routing === 'revive') return undefined;
+        const request: SendMessageRequest = {
+          id,
+          sendId: current.sendId,
+          message: current.message,
+          ...(current.replyExpected === true ? { replyExpected: true } : {}),
+        };
+        const release = { record: current };
+        return routing === 'idle'
+          ? await this.deliver(target, request, current.message, undefined, release)
+          : await this.queue(target, request, current.message, undefined, release);
+      });
+      if (outcome !== undefined) released += 1;
+    }
+    if (released > 0) this.ports.tracking.track(id);
+    return released;
   }
 
   /**
@@ -216,25 +354,29 @@ export class SessionSendService {
    * The turn document is written on BOTH transports, not only the indirect one. It is what the logs
    * and a later revive read to know what this turn asked for, and a direct send that skipped it would
    * leave the agent holding an instruction with no durable record of what it was.
+   *
+   * A `release` is a held message being delivered after a revive: its record already exists, so it
+   * is moved onto this transport in the same step rather than accepted a second time.
    */
   private async deliver(
     target: SendTarget,
     request: SendMessageRequest,
     payload: string,
     sender: SendTarget | undefined,
-  ): Promise<LockedOutcome> {
+    release?: HeldRelease,
+  ): Promise<Extract<LockedOutcome, { kind: 'settled' }>> {
     const turn = target.turn + 1;
     const turnFile = await this.ports.turns.writeTurn(target.id, turn, `${payload}\n`);
     const direct = isDirectPayload(payload, directLimitFor(target, this.settings));
     const text = direct ? payload : turnInstruction(turnFile);
-    const accepted = await this.accept(target, request, sender, {
-      sendId: request.sendId,
-      path: direct ? 'direct' : 'turn-file',
+    const path: SendPath = direct ? 'direct' : 'turn-file';
+    const accepted = await this.transported(target, request, sender, release, {
+      path,
       message: payload,
       matchText: text,
       turn,
     });
-    if (!accepted.created) return { kind: 'settled', path: accepted.record.path, applied: false };
+    if (!accepted.created) return this.settledAs(accepted.record, false);
     // May throw after the keys landed or the Enter was consumed. That is an UNCERTAIN fate, never a
     // withdrawal: the record stays accepted so a human can see a message that may have arrived.
     await this.ports.terminal.deliver(target.id, text);
@@ -264,7 +406,7 @@ export class SessionSendService {
       // wall-clock AGE passes a timeout that was only ever meant to bound one turn of work.
       restartTurnClock: true,
     });
-    return { kind: 'settled', path: accepted.record.path, applied: true };
+    return { kind: 'settled', path, applied: true, record: accepted.record, held: true };
   }
 
   /**
@@ -272,14 +414,16 @@ export class SessionSendService {
    * next turn boundary.
    *
    * No turn is claimed and no state moves, because none has started — the agent is still working on
-   * the previous one. That is exactly why this is reported as `queued` rather than `delivered`.
+   * the previous one. The send is `queued` only once the pane PROVED the harness is holding the text;
+   * a busy pane that merely took the keys stays `accepted`, and the tracker settles where it went.
    */
   private async queue(
     target: SendTarget,
     request: SendMessageRequest,
     payload: string,
     sender: SendTarget | undefined,
-  ): Promise<LockedOutcome> {
+    release?: HeldRelease,
+  ): Promise<Extract<LockedOutcome, { kind: 'settled' }>> {
     const fileBacked = isFileBackedQueue(payload, this.settings);
     // Written before the ledger and before any keystroke: it costs nothing if the send is refused
     // afterwards, and it is the only copy of the payload if the transport goes wrong.
@@ -287,15 +431,16 @@ export class SessionSendService {
       ? await this.ports.turns.writeQueuedPayload(target.id, request.sendId, payload)
       : undefined;
     const text = payloadFile === undefined ? payload : queuedPayloadInstruction(payloadFile);
-    const accepted = await this.accept(target, request, sender, {
-      sendId: request.sendId,
-      path: fileBacked ? 'native-file' : 'native-inline',
+    const path: SendPath = fileBacked ? 'native-file' : 'native-inline';
+    const accepted = await this.transported(target, request, sender, release, {
+      path,
       message: payload,
       matchText: text,
       ...(payloadFile === undefined ? {} : { payloadFile }),
     });
-    if (!accepted.created) return { kind: 'settled', path: accepted.record.path, applied: false };
-    await this.ports.terminal.queue(target.id, text);
+    if (!accepted.created) return this.settledAs(accepted.record, accepted.record.fate === 'queued');
+    const outcome = await this.ports.terminal.queue(target.id, text);
+    const record = (await this.queued(target.id, accepted.record, outcome)) ?? accepted.record;
     await this.ports.channel.recordInbound(target.id, {
       at: this.ports.clock.now(),
       message: payload,
@@ -306,11 +451,24 @@ export class SessionSendService {
     await this.ports.repository.journal(target.id, 'control.send_queued', {
       sendId: request.sendId,
       native: true,
+      held: outcome === 'held',
       ...(payloadFile === undefined ? {} : { fileBacked: true, payloadFile }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),
       ...this.attribution(sender),
     });
-    return { kind: 'settled', path: accepted.record.path, applied: true };
+    return { kind: 'settled', path, applied: true, record, held: outcome === 'held' };
+  }
+
+  /** Records the pane's proof that the harness is holding a send, when it gave one. */
+  private async queued(id: SessionId, record: SendRecord, outcome: SendQueueOutcome): Promise<SendRecord | undefined> {
+    if (outcome !== 'held') return undefined;
+    const at = this.ports.clock.now();
+    return await this.ports.ledger.settle(id, record.sendId, {
+      fate: 'queued',
+      fateAt: at,
+      queuedAt: at,
+      queueProof: 'pane',
+    });
   }
 
   /**
@@ -333,7 +491,7 @@ export class SessionSendService {
         turn: target.turn + 1,
       });
     });
-    if (!accepted.created) return { kind: 'settled', path: accepted.record.path, applied: false };
+    if (!accepted.created) return this.settledAs(accepted.record, false);
     try {
       await this.ports.reviver.revive(request.id, payload);
     } catch (error) {
@@ -349,7 +507,7 @@ export class SessionSendService {
       turn: accepted.record.turn,
       ...this.attribution(sender),
     });
-    return { kind: 'settled', path: 'revive', applied: true };
+    return { kind: 'settled', path: 'revive', applied: true, record: accepted.record, held: true };
   }
 
   /** Retains a message the reviver would not carry, so an explicit revive can still deliver it. */
@@ -359,15 +517,16 @@ export class SessionSendService {
     sender: SendTarget | undefined,
     refusal: ReviveRefusedForSend,
   ): Promise<Extract<LockedOutcome, { kind: 'settled' }>> {
-    await this.ports.serial.run(request.id, async () => {
-      const held = await this.ports.ledger.revise(request.id, request.sendId, {
+    const held = await this.ports.serial.run(request.id, async () => {
+      const revised = await this.ports.ledger.revise(request.id, request.sendId, {
         path: 'revive-queue',
         held: true,
         matchText: undefined,
         turn: undefined,
       });
-      if (held === undefined)
+      if (revised === undefined)
         throw new Error(`could not retain accepted send ${request.sendId} for an explicit revive`);
+      return revised;
     });
     await this.ports.channel.recordInbound(request.id, {
       at: this.ports.clock.now(),
@@ -387,7 +546,37 @@ export class SessionSendService {
     });
     // `applied` stays true: the message IS durably held for this session, so the sender's own outbox
     // must record having sent it. What it must NOT do is end a peer wait — see `attribute`.
-    return { kind: 'settled', path: 'revive-queue', applied: true };
+    return { kind: 'settled', path: 'revive-queue', applied: true, record: held, held: false };
+  }
+
+  /** An outcome for a send this request did not transport: a duplicate, answered from its record. */
+  private settledAs(record: SendRecord, held: boolean): Extract<LockedOutcome, { kind: 'settled' }> {
+    return { kind: 'settled', path: record.path, applied: false, record, held };
+  }
+
+  /**
+   * The record a transport is about to type for: a fresh acceptance, or — for a held message being
+   * released after a revive — the existing record moved onto this transport and un-held.
+   */
+  private async transported(
+    target: SendTarget,
+    request: SendMessageRequest,
+    sender: SendTarget | undefined,
+    release: HeldRelease | undefined,
+    input: Pick<SendRecord, 'path' | 'message' | 'matchText' | 'turn' | 'payloadFile'>,
+  ): Promise<{ record: SendRecord; created: boolean }> {
+    if (release === undefined) return await this.accept(target, request, sender, { sendId: request.sendId, ...input });
+    const { message: _released, ...transport } = input;
+    const record = await this.ports.ledger.settle(target.id, release.record.sendId, {
+      ...transport,
+      held: false,
+      attemptAt: this.ports.clock.now(),
+    });
+    await this.ports.repository.journal(target.id, 'control.send_released', {
+      sendId: release.record.sendId,
+      path: input.path,
+    });
+    return { record: record ?? release.record, created: true };
   }
 
   /** Records the send as accepted, and journals that acceptance before anything is typed. */
@@ -397,11 +586,18 @@ export class SessionSendService {
     sender: SendTarget | undefined,
     input: Pick<SendRecord, 'sendId' | 'path' | 'message' | 'matchText' | 'turn' | 'payloadFile'>,
   ): Promise<{ record: SendRecord; created: boolean }> {
+    const now = this.ports.clock.now();
     const accepted = await this.ports.ledger.accept(target.id, {
       ...input,
-      acceptedAt: this.ports.clock.now(),
+      acceptedAt: now,
       acceptedTurn: target.turn,
       fate: 'accepted',
+      attempt: 1,
+      attemptAt: now,
+      senderKind: request.origin === 'daemon' ? 'daemon' : sender === undefined ? 'human' : 'agent',
+      ...(request.attachmentIds === undefined || request.attachmentIds.length === 0
+        ? {}
+        : { attachmentIds: [...request.attachmentIds] }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),
       ...this.attribution(sender),
     });
@@ -434,9 +630,9 @@ export class SessionSendService {
     target: SendTarget,
     sender: SendTarget,
     request: SendMessageRequest,
-    path: SendPath,
+    settled: Extract<LockedOutcome, { kind: 'settled' }>,
   ): Promise<void> {
-    const disposition = dispositionOf(path);
+    const disposition = dispositionOf(settled.path, settled.held);
     await this.ports.channel
       .recordOutbound(sender.id, {
         at: this.ports.clock.now(),
@@ -460,7 +656,7 @@ export class SessionSendService {
       });
     // A message merely HELD for an explicit revive reached no running agent, so a park ended on it
     // would wake the waiter for a reply nobody has been asked to give.
-    if (path === 'revive-queue') return;
+    if (settled.path === 'revive-queue') return;
     if (!endsPeerWait(target, sender.id)) return;
     await this.ports.peerWaits.endPeerWait(target.id, sender.id).catch(() => undefined);
   }

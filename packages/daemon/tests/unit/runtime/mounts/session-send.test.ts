@@ -1,7 +1,14 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, SendResultSchema, SessionViewSchema } from '@ferretry/protocol';
+import {
+  FY_REQUEST_ID_HEADER,
+  SendListResponseSchema,
+  type SendRecord,
+  SendRecordSchema,
+  SendResultSchema,
+  SessionViewSchema,
+} from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { SessionSendError, sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
@@ -57,8 +64,8 @@ describe('the session send mount', () => {
     const result = SendResultSchema.parse(JSON.parse(response.body));
     should(result.config.id).equal('s1');
     should(result.disposition).equal('delivered');
-    should(sessions.sends).have.length(1);
-    should(sessions.sends[0]?.[1]).match({ message: 'ship it', sendId: 'req-1' });
+    should(sessions.sent).have.length(1);
+    should(sessions.sent[0]?.[1]).match({ message: 'ship it', sendId: 'req-1' });
   });
 
   it('should pass `now` and `replyExpected` through untouched', async () => {
@@ -74,7 +81,7 @@ describe('the session send mount', () => {
     );
 
     // Assert
-    should(sessions.sends[0]?.[1]).match({ now: true, replyExpected: true });
+    should(sessions.sent[0]?.[1]).match({ now: true, replyExpected: true });
   });
 
   it('should take the sender from the credential, never from the body', async () => {
@@ -89,9 +96,9 @@ describe('the session send mount', () => {
     await subject.dispatch(sendRequest('s1', JSON.stringify({ message: 'ship it' }), withRequestId(human, 'req-2')));
 
     // Assert
-    should(sessions.sends[0]?.[1].senderSessionId).equal('s2');
+    should(sessions.sent[0]?.[1].senderSessionId).equal('s2');
     // The human's own CLI is not a peer, so nothing is attributed.
-    should(sessions.sends[1]?.[1].senderSessionId).be.undefined();
+    should(sessions.sent[1]?.[1].senderSessionId).be.undefined();
   });
 
   it('should refuse a send that carries no idempotency key', async () => {
@@ -107,7 +114,7 @@ describe('the session send mount', () => {
     // Assert
     should(response.status).equal(400);
     should((JSON.parse(response.body) as { code: string }).code).equal('missing_request_id');
-    should(sessions.sends).be.empty();
+    should(sessions.sent).be.empty();
   });
 
   it('should refuse a body the protocol does not accept', async () => {
@@ -134,7 +141,7 @@ describe('the session send mount', () => {
     // Assert
     should(response.status).equal(400);
     should((JSON.parse(response.body) as { code: string }).code).equal('invalid_session_id');
-    should(sessions.sends).be.empty();
+    should(sessions.sent).be.empty();
   });
 
   it('should answer each refusal with the status its next action deserves', async () => {
@@ -183,7 +190,7 @@ describe('the session send mount', () => {
     should(anonymous.status).equal(401);
     // A warden watches sessions; it does not type into them.
     should(warden.status).equal(403);
-    should(sessions.sends).be.empty();
+    should(sessions.sent).be.empty();
   });
 });
 
@@ -233,5 +240,66 @@ describe('the session interrupt mount', () => {
     // Assert
     should(refused.status).equal(409);
     should(missing.status).equal(404);
+  });
+});
+
+describe('the session send ledger routes', () => {
+  const record: SendRecord = {
+    v: 1,
+    sendId: 'send-1',
+    acceptedAt: '2026-08-01T12:00:00.000Z',
+    acceptedTurn: 1,
+    path: 'direct',
+    message: 'ship it',
+    attachmentIds: [],
+    fate: 'timed_out',
+    unaccountedReason: 'not_delivered',
+    retryable: true,
+  };
+
+  it('should serve the ledger and one send by its id', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    sessions.ledger = [record];
+    const subject = dispatcher(sessions);
+
+    // Act
+    const list = await subject.dispatch(request({ method: 'GET', path: '/v1/sessions/s1/sends', headers: human }));
+    const one = await subject.dispatch(
+      request({ method: 'GET', path: '/v1/sessions/s1/sends/send-1', headers: human }),
+    );
+    const missing = await subject.dispatch(
+      request({ method: 'GET', path: '/v1/sessions/s1/sends/nope', headers: human }),
+    );
+    const unusable = await subject.dispatch(
+      request({ method: 'GET', path: '/v1/sessions/s1/sends/%2F', headers: human }),
+    );
+
+    // Assert
+    should(SendListResponseSchema.parse(JSON.parse(list.body)).sends).deepEqual([record]);
+    should(SendRecordSchema.parse(JSON.parse(one.body)).fate).equal('timed_out');
+    should(missing.status).equal(404);
+    should(unusable.status).equal(400);
+  });
+
+  it('should retry under the same id, passing a deliberate "send again anyway" through', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    sessions.ledger = [record];
+    const subject = dispatcher(sessions);
+    const retry = (body: string) =>
+      request({ method: 'POST', path: '/v1/sessions/s1/sends/send-1/retry', headers: human, body });
+
+    // Act
+    const plain = await subject.dispatch(retry('{}'));
+    const forced = await subject.dispatch(retry(JSON.stringify({ force: true })));
+
+    // Assert
+    should(plain.status).equal(200);
+    should(forced.status).equal(200);
+    should(sessions.retries).deepEqual([
+      ['s1', 'send-1', false],
+      ['s1', 'send-1', true],
+    ]);
   });
 });

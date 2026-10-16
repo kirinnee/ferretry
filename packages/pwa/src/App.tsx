@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { composerSuggestionSwitches } from './components/composer-autocomplete.ts';
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
+import type { SendRetry } from './components/ledger-message.tsx';
 import { liveStreamState } from './components/live-stream-indicator.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
 import {
@@ -25,6 +26,7 @@ import { browserTerminalDeckDependencies } from './components/session-terminal-d
 import {
   type SessionWorkspaceRefreshControl,
   type SessionWorkspaceRefreshEnvironment,
+  sendRetrier,
   startSessionWorkspaceRefresh,
   type transcriptEntriesFromLog,
 } from './components/session-workspace-model.ts';
@@ -105,6 +107,7 @@ import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
+import { placeLedgerRows } from './lib/ledger-placement.ts';
 import type { NotificationCategory, QuietHours } from './lib/notification-filter.ts';
 import type {
   NotificationPermissionState,
@@ -144,6 +147,7 @@ import {
 } from './lib/push-enrolment.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
+import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
 import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
 import {
   AppBar,
@@ -821,6 +825,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const openSessions = useContext(SessionsDrawerContext);
   const projects = useKnownProjects(store.projects, daemonId);
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
+  /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
+  const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The highest event sequence this browser has actually received. `0` means none yet. */
@@ -901,6 +907,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     let control: SessionWorkspaceRefreshControl | null = null;
     setError(null);
     setEntries([]);
+    setSends([]);
     setClient(null);
     void store.clients
       .client(connection)
@@ -918,10 +925,12 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
               return await api.logs(id);
             },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
+            sends: async id => await api.sends(id),
           },
           sessionId,
           environment: browserWorkspaceRefreshEnvironment,
           onTranscript: setEntries,
+          onSends: rows => setSends(parseLedgerSendsResponse(rows)),
           // fetchSession publishes the same proved view into the daemon-scoped
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,
@@ -992,6 +1001,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     };
   }, [streamOwner]);
 
+  /**
+   * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
+   * send not yet in the conversation sits after it with a chip saying where it is.
+   */
+  const placedEntries = useMemo(() => placeLedgerRows(entries, sends), [entries, sends]);
+  /** A row's Retry, under the send's ORIGINAL id — see `sendRetrier`. */
+  const retrySend = useMemo<SendRetry>(
+    () => sendRetrier(client, sessionId, () => void refreshControl.current?.refresh(true)),
+    [client, sessionId],
+  );
   /**
    * The reader's way back, and it is a REF rather than the control itself on purpose: a callback
    * that depended on the live stream object would change identity on every resubscription and
@@ -1098,7 +1117,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           {...(fleetSlice?.sessions === null || fleetSlice?.sessions === undefined
             ? {}
             : { daemonSessions: fleetSlice.sessions })}
-          entries={entries}
+          entries={placedEntries}
+          onRetry={retrySend}
           onNavigate={navigate}
           {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
           project={projectKeyFor(session.config.cwd, projects).name}

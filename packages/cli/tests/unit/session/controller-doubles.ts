@@ -1,5 +1,6 @@
 import type {
   AttachmentView,
+  SendRecord,
   SendRequest,
   SendResult,
   SessionView,
@@ -62,6 +63,7 @@ export class RecordingApi implements ISessionApi {
       suggestNames?: string[];
       start?: SessionView;
       send?: SendResult;
+      sendStatus?: SendRecord[];
       answer?: SessionView;
       interrupt?: SessionView;
       resume?: SessionView;
@@ -98,6 +100,16 @@ export class RecordingApi implements ISessionApi {
 
   send(id: string, input: SendRequest): Promise<SendResult> {
     return this.record('send', [id, input], this.responses.send);
+  }
+
+  /** Answers each poll with the next stubbed row, repeating the last. */
+  sendStatus(id: string, sendId: string): Promise<SendRecord> {
+    const rows = this.responses.sendStatus;
+    return this.record(
+      'sendStatus',
+      [id, sendId],
+      rows === undefined ? undefined : rows.length > 1 ? rows.shift() : rows[0],
+    );
   }
 
   answer(...args: Parameters<ISessionApi['answer']>): Promise<SessionView> {
@@ -159,3 +171,20 @@ export function capturedPresenter(): { io: CapturedIo; presenter: SessionPresent
   const io = new CapturedIo();
   return { io, presenter: new SessionPresenter(io, frozenClock) };
 }
+
+/** A `send --wait` clock that never really waits: each sleep advances it. */
+export class SteppedClock {
+  now = 0;
+  readonly slept: number[] = [];
+
+  nowMs(): number {
+    return this.now;
+  }
+
+  async sleep(milliseconds: number): Promise<void> {
+    this.slept.push(milliseconds);
+    this.now += milliseconds;
+  }
+}
+
+export const WAIT_CLOCK = new SteppedClock();

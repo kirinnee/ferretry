@@ -1,8 +1,6 @@
 import type { DaemonCarrier } from '@ferretry/protocol';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
-import type { StepUpService } from '../../step-up/index.ts';
-import type { SecuritySettingsService } from '../../security/index.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
@@ -17,10 +15,13 @@ import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
+import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
+import type { SendTrackingLoop } from '../../session/send/tracker.ts';
+import type { StepUpService } from '../../step-up/index.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { attentionRoutes, type DirectNotificationSubsystem } from './attention.ts';
@@ -48,11 +49,10 @@ import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
-import { securityRoutes } from './security.ts';
-import { stepUpRoutes } from './step-up.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
+import { securityRoutes } from './security.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
@@ -69,6 +69,7 @@ import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts'
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
+import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
@@ -190,6 +191,10 @@ export interface MountedSubsystems {
    *  is on. The verb the client has always posted and the daemon has never answered — and the one a
    *  declared wait on a peer needs, because the reply that ends such a wait IS a send. */
   readonly sessionSend: SessionSendSubsystem;
+  /** Where each send WENT: the event-driven tracker that proves a send queued or delivered, re-types one
+   *  proven absent, and settles the rest honestly. It is armed at boot because a restart owes every
+   *  in-flight send a re-derivation from the transcript — never a re-typing. */
+  readonly sendTracking: SendTrackingLoop;
   /** Answering a live structured form, after a pane-bound confirmation. */
   readonly sessionAnswer: SessionAnswerSubsystem;
   /** Durable encrypted attachment originals plus process-local unlock state. */

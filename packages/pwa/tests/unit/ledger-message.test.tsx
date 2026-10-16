@@ -2,11 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { LedgerMessage, RESEND_RISK_COPY, runResendOnce } from '../../src/components/ledger-message.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
-import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../../src/lib/ledger-placement.ts';
+import {
+  type LedgerBlockPlacement,
+  ledgerPlacementCopy,
+  placeLedgerRows,
+  SETTLED_ROW_LIFETIME_MS,
+} from '../../src/lib/ledger-placement.ts';
 import { peerFrom } from '../../src/lib/peer-message.ts';
 import { sendBadge } from '../../src/lib/send-badge.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
-import { absoluteTime } from '../../src/lib/session-screens.ts';
+import { absoluteTime, type TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { render, runAsync } from '../support/react.ts';
 
 const record = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
@@ -36,42 +41,90 @@ const click = async (button: ReactTestInstance): Promise<void> => {
   });
 };
 
+const buttonLabelled = (renderer: ReactTestRenderer, label: string): ReactTestInstance =>
+  renderer.root.find(node => node.type === 'button' && textOfNode(node) === label);
+
+const textOfNode = (node: ReactTestInstance): string =>
+  node.children.map(child => (typeof child === 'string' ? child : textOfNode(child))).join('');
+
 describe('sendBadge', () => {
-  test('never dresses an unconfirmed send as an error, and names why it is unconfirmed', () => {
-    const timedOut = sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'timeout' }));
-
-    expect(timedOut.label).toBe('unconfirmed');
-    expect(timedOut.tone).not.toContain('err');
-    expect(timedOut.detail).toContain('may still have landed');
-
-    expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'session_ended' })).detail).toContain(
-      'the session ended',
-    );
-    expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'composer_discarded' })).detail).toContain(
-      'interrupted',
-    );
-    expect(sendBadge(record({ fate: 'unaccounted' })).detail).toContain('may still have landed');
-  });
-
-  test('claims delivery only when the harness transcript proves it', () => {
-    const badge = sendBadge(record({ fate: 'delivered' }));
-
-    expect(badge.label).toBe('delivered');
-    expect(badge.tone).toContain('ok');
-    expect(badge.detail).toContain('confirms');
-  });
-
-  test('separates a held row from one the harness has yet to read', () => {
+  test('says only what the daemon proved, in five plain words', () => {
+    expect(sendBadge(record()).label).toBe('sending');
+    expect(sendBadge(record({ attempt: 2 })).detail).toContain('sending again (2 attempts)');
+    expect(sendBadge(record({ fate: 'queued' })).label).toBe('queued');
+    expect(sendBadge(record({ fate: 'queued' })).detail).toContain('its own queue');
     expect(sendBadge(record({ held: true })).label).toBe('held for revive');
+    expect(sendBadge(record({ fate: 'delivered' }))).toMatchObject({
+      label: 'delivered',
+      tone: expect.stringContaining('ok'),
+    });
   });
 
-  test('promises the harness queue only on a native queue path that still has a turn coming', () => {
-    expect(sendBadge(record({ path: 'native-inline' })).label).toBe('queued for next turn');
-    expect(sendBadge(record({ path: 'native-file' })).label).toBe('queued for next turn');
-    expect(sendBadge(record({ path: 'native-inline', opportunityAt: '2026-07-31T10:01:00.000Z' })).label).toBe(
-      'accepted — awaiting confirmation',
+  test('names a proven absence "not delivered", and never dresses an unconfirmed send as an error', () => {
+    const lost = sendBadge(record({ fate: 'timed_out', unaccountedReason: 'not_delivered', attempt: 2 }));
+    const unsure = sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' }));
+
+    expect(lost.label).toBe('not delivered');
+    expect(lost.detail).toBe('timed out — it never reached the agent (2 attempts)');
+    expect(sendBadge(record({ fate: 'timed_out' })).detail).toContain('(1 attempt)');
+    expect(unsure.label).toBe('unconfirmed');
+    expect(unsure.tone).not.toContain('err');
+    expect(unsure.detail).toContain('transcript could not be read');
+    expect(unsure.detail).toContain('may still have landed');
+    expect(sendBadge(record({ fate: 'unaccounted' })).detail).toContain('arrival could not be checked');
+    for (const reason of ['timeout', 'session_ended', 'composer_discarded', 'pane_unreadable'] as const)
+      expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: reason })).detail.length).toBeGreaterThan(30);
+  });
+});
+
+describe('placeLedgerRows', () => {
+  const entries: TranscriptEntry[] = [
+    { id: 'a', kind: 'user', text: 'continue' },
+    { id: 'b', kind: 'assistant', text: 'done' },
+    { id: 'c', kind: 'user', text: 'continue' },
+    { id: 'd', kind: 'user', text: '[peer message from teammate nero]\nFYI\n\nthe rail landed' },
+  ];
+  const now = Date.parse('2026-07-31T10:05:00.000Z');
+
+  test('chips the newest matching message for each delivered send, one to one', () => {
+    const placed = placeLedgerRows(
+      entries,
+      [
+        record({ sendId: 'old', fate: 'delivered', message: 'continue', acceptedAt: '2026-07-31T09:00:00.000Z' }),
+        record({ sendId: 'new', fate: 'delivered', message: 'continue', acceptedAt: '2026-07-31T09:30:00.000Z' }),
+        record({
+          sendId: 'peer',
+          fate: 'delivered',
+          message: '[peer message from teammate nero]\nFYI\n\nthe rail landed',
+        }),
+        record({ sendId: 'off-page', fate: 'delivered', message: 'scrolled away' }),
+      ],
+      now,
     );
-    expect(sendBadge(record({ path: 'direct' })).label).toBe('accepted — awaiting confirmation');
+
+    expect(placed.map(entry => entry.send?.sendId)).toEqual(['old', undefined, 'new', 'peer']);
+  });
+
+  test('puts every send not yet in the conversation after it, oldest first, and retires old failures', () => {
+    const placed = placeLedgerRows(
+      [],
+      [
+        record({ sendId: 'queued', fate: 'queued', acceptedAt: '2026-07-31T10:04:00.000Z' }),
+        record({ sendId: 'sending', acceptedAt: '2026-07-31T10:03:00.000Z' }),
+        record({ sendId: 'lost', fate: 'timed_out', acceptedAt: '2026-07-31T10:00:00.000Z' }),
+        record({
+          sendId: 'stale',
+          fate: 'timed_out',
+          acceptedAt: new Date(now - SETTLED_ROW_LIFETIME_MS).toISOString(),
+        }),
+        record({ sendId: 'undated', fate: 'unaccounted', acceptedAt: 'not a date' }),
+        record({ sendId: 'gone', withdrawn: true }),
+      ],
+      now,
+    );
+
+    expect(placed.map(entry => entry.id)).toEqual(['ledger:undated', 'ledger:lost', 'ledger:sending', 'ledger:queued']);
+    expect(placed[0]).toMatchObject({ kind: 'ledger', placement: 'chronological', text: 'ship the tool group' });
   });
 });
 
@@ -82,29 +135,13 @@ describe('peerFrom', () => {
     expect(parked.from?.name).toBe('freddie');
     expect(parked.from?.replyExpected).toBe(true);
     expect(parked.body).toBe('is CI green?');
-
-    const informational = peerFrom('[peer message from teammate nero]\nFYI\n\nthe rail landed');
-
-    expect(informational.from?.replyExpected).toBe(false);
-    expect(informational.body).toBe('the rail landed');
-  });
-
-  test('leaves an unrecognised banner in the body rather than half-stripping it', () => {
-    const human = peerFrom('[peer message from an unknown shape]\nbody');
-
-    expect(human.from).toBeNull();
-    expect(human.body).toBe('[peer message from an unknown shape]\nbody');
+    expect(peerFrom('[peer message from an unknown shape]\nbody').from).toBeNull();
   });
 });
 
 describe('absoluteTime', () => {
-  test('shows the exact instant a ledger row was accepted', () => {
-    const at = new Date(2026, 6, 31, 9, 8, 7);
-
-    expect(absoluteTime(at.toISOString())).toBe('2026-07-31 09:08:07');
-  });
-
-  test('shows an unparseable value verbatim instead of hiding the skew that produced it', () => {
+  test('shows the exact instant, or an unparseable value verbatim', () => {
+    expect(absoluteTime(new Date(2026, 6, 31, 9, 8, 7).toISOString())).toBe('2026-07-31 09:08:07');
     expect(absoluteTime('not a date')).toBe('not a date');
     expect(absoluteTime(undefined)).toBe('—');
   });
@@ -146,42 +183,38 @@ describe('runResendOnce', () => {
   });
 });
 
-describe('a ledger row inside the transcript', () => {
-  test('renders the durable attempt where it happened, and carries the resend down to it', async () => {
-    const attempts: string[] = [];
+describe('sends inside the transcript', () => {
+  test('chips a delivered message where it is, and carries a retry down to a send that never arrived', async () => {
+    const attempts: Array<[string, boolean]> = [];
     const transcript = render(
       <Transcript
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
         daemonId="daemon-a"
         entries={[
-          { id: 'said', kind: 'user', text: 'ship it' },
+          { id: 'said', kind: 'user', text: 'ship it', send: record({ fate: 'delivered', message: 'ship it' }) },
           {
             id: 'ledger-1',
             kind: 'ledger',
             text: 'a durable send attempt',
-            ledger: record({ fate: 'unaccounted', unaccountedReason: 'timeout' }),
+            ledger: record({ sendId: 'lost', fate: 'timed_out', retryable: true, unaccountedReason: 'not_delivered' }),
             placement: 'after-loaded',
           },
         ]}
-        onResend={async attempted => {
-          attempts.push(attempted.sendId);
+        onRetry={async (attempted, force) => {
+          attempts.push([attempted.sendId, force]);
           return true;
         }}
         sessionId="session-1"
       />,
     );
 
-    const row = transcript.root.findByProps({ 'data-transcript-kind': 'ledger' });
-
-    expect(textOf(transcript)).toContain('unconfirmed');
+    expect(transcript.root.findByProps({ 'data-send-fate': 'delivered' })).toBeDefined();
+    expect(textOf(transcript)).toContain('not delivered');
     expect(textOf(transcript)).toContain('newer than the loaded transcript');
-    // The row must NOT fall back to the plain text line: `text` is the summary
-    // the entry carries for a reader that cannot render the bubble.
     expect(textOf(transcript)).not.toContain('a durable send attempt');
 
-    await click(row.findByType('button'));
+    await click(buttonLabelled(transcript, 'Retry'));
 
-    expect(attempts).toEqual(['send-1']);
+    expect(attempts).toEqual([['lost', false]]);
   });
 
   test('falls back to a text row when a ledger entry carries no record', () => {
@@ -199,65 +232,79 @@ describe('a ledger row inside the transcript', () => {
 });
 
 describe('LedgerMessage', () => {
-  test('shows who sent it, when it was accepted, and the badge for its fate', () => {
+  test('shows who sent it and its chip, and reads out the reason when the chip is tapped', async () => {
     const row = render(
       <LedgerMessage
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
         record={record({
           message: '[peer message from teammate freddie]\nPARKED until 30m\n\nis CI green?',
-          path: 'native-inline',
+          fate: 'queued',
         })}
       />,
     );
 
     expect(textOf(row)).toContain('Freddie sent:');
     expect(textOf(row)).toContain('is CI green?');
-    expect(textOf(row)).toContain('queued for next turn');
+    expect(row.root.findAllByProps({ 'data-send-reason': '' })).toHaveLength(0);
+
+    await click(buttonLabelled(row, 'queued'));
+
+    expect(row.root.findByProps({ 'data-send-reason': '' })).toBeDefined();
+    expect(textOf(row)).toContain('will read it when its current turn ends');
     expect(row.root.findByProps({ 'data-ledger-placement': 'chronological' })).toBeDefined();
   });
 
-  test('says a human sent it when there is no peer banner, and carries the detail for a reader who cannot see colour', () => {
-    const row = render(<LedgerMessage asOf={Date.parse('2026-07-31T10:00:30.000Z')} record={record()} />);
-
-    expect(textOf(row)).toContain('You said:');
-    expect(textOf(row)).toContain('stored durably');
-  });
-
-  test('marks a row that is only at the loaded-history boundary', () => {
-    const row = render(
-      <LedgerMessage asOf={Date.parse('2026-07-31T10:00:30.000Z')} placement="before-loaded" record={record()} />,
+  test('says a human sent it, marks a boundary row, and drops an empty prose block', () => {
+    const human = render(<LedgerMessage record={record()} />);
+    const boundary = render(<LedgerMessage placement="before-loaded" record={record()} />);
+    const bodyless = render(
+      <LedgerMessage record={record({ message: '[peer message from teammate nero]\nFYI\n\n' })} />,
     );
 
-    expect(row.root.findByProps({ 'data-ledger-boundary': true })).toBeDefined();
-    expect(textOf(row)).toContain('older than the loaded transcript');
+    expect(textOf(human)).toContain('You said:');
+    expect(textOf(human)).toContain('checking that it reached the agent');
+    expect(boundary.root.findByProps({ 'data-ledger-boundary': true })).toBeDefined();
+    expect(bodyless.root.findAllByProps({ className: expect.stringContaining('kt-user-copy') })).toHaveLength(0);
   });
 
-  test('renders a body-less row without an empty prose block', () => {
+  test('offers no retry while a send is still in flight, or once it was delivered', () => {
+    for (const fate of ['accepted', 'queued', 'delivered'] as const) {
+      const row = render(<LedgerMessage onRetry={async () => true} record={record({ fate })} />);
+      expect(row.root.findAllByType('button')).toHaveLength(1);
+    }
+    const unprovable = render(
+      <LedgerMessage
+        onRetry={async () => true}
+        record={record({ fate: 'timed_out', unaccountedReason: 'session_ended' })}
+      />,
+    );
+    expect(unprovable.root.findAllByType('button')).toHaveLength(1);
+  });
+
+  test('retries a proven-absent send in one tap, under its own id, and says it is sending again', async () => {
+    const attempts: Array<[string, boolean]> = [];
     const row = render(
       <LedgerMessage
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
-        record={record({ message: '[peer message from teammate nero]\nFYI\n\n' })}
+        onRetry={async (attempted, force) => {
+          attempts.push([attempted.sendId, force]);
+          return true;
+        }}
+        record={record({ fate: 'timed_out', retryable: true })}
       />,
     );
 
-    expect(row.root.findAllByProps({ className: expect.stringContaining('kt-user-copy') })).toHaveLength(0);
+    await click(buttonLabelled(row, 'Retry'));
+
+    expect(attempts).toEqual([['send-1', false]]);
+    expect(row.root.findByProps({ role: 'status' })).toBeDefined();
+    expect(row.root.findAll(node => node.type === 'button' && textOfNode(node) === 'Retry')).toHaveLength(0);
   });
 
-  test('offers no resend at all until a send is unconfirmed', () => {
-    const row = render(
-      <LedgerMessage asOf={Date.parse('2026-07-31T10:00:30.000Z')} onResend={async () => true} record={record()} />,
-    );
-
-    expect(row.root.findAllByType('button')).toHaveLength(0);
-  });
-
-  test('keeps the duplicate risk behind a disclosure and reports an accepted resend', async () => {
-    const attempts: string[] = [];
+  test('keeps "send again anyway" for an unconfirmed send behind a disclosure that says what it costs', async () => {
+    const attempts: Array<[string, boolean]> = [];
     const row = render(
       <LedgerMessage
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
-        onResend={async attempted => {
-          attempts.push(attempted.sendId);
+        onRetry={async (attempted, force) => {
+          attempts.push([attempted.sendId, force]);
           return true;
         }}
         record={record({ fate: 'unaccounted', unaccountedReason: 'timeout' })}
@@ -265,48 +312,30 @@ describe('LedgerMessage', () => {
     );
 
     expect(textOf(row)).toContain(RESEND_RISK_COPY);
-    await click(row.root.findByType('button'));
+    await click(buttonLabelled(row, 'Send again anyway'));
 
-    expect(attempts).toEqual(['send-1']);
-    expect(row.root.findByProps({ role: 'status' })).toBeDefined();
-    expect(textOf(row)).toContain('The original remains unconfirmed');
-    // The disclosure is gone once a fresh attempt was accepted: a second one
-    // would be a third copy of the same message.
-    expect(row.root.findAllByType('button')).toHaveLength(0);
+    expect(attempts).toEqual([['send-1', true]]);
   });
 
-  test('reports a refused resend as an alert and leaves the disclosure open for another try', async () => {
-    const row = render(
+  test('reports a refused or thrown retry as an alert and leaves the control for another try', async () => {
+    const refused = render(<LedgerMessage onRetry={async () => false} record={record({ fate: 'unaccounted' })} />);
+    await click(buttonLabelled(refused, 'Send again anyway'));
+    const thrown = render(
       <LedgerMessage
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
-        onResend={async () => false}
-        record={record({ fate: 'unaccounted' })}
-      />,
-    );
-
-    await click(row.root.findByType('button'));
-
-    expect(row.root.findByProps({ role: 'alert' })).toBeDefined();
-    expect(row.root.findAllByType('button')).toHaveLength(1);
-  });
-
-  test('treats a thrown resend exactly as a refused one', async () => {
-    const row = render(
-      <LedgerMessage
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
-        onResend={async () => {
+        onRetry={async () => {
           throw new Error('the daemon is unreachable');
         }}
-        record={record({ fate: 'unaccounted' })}
+        record={record({ fate: 'timed_out', retryable: true })}
       />,
     );
+    await click(buttonLabelled(thrown, 'Retry'));
 
-    await click(row.root.findByType('button'));
-
-    expect(row.root.findByProps({ role: 'alert' })).toBeDefined();
+    expect(refused.root.findByProps({ role: 'alert' })).toBeDefined();
+    expect(thrown.root.findByProps({ role: 'alert' })).toBeDefined();
+    expect(buttonLabelled(thrown, 'Retry')).toBeDefined();
   });
 
-  test('disables the button while a resend is in flight, so a double tap is one send', async () => {
+  test('disables the control while a retry is in flight, so a double tap is one send', async () => {
     let release: (accepted: boolean) => void = () => {};
     const pending = new Promise<boolean>(resolve => {
       release = resolve;
@@ -314,24 +343,22 @@ describe('LedgerMessage', () => {
     let calls = 0;
     const row = render(
       <LedgerMessage
-        asOf={Date.parse('2026-07-31T10:00:30.000Z')}
-        onResend={() => {
+        onRetry={() => {
           calls += 1;
           return pending;
         }}
-        record={record({ fate: 'unaccounted' })}
+        record={record({ fate: 'timed_out', retryable: true })}
       />,
     );
 
     await runAsync(async () => {
-      row.root.findByType('button').props.onClick();
+      buttonLabelled(row, 'Retry').props.onClick();
     });
 
-    expect(row.root.findByType('button').props.disabled).toBe(true);
-    expect(textOf(row)).toContain('resending…');
+    expect(buttonLabelled(row, 'retrying…').props.disabled).toBe(true);
 
     await runAsync(async () => {
-      row.root.findByType('button').props.onClick();
+      buttonLabelled(row, 'retrying…').props.onClick();
       release(true);
     });
 

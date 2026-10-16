@@ -18,17 +18,18 @@ import {
   StateHomeLayout,
   StorageSendRepository,
   SystemClock,
+  TimerSendScheduler,
   TmuxSendTerminal,
 } from '../../../../src/adapters/index.ts';
 import {
   parseSessionId,
   ResumeRefused,
+  type ResumeTarget,
   ReviveDedupeConflict,
   ReviveRefusedForSend,
-  TmuxController,
-  type ResumeTarget,
   type SendRecord,
   type SessionId,
+  TmuxController,
 } from '../../../../src/lib/index.ts';
 
 /**
@@ -556,5 +557,95 @@ describe('the tmux send terminal', () => {
     // Assert
     should(typed).deepEqual(['ship it']);
     should(queued).deepEqual(['and this']);
+  });
+});
+
+describe('the file send ledger, as the tracker moves it', () => {
+  it('should list every send, settle a proven fate, and clear a field a patch sets to undefined', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record({ deadlineAt: '2026-08-01T12:01:00.000Z' }));
+
+    // Act
+    const settled = await subject.settle(ID, 'send-1', { fate: 'delivered', deadlineAt: undefined });
+    const listed = await subject.list(ID);
+
+    // Assert
+    should(settled).match({ fate: 'delivered' });
+    should(Object.hasOwn(settled ?? {}, 'deadlineAt')).be.false();
+    should(listed.map(entry => entry.fate)).deepEqual(['delivered']);
+    should(await subject.settle(ID, 'send-unknown', { fate: 'delivered' })).be.undefined();
+  });
+
+  it('should let a withdrawn id start over, and never settle the tombstone itself', async () => {
+    // Nothing was typed for a withdrawn send, which is what the withdrawal promised its caller: the
+    // same id may honestly be accepted again.
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    await subject.withdraw(ID, 'send-1', 'acceptance could not be journalled');
+
+    // Act
+    const tombstone = await subject.settle(ID, 'send-1', { fate: 'delivered' });
+    const again = await subject.accept(ID, record({ message: 'second try' }));
+
+    // Assert
+    should(tombstone).be.undefined();
+    should(again.created).be.true();
+    should((await subject.list(ID))[0]).match({ fate: 'accepted', message: 'second try' });
+  });
+});
+
+describe('the tmux send terminal, as the tracker reads it', () => {
+  class FrameTmux {
+    constructor(private readonly frame: string) {}
+
+    async execute(arguments_: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+      const verb = arguments_[0] ?? '';
+      if (verb === 'display-message') return { code: 0, stdout: '0|0|1|80|24|', stderr: '' };
+      if (verb === 'capture-pane') return { code: 0, stdout: this.frame, stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    }
+  }
+
+  const subject = (frame: string, queued: 'held' | 'working' = 'held') =>
+    new TmuxSendTerminal(
+      new TmuxController(new FrameTmux(frame)),
+      async () => 'fy-session-1',
+      {} as never,
+      { queue: async () => queued } as never,
+    );
+
+  it('should say whether the pane still shows the payload, a collapsed paste included', async () => {
+    should(await subject('❯ ship it please').holds(ID, 'ship it please')).be.true();
+    should(await subject('❯ [Pasted text #1 +40 lines]').holds(ID, 'a very long message')).be.true();
+    should(await subject('❯ ').holds(ID, 'ship it please')).be.false();
+  });
+
+  it('should call a busy-pane transport held only when the pane proved it', async () => {
+    should(await subject('❯ ').queue(ID, 'x')).equal('held');
+    should(await subject('❯ ', 'working').queue(ID, 'x')).equal('unproven');
+  });
+});
+
+describe('the timer send scheduler', () => {
+  it('should keep one pending look per session, replace it, and cancel them all', async () => {
+    // Arrange
+    const subject = new TimerSendScheduler();
+    const ran: string[] = [];
+
+    // Act
+    subject.schedule(ID, 5, () => void ran.push('replaced'));
+    subject.schedule(ID, 5, () => void ran.push('kept'));
+    subject.schedule(parseSessionId('session-2'), 5, () => void ran.push('other session'));
+    await Bun.sleep(20);
+    subject.schedule(ID, 5, () => void ran.push('cancelled'));
+    subject.cancelAll();
+    await Bun.sleep(20);
+
+    // Assert
+    should(ran.sort()).deepEqual(['kept', 'other session']);
   });
 });

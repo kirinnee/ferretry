@@ -205,7 +205,16 @@ export interface TranscriptIssue {
   readonly byteLength?: number;
 }
 
-export type ObservedHumanInputProof = 'normal-user-record' | 'native-queue-drain';
+/**
+ * How a human input was observed. The first two prove it ENTERED the conversation; the last two are
+ * the harness's own queue bookkeeping — it is holding the text, or it let go of it — which proves
+ * where a message is while it waits, and never that it was read.
+ */
+export type ObservedHumanInputProof =
+  | 'normal-user-record'
+  | 'native-queue-drain'
+  | 'native-queue-hold'
+  | 'native-queue-release';
 
 /** Canonical evidence that human input entered the live harness conversation. */
 export interface ObservedHumanInput {

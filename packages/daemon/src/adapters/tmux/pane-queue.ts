@@ -11,11 +11,12 @@
 
 import {
   composerEvidence,
+  composerHolds,
   composerTransport,
+  type LandingEvidence,
   landingEvidence,
   needsQueueKey,
   queueAccepted,
-  type LandingEvidence,
   type TmuxController,
 } from '../../lib/tmux/index.ts';
 import type { DeliverySleep } from './pane-delivery.ts';
@@ -67,7 +68,7 @@ export class TmuxPaneQueue {
    * had just gone idle would be reported as `queued`, and the caller would wait at a turn boundary
    * for a message the harness consumed — or dropped — seconds earlier.
    */
-  async queue(session: string, text: string): Promise<void> {
+  async queue(session: string, text: string): Promise<'held' | 'working'> {
     const evidence = await this.fill(session, text);
     const submitted = await this.tmux.sendKey(session, 'Enter').then(
       () => true,
@@ -79,7 +80,12 @@ export class TmuxPaneQueue {
       await this.tmux.sendKey(session, 'Tab');
       await this.sleep(this.settings.queueKeySettleMs);
     }
-    if (queueAccepted(await this.tmux.capture(session, false), text, evidence)) return;
+    // HELD is the only answer that proves the harness has the text: it is still on screen after the
+    // submit. A pane that is merely working is accepted too — it is about to consume or queue it — but
+    // it is reported as such, so nothing upstream calls the send queued on that alone.
+    const frame = await this.tmux.capture(session, false);
+    if (composerHolds(frame, text, evidence)) return 'held';
+    if (queueAccepted(frame, text, evidence)) return 'working';
     throw new PaneQueueError(
       `the message left the composer of tmux session ${session} without queue evidence; ` +
         'the pane may have gone idle mid-type',

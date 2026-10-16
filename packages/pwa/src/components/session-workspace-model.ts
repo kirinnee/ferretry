@@ -1,4 +1,4 @@
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
 
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
@@ -175,7 +175,10 @@ export const transcriptEntriesFromLog = (text: string): readonly TranscriptEntry
   ];
 };
 
-type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'>;
+type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {
+  /** The session's send ledger. Optional: a reader that does not show sends never asks. */
+  readonly sends?: (id: string) => Promise<readonly SendRecord[]>;
+};
 
 export interface SessionWorkspaceRefreshEnvironment {
   readonly visible: () => boolean;
@@ -191,6 +194,8 @@ export interface SessionWorkspaceRefreshInput {
   readonly environment: SessionWorkspaceRefreshEnvironment;
   readonly onTranscript: (entries: readonly TranscriptEntry[]) => void;
   readonly onSession: (view: SessionView) => void;
+  /** Every refresh's send ledger, when the api reads one. A failed read keeps the previous rows. */
+  readonly onSends?: (sends: readonly SendRecord[]) => void;
   readonly onError: (message: string | null) => void;
 }
 
@@ -219,9 +224,15 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     if (stopped || !input.environment.visible()) return Promise.resolve();
     if (inflight !== null) return afterCurrent ? inflight.then(() => refresh()) : inflight;
 
-    inflight = Promise.allSettled([input.api.logs(input.sessionId), input.api.get(input.sessionId)])
-      .then(([logs, session]) => {
+    inflight = Promise.allSettled([
+      input.api.logs(input.sessionId),
+      input.api.get(input.sessionId),
+      // A daemon that cannot answer the ledger still shows its transcript: the sends are an overlay.
+      input.api.sends?.(input.sessionId) ?? Promise.resolve(undefined),
+    ])
+      .then(([logs, session, sends]) => {
         if (stopped) return;
+        if (sends.status === 'fulfilled' && sends.value !== undefined) input.onSends?.(sends.value);
         const errors: string[] = [];
         if (logs.status === 'fulfilled') input.onTranscript(transcriptEntriesFromLog(logs.value));
         else errors.push(`Transcript: ${errorMessage(logs.reason)}`);
@@ -253,3 +264,21 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     },
   };
 };
+
+/**
+ * A ledger row's Retry, bound to one session: re-sends under the send's ORIGINAL id — which the daemon
+ * types again only when it proved the message absent, or when the reader chose "send again anyway"
+ * on an unconfirmed one — then asks for fresh evidence so the row moves at once.
+ */
+export const sendRetrier =
+  (
+    client: Pick<IFyApiClient, 'retrySend'> | null,
+    sessionId: string,
+    refresh: () => void,
+  ): ((record: { readonly sendId: string }, force: boolean) => Promise<boolean>) =>
+  async (record, force) => {
+    if (client === null) return false;
+    await client.retrySend(sessionId, record.sendId, force);
+    refresh();
+    return true;
+  };

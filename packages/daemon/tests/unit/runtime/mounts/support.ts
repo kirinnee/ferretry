@@ -8,6 +8,7 @@ import {
   type Pin,
   type PinSnapshot,
   type SecretName,
+  type SendRecord,
   type SendResult,
   SessionConfigSchema,
   SessionStateSchema,
@@ -54,8 +55,8 @@ import {
 } from '../../../../src/lib/core/index.ts';
 import {
   CapabilityGrantService,
-  DeviceGrantService,
   DEFAULT_CAPABILITY_GRANTS,
+  DeviceGrantService,
   type GrantAuditEntry,
 } from '../../../../src/lib/grants/index.ts';
 import { describeGrantRefusal } from '../../../../src/lib/grants/policy.ts';
@@ -1138,8 +1139,10 @@ export class FakeSessionSignal implements SessionSignalSubsystem {
  * cannot claim to be somebody else.
  */
 export class FakeSessionSend implements SessionSendSubsystem {
-  readonly sends: Array<readonly [string, SendInput]> = [];
+  readonly sent: Array<readonly [string, SendInput]> = [];
   readonly interrupts: string[] = [];
+  readonly retries: Array<readonly [string, string, boolean]> = [];
+  ledger: SendRecord[] = [];
 
   constructor(
     private readonly known: readonly string[] = ['s1'],
@@ -1147,9 +1150,26 @@ export class FakeSessionSend implements SessionSendSubsystem {
   ) {}
 
   async send(sessionId: string, request: SendInput): Promise<SendResult> {
-    this.sends.push([sessionId, request]);
+    this.sent.push([sessionId, request]);
     this.refuse(sessionId);
     return { ...sessionView(sessionId, {}, { status: 'running' }), disposition: 'delivered' };
+  }
+
+  async sends(sessionId: string): Promise<readonly SendRecord[]> {
+    this.refuse(sessionId);
+    return this.ledger;
+  }
+
+  async sendStatus(sessionId: string, sendId: string): Promise<SendRecord> {
+    this.refuse(sessionId);
+    const record = this.ledger.find(entry => entry.sendId === sendId);
+    if (record === undefined) throw new SessionSendError('not_found', `no send ${sendId}`);
+    return record;
+  }
+
+  async retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord> {
+    this.retries.push([sessionId, sendId, force]);
+    return await this.sendStatus(sessionId, sendId);
   }
 
   async interrupt(sessionId: string): Promise<SessionView> {
