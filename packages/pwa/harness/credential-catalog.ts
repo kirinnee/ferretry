@@ -270,7 +270,33 @@ const BOTH = [
 const PRESETS = {
   presets: [
     preset({
+      id: 'anthropic-api-key',
+      group: 'popular',
+      label: 'Anthropic API key',
+      summary: 'Claude Code with an API key from the Claude Platform console, billed per token.',
+      variables: [presetVariable({ name: 'ANTHROPIC_API_KEY', kind: 'secret', secret: 'ANTHROPIC_API_KEY' })],
+    }),
+    preset({
+      id: 'openai-api-key',
+      group: 'popular',
+      label: 'OpenAI API key',
+      harness: 'codex',
+      summary: 'Codex with an OpenAI platform API key, billed per token, through the Responses API.',
+      variables: [presetVariable({ name: 'OPENAI_API_KEY', kind: 'secret', secret: 'OPENAI_API_KEY' })],
+    }),
+    preset({
+      id: 'litellm',
+      group: 'self-hosted',
+      label: 'LiteLLM proxy',
+      summary: 'Claude Code through your own LiteLLM proxy, with a master or virtual key.',
+      variables: [
+        presetVariable({ name: 'ANTHROPIC_BASE_URL', value: '', description: "the proxy's address, https://…" }),
+        presetVariable({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'LITELLM_API_KEY' }),
+      ],
+    }),
+    preset({
       id: 'amazon-bedrock',
+      group: 'cloud',
       label: 'Amazon Bedrock (AWS profile)',
       summary: 'Claude Code on Amazon Bedrock with an AWS profile this machine already has.',
       cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
@@ -283,6 +309,7 @@ const PRESETS = {
     }),
     preset({
       id: 'azure-openai',
+      group: 'cloud',
       label: 'Azure OpenAI',
       harness: 'codex',
       summary: 'Codex on your Azure OpenAI resource with its API key. The model is your deployment name.',
@@ -298,6 +325,7 @@ const PRESETS = {
     }),
     preset({
       id: 'custom-gateway',
+      group: 'self-hosted',
       label: 'Custom gateway',
       summary: 'Claude Code through any gateway that speaks the Anthropic Messages API.',
       variables: [
@@ -309,6 +337,7 @@ const PRESETS = {
     }),
     preset({
       id: 'deepseek',
+      group: 'popular',
       label: 'DeepSeek',
       summary: 'Claude Code and Codex on DeepSeek models with one DeepSeek platform key.',
       docs: 'https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code',
@@ -334,6 +363,7 @@ const PRESETS = {
     }),
     preset({
       id: 'kimi',
+      group: 'popular',
       label: 'Kimi (Moonshot)',
       summary: 'Claude Code and Codex on Kimi models with one Moonshot platform key.',
       halves: BOTH,
@@ -355,6 +385,7 @@ const PRESETS = {
     }),
     preset({
       id: 'minimax',
+      group: 'popular',
       label: 'MiniMax',
       summary: 'Claude Code and Codex on MiniMax models with one MiniMax key.',
       halves: BOTH,
@@ -376,6 +407,7 @@ const PRESETS = {
     }),
     preset({
       id: 'ollama-codex',
+      group: 'self-hosted',
       label: 'Ollama (local)',
       harness: 'codex',
       summary: 'Codex on a model served by Ollama on this machine. No key.',
@@ -385,6 +417,7 @@ const PRESETS = {
     }),
     preset({
       id: 'openrouter',
+      group: 'popular',
       label: 'OpenRouter',
       summary: 'Claude Code and Codex through OpenRouter with one OpenRouter key.',
       halves: BOTH,
@@ -408,6 +441,7 @@ const PRESETS = {
     }),
     preset({
       id: 'zai-glm',
+      group: 'popular',
       label: 'GLM / Z.ai',
       summary: 'Claude Code on GLM models with a Z.ai Coding Plan key.',
       docs: 'https://docs.z.ai/devpack/tool/claude',
@@ -448,6 +482,7 @@ const PRESETS = {
     }),
     preset({
       id: 'google-vertex',
+      group: 'cloud',
       label: 'Google Vertex AI',
       summary: 'Claude Code on Vertex AI with this machine’s gcloud application-default credentials.',
       offered: { available: false, reason: 'gcloud is not installed on this machine.' },

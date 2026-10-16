@@ -1,6 +1,7 @@
 # Z.ai's GLM Coding Plan for Claude Code, through its Anthropic-compatible endpoint. Its Codex half is documented by Z.ai but not offered here (see `codex.unavailable`).
 label: GLM / Z.ai
 summary: Claude Code on GLM models with a Z.ai Coding Plan key.
+group: popular
 docs: https://docs.z.ai/devpack/tool/claude
 verified: '2026-10-16'
 unverified:

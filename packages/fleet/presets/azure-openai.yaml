@@ -2,6 +2,7 @@
 label: Azure OpenAI
 harness: codex
 summary: Codex on your Azure OpenAI resource with its API key. The model is your deployment name. Entra ID sign-in is not supported by Codex.
+group: cloud
 docs: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex
 verified: '2026-10-16'
 unverified:

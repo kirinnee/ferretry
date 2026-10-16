@@ -18,7 +18,13 @@
  *
  * Pure.
  */
-import { CloudCredentialKindSchema, ProviderQuotaSourceSchema, SecretNameSchema } from '@ferretry/protocol';
+import {
+  CloudCredentialKindSchema,
+  type FleetPresetGroup,
+  FleetPresetGroupSchema,
+  ProviderQuotaSourceSchema,
+  SecretNameSchema,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import { CodexProviderSchema } from '../account/environment.ts';
 import { EnvNameSchema } from '../config.ts';
@@ -156,6 +162,8 @@ export const ProviderPresetFileSchema = z
   .strictObject({
     label: z.string().min(1).max(80),
     summary: Text,
+    /** Its heading in the Add a login grid. Left out, the preset is listed after the clouds. */
+    group: FleetPresetGroupSchema.optional(),
     /** The provider's own documentation for this setup. */
     docs: z.url(),
     /** When its facts were last checked against that documentation. */
@@ -279,6 +287,7 @@ export interface ProviderPreset {
   readonly origin: 'built-in' | 'file';
   readonly label: string;
   readonly summary: string;
+  readonly group?: FleetPresetGroup;
   readonly docs: string;
   readonly verified: string;
   readonly unverified: readonly string[];
@@ -324,6 +333,7 @@ export function presetFromFile(id: string, file: ProviderPresetFile, origin: Pro
     origin,
     label: file.label,
     summary: file.summary,
+    ...(file.group === undefined ? {} : { group: file.group }),
     docs: file.docs,
     verified: file.verified,
     unverified: file.unverified,

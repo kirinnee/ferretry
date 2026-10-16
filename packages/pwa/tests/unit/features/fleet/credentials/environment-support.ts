@@ -19,6 +19,7 @@ const preset = (overrides: Partial<FleetProviderPresetView> & { readonly id: str
 
 export const ZAI = preset({
   id: 'zai-glm',
+  group: 'popular',
   label: 'GLM / Z.ai',
   quota: { source: 'zai-coding-plan', note: 'Z.ai’s Coding Plan quota.' },
   unverified: ['The quota endpoint is community-documented.'],
@@ -48,6 +49,7 @@ export const FOUNDRY = preset({
 
 export const BEDROCK = preset({
   id: 'amazon-bedrock',
+  group: 'cloud',
   label: 'Amazon Bedrock (AWS profile)',
   test: { available: false, reason: 'Bedrock needs AWS request signing.' },
   cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
@@ -58,6 +60,7 @@ export const OLLAMA = preset({ id: 'ollama-codex', label: 'Ollama (local)', harn
 
 export const ZAI_CODEX = preset({
   id: 'zai-glm-codex',
+  group: 'popular',
   label: 'GLM / Z.ai',
   harness: 'codex',
   offered: { available: false, reason: 'Codex needs a model catalogue file.' },
@@ -82,6 +85,7 @@ export const ENVIRONMENT: FleetCredentialEnvironment = {
 /** A preset with a `claude:` and a `codex:` half: one key, both CLIs. */
 export const DEEPSEEK = preset({
   id: 'deepseek',
+  group: 'popular',
   label: 'DeepSeek',
   summary: 'Claude Code and Codex on DeepSeek models with one DeepSeek platform key.',
   halves: [
@@ -137,6 +141,7 @@ export const DEEPSEEK_MIRROR = preset({
 /** Codex on an Azure resource: a required value with no default. */
 export const AZURE = preset({
   id: 'azure-openai',
+  group: 'cloud',
   label: 'Azure OpenAI',
   harness: 'codex',
   detect: { hosts: ['openai.azure.com'], variables: ['AZURE_OPENAI_*'], keyPrefixes: [] },
@@ -156,6 +161,7 @@ export const AZURE = preset({
 /** The custom gateway: no clues, a blank base URL. */
 export const GATEWAY = preset({
   id: 'custom-gateway',
+  group: 'self-hosted',
   label: 'Custom gateway',
   variables: [
     { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: '', required: true, allowEmpty: false },

@@ -1,6 +1,7 @@
 # MiniMax's Token Plan for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: MiniMax (Token Plan)
 summary: Claude Code and Codex on MiniMax models with one Token Plan subscription key (a pay-as-you-go key is a different key). Codex 0.146.0 or newer is recommended.
+group: popular
 docs: https://platform.minimax.io/docs/api-reference/text-anthropic-api.md
 verified: '2026-10-16'
 unverified:

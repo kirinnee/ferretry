@@ -2,6 +2,7 @@
 label: Ollama (local)
 harness: codex
 summary: Codex on a model Ollama serves on this machine, through Codex's own Ollama provider. Nothing leaves the machine.
+group: self-hosted
 docs: https://docs.ollama.com/integrations/codex
 verified: '2026-10-16'
 unverified:

@@ -2,6 +2,7 @@
 label: Amazon Bedrock (API key)
 harness: claude
 summary: Claude Code through Amazon Bedrock with a Bedrock API key, which skips the AWS credential chain.
+group: cloud
 docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-16'
 unverified:

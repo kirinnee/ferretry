@@ -412,6 +412,13 @@ export const FleetPresetDetectSchema = z.strictObject({
 });
 export type FleetPresetDetect = z.infer<typeof FleetPresetDetectSchema>;
 
+/**
+ * Where a preset sits in the Add a login grid: the providers most people pick, the clouds that host
+ * Claude, and what a person runs themselves. A preset with no group is listed after the clouds.
+ */
+export const FleetPresetGroupSchema = z.enum(['popular', 'cloud', 'self-hosted']);
+export type FleetPresetGroup = z.infer<typeof FleetPresetGroupSchema>;
+
 /** A preset, as the Add a login flow offers it. */
 export const FleetProviderPresetViewSchema = z.strictObject({
   id: NonEmptyStringSchema,
@@ -419,6 +426,8 @@ export const FleetProviderPresetViewSchema = z.strictObject({
   harness: HarnessKindSchema,
   summary: NonEmptyStringSchema,
   docs: NonEmptyStringSchema,
+  /** Its heading in the Add a login grid. Absent when it has none, or from a daemon that predates groups. */
+  group: FleetPresetGroupSchema.optional(),
   /** Shipped with Ferretry, or a file in this machine's `config/presets/`. */
   origin: z.enum(['built-in', 'file']),
   variables: z.array(FleetPresetVariableSchema).readonly(),
