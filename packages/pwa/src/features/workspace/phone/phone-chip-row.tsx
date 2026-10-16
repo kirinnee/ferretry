@@ -7,6 +7,11 @@
  * a chip the reader cannot see. A chip an agent is driving carries an AGENT
  * badge, because typing into a tab someone else is steering is a collision.
  *
+ * It is SLIM — about 32px in all — because it is a switch, not a destination (owner: "it's taking up
+ * so much vertical space for a switch"). The chips are 28px tall rather than the 44px control floor;
+ * each is still a wide target, and the whole strip under a thumb is one of them (`[data-phone-tab-row]`
+ * in styles/index.css lifts the global floor for exactly this row).
+ *
  * It is a real WAI-ARIA tablist: roving tabindex, arrow keys move focus AND
  * selection, Home/End jump. ＋ sits after the list as a plain menu button — it is
  * an action, not a tab.
@@ -109,7 +114,7 @@ function PhoneChip({
       onClick={() => onSelect(tab.id)}
       onKeyDown={onKeyDown}
       className={cn(
-        'flex min-h-control max-w-[14rem] shrink-0 items-center gap-xs rounded-control border px-control-x text-ui font-medium transition-colors',
+        'flex h-7 max-w-[14rem] shrink-0 items-center gap-xs rounded-control border px-control-x text-cell font-medium leading-none transition-colors',
         active
           ? 'border-accent-border bg-accent-soft text-fg'
           : 'border-border-soft bg-surface-2 text-muted hover:border-accent-border hover:text-fg',
@@ -171,7 +176,10 @@ export function PhoneChipRow({ rowId, tabs, activeId, onSelect, ...actions }: Ph
   };
 
   return (
-    <div className="flex min-w-0 items-center gap-xs border-b border-border-soft bg-surface px-panel py-xs">
+    <div
+      className="flex min-w-0 items-center gap-xs border-b border-border-soft bg-surface px-panel py-0.5"
+      data-phone-tab-row=""
+    >
       <div
         ref={rowRef}
         role="tablist"
@@ -203,7 +211,7 @@ export function PhoneChipRow({ rowId, tabs, activeId, onSelect, ...actions }: Ph
           aria-haspopup="menu"
           aria-expanded={menu !== null}
           onClick={openMenu}
-          className="flex min-h-control min-w-[var(--control-h)] shrink-0 items-center justify-center rounded-control border border-border-soft bg-surface-2 text-muted hover:border-accent-border hover:text-fg"
+          className="flex h-7 w-9 shrink-0 items-center justify-center rounded-control border border-border-soft bg-surface-2 text-muted hover:border-accent-border hover:text-fg"
         >
           <Plus size={16} aria-hidden="true" />
         </button>

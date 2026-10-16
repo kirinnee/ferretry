@@ -11,7 +11,7 @@
  * security on its Machine tab, so the list of machines here is the only machine picker in Settings.
  */
 
-import { ChevronRight, Palette, Plus, SlidersHorizontal } from 'lucide-react';
+import { ChevronRight, Palette, Plus, SlidersHorizontal, Smartphone } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { AccountStatus } from '../fleet/shell/account-status.tsx';
@@ -29,6 +29,7 @@ export interface SettingsMachineEntry {
 const BROWSER_SECTIONS: readonly { readonly id: Exclude<SettingsSectionId, 'machines'>; readonly icon: ReactNode }[] = [
   { id: 'appearance', icon: <Palette size={16} aria-hidden="true" /> },
   { id: 'behaviour', icon: <SlidersHorizontal size={16} aria-hidden="true" /> },
+  { id: 'device', icon: <Smartphone size={16} aria-hidden="true" /> },
 ];
 
 const sectionLabel = (id: SettingsSectionId): string =>

@@ -212,7 +212,9 @@ describe('sends inside the transcript', () => {
     );
 
     expect(transcript.root.findByProps({ 'data-send-fate': 'delivered' })).toBeDefined();
-    expect(textOf(transcript)).toContain('not delivered');
+    // A failed send keeps a word beside its mark, because it needs the reader; a delivered one never does.
+    expect(transcript.root.findByProps({ 'data-send-chip': 'failed' }).children).toEqual(['not delivered']);
+    expect(transcript.root.findAllByProps({ 'data-send-chip': 'delivered' })).toHaveLength(0);
     expect(textOf(transcript)).toContain('newer than the loaded transcript');
     expect(textOf(transcript)).not.toContain('a durable send attempt');
 
@@ -236,7 +238,7 @@ describe('sends inside the transcript', () => {
 });
 
 describe('LedgerMessage', () => {
-  test('shows who sent it and its chip, and reads out the reason when the chip is tapped', async () => {
+  test('shows who sent it and its receipt, and reads out the reason when the receipt is tapped', async () => {
     const row = render(
       <LedgerMessage
         record={record({
@@ -250,7 +252,9 @@ describe('LedgerMessage', () => {
     expect(textOf(row)).toContain('is CI green?');
     expect(row.root.findAllByProps({ 'data-send-reason': '' })).toHaveLength(0);
 
-    await click(buttonLabelled(row, 'queued'));
+    const receipt = row.root.findByProps({ 'data-send-receipt': 'queued' });
+    expect(receipt.props['aria-label']).toMatch(/^Queued, sent \d{2}:\d{2}:\d{2}$/u);
+    await click(receipt);
 
     expect(row.root.findByProps({ 'data-send-reason': '' })).toBeDefined();
     expect(textOf(row)).toContain('will read it when its current turn ends');

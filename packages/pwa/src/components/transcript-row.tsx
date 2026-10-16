@@ -1,9 +1,11 @@
+import { clockOfInstant, clockOfLabel } from '../lib/send-receipt.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
-import { LedgerMessage, SendChip, type SendRetry } from './ledger-message.tsx';
+import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
+import { MessageFooter } from './send-receipt.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -17,6 +19,8 @@ export interface TranscriptRowProps {
   readonly isLast?: boolean;
   /** Offered on a ledger row, and only when a retry is possible at all. */
   readonly onRetry?: SendRetry;
+  /** An assistant row follows this one, so a delivered send on it reads as `read`. */
+  readonly answered?: boolean;
 }
 
 /**
@@ -26,7 +30,14 @@ export interface TranscriptRowProps {
  * renders as the collapsed tool group, and a `command` row as the one-line slash
  * command; attachments remain owned by a later port.
  */
-export function TranscriptRow({ entry, previous, live = false, isLast = false, onRetry }: TranscriptRowProps) {
+export function TranscriptRow({
+  entry,
+  previous,
+  live = false,
+  isLast = false,
+  onRetry,
+  answered = false,
+}: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
@@ -52,7 +63,35 @@ export function TranscriptRow({ entry, previous, live = false, isLast = false, o
   if (entry.kind === 'user' && entry.peer !== undefined)
     return <PeerMessageRow entry={entry} peer={entry.peer} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
+  if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
+}
+
+/**
+ * The reader's own message: no "You · 14:02:55" header — the bubble's alignment already says who — and
+ * its time and receipt as one small faded line at its foot (`send-receipt.tsx`). The clock is the
+ * row's own instant when it has one, else the time the daemon printed in its label.
+ */
+function OwnMessageRow({
+  entry,
+  rhythm,
+  answered,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly rhythm: Record<string, string | undefined>;
+  readonly answered: boolean;
+}) {
+  return (
+    <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
+      <span className="sr-only">You said:</span>
+      <p>{entry.text}</p>
+      <MessageFooter
+        answered={answered}
+        clock={clockOfInstant(entry.at) ?? clockOfLabel(entry.label)}
+        record={entry.send}
+      />
+    </article>
+  );
 }
 
 function TranscriptTextRow({
@@ -76,7 +115,6 @@ function TranscriptTextRow({
       <header>
         <span>{label}</span>
         {validTimestamp ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleTimeString()}</time> : null}
-        {entry.send === undefined ? null : <SendChip record={entry.send} />}
       </header>
       {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
     </article>

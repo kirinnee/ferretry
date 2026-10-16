@@ -1,9 +1,9 @@
 import { displayCallsign } from '../lib/callsign.ts';
 import type { PeerFrom } from '../lib/peer-message.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
-import { SendChip } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
+import { MessageFooter } from './send-receipt.tsx';
 
 /**
  * The two transcript rows that arrive on the user channel but are NOT the person speaking.
@@ -47,9 +47,10 @@ export function PeerMessageRow({
         <Markdown className="fy-peer-reference" text={`:${peer.name}`} {...surface} />
         {peer.replyExpected ? <span className="fy-peer-awaiting">waiting for a reply</span> : null}
         {entry.label === undefined ? null : <span className="fy-peer-clock">{entry.label}</span>}
-        {entry.send === undefined ? null : <SendChip record={entry.send} />}
       </header>
       <Markdown className="fy-peer-body" text={entry.text} {...surface} />
+      {/* Where this send is, as the same small receipt mark the reader's own bubbles wear. */}
+      <MessageFooter record={entry.send} />
       {peer.note === '' ? null : (
         <details className="fy-peer-note">
           <summary>Delivery note for the agent</summary>

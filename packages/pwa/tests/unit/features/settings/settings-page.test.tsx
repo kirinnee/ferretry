@@ -206,12 +206,13 @@ describe('SettingsPage sections', () => {
       .findAll(node => node.props['data-settings-section-choice'] !== undefined && node.type === 'button');
 
     expect(scroller.props.className).toContain('overflow-y-auto');
-    // Daemons is no longer a section: the browser's own two sections, and then each machine by name.
+    // Daemons is no longer a section: the browser's own three sections, and then each machine by name.
     expect(sidebarChoices.map(choice => choice.props['data-settings-section-choice'])).toEqual([
       'appearance',
       'behaviour',
+      'device',
     ]);
-    expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined]);
+    expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined, undefined]);
     expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
