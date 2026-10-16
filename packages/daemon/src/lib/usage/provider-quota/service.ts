@@ -24,7 +24,13 @@
 import type { ProviderQuotaReading, ProviderQuotaSpend } from '@ferretry/protocol';
 import type { AuthorizedOutcome, OutboundAuthorizerPort } from '../../speedups/ports.ts';
 import type { ParsedProviderQuota, ProviderQuotaParse } from './parse.ts';
-import { hasQuotaEndpoint, type ProviderQuotaLogin, planProviderQuota } from './plan.ts';
+import {
+  hasQuotaEndpoint,
+  type ProviderQuotaLogin,
+  planProviderQuota,
+  presetQuotaSource,
+  presetQuotaUnverified,
+} from './plan.ts';
 
 /** The fewest milliseconds between two reads of one login's quota. */
 export const PROVIDER_QUOTA_MIN_INTERVAL_MS = 60_000;
@@ -147,8 +153,8 @@ export class ProviderQuotaService {
 
   async #read(login: ProviderQuotaLogin, last: CacheEntry | undefined): Promise<void> {
     const attemptedAt = this.deps.clock.nowMs();
-    const source = login.preset?.quota.source ?? 'transcript-pricing';
-    const unverifiedPreset = login.preset?.unverified.some(fact => /quota|usage|balance|spend/iu.test(fact)) ?? false;
+    const source = presetQuotaSource(login.preset);
+    const unverifiedPreset = presetQuotaUnverified(login.preset);
     const stamp = (
       via: ProviderQuotaReading['via'],
       fields: Partial<

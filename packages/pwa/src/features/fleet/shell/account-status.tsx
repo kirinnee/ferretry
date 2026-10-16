@@ -95,13 +95,17 @@ export function ProviderQuota({ reading, now }: ProviderQuotaProps) {
   return (
     <div className="flex flex-col gap-1 text-meta" data-provider-quota={reading.via}>
       {reading.windows.map(window => (
-        <div key={window.label} className="flex min-w-0 items-center gap-2" data-provider-quota-window={window.label}>
+        <div
+          key={window.label}
+          className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"
+          data-provider-quota-window={window.label}
+        >
           <span className="w-10 shrink-0 text-muted">{WINDOW_NAMES[window.label]}</span>
           {window.usedPercent === undefined ? null : (
             <span
               role="img"
               aria-label={`${WINDOW_NAMES[window.label]}: ${providerWindowText(window, now)}`}
-              className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-2"
+              className="relative h-1.5 min-w-[3rem] flex-1 overflow-hidden rounded-full bg-surface-2"
             >
               <span
                 className={cn(
@@ -112,7 +116,7 @@ export function ProviderQuota({ reading, now }: ProviderQuotaProps) {
               />
             </span>
           )}
-          <span className={cn('text-muted', window.usedPercent === undefined ? 'min-w-0 flex-1' : 'shrink-0')}>
+          <span className={cn('min-w-0 text-muted', window.usedPercent === undefined ? 'flex-1' : '')}>
             {providerWindowText(window, now) || 'not measured'}
           </span>
         </div>

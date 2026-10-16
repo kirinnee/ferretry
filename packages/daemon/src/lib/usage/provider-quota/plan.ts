@@ -140,6 +140,25 @@ export const PROVIDER_QUOTA_ENDPOINTS: Readonly<Record<EndpointSource, QuotaEndp
   },
 };
 
+/**
+ * THE ONE PLACE this reader looks inside a preset. Preset files are changing shape (one preset per
+ * provider, with `claude:` and `codex:` halves), so every read of a preset goes through these and a
+ * shape change is a fix here, not across the module.
+ */
+export const presetQuotaSource = (preset: ProviderPreset | undefined): ProviderQuotaSource =>
+  preset?.quota.source ?? 'transcript-pricing';
+
+/** The variable a preset's Test sends its key in, when its Test sends one. */
+const presetKeyVariable = (preset: ProviderPreset | undefined): string | undefined =>
+  preset?.test.kind === 'request' || preset?.test.kind === 'inference' ? preset.test.keyVariable : undefined;
+
+/** Whether a preset ships with Ferretry, so its pairing of quota source and key is vouched for. */
+const presetIsBuiltIn = (preset: ProviderPreset | undefined): boolean => preset?.origin === 'built-in';
+
+/** Whether the preset says its quota or spend facts are not from the provider's own docs. */
+export const presetQuotaUnverified = (preset: ProviderPreset | undefined): boolean =>
+  preset?.unverified.some(fact => /quota|usage|balance|spend/iu.test(fact)) ?? false;
+
 /** Whether a source is read from an endpoint at all. */
 export const hasQuotaEndpoint = (source: ProviderQuotaSource): source is EndpointSource =>
   source in PROVIDER_QUOTA_ENDPOINTS;
@@ -152,8 +171,8 @@ const WHOLE_REFERENCE = new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u');
  * else the only variable that is a whole secret reference.
  */
 function keyVariableOf(login: ProviderQuotaLogin): string | undefined {
-  const test = login.preset?.test;
-  if (test !== undefined && (test.kind === 'request' || test.kind === 'inference')) return test.keyVariable;
+  const tested = presetKeyVariable(login.preset);
+  if (tested !== undefined) return tested;
   const codex = login.credential.codexProvider?.keyVariable;
   if (codex !== undefined) return codex;
   const whole = Object.entries(login.credential.env ?? {}).filter(([, value]) => WHOLE_REFERENCE.test(value));
@@ -178,7 +197,7 @@ function ownHosts(login: ProviderQuotaLogin): ReadonlySet<string> {
 
 /** The one endpoint read for this login, or why there is none. */
 export function planProviderQuota(login: ProviderQuotaLogin): ProviderQuotaPlan | ProviderQuotaNoPlan {
-  const source = login.preset?.quota.source ?? 'transcript-pricing';
+  const source = presetQuotaSource(login.preset);
   if (!hasQuotaEndpoint(source)) return { reason: 'This provider has no quota endpoint.' };
   const endpoint = PROVIDER_QUOTA_ENDPOINTS[source];
   const env = login.credential.env ?? {};
@@ -195,7 +214,7 @@ export function planProviderQuota(login: ProviderQuotaLogin): ProviderQuotaPlan 
   const host = new URL(url).host.toLowerCase();
   const own = ownHosts(login);
   const related = own.has(host) || [...own].some(candidate => parentDomain(candidate) === parentDomain(host));
-  if (!related && login.preset?.origin !== 'built-in') {
+  if (!related && !presetIsBuiltIn(login.preset)) {
     return {
       reason: `Reading this quota would send the key to ${host}, which is not where this login sends it, so it is not read.`,
     };
