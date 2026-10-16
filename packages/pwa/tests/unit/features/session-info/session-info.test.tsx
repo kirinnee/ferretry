@@ -297,6 +297,13 @@ describe('SessionInfo — runtimeControls and the phone sheet', () => {
     expect(root.textContent).toContain('Switch model');
   });
 
+  it('shows the host’s passive-learning flag on Runtime', async () => {
+    const root = await show({ learning: true });
+    await interact(() => placement?.setTab('runtime'));
+    await settle();
+    expect(root.textContent).toContain('On · instructed to file lessons');
+  });
+
   it('offers the half/full sheet control only in the sheet presentation', async () => {
     const panel = await show({ presentation: 'panel' });
     expect(panel.querySelector('[data-info-size]')).toBeNull();

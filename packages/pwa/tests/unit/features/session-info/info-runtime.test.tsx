@@ -146,3 +146,30 @@ describe('InfoRuntime — skills', () => {
     expect(must(root.querySelector('[data-info-row="Skills"]'), 'skills').textContent).toBe('Skills5 available');
   });
 });
+
+describe('InfoRuntime — learning', () => {
+  const row = (root: HTMLElement) => must(root.querySelector('[data-info-row="Learning"]'), 'learning row');
+
+  it('draws no row when the host has no passive-learning read', async () => {
+    const root = await show();
+    expect(root.querySelector('[data-info-row="Learning"]')).toBeNull();
+  });
+
+  it('says the ferret is instructed to file lessons when passive learning is on', async () => {
+    const root = await show({ learning: true });
+    expect(row(root).textContent).toContain('On · instructed to file lessons');
+    expect(root.querySelector('[data-info-learning="on"]')).not.toBeNull();
+  });
+
+  it('says it is not instructed when passive learning is off', async () => {
+    const root = await show({ learning: false });
+    expect(row(root).textContent).toContain('Off · not instructed');
+    expect(root.querySelector('[data-info-learning="off"]')).not.toBeNull();
+  });
+
+  it('says it has not heard yet rather than guessing off', async () => {
+    const root = await show({ learning: null });
+    expect(row(root).textContent).toContain('Not reported yet');
+    expect(root.querySelector('[data-info-learning]')).toBeNull();
+  });
+});

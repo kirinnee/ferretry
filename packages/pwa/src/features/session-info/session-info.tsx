@@ -65,6 +65,8 @@ export interface SessionInfoProps {
   readonly onOpenAnalytics?: () => void;
   /** The model and effort pickers, when the host has them (another surface owns them). */
   readonly runtimeControls?: ReactNode;
+  /** Whether this ferret is instructed to learn (see `InfoRuntimeProps.learning`). Absent: no Learning row. */
+  readonly learning?: boolean | null;
   readonly now?: () => number;
 }
 
@@ -103,6 +105,7 @@ export function SessionInfo({
   onOpenTasks,
   onOpenAnalytics,
   runtimeControls,
+  learning,
   now = Date.now,
 }: SessionInfoProps) {
   const { tab } = placement;
@@ -164,6 +167,7 @@ export function SessionInfo({
             skills={skills.load.kind === 'ready' ? skills.load.value.skills.length : null}
             view={view}
             {...(runtimeControls === undefined ? {} : { controls: runtimeControls })}
+            {...(learning === undefined ? {} : { learning })}
           />
         ),
         usage: () => (

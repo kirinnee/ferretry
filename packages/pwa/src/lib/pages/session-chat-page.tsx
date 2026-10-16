@@ -235,6 +235,11 @@ export interface SessionChatPageProps {
    * change them.
    */
   readonly infoRuntimeControls?: ReactNode;
+  /**
+   * Whether this ferret is instructed to file lessons, for Info › Runtime's Learning row: the host's own
+   * passive-learning read (the one Actions toggles), `null` while unread. Absent: no row.
+   */
+  readonly infoLearning?: boolean | null;
   /** Info open on this tab from the first frame. Absent: Info starts shut. */
   readonly initialInfo?: InfoTab;
 }
@@ -333,6 +338,7 @@ export function SessionChatPage({
   surfaceEvents,
   actionContributions = NO_CONTRIBUTIONS,
   infoRuntimeControls,
+  infoLearning,
   initialInfo,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
@@ -991,6 +997,7 @@ export function SessionChatPage({
                 ? {}
                 : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
               {...(infoControls === undefined ? {} : { runtimeControls: infoControls })}
+              {...(infoLearning === undefined ? {} : { learning: infoLearning })}
             />
           ),
         };
