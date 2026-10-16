@@ -32,7 +32,7 @@ const CLAUDE_TOOL_ARGS = [
 ];
 /** Every one-shot dialog a Claude agent's `.claude.json` records as seen, as locked entries. */
 const CLAUDE_SEEN_ENTRIES = Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) => ({
-  purpose: 'onboarding',
+  purpose: 'one-time-prompts',
   target: 'claude-json',
   path: [key],
   key,

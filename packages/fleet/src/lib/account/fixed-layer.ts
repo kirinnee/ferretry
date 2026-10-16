@@ -64,6 +64,7 @@ export type FixedEntryPurpose =
   | 'skip-prompt'
   | 'trust'
   | 'onboarding'
+  | 'one-time-prompts'
   | 'no-questions'
   | 'no-alt-screen'
   | 'tools'
@@ -293,7 +294,9 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
       entry('trust', 'claude-json', ['projects', cwd, 'hasTrustDialogAccepted'], true),
       entry('onboarding', 'claude-json', ['hasCompletedOnboarding'], true),
-      ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) => entry('onboarding', 'claude-json', [key], value)),
+      ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) =>
+        entry('one-time-prompts', 'claude-json', [key], value),
+      ),
       ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
       entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
       entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
@@ -339,7 +342,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
         entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
         entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
         entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
-        ...CODEX_HIDDEN_NOTICES.map(key => entry('onboarding', 'settings', ['notice', key], true)),
+        ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
         entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
         entry('instructions', 'settings', ['developer_instructions'], AGENT_TOOLS_INSTRUCTION),
       ],
