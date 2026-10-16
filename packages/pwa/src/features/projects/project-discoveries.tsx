@@ -90,7 +90,8 @@ export function ProjectDiscoveries({ discoveries, sessionsError, status, onConfi
                 data-project-discovery={option.path}
                 key={option.key}
               >
-                <div className="min-w-0 flex-1">
+                {/* `basis-64`: the name and path wrap the row before they shrink, never to one fragment a line. */}
+                <div className="min-w-0 grow basis-64">
                   <p className="m-0 text-ui font-medium text-fg">{option.name}</p>
                   <p className="mono m-0 break-all text-meta leading-tight text-muted">{option.path}</p>
                 </div>

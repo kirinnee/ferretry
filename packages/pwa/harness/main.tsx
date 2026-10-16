@@ -97,11 +97,13 @@ import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
+import { AnalyticsCostChart } from '../src/features/analytics/analytics-cost-chart.tsx';
+import type { AnalyticsRequest } from '../src/features/analytics/analytics-custom-query.tsx';
+import { analyticsOverview, analyticsRangeDays } from '../src/features/analytics/analytics-overview.ts';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
-import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
-import { type AnalyticsRequest, GlobalAnalyticsPage } from '../src/features/analytics/global-analytics-page.tsx';
+import { GlobalAnalyticsPage } from '../src/features/analytics/global-analytics-page.tsx';
 import {
   type SessionAnalyticsRequest,
   SessionAnalyticsSurface,
@@ -265,6 +267,7 @@ import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -1031,7 +1034,17 @@ function AppChromeHarness({ active }: { readonly active: string }) {
     candidate => candidate === active,
   );
   const insights = destination === 'analytics' || destination === 'warden' || destination === 'learning';
-  const page = <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>;
+  const page =
+    destination === 'analytics' ? (
+      <GlobalAnalyticsPage
+        connection={daemon}
+        requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
+        now={() => ANALYTICS_FIXTURE_NOW}
+        initialQuery={null}
+      />
+    ) : (
+      <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
+    );
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} id="harness-app-chrome">
       {phone ? null : (
@@ -3491,57 +3504,16 @@ const ANALYTICS_RAW: AnalyticsResponse = {
   ],
 };
 
-/** Temporal fixture intentionally has a missing day and an unknown cost so the
- * screenshot makes the chart's honest-gap treatment reviewable. */
-const ANALYTICS_TIME = {
-  kind: 'aggregate',
-  aggregation: 'sum',
-  query: 'sum by (day)',
-  parsed: { aggregation: 'sum', groupBy: ['day'], matchers: [] },
-  scope: { allSessions: true, indexed: 3, matched: 3 },
-  index: {
-    schemaVersion: 6,
-    sessions: 3,
-    tokenSessions: 3,
-    transcriptSources: 3,
-    indexedTranscriptSources: 3,
-    pendingTranscriptSources: 0,
-    sourceErrors: 0,
-    refreshing: false,
-  },
-  results: [
-    {
-      labels: { day: '2026-07-29' },
-      sessions: 2,
-      tokens: { value: 904_320, known: 2, total: 2 },
-      inputTokens: { value: 700_100, known: 2, total: 2 },
-      outputTokens: { value: 204_220, known: 2, total: 2 },
-      cachedInputTokens: { value: 100_000, known: 2, total: 2 },
-      cacheWriteInputTokens: { value: 10_000, known: 2, total: 2 },
-      equivalentApiCostUsdMicros: { value: 2_450_000, known: 2, total: 2 },
-    },
-    {
-      labels: { day: '2026-07-31' },
-      sessions: 1,
-      tokens: { value: 80_120, known: 1, total: 1 },
-      inputTokens: { value: 67_000, known: 1, total: 1 },
-      outputTokens: { value: 13_120, known: 1, total: 1 },
-      cachedInputTokens: { value: 0, known: 1, total: 1 },
-      cacheWriteInputTokens: { value: 0, known: 1, total: 1 },
-      equivalentApiCostUsdMicros: { value: null, known: 0, total: 1 },
-    },
-  ],
-} as unknown as AnalyticsAggregateResponse;
-
 /** Stable injected requests prevent parent harness renders from restarting either analytics surface. */
-const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (_connection, query) => ({
-  ...ANALYTICS_TIME,
-  query: query ?? ANALYTICS_TIME.query,
-});
-const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (_connection, _scope, query) => ({
-  ...ANALYTICS,
-  query: query ?? ANALYTICS.query,
-});
+const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (_connection, query) =>
+  answerAnalyticsFixture(query ?? 'sum by (day)', ANALYTICS);
+const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (_connection, _scope, query) =>
+  answerAnalyticsFixture(query ?? 'sum by (model)', ANALYTICS);
+/** The cost chart on its own, over the same fleet the Analytics page reads. */
+const HARNESS_ANALYTICS_DAYS = analyticsOverview(
+  analyticsRangeDays(14, ANALYTICS_FIXTURE_NOW),
+  ANALYTICS_FIXTURE_ROWS,
+).days;
 
 class HarnessBrowserSocket implements RemoteBrowserSocket {
   readyState = 0;
@@ -5508,7 +5480,14 @@ function Shell() {
     },
     {
       label: 'Global analytics',
-      render: () => <GlobalAnalyticsPage connection={daemon} requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST} />,
+      render: () => (
+        <GlobalAnalyticsPage
+          connection={daemon}
+          requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
+          now={() => ANALYTICS_FIXTURE_NOW}
+          initialQuery={null}
+        />
+      ),
     },
     {
       label: 'Session analytics',
@@ -5518,6 +5497,7 @@ function Shell() {
             connection={daemon}
             scope={scope}
             requestAnalytics={HARNESS_SESSION_ANALYTICS_REQUEST}
+            requestFleetAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
           />
         </Card>
       ),
@@ -5535,14 +5515,14 @@ function Shell() {
       ),
     },
     {
-      label: 'Analytics time series',
+      label: 'Analytics cost chart',
       render: () => (
-        <Card aria-label="Analytics time series" className="min-w-0 overflow-hidden">
+        <Card aria-label="Analytics cost chart" className="min-w-0 overflow-hidden">
           <PanelHeader>
-            <Label>Analytics — time series</Label>
+            <Label>Analytics — cost per day</Label>
           </PanelHeader>
           <PanelBody className="min-w-0">
-            <AnalyticsTimeSeries response={ANALYTICS_TIME} />
+            <AnalyticsCostChart days={HARNESS_ANALYTICS_DAYS} />
           </PanelBody>
         </Card>
       ),
@@ -7136,6 +7116,57 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
 ];
 
 /**
+ * `?wide` appends what made a phone's chat column grow past the screen (the mobile audit's L1): a fenced
+ * block of long lines, a table, a long unbroken URL and a tool result of long lines. Each must scroll or
+ * wrap inside its own box; none may widen the column, the composer or the page.
+ */
+const WIDE_ENTRIES: readonly TranscriptEntry[] = [
+  {
+    id: 'workspace-wide-assistant',
+    kind: 'assistant',
+    label: 'hadi',
+    text: [
+      '| File | Line | Problem | Severity |',
+      '| --- | --- | --- | --- |',
+      '| `packages/pwa/src/hooks/use-app-viewport.ts` | 88 | reads `visualViewport` without a null guard | high |',
+      '| `packages/pwa/src/components/composer.tsx` | 412 | `position: sticky` inside a scroller with `overflow: hidden` | high |',
+      '',
+      '```ts',
+      "export function useAppViewport(target: VisualViewport | null = window.visualViewport, write = (height: number) => document.documentElement.style.setProperty('--app-height', String(height) + 'px')): void {",
+      '  useLayoutEffect(() => { if (target === null) return; target.addEventListener("resize", () => write(Math.round(target.height))); }, [target]);',
+      '}',
+      '```',
+      '',
+      'A long unbroken token like https://example.invalid/a/really/long/path/that/never/breaks/because/it/has/no/spaces/at/all/and/keeps/going/forever.tsx must wrap.',
+    ].join('\n'),
+  },
+  {
+    id: 'workspace-wide-tools',
+    kind: 'tool',
+    text: 'ran 1 tool',
+    tools: [
+      {
+        key: 'workspace-wide-bash',
+        use: {
+          name: 'Bash',
+          input: { command: 'rg -n "visualViewport" packages/pwa/src --glob "*.ts" --glob "*.tsx" --max-columns 400' },
+        },
+        result: {
+          text: Array.from(
+            { length: 6 },
+            (_, line) =>
+              `packages/pwa/src/hooks/use-app-viewport.ts:${88 + line}:  const height = window.visualViewport?.height ?? window.innerHeight; // a line far wider than any phone`,
+          ).join('\n'),
+        },
+      },
+    ],
+  },
+];
+const SESSION_ENTRIES: readonly TranscriptEntry[] = new URLSearchParams(window.location.search).has('wide')
+  ? [...WORKSPACE_ENTRIES, ...WIDE_ENTRIES]
+  : WORKSPACE_ENTRIES;
+
+/**
  * The whole daemon surface this page can reach, answered locally.
  *
  * Nothing here touches the network: the screenshot driver aborts every
@@ -7341,7 +7372,7 @@ function SessionWorkspaceHarness() {
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
-          entries={WORKSPACE_ENTRIES}
+          entries={SESSION_ENTRIES}
           onSessionChange={setSession}
           {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}

@@ -478,3 +478,91 @@ describe('the default refresh schedule', () => {
     }
   });
 });
+
+describe('the new-device notice on a phone', () => {
+  /** Layout reads `innerWidth`; every phone case sets it and puts it back. */
+  const onPhone = async (body: () => Promise<void>): Promise<void> => {
+    const original = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    try {
+      await body();
+    } finally {
+      if (original) Object.defineProperty(window, 'innerWidth', original);
+      else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'innerWidth');
+    }
+  };
+  const phoneNotice = async (alphaMachine: Machine) => {
+    const shown = await mount(
+      <NewDeviceNotices
+        connections={[alpha]}
+        clients={pool({ alpha: alphaMachine })}
+        storage={memory(seenAlpha('old', 'me'))}
+        now={now}
+      />,
+    );
+    await until(() => shown.container.querySelector('[data-new-device-compact]') !== null, 'the one-line notice');
+    return shown;
+  };
+  const review = (): HTMLButtonElement =>
+    must(document.querySelector('[data-new-device-review]'), 'the Review button') as HTMLButtonElement;
+  const sheet = (): HTMLElement =>
+    must(document.getElementById(review().getAttribute('aria-controls') ?? ''), 'the review sheet') as HTMLElement;
+
+  it('is one row naming the device, with the sentence and its actions one tap away in a sheet', async () => {
+    await onPhone(async () => {
+      const alphaMachine = machine([device('me', ago(MINUTE)), device('phone', ago(5 * MINUTE), 'Pixel 8')]);
+      const shown = await phoneNotice(alphaMachine);
+      const row = must(
+        shown.container.querySelector('[data-new-device-compact]'),
+        'the one-line notice',
+      ) as HTMLElement;
+      expect(row.textContent).toBe('New device paired: “Pixel 8”Review');
+      expect(row.getAttribute('role')).toBe('status');
+      expect(row.hasAttribute('data-kb-hide')).toBe(true);
+      // The actions live only in the sheet, which is closed.
+      expect(row.querySelector('[data-new-device-mine], [data-new-device-remove]')).toBeNull();
+      expect(document.getElementById(review().getAttribute('aria-controls') ?? '')).toBeNull();
+
+      await interact(() => review().click());
+      expect(sheet().getAttribute('aria-modal')).toBe('true');
+      expect(sheet().textContent).toContain(`A device calling itself ${label('phone', 'Pixel 8')} was paired with`);
+
+      await interact(() =>
+        (
+          must(sheet().querySelector('[data-new-device-remove]'), 'Remove it in the sheet') as HTMLButtonElement
+        ).click(),
+      );
+      await until(() => alphaMachine.revoked.length === 1, 'the removal');
+      expect(alphaMachine.revoked).toEqual([did('phone')]);
+      await until(() => shown.container.querySelector('[data-new-device-removed]') !== null, 'the removed row');
+      expect(shown.container.querySelector('[data-new-device-compact]')).toBeNull();
+      await shown.unmount();
+    });
+  });
+
+  it('closes its sheet when the keyboard comes up', async () => {
+    await onPhone(async () => {
+      const shown = await phoneNotice(machine([device('me', ago(MINUTE)), device('phone', ago(5 * MINUTE))]));
+      await interact(() => review().click());
+      expect(sheet().getAttribute('aria-modal')).toBe('true');
+      try {
+        await interact(() => document.documentElement.setAttribute('data-keyboard', 'open'));
+        expect(sheet().getAttribute('aria-modal')).toBeNull();
+      } finally {
+        document.documentElement.removeAttribute('data-keyboard');
+      }
+      // Dismissed through the sheet's own path as well.
+      await interact(() => review().click());
+      await interact(() =>
+        (
+          must(
+            document.querySelector('[aria-label="Dismiss the new device notice"]'),
+            'the sheet backdrop',
+          ) as HTMLButtonElement
+        ).click(),
+      );
+      expect(sheet().getAttribute('aria-modal')).toBeNull();
+      await shown.unmount();
+    });
+  });
+});

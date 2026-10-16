@@ -57,3 +57,11 @@ export function useRouter(): RouterController {
   if (router === null) throw new Error('useRouter must be rendered inside RouterProvider');
   return router;
 }
+
+/**
+ * The nearest router, or null where none is mounted. For a surface that offers in-app links and is ALSO
+ * rendered on its own — by a harness or a test — where a missing router means "follow the href".
+ */
+export function useOptionalRouter(): RouterController | null {
+  return useContext(RouterContext);
+}

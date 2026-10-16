@@ -40,6 +40,8 @@ export interface AppViewportEnvironment {
   readonly cancelFrame: (id: number) => void;
   readonly addWindowListener: (type: 'resize' | 'orientationchange', listener: () => void) => void;
   readonly removeWindowListener: (type: 'resize' | 'orientationchange', listener: () => void) => void;
+  /** Bring a focused field back into view once the keyboard has shrunk the shell ({@link revealInScroller}). */
+  readonly reveal: (element: Element) => void;
 }
 
 const isTextEntry = (element: Element | null): boolean => {
@@ -49,6 +51,32 @@ const isTextEntry = (element: Element | null): boolean => {
   return !['button', 'checkbox', 'radio', 'range', 'submit'].includes((element as HTMLInputElement).type);
 };
 
+/** Room left between a revealed field and its scroller's edge, so its label or border is not on the edge. */
+export const REVEAL_MARGIN_PX = 16;
+
+/**
+ * Scrolls the field's SCROLLERS — every `auto`/`scroll` ancestor, innermost first — until the field is inside
+ * each of them. A box that clips without scrolling is passed over.
+ *
+ * Not `scrollIntoView`: that also scrolls every `overflow: hidden` ancestor — the fixed shell, the session's
+ * column — and a shell scrolled by a focus is the sideways-shifted header this app already shipped once.
+ */
+export const revealInScroller = (
+  element: Element,
+  overflowY: (node: Element) => string = node => getComputedStyle(node).overflowY,
+): void => {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflow = overflowY(node);
+    if (overflow !== 'auto' && overflow !== 'scroll') continue;
+    const field = element.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    // Down far enough to show the field's bottom, but never so far that its top (its label's line) leaves.
+    if (field.bottom > box.bottom)
+      node.scrollTop += Math.min(field.bottom - box.bottom + REVEAL_MARGIN_PX, field.top - box.top - REVEAL_MARGIN_PX);
+    else if (field.top < box.top) node.scrollTop -= box.top - field.top + REVEAL_MARGIN_PX;
+  }
+};
+
 /**
  * Installs the browser producer. The explicit port makes the geometry policy
  * testable without replacing global browser APIs, while production uses the
@@ -56,6 +84,7 @@ const isTextEntry = (element: Element | null): boolean => {
  */
 export const installAppViewport = (env: AppViewportEnvironment): (() => void) => {
   let frame: number | null = null;
+  let keyboardWasOpen = false;
   const baselines = new Map<number, number>();
 
   const apply = () => {
@@ -80,6 +109,11 @@ export const installAppViewport = (env: AppViewportEnvironment): (() => void) =>
     env.root.style.setProperty('--kb-h', `${hidden}px`);
     if (keyboardOpen) env.root.setAttribute(KEYBOARD_ATTRIBUTE, 'open');
     else env.root.removeAttribute(KEYBOARD_ATTRIBUTE);
+    // The keyboard just came up over a focused field. The shell is now the short visible box, but the field
+    // stayed where it was, under the keyboard or the chrome that rode up with it. Bring it back into its
+    // own scroller; a field already in view does not move.
+    if (keyboardOpen && !keyboardWasOpen && typing) env.reveal(env.document.activeElement as Element);
+    keyboardWasOpen = keyboardOpen;
 
     const scroll = env.scroll();
     if (scroll.x !== 0 || scroll.y !== 0) env.scrollTo(0, 0);
@@ -128,6 +162,7 @@ const browserViewportEnvironment = (): AppViewportEnvironment | null => {
     cancelFrame: id => window.cancelAnimationFrame(id),
     addWindowListener: (type, listener) => window.addEventListener(type, listener),
     removeWindowListener: (type, listener) => window.removeEventListener(type, listener),
+    reveal: element => revealInScroller(element),
   };
 };
 
