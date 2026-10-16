@@ -814,7 +814,12 @@ describe('SessionChatPage', () => {
   });
 
   test('hands the composer the reader’s suggestion switches and Vim preference, mapped once above it', () => {
-    const suggestions = { mentionSuggestions: false, directReferenceSuggestions: true, skillSuggestions: false };
+    const suggestions = {
+      mentionSuggestions: false,
+      ladderSuggestions: false,
+      directReferenceSuggestions: true,
+      skillSuggestions: false,
+    };
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}

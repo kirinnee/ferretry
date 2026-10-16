@@ -61,7 +61,7 @@ const mountComposer = (props: Partial<ComposerProps> & { upload: ComposerAttachm
     />,
     {
       createNodeMock: element =>
-        element.type === 'input' && element.props.type === 'file'
+        element.type === 'input' && (element.props as { type?: string }).type === 'file'
           ? {
               click: () => {
                 clicked += 1;

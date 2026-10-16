@@ -11,6 +11,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { composerSuggestionSwitches } from './components/composer-autocomplete.ts';
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
 import { liveStreamState } from './components/live-stream-indicator.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
@@ -38,8 +39,8 @@ import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
-import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
+import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -70,7 +71,7 @@ import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
-import { UNLOCK_COPY, StepUpDialog } from './features/step-up/step-up-dialog.tsx';
+import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
@@ -80,7 +81,6 @@ import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.t
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useFleetPoll } from './hooks/use-fleet-poll.ts';
-import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
@@ -88,10 +88,11 @@ import {
   useNotificationControls,
   useNotificationWatch,
 } from './hooks/use-notifications.ts';
+import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
 import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
 import {
-  type ServiceWorkerUpdateEnvironment,
   canRegister,
+  type ServiceWorkerUpdateEnvironment,
   useServiceWorkerUpdate,
   workerUrl,
 } from './hooks/use-service-worker-update.ts';
@@ -102,7 +103,6 @@ import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
-import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import type {
   NotificationPermissionState,
   NotificationRegistrationLike,
@@ -139,6 +139,7 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
+import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
 import {
@@ -795,16 +796,12 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const fleet = useSyncExternalStore(subscribe, snapshot);
   const controls = useSyncExternalStore(store.controls.subscribe, () => store.controls.controls(daemonId));
   // THE mapping from the persisted device preference to the composer's rule,
-  // written once. It is memoised on the three booleans rather than rebuilt on
+  // written once. It is memoised on the two values rather than rebuilt on
   // every render because the composer rebuilds its providers from it, and a
   // fresh object each render would abort an open list on every keystroke.
   const composerSuggestions = useMemo(
-    () => ({
-      mentionSuggestions: controls.mentionSuggestions,
-      directReferenceSuggestions: controls.directReferenceSuggestions,
-      skillSuggestions: controls.skillSuggestions,
-    }),
-    [controls.mentionSuggestions, controls.directReferenceSuggestions, controls.skillSuggestions],
+    () => composerSuggestionSwitches(controls.suggestionKeys, controls.skillSuggestions),
+    [controls.suggestionKeys, controls.skillSuggestions],
   );
   const fleetSlice = fleet.daemons.get(scope.daemonId);
   const session = fleetSlice?.byId.get(scope.sessionId);

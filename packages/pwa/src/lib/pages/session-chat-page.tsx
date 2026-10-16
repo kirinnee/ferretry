@@ -5,6 +5,7 @@ import type { ComposerSuggestionSwitches } from '../../components/composer-autoc
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
+import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
@@ -25,6 +26,7 @@ import type { TerminalDeckDependencies } from '../../components/session-terminal
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import { SessionTopBar } from '../../components/session-top-bar.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
+import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
@@ -34,8 +36,8 @@ import { useSessionSkills } from '../../features/skills/session-skills-store.ts'
 import { SessionSkillsSurface } from '../../features/skills/session-skills-surface.tsx';
 import type { SkillsCatalogLoader } from '../../features/skills/skills-api.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { Button } from '../../shell/primitives.tsx';
 import type { ContextMenuItem } from '../../shell/context-menu.tsx';
+import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import { type SidePaneSurfaceProps, SidePaneWorkspace, useSidePane } from '../../shell/side-pane.tsx';
 import {
@@ -596,6 +598,12 @@ export function SessionChatPage({
     [canControl, session],
   );
   const busy = statusMark(session).klass === 'active';
+  // The harness's own status line, read off its pane while — and only while — the session works.
+  const readActivityFrame = useCallback<PaneFrameReader>(
+    async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true),
+    [connection, referenceFetch, scope],
+  );
+  const paneActivity = usePaneActivity(readActivityFrame, busy);
   /**
    * THE RUNTIME CHIPS ASK A DIFFERENT QUESTION THAN THE TRANSCRIPT DOES.
    *
@@ -829,7 +837,14 @@ export function SessionChatPage({
             here cannot touch the split. */}
           <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
             <div className="grid min-h-0 flex-1">
-              <Transcript busy={busy} daemonId={connection.daemonId} entries={entries} sessionId={session.config.id} />
+              <Transcript
+                activity={paneActivity}
+                activityFallback={session.state.activity ?? null}
+                busy={busy}
+                daemonId={connection.daemonId}
+                entries={entries}
+                sessionId={session.config.id}
+              />
             </div>
             <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
               {question !== null && canControl ? (
@@ -857,8 +872,37 @@ export function SessionChatPage({
                   </p>
                 </section>
               ) : (
-                <>
-                  {runtimeApi === null ? null : (
+                <Composer
+                  api={client}
+                  {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
+                  {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
+                  {...(composerCatalogs.attention === undefined
+                    ? {}
+                    : { autocompleteAttention: composerCatalogs.attention })}
+                  {...(composerCatalogs.skills?.skills === undefined
+                    ? {}
+                    : { autocompleteSkills: composerCatalogs.skills })}
+                  // The in-flight owner reads: a menu opened before they settle waits
+                  // instead of inventing an empty family or fetching a fact twice.
+                  autocompleteReady={composerCatalogs.settled}
+                  busy={busy}
+                  compact={compact}
+                  {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
+                  vimMode={composerVimMode}
+                  {...(dictationSettings === undefined ? {} : { dictationSettings })}
+                  enterKeyPreference={composerEnterKey}
+                  daemon={connection}
+                  disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
+                  onSent={onRefresh}
+                  quota={session.state.quota}
+                  sessionId={session.config.id}
+                  {...(session.state.contextPercent === undefined
+                    ? {}
+                    : { contextPercent: session.state.contextPercent })}
+                  // The model and effort chips ride the composer's own status line, so the
+                  // runtime costs no row of its own above the message box.
+                  statusSlot={
+                    runtimeApi === null ? null : (
                     <ComposerRuntime
                       busy={runtimeSwitchBusy}
                       canControl={canControl}
@@ -887,34 +931,9 @@ export function SessionChatPage({
                       )}
                       view={session}
                     />
-                  )}
-                  <Composer
-                    api={client}
-                    {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
-                    {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
-                    {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
-                    {...(composerCatalogs.attention === undefined
-                      ? {}
-                      : { autocompleteAttention: composerCatalogs.attention })}
-                    {...(composerCatalogs.skills?.skills === undefined
-                      ? {}
-                      : { autocompleteSkills: composerCatalogs.skills })}
-                    // The in-flight owner reads: a menu opened before they settle waits
-                    // instead of inventing an empty family or fetching a fact twice.
-                    autocompleteReady={composerCatalogs.settled}
-                    busy={busy}
-                    compact={compact}
-                    {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
-                    vimMode={composerVimMode}
-                    {...(dictationSettings === undefined ? {} : { dictationSettings })}
-                    enterKeyPreference={composerEnterKey}
-                    daemon={connection}
-                    disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-                    onSent={onRefresh}
-                    quota={session.state.quota}
-                    sessionId={session.config.id}
-                  />
-                </>
+                    )
+                  }
+                />
               )}
             </div>
           </div>

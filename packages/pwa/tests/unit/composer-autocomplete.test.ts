@@ -6,6 +6,7 @@ import {
   type ComposerSelection,
   type ComposerSuggestionSwitches,
   type ComposerTriggerMatch,
+  composerSuggestionSwitches,
   composerSuggestionsAllow,
   DEFAULT_COMPOSER_SUGGESTIONS,
   detectComposerTrigger,
@@ -55,7 +56,7 @@ describe('COMPOSER_REFERENCE_TIERS', () => {
   test('should name each family the direct sigil that opens it, files excepted', () => {
     // Assert — one table, read from both ends: the ladder teaches it and the
     // direct providers route by it.
-    should(COMPOSER_REFERENCE_TIERS.map(item => item.direct)).deepEqual([undefined, ':', '&', '!']);
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.direct)).deepEqual([undefined, ':', '!']);
   });
 });
 
@@ -436,7 +437,7 @@ describe('replaceComposerTrigger', () => {
 
 describe('composerSuggestionsAllow', () => {
   const off = (patch: Partial<ComposerSuggestionSwitches>): ComposerSuggestionSwitches => ({
-    ...DEFAULT_COMPOSER_SUGGESTIONS,
+    ...composerSuggestionSwitches('both', true),
     ...patch,
   });
   const allow = (suggestions: ComposerSuggestionSwitches, value: string): boolean => {
@@ -445,22 +446,39 @@ describe('composerSuggestionsAllow', () => {
     return composerSuggestionsAllow(suggestions, match);
   };
 
-  test('should offer every family by default', () => {
+  test('should open the @ ladder by default and leave the direct symbols as prose', () => {
     // Act & Assert
     should(DEFAULT_COMPOSER_SUGGESTIONS).deepEqual({
       mentionSuggestions: true,
-      directReferenceSuggestions: true,
+      ladderSuggestions: true,
+      directReferenceSuggestions: false,
       skillSuggestions: true,
     });
-    for (const value of ['@sr', '@@ott', ':zel', '&F1', '!A3', '$sum', '/sum', '%term'])
+    for (const value of ['@sr', '@@ott', '@@@A3', '$sum', '/sum', '%term'])
       should(allow(DEFAULT_COMPOSER_SUGGESTIONS, value)).equal(true);
+    for (const value of [':zel', '!A3']) should(allow(DEFAULT_COMPOSER_SUGGESTIONS, value)).equal(false);
+  });
+
+  test('should map each choice of keys onto the switches', () => {
+    should(composerSuggestionSwitches('symbols', false)).deepEqual({
+      mentionSuggestions: true,
+      ladderSuggestions: false,
+      directReferenceSuggestions: true,
+      skillSuggestions: false,
+    });
+    const symbols = composerSuggestionSwitches('symbols', true);
+    should(allow(symbols, '@src')).equal(true);
+    should(allow(symbols, '@@ott')).equal(false);
+    should(allow(symbols, ':zel')).equal(true);
+    const both = composerSuggestionSwitches('both', true);
+    for (const value of ['@src', '@@ott', ':zel', '!A3']) should(allow(both, value)).equal(true);
   });
 
   test('should suppress the whole @ ladder, bare @ included', () => {
     // Act & Assert — the Settings switch names all four tiers, so exempting
     // tier 1 would make its own copy untrue.
     const suggestions = off({ mentionSuggestions: false });
-    for (const value of ['@src', '@@ott', '@@@F12', '@@@@A3']) should(allow(suggestions, value)).equal(false);
+    for (const value of ['@src', '@@ott', '@@@A3']) should(allow(suggestions, value)).equal(false);
     should(allow(suggestions, ':zel')).equal(true);
   });
 

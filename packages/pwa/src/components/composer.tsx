@@ -24,7 +24,11 @@ import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
-import { type ComposerSuggestionSwitches, useComposerAutocomplete } from './composer-autocomplete.ts';
+import {
+  type ComposerSuggestionSwitches,
+  DEFAULT_COMPOSER_SUGGESTIONS,
+  useComposerAutocomplete,
+} from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import {
   type ComposerAttentionItem,
@@ -352,11 +356,12 @@ export function Composer({
   const references = useReferenceSurface();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // Read as three booleans rather than as one object BECAUSE providers are
+  // Read as four booleans rather than as one object BECAUSE providers are
   // rebuilt from these: a host that passed a fresh literal every render would
   // otherwise abort and re-issue the open list's request on every keystroke.
-  // Absent stays "every family offered", exactly as the stored preference does.
-  const { mentionSuggestions = true, directReferenceSuggestions = true, skillSuggestions = true } = suggestions ?? {};
+  // Absent is the shipped default — the `@` ladder — exactly as the stored preference is.
+  const { mentionSuggestions, ladderSuggestions, directReferenceSuggestions, skillSuggestions } =
+    suggestions ?? DEFAULT_COMPOSER_SUGGESTIONS;
   // A host that supplies any of these owns all four families; a host that
   // supplies none is a standalone composer and keeps the daemon-backed defaults.
   const hosted =
@@ -391,7 +396,7 @@ export function Composer({
         daemon,
         scope,
         ...(autocompleteFetcher === undefined ? {} : { fetcher: autocompleteFetcher }),
-        suggestions: { mentionSuggestions, directReferenceSuggestions, skillSuggestions },
+        suggestions: { mentionSuggestions, ladderSuggestions, directReferenceSuggestions, skillSuggestions },
         // THE GETTERS ARE UNCONDITIONAL once a host claims these families, and
         // they read the LIVE prop through a ref rather than closing over one
         // render's value. A getter installed only "once the value arrived" is
@@ -419,6 +424,7 @@ export function Composer({
       directReferenceSuggestions,
       hostWarmup,
       hosted,
+      ladderSuggestions,
       mentionSuggestions,
       scope,
       skillSuggestions,
