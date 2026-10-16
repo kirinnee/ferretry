@@ -29,8 +29,8 @@ import { Profiler, useCallback, useRef, useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import type {
-  ComposerSkillsCatalog,
   ComposerAttentionItem,
+  ComposerSkillsCatalog,
 } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../support/react.ts';

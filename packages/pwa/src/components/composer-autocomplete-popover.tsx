@@ -115,6 +115,18 @@ function announcement(status: ComposerAutocompleteSurface['status'], count: numb
   return count === 1 ? '1 suggestion' : `${count} suggestions`;
 }
 
+/**
+ * An agent's status as a dot, from the status word the agent row already carries as its badge:
+ * working green, waiting amber, anything else quiet. The word stays beside it, so colour is never the
+ * only signal.
+ */
+export const agentStatusTone = (badge: string | undefined): 'ok' | 'warn' | 'idle' => {
+  if (badge === undefined) return 'idle';
+  if (/running|working|starting|thinking/u.test(badge)) return 'ok';
+  if (/wait|awaiting|interrupted|limited/u.test(badge)) return 'warn';
+  return 'idle';
+};
+
 function CandidateRow({
   candidate,
   index,
@@ -138,7 +150,7 @@ function CandidateRow({
     <div
       aria-disabled={refused || undefined}
       aria-selected={active}
-      className={`flex min-h-[44px] w-full select-none items-center gap-sm border-l-[3px] border-l-transparent px-control-x py-row-y text-left text-fg outline-none${active ? ' border-l-accent bg-accent-soft shadow-active' : ''}${refused ? ' cursor-not-allowed opacity-70' : ' cursor-pointer hover:bg-surface-2'}`}
+      className={`fy-ac-row${refused ? ' fy-ac-row-refused' : ''}`}
       data-active={active || undefined}
       data-kind={candidate.kind}
       id={optionId(listboxId, index)}
@@ -158,28 +170,23 @@ function CandidateRow({
       tabIndex={-1}
       title={candidate.disabledReason}
     >
-      <Icon aria-hidden="true" className="shrink-0 text-faint" size={15} />
-      <span className="min-w-0 flex-1 leading-tight">
-        <span className="mono block truncate font-medium text-current">{candidate.label}</span>
-        {detail === undefined ? null : (
-          <span className={`block truncate text-meta${refused ? ' text-warn' : ' text-muted'}`}>{detail}</span>
-        )}
-      </span>
-      {candidate.badge === undefined ? null : (
-        <span className="mono shrink-0 rounded-badge border border-border-soft bg-surface px-badge-x py-px text-2xs text-faint">
-          {candidate.badge}
-        </span>
+      {candidate.kind === 'agent' ? (
+        <span aria-hidden="true" className="fy-ac-dot" data-tone={agentStatusTone(candidate.badge)} />
+      ) : (
+        <Icon aria-hidden="true" className="fy-ac-icon" size={14} />
       )}
+      <span className="fy-ac-name">{candidate.label}</span>
+      {detail === undefined ? null : <span className="fy-ac-detail">{detail}</span>}
+      {candidate.badge === undefined ? null : <span className="fy-ac-badge">{candidate.badge}</span>}
     </div>
   );
 }
 
 /**
- * The `@` tier legend. It is teaching material rather than navigation:
- * repeating the sigil is what selects a family, so the tier the reader is
- * currently in is marked instead of made clickable.
+ * The `@` ladder, inline in the header: every tier, the one the caret is in marked. It is teaching
+ * material rather than navigation — repeating the sigil is what selects a family.
  */
-function TierLegend({
+function TierLadder({
   legend,
   activeTier,
 }: {
@@ -188,23 +195,40 @@ function TierLegend({
 }) {
   if (legend === undefined) return null;
   return (
-    <div className="flex flex-wrap items-center gap-xs border-b border-border-soft px-control-x py-1">
-      {legend.map(item => (
+    <span className="fy-ac-ladder" title="The ladder: one more @ moves to the next kind">
+      {legend.map((item, index) => (
         <span
-          className={`mono rounded-badge border px-badge-x py-px text-2xs${item.trigger.length === activeTier ? ' border-accent bg-accent-soft text-fg' : ' border-border-soft text-faint'}`}
+          className="fy-ac-tier"
+          data-active={item.trigger.length === activeTier || undefined}
           data-tier={item.tier}
           key={item.trigger}
         >
-          {item.trigger} {item.label}
+          {index === 0 ? null : ' · '}
+          {item.trigger} {item.label.toLowerCase()}
         </span>
       ))}
-    </div>
+    </span>
   );
 }
+
+/** The footer's one line of keys, and on the ladder what one more `@` reaches. */
+export const autocompleteFooterHint = (
+  legend: readonly ComposerReferenceTierLegendItem[] | undefined,
+  activeTier: number | undefined,
+  active: ComposerAutocompleteCandidate | undefined,
+): string => {
+  const keys = active === undefined ? '↑↓ choose · esc' : `↵ inserts ${active.replacement} · ⇥ complete · esc`;
+  const next = legend?.find(item => item.tier === (activeTier ?? 0) + 1);
+  return next === undefined ? keys : `${keys} · type @ again for ${next.label.toLowerCase()}`;
+};
 
 /**
  * The rendered half of the composer's autocomplete. It reads a controller
  * snapshot and writes back exactly one thing: an accepted index.
+ *
+ * ONE SMALL POPOVER ABOVE THE CARET: a header (what this list is, and the ladder when there is one),
+ * at most six rows of icon · name · one-line hint, and a footer naming the keys. On a phone the same
+ * popover spans the composer just above the keyboard, and its rows keep the 44px touch floor.
  */
 export function ComposerAutocompletePopover({ surface }: { readonly surface: ComposerAutocompleteSurface }) {
   const { activeIndex, candidates, contextLabel, error, listboxId, match, notice, open, provider, status } = surface;
@@ -226,6 +250,7 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
         onAccept={surface.accept}
       />
     ));
+  const ready = status === 'ready' && candidates.length > 0;
   return (
     <>
       <span aria-atomic="true" aria-live="polite" className="sr-only">
@@ -233,50 +258,38 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
       </span>
       {open ? (
         <div
-          className="absolute inset-x-0 bottom-[calc(100%+var(--gap-xs))] z-40 overflow-hidden rounded-panel border-panel border-border-strong bg-surface shadow-popover"
+          className="fy-ac-pop"
           data-composer-autocomplete={provider?.label ?? 'Suggestions'}
           onPointerDown={event => {
             event.preventDefault();
           }}
         >
-          <div className="flex min-h-[34px] items-center gap-sm border-b border-border-soft bg-surface-2 px-control-x py-1">
-            <span className="min-w-0 flex-1 truncate text-meta font-semibold uppercase tracking-label text-fg-soft">
-              {contextLabel ?? provider?.label}
-            </span>
-            {candidates.length === 0 ? null : (
-              <span className="mono shrink-0 text-2xs text-faint">{candidates.length}</span>
+          <div className="fy-ac-head">
+            <span className="fy-ac-title">{contextLabel ?? provider?.label}</span>
+            {provider?.legend === undefined ? (
+              candidates.length === 0 ? null : <span className="fy-ac-count">{candidates.length}</span>
+            ) : (
+              <TierLadder activeTier={match?.referenceTier} legend={provider.legend} />
             )}
           </div>
-          <TierLegend activeTier={match?.referenceTier} legend={provider?.legend} />
           <div
-            {...(status === 'ready' && candidates.length > 0
-              ? { 'aria-label': provider?.label ?? 'Suggestions', role: 'listbox' }
-              : {})}
-            className="relative max-h-[min(280px,max(88px,calc(var(--app-h,100dvh)*0.34)))] overflow-y-auto overscroll-contain scroll-thin [touch-action:pan-y]"
+            {...(ready ? { 'aria-label': provider?.label ?? 'Suggestions', role: 'listbox' } : {})}
+            className="fy-ac-list"
             id={listboxId}
           >
             {status === 'loading' ? (
-              <div
-                className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
-                role="status"
-              >
-                <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={15} />
+              <div className="fy-ac-state" role="status">
+                <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
                 Searching…
               </div>
             ) : status === 'error' ? (
-              <div
-                className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-err"
-                role="alert"
-              >
-                <ShieldAlert aria-hidden="true" size={15} />
+              <div className="fy-ac-state fy-ac-state-error" role="alert">
+                <ShieldAlert aria-hidden="true" size={14} />
                 {error ?? 'Suggestions unavailable'}
               </div>
             ) : candidates.length === 0 ? (
-              <div
-                className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
-                role="status"
-              >
-                <SearchX aria-hidden="true" size={15} />
+              <div className="fy-ac-state" role="status">
+                <SearchX aria-hidden="true" size={14} />
                 {notice ?? 'Nothing matches yet'}
               </div>
             ) : (
@@ -285,7 +298,7 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
                   rows(section)
                 ) : (
                   <fieldset aria-label={section.group} className="m-0 min-w-0 border-0 p-0" key={section.group}>
-                    <div aria-hidden="true" className="kt-label px-control-x pb-xs pt-xs">
+                    <div aria-hidden="true" className="fy-ac-group">
                       {section.group}
                     </div>
                     {rows(section)}
@@ -295,13 +308,13 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
             )}
           </div>
           {notice === undefined || candidates.length === 0 ? null : (
-            <div
-              className="border-t border-border-soft bg-warn-bg px-control-x py-1 text-2xs leading-base text-warn"
-              role="status"
-            >
+            <div className="fy-ac-notice" role="status">
               {notice}
             </div>
           )}
+          <div className="fy-ac-foot">
+            {autocompleteFooterHint(provider?.legend, match?.referenceTier, ready ? candidates[activeIndex] : undefined)}
+          </div>
         </div>
       ) : null}
     </>
