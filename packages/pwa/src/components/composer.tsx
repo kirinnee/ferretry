@@ -1,21 +1,21 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import { ArrowUp, Plus } from 'lucide-react';
+import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
-import { continueList, type DraftEdit, insideCodeBlock, toggleWrap, wrapMarkerFor } from '../lib/composer-editing.ts';
+import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import {
   type ComposerEnterKeyPreference,
   composerEnterAction,
-  composerEnterHint,
   shiftedComposerEnterAction,
 } from '../lib/composer-keybinding.ts';
-import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
+import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
+import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
@@ -28,6 +28,8 @@ import { type ComposerAttachmentUploader, useComposerAttachments } from './compo
 import {
   type ComposerSuggestionSwitches,
   DEFAULT_COMPOSER_SUGGESTIONS,
+  type ComposerField,
+  type ComposerFieldKeyEvent,
   useComposerAutocomplete,
 } from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
@@ -36,12 +38,12 @@ import {
   type ComposerSkillsCatalog,
   createComposerAutocompleteProviders,
 } from './composer-autocomplete-providers.ts';
-import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
-import { RichTextEditor } from './rich-text-editor.tsx';
+import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
+import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
 export interface ComposerProps {
@@ -214,6 +216,26 @@ const hasFiles = (transfer: Pick<DataTransfer, 'types'> | null): boolean =>
 const EMPTY_SESSIONS: readonly SessionView[] = [];
 const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
 
+/** The selection half of the field: a textarea has it, and so does the live editor's handle. */
+interface ComposerFieldSelection {
+  readonly selectionStart: number;
+  readonly selectionEnd: number;
+  focus(): void;
+}
+
+/** A key on the field, from the textarea or the live editor: the slice the arbitration reads. */
+interface ComposerKeyEvent extends ComposerFieldKeyEvent {
+  readonly code?: string;
+  readonly shiftKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  readonly altKey: boolean;
+  readonly currentTarget?: ComposerFieldSelection;
+}
+
+/** How this platform spells the shortcut modifier in a tooltip. */
+const shortcutModifier = (): string => (/Mac|iPhone|iPad/u.test(globalThis.navigator?.platform ?? '') ? '⌘' : 'Ctrl+');
+
 /** The composer's own name for a Vim mode, in words rather than in colour. */
 const VIM_MODE_LABEL: Record<VimState['mode'], string> = { insert: 'Insert', normal: 'Normal' };
 
@@ -275,15 +297,23 @@ export function Composer({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
-  const hintId = useId();
+  const fieldId = useId();
   // A reader preference, not daemon data: it changes only how this browser
-  // paints a textarea, so a daemon switch must not change the editor chrome.
+  // edits a draft, so a daemon switch must not change the editor chrome.
   const editorStyle = useMdComposePref();
-  const highlighted = editorStyle === 'on';
+  /** Markdown (Notion-style) and Rich text both edit through the live editor; Plain is a textarea. */
+  const formatting = editorStyle !== 'off';
   const rich = editorStyle === 'rich';
   const references = useReferenceSurface();
-  const overlayRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  /** The field every editing path reads and writes: the textarea, or the live editor's handle. */
+  const inputRef = useRef<(ComposerField & ComposerFieldSelection) | null>(null);
+  /** The Plain textarea itself, whose height the composer measures. */
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** The editable element, for the dictation shortcut's focus check. */
+  const elementRef = useRef<HTMLElement | null>(null);
+  const setField = useCallback((field: (ComposerField & ComposerFieldSelection) | null) => {
+    inputRef.current = field;
+  }, []);
   // Read as four booleans rather than as one object BECAUSE providers are
   // rebuilt from these: a host that passed a fresh literal every render would
   // otherwise abort and re-issue the open list's request on every keystroke.
@@ -373,9 +403,6 @@ export function Composer({
   const pendingVimSelection = useRef<{ readonly value: string; readonly start: number; readonly end: number } | null>(
     null,
   );
-  const syncHighlight = useCallback((input: HTMLTextAreaElement) => {
-    syncComposerHighlightViewport(input, overlayRef.current);
-  }, []);
   const keyboardOpen = useKeyboardOpen();
   const inputModality = useInputModality();
   const bareEnterAction = composerEnterAction(
@@ -398,21 +425,18 @@ export function Composer({
   // 160px through a 430px viewport. `overflowY` is only turned on AT the cap, so
   // a draft that fits never shows a scrollbar it does not need — which is the
   // whole difference between growing and clipping.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `highlighted` is a re-sync trigger
+  //
+  // Only the Plain textarea is measured: the live editor is a block that grows with its own content
+  // up to the same ceiling, given as its `maxHeight`.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `formatting` is a re-measure trigger -- switching back to Plain mounts a fresh textarea
   useLayoutEffect(() => {
-    // `highlighted` is in the dependency list although the body never reads it:
-    // toggling it mounts or unmounts the paint overlay, and the overlay has to
-    // be re-aligned to the textarea's viewport the moment it appears. Dropping
-    // it leaves a freshly enabled overlay painting at the wrong offset until the
-    // next keystroke.
-    const input = inputRef.current;
+    const input = textareaRef.current;
     if (input === null) return;
     input.style.height = 'auto';
     const next = Math.min(maxTextareaPx, Math.max(MIN_TEXTAREA_PX, input.scrollHeight));
     input.style.height = `${next}px`;
     input.style.overflowY = input.scrollHeight > maxTextareaPx ? 'auto' : 'hidden';
-    syncHighlight(input);
-  }, [draft, highlighted, maxTextareaPx, syncHighlight]);
+  }, [draft, formatting, maxTextareaPx]);
 
   // The draft is read through a ref so registration survives every keystroke:
   // re-registering on each character would churn the quote registry for nothing.
@@ -634,13 +658,133 @@ export function Composer({
     setDraft(outcome.value);
   };
 
-  const sendLabel = sending ? 'Sending…' : busy ? 'Queue' : 'Send';
+  /** A toolbar or shortcut format, applied to the draft at the field's selection. */
+  const format = (command: FormatCommand, field: ComposerFieldSelection | null = inputRef.current): void => {
+    const start = field?.selectionStart ?? draft.length;
+    const end = field?.selectionEnd ?? start;
+    applyEdit(applyFormat(draft, start, end, command));
+  };
+
+  /**
+   * ONE KEY ARBITRATION for every editor style — the textarea and the live editor hand it the same
+   * textarea-shaped event — and every step of its order is load-bearing.
+   *
+   * 0. A composing key belongs to the input method and to nobody else. It must not accept a
+   *    candidate, must not send, and must never reach the Vim engine, which would read a Japanese,
+   *    Chinese or Korean composition as commands.
+   * 1. A visible, SELECTED completion gets Enter/Tab; an empty, loading or refused list cannot consume
+   *    either key, and neither can a direct-sigil list nobody has chosen a row in.
+   * 2. Escape and the arrows belong to the open list first — which is why the FIRST Escape closes it
+   *    and stays in insert mode.
+   * 3. Vim, when the reader asked for it. A second Escape reaches it because the list is now closed,
+   *    and in normal mode Enter is a motion — it never sends.
+   * 4. The formatting shortcuts, list continuation and the reader's configured send key, last.
+   */
+  const onFieldKeyDown = (event: ComposerKeyEvent): void => {
+    if (composing.current || event.nativeEvent.isComposing) return;
+    const completionKey = event.key === 'Enter' || event.key === 'Tab';
+    const hasAcceptableCompletion = autocomplete.open && autocomplete.activeIndex >= 0;
+    if (completionKey) {
+      if (hasAcceptableCompletion && autocomplete.handleKeyDown(event)) return;
+    } else if (autocomplete.handleKeyDown(event)) return;
+    // A synthetic key event may carry no target; the caret then reads as the end of the draft.
+    const field = event.currentTarget;
+    const selectionStart = field?.selectionStart ?? draft.length;
+    const selectionEnd = field?.selectionEnd ?? selectionStart;
+    if (vimMode) {
+      const outcome = vimReduce(
+        vim,
+        { key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey },
+        { value: draft, selectionStart, selectionEnd },
+      );
+      // `handled` is the EVIDENCE for preventDefault, never a request: an unclaimed key keeps its
+      // browser and system meaning.
+      if (outcome.handled) {
+        event.preventDefault();
+        applyVim(outcome);
+        return;
+      }
+    }
+    const modified = event.metaKey || event.ctrlKey;
+    if (formatting && modified) {
+      const command = formatShortcut(event);
+      if (command !== null) {
+        event.preventDefault();
+        format(command, field ?? null);
+        return;
+      }
+    }
+    if (event.key === 'ArrowUp' && !modified && !event.shiftKey && recallQueued()) {
+      event.preventDefault();
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    // ⌘/Ctrl+Enter sends in every mode, on every device; with Shift it is the one explicit
+    // "send now", which interrupts the running turn.
+    if (modified) {
+      event.preventDefault();
+      void submit(event.shiftKey);
+      return;
+    }
+    if (formatting && !event.shiftKey) {
+      if (insideCodeBlock(draft, selectionStart)) return;
+      const continued = continueList(draft, selectionStart);
+      if (continued !== null) {
+        event.preventDefault();
+        applyEdit(continued);
+        return;
+      }
+    }
+    if (!sendsOnEnter(event)) return;
+    event.preventDefault();
+    void submit();
+  };
+
+  /** What the field's editing events share, whichever editor style is drawing it. */
+  const fieldEvents = {
+    onChange: (event: { readonly currentTarget: ComposerFieldSelection & { readonly value: string } }) => {
+      const input = event.currentTarget;
+      setDraft(input.value);
+      autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
+    },
+    onCompositionEnd: (event: { readonly currentTarget: ComposerFieldSelection }) => {
+      composing.current = false;
+      const input = event.currentTarget;
+      // Re-read the trigger only now: the bytes are finally the reader's, so a reference the
+      // composition ended on is offered immediately rather than after one more keystroke.
+      autocomplete.endComposition({ start: input.selectionStart, end: input.selectionEnd });
+    },
+    onCompositionStart: () => {
+      composing.current = true;
+      autocomplete.startComposition();
+    },
+    onSelect: (event: { readonly currentTarget: ComposerFieldSelection }) => {
+      const input = event.currentTarget;
+      autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
+    },
+    onPaste: (event: { readonly clipboardData: DataTransfer | null; preventDefault(): void }) => {
+      // A pasted screenshot is an attachment; pasted text stays the editor's to insert.
+      const files = Array.from(event.clipboardData?.files ?? []);
+      if (files.length === 0) return;
+      event.preventDefault();
+      attachments.add(files);
+    },
+  };
+
+  const modifierLabel = shortcutModifier();
+  const sendKeyLabel = bareEnterAction === 'send' ? '↵' : '⇧↵';
+  const sendLabel = sending ? 'Sending…' : 'Send';
+  const sendTitle = busy
+    ? `Send — queued for the agent's next turn (${sendKeyLabel} or ${modifierLabel}↵)`
+    : `Send (${sendKeyLabel} or ${modifierLabel}↵)`;
+  const interruptTitle = `Interrupt & send — stops the agent's turn and sends now (${modifierLabel}⇧↵)`;
+  const fieldDisabled = disabled || sending;
 
   return (
     <form
-      aria-describedby={hintId}
       className="fy-composer"
       data-composer-dropping={dropping ? '' : undefined}
+      data-composer-style={editorStyle}
       onDragLeave={() => setDropping(false)}
       onDragOver={event => {
         // Only a drag that carries files is ours; dragged text keeps the browser's own behaviour.
@@ -659,7 +803,7 @@ export function Composer({
         void submit();
       }}
     >
-      <label className="sr-only" htmlFor={`${hintId}-input`}>
+      <label className="sr-only" htmlFor={`${fieldId}-input`}>
         Message
       </label>
       {attachments.entries.length === 0 ? null : (
@@ -681,14 +825,24 @@ export function Composer({
         }}
         surface={references}
       />
+      {rich ? (
+        <ComposerFormatToolbar
+          disabled={fieldDisabled}
+          modifier={modifierLabel}
+          onFormat={command => {
+            format(command);
+            inputRef.current?.focus();
+          }}
+        />
+      ) : null}
       <div className="fy-composer-row">
         <button
           aria-label="Attach an image, audio or a file"
           className="fy-composer-icon"
           data-composer-attach=""
-          disabled={disabled || sending}
+          disabled={fieldDisabled}
           onClick={() => fileInput.current?.click()}
-          title="Attach an image, audio or a file — or drop or paste one"
+          title="Attach an image, audio or a file — or drop or paste one here"
           type="button"
         >
           <Plus aria-hidden="true" size={18} />
@@ -707,150 +861,51 @@ export function Composer({
           tabIndex={-1}
           type="file"
         />
-        {rich ? (
-          <RichTextEditor
-            describedBy={hintId}
-            disabled={disabled || sending}
-            id={`${hintId}-input`}
-            onChange={setDraft}
-            onPasteFiles={files => attachments.add(files)}
-            onSubmit={interrupt => void submit(interrupt)}
-            placeholder={placeholder}
-            sendsOnEnter={sendsOnEnter}
-            value={draft}
-          />
-        ) : (
-          <div className="fy-composer-input-layer" data-highlighted={String(highlighted)}>
-            <ComposerHighlight enabled={highlighted} overlayRef={overlayRef} text={draft} />
-            <textarea
-              disabled={disabled || sending}
-              id={`${hintId}-input`}
-              onPaste={event => {
-                // A pasted screenshot is an attachment; pasted text stays the browser's to insert.
-                const files = Array.from(event.clipboardData?.files ?? []);
-                if (files.length === 0) return;
-                event.preventDefault();
-                attachments.add(files);
-              }}
-              onChange={event => {
-                const input = event.currentTarget as unknown as HTMLTextAreaElement;
-                setDraft(input.value);
-                autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
-                syncHighlight(input);
-              }}
-              onCompositionEnd={event => {
-                composing.current = false;
-                const input = event.currentTarget as unknown as HTMLTextAreaElement;
-                // Re-read the trigger only now: the bytes are finally the reader's,
-                // so a reference the composition ended on is offered immediately
-                // rather than after one more keystroke.
-                autocomplete.endComposition({ start: input.selectionStart, end: input.selectionEnd });
-              }}
-              onCompositionStart={() => {
-                composing.current = true;
-                autocomplete.startComposition();
-              }}
-              onKeyDown={event => {
-                // ARBITRATION ORDER, and every step of it is load-bearing.
-                //
-                // 0. A composing key belongs to the input method and to nobody else.
-                //    It must not accept a candidate, must not send, and must never
-                //    reach the Vim engine, which would read a Japanese, Chinese or
-                //    Korean composition as commands.
-                // 1. A visible, SELECTED completion gets Enter/Tab; an empty,
-                //    loading or refused list cannot consume either key, and neither
-                //    can a direct-sigil list nobody has chosen a row in.
-                // 2. Escape and the arrows belong to the open list first — which is
-                //    why the FIRST Escape closes it and stays in insert mode.
-                // 3. Vim, when the reader asked for it. A second Escape reaches it
-                //    because the list is now closed.
-                // 4. The reader's configured send/newline behaviour, last. Enter in
-                //    normal mode arrives here unclaimed, so the policy is unchanged.
-                if (composing.current || (event.nativeEvent as { isComposing?: boolean }).isComposing) return;
-                const completionKey = event.key === 'Enter' || event.key === 'Tab';
-                const hasAcceptableCompletion = autocomplete.open && autocomplete.activeIndex >= 0;
-                if (completionKey) {
-                  if (hasAcceptableCompletion && autocomplete.handleKeyDown(event)) return;
-                } else if (autocomplete.handleKeyDown(event)) return;
-                if (vimMode) {
-                  const input = event.currentTarget as unknown as HTMLTextAreaElement;
-                  const outcome = vimReduce(
-                    vim,
-                    { key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey },
-                    { value: draft, selectionStart: input.selectionStart, selectionEnd: input.selectionEnd },
-                  );
-                  // `handled` is the EVIDENCE for preventDefault, never a request:
-                  // an unclaimed key keeps its browser and system meaning.
-                  if (outcome.handled) {
-                    event.preventDefault();
-                    applyVim(outcome);
-                    return;
-                  }
-                }
-                // A synthetic key event may carry no target; the caret then reads as the end of the draft.
-                const field = event.currentTarget as unknown as HTMLTextAreaElement | undefined;
-                const selectionStart = field?.selectionStart ?? draft.length;
-                const selectionEnd = field?.selectionEnd ?? selectionStart;
-                const modified = event.metaKey || event.ctrlKey;
-                // The Notion-style editor's own keys, in markdown mode only: ⌘B/⌘I/⌘E wrap the
-                // selection, and Enter continues a list or stays a line break inside a code block.
-                if (highlighted && modified && !event.shiftKey && !event.altKey) {
-                  const marker = wrapMarkerFor(event.key);
-                  if (marker !== null) {
-                    event.preventDefault();
-                    applyEdit(toggleWrap(draft, selectionStart, selectionEnd, marker));
-                    return;
-                  }
-                }
-                if (event.key === 'ArrowUp' && !modified && !event.shiftKey && recallQueued()) {
-                  event.preventDefault();
-                  return;
-                }
-                if (event.key !== 'Enter') return;
-                // ⌘/Ctrl+Enter sends in every mode, on every device; with Shift it is the one explicit
-                // "send now", which interrupts the running turn.
-                if (modified) {
-                  event.preventDefault();
-                  void submit(event.shiftKey);
-                  return;
-                }
-                if (highlighted && !event.shiftKey) {
-                  if (insideCodeBlock(draft, selectionStart)) return;
-                  const continued = continueList(draft, selectionStart);
-                  if (continued !== null) {
-                    event.preventDefault();
-                    applyEdit(continued);
-                    return;
-                  }
-                }
-                if (!sendsOnEnter(event)) return;
-                event.preventDefault();
-                void submit();
-              }}
-              onScroll={event => syncHighlight(event.currentTarget as unknown as HTMLTextAreaElement)}
-              onSelect={event => {
-                const input = event.currentTarget as unknown as HTMLTextAreaElement;
-                autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
-              }}
+        <div className="fy-composer-input-layer" data-vim={vimMode ? vim.mode : undefined}>
+          {formatting ? (
+            <LiveMarkdownEditor
+              {...autocomplete.textareaAria}
+              {...fieldEvents}
+              disabled={fieldDisabled}
+              elementRef={elementRef}
+              fieldRef={setField}
+              id={`${fieldId}-input`}
+              markers={rich ? 'hidden' : 'faint'}
+              maxHeight={maxTextareaPx}
+              onKeyDown={onFieldKeyDown}
               placeholder={placeholder}
-              ref={inputRef}
+              value={draft}
+              {...(vimMode ? { vimMode: vim.mode } : {})}
+            />
+          ) : (
+            <textarea
+              {...fieldEvents}
+              disabled={fieldDisabled}
+              id={`${fieldId}-input`}
+              onKeyDown={onFieldKeyDown}
+              placeholder={placeholder}
+              ref={node => {
+                textareaRef.current = node;
+                elementRef.current = node;
+                setField(node);
+              }}
               rows={1}
               value={draft}
               {...autocomplete.textareaAria}
             />
-            {/* Anchored to the input layer, opening UPWARD: the composer sits at the
-            bottom of the session, so a downward list would land off-screen and
-            under the on-screen keyboard. */}
-            <ComposerAutocompletePopover surface={autocomplete} />
-          </div>
-        )}
+          )}
+          {/* Anchored to the input layer, opening UPWARD: the composer sits at the
+              bottom of the session, so a downward list would land off-screen and
+              under the on-screen keyboard. */}
+          <ComposerAutocompletePopover surface={autocomplete} />
+        </div>
         {dictationSettings ? (
           <DictationControl
             {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
             className="fy-composer-icon"
-            composerRef={inputRef}
+            composerRef={elementRef}
             daemon={daemon}
-            disabled={disabled || sending}
+            disabled={fieldDisabled}
             draft={draft}
             layout="compact"
             onDraftChange={applyDictation}
@@ -860,9 +915,28 @@ export function Composer({
             settings={dictationSettings}
           />
         ) : null}
-        <button className="fy-composer-send" disabled={!canSubmit} title={sendLabel} type="submit">
+        {busy ? (
+          <button
+            aria-label="Interrupt & send"
+            className="fy-composer-interrupt"
+            data-composer-interrupt=""
+            disabled={!canSubmit}
+            onClick={() => void submit(true)}
+            title={interruptTitle}
+            type="button"
+          >
+            <Zap aria-hidden="true" size={17} strokeWidth={2.25} />
+          </button>
+        ) : null}
+        <button
+          aria-label={sendLabel}
+          className="fy-composer-send"
+          data-composer-send=""
+          disabled={!canSubmit}
+          title={sendTitle}
+          type="submit"
+        >
           <ArrowUp aria-hidden="true" size={18} strokeWidth={2.5} />
-          <span className="sr-only">{sendLabel}</span>
         </button>
       </div>
       <div className="fy-composer-actions" data-composer-status="">
@@ -873,10 +947,7 @@ export function Composer({
           </span>
         )}
         <ComposerQuota quota={quota} />
-        <p id={hintId}>
-          {busy ? 'Queue for the next turn' : composerEnterHint(bareEnterAction, inputModality.touchAffected)}
-          {inputModality.touchAffected ? null : ' · ⌘⇧↵ sends now and interrupts · drop files here'}
-        </p>
+        <span className="fy-composer-spacer" />
         {vimMode ? (
           <>
             {/* One transition, one polite announcement. The word itself is the
@@ -890,21 +961,22 @@ export function Composer({
               aria-label={`Vim ${VIM_MODE_LABEL[vim.mode]} mode. Switch to ${
                 vim.mode === 'insert' ? VIM_MODE_LABEL.normal : VIM_MODE_LABEL.insert
               } mode`}
-              className="mono min-h-[44px] min-w-[44px] rounded-control border border-border-soft px-2 text-2xs uppercase tracking-label"
+              className="fy-composer-vim"
               data-composer-vim-mode={vim.mode}
-              disabled={disabled || sending}
+              disabled={fieldDisabled}
               onClick={() => {
-                setVim(vim.mode === 'insert' ? { mode: 'normal', operator: null, column: null } : initialVimState);
+                setVim(vim.mode === 'insert' ? normalVimState(vim) : { ...vim, mode: 'insert', operator: null });
                 inputRef.current?.focus();
               }}
+              title={vim.mode === 'insert' ? 'Insert mode — Esc for normal mode' : 'Normal mode — i, a or o to type'}
               type="button"
             >
-              {VIM_MODE_LABEL[vim.mode]}
+              {`-- ${VIM_MODE_LABEL[vim.mode].toUpperCase()} --`}
             </button>
           </>
         ) : null}
         {inputModality.touchAffected && bareEnterAction === 'send' ? (
-          <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={disabled || sending}>
+          <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={fieldDisabled}>
             New line
           </button>
         ) : null}

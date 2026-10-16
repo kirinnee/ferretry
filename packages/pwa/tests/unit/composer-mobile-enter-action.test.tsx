@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import '../support/dom.ts';
 
 import { Composer, type ComposerProps } from '../../src/components/composer.tsx';
@@ -6,6 +6,12 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 class MemoryStorage implements DraftStorage {
   readonly values = new Map<string, string>();

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { Composer } from '../../src/components/composer.tsx';
 import { Transcript, withAgentName } from '../../src/components/transcript.tsx';
-import { continueList, insideCodeBlock, toggleWrap, wrapMarkerFor } from '../../src/lib/composer-editing.ts';
+import { continueList, insideCodeBlock, toggleWrap } from '../../src/lib/composer-editing.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { LiveMarkdownEditor } from '../../src/components/live-markdown-editor.tsx';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { foldsIntoDetails, type TranscriptEntry } from '../../src/lib/session-screens.ts';
 import '../support/dom.ts';
@@ -35,7 +36,6 @@ describe('editing helpers', () => {
     expect(toggleWrap('make bold', 5, 9, '**')).toEqual({ value: 'make **bold**', caret: 13 });
     expect(toggleWrap('make **bold**', 7, 11, '**')).toEqual({ value: 'make bold', caret: 9 });
     expect(toggleWrap('ab', 1, 1, '`')).toEqual({ value: 'a``b', caret: 2 });
-    expect(['b', 'I', 'e', 'x'].map(wrapMarkerFor)).toEqual(['**', '*', '`', null]);
   });
 });
 
@@ -69,7 +69,7 @@ const mountComposer = (draft: string, disposition?: string) => {
       sessionId="s"
     />,
   );
-  const textarea = () => view.root.findByType('textarea');
+  const textarea = () => view.root.find(node => node.type === 'textarea' || node.type === LiveMarkdownEditor);
   run(() =>
     textarea().props.onChange({
       currentTarget: { value: draft, selectionStart: draft.length, selectionEnd: draft.length },
@@ -157,12 +157,12 @@ describe('the Notion-style composer keys', () => {
           sessionId={`plain-${busyKey}`}
         />,
       );
-      const textarea = view.root.findByType('textarea');
+      const textarea = view.root.findByType(LiveMarkdownEditor);
       run(() => textarea.props.onChange({ currentTarget: { value: 'hello', selectionStart: 5, selectionEnd: 5 } }));
       await runAsync(async () => {
         if (busyKey === 'button') view.root.findByType('form').props.onSubmit({ preventDefault() {} });
         else
-          view.root.findByType('textarea').props.onKeyDown({
+          view.root.findByType(LiveMarkdownEditor).props.onKeyDown({
             key: 'Enter',
             shiftKey: false,
             metaKey: busyKey === 'Enter+meta',
@@ -219,6 +219,81 @@ describe('the Notion-style composer keys', () => {
     const view = mountComposer('- first');
     expect(view.key({ key: 'b', metaKey: true })).toBe(false);
     writeMdComposePref('on');
+  });
+
+  test('every formatting shortcut edits the markdown at the selection', () => {
+    writeMdComposePref('on');
+    const view = mountComposer('one\ntwo');
+    const at = { selectionStart: 0, selectionEnd: 7 };
+    expect(view.key({ key: '*', code: 'Digit8', metaKey: true, shiftKey: true }, at)).toBe(true);
+    expect(view.textarea().props.value).toBe('- one\n- two');
+    expect(
+      view.key({ key: '¡', code: 'Digit1', ctrlKey: true, altKey: true }, { selectionStart: 2, selectionEnd: 2 }),
+    ).toBe(true);
+    expect(view.textarea().props.value).toBe('# one\n- two');
+    expect(view.key({ key: 'X', metaKey: true, shiftKey: true }, { selectionStart: 2, selectionEnd: 5 })).toBe(true);
+    expect(view.textarea().props.value).toBe('# ~~one~~\n- two');
+    expect(view.key({ key: 'ç', code: 'KeyC', metaKey: true, altKey: true })).toBe(true);
+    expect(view.textarea().props.value).toContain('```\n- two\n```');
+    // A modified key that formats nothing keeps its browser meaning.
+    expect(view.key({ key: 'k', metaKey: true })).toBe(false);
+  });
+
+  test('Rich text adds a toolbar whose buttons format the draft, each naming its shortcut', () => {
+    writeMdComposePref('rich');
+    const view = mountComposer('make bold');
+    const bold = view.view.root.findByProps({ 'data-format': 'Bold' });
+    expect(String(bold.props.title)).toMatch(/^Bold \((⌘|Ctrl\+)B\)$/u);
+    let prevented = false;
+    bold.props.onMouseDown({ preventDefault: () => (prevented = true) });
+    expect(prevented).toBe(true);
+    run(() => bold.props.onClick());
+    // Unfocused, the editor formats at the caret it last had: the start, before anything was typed.
+    expect(view.textarea().props.value).toBe('****make bold');
+    expect(view.textarea().props.markers).toBe('hidden');
+    const checklist = view.view.root.findByProps({ 'data-format': 'Checklist' });
+    expect(checklist.props.title).toBe('Checklist');
+    run(() => writeMdComposePref('on'));
+    expect(view.view.root.findAll(node => node.props['data-composer-toolbar'] === '')).toHaveLength(0);
+  });
+
+  test('Send and Interrupt & send: two buttons, the second only while the agent works', async () => {
+    writeMdComposePref('on');
+    const sent: unknown[] = [];
+    const props = {
+      api: {
+        send: async (_id: string, request: unknown) => {
+          sent.push(request);
+          return {} as never;
+        },
+      },
+      daemon,
+      draftStore: new DaemonDraftStore(new MemoryStorage()),
+      enterKeyPreference: 'send' as const,
+      phoneEnterKeyPreference: 'send' as const,
+      sessionId: 'buttons',
+    };
+    const view = render(<Composer {...props} busy={false} />);
+    const interrupt = () =>
+      view.root.findAll(node => node.type === 'button' && node.props['data-composer-interrupt'] === '');
+    expect(interrupt()).toHaveLength(0);
+    expect(view.root.findByProps({ 'data-composer-send': '' }).props.title).toMatch(/^Send \(↵ or /u);
+    run(() => view.update(<Composer {...props} busy enterKeyPreference="newline" phoneEnterKeyPreference="newline" />));
+    expect(view.root.findByProps({ 'data-composer-send': '' }).props.title).toMatch(
+      /queued for the agent's next turn \(⇧↵/u,
+    );
+    const [button] = interrupt();
+    expect(String(button?.props.title)).toMatch(/^Interrupt & send — .*⇧↵\)$/u);
+    expect(button?.props.disabled).toBe(true);
+    run(() =>
+      view.root
+        .findByType(LiveMarkdownEditor)
+        .props.onChange({ currentTarget: { value: 'stop', selectionStart: 4, selectionEnd: 4, focus() {} } }),
+    );
+    await runAsync(async () => {
+      interrupt()[0]?.props.onClick();
+    });
+    expect(sent).toEqual([{ message: 'stop', now: true }]);
   });
 });
 

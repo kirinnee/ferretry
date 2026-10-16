@@ -89,7 +89,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'composer-markdown',
     label: 'Editor style',
     description:
-      'Markdown, Notion-style (the default) shapes the line as you type — headings, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text shows headings at their real size and hides the markers; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
+      'Markdown, Notion-style (the default) formats as you type — headings at their real size, bold, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible; Rich text hides the markers and adds a toolbar; or choose a plain text box. Whichever style, you send markdown. Optional Vim-style modal keys live here too.',
     keywords: [
       'composer',
       'markdown',

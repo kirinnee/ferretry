@@ -2527,11 +2527,11 @@ describe('the command palette shortcut', () => {
       'the current-session search input',
     );
 
-    // The REAL COMPOSER textarea, not an unrelated element appended by the
-    // test: session search deliberately claims this editable context and no
-    // other one.
+    // The REAL COMPOSER field (the live editor, in the default editor style),
+    // not an unrelated element appended by the test: session search
+    // deliberately claims this editable context and no other one.
     const composer = must(
-      view.container.querySelector<HTMLTextAreaElement>('form.fy-composer textarea'),
+      view.container.querySelector<HTMLElement>('form.fy-composer [data-live-editor]'),
       'the session composer',
     );
     composer.focus();

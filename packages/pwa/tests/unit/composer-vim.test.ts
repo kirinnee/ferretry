@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   initialVimState,
+  normalVimState,
   vimReduce,
   type VimDocument,
   type VimKey,
@@ -9,8 +10,8 @@ import {
   type VimState,
 } from '../../src/lib/composer-vim.ts';
 
-const NORMAL: VimState = { mode: 'normal', operator: null, column: null };
-const INSERT: VimState = { mode: 'insert', operator: null, column: null };
+const NORMAL: VimState = { mode: 'normal', operator: null, column: null, register: null, history: [] };
+const INSERT: VimState = { mode: 'insert', operator: null, column: null, register: null, history: [] };
 
 const bare = (key: string): VimKey => ({ key, ctrlKey: false, metaKey: false, altKey: false });
 
@@ -39,6 +40,14 @@ const type = (editor: Editor, ...keys: readonly string[]): Editor =>
 
 const caretOf = (editor: Editor): number => editor.doc.selectionStart;
 
+/** What an editor looks like to a reader: the text, the caret and the mode — not the register or the undo history. */
+const shape = (editor: Editor) => ({
+  mode: editor.state.mode,
+  operator: editor.state.operator,
+  column: editor.state.column,
+  doc: editor.doc,
+});
+
 describe('composer vim engine — what it declines', () => {
   test('never claims a key held with a browser or system modifier', () => {
     for (const modifier of ['ctrlKey', 'metaKey', 'altKey'] as const) {
@@ -53,9 +62,8 @@ describe('composer vim engine — what it declines', () => {
     expect(press(at('abc', 1, INSERT), 'Escape').handled).toBe(true);
   });
 
-  test('leaves every key with no printable character to the host in normal mode', () => {
-    for (const key of ['Enter', 'Tab', 'Backspace', 'Delete', 'ArrowLeft', 'Escape', 'F2'])
-      expect(press(at('abc', 1), key).handled).toBe(false);
+  test('leaves Tab, Delete, the arrows and function keys to the host in normal mode', () => {
+    for (const key of ['Tab', 'Delete', 'ArrowLeft', 'F2']) expect(press(at('abc', 1), key).handled).toBe(false);
   });
 
   test('claims an unimplemented printable key inertly, so a stray letter is never typed', () => {
@@ -85,8 +93,8 @@ describe('composer vim engine — mode transitions', () => {
   });
 
   test('i inserts before the caret and a inserts after it', () => {
-    expect(type(at('hi', 0), 'i')).toEqual(at('hi', 0, INSERT));
-    expect(type(at('hi', 0), 'a')).toEqual(at('hi', 1, INSERT));
+    expect(shape(type(at('hi', 0), 'i'))).toEqual(shape(at('hi', 0, INSERT)));
+    expect(shape(type(at('hi', 0), 'a'))).toEqual(shape(at('hi', 1, INSERT)));
   });
 
   test('a at the last character reaches the end of the line, and no further', () => {
@@ -103,15 +111,15 @@ describe('composer vim engine — mode transitions', () => {
   });
 
   test('o opens a line below and O opens one above', () => {
-    expect(type(at('ab\ncd', 0), 'o')).toEqual(at('ab\n\ncd', 3, INSERT));
-    expect(type(at('ab\ncd', 4), 'O')).toEqual(at('ab\n\ncd', 3, INSERT));
-    expect(type(at('ab\ncd', 0), 'O')).toEqual(at('\nab\ncd', 0, INSERT));
-    expect(type(at('ab', 1), 'o')).toEqual(at('ab\n', 3, INSERT));
-    expect(type(at('', 0), 'o')).toEqual(at('\n', 1, INSERT));
+    expect(shape(type(at('ab\ncd', 0), 'o'))).toEqual(shape(at('ab\n\ncd', 3, INSERT)));
+    expect(shape(type(at('ab\ncd', 4), 'O'))).toEqual(shape(at('ab\n\ncd', 3, INSERT)));
+    expect(shape(type(at('ab\ncd', 0), 'O'))).toEqual(shape(at('\nab\ncd', 0, INSERT)));
+    expect(shape(type(at('ab', 1), 'o'))).toEqual(shape(at('ab\n', 3, INSERT)));
+    expect(shape(type(at('', 0), 'o'))).toEqual(shape(at('\n', 1, INSERT)));
   });
 
   test('o keeps a CRLF terminator intact', () => {
-    expect(type(at('ab\r\ncd', 0), 'o')).toEqual(at('ab\r\n\ncd', 4, INSERT));
+    expect(shape(type(at('ab\r\ncd', 0), 'o'))).toEqual(shape(at('ab\r\n\ncd', 4, INSERT)));
   });
 });
 
@@ -212,52 +220,52 @@ describe('composer vim engine — vertical movement', () => {
 
 describe('composer vim engine — deletion', () => {
   test('x deletes the character under the caret', () => {
-    expect(type(at('abc', 1), 'x')).toEqual(at('ac', 1));
+    expect(shape(type(at('abc', 1), 'x'))).toEqual(shape(at('ac', 1)));
   });
 
   test('x at the end of a line pulls the caret back', () => {
-    expect(type(at('abc', 2), 'x')).toEqual(at('ab', 1));
+    expect(shape(type(at('abc', 2), 'x'))).toEqual(shape(at('ab', 1)));
   });
 
   test('x never eats a line terminator, and is inert on an empty line', () => {
-    expect(type(at('a\nb', 0), 'x')).toEqual(at('\nb', 0));
-    expect(type(at('\nb', 0), 'x')).toEqual(at('\nb', 0));
-    expect(type(at('', 0), 'x')).toEqual(at('', 0));
-    expect(type(at('ab\r\ncd', 1), 'x')).toEqual(at('a\r\ncd', 0));
+    expect(shape(type(at('a\nb', 0), 'x'))).toEqual(shape(at('\nb', 0)));
+    expect(shape(type(at('\nb', 0), 'x'))).toEqual(shape(at('\nb', 0)));
+    expect(shape(type(at('', 0), 'x'))).toEqual(shape(at('', 0)));
+    expect(shape(type(at('ab\r\ncd', 1), 'x'))).toEqual(shape(at('a\r\ncd', 0)));
   });
 
   test('x deletes a whole code point, never half a surrogate pair', () => {
-    expect(type(at('a😀b', 1), 'x')).toEqual(at('ab', 1));
+    expect(shape(type(at('a😀b', 1), 'x'))).toEqual(shape(at('ab', 1)));
   });
 
   test('dd deletes the line and lands on the next line’s first word', () => {
-    expect(type(at('one\ntwo\nthree', 0), 'd', 'd')).toEqual(at('two\nthree', 0));
-    expect(type(at('one\ntwo\nthree', 4), 'd', 'd')).toEqual(at('one\nthree', 4));
-    expect(type(at('one\n   two', 0), 'd', 'd')).toEqual(at('   two', 3));
+    expect(shape(type(at('one\ntwo\nthree', 0), 'd', 'd'))).toEqual(shape(at('two\nthree', 0)));
+    expect(shape(type(at('one\ntwo\nthree', 4), 'd', 'd'))).toEqual(shape(at('one\nthree', 4)));
+    expect(shape(type(at('one\n   two', 0), 'd', 'd'))).toEqual(shape(at('   two', 3)));
   });
 
   test('dd on the final line takes the terminator before it and lands on the new last line', () => {
-    expect(type(at('one\ntwo', 5), 'd', 'd')).toEqual(at('one', 0));
-    expect(type(at('one\r\ntwo', 6), 'd', 'd')).toEqual(at('one', 0));
-    expect(type(at('  one\ntwo', 7), 'd', 'd')).toEqual(at('  one', 2));
+    expect(shape(type(at('one\ntwo', 5), 'd', 'd'))).toEqual(shape(at('one', 0)));
+    expect(shape(type(at('one\r\ntwo', 6), 'd', 'd'))).toEqual(shape(at('one', 0)));
+    expect(shape(type(at('  one\ntwo', 7), 'd', 'd'))).toEqual(shape(at('  one', 2)));
   });
 
   test('dd on the only line empties the draft', () => {
-    expect(type(at('one', 1), 'd', 'd')).toEqual(at('', 0));
-    expect(type(at('', 0), 'd', 'd')).toEqual(at('', 0));
-    expect(type(at('a\n', 0), 'd', 'd')).toEqual(at('', 0));
+    expect(shape(type(at('one', 1), 'd', 'd'))).toEqual(shape(at('', 0)));
+    expect(shape(type(at('', 0), 'd', 'd'))).toEqual(shape(at('', 0)));
+    expect(shape(type(at('a\n', 0), 'd', 'd'))).toEqual(shape(at('', 0)));
   });
 
   test('d waits for its second key and says so', () => {
     const pending = type(at('one\ntwo', 0), 'd');
-    expect(pending.state).toEqual({ mode: 'normal', operator: 'd', column: null });
+    expect(pending.state).toEqual({ ...NORMAL, operator: 'd' });
     expect(pending.doc.value).toBe('one\ntwo');
   });
 
   test('any key other than d cancels the operator without changing the draft', () => {
-    for (const key of ['x', 'Escape', 'w', 'Enter']) {
+    for (const key of ['x', 'Escape', 'Enter']) {
       const cancelled = type(at('one\ntwo', 0), 'd', key);
-      expect(cancelled).toEqual(at('one\ntwo', 0));
+      expect(shape(cancelled)).toEqual(shape(at('one\ntwo', 0)));
     }
   });
 });
@@ -267,7 +275,7 @@ describe('composer vim engine — what it assumes about the host', () => {
     const outcome = vimReduce(NORMAL, bare('x'), { value: 'abcd', selectionStart: 1, selectionEnd: 3 });
     expect(outcome).toEqual({
       handled: true,
-      state: NORMAL,
+      state: { ...NORMAL, register: { text: 'b', linewise: false }, history: [{ value: 'abcd', caret: 1 }] },
       value: 'acd',
       selectionStart: 1,
       selectionEnd: 1,
@@ -275,8 +283,82 @@ describe('composer vim engine — what it assumes about the host', () => {
   });
 
   test('normalises a caret the host left past the end of a line', () => {
-    expect(type(at('abc', 3), 'x')).toEqual(at('ab', 1));
-    expect(type(at('abc', 99), 'i')).toEqual(at('abc', 2, INSERT));
-    expect(type(at('abc', -5), 'i')).toEqual(at('abc', 0, INSERT));
+    expect(shape(type(at('abc', 3), 'x'))).toEqual(shape(at('ab', 1)));
+    expect(shape(type(at('abc', 99), 'i'))).toEqual(shape(at('abc', 2, INSERT)));
+    expect(shape(type(at('abc', -5), 'i'))).toEqual(shape(at('abc', 0, INSERT)));
+  });
+});
+
+describe('composer vim engine — the keys a modal editor needs', () => {
+  test('Enter moves to the next line’s first word and never sends; on the last line it stays', () => {
+    expect(shape(type(at('one\n  two', 1), 'Enter'))).toEqual(shape(at('one\n  two', 6)));
+    expect(shape(type(at('one', 1), 'Enter'))).toEqual(shape(at('one', 1)));
+  });
+
+  test('Backspace moves left and deletes nothing; Escape cancels a pending key', () => {
+    expect(shape(type(at('abc', 2), 'Backspace'))).toEqual(shape(at('abc', 1)));
+    expect(shape(type(at('abc', 0), 'Backspace'))).toEqual(shape(at('abc', 0)));
+    expect(type(at('abc', 1), 'g', 'Escape').state.operator).toBe(null);
+  });
+
+  test('gg goes to the first line’s first word and G to the last’s; any other key cancels g', () => {
+    expect(shape(type(at('  one\ntwo\n  three', 8), 'g', 'g'))).toEqual(shape(at('  one\ntwo\n  three', 2)));
+    expect(shape(type(at('  one\ntwo\n  three', 1), 'G'))).toEqual(shape(at('  one\ntwo\n  three', 12)));
+    expect(shape(type(at('one\ntwo', 5), 'g', 'x'))).toEqual(shape(at('one\ntwo', 5)));
+  });
+
+  test('dw deletes to the next word, stops at the line end, and does nothing at an empty line', () => {
+    expect(shape(type(at('one two three', 4), 'd', 'w'))).toEqual(shape(at('one three', 4)));
+    expect(shape(type(at('one two\nnext', 4), 'd', 'w'))).toEqual(shape(at('one \nnext', 3)));
+    expect(shape(type(at('one\n\ntwo', 4), 'd', 'w'))).toEqual(shape(at('one\n\ntwo', 4)));
+  });
+
+  test('p and P put back what x, dw and dd cut — a whole line below or above, text after or at the caret', () => {
+    const line = type(at('one\ntwo\nthree', 4), 'd', 'd');
+    expect(line.state.register).toEqual({ text: 'two\n', linewise: true });
+    expect(shape(type(line, 'p'))).toEqual(shape(at('one\nthree\ntwo', 10)));
+    expect(shape(type(line, 'P'))).toEqual(shape(at('one\ntwo\nthree', 4)));
+    const word = type(at('ab cd', 0), 'd', 'w');
+    expect(word.doc.value).toBe('cd');
+    expect(shape(type(word, 'p'))).toEqual(shape(at('cab d', 3)));
+    expect(shape(type(word, 'P'))).toEqual(shape(at('ab cd', 2)));
+    const character = type(at('xy', 1), 'x');
+    expect(shape(type(at('', 0, character.state), 'p'))).toEqual(shape(at('y', 0)));
+  });
+
+  test('p with nothing cut changes nothing; a line put on a register with no terminator still lands whole', () => {
+    expect(shape(type(at('abc', 1), 'p'))).toEqual(shape(at('abc', 1)));
+    const register = { text: 'raw', linewise: true };
+    expect(shape(type(at('a', 0, { ...NORMAL, register }), 'p'))).toEqual(shape(at('a\nraw', 2)));
+  });
+
+  test('u undoes the last change, an insert session counting as one, and stops when there is nothing left', () => {
+    const cut = type(at('one two', 0), 'x', 'x');
+    expect(shape(type(cut, 'u'))).toEqual(shape(at('ne two', 0)));
+    expect(shape(type(cut, 'u', 'u'))).toEqual(shape(at('one two', 0)));
+    expect(shape(type(cut, 'u', 'u', 'u'))).toEqual(shape(at('one two', 0)));
+    // An insert session: `A`, the typed text (applied by the host), then Escape.
+    const opened = type(at('hi', 0), 'A');
+    const typed = { state: opened.state, doc: { value: 'hi there', selectionStart: 8, selectionEnd: 8 } };
+    const back = type(typed, 'Escape', 'u');
+    expect(shape(back)).toEqual(shape(at('hi', 0)));
+  });
+
+  test('an insert session that changed nothing costs u nothing', () => {
+    const idle = type(at('ab', 1), 'x', 'i', 'Escape');
+    expect(idle.state.history).toHaveLength(1);
+    expect(shape(type(idle, 'u'))).toEqual(shape(at('ab', 1)));
+  });
+
+  test('keeps at most a hundred changes', () => {
+    const start = at('x'.repeat(150), 0);
+    const cut = type(start, ...Array.from({ length: 120 }, () => 'x'));
+    expect(cut.state.history).toHaveLength(100);
+  });
+
+  test('the indicator enters normal mode without losing the register or the history', () => {
+    const cut = type(at('abc', 0), 'x', 'i');
+    const normal = normalVimState(cut.state);
+    expect(normal).toEqual({ ...cut.state, mode: 'normal' });
   });
 });

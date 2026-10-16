@@ -88,7 +88,7 @@ describe('MarkdownComposerSettings', () => {
     });
   });
 
-  it('says what is sent is the markdown typed, and keeps the native textarea as the only editor', () => {
+  it('says what is sent is the markdown typed, and holds no editor of its own', () => {
     withBrowser(() => {
       const renderer = render(surface());
       const tree = JSON.stringify(renderer.toJSON());
@@ -102,7 +102,7 @@ describe('MarkdownComposerSettings', () => {
     });
   });
 
-  it('offers Vim-style editing off by default, reports the reader’s choice, and keeps the textarea', () => {
+  it('offers Vim-style editing off by default and reports the reader’s choice', () => {
     withBrowser(() => {
       writeMdComposePref('off');
       const chosen: boolean[] = [];
@@ -134,7 +134,7 @@ describe('MarkdownComposerSettings', () => {
       expect(VIM_COMPOSER_EXPLANATION).not.toContain('visual');
       expect(VIM_COMPOSER_EXPLANATION).toContain('physical keyboard');
       expect(tree).toContain(VIM_COMPOSER_EXPLANATION);
-      expect(tree).toContain('native textarea keeps input');
+      expect(tree).toContain('NORMAL and INSERT shown under the box');
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);
 
       run(() => switches(renderer)[0]?.props.onClick());
