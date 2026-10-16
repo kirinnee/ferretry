@@ -66,7 +66,7 @@ export function ContentsList(props: ContentsListProps) {
           <span className="w-5 shrink-0 text-right font-mono text-meta text-muted">{index + 1}</span>
           <GripVertical size={14} aria-hidden="true" className="hidden shrink-0 text-muted md:inline" />
           <KindTag kind={item.kind} />
-          <span className="min-w-0 flex-1 break-words text-cell font-semibold text-fg">{item.name}</span>
+          <span className="min-w-[7rem] flex-1 break-words text-cell font-semibold text-fg">{item.name}</span>
           <ScopeTag scope={item.scope} />
           {(chips.get(item.reference) ?? []).map(chip => (
             <span

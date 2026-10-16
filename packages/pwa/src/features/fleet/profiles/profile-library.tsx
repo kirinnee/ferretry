@@ -125,7 +125,7 @@ function LibraryRows({
               <GripVertical size={14} aria-hidden="true" className="shrink-0 text-muted" />
             )}
             <KindTag kind={item.kind} />
-            <span className="min-w-0 flex-1 break-words text-cell font-semibold text-fg">{item.name}</span>
+            <span className="min-w-[7rem] flex-1 break-words text-cell font-semibold text-fg">{item.name}</span>
             <ScopeTag scope={item.scope} />
             <Button
               type="button"
