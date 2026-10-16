@@ -2675,6 +2675,41 @@ const HARNESS_LIVE_PANE = [
   '> ',
 ].join('\n');
 
+/**
+ * A BRAND-NEW SESSION nobody has asked anything yet: launched, on turn zero, its harness sitting at
+ * its prompt. `#session-new` renders it; `?harness=codex` swaps the runtime. The pane each harness
+ * paints at an idle prompt carries no status line, which is what makes the page read it as ready.
+ */
+const NEW_SESSION_HARNESS: 'claude' | 'codex' =
+  new URLSearchParams(window.location.search).get('harness') === 'codex' ? 'codex' : 'claude';
+const NEW_SESSION_ID = 'harness-new-session';
+/** `?turn=working|your-turn|needs-input`: the daemon's turn fact for the page; absent is a brand-new session. */
+const NEW_SESSION_TURN = ((value: string | null) =>
+  value === 'working' || value === 'your-turn' || value === 'needs-input' ? value : undefined)(
+  new URLSearchParams(window.location.search).get('turn'),
+);
+const HARNESS_IDLE_PANES: Readonly<Record<'claude' | 'codex', string>> = {
+  claude: [
+    ' ✻ Welcome to Claude Code!',
+    '',
+    '   cwd: /Users/kirin/.config/home-manager',
+    '',
+    '╭──────────────────────────────────────────────────────────────╮',
+    '│ > ',
+    '╰──────────────────────────────────────────────────────────────╯',
+    '  ? for shortcuts',
+  ].join('\n'),
+  codex: [
+    '>_ OpenAI Codex',
+    '',
+    '  directory: ~/.config/home-manager',
+    '',
+    '› Ask Codex to do anything',
+    '',
+    '  100% context left · ? for shortcuts',
+  ].join('\n'),
+};
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
@@ -2693,7 +2728,14 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (answered !== null) return answered;
   }
   if (method === 'GET' && sessionRoute?.rest === 'snapshot')
-    return new Response(HARNESS_LIVE_PANE, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    return new Response(
+      sessionRoute.sessionId === NEW_SESSION_ID && NEW_SESSION_TURN !== 'working'
+        ? HARNESS_IDLE_PANES[NEW_SESSION_HARNESS]
+        : NEW_SESSION_HARNESS === 'codex' && sessionRoute.sessionId === NEW_SESSION_ID
+          ? '• Working (1m 12s • Esc to interrupt)\n\n› '
+          : HARNESS_LIVE_PANE,
+      { headers: { 'content-type': 'text/plain; charset=utf-8' } },
+    );
   // An attachment upload answers with the daemon's own view of the file it now holds.
   if (method === 'POST' && sessionRoute?.rest === 'attachments') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };
@@ -6894,7 +6936,6 @@ const WORKSPACE_SESSION = {
     turn: 12,
     lastActivityAt: '2026-07-31T10:00:00.000Z',
     contextPercent: 61,
-    quota: { fiveHourPercent: 23, weeklyPercent: 41 },
     activity: 'Editing session-chat-page.tsx',
   },
   directory: '/work/ferretry',
@@ -7235,6 +7276,30 @@ const WORKSPACE_CHAT_WIDTH: ChatWidthPreference = (() => {
   return asked === 'balanced' || asked === 'full' ? asked : 'readable';
 })();
 
+/**
+ * The account usage the composer reads, from the same passive feed the app polls: the session
+ * document carries none. `isHidden` pinned true, so one read and no 60s poll behind a screenshot.
+ */
+const harnessUsage = (accounts: readonly { readonly agent: string; readonly five: number; readonly week: number }[]) =>
+  new DaemonUsageStore(
+    {
+      usage: async () => ({
+        at: '2026-10-16T06:00:00.000Z',
+        stale: false,
+        accounts: accounts.map(account => ({
+          agent: account.agent,
+          availability: 'available',
+          fiveHourPercent: account.five,
+          weeklyPercent: account.week,
+          atLimit: false,
+          authOk: true,
+        })),
+      }),
+    } satisfies DaemonUsagePort,
+    { isHidden: () => true },
+  );
+const WORKSPACE_USAGE = harnessUsage([{ agent: 'claude', five: 23, week: 41 }]);
+
 function SessionWorkspaceHarness() {
   useAppViewport();
   const layout = useLayoutMode();
@@ -7283,6 +7348,7 @@ function SessionWorkspaceHarness() {
           readSnapshot={HARNESS_PANE_SNAPSHOT}
           typeIntoConsole={HARNESS_CONSOLE_TYPER}
           session={session}
+          usage={WORKSPACE_USAGE}
           deck={WORKSPACE_TERMINAL_DECK}
           browser={HARNESS_WORKSPACE_BROWSER_DEPENDENCIES}
           workspaceLayouts={WORKSPACE_LAYOUTS}
@@ -7294,6 +7360,84 @@ function SessionWorkspaceHarness() {
         />
       </div>
       {layout === 'drawer' && drawer ? bar('drawer') : null}
+    </div>
+  );
+}
+
+const NEW_SESSION: SessionView = {
+  config: {
+    id: NEW_SESSION_ID,
+    name: 'Gabriela',
+    teammate: 'gabriela',
+    agent: NEW_SESSION_HARNESS === 'claude' ? 'claude-auto-gabriela' : 'codex-auto-gabriela',
+    harness: NEW_SESSION_HARNESS,
+    model: NEW_SESSION_HARNESS === 'claude' ? 'claude-opus-5[1m]' : 'gpt-5.6-codex',
+    modelHint: NEW_SESSION_HARNESS === 'claude' ? 'claude-opus-5[1m]' : 'gpt-5.6-codex',
+    launchReasoningEffort: NEW_SESSION_HARNESS === 'claude' ? 'high' : 'medium',
+    harnessFlags: [],
+    mode: 'interactive',
+    cwd: '/Users/kirin/.config/home-manager',
+    createdAt: '2026-10-16T06:00:00.000Z',
+    updatedAt: '2026-10-16T06:00:00.000Z',
+  },
+  state: {
+    id: NEW_SESSION_ID,
+    status: 'running',
+    turn: NEW_SESSION_TURN === undefined ? 0 : 3,
+    startedAt: '2026-10-16T06:00:00.000Z',
+    ...(NEW_SESSION_TURN === undefined ? {} : { turnState: NEW_SESSION_TURN, turnStateAt: '2026-10-16T06:05:00.000Z' }),
+  },
+  directory: '/Users/kirin/.config/home-manager',
+} as unknown as SessionView;
+/** A short conversation for the turn frames: one ask, one answer. */
+const NEW_SESSION_ENTRIES: readonly TranscriptEntry[] = [
+  { id: 'ns-user', kind: 'user', label: 'You', text: 'Bump the flake inputs and rebuild.' },
+  {
+    id: 'ns-agent',
+    kind: 'assistant',
+    label: 'Gabriela',
+    text: 'Updated `flake.lock` (nixpkgs, home-manager). Running `hms` now to check the rebuild.',
+  },
+];
+const NEW_SESSION_USAGE = harnessUsage([
+  { agent: 'claude-auto-gabriela', five: 18, week: 42 },
+  { agent: 'codex-auto-gabriela', five: 7, week: 23 },
+]);
+const NEW_SESSION_CLIENT: SessionChatClient = {
+  answer: async () => NEW_SESSION,
+  interrupt: async () => NEW_SESSION,
+  resume: async () => NEW_SESSION,
+  send: async () => ({ ...NEW_SESSION, disposition: 'queued' }) as never,
+  stop: async () => NEW_SESSION,
+  runtime: async () => NEW_SESSION,
+};
+
+/** The owner's report, rendered: a session started a moment ago, before anything has been sent. */
+function NewSessionHarness() {
+  useAppViewport();
+  const layout = useLayoutMode();
+  const presentation = layout === 'drawer' ? 'sheet' : 'pane';
+  const [session, setSession] = useState(NEW_SESSION);
+  return (
+    <div
+      className={`kt-shell flex overflow-hidden ${layout === 'drawer' ? 'flex-col' : 'flex-row'}`}
+      id="harness-new-session-page"
+    >
+      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+        <SessionChatPage
+          chatWidth="readable"
+          client={NEW_SESSION_CLIENT}
+          connection={daemon}
+          dictationSettings={DEFAULT_STT_SETTINGS}
+          entries={NEW_SESSION_TURN === undefined ? [] : NEW_SESSION_ENTRIES}
+          onSessionChange={setSession}
+          presentation={presentation}
+          project="home-manager"
+          readSnapshot={HARNESS_PANE_SNAPSHOT}
+          session={session}
+          usage={NEW_SESSION_USAGE}
+        />
+      </div>
     </div>
   );
 }
@@ -7492,6 +7636,8 @@ if (host) {
           <StandaloneSettingsPageHarness />
         ) : window.location.hash === '#session-workspace' ? (
           <SessionWorkspaceHarness />
+        ) : window.location.hash === '#session-new' ? (
+          <NewSessionHarness />
         ) : window.location.hash === '#session-search' ? (
           <SessionSearchHarness />
         ) : window.location.hash === '#browser-full-viewport' ? (

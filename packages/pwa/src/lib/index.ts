@@ -353,6 +353,7 @@ export * from './security-settings-client.ts';
 export * from './send-badge.ts';
 export * from './send-ledger.ts';
 export * from './send-ledger-join.ts';
+export * from './session-activity.ts';
 export * from './session-screens.ts';
 export * from './side-pane-preferences.ts';
 export * from './slash-commands.ts';

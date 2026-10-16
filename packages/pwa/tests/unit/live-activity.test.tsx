@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { LiveActivityLine, type PaneFrameReader, usePaneActivity } from '../../src/components/live-activity.tsx';
-import type { PaneActivity } from '../../src/lib/pane-activity.ts';
+import { type PaneReading, UNREAD_PANE } from '../../src/lib/session-activity.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { settleUntil } from '../support/settle.ts';
@@ -13,7 +13,9 @@ const textOf = (value: unknown): string => {
   return '';
 };
 
-let seen: PaneActivity | null | 'unset' = 'unset';
+let seen: PaneReading | 'unset' = 'unset';
+/** The status line the last reading carried, or `null` when there was none (or nothing was read). */
+const line = () => (seen === 'unset' ? 'unset' : seen.activity);
 function Probe({ read, active }: { readonly read: PaneFrameReader | undefined; readonly active: boolean }) {
   seen = usePaneActivity(read, active, 5);
   return null;
@@ -30,12 +32,25 @@ describe('usePaneActivity', () => {
     let reads = 0;
     const read: PaneFrameReader = async () => frames[Math.min(reads++, 1)] as string;
     const view = render(<Probe active read={read} />);
-    await settleUntil(() => seen !== null && seen !== 'unset' && seen.elapsed === '2s', 'the second frame', runAsync);
+    await settleUntil(
+      () => line() !== null && line() !== 'unset' && (line() as { elapsed?: string }).elapsed === '2s',
+      'the second frame',
+      runAsync,
+    );
+    expect(seen).toMatchObject({ read: true });
     run(() => view.update(<Probe active={false} read={read} />));
-    expect(seen).toBeNull();
+    expect(seen).toEqual(UNREAD_PANE);
     const after = reads;
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 30)));
     expect(reads).toBe(after);
+    run(() => view.unmount());
+  });
+
+  test('a frame with no status line is READ, and carries no activity — an agent at its prompt', async () => {
+    const read: PaneFrameReader = async () => '❯ \n  ? for shortcuts';
+    const view = render(<Probe active read={read} />);
+    await settleUntil(() => seen !== 'unset' && seen.read, 'a first reading', runAsync);
+    expect(seen).toEqual({ read: true, activity: null });
     run(() => view.unmount());
   });
 
@@ -46,9 +61,10 @@ describe('usePaneActivity', () => {
       return '✻ Thinking…';
     };
     const view = render(<Probe active read={read} />);
-    await settleUntil(() => seen !== null && seen !== 'unset', 'a first reading', runAsync);
+    await settleUntil(() => line() !== null && line() !== 'unset', 'a first reading', runAsync);
     fail = true;
-    await settleUntil(() => seen === null, 'the failure to clear the line', runAsync);
+    await settleUntil(() => seen !== 'unset' && !seen.read, 'the failure to clear the line', runAsync);
+    expect(seen).toEqual(UNREAD_PANE);
     run(() => view.unmount());
   });
 
@@ -63,7 +79,7 @@ describe('usePaneActivity', () => {
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 30)));
     expect(reads).toBe(0);
     run(() => view.update(<Probe active read={undefined} />));
-    expect(seen).toBeNull();
+    expect(seen).toEqual(UNREAD_PANE);
     run(() => view.unmount());
   });
 
@@ -76,7 +92,7 @@ describe('usePaneActivity', () => {
     const view = render(<Probe active read={read} />);
     run(() => view.update(<Probe active={false} read={read} />));
     await runAsync(async () => release('✻ Late…'));
-    expect(seen).toBeNull();
+    expect(seen).toEqual(UNREAD_PANE);
     run(() => view.unmount());
   });
 
@@ -89,7 +105,7 @@ describe('usePaneActivity', () => {
     const view = render(<Probe active read={read} />);
     run(() => view.update(<Probe active={false} read={read} />));
     await runAsync(async () => reject(new Error('late')));
-    expect(seen).toBeNull();
+    expect(seen).toEqual(UNREAD_PANE);
     run(() => view.unmount());
   });
 });
