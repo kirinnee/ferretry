@@ -19,6 +19,8 @@ export interface SheetTabSpec<T extends string> {
   readonly key: T;
   readonly label: string;
   readonly icon?: ReactNode;
+  /** After the label: a count a reader should see without opening the tab. */
+  readonly badge?: ReactNode;
 }
 
 /**
@@ -129,6 +131,7 @@ export function SheetTabs<T extends string>({
           >
             {tab.icon}
             {tab.label}
+            {tab.badge}
           </button>
         );
       })}
