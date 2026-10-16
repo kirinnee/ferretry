@@ -9,6 +9,7 @@ import {
   isPromptKnownBusy,
   isRuntimeEndpointUnavailable,
   type RuntimeControlCommand,
+  RuntimeChoiceMenu,
   RuntimeEffortControls,
   type RuntimeModelCatalogSource,
   RuntimeModelChoices,
@@ -18,7 +19,7 @@ import {
 } from '../../src/components/runtime-controls.tsx';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { RuntimeModelCatalog } from '../../src/lib/runtime-models.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
@@ -203,13 +204,14 @@ describe('RuntimeModelChoices', () => {
       />,
     );
 
-    // A labelled list must be a real `<ul>`: `aria-label` on a div has no role.
-    const list = must(screen.container.querySelector('ul'), 'the choice list');
+    // A labelled single-choice menu: the role carries the label a bare div could not.
+    const list = must(screen.container.querySelector('[role="menu"]'), 'the choice list');
     expect(list.getAttribute('aria-label')).toBe('Switch claude model in place');
-    expect(list.querySelectorAll('li').length).toBe(2);
+    expect(list.querySelectorAll('[role="menuitemradio"]').length).toBe(2);
 
     const current = byLabel(screen.container, 'Switch model in place to claude-sonnet-5, current');
-    expect(current.getAttribute('aria-current')).toBe('true');
+    expect(current.getAttribute('aria-checked')).toBe('true');
+    expect(current.getAttribute('role')).toBe('menuitemradio');
     // label === value, so the mono second line is suppressed.
     expect(current.querySelectorAll('.mono').length).toBe(0);
 
@@ -272,7 +274,8 @@ describe('RuntimeReasoningChoices', () => {
     expect(medium.textContent).toContain('balanced');
 
     const current = byLabel(screen.container, 'Set GPT-5.6 reasoning to Extra high, current');
-    expect(current.getAttribute('aria-current')).toBe('true');
+    expect(current.getAttribute('aria-checked')).toBe('true');
+    expect(current.getAttribute('role')).toBe('menuitemradio');
 
     await click(current);
     expect(chosen).toEqual(['xhigh']);
@@ -284,9 +287,9 @@ describe('ClaudeEffortChoices', () => {
   test('offers exactly the four persistable levels as real list items', async () => {
     const chosen: string[] = [];
     const screen = await mount(<ClaudeEffortChoices disabled={false} onChoose={level => chosen.push(level)} />);
-    const list = must(screen.container.querySelector('ul'), 'the level list');
+    const list = must(screen.container.querySelector('[role="menu"]'), 'the level list');
     expect(list.getAttribute('aria-label')).toBe('Set Claude reasoning effort');
-    expect(list.querySelectorAll('li').length).toBe(CLAUDE_EFFORT_LEVELS.length);
+    expect(list.querySelectorAll('[role="menuitemradio"]').length).toBe(CLAUDE_EFFORT_LEVELS.length);
     await click(byLabel(screen.container, 'Set reasoning effort to xhigh'));
     expect(chosen).toEqual(['xhigh']);
     await screen.unmount();
@@ -694,14 +697,24 @@ describe('RuntimeEffortControls', () => {
   test('says the observed model left the catalog rather than guessing a level', async () => {
     const codex = view({ config: { harness: 'codex' }, state: { observedModel: 'gpt-4' } });
     const screen = await mount(<RuntimeEffortControls {...props({ view: codex })} />);
-    expect(screen.container.textContent).toContain('The observed model (gpt-4) is not in this account');
+    expect(screen.container.textContent).toContain('The running model (gpt-4) is not in this account');
     await screen.unmount();
   });
 
-  test('names the missing observation when the daemon reported none at all', async () => {
-    const codex = view({ config: { harness: 'codex' } });
+  test('names the missing model when neither the daemon nor the launch reported one', async () => {
+    const codex = view({ config: { harness: 'codex', modelHint: undefined } });
     const screen = await mount(<RuntimeEffortControls {...props({ view: codex })} />);
-    expect(screen.container.textContent).toContain('The observed model (unknown)');
+    expect(screen.container.textContent).toContain('The running model (unknown)');
+    await screen.unmount();
+  });
+
+  test('offers the launched model levels, checking the launch level, before Codex reports either', async () => {
+    const codex = view({ config: { harness: 'codex', model: 'gpt-5.6', launchReasoningEffort: 'xhigh' } });
+    const screen = await mount(<RuntimeEffortControls {...props({ view: codex })} />);
+    await interact(() => undefined);
+    expect(byLabel(screen.container, 'Set GPT-5.6 reasoning to Extra high, current').getAttribute('aria-checked')).toBe(
+      'true',
+    );
     await screen.unmount();
   });
 
@@ -783,6 +796,167 @@ describe('RuntimeEffortControls', () => {
 
     await screen.render(<RuntimeEffortControls {...base} daemon={beta} />);
     expect(screen.container.textContent).not.toContain('Effort set to high');
+    await screen.unmount();
+  });
+});
+
+describe('RuntimeChoiceMenu', () => {
+  const items = (chosen: string[]) =>
+    ['low', 'medium', 'high'].map(value => ({
+      key: value,
+      label: effortDisplayName(value),
+      ariaLabel: `Pick ${value}`,
+      checked: value === 'medium',
+      ...(value === 'high' ? { description: 'Thinks the longest' } : {}),
+      onSelect: () => chosen.push(value),
+    }));
+  const radios = (container: HTMLElement) => [
+    ...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+  ];
+
+  test('checks the value in force, carries descriptions, and lands focus on the checked choice', async () => {
+    const screen = await mount(
+      <RuntimeChoiceMenu ariaLabel="Pick a level" disabled={false} items={items([])} presentation="popover" />,
+    );
+    const menu = must(screen.container.querySelector('[role="menu"]'), 'the menu');
+    expect(menu.getAttribute('aria-label')).toBe('Pick a level');
+    expect(radios(screen.container).map(radio => radio.getAttribute('aria-checked'))).toEqual([
+      'false',
+      'true',
+      'false',
+    ]);
+    expect(radios(screen.container).map(radio => radio.tabIndex)).toEqual([-1, 0, -1]);
+    expect(document.activeElement).toBe(must(radios(screen.container)[1], 'the checked choice'));
+    expect(radios(screen.container)[2]!.textContent).toContain('Thinks the longest');
+    expect(radios(screen.container)[2]!.getAttribute('title')).toBe('Thinks the longest');
+    // A pointer-sized row in the popover, not the 44px thumb floor of the sheet.
+    expect(radios(screen.container)[0]!.className).toContain('min-h-[34px]');
+    await screen.unmount();
+  });
+
+  test('moves with the arrow keys, Home and End, wrapping at the ends, and chooses on Enter or Space', async () => {
+    const chosen: string[] = [];
+    const screen = await mount(<RuntimeChoiceMenu ariaLabel="Pick" disabled={false} items={items(chosen)} />);
+    const [low, medium, high] = radios(screen.container) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
+    expect(low.className).toContain('min-h-[44px]');
+
+    await interact(() => pressKey(medium, 'ArrowDown'));
+    expect(document.activeElement).toBe(high);
+    expect(high.tabIndex).toBe(0);
+    await interact(() => pressKey(high, 'ArrowDown'));
+    expect(document.activeElement).toBe(low);
+    await interact(() => pressKey(low, 'ArrowUp'));
+    expect(document.activeElement).toBe(high);
+    await interact(() => pressKey(high, 'ArrowUp'));
+    expect(document.activeElement).toBe(medium);
+    await interact(() => pressKey(medium, 'Home'));
+    expect(document.activeElement).toBe(low);
+    await interact(() => pressKey(low, 'End'));
+    expect(document.activeElement).toBe(high);
+    await interact(() => pressKey(high, 'Tab'));
+    expect(document.activeElement).toBe(high);
+
+    await interact(() => pressKey(high, 'Enter'));
+    await interact(() => pressKey(high, ' '));
+    expect(chosen).toEqual(['high', 'high']);
+    await screen.unmount();
+  });
+
+  test('starts from the ends when focus is not on a choice, and does nothing when every choice is disabled', async () => {
+    const chosen: string[] = [];
+    const screen = await mount(<RuntimeChoiceMenu ariaLabel="Pick" disabled={false} items={items(chosen)} />);
+    const menu = must(screen.container.querySelector<HTMLElement>('[role="menu"]'), 'the menu');
+    const [low, , high] = radios(screen.container) as [HTMLButtonElement, HTMLButtonElement, HTMLButtonElement];
+    (document.activeElement as HTMLElement | null)?.blur();
+    await interact(() => pressKey(menu, 'ArrowDown'));
+    expect(document.activeElement).toBe(low);
+    (document.activeElement as HTMLElement | null)?.blur();
+    await interact(() => pressKey(menu, 'ArrowUp'));
+    expect(document.activeElement).toBe(high);
+
+    await screen.render(<RuntimeChoiceMenu ariaLabel="Pick" disabled items={items(chosen)} />);
+    await interact(() => pressKey(menu, 'Enter'));
+    await interact(() => pressKey(menu, 'ArrowDown'));
+    expect(chosen).toEqual([]);
+    await screen.unmount();
+  });
+
+  test('puts the tab stop on the first choice when nothing is in force', async () => {
+    const unchecked = items([]).map(item => ({ ...item, checked: false }));
+    const screen = await mount(<RuntimeChoiceMenu ariaLabel="Pick" disabled={false} items={unchecked} />);
+    expect(radios(screen.container).map(radio => radio.tabIndex)).toEqual([0, -1, -1]);
+    await screen.unmount();
+  });
+});
+
+describe('popover presentation', () => {
+  const base = {
+    api: recorder().api,
+    canControl: true,
+    catalogs: resolved(claudeCatalog),
+    daemon: alpha,
+    newRequestId: nextRequestId,
+    onClose: () => undefined,
+    presentation: 'popover' as const,
+    view: view(),
+  };
+
+  test('the model popover drops the heading and prose but keeps the checked choices', async () => {
+    const screen = await mount(
+      <RuntimeModelControls {...base} open view={view({ state: { observedModel: 'claude-opus-5' } })} />,
+    );
+    await interact(() => undefined);
+    expect(screen.container.querySelector('h3')).toBeNull();
+    expect(screen.container.textContent).not.toContain('Only this account’s advertised Claude choices');
+    const current = byLabel(screen.container, 'Switch model in place to Opus 5, current');
+    expect(current.getAttribute('aria-checked')).toBe('true');
+    expect(current.textContent).toContain('The big one');
+    await screen.unmount();
+  });
+
+  test('checks the launched model before the harness has reported one', async () => {
+    const launched = view({ config: { model: 'claude-sonnet-5' }, state: { observedModel: undefined } });
+    const screen = await mount(<RuntimeModelControls {...base} open view={launched} />);
+    await interact(() => undefined);
+    expect(
+      byLabel(screen.container, 'Switch model in place to claude-sonnet-5, current').getAttribute('aria-checked'),
+    ).toBe('true');
+    await screen.unmount();
+  });
+
+  test('the Codex reasoning step in a popover drops its explanation', async () => {
+    const codex = view({ config: { harness: 'codex' }, state: { observedModel: 'gpt-5.6' } });
+    const screen = await mount(<RuntimeModelControls {...base} catalogs={resolved(codexCatalog)} open view={codex} />);
+    await interact(() => undefined);
+    await click(byText(screen.container, 'GPT-5.6'));
+    expect(screen.container.textContent).toContain('Back to models');
+    expect(screen.container.textContent).not.toContain('The switch stays pending until Codex reports');
+    await screen.unmount();
+  });
+
+  test('the Claude effort popover checks the level in force and says it persists in one line', async () => {
+    const screen = await mount(<RuntimeEffortControls {...base} claudeEffort="high" />);
+    expect(screen.container.querySelector('h3')).toBeNull();
+    expect(screen.container.textContent).toContain('Also saved as this account’s default for new sessions.');
+    expect(screen.container.textContent).not.toContain('Claude does not echo the level back');
+    expect(byLabel(screen.container, 'Set reasoning effort to high').getAttribute('aria-checked')).toBe('true');
+    expect(byLabel(screen.container, 'Set reasoning effort to low').getAttribute('aria-checked')).toBe('false');
+    expect(document.activeElement).toBe(byLabel(screen.container, 'Set reasoning effort to high'));
+    await screen.unmount();
+  });
+
+  test('the Codex effort popover lists the running model levels without the explanation', async () => {
+    const codex = view({
+      config: { harness: 'codex' },
+      state: { observedModel: 'gpt-5.6', observedReasoningEffort: 'xhigh' },
+    });
+    const screen = await mount(<RuntimeEffortControls {...base} catalogs={resolved(codexCatalog)} view={codex} />);
+    await interact(() => undefined);
+    expect(screen.container.textContent).not.toContain('The switch stays pending until Codex reports');
+    expect(byLabel(screen.container, 'Set GPT-5.6 reasoning to Extra high, current').getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    expect(byLabel(screen.container, 'Set GPT-5.6 reasoning to Medium').textContent).toContain('balanced');
     await screen.unmount();
   });
 });

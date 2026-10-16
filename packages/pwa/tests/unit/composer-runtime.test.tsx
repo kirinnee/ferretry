@@ -10,9 +10,11 @@ import {
   launchedModel,
   runtimeEffortReadout,
   runtimeModelChipLabel,
+  runtimePopoverPosition,
   runtimeSwitchDisabledReason,
 } from '../../src/components/composer-runtime.tsx';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { pushEscapeLayer } from '../../src/hooks/use-dialog-focus.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 
 /**
  * The bar's contract is what its two chips CLAIM: what the harness reported,
@@ -522,6 +524,266 @@ describe('ComposerRuntime sheets', () => {
       should(modelChip(view).getAttribute('aria-expanded')).equal('false');
     } finally {
       await view.unmount();
+    }
+  });
+});
+
+describe('runtimePopoverPosition', () => {
+  const viewport = { width: 1280, height: 800 };
+  const size = { width: 300, height: 200 };
+
+  test('should open upward, left-aligned with the chip and clear of it', () => {
+    // Assert
+    should(runtimePopoverPosition({ left: 100, top: 700, bottom: 720 }, size, viewport)).eql({ left: 100, top: 494 });
+  });
+
+  test('should drop below the chip when there is no room above it', () => {
+    // Assert
+    should(runtimePopoverPosition({ left: 100, top: 40, bottom: 60 }, size, viewport)).eql({ left: 100, top: 66 });
+  });
+
+  test('should stay on screen at the right edge', () => {
+    // Assert
+    should(runtimePopoverPosition({ left: 1200, top: 700, bottom: 720 }, size, viewport).left).equal(900);
+  });
+});
+
+describe('ComposerRuntime presentations', () => {
+  const sheetOf = (): Element | null => document.querySelector('[data-bottom-sheet]');
+  const popoverOf = (): HTMLElement | null => document.querySelector<HTMLElement>('[data-runtime-popover]');
+  const choices = (lifecycle: RuntimeSwitchLifecycle) => (
+    <div aria-label="choices" role="menu">
+      <button role="menuitemradio" aria-checked type="button">
+        {lifecycle.presentation}
+      </button>
+    </div>
+  );
+  const bar = (presentation?: 'sheet' | 'popover', view = session({})) => (
+    <ComposerRuntime
+      busy={false}
+      canControl
+      {...(presentation === undefined ? {} : { presentation })}
+      renderEffortControls={choices}
+      renderModelControls={choices}
+      view={view}
+    />
+  );
+
+  test('should keep the bottom sheet on a phone, which is the default', async () => {
+    // Arrange
+    const view = await mount(bar());
+
+    // Act
+    await interact(() => modelChip(view).click());
+
+    // Assert
+    should(sheetOf()).not.be.null();
+    should(popoverOf()).be.null();
+    should(must(document.querySelector('[role="menuitemradio"]'), 'the body').textContent).equal('sheet');
+    await view.unmount();
+  });
+
+  test('should anchor a small popover at the chip on a desktop, not a sheet', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+
+    // Act
+    await interact(() => modelChip(view).click());
+
+    // Assert
+    const popover = must(popoverOf(), 'the popover');
+    should(sheetOf()).be.null();
+    should(popover.getAttribute('role')).equal('dialog');
+    should(popover.getAttribute('aria-modal')).be.null();
+    should(popover.getAttribute('aria-label')).equal('Switch model');
+    should(popover.id).equal(modelChip(view).getAttribute('aria-controls'));
+    should(popover.className).containEql('fixed');
+    should(popover.style.visibility).equal('visible');
+    should(popover.textContent).containEql('claude');
+    should(must(popover.querySelector('[role="menuitemradio"]'), 'the body').textContent).equal('popover');
+    await view.unmount();
+  });
+
+  test('should hand the body the Claude effort the chip names', async () => {
+    // Arrange
+    let captured: RuntimeSwitchLifecycle | undefined;
+    const view = await mount(
+      <ComposerRuntime
+        busy={false}
+        canControl
+        presentation="popover"
+        renderEffortControls={lifecycle => {
+          captured = lifecycle;
+          return null;
+        }}
+        view={session({ launchReasoningEffort: 'high' })}
+      />,
+    );
+
+    // Act
+    await interact(() => effortChip(view).click());
+
+    // Assert
+    should(must(captured, 'the lifecycle').claudeEffort).equal('high');
+    should(must(popoverOf(), 'the popover').getAttribute('aria-label')).equal('Reasoning effort');
+    await interact(() => must(captured, 'the lifecycle').onClaudeEffortSent('low'));
+    should(must(captured, 'the lifecycle').claudeEffort).equal('low');
+    await view.unmount();
+  });
+
+  test('should lift itself above the chip again when its body grows', async () => {
+    // Arrange — a resize observer the test can fire, because the body grows on
+    // its own render (a catalog arriving) without re-rendering this shell.
+    const original = globalThis.ResizeObserver;
+    const fired: (() => void)[] = [];
+    const disconnected: boolean[] = [];
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        fired.push(callback);
+      }
+      observe(): void {}
+      disconnect(): void {
+        disconnected.push(true);
+      }
+      unobserve(): void {}
+    } as unknown as typeof ResizeObserver;
+    const view = await mount(bar('popover'));
+    try {
+      await interact(() => modelChip(view).click());
+      const popover = must(popoverOf(), 'the popover');
+      modelChip(view).getBoundingClientRect = () => ({ left: 100, top: 700, bottom: 720 }) as DOMRect;
+      Object.defineProperty(popover, 'offsetHeight', { configurable: true, value: 200 });
+      Object.defineProperty(popover, 'offsetWidth', { configurable: true, value: 300 });
+
+      // Act
+      await interact(() => must(fired[0], 'the observer callback')());
+
+      // Assert
+      should(popover.style.top).equal('494px');
+      should(popover.style.left).equal('100px');
+      await interact(() => modelChip(view).click());
+      should(disconnected).eql([true]);
+    } finally {
+      await view.unmount();
+      globalThis.ResizeObserver = original;
+    }
+  });
+
+  test('should close on Escape and hand focus back to the chip', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+    await interact(() => effortChip(view).click());
+
+    // Act
+    await interact(() => pressKey(must(document.activeElement, 'the focus'), 'Escape'));
+
+    // Assert
+    should(popoverOf()).be.null();
+    should(effortChip(view).getAttribute('aria-expanded')).equal('false');
+    should(document.activeElement).equal(effortChip(view));
+    await view.unmount();
+  });
+
+  test('should leave Escape to a layer opened over it', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+    await interact(() => modelChip(view).click());
+    const release = pushEscapeLayer({});
+
+    // Act
+    try {
+      await interact(() => pressKey(document, 'Escape'));
+      await interact(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    } finally {
+      release();
+    }
+
+    // Assert
+    should(popoverOf()).not.be.null();
+    await view.unmount();
+  });
+
+  test('should ignore keys other than Escape', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+    await interact(() => modelChip(view).click());
+
+    // Act
+    await interact(() => pressKey(document, 'a'));
+
+    // Assert
+    should(popoverOf()).not.be.null();
+    await view.unmount();
+  });
+
+  test('should close on an outside press but not on a press inside it or on its chip', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+    await interact(() => modelChip(view).click());
+    const press = (target: EventTarget) =>
+      interact(() => target.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+
+    // Act + Assert
+    await press(must(popoverOf(), 'the popover'));
+    should(popoverOf()).not.be.null();
+    await press(modelChip(view));
+    should(popoverOf()).not.be.null();
+    await press(document.body);
+    should(popoverOf()).be.null();
+    should(modelChip(view).getAttribute('aria-expanded')).equal('false');
+    await view.unmount();
+  });
+
+  test('should toggle shut from its own chip', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+    await interact(() => modelChip(view).click());
+
+    // Act
+    await interact(() => modelChip(view).click());
+
+    // Assert
+    should(popoverOf()).be.null();
+    await view.unmount();
+  });
+
+  test('should close when the window resizes, because the chip it was placed against moved', async () => {
+    // Arrange
+    const view = await mount(bar('popover'));
+    await interact(() => modelChip(view).click());
+
+    // Act
+    await interact(() => window.dispatchEvent(new Event('resize')));
+
+    // Assert
+    should(popoverOf()).be.null();
+    await view.unmount();
+  });
+
+  test('should close when focus leaves for the page, but not when it moves inside or to the chip', async () => {
+    // Arrange
+    const outside = document.createElement('button');
+    document.body.appendChild(outside);
+    const view = await mount(bar('popover'));
+    await interact(() => modelChip(view).click());
+    const popover = must(popoverOf(), 'the popover');
+    const item = must(popover.querySelector<HTMLElement>('[role="menuitemradio"]'), 'the item');
+    const blur = (relatedTarget: EventTarget | null) =>
+      interact(() => item.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget })));
+
+    try {
+      // Act + Assert
+      await blur(null);
+      should(popoverOf()).not.be.null();
+      await blur(popover);
+      should(popoverOf()).not.be.null();
+      await blur(modelChip(view));
+      should(popoverOf()).not.be.null();
+      await blur(outside);
+      should(popoverOf()).be.null();
+    } finally {
+      await view.unmount();
+      outside.remove();
     }
   });
 });
