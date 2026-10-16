@@ -194,7 +194,7 @@ import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/
 import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
-import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
@@ -226,6 +226,7 @@ import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-setti
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
+import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BrandMark } from '../src/shell/brand-mark.tsx';
@@ -6755,35 +6756,84 @@ const WORKSPACE_CLIENT: SessionChatClient = {
  * regime, so 390 gets the sheet and 1440 gets the non-modal pane without the
  * driver having to say which.
  */
+/** The other agents on this harness machine, as the sessions bar lists them beside the workspace. */
+const workspacePeer = (
+  id: string,
+  teammate: string,
+  name: string,
+  cwd: string,
+  status: SessionView['state']['status'],
+  extra: Partial<SessionView['state']> = {},
+): SessionView =>
+  ({
+    ...WORKSPACE_SESSION,
+    config: { ...WORKSPACE_SESSION.config, id, teammate, name, label: name, cwd },
+    state: { ...WORKSPACE_SESSION.state, id, status, lastActivityAt: new Date(Date.now() - 600_000).toISOString(), ...extra },
+  }) as SessionView;
+
+const WORKSPACE_FLEET: readonly SessionView[] = [
+  { ...WORKSPACE_SESSION, config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' } } as SessionView,
+  workspacePeer('harness-marin', 'marin', 'Flaky test fix', '/work/ferretry', 'completed'),
+  workspacePeer('harness-jaylynn', 'jaylynn', 'Main agent', '/work/home-manager', 'running'),
+  workspacePeer('harness-maryah', 'maryah', 'Diene work', '/work/home-manager', 'awaiting_user', {
+    needsHuman: 'Two old sign-ins are holding port 1455',
+  }),
+  workspacePeer('harness-kamila', 'kamila', 'Nitroso project', '/work/nitroso', 'waiting'),
+];
+
+const WORKSPACE_MACHINES = [
+  { daemonId: daemon.daemonId, name: 'AMER-D22HXVF42W' },
+  { daemonId: 'harness-other-daemon' as DaemonId, name: 'kirin-box' },
+];
+
 function SessionWorkspaceHarness() {
   useAppViewport();
-  const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
-  const [session, setSession] = useState(WORKSPACE_SESSION);
+  const layout = useLayoutMode();
+  const presentation = layout === 'drawer' ? 'sheet' : 'pane';
+  const [session, setSession] = useState({
+    ...WORKSPACE_SESSION,
+    config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+  } as SessionView);
+  const [drawer, setDrawer] = useState(window.location.search.includes('drawer'));
+  const bar = (shape: 'column' | 'rail' | 'drawer') => (
+    <SessionsBar
+      active={null}
+      activeSessionId={session.config.id}
+      daemonId={daemon.daemonId}
+      machineName="AMER-D22HXVF42W"
+      machines={WORKSPACE_MACHINES}
+      onAddMachine={() => {}}
+      onClose={() => setDrawer(false)}
+      onCollapse={() => {}}
+      onNavigate={() => {}}
+      onOpenPalette={() => {}}
+      presentation={shape}
+      projects={[]}
+      {...(shape === 'drawer' ? {} : { search: <SessionSearchControl shortcutTarget /> })}
+      sessions={WORKSPACE_FLEET}
+    />
+  );
   return (
-    <div className="kt-shell flex flex-col overflow-hidden" id="harness-session-workspace-page">
-      <AppBar
-        crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'harness-workspace' }]}
-        daemon={daemon.daemonId}
-        onOpenPalette={() => {}}
-        onOpenSidebar={() => {}}
-        sessionCount={7}
-        connectionStatus="open"
-        themeToggle={<Button size="sm">Theme</Button>}
-        currentSessionSearch={<SessionSearchControl shortcutTarget />}
-      />
+    <div
+      className={`kt-shell flex overflow-hidden ${layout === 'drawer' ? 'flex-col' : 'flex-row'}`}
+      id="harness-session-workspace-page"
+    >
+      {layout === 'drawer' ? null : bar(layout === 'rail' ? 'rail' : 'column')}
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
           chatWidth="readable"
           client={WORKSPACE_CLIENT}
           connection={daemon}
           entries={WORKSPACE_ENTRIES}
-          onBack={() => {}}
           onSessionChange={setSession}
+          {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}
+          project="ferretry"
           readSnapshot={HARNESS_PANE_SNAPSHOT}
           session={session}
         />
       </div>
+      {layout === 'drawer' && drawer ? bar('drawer') : null}
     </div>
   );
 }

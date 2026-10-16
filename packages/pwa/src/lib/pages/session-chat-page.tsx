@@ -21,17 +21,13 @@ import {
   RuntimeModelControls,
 } from '../../components/runtime-controls.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
-import { RosterSessionHeader, SessionHeader } from '../../components/session-header.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
+import { SessionTopBar } from '../../components/session-top-bar.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
-import {
-  type AttentionActionClient,
-  AttentionActionModal,
-  AttentionActionTrigger,
-} from '../../features/attention/attention-action-modal.tsx';
+import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
 import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
@@ -39,7 +35,8 @@ import { SessionSkillsSurface } from '../../features/skills/session-skills-surfa
 import type { SkillsCatalogLoader } from '../../features/skills/skills-api.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
-import { type SessionAction, sessionActionSpecs } from '../../shell/session-actions.ts';
+import type { ContextMenuItem } from '../../shell/context-menu.tsx';
+import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import { type SidePaneSurfaceProps, SidePaneWorkspace, useSidePane } from '../../shell/side-pane.tsx';
 import {
   openSidePaneFileTab,
@@ -130,7 +127,6 @@ export interface SessionChatPageProps {
   readonly composerVimMode?: boolean;
   /** Carrier-bound transport for the composer's daemon-backed autocomplete. */
   readonly composerFetch?: DaemonFetch;
-  readonly onBack: (daemonId: string) => void;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
   /** Test seam for the read-only terminal fallback. */
@@ -162,44 +158,25 @@ export interface SessionChatPageProps {
    * than a chip claiming a state nobody is measuring.
    */
   readonly liveStream?: LiveStreamIndicatorProps;
+  /** The project this session's folder belongs to, named the way the sessions bar groups it. */
+  readonly project?: string | null;
+  /** Phone only: opens the sessions drawer the bar's ☰ stands for. */
+  readonly onOpenSessions?: () => void;
+  /** Writes the session id to the clipboard. Absent: the browser's own clipboard. */
+  readonly copyText?: (text: string) => Promise<void>;
 }
+
+/** The browser's clipboard, or a refusal a reader can be told about. */
+const browserCopyText = async (text: string): Promise<void> => {
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  if (clipboard === undefined) throw new Error('this browser offers no clipboard here');
+  await clipboard.writeText(text);
+};
 
 const actionFailureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
 const sessionWorkspaceTab = (tab: SidePaneTabDefinition): boolean =>
   tab.id !== 'browser' && tab.instance?.kind !== 'browser';
-
-/**
- * The pane openers — ONE compact row, on a phone as well as a desktop.
- *
- * `<fieldset>` rather than `role="toolbar"`: a toolbar promises single-tab-stop
- * roving arrow navigation, and these are plain buttons with none of it, so the
- * role was a claim the markup did not keep. A fieldset carries the same implicit
- * grouping, takes an accessible name, and Tailwind's preflight zeroes its box —
- * so nothing moves.
- *
- * Browser automation is stated, not implied. It used to be a DISABLED button
- * whose only explanation lived in a `title`: unreachable by keyboard, invisible
- * on touch, and unread by most screen readers on a disabled control. The reason
- * is now ordinary visible text in the row, which is what makes absence legible.
- */
-function PaneLaunchers() {
-  const pane = useSidePane();
-  if (pane === null) return null;
-  return (
-    <fieldset aria-label="Workspace panes" className="flex min-w-0 flex-wrap items-center gap-1">
-      <Button size="sm" onClick={event => pane.open('files', event.currentTarget)} type="button">
-        Files
-      </Button>
-      <Button size="sm" onClick={event => pane.open('terminals', event.currentTarget)} type="button">
-        Terminal
-      </Button>
-      <span className="min-w-0 text-2xs text-muted" data-pane-unavailable="browser">
-        No browser pane: this daemon runs no browser worker.
-      </span>
-    </fieldset>
-  );
-}
 
 /**
  * Codex's native model picker lives in the Terminal view, and the runtime sheet
@@ -398,7 +375,6 @@ export function SessionChatPage({
   composerVimMode = false,
   composerFetch,
   dictationSettings,
-  onBack,
   onSessionChange,
   onRefresh,
   readSnapshot,
@@ -407,6 +383,9 @@ export function SessionChatPage({
   onNavigate,
   attention,
   liveStream,
+  project = null,
+  onOpenSessions,
+  copyText = browserCopyText,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const search = useSessionSearch();
@@ -682,48 +661,102 @@ export function SessionChatPage({
     };
   }, [client, publish]);
 
-  // `<fieldset>`, not `role="toolbar"`: these are plain wrapping buttons with no
-  // roving tabindex and no arrow handling, and a toolbar role promises both.
-  // Rendered in exactly ONE place per presentation — the row on a desktop, the
-  // details sheet on a phone — so there is never a second copy of a control that
-  // mutates the session.
-  const lifecycleActions = (
-    <fieldset aria-label="Session lifecycle" className="flex min-w-0 flex-wrap items-center gap-1">
-      {actions.map(spec => (
-        <Button
-          disabled={pendingAction !== null}
-          key={spec.action}
-          onClick={() => void runAction(spec.action)}
-          size="sm"
-          type="button"
-          variant={spec.danger ? 'danger' : 'outline'}
-        >
-          {pendingAction === spec.action
-            ? `${spec.label.replace(/…$/u, '')}…`
-            : spec.action === 'stop' && confirmStop
-              ? 'Confirm stop'
-              : spec.label}
-        </Button>
-      ))}
-      {confirmStop ? (
-        <Button onClick={() => setConfirmStop(false)} size="sm" type="button" variant="ghost">
-          Cancel
-        </Button>
-      ) : null}
-    </fieldset>
+  /**
+   * THE BAR'S LIFECYCLE BUTTONS: Interrupt and Stop while a session runs, Start once it has stopped.
+   *
+   * Short words, because they sit beside the agent's name rather than in a row of their own. A phone
+   * keeps ONE of them — the one a reader reaches for mid-turn — and Stop moves into ⋯, which is also
+   * where moving to another login lives on every width. Stop still asks first: choosing it, from either
+   * place, turns the bar's buttons into Confirm stop and Cancel.
+   */
+  const barActions = actions.filter(
+    spec => spec.action === 'interrupt' || spec.action === 'resume' || (spec.action === 'stop' && !compact),
+  );
+  const barLabel = (spec: SessionActionSpec): string =>
+    spec.action === 'interrupt' ? 'Interrupt' : spec.action === 'resume' ? 'Start' : 'Stop';
+  const lifecycleActions = confirmStop ? (
+    <>
+      <Button
+        data-session-action="confirm-stop"
+        disabled={pendingAction !== null}
+        onClick={() => void runAction('stop')}
+        size="sm"
+        type="button"
+        variant="danger"
+      >
+        {pendingAction === 'stop' ? 'Stopping…' : 'Confirm stop'}
+      </Button>
+      <Button onClick={() => setConfirmStop(false)} size="sm" type="button" variant="ghost">
+        Cancel
+      </Button>
+    </>
+  ) : (
+    barActions.map(spec => (
+      <Button
+        aria-label={spec.label}
+        data-session-action={spec.action}
+        disabled={pendingAction !== null}
+        key={spec.action}
+        onClick={() => void runAction(spec.action)}
+        size="sm"
+        type="button"
+        variant={spec.danger ? 'danger' : 'outline'}
+      >
+        {pendingAction === spec.action ? `${barLabel(spec)}…` : barLabel(spec)}
+      </Button>
+    ))
   );
   const actionAlert = (
     <p className={actionError === null ? 'sr-only' : 'm-0 px-3 py-1 text-ui text-err'} role="alert">
       {actionError === null ? '' : `Session action failed: ${actionError}`}
     </p>
   );
-  const headerProps = {
-    daemonId: connection.daemonId,
-    session,
-    onBack,
-    onOpenFleet: onBack,
-    onOpenDetails: () => setDetailsOpen(true),
+  const openPane = (id: string): void => {
+    paneHost.current?.open(id);
   };
+  const copySessionId = (): void => {
+    setActionError(null);
+    copyText(session.config.id).catch((reason: unknown) =>
+      setActionError(`could not copy the session id: ${actionFailureMessage(reason)}`),
+    );
+  };
+  /**
+   * ⋯ — everything that used to sit on screen permanently. Files and the terminals open the side pane
+   * exactly as the old pane openers did; Stop is here on a phone only, where the bar keeps one button.
+   */
+  const menuItems: readonly ContextMenuItem[] = [
+    { key: 'files', label: 'Files', onSelect: () => openPane('files') },
+    { key: 'terminals', label: 'Terminal', onSelect: () => openPane('terminals') },
+    { key: 'analytics', label: 'Analytics for this session', onSelect: () => openPane('analytics') },
+    ...(attention === undefined
+      ? []
+      : [{ key: 'attention', label: 'Attention', onSelect: () => openAttention(null) }]),
+    ...actions
+      .filter(spec => spec.action === 'migrate')
+      .map(spec => ({ key: spec.action, label: 'Move to another login…', onSelect: () => void runAction(spec.action) })),
+    { key: 'copy-id', label: 'Copy session id', onSelect: copySessionId },
+    { key: 'details', label: 'Session details', onSelect: () => setDetailsOpen(true) },
+    ...(compact
+      ? actions
+          .filter(spec => spec.action === 'stop')
+          .map(spec => ({ key: spec.action, label: spec.label, danger: true, onSelect: () => void runAction(spec.action) }))
+      : []),
+  ];
+  const needsYou =
+    attention === undefined || attentionItems.length === 0 ? null : (
+      <button
+        aria-controls={attentionId}
+        aria-expanded={attentionOpen}
+        aria-label={`Needs you: ${attentionItems.length} unanswered`}
+        className="fy-needs-you"
+        data-needs-you={attentionItems.length}
+        id={`${attentionId}-trigger`}
+        onClick={event => openAttention(null, event.currentTarget)}
+        type="button"
+      >
+        needs you
+      </button>
+    );
 
   return (
     <SidePaneWorkspace
@@ -755,47 +788,31 @@ export function SessionChatPage({
           data-daemon={connection.daemonId}
           data-session={session.config.id}
         >
-          {accountPicker === undefined ? (
-            <SessionHeader {...headerProps} />
-          ) : (
-            <RosterSessionHeader {...headerProps} accountPicker={accountPicker} connection={connection} />
-          )}
-          {/* One compact row. On a phone it carries the pane openers ONLY: the
-            lifecycle buttons wrapped to four bands here — 149px of an 844px
-            screen, measured — and they are reachable in Session Details
-            instead, which is where the source keeps them on compact. */}
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-soft px-2 py-1">
-            {compact ? null : lifecycleActions}
-            <PaneLaunchers />
-            {/* THE Attention entry point, in the one row that exists on a phone
-                as well as a desktop. It is deliberately NOT a side-pane tab
-                (#35): an item opens the focused modal below. */}
-            {attention === undefined ? null : (
-              <AttentionActionTrigger
-                id={`${attentionId}-trigger`}
-                controls={attentionId}
-                count={attentionItems.length}
-                expanded={attentionOpen}
-                loading={attention.snapshot === null && attention.status !== 'error'}
-                onOpen={opener => openAttention(null, opener)}
-              />
-            )}
-            {/* THE LIVE FEED'S OWN STATE, in the one row a phone keeps. It is here rather than in
-                the session header because the header's meta column is `display: none` on compact —
-                and a reader on a phone is the one most likely to have lost the socket to a screen
-                lock or a Wi-Fi roam in the first place. */}
-            {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} />}
-            <SidePaneCapture onHost={captureSidePane} />
-          </div>
+          <SessionTopBar
+            actions={lifecycleActions}
+            compact={compact}
+            menuItems={menuItems}
+            project={project}
+            session={session}
+            status={
+              <>
+                {needsYou}
+                {/* THE LIVE FEED'S OWN STATE, folded into the status dot: nothing visible while it is
+                    healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
+                    lock or a Wi-Fi roam most often drops the socket. */}
+                {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} quiet />}
+              </>
+            }
+            {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
+          />
+          <SidePaneCapture onHost={captureSidePane} />
           {/* NOT a live region. App.tsx owns the single announcement for a refresh
             failure and hands down a finished sentence; a second `role=status`
             here made assistive tech say it twice, and a prefix added here would
             have made the two disagree. Rendered only when there is something to
             render, precisely because it announces nothing. */}
           {refreshError === null ? null : <p className="m-0 px-3 py-1 text-ui text-warn">{refreshError}</p>}
-          {/* The action alert belongs beside the actions, so it is rendered inside
-            the details sheet on compact — one alert region either way. */}
-          {compact ? null : actionAlert}
+          {actionAlert}
           {/* THE CHAT MEASURE, applied to transcript and composer TOGETHER so the
             two never disagree about where the column ends. `full` is the shipped
             default and is deliberately uncapped, exactly as the source is; the
@@ -903,16 +920,6 @@ export function SessionChatPage({
             panelClassName="kt-details bg-surface"
           >
             <SessionDetails daemonId={connection.daemonId} onClose={() => setDetailsOpen(false)} session={session} />
-            {/* Compact's home for the lifecycle controls. The sheet is already a
-              focus-trapped dialog with an Escape path and restored focus, so the
-              controls keep a robust home instead of a wrapped row that cost a
-              sixth of the screen on every session. */}
-            {compact ? (
-              <div className="flex flex-col gap-2 px-4 pb-4">
-                {lifecycleActions}
-                {actionAlert}
-              </div>
-            ) : null}
           </BottomSheet>
           {/* Inside the reference provider, so Attention prose reads the SAME
               grammar the transcript does — including a `!A3` that re-targets

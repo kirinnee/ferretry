@@ -182,7 +182,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -205,7 +204,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[{ id: 'one', kind: 'assistant', label: 'Assistant', text: 'The daemon answered.' }]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared', { config: { teammate: 'Alpha Agent' } })}
@@ -234,7 +232,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={next}
@@ -277,7 +274,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={ready}
@@ -323,7 +319,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={unknown}
@@ -364,7 +359,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={busyPrompt}
@@ -398,7 +392,6 @@ describe('SessionChatPage', () => {
         client={receiver as unknown as SessionChatClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={view => published.push(view)}
         presentation="pane"
         session={sessionView('shared')}
@@ -546,7 +539,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={view => published.push(view)}
         presentation="pane"
         session={sessionView('shared')}
@@ -588,7 +580,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -617,7 +608,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="sheet"
         session={sessionView('shared')}
@@ -677,7 +667,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="sheet"
         session={sessionView('shared')}
@@ -700,7 +689,6 @@ describe('SessionChatPage', () => {
         connection={alpha}
         dictationSettings={DEFAULT_STT_SETTINGS}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -722,7 +710,6 @@ describe('SessionChatPage', () => {
         composerVimMode
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -757,7 +744,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={codex}
@@ -796,7 +782,6 @@ describe('SessionChatPage', () => {
         client={client(calls, next)}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onRefresh={() => {
           refreshes += 1;
         }}
@@ -851,7 +836,6 @@ describe('SessionChatPage', () => {
         client={client(calls, sessionView('shared', { state: { status: 'running' } }))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={finished}
@@ -946,7 +930,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         readSnapshot={async () => 'paired snapshot'}
@@ -1032,7 +1015,6 @@ describe('SessionChatPage', () => {
         connection={alpha}
         daemonSessions={sessions}
         entries={[]}
-        onBack={() => undefined}
         onNavigate={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
@@ -1090,7 +1072,6 @@ describe('SessionChatPage', () => {
         client={sharedClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -1128,7 +1109,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -1166,7 +1146,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="sheet"
         session={sessionView('shared')}
@@ -1201,7 +1180,6 @@ describe('SessionChatPage', () => {
         client={client(calls, pending)}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onRefresh={() => {
           refreshed += 1;
         }}
@@ -1276,7 +1254,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         refreshError="Workspace refresh issue: the daemon did not answer."
@@ -1348,7 +1325,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}

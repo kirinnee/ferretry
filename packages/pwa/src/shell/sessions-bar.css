@@ -1,0 +1,427 @@
+/* ============================================================================
+   THE SESSIONS BAR and THE SESSION BAR — the approved session-view redesign.
+
+   Every colour is a role token from themes.css, so each of the eleven families draws these in its own
+   voice: the selected session is the family's soft filled pill (`--nav-sel-*`, never a side bar), the
+   "needs you" badge is the family's warn tone, controls take the family's control casing and strokes.
+   ============================================================================ */
+
+/* ---- the sessions bar (left column, rail, phone drawer) ------------------ */
+.fy-sbar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+}
+.fy-sbar--column {
+  width: 264px;
+  flex-shrink: 0;
+  border-right: var(--divider-width) solid var(--border);
+}
+.fy-sbar--rail {
+  width: 52px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding-block: var(--gap-sm);
+  border-right: var(--divider-width) solid var(--border);
+}
+.fy-sbar--drawer {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: min(88vw, 320px);
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  border-right: var(--divider-width) solid var(--border-strong);
+  box-shadow: var(--shadow-popover);
+}
+.fy-sbar__top {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) var(--gap-sm) var(--gap-xs);
+}
+.fy-sbar__icon {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+}
+.fy-sbar__icon:hover,
+.fy-sbar__icon[aria-current='page'] {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-sbar__icon[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  color: var(--nav-sel-fg, var(--accent));
+}
+.fy-sbar__machine {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  min-width: 0;
+  flex: 1;
+  height: 32px;
+  padding-inline: var(--gap-sm);
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  text-align: left;
+}
+.fy-sbar__machine:hover {
+  background: var(--nav-hover, var(--surface-2));
+}
+.fy-sbar__machine svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.fy-sbar__machine-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__notice {
+  margin: 0 var(--gap-sm) var(--gap-xs);
+  justify-content: center;
+}
+.fy-sbar__search {
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+.fy-sbar__find {
+  width: 100%;
+  min-width: 0;
+}
+.fy-sbar__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+.fy-sbar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-pill, 9999px);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  text-transform: var(--control-transform, none);
+}
+.fy-sbar__chip:hover {
+  color: var(--fg);
+}
+.fy-sbar__chip[aria-pressed='true'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  color: var(--nav-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__count {
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  opacity: 0.85;
+}
+.fy-sbar__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 6px var(--gap-sm);
+}
+.fy-sbar__list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-sbar__empty {
+  margin: 0;
+  padding: var(--gap-sm) 8px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-sbar__project {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  text-transform: var(--label-transform);
+  font-variant-caps: var(--label-variant);
+}
+.fy-sbar__session {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  padding: 6px 8px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--fg-soft);
+  text-decoration: none;
+}
+.fy-sbar__session:hover {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-sbar__session[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  box-shadow: var(--nav-sel-shadow, none);
+  color: var(--nav-sel-fg, var(--accent));
+}
+.fy-sbar__name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__name {
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__badge {
+  color: var(--warn);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  white-space: nowrap;
+}
+.fy-sbar__sub {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__sub {
+  color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));
+}
+.fy-sbar__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 6px;
+  border-top: var(--divider-width) solid var(--border);
+}
+.fy-sbar__foot--rail {
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0 0;
+}
+.fy-sbar__place {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 4px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  text-transform: var(--control-transform, none);
+}
+.fy-sbar__place:hover {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-sbar__place[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  color: var(--nav-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__dots {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: var(--gap-xs) 0;
+}
+.fy-sbar__dot {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 28px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+}
+.fy-sbar__dot:hover {
+  background: var(--nav-hover, var(--surface-2));
+}
+.fy-sbar__dot[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+}
+.fy-sbar--drawer .fy-sbar__session,
+.fy-sbar--drawer .fy-sbar__place,
+.fy-sbar--drawer .fy-sbar__icon,
+.fy-sbar--drawer .fy-sbar__machine {
+  min-height: 44px;
+}
+.fy-sbar--drawer .fy-sbar__icon {
+  width: 44px;
+}
+
+/* ---- the session bar (one row above the conversation) -------------------- */
+.fy-session-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-height: 52px;
+  padding: 6px 12px;
+  border-bottom: var(--divider-width) solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+}
+.fy-session-bar[data-compact] {
+  gap: var(--gap-xs);
+  padding: 6px 8px;
+}
+.fy-session-bar__who {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.fy-session-bar__name {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-display);
+  letter-spacing: var(--tracking-display, 0);
+  text-overflow: ellipsis;
+  text-transform: var(--display-transform, none);
+  white-space: nowrap;
+}
+.fy-session-bar__project {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-session-bar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  align-self: center;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.fy-session-bar__word::first-letter {
+  text-transform: uppercase;
+}
+.fy-session-bar__word {
+  display: inline-block;
+}
+.fy-session-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex-shrink: 0;
+}
+.fy-session-bar__icon {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+}
+.fy-session-bar__icon:hover,
+.fy-session-bar__icon[aria-expanded='true'] {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-session-bar[data-compact] .fy-session-bar__icon {
+  width: 44px;
+  height: 44px;
+}
+
+/* "needs you": the status dot's own warning, a button because it opens the answer sheet. */
+.fy-needs-you {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border: var(--stroke) solid var(--warn-border);
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+}
+.fy-needs-you:hover {
+  border-color: var(--warn);
+}
+
+/* The live feed, folded into the status: a word only when it is not healthy. */
+.fy-live-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+}
+.fy-live-quiet[data-tone='warn'] {
+  color: var(--warn);
+}
+.fy-live-quiet[data-tone='err'] {
+  color: var(--err);
+}
+.fy-live-quiet__reconnect {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fy-sbar--drawer .kt-findbox kbd {
+  display: none;
+}
