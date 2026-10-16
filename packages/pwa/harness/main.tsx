@@ -226,6 +226,7 @@ import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-setti
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
+import { InsightsFrame } from '../src/shell/insights-frame.tsx';
 import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
@@ -1023,25 +1024,54 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
  */
 function AppChromeHarness({ active }: { readonly active: string }) {
   useAppViewport();
-  const phone = useLayoutMode() === 'drawer';
+  const layout = useLayoutMode();
+  const phone = layout === 'drawer';
   const destination = (['sessions', 'projects', 'analytics', 'warden', 'learning', 'settings'] as const).find(
     candidate => candidate === active,
   );
+  const insights = destination === 'analytics' || destination === 'warden' || destination === 'learning';
+  const page = <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>;
   return (
-    <div className="kt-shell flex flex-col overflow-hidden" id="harness-app-chrome">
-      <AppBar
-        crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]}
-        daemon={daemon.daemonId}
-        onOpenPalette={() => {}}
-        sessionCount={7}
-        active={destination ?? 'settings'}
-        tabBarShown={phone}
-        themeToggle={<Button size="sm">Theme</Button>}
-      />
-      <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
-      {phone ? (
-        <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} />
-      ) : null}
+    <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} id="harness-app-chrome">
+      {phone ? null : (
+        <SessionsBar
+          active={insights ? 'insights' : destination === 'projects' || destination === 'settings' ? destination : null}
+          activeSessionId={null}
+          daemonId={daemon.daemonId}
+          machineName="AMER-D22HXVF42W"
+          machines={WORKSPACE_MACHINES}
+          onAddMachine={() => {}}
+          onCollapse={() => {}}
+          onNavigate={() => {}}
+          onOpenPalette={() => {}}
+          presentation={layout === 'rail' ? 'rail' : 'column'}
+          projects={[]}
+          sessions={WORKSPACE_FLEET}
+        />
+      )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {phone ? (
+          <AppBar
+            crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]}
+            daemon={daemon.daemonId}
+            onOpenPalette={() => {}}
+            onOpenSidebar={() => {}}
+            sessionCount={7}
+            active={destination ?? 'settings'}
+            tabBarShown={phone}
+          />
+        ) : null}
+        {insights ? (
+          <InsightsFrame current={destination} daemonId={daemon.daemonId} onNavigate={() => {}}>
+            {page}
+          </InsightsFrame>
+        ) : (
+          page
+        )}
+        {phone ? (
+          <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} />
+        ) : null}
+      </div>
     </div>
   );
 }

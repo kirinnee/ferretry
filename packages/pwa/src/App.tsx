@@ -152,7 +152,12 @@ import {
 } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
-import { SessionsBar, type SessionsBarPlace, type SessionsBarPresentation } from './shell/sessions-bar.tsx';
+import {
+  SessionsBar,
+  type SessionsBarPlace,
+  type SessionsBarPresentation,
+  type SessionsBarUpdate,
+} from './shell/sessions-bar.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
@@ -638,6 +643,12 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
  */
 const SessionsDrawerContext = createContext<(() => void) | null>(null);
 
+/** The sessions bar's reload offer, worded exactly as the app bar's chip always was. */
+export const updateOffer = (reason: UpdateReason): SessionsBarUpdate => ({
+  ...UPDATE_CHIP[reason],
+  tone: reason === 'recovery' ? 'warn' : 'accent',
+});
+
 /** Which foot place of the sessions bar a route belongs to. */
 export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
   switch (route.kind) {
@@ -703,12 +714,7 @@ function ShellSessionsBar({
         daemonId: candidate.daemonId,
         name: distinctDaemonName(candidate, connections),
       }))}
-      {...(updateReady === null
-        ? {}
-        : {
-            update: { ...UPDATE_CHIP[updateReady], tone: updateReady === 'recovery' ? 'warn' : 'accent' },
-            onApplyUpdate,
-          })}
+      {...(updateReady === null ? {} : { update: updateOffer(updateReady), onApplyUpdate })}
       onAddMachine={() => navigate(connectionPickerPath())}
       onNavigate={navigate}
       onOpenPalette={onOpenPalette}

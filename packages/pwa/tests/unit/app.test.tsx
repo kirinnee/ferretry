@@ -52,8 +52,10 @@ import {
   pushMachineLabel,
   routeAnnouncement,
   sessionsBarPlace,
+  updateOffer,
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
+import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
@@ -3744,6 +3746,11 @@ describe('the full-screen machine setup route', () => {
 const WARDEN_REFRESH_MS = 30_000;
 
 describe('the sessions bar', () => {
+  it('words the reload offer as the app bar always has, warning only for a recovery', () => {
+    expect(updateOffer('update')).toEqual({ ...UPDATE_CHIP.update, tone: 'accent' });
+    expect(updateOffer('recovery')).toEqual({ ...UPDATE_CHIP.recovery, tone: 'warn' });
+  });
+
   it('names the foot place every route belongs to', () => {
     const at = (kind: string) => sessionsBarPlace({ kind, daemonId: alpha.daemonId } as never);
     expect(['projects', 'project-detail', 'analytics', 'warden', 'learning', 'settings', 'sessions'].map(at)).toEqual([
