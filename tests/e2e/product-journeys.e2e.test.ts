@@ -653,7 +653,9 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   });
 
   await step(journey, 'open-terminal', async () => {
-    await page.click('fieldset[aria-label="Workspace panes"] button:has-text("Terminal")');
+    // The terminals open from the session bar's ⋯ menu.
+    await page.click('button[data-session-more]');
+    await page.click('[role="menuitem"]:has-text("Terminal")');
     await expectScreen(page, '[data-terminal-deck]');
     const create = await page.evaluate<boolean>(
       `[...document.querySelectorAll('[data-terminal-deck] button')].some(b => /New terminal|Create terminal/.test(b.textContent + (b.getAttribute('aria-label') ?? '')))`,

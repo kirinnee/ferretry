@@ -11,11 +11,11 @@ import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
-import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
+import { SessionTopBar } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
-import { AttentionActionModal, AttentionActionTrigger } from '../../src/features/attention/attention-action-modal.tsx';
+import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
@@ -107,6 +107,32 @@ const buttonWithLabelSpan = (root: ReactTestInstance, label: string): ReactTestI
   return button;
 };
 
+/** A lifecycle button in the session bar, by the full name it announces. */
+const barAction = (root: ReactTestInstance, label: string): ReactTestInstance => {
+  const button = root.findAllByType('button').find(candidate => candidate.props['aria-label'] === label);
+  if (button === undefined) throw new Error(`missing ${label} in the session bar`);
+  return button;
+};
+
+const hasBarAction = (root: ReactTestInstance, label: string): boolean =>
+  root.findAllByType('button').some(candidate => candidate.props['aria-label'] === label);
+
+/** The ⋯ menu's rows, as the bar was handed them. */
+const menuLabels = (root: ReactTestInstance): readonly string[] =>
+  (root.findByType(SessionTopBar).props.menuItems as readonly { label: string }[]).map(item => item.label);
+
+const selectMenu = (root: ReactTestInstance, label: string): void => {
+  const item = (
+    root.findByType(SessionTopBar).props.menuItems as readonly { label: string; onSelect: () => void }[]
+  ).find(candidate => candidate.label === label);
+  if (item === undefined) throw new Error(`missing ${label} in the session menu`);
+  run(() => item.onSelect());
+};
+
+/** The "needs you" button the status carries while the session has unanswered Attention. */
+const needsYouButtons = (root: ReactTestInstance): readonly ReactTestInstance[] =>
+  root.findAll(node => node.type === 'button' && node.props['data-needs-you'] !== undefined);
+
 const client = (calls: string[], next: SessionView): SessionChatClient =>
   ({
     answer: async (_id: string, toolUseId: string) => {
@@ -182,7 +208,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -205,21 +230,26 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[{ id: 'one', kind: 'assistant', label: 'Assistant', text: 'The daemon answered.' }]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared', { config: { teammate: 'Alpha Agent' } })}
       />,
     );
 
-    expect(page.root.findAllByType(SessionHeader)).toHaveLength(1);
+    expect(page.root.findAllByType(SessionTopBar)).toHaveLength(1);
     expect(page.root.findByType(Transcript).props.daemonId).toBe('alpha');
     expect(page.root.findByType(Transcript).props.entries[0].text).toBe('The daemon answered.');
     expect(page.root.findByProps({ className: 'fy-composer' })).toBeDefined();
-    expect(buttonNamed(page.root, 'Files')).toBeDefined();
-    expect(buttonNamed(page.root, 'Terminal')).toBeDefined();
-    expect(buttonNamed(page.root, 'Interrupt turn')).toBeDefined();
-    expect(buttonNamed(page.root, 'Stop session')).toBeDefined();
+    expect(menuLabels(page.root)).toEqual([
+      'Files',
+      'Terminal',
+      'Analytics for this session',
+      'Move to another login…',
+      'Copy session id',
+      'Session details',
+    ]);
+    expect(barAction(page.root, 'Interrupt turn').children.join('')).toBe('Interrupt');
+    expect(barAction(page.root, 'Stop session').children.join('')).toBe('Stop');
     run(() => page.unmount());
   });
 
@@ -234,7 +264,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={next}
@@ -277,7 +306,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={ready}
@@ -323,7 +351,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={unknown}
@@ -364,7 +391,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={busyPrompt}
@@ -398,7 +424,6 @@ describe('SessionChatPage', () => {
         client={receiver as unknown as SessionChatClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={view => published.push(view)}
         presentation="pane"
         session={sessionView('shared')}
@@ -456,14 +481,12 @@ describe('SessionChatPage', () => {
     // Stable across both renders, so `publish` — the memo's other dependency —
     // cannot recompute the binding for us and hide a regression.
     const onSessionChange = (view: SessionView) => published.push(view);
-    const onBack = () => undefined;
     const session = sessionView('shared');
     const pageFor = (chatClient: ReceiverBoundChatClient) => (
       <SessionChatPage
         client={chatClient as unknown as SessionChatClient}
         connection={alpha}
         entries={[]}
-        onBack={onBack}
         onSessionChange={onSessionChange}
         presentation="pane"
         session={session}
@@ -501,7 +524,6 @@ describe('SessionChatPage', () => {
     // offered a switch nothing can carry.
     // Arrange
     const next = sessionView('shared');
-    const onBack = () => undefined;
     const onSessionChange = () => undefined;
     const session = sessionView('shared');
     const pageFor = (chatClient: SessionChatClient) => (
@@ -509,7 +531,6 @@ describe('SessionChatPage', () => {
         client={chatClient}
         connection={alpha}
         entries={[]}
-        onBack={onBack}
         onSessionChange={onSessionChange}
         presentation="pane"
         session={session}
@@ -546,7 +567,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={view => published.push(view)}
         presentation="pane"
         session={sessionView('shared')}
@@ -582,61 +602,144 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('states the missing browser pane in visible text rather than a disabled control', () => {
+  test('keeps ONE bar: no pane-opener row, no toolbar, and no browser offer a daemon cannot keep', () => {
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
+        project="ferretry"
         session={sessionView('shared')}
       />,
     );
     try {
-      // A disabled button explains nothing: it takes no focus, shows no title on
-      // touch, and most screen readers skip it. The reason is ordinary text now.
-      expect(page.root.findAllByType('button').some(node => node.children.join('').includes('Browser'))).toBe(false);
-      expect(page.root.findByProps({ 'data-pane-unavailable': 'browser' }).children.join('')).toContain(
-        'No browser pane',
-      );
-      // Neither group claims a toolbar: they are plain wrapping buttons with no
-      // roving tabindex, so the role would promise arrow keys nothing implements.
+      expect(page.root.findAllByProps({ 'aria-label': 'Workspace panes' })).toHaveLength(0);
+      expect(page.root.findAllByProps({ 'data-pane-unavailable': 'browser' })).toHaveLength(0);
       expect(page.root.findAllByProps({ role: 'toolbar' })).toHaveLength(0);
-      expect(page.root.findByProps({ 'aria-label': 'Workspace panes' }).type).toBe('fieldset');
-      expect(page.root.findByProps({ 'aria-label': 'Session lifecycle' }).type).toBe('fieldset');
+      expect(page.root.findAllByType('button').some(node => node.children.join('').includes('Browser'))).toBe(false);
+      expect(page.root.findByType(SessionTopBar).props.project).toBe('ferretry');
+      // No phone drawer opener on a page that was not handed one.
+      expect(page.root.findByType(SessionTopBar).props.onOpenSessions).toBeUndefined();
     } finally {
       run(() => page.unmount());
     }
   });
 
-  test('moves the lifecycle controls into Session Details on a phone instead of wrapping the row', () => {
+  test('keeps Interrupt on a phone bar and moves Stop into the menu, still behind its confirmation', async () => {
+    const calls: string[] = [];
+    let opened = 0;
     const page = renderSessionChatPage(
       <SessionChatPage
-        client={client([], sessionView('shared'))}
+        client={client(calls, sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
+        onOpenSessions={() => {
+          opened += 1;
+        }}
         onSessionChange={() => undefined}
         presentation="sheet"
         session={sessionView('shared')}
       />,
     );
     try {
-      // The wrapped four-band row is gone: at rest a phone shows the pane
-      // openers and nothing else. A closed BottomSheet renders null, so the
-      // absence of the button IS the absence of the row.
-      expect(page.root.findAllByProps({ 'aria-label': 'Session lifecycle' })).toHaveLength(0);
-      expect(buttonNamed(page.root, 'Files')).toBeDefined();
+      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
+      expect(hasBarAction(page.root, 'Stop session')).toBe(false);
+      expect(menuLabels(page.root).at(-1)).toBe('Stop session');
+      run(() => page.root.findByType(SessionTopBar).props.onOpenSessions());
+      expect(opened).toBe(1);
 
-      // And they are reachable — in the sheet the source keeps them in.
-      run(() => page.root.findByType(SessionHeader).props.onOpenDetails());
-      expect(page.root.findAllByProps({ 'aria-label': 'Session lifecycle' })).toHaveLength(1);
-      expect(buttonNamed(page.root, 'Interrupt turn')).toBeDefined();
-      expect(buttonNamed(page.root, 'Stop session')).toBeDefined();
+      selectMenu(page.root, 'Stop session');
+      expect(calls).toEqual([]);
+      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(false);
+      run(() => buttonNamed(page.root, 'Cancel').props.onClick());
+      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
     } finally {
       run(() => page.unmount());
+    }
+  });
+
+  test('copies the session id from the menu and says so when the clipboard refuses', async () => {
+    const copied: string[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        copyText={async text => {
+          copied.push(text);
+        }}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      selectMenu(page.root, 'Copy session id');
+      await runAsync(async () => await Promise.resolve());
+      expect(copied).toEqual(['shared']);
+      expect(JSON.stringify(page.toJSON())).not.toContain('could not copy');
+
+      run(() =>
+        page.update(
+          withSessionSearch(
+            <SessionChatPage
+              client={client([], sessionView('shared'))}
+              connection={alpha}
+              copyText={async () => await Promise.reject(new Error('denied'))}
+              entries={[]}
+              onSessionChange={() => undefined}
+              presentation="pane"
+              session={sessionView('shared')}
+            />,
+          ),
+        ),
+      );
+      selectMenu(page.root, 'Copy session id');
+      await runAsync(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(JSON.stringify(page.toJSON())).toContain('could not copy the session id: denied');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('copies through the browser clipboard by default, and refuses where there is none', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const written: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text: string) => void written.push(text) },
+    });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      selectMenu(page.root, 'Copy session id');
+      await runAsync(async () => await Promise.resolve());
+      expect(written).toEqual(['shared']);
+
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+      selectMenu(page.root, 'Copy session id');
+      await runAsync(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(JSON.stringify(page.toJSON())).toContain('this browser offers no clipboard here');
+    } finally {
+      run(() => page.unmount());
+      if (original === undefined) Reflect.deleteProperty(navigator, 'clipboard');
+      else Object.defineProperty(navigator, 'clipboard', original);
     }
   });
 
@@ -648,7 +751,6 @@ describe('SessionChatPage', () => {
           client={client([], sessionView('shared'))}
           connection={alpha}
           entries={[]}
-          onBack={() => undefined}
           onSessionChange={() => undefined}
           presentation={presentation}
           session={sessionView('shared')}
@@ -677,7 +779,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="sheet"
         session={sessionView('shared')}
@@ -700,7 +801,6 @@ describe('SessionChatPage', () => {
         connection={alpha}
         dictationSettings={DEFAULT_STT_SETTINGS}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -714,7 +814,12 @@ describe('SessionChatPage', () => {
   });
 
   test('hands the composer the reader’s suggestion switches and Vim preference, mapped once above it', () => {
-    const suggestions = { mentionSuggestions: false, directReferenceSuggestions: true, skillSuggestions: false };
+    const suggestions = {
+      mentionSuggestions: false,
+      ladderSuggestions: false,
+      directReferenceSuggestions: true,
+      skillSuggestions: false,
+    };
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
@@ -722,7 +827,6 @@ describe('SessionChatPage', () => {
         composerVimMode
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -757,7 +861,6 @@ describe('SessionChatPage', () => {
         client={runtimeClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={codex}
@@ -796,7 +899,6 @@ describe('SessionChatPage', () => {
         client={client(calls, next)}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onRefresh={() => {
           refreshes += 1;
         }}
@@ -807,14 +909,14 @@ describe('SessionChatPage', () => {
     );
 
     await runAsync(async () => {
-      buttonNamed(page.root, 'Interrupt turn').props.onClick();
+      barAction(page.root, 'Interrupt turn').props.onClick();
       await Promise.resolve();
     });
     expect(calls).toEqual(['interrupt:shared']);
     expect(published).toEqual([next]);
     expect(refreshes).toBe(1);
 
-    run(() => buttonNamed(page.root, 'Stop session').props.onClick());
+    run(() => barAction(page.root, 'Stop session').props.onClick());
     expect(calls).toEqual(['interrupt:shared']);
     expect(buttonNamed(page.root, 'Confirm stop')).toBeDefined();
     await runAsync(async () => {
@@ -829,12 +931,12 @@ describe('SessionChatPage', () => {
     expect(page.root.findAllByType(RenameSheet)).toHaveLength(0);
 
     // Migrate's route IS mounted, so it stays exactly as it was.
-    run(() => buttonNamed(page.root, 'Move account + relaunch…').props.onClick());
+    selectMenu(page.root, 'Move to another login…');
     expect(page.root.findByType(MigrateSheet).props.open).toBe(true);
     run(() => page.root.findByType(MigrateSheet).props.onClose());
     expect(page.root.findByType(MigrateSheet).props.open).toBe(false);
 
-    run(() => page.root.findByType(SessionHeader).props.onOpenDetails());
+    selectMenu(page.root, 'Session details');
     expect(
       page.root
         .findAllByType(BottomSheet)
@@ -851,7 +953,6 @@ describe('SessionChatPage', () => {
         client={client(calls, sessionView('shared', { state: { status: 'running' } }))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={finished}
@@ -859,7 +960,8 @@ describe('SessionChatPage', () => {
     );
 
     await runAsync(async () => {
-      buttonNamed(page.root, 'Resume session').props.onClick();
+      expect(barAction(page.root, 'Resume session').children.join('')).toBe('Start');
+      barAction(page.root, 'Resume session').props.onClick();
       await Promise.resolve();
     });
     expect(calls).toEqual(['resume:shared']);
@@ -875,7 +977,6 @@ describe('SessionChatPage', () => {
             client={failing}
             connection={alpha}
             entries={[]}
-            onBack={() => undefined}
             onSessionChange={() => undefined}
             presentation="pane"
             session={sessionView('shared')}
@@ -884,7 +985,7 @@ describe('SessionChatPage', () => {
       ),
     );
     await runAsync(async () => {
-      buttonNamed(page.root, 'Interrupt turn').props.onClick();
+      barAction(page.root, 'Interrupt turn').props.onClick();
       await Promise.resolve();
     });
     expect(JSON.stringify(page.toJSON())).toContain('Session action failed: daemon offline');
@@ -946,7 +1047,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         readSnapshot={async () => 'paired snapshot'}
@@ -968,11 +1068,11 @@ describe('SessionChatPage', () => {
       expect(seen.filter(row => row.method === 'GET' && /\/tasks\/[^/]+$/u.test(row.pathname))).toHaveLength(0);
       expect(seen.filter(row => row.pathname.endsWith('/fs'))).toHaveLength(0);
 
-      run(() => buttonNamed(page.root, 'Files').props.onClick({ currentTarget: null }));
+      selectMenu(page.root, 'Files');
       expect(page.root.findAllByType(FilesTab)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
 
-      run(() => buttonNamed(page.root, 'Terminal').props.onClick({ currentTarget: null }));
+      selectMenu(page.root, 'Terminal');
       expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
       expect(JSON.stringify(page.toJSON())).toContain('paired snapshot');
@@ -982,7 +1082,9 @@ describe('SessionChatPage', () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
       expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
-      const input = page.root.findByType('input');
+      const input = page.root.findAll(node => node.type === 'input' && node.props.type !== 'file')[0] as NonNullable<
+        ReturnType<typeof page.root.find>
+      >;
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       // The task half is network-bound now. Reading the popup on the very next
       // line would see the file row alone and count 1 — a failure that looks
@@ -1032,7 +1134,6 @@ describe('SessionChatPage', () => {
         connection={alpha}
         daemonSessions={sessions}
         entries={[]}
-        onBack={() => undefined}
         onNavigate={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
@@ -1090,7 +1191,6 @@ describe('SessionChatPage', () => {
         client={sharedClient}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -1128,7 +1228,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -1166,7 +1265,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="sheet"
         session={sessionView('shared')}
@@ -1201,7 +1299,6 @@ describe('SessionChatPage', () => {
         client={client(calls, pending)}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onRefresh={() => {
           refreshed += 1;
         }}
@@ -1241,7 +1338,7 @@ describe('SessionChatPage', () => {
 
       // Interrupt is the one action that CAN clear the turn, so it stays live.
       await runAsync(async () => {
-        buttonNamed(page.root, 'Interrupt turn').props.onClick();
+        barAction(page.root, 'Interrupt turn').props.onClick();
         await Promise.resolve();
       });
       expect(calls).toEqual(['answer:ask-1', 'interrupt:shared']);
@@ -1255,7 +1352,6 @@ describe('SessionChatPage', () => {
               client={client([], pending)}
               connection={alpha}
               entries={[]}
-              onBack={() => undefined}
               onSessionChange={() => undefined}
               presentation="pane"
               session={sessionView('shared', { state: { status: 'awaiting_question', pendingQuestion: null } })}
@@ -1276,7 +1372,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         refreshError="Workspace refresh issue: the daemon did not answer."
@@ -1294,7 +1389,11 @@ describe('SessionChatPage', () => {
       // already does.
       const statuses = page.root
         .findAllByProps({ role: 'status' })
-        .filter(node => JSON.stringify(node.props.children ?? '').includes('daemon did not answer'));
+        .filter(node =>
+          [node.props.children]
+            .flat()
+            .some(child => typeof child === 'string' && child.includes('daemon did not answer')),
+        );
       expect(statuses).toHaveLength(0);
     } finally {
       run(() => page.unmount());
@@ -1348,7 +1447,6 @@ describe('SessionChatPage', () => {
         client={client([], sessionView('shared'))}
         connection={alpha}
         entries={[]}
-        onBack={() => undefined}
         onSessionChange={() => undefined}
         presentation="pane"
         session={sessionView('shared')}
@@ -1360,18 +1458,22 @@ describe('SessionChatPage', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
 
       try {
-        const trigger = page.root.findByType(AttentionActionTrigger);
+        const [trigger] = needsYouButtons(page.root);
         const sheet = page.root.findByType(AttentionActionModal);
-        expect(trigger.props.count).toBe(1);
-        expect(trigger.props.expanded).toBe(false);
+        expect(trigger?.props['data-needs-you']).toBe(1);
+        expect(trigger?.props['aria-expanded']).toBe(false);
         // The trigger names the sheet it controls, and the sheet answers to it.
-        expect(trigger.props.controls).toBe(sheet.props.id);
+        expect(trigger?.props['aria-controls']).toBe(sheet.props.id);
         expect(sheet.props.open).toBe(false);
 
-        run(() => trigger.props.onOpen(null));
+        run(() => trigger?.props.onClick({ currentTarget: null }));
 
         expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
-        expect(page.root.findByType(AttentionActionTrigger).props.expanded).toBe(true);
+        expect(needsYouButtons(page.root)[0]?.props['aria-expanded']).toBe(true);
+        // The board is also one menu row away, whether or not anything is waiting.
+        run(() => page.root.findByType(AttentionActionModal).props.onClose());
+        selectMenu(page.root, 'Attention');
+        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
       } finally {
         run(() => page.unmount());
       }
@@ -1383,7 +1485,8 @@ describe('SessionChatPage', () => {
       try {
         // Absence, not an empty badge: a "0" here would be a claim this build
         // cannot make, because nothing has read the ledger.
-        expect(page.root.findAllByType(AttentionActionTrigger)).toHaveLength(0);
+        expect(needsYouButtons(page.root)).toHaveLength(0);
+        expect(menuLabels(page.root)).not.toContain('Attention');
         expect(page.root.findAllByType(AttentionActionModal)).toHaveLength(0);
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
         expect(surface.attentionReferenceResolver).toBeUndefined();
@@ -1476,13 +1579,13 @@ describe('SessionChatPage', () => {
         // Opened from the trigger itself, which this renderer never puts in the
         // document — so the fallback lookup finds nothing and must simply do
         // nothing. A close path that can throw would trap the reader in a sheet.
-        run(() => page.root.findByType(AttentionActionTrigger).props.onOpen(null));
+        run(() => needsYouButtons(page.root)[0]?.props.onClick({ currentTarget: null }));
         expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
 
         run(() => page.root.findByType(AttentionActionModal).props.onClose());
 
         expect(page.root.findByType(AttentionActionModal).props.open).toBe(false);
-        expect(page.root.findByType(AttentionActionTrigger).props.expanded).toBe(false);
+        expect(needsYouButtons(page.root)[0]?.props['aria-expanded']).toBe(false);
       } finally {
         run(() => page.unmount());
       }

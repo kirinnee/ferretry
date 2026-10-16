@@ -194,7 +194,7 @@ import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/
 import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
-import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
@@ -226,6 +226,8 @@ import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-setti
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
+import { InsightsFrame } from '../src/shell/insights-frame.tsx';
+import { SessionsBar } from '../src/shell/sessions-bar.tsx';
 import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BrandMark } from '../src/shell/brand-mark.tsx';
@@ -1023,25 +1025,54 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
  */
 function AppChromeHarness({ active }: { readonly active: string }) {
   useAppViewport();
-  const phone = useLayoutMode() === 'drawer';
+  const layout = useLayoutMode();
+  const phone = layout === 'drawer';
   const destination = (['sessions', 'projects', 'analytics', 'warden', 'learning', 'settings'] as const).find(
     candidate => candidate === active,
   );
+  const insights = destination === 'analytics' || destination === 'warden' || destination === 'learning';
+  const page = <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>;
   return (
-    <div className="kt-shell flex flex-col overflow-hidden" id="harness-app-chrome">
-      <AppBar
-        crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]}
-        daemon={daemon.daemonId}
-        onOpenPalette={() => {}}
-        sessionCount={7}
-        active={destination ?? 'settings'}
-        tabBarShown={phone}
-        themeToggle={<Button size="sm">Theme</Button>}
-      />
-      <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
-      {phone ? (
-        <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} />
-      ) : null}
+    <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} id="harness-app-chrome">
+      {phone ? null : (
+        <SessionsBar
+          active={insights ? 'insights' : destination === 'projects' || destination === 'settings' ? destination : null}
+          activeSessionId={null}
+          daemonId={daemon.daemonId}
+          machineName="AMER-D22HXVF42W"
+          machines={WORKSPACE_MACHINES}
+          onAddMachine={() => {}}
+          onCollapse={() => {}}
+          onNavigate={() => {}}
+          onOpenPalette={() => {}}
+          presentation={layout === 'rail' ? 'rail' : 'column'}
+          projects={[]}
+          sessions={WORKSPACE_FLEET}
+        />
+      )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {phone ? (
+          <AppBar
+            crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]}
+            daemon={daemon.daemonId}
+            onOpenPalette={() => {}}
+            onOpenSidebar={() => {}}
+            sessionCount={7}
+            active={destination ?? 'settings'}
+            tabBarShown={phone}
+          />
+        ) : null}
+        {insights ? (
+          <InsightsFrame current={destination} daemonId={daemon.daemonId} onNavigate={() => {}}>
+            {page}
+          </InsightsFrame>
+        ) : (
+          page
+        )}
+        {phone ? (
+          <AppTabBar daemon={daemon.daemonId} active={destination ?? 'settings'} onOpenPalette={() => {}} />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -2451,6 +2482,16 @@ const harnessSessionRoute = (pathname: string): { readonly sessionId: string; re
   return { sessionId: decodeURIComponent(sessionId), rest };
 };
 
+/** A running Claude turn's pane, ending on the spinner line the activity line reads. */
+const HARNESS_LIVE_PANE = [
+  '● Read(packages/daemon/src/lib/fleet-login/service.ts)',
+  '  ⎿  Read 512 lines',
+  '',
+  '✽ Pontificating… (42s · ↓ 3.1k tokens · esc to interrupt)',
+  '',
+  '> ',
+].join('\n');
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
@@ -2463,6 +2504,21 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.hostname !== HARNESS_DAEMON_HOSTS.answering) return await harnessFetch(input, init);
   harnessRequests.push(`${method} ${url.pathname}${url.search}`);
   const sessionRoute = harnessSessionRoute(url.pathname);
+  // The live pane the activity line reads: Claude's own spinner line, as a running turn paints it.
+  if (method === 'GET' && sessionRoute?.rest === 'snapshot')
+    return new Response(HARNESS_LIVE_PANE, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
+  // An attachment upload answers with the daemon's own view of the file it now holds.
+  if (method === 'POST' && sessionRoute?.rest === 'attachments') {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };
+    return harnessJson({
+      id: `att_${'0'.repeat(60)}${harnessRequests.length.toString(16).padStart(4, '0')}`,
+      filename: body.filename ?? 'file',
+      mime: body.mime ?? 'application/octet-stream',
+      size: atob(body.base64 ?? '').length,
+      sha256: 'a'.repeat(64),
+      createdAt: '2026-10-16T00:00:00.000Z',
+    });
+  }
   // `/fs/index` BEFORE the broad `/fs` branch, and this ladder is order-sensitive
   // for exactly the reason `mounts/session-filesystem.ts` registers `fs/index`
   // before `fs`: `/fs/index` INCLUDES `/fs`, matches none of the inner cases, and
@@ -6571,13 +6627,7 @@ const WORKSPACE_SCOPE = daemonSessionScope(daemon, 'harness-workspace');
  * would hide the markdown paint layer, the send button's enabled state and the
  * textarea's grown height, which are three of the things this capture is for.
  */
-const WORKSPACE_DRAFT = [
-  'Two things before you push:',
-  '',
-  '- the `--app-h` fallback ladder has to stay `100vh -> 100dvh -> var(--app-h)`',
-  '- `packages/pwa/src/shell/side-pane.tsx` still announces `Opened <tab>` without',
-  '  the "beside the conversation" half',
-].join('\n');
+const WORKSPACE_DRAFT = 'Capture it at 390px and 1440px before you call it done';
 new DaemonDraftStore().save(WORKSPACE_SCOPE, WORKSPACE_DRAFT, HARNESS_NOW);
 
 const WORKSPACE_SESSION = {
@@ -6673,6 +6723,20 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
     label: 'mylie',
   },
   {
+    id: 'workspace-reasoning',
+    kind: 'notice',
+    label: 'Reasoning · 01:28:07',
+    text: 'The host filter has to reject a stale open as well as hide the catalogue entry.',
+    detail: true,
+  },
+  {
+    id: 'workspace-usage',
+    kind: 'notice',
+    label: 'Usage · 01:28:09',
+    text: 'in=2 out=300',
+    detail: true,
+  },
+  {
     id: 'workspace-notice',
     kind: 'notice',
     text: 'Browser automation stays unavailable: this daemon has no browser worker installed.',
@@ -6756,35 +6820,92 @@ const WORKSPACE_CLIENT: SessionChatClient = {
  * regime, so 390 gets the sheet and 1440 gets the non-modal pane without the
  * driver having to say which.
  */
+/** The other agents on this harness machine, as the sessions bar lists them beside the workspace. */
+const workspacePeer = (
+  id: string,
+  teammate: string,
+  name: string,
+  cwd: string,
+  status: SessionView['state']['status'],
+  extra: Partial<SessionView['state']> = {},
+): SessionView =>
+  ({
+    ...WORKSPACE_SESSION,
+    config: { ...WORKSPACE_SESSION.config, id, teammate, name, label: name, cwd },
+    state: {
+      ...WORKSPACE_SESSION.state,
+      id,
+      status,
+      lastActivityAt: new Date(Date.now() - 600_000).toISOString(),
+      ...extra,
+    },
+  }) as SessionView;
+
+const WORKSPACE_FLEET: readonly SessionView[] = [
+  { ...WORKSPACE_SESSION, config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' } } as SessionView,
+  workspacePeer('harness-marin', 'marin', 'Flaky test fix', '/work/ferretry', 'completed'),
+  workspacePeer('harness-jaylynn', 'jaylynn', 'Main agent', '/work/home-manager', 'running'),
+  workspacePeer('harness-maryah', 'maryah', 'Diene work', '/work/home-manager', 'awaiting_user', {
+    needsHuman: 'Two old sign-ins are holding port 1455',
+  }),
+  workspacePeer('harness-kamila', 'kamila', 'Nitroso project', '/work/nitroso', 'waiting'),
+];
+
+const WORKSPACE_MACHINES = [
+  { daemonId: daemon.daemonId, name: 'AMER-D22HXVF42W' },
+  { daemonId: 'harness-other-daemon' as DaemonId, name: 'kirin-box' },
+];
+
 function SessionWorkspaceHarness() {
   useAppViewport();
-  const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
-  const [session, setSession] = useState(WORKSPACE_SESSION);
+  const layout = useLayoutMode();
+  const presentation = layout === 'drawer' ? 'sheet' : 'pane';
+  const [session, setSession] = useState({
+    ...WORKSPACE_SESSION,
+    config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+  } as SessionView);
+  const [drawer, setDrawer] = useState(window.location.search.includes('drawer'));
+  const bar = (shape: 'column' | 'rail' | 'drawer') => (
+    <SessionsBar
+      active={null}
+      activeSessionId={session.config.id}
+      daemonId={daemon.daemonId}
+      machineName="AMER-D22HXVF42W"
+      machines={WORKSPACE_MACHINES}
+      onAddMachine={() => {}}
+      onClose={() => setDrawer(false)}
+      onCollapse={() => {}}
+      onNavigate={() => {}}
+      onOpenPalette={() => {}}
+      presentation={shape}
+      projects={[]}
+      {...(shape === 'drawer' ? {} : { search: <SessionSearchControl shortcutTarget /> })}
+      sessions={WORKSPACE_FLEET}
+    />
+  );
   return (
-    <div className="kt-shell flex flex-col overflow-hidden" id="harness-session-workspace-page">
-      <AppBar
-        crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'harness-workspace' }]}
-        daemon={daemon.daemonId}
-        onOpenPalette={() => {}}
-        onOpenSidebar={() => {}}
-        sessionCount={7}
-        connectionStatus="open"
-        themeToggle={<Button size="sm">Theme</Button>}
-        currentSessionSearch={<SessionSearchControl shortcutTarget />}
-      />
+    <div
+      className={`kt-shell flex overflow-hidden ${layout === 'drawer' ? 'flex-col' : 'flex-row'}`}
+      id="harness-session-workspace-page"
+    >
+      {layout === 'drawer' ? null : bar(layout === 'rail' ? 'rail' : 'column')}
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
           chatWidth="readable"
           client={WORKSPACE_CLIENT}
           connection={daemon}
+          daemonSessions={WORKSPACE_FLEET}
+          dictationSettings={DEFAULT_STT_SETTINGS}
           entries={WORKSPACE_ENTRIES}
-          onBack={() => {}}
           onSessionChange={setSession}
+          {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}
+          project="ferretry"
           readSnapshot={HARNESS_PANE_SNAPSHOT}
           session={session}
         />
       </div>
+      {layout === 'drawer' && drawer ? bar('drawer') : null}
     </div>
   );
 }

@@ -254,19 +254,18 @@ describe('SettingsPage sections', () => {
     const controls = new DaemonControlsStore(storage);
     const view = render(page({ controls }));
 
-    const suggestions = settingSwitches(view, 'composer-suggestions');
-    expect(suggestions.map(control => control.props['aria-checked'])).toEqual([true, true, true]);
+    const keys = () =>
+      view.root
+        .findByProps({ 'data-setting-id': 'composer-suggestions' })
+        .findAll(node => node.type === 'input' && node.props.type === 'radio');
+    expect(keys().map(radio => radio.props.checked)).toEqual([true, false, false]);
 
-    // Only the family pressed moves; the @ ladder and $ skills are untouched.
-    run(() => suggestions[1]?.props.onClick());
-    expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([
-      true,
-      false,
-      true,
-    ]);
-    expect(controls.snapshot().device.directReferenceSuggestions).toBe(false);
-    expect(controls.snapshot().device.mentionSuggestions).toBe(true);
+    // Choosing the symbols moves only the keys; $ skills is untouched.
+    run(() => keys()[1]?.props.onChange());
+    expect(keys().map(radio => radio.props.checked)).toEqual([false, true, false]);
+    expect(controls.snapshot().device.suggestionKeys).toBe('symbols');
     expect(controls.snapshot().device.skillSuggestions).toBe(true);
+    expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([true]);
 
     // Vim shares the composer-editing control with Markdown highlighting, and
     // is the second switch there rather than a page of its own.
@@ -280,7 +279,7 @@ describe('SettingsPage sections', () => {
     // Both are properties of this screen: they survive a reload and read the
     // same for a daemon this page never named.
     const reloaded = new DaemonControlsStore(storage);
-    expect(reloaded.controls(beta.daemonId).directReferenceSuggestions).toBe(false);
+    expect(reloaded.controls(beta.daemonId).suggestionKeys).toBe('symbols');
     expect(reloaded.controls(beta.daemonId).composerVimMode).toBe(true);
 
     run(() => view.unmount());

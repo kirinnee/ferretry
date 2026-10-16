@@ -568,7 +568,7 @@ describe('session screen components', () => {
       );
       expect(prevented).toBe(false);
       expect(textarea.props.disabled).toBe(true);
-      expect(composer.root.findByType('button').props.disabled).toBe(true);
+      expect(composer.root.findByProps({ type: 'submit' }).props.disabled).toBe(true);
       run(() => composer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
 
       Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: () => ({ matches: true }) });

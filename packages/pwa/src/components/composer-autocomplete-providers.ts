@@ -4,20 +4,19 @@
  * Every family is reachable two ways, and both ways read ONE source. `/` merges
  * harness-valid built-in commands with the exact session account's discovered
  * skills, and `$` offers those same skills from the same catalog read. A
- * repeated `@` run selects one reference family — Files, Agents, Tasks,
- * Attention — and `:`, `&` and `!` open the last three of those directly, from
- * the same host getters the ladder reads. A second read would be a second
- * definition: a menu that offers `&F12` beside a transcript that cannot prove
- * it is exactly the disagreement this repository keeps finding.
+ * repeated `@` run selects one reference family — Files, Agents, Attention —
+ * and `:` and `!` open the last two of those directly, from the same host
+ * getters the ladder reads. A second read would be a second definition: a menu
+ * that offers `!A3` beside a transcript that cannot prove it is exactly the
+ * disagreement this repository keeps finding. Tasks are offered by no menu for
+ * now (`COMPOSER_REFERENCE_TIERS` says why); their grammar is untouched.
  *
  * Every provider, candidate, cache key and store callback carries the complete
  * daemon/session scope; equal session ids on two paired daemons are unrelated
  * identities.
  */
 
-import type { AttentionItem, SessionView, TaskSummary, TerminalListView } from '@ferretry/protocol';
-import { taskReference } from '../features/tasks/task-board-model.ts';
-import { TASK_STATUS_META } from '../features/tasks/task-presentation.ts';
+import type { AttentionItem, SessionView, TerminalListView } from '@ferretry/protocol';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
@@ -59,7 +58,6 @@ const COMPOSER_BUILTIN_COMMANDS: readonly ComposerBuiltinCommand[] = [
   },
 ];
 
-export type ComposerTaskSummary = Pick<TaskSummary, 'id' | 'title' | 'status'>;
 export type ComposerAttentionItem = Pick<AttentionItem, 'id' | 'subject' | 'source'>;
 
 /** Exactly the facts the daemon's skills route reports. */
@@ -123,9 +121,7 @@ export interface ComposerSkillsProviderOptions extends ComposerProviderScopeOpti
 export interface ComposerReferenceProviderOptions extends ComposerProviderScopeOptions {
   /** Must return only the fleet slice belonging to `scope.daemonId`. */
   readonly getSessions?: ComposerScopedGetter<SessionView>;
-  readonly getTasks?: ComposerScopedGetter<ComposerTaskSummary>;
   readonly getAttentionItems?: ComposerScopedGetter<ComposerAttentionItem>;
-  readonly waitForTasks?: ComposerProviderWarmup;
   readonly waitForAttentionItems?: ComposerProviderWarmup;
 }
 
@@ -181,10 +177,8 @@ const surfaceCandidate =
   });
 
 const EMPTY_SESSIONS: readonly SessionView[] = [];
-const EMPTY_TASKS: readonly ComposerTaskSummary[] = [];
 const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
 const noSessions: ComposerScopedGetter<SessionView> = () => EMPTY_SESSIONS;
-const noTasks: ComposerScopedGetter<ComposerTaskSummary> = () => EMPTY_TASKS;
 const noAttention: ComposerScopedGetter<ComposerAttentionItem> = () => EMPTY_ATTENTION;
 
 const assertProviderScope = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
@@ -726,25 +720,6 @@ const agentCandidates = (
   });
 };
 
-const taskCandidates = (
-  scope: DaemonSessionScope,
-  tasks: readonly ComposerTaskSummary[],
-): ComposerAutocompleteCandidate[] =>
-  tasks.map(task => {
-    const reference = taskReference(task.id);
-    return {
-      id: scopedId('task', scope, task.id),
-      kind: 'task',
-      label: reference,
-      detail: task.title,
-      keywords: `${task.id} ${task.title} ${task.status}`,
-      group: 'Tasks',
-      badge: TASK_STATUS_META[task.status].label,
-      replacement: reference,
-      append: 'space',
-    } satisfies ComposerAutocompleteCandidate;
-  });
-
 const attentionCandidates = (
   scope: DaemonSessionScope,
   items: readonly ComposerAttentionItem[],
@@ -768,9 +743,9 @@ const attentionCandidates = (
  * The three store-backed families, projected once.
  *
  * The repeated-`@` ladder and the direct sigils are two ways into the SAME
- * three facts, so the projection is written here and read from both. Two
- * copies would drift exactly one way — a `&F12` offered by one menu and not
- * the other — and nothing would fail until a reader noticed.
+ * facts, so the projection is written here and read from both. Two copies
+ * would drift exactly one way — a `!A3` offered by one menu and not the
+ * other — and nothing would fail until a reader noticed.
  */
 const agentsResult = (
   scope: DaemonSessionScope,
@@ -782,13 +757,6 @@ const agentsResult = (
   filterQuery: query,
   contextLabel,
 });
-
-const tasksResult = (
-  scope: DaemonSessionScope,
-  tasks: readonly ComposerTaskSummary[],
-  query: string,
-  contextLabel: string,
-): ComposerProviderResult => ({ candidates: taskCandidates(scope, tasks), filterQuery: query, contextLabel });
 
 const attentionResult = (
   scope: DaemonSessionScope,
@@ -875,9 +843,7 @@ export function createReferencesProvider({
   fetcher = browserFetch,
   suggestions = DEFAULT_COMPOSER_SUGGESTIONS,
   getSessions = noSessions,
-  getTasks = noTasks,
   getAttentionItems = noAttention,
-  waitForTasks,
   waitForAttentionItems,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
@@ -887,21 +853,20 @@ export function createReferencesProvider({
   /** Only the two host-backed tiers warm: agents read a prop the page already
    *  holds, and tier 1 files are the provider's own request. */
   const tierWarmup = (tier: number): ComposerProviderWarmup | undefined =>
-    tier === 3 ? waitForTasks : tier === 4 ? waitForAttentionItems : undefined;
+    tier === 3 ? waitForAttentionItems : undefined;
 
   const tierResult = (tier: number, query: string): ComposerProviderResult => {
-    if (tier === 2) return agentsResult(scope, getSessions(scope), query, '@@ fleet agents');
-    if (tier === 3) return tasksResult(scope, getTasks(scope), query, '@@@ fleet tasks');
-    if (tier === 4) return attentionResult(scope, getAttentionItems(scope), query, '@@@@ unresolved attention');
+    if (tier === 2) return agentsResult(scope, getSessions(scope), query, 'Agents');
+    if (tier === 3) return attentionResult(scope, getAttentionItems(scope), query, 'Attention');
     return {
       candidates: [],
       filterQuery: query,
       contextLabel: `${'@'.repeat(Math.min(tier, 8))} has no reference family`,
       // The one place a reader who over-types `@` is already looking, so it is
-      // also the cheapest place to teach the two families that are not tiers:
-      // live surfaces have their own sigil, and so does every tier below.
+      // also the cheapest place to teach the family that is not a tier: live
+      // surfaces have their own sigil.
       notice:
-        'Use one to four @ signs. The legend above shows every available tier, and each family also has its own sigil. For this session’s terminals, use %.',
+        'Use one to three @ signs. The legend above shows every available tier. For this session’s terminals, use %.',
     };
   };
 
@@ -913,20 +878,15 @@ export function createReferencesProvider({
     shouldOpen: match => composerSuggestionsAllow(suggestions, match),
     get snapshotKey() {
       const sessions = getSessions(scope);
-      return track([
-        sessions,
-        getTasks(scope),
-        getAttentionItems(scope),
-        agentReferenceIdentityKey(scope.daemonId, sessions),
-      ]);
+      return track([sessions, getAttentionItems(scope), agentReferenceIdentityKey(scope.daemonId, sessions)]);
     },
     reset: () => files.reset?.(),
     initialCandidates: context => {
       const tier = context.match.referenceTier ?? 0;
       // Tier 1 is the filesystem, which has no host store to be stale about.
       if (tier === 1) return undefined;
-      // Tiers 3 and 4 read host props, so the same rule the direct `&` and `!`
-      // sigils follow applies here: a family still being read is unknown rather
+      // Tier 3 reads a host prop, so the same rule the direct `!` sigil
+      // follows applies here: a family still being read is unknown rather
       // than empty. Tier 2 and the over-typed tiers answer synchronously.
       return initialUnlessWarming(tierWarmup(tier), context.signal, () => tierResult(tier, context.query));
     },
@@ -939,13 +899,13 @@ export function createReferencesProvider({
 }
 
 /**
- * `:` `&` `!` — the same three families, one keystroke instead of two to four.
+ * `:` `!` — the same two families, one keystroke instead of two or three.
  *
  * They exist because the tokens themselves start with these sigils: a reader
- * who has learned that a task is `&F12` should not have to learn `@@@` as well,
+ * who has learned that an ask is `!A3` should not have to learn `@@@` as well,
  * and an agent reading the same transcript writes `:zelda` rather than `@@`.
  * The ladder stays because it is DISCOVERABLE — one sigil, repeated, teaches
- * four families with a legend — while a direct sigil is what you use once you
+ * three families with a legend — while a direct sigil is what you use once you
  * know. Neither reads a store the other does not.
  */
 export function createDirectReferenceProviders({
@@ -953,15 +913,12 @@ export function createDirectReferenceProviders({
   scope,
   suggestions = DEFAULT_COMPOSER_SUGGESTIONS,
   getSessions = noSessions,
-  getTasks = noTasks,
   getAttentionItems = noAttention,
-  waitForTasks,
   waitForAttentionItems,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider[] {
   assertProviderScope(daemon, scope);
   const scopeKey = daemonSessionKey(scope);
   const trackAgents = snapshotTracker(scopeKey);
-  const trackTasks = snapshotTracker(scopeKey);
   const trackAttention = snapshotTracker(scopeKey);
   const allow = (match: ComposerTriggerMatch): boolean => composerSuggestionsAllow(suggestions, match);
   const { initialUnlessWarming, warmed } = hostWarmupGate(daemon, scope);
@@ -976,19 +933,6 @@ export function createDirectReferenceProviders({
         return trackAgents([sessions, agentReferenceIdentityKey(scope.daemonId, sessions)]);
       },
       candidates: ({ query }) => agentsResult(scope, getSessions(scope), query, ': fleet agents'),
-    },
-    {
-      id: scopedId('tasks', scope),
-      trigger: '&',
-      label: 'Tasks',
-      shouldOpen: allow,
-      get snapshotKey() {
-        return trackTasks([getTasks(scope)]);
-      },
-      initialCandidates: ({ query, signal }) =>
-        initialUnlessWarming(waitForTasks, signal, () => tasksResult(scope, getTasks(scope), query, '& fleet tasks')),
-      candidates: ({ query, signal }) =>
-        warmed(waitForTasks, signal, () => tasksResult(scope, getTasks(scope), query, '& fleet tasks')),
     },
     {
       id: scopedId('attention', scope),
