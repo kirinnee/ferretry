@@ -8,8 +8,9 @@ import {
   modelRows,
   modelSetNote,
   profileFit,
-  profilesFitFirst,
   profileSummary,
+  profilesFitFirst,
+  runsHarness,
   runtimeDefaultModel,
   runtimeNameProblem,
   runtimeProfileLine,
@@ -181,10 +182,45 @@ describe('profilesFitFirst', () => {
     const codexOnly = profile({ name: 'Codex', scope: { kind: 'scoped', scope: 'codex' } });
     const generic = profile({ name: 'Shared' });
     const claudeOnly = profile({ name: 'Claude', scope: { kind: 'scoped', scope: 'claude' } });
-    expect(profilesFitFirst([codexOnly, generic, claudeOnly], 'claude').map(entry => entry.profile.name)).toEqual([
+    expect(profilesFitFirst([codexOnly, generic, claudeOnly], ['claude']).map(entry => entry.profile.name)).toEqual([
       'Shared',
       'Claude',
       'Codex',
+    ]);
+  });
+});
+
+describe('runsHarness', () => {
+  const codexOnly = profile({ name: 'Codex', scope: { kind: 'scoped', scope: 'codex' } });
+  const generic = profile({ name: 'Shared' });
+  const mixed = profile({ name: 'Old', scope: { kind: 'mixed', sentence: 'Mixed.' } });
+
+  it('runs a one-CLI login’s CLI, whatever was chosen', () => {
+    expect(runsHarness(['codex'], 'claude', generic)).toBe('codex');
+    expect(runsHarness([], null)).toBe('claude');
+  });
+
+  it('runs a dual login’s chosen CLI, else its profile’s scope, else its first', () => {
+    expect(runsHarness(['claude', 'codex'], 'codex', generic)).toBe('codex');
+    expect(runsHarness(['claude', 'codex'], null, codexOnly)).toBe('codex');
+    expect(runsHarness(['claude', 'codex'], null, generic)).toBe('claude');
+    expect(runsHarness(['claude', 'codex'], null, mixed)).toBe('claude');
+    expect(runsHarness(['claude', 'codex'], null)).toBe('claude');
+  });
+
+  it('fits a Codex-only profile to a dual login by running Codex, unless Claude Code was chosen', () => {
+    expect(profilesFitFirst([codexOnly, generic], ['claude', 'codex']).map(entry => entry.fit.fits)).toEqual([
+      true,
+      true,
+    ]);
+    expect(
+      profilesFitFirst([codexOnly, generic], ['claude', 'codex'], 'claude').map(entry => [
+        entry.profile.name,
+        entry.fit.fits,
+      ]),
+    ).toEqual([
+      ['Shared', true],
+      ['Codex', false],
     ]);
   });
 });

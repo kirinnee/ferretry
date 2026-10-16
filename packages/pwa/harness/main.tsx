@@ -21,13 +21,11 @@ import type {
   DoctorReport,
   GrantRefusal,
   GrantsView,
-  LearningStatus,
   PairedDevicesView,
   PairingCodeMintResponse,
   PasskeysView,
   PinSnapshot,
   ProjectInfo,
-  ProposalView,
   SecretList,
   SecuritySettingsView,
   SessionSearchTask,
@@ -88,7 +86,6 @@ import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/c
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
-import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
@@ -122,13 +119,12 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import { ConfigFilesSurface } from '../src/features/config-files/config-files-settings.tsx';
 import { type NewDeviceNoticeClients, NewDeviceNotices } from '../src/features/device-notice/new-device-notice.tsx';
 import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
 import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
-import { LearningHeader } from '../src/features/learning/learning-header.tsx';
-import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
@@ -149,8 +145,8 @@ import { ProjectsHub } from '../src/features/projects/projects-hub.tsx';
 import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
+import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
-import { ConfigFilesSurface } from '../src/features/config-files/config-files-settings.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -215,8 +211,8 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.t
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
-import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
+import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
@@ -279,15 +275,21 @@ import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
 import { harnessConfigFilesClient } from './config-files-fixture.ts';
 import {
+  LEARNING_PASSIVE,
+  LearningHubHarness,
+  LearningSettingsHarness,
+  useHarnessLearningActions,
+} from './learning-hub.tsx';
+import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
+import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
+import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
+import {
   WARDEN_FIXTURE_ATTENTION,
   WARDEN_FIXTURE_CONFIG,
   WARDEN_FIXTURE_NOW,
   WARDEN_FIXTURE_STATUS,
   wardenFixtureRequest,
 } from './warden-fixture.ts';
-import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
-import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
-import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -1074,6 +1076,17 @@ function AppChromeHarness({ active }: { readonly active: string }) {
         now={() => ANALYTICS_FIXTURE_NOW}
         initialQuery={null}
       />
+    ) : destination === 'learning' ? (
+      <LearningHubHarness
+        connection={daemon}
+        sessions={WORKSPACE_FLEET}
+        scanRunning={new URLSearchParams(window.location.search).has('scan-running')}
+      />
+    ) : destination === 'settings' && new URLSearchParams(window.location.search).has('learning-settings') ? (
+      <main className="min-h-0 flex-1 overflow-y-auto p-panel" aria-label="Settings › Learning">
+        <h1 className="m-0 mb-3 font-display text-display font-bold tracking-display">Learning</h1>
+        <LearningSettingsHarness connection={daemon} sessions={WORKSPACE_FLEET} />
+      </main>
     ) : destination === 'warden' ? (
       <WardenPage connection={daemon} slots={{ Overview: HarnessWardenOverview }} />
     ) : active === 'warden-settings' ? (
@@ -1098,6 +1111,7 @@ function AppChromeHarness({ active }: { readonly active: string }) {
           onCollapse={() => {}}
           onNavigate={() => {}}
           onOpenPalette={() => {}}
+          learningPassive={LEARNING_PASSIVE}
           presentation={layout === 'rail' ? 'rail' : 'column'}
           projects={[]}
           sessions={WORKSPACE_FLEET}
@@ -1707,7 +1721,10 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   };
   return {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
-      schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
+      // A profile's Edit as YAML reads its file through the same client, as it does from a real daemon.
+      path.startsWith('/v1/config/')
+        ? (await HARNESS_CONFIG_FILES_CLIENT(connection)).request(path, schema as never, init)
+        : schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
 };
 
@@ -1934,70 +1951,6 @@ function HarnessWardenConfig() {
     />
   );
 }
-
-const LEARNING_STATUS: LearningStatus = {
-  enabled: true,
-  intervalMinutes: 10,
-  lastRunAt: '2026-07-31T11:58:00.000Z',
-  pending: { total: 2, strong: 1, weak: 1 },
-  totals: { observations: 8, proposals: 2, tombstones: 0 },
-  running: false,
-};
-
-const LEARNING_PROPOSALS: readonly ProposalView[] = [
-  {
-    id: 'paired-daemon',
-    category: 'global',
-    state: 'pending',
-    title: 'Pair before opening daemon data',
-    ruleText: 'Use the selected daemon connection for every request and cache key.',
-    target: { kind: 'global-agent-guidance', path: 'AGENTS.md', anchor: 'PWA' },
-    observationIds: ['observe-1'],
-    occurrences: 5,
-    crossRepoCount: 2,
-    firstSeen: '2026-07-30T12:00:00.000Z',
-    lastSeen: '2026-07-31T11:58:00.000Z',
-    identity: 'paired-daemon',
-    history: [{ at: '2026-07-31T11:58:00.000Z', event: 'created', by: 'miner' }],
-    evidence: [
-      {
-        observationId: 'observe-1',
-        sessionId: 'harness-session',
-        repo: 'ferretry',
-        at: '2026-07-31T11:58:00.000Z',
-        quote: 'This data belongs to daemon A.',
-        source: 'human',
-        kind: 'correction',
-      },
-    ],
-  },
-  {
-    id: 'visual-review',
-    category: 'global',
-    state: 'pending',
-    title: 'Open both viewport screenshots',
-    ruleText: 'Compare mobile and desktop captures before claiming UI fidelity.',
-    target: { kind: 'global-agent-guidance', path: 'AGENTS.md' },
-    observationIds: ['observe-2'],
-    occurrences: 1,
-    crossRepoCount: 1,
-    firstSeen: '2026-07-31T11:00:00.000Z',
-    lastSeen: '2026-07-31T11:00:00.000Z',
-    identity: 'visual-review',
-    history: [{ at: '2026-07-31T11:00:00.000Z', event: 'created', by: 'miner' }],
-    evidence: [
-      {
-        observationId: 'observe-2',
-        sessionId: 'harness-session',
-        repo: 'ferretry',
-        at: '2026-07-31T11:00:00.000Z',
-        quote: 'Open the images.',
-        source: 'human',
-        kind: 'correction',
-      },
-    ],
-  },
-];
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -5908,26 +5861,6 @@ function Shell() {
       ),
     },
     {
-      label: 'Learning header',
-      render: () => (
-        <Card aria-label="Learning header">
-          <PanelHeader>
-            <Label>Learning</Label>
-          </PanelHeader>
-          <PanelBody>
-            <LearningHeader
-              busy={false}
-              canRun
-              failed={false}
-              now={HARNESS_NOW}
-              onRunNow={() => {}}
-              status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
-            />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
       label: 'Notification settings',
       render: () => (
         <Card aria-label="Notification settings">
@@ -6156,16 +6089,9 @@ function Shell() {
     {
       label: 'Learning review',
       render: () => (
-        <LearningReview
-          connection={daemon}
-          status={LEARNING_STATUS}
-          proposals={LEARNING_PROPOSALS}
-          error={null}
-          busy={false}
-          now={HARNESS_NOW}
-          onRun={() => {}}
-          onAction={() => {}}
-        />
+        <Card aria-label="Learning proposals" className="min-w-0 p-3">
+          <LearningHubHarness connection={daemon} sessions={WORKSPACE_FLEET} scanRunning={false} />
+        </Card>
       ),
     },
     {
@@ -7583,6 +7509,7 @@ function SessionWorkspaceHarness() {
     config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
   } as SessionView);
   const [drawer, setDrawer] = useState(window.location.search.includes('drawer'));
+  const learningActions = useHarnessLearningActions(daemon, WORKSPACE_FLEET);
   const bar = (shape: 'column' | 'rail' | 'drawer') => (
     <SessionsBar
       active={null}
@@ -7595,6 +7522,7 @@ function SessionWorkspaceHarness() {
       onCollapse={() => {}}
       onNavigate={() => {}}
       onOpenPalette={() => {}}
+      learningPassive={LEARNING_PASSIVE}
       presentation={shape}
       projects={[]}
       {...(shape === 'drawer' ? {} : { search: <SessionSearchControl shortcutTarget /> })}
@@ -7611,7 +7539,7 @@ function SessionWorkspaceHarness() {
         <SessionChatPage
           chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_PAGE_CLIENT}
-          actionContributions={WORKSPACE_ACTIONS}
+          actionContributions={[...WORKSPACE_ACTIONS, ...learningActions.contributions]}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
@@ -7636,6 +7564,7 @@ function SessionWorkspaceHarness() {
         />
       </div>
       {layout === 'drawer' && drawer ? bar('drawer') : null}
+      {learningActions.host}
     </div>
   );
 }

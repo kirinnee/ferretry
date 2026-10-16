@@ -10,7 +10,7 @@ function run(argv: string[], board = [proposal('p1'), proposal('p2', { state: 'a
   const out = new CapturingOutput();
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerLearningCommands(program, new LearningController(gateway, out));
+  registerLearningCommands(program, new LearningController(gateway, out, 'fy'));
   return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, out };
 }
 
@@ -94,6 +94,50 @@ describe('learning command surface', () => {
 
     // Assert
     should(gateway.patched).eql(['p1']);
+  });
+
+  it('should categorize a lesson', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['learning', 'categorize', 'p1', 'repo']);
+    await parsed;
+
+    // Assert
+    should(gateway.acted).eql([{ id: 'p1', request: { action: 'categorize', category: 'repo' } }]);
+  });
+
+  it('should reopen a lesson', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['learning', 'reopen', 'p1']);
+    await parsed;
+
+    // Assert
+    should(gateway.acted).eql([{ id: 'p1', request: { action: 'reopen' } }]);
+  });
+
+  it('should preview an apply without --yes, and write only with it', async () => {
+    // Arrange + Act
+    const preview = run(['learning', 'apply', 'p1']);
+    await preview.parsed;
+    const applied = run(['learning', 'apply', 'p1', '--yes']);
+    await applied.parsed;
+
+    // Assert
+    should(preview.gateway.applied).be.empty();
+    should(applied.gateway.applied).eql([{ id: 'p1', etag: 'etag-1' }]);
+  });
+
+  it('should estimate a scan by default, and scan only under --start', async () => {
+    // Arrange + Act
+    const estimate = run(['learning', 'scan', '--sessions', 's1,s2', '--agent', 'miner', '--model', 'opus']);
+    await estimate.parsed;
+    const start = run(['learning', 'scan', '--start']);
+    await start.parsed;
+
+    // Assert
+    should(estimate.gateway.estimated).eql([
+      { scope: { kind: 'sessions', sessionIds: ['s1', 's2'] }, agent: 'miner', model: 'opus' },
+    ]);
+    should(start.gateway.scanned).eql([{ scope: { kind: 'not-passive' } }]);
   });
 
   it('should mine on demand, spawning miners only when asked', async () => {

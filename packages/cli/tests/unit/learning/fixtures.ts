@@ -1,8 +1,12 @@
 import type {
   EvidenceView,
   LearningActionRequest,
+  LearningApplyPreview,
   LearningConfig,
   LearningPatchResponse,
+  LearningScanEstimate,
+  LearningScanProgress,
+  LearningScanRequest,
   LearningStatus,
   ProposalState,
   ProposalView,
@@ -52,6 +56,8 @@ export function proposal(id: string, overrides: Partial<ProposalView> = {}): Pro
     lastSeen: '2026-07-20T09:00:00.000Z',
     identity: 'install-from-package-dir',
     history: [{ at: '2026-07-10T09:00:00.000Z', event: 'created', by: 'miner' }],
+    source: 'passive',
+    count: 3,
     evidence: [evidence()],
     ...overrides,
   };
@@ -86,6 +92,7 @@ export function learningStatus(overrides: Partial<LearningStatus> = {}): Learnin
     pending: { total: 3, strong: 1, weak: 2 },
     totals: { observations: 40, proposals: 6, tombstones: 1 },
     running: false,
+    passiveDefault: true,
     ...overrides,
   };
 }
@@ -99,12 +106,54 @@ export function learningConfig(overrides: Partial<LearningConfig> = {}): Learnin
     maxMinersPerRun: 2,
     maxSessionsPerRun: 30,
     minSpawnGapMinutes: 15,
+    passiveDefault: true,
     ...overrides,
   };
 }
 
 export function patchResponse(overrides: Partial<LearningPatchResponse> = {}): LearningPatchResponse {
   return { path: 'guidance.md', contents: '- install from the package directory\n', ...overrides };
+}
+
+export function applyPreview(overrides: Partial<LearningApplyPreview> = {}): LearningApplyPreview {
+  return {
+    proposalId: 'p1',
+    category: 'global',
+    path: 'guidance.md',
+    exists: true,
+    etag: 'etag-1',
+    diff: '+ install from the package directory',
+    capability: 'fleet',
+    notes: [],
+    ...overrides,
+  };
+}
+
+export function scanEstimate(overrides: Partial<LearningScanEstimate> = {}): LearningScanEstimate {
+  return {
+    sessions: 4,
+    sessionIds: ['s1', 's2', 's3', 's4'],
+    skipped: 1,
+    tokens: 12_000,
+    usd: 0.42,
+    beyondLimit: 0,
+    miners: 1,
+    agent: 'miner',
+    ...overrides,
+  };
+}
+
+export function scanProgress(overrides: Partial<LearningScanProgress> = {}): LearningScanProgress {
+  return {
+    runId: 'scan-1',
+    state: 'running',
+    total: 4,
+    done: 0,
+    startedAt: '2026-07-31T09:00:00.000Z',
+    added: 0,
+    merged: 0,
+    ...overrides,
+  };
 }
 
 /** What one gateway call recorded. */
@@ -119,11 +168,21 @@ export interface ActCall {
  * It is a fake, not a mock: the controller's decisions are asserted through the payload it produced
  * and the text it printed, never through "was this called".
  */
+/** What one `apply` recorded. */
+export interface ApplyCall {
+  readonly id: string;
+  readonly etag: string;
+}
+
 export class RecordingLearningGateway implements ILearningGateway {
   readonly listed: Array<ProposalState | undefined> = [];
   readonly acted: ActCall[] = [];
   readonly ran: boolean[] = [];
   readonly patched: string[] = [];
+  readonly previewed: string[] = [];
+  readonly applied: ApplyCall[] = [];
+  readonly estimated: LearningScanRequest[] = [];
+  readonly scanned: LearningScanRequest[] = [];
 
   constructor(
     private readonly board: readonly ProposalView[] = [proposal('p1')],
@@ -132,6 +191,10 @@ export class RecordingLearningGateway implements ILearningGateway {
     private readonly statusView: LearningStatus = learningStatus(),
     private readonly configView: LearningConfig = learningConfig(),
     private readonly patchView: LearningPatchResponse = patchResponse(),
+    private readonly previewView: LearningApplyPreview = applyPreview(),
+    private readonly appliedView: ProposalView = proposal('p1', { state: 'applied' }),
+    private readonly estimateView: LearningScanEstimate = scanEstimate(),
+    private readonly scanView: LearningScanProgress = scanProgress(),
   ) {}
 
   status(): Promise<LearningStatus> {
@@ -160,5 +223,25 @@ export class RecordingLearningGateway implements ILearningGateway {
   patch(id: string): Promise<LearningPatchResponse> {
     this.patched.push(id);
     return Promise.resolve(this.patchView);
+  }
+
+  applyPreview(id: string): Promise<LearningApplyPreview> {
+    this.previewed.push(id);
+    return Promise.resolve(this.previewView);
+  }
+
+  apply(id: string, etag: string): Promise<ProposalView> {
+    this.applied.push({ id, etag });
+    return Promise.resolve(this.appliedView);
+  }
+
+  scanEstimate(request: LearningScanRequest): Promise<LearningScanEstimate> {
+    this.estimated.push(request);
+    return Promise.resolve(this.estimateView);
+  }
+
+  scan(request: LearningScanRequest): Promise<LearningScanProgress> {
+    this.scanned.push(request);
+    return Promise.resolve(this.scanView);
   }
 }

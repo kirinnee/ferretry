@@ -634,6 +634,51 @@ describe('planClone alongside', () => {
     );
   });
 
+  it('should carry a dual login’s halves and a runtime’s own harness through the copy', () => {
+    // Arrange — docs/provider-presets.md § One login, both CLIs
+    const bundle = bundleWith({
+      credentials: [
+        {
+          id: 'glm',
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_AUTH_TOKEN: secretReference('S') } },
+          codex: {
+            env: { OPENROUTER_API_KEY: secretReference('S') },
+            codexProvider: {
+              id: 'openrouter',
+              name: 'OpenRouter',
+              keyVariable: 'OPENROUTER_API_KEY',
+              baseUrl: 'https://openrouter.ai/api/v1',
+            },
+          },
+        },
+      ],
+      runtimes: {
+        'claude-glm': { credential: 'glm', profile: 'default', agent: false },
+        'codex-glm': { credential: 'glm', profile: 'default', agent: false, harness: 'codex' },
+      },
+    });
+
+    // Act
+    const plan = planClone(emptyTarget(), bundle, options({ existingSecrets: ['S'] }));
+
+    // Assert — copied whole, no slot, both halves present and the runtime's own harness kept
+    should(plan.slots).deepEqual([]);
+    should(plan.model.credentials.glm).containDeep({
+      store: 'environment',
+      claude: { env: { ANTHROPIC_AUTH_TOKEN: secretReference('S') } },
+      codex: { env: { OPENROUTER_API_KEY: secretReference('S') }, codexProvider: { id: 'openrouter' } },
+    });
+    should(plan.model.runtimes['codex-glm']).deepEqual({
+      credential: 'glm',
+      profile: 'default',
+      agent: false,
+      harness: 'codex',
+    });
+    should(plan.model.runtimes['claude-glm']).deepEqual({ credential: 'glm', profile: 'default', agent: false });
+  });
+
   it('should give a runtime a free name when a command wrapper already holds its name', () => {
     // Arrange
     const target = emptyTarget({

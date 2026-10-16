@@ -5,6 +5,7 @@ import type {
   FleetProviderPresetCatalog,
 } from '@ferretry/protocol';
 import { HARNESS_LABEL, indent, listOrNone } from '../fleet/account-render.ts';
+import { presetScopeChip } from './provider-match.ts';
 
 const window = (name: string, usage: FleetCredentialUsageWindow): string =>
   usage.usedPercent === undefined ? `${name} not measured yet` : `${name} ${Math.round(usage.usedPercent)}% used`;
@@ -66,7 +67,7 @@ export function renderPresetList(catalog: FleetProviderPresetCatalog, binaryName
         : 'no test';
       lines.push(
         ...indent([
-          `${preset.id}  ${preset.label}  — ${test}, quota: ${preset.quota.source}`,
+          `${preset.id}  ${preset.label}  (${presetScopeChip(preset)})  — ${test}, quota: ${preset.quota.source}`,
           ...(preset.offered.available ? [] : indent([`Not offered: ${preset.offered.reason}`])),
         ]),
       );

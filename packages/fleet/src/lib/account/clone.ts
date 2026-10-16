@@ -57,6 +57,7 @@ import {
   parseLayerReference,
   type Runtime,
 } from './schema.ts';
+import { runtimeHarness } from './scope.ts';
 
 /** Why a bundle cannot be copied. The message is the sentence a person reads. */
 export class CloneRefusal extends Error {
@@ -318,7 +319,11 @@ function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[]): Flee
 function bundleModel(bundle: FleetCloneBundle): AccountModel {
   const credentials: Record<string, Credential> = {};
   for (const credential of bundle.credentials) {
-    credentials[credential.id] = { harness: credential.harness, store: 'ferretry' };
+    // An environment login keeps its halves, so a runtime on its Codex half still reads as one.
+    credentials[credential.id] =
+      credential.store === 'environment'
+        ? (environmentCredential(credential) as Credential)
+        : { harness: credential.harness, store: 'ferretry' };
   }
   try {
     return parseAccountModel({
@@ -465,9 +470,14 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     const free = freeName(name, candidate => runtimes[candidate] !== undefined || commandNames.has(candidate));
     if (free !== name) renamed.push({ what: 'runtime', from: name, to: free });
     const credential = credentialIds.get(runtime.credential) as string;
-    runtimes[free] = { credential, profile: profileNames.get(runtime.profile) as string, agent: runtime.agent };
+    runtimes[free] = {
+      credential,
+      profile: profileNames.get(runtime.profile) as string,
+      agent: runtime.agent,
+      ...(runtime.harness === undefined ? {} : { harness: runtime.harness }),
+    };
     slotRuntimes.set(credential, [...(slotRuntimes.get(credential) ?? []), free]);
-    const harness = source.credentials[runtime.credential]?.harness as HarnessKind;
+    const harness = runtimeHarness(source, runtime) as HarnessKind;
     if (!options.installed.includes(harness)) missingHarnesses.add(harness);
   }
 
@@ -505,7 +515,9 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
   const missingSecrets = [
     ...new Set([
       ...secretReferencesIn(JSON.stringify(source.components)),
-      ...environmentLogins.flatMap(credential => secretReferencesIn(JSON.stringify(credential.env ?? {}))),
+      ...environmentLogins.flatMap(credential =>
+        secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}])),
+      ),
     ]),
   ].filter(name => !held.has(name));
   const references = environmentLogins.flatMap(credential => {
@@ -647,6 +659,8 @@ function environmentDescriptor(credential: Credential): Partial<FleetCloneCreden
     ...(credential.preset === undefined ? {} : { preset: credential.preset }),
     ...(credential.cloudCredential === undefined ? {} : { cloudCredential: credential.cloudCredential }),
     ...(credential.codexProvider === undefined ? {} : { codexProvider: { ...credential.codexProvider } }),
+    ...(credential.claude === undefined ? {} : { claude: structuredClone(credential.claude) }),
+    ...(credential.codex === undefined ? {} : { codex: structuredClone(credential.codex) }),
   };
 }
 
@@ -660,5 +674,7 @@ function environmentCredential(descriptor: FleetCloneCredential): Record<string,
     ...(descriptor.preset === undefined ? {} : { preset: descriptor.preset }),
     ...(descriptor.cloudCredential === undefined ? {} : { cloudCredential: descriptor.cloudCredential }),
     ...(descriptor.codexProvider === undefined ? {} : { codexProvider: { ...descriptor.codexProvider } }),
+    ...(descriptor.claude === undefined ? {} : { claude: structuredClone(descriptor.claude) }),
+    ...(descriptor.codex === undefined ? {} : { codex: structuredClone(descriptor.codex) }),
   };
 }

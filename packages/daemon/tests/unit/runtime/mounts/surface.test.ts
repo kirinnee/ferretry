@@ -603,13 +603,19 @@ describe('the mounted daemon surface', () => {
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
-      1; // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
-    should(minima).deepEqual({ none: 6, authenticated: 8, operator: operatorRoutes, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 7, authenticated: 8, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
-    ).deepEqual(['POST /v1/agent/config', 'POST /v1/agent/tools', 'GET /v1/sessions/:sessionId/attach']);
+    ).deepEqual([
+      'POST /v1/agent/config',
+      'POST /v1/agent/tools',
+      'POST /v1/agent/lessons',
+      'GET /v1/sessions/:sessionId/attach',
+    ]);
   });
 
   it('should serve the base feeds and every mounted subsystem from one table', () => {
@@ -826,6 +832,16 @@ describe('the mounted daemon surface', () => {
       'POST /v1/learning/proposals/:id',
       'GET /v1/learning/proposals/:id/patch',
       'POST /v1/learning/run',
+      'PATCH /v1/learning/config',
+      'GET /v1/learning/proposals/:id/apply-preview',
+      'POST /v1/learning/proposals/:id/apply',
+      'GET /v1/learning/sessions',
+      'PATCH /v1/sessions/:sessionId/learning',
+      'POST /v1/learning/scan/estimate',
+      'POST /v1/learning/scan/cancel',
+      'GET /v1/learning/scan',
+      'POST /v1/learning/scan',
+      'POST /v1/agent/lessons',
       'POST /v1/recommend',
       // Dictation enhancement: the daemon's one remaining speech-to-text route, and a fixed literal
       // under a prefix no other subsystem uses. Recognition happens in the browser.

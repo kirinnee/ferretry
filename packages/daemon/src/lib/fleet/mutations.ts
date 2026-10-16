@@ -10,13 +10,17 @@ import {
   type AccountModel,
   AccountModelSchema,
   type ComponentKind,
+  type Credential,
   componentFilePath,
   credentialFromPreset,
+  credentialHarnesses,
+  credentialVariables,
   describeScopeConflict,
   freeName,
   HARNESS_DISPLAY_NAMES,
   HARNESS_SCOPE_WORDS,
   type HarnessKind,
+  hasHalves,
   isRuntimeName,
   looksLikeRawSecret,
   looksSecret,
@@ -28,6 +32,7 @@ import {
   presetLoginRefusal,
   profileScope,
   resolveProfile,
+  runtimeHarness,
   type SettingsFormat,
   type SettingsObject,
   scopeFits,
@@ -546,21 +551,32 @@ function putRuntime(
   if (credential === undefined) return refuse(`no login ${change.credential} exists on this machine`);
   if (model.profiles[change.profile] === undefined)
     return refuse(`no profile ${change.profile} exists on this machine`);
+  // A login that drives both CLIs runs the one asked for, else the one the profile is scoped to.
+  const served = credentialHarnesses(credential);
+  if (change.harness !== undefined && !served.includes(change.harness)) {
+    refuse(
+      `${change.credential} does not drive ${HARNESS_DISPLAY_NAMES[change.harness]}: it is a ${HARNESS_DISPLAY_NAMES[credential.harness]} login.`,
+    );
+  }
+  const harness = runtimeHarness(model, change) as HarnessKind;
   // P7: a Claude-only profile never runs on a Codex login, nor the other way round. A profile mixed
-  // before P7 existed is refused only when a runtime is moved ONTO it.
+  // before P7 existed is refused only when a runtime is moved ONTO it. A login that drives both fits
+  // either, unless the runtime was pinned to the other CLI.
   const scope = profileScope(model, change.profile);
   const moving = model.runtimes[change.name]?.profile !== change.profile;
-  if (scope.kind === 'scoped' && !scopeFits(scope.scope, credential.harness)) {
+  if (scope.kind === 'scoped' && !scopeFits(scope.scope, harness)) {
     refuse(
-      `Profile ${change.profile} is ${HARNESS_SCOPE_WORDS[scope.scope]} and ${change.credential} is a ${HARNESS_DISPLAY_NAMES[credential.harness]} login. Pick a Generic or ${HARNESS_SCOPE_WORDS[credential.harness]} profile.`,
+      served.length > 1
+        ? `Profile ${change.profile} is ${HARNESS_SCOPE_WORDS[scope.scope]} and this runtime runs ${HARNESS_DISPLAY_NAMES[harness]} on ${change.credential}. Run it on the other CLI, or pick a Generic or ${HARNESS_SCOPE_WORDS[harness]} profile.`
+        : `Profile ${change.profile} is ${HARNESS_SCOPE_WORDS[scope.scope]} and ${change.credential} is a ${HARNESS_DISPLAY_NAMES[harness]} login. Pick a Generic or ${HARNESS_SCOPE_WORDS[harness]} profile.`,
     );
   }
   if (scope.kind === 'mixed' && moving) refuse(describeScopeConflict(scope, change.profile));
   // P5, E14: a profile with nothing for this login's harness launches nothing of the person's setup.
-  const resolved = resolveProfile({ model, profile: change.profile, harness: credential.harness });
+  const resolved = resolveProfile({ model, profile: change.profile, harness });
   if (resolved.ok && !resolved.resolved.availability.available) {
     refuse(
-      `Nothing in profile ${change.profile} applies on ${HARNESS_DISPLAY_NAMES[credential.harness]}. Pick a different profile.`,
+      `Nothing in profile ${change.profile} applies on ${HARNESS_DISPLAY_NAMES[harness]}. Pick a different profile.`,
     );
   }
   // R4, E15: allowed, but only once the person has seen that it duplicates one.
@@ -578,7 +594,12 @@ function putRuntime(
   }
   if (twins.length > 0)
     consequences.push(`${listed(twins)} already ${twins.length === 1 ? 'uses' : 'use'} this login and profile.`);
-  draft.runtimes[change.name] = { credential: change.credential, profile: change.profile, agent: change.agent };
+  draft.runtimes[change.name] = {
+    credential: change.credential,
+    profile: change.profile,
+    agent: change.agent,
+    ...(change.harness === undefined ? {} : { harness: change.harness }),
+  };
   if (exists) consequences.push('Running sessions keep the old setup until restarted.');
   return exists ? `Change runtime ${change.name}` : `Add runtime ${change.name}`;
 }
@@ -780,16 +801,51 @@ function addEnvironmentLogin(
   }
   const preset = facts.presets?.find(candidate => candidate.id === change.preset);
   if (preset === undefined) return refuse(`there is no preset ${change.preset} on ${facts.machineName}`);
-  if (preset.harness !== change.harness) {
-    refuse(
-      `${preset.label} is a ${HARNESS_DISPLAY_NAMES[preset.harness]} preset, not ${HARNESS_DISPLAY_NAMES[change.harness]}`,
+  // The login gets every half the preset offers; `harness` only says which is listed first.
+  const refusal = presetLoginRefusal(preset, { ...input, harness: change.harness });
+  if (refusal !== undefined) refuse(refusal);
+  const credential = credentialFromPreset(preset, { ...input, harness: change.harness });
+  draft.credentials[change.id] = { ...credential };
+  const harnesses = credentialHarnesses(credential);
+  consequences.push(ENVIRONMENT_CONSEQUENCE);
+  if (harnesses.length > 1) {
+    consequences.push(
+      `One login, one secret: runtimes on it can run ${harnesses.map(name => HARNESS_DISPLAY_NAMES[name]).join(' or ')}.`,
     );
   }
-  const refusal = presetLoginRefusal(preset, input);
-  if (refusal !== undefined) refuse(refusal);
-  draft.credentials[change.id] = { ...credentialFromPreset(preset, input) };
-  consequences.push(ENVIRONMENT_CONSEQUENCE);
-  return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id} from ${preset.label}`;
+  return `Add a ${harnesses.map(name => HARNESS_DISPLAY_NAMES[name]).join(' + ')} login ${change.id} from ${preset.label}`;
+}
+
+/** A two-CLI login's variables, put back where each belongs. */
+interface SplitVariables {
+  readonly shared: Record<string, string>;
+  readonly claude?: Record<string, string>;
+  readonly codex?: Record<string, string>;
+}
+
+/**
+ * A login with halves, its edited variables put back: a name it shares stays shared, a name a half
+ * sets stays in that half (in both, when both set it), a new name goes to the half its preset declares
+ * it in, and anything else is shared by both.
+ */
+function splitHalves(
+  credential: Credential,
+  preset: ProviderPreset | undefined,
+  env: Readonly<Record<string, string>>,
+): SplitVariables {
+  const harnesses = credentialHarnesses(credential);
+  const halves: Partial<Record<HarnessKind, Record<string, string>>> = Object.fromEntries(
+    harnesses.map(harness => [harness, {}]),
+  );
+  const shared: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    const owners = harnesses.filter(harness => credential[harness]?.env?.[name] !== undefined);
+    const declared = harnesses.filter(harness => preset?.halves[harness]?.env[name] !== undefined);
+    const into = credential.env?.[name] !== undefined ? [] : owners.length > 0 ? owners : declared;
+    if (into.length === 0) shared[name] = value;
+    for (const harness of into) (halves[harness] as Record<string, string>)[name] = value;
+  }
+  return { shared, ...halves };
 }
 
 /** `credential.env`: an environment login's variables and cloud credential reference, changed. */
@@ -806,7 +862,8 @@ function putEnvironmentLogin(
     refuse(`login ${change.id} is signed in, not made from environment variables — it has no variables to change`);
   }
   const owner = `login ${change.id}`;
-  const env = resolvedEnv(change.env, credential.env, owner) ?? {};
+  // A login that drives both CLIs is edited as one set of variables and put back half by half.
+  const env = resolvedEnv(change.env, credentialVariables(credential), owner) ?? {};
   assertNoRawSecrets(
     Object.fromEntries(Object.entries(change.env).filter(([, value]) => typeof value === 'string')) as Record<
       string,
@@ -818,16 +875,27 @@ function putEnvironmentLogin(
     change.cloudCredential === undefined ? credential.cloudCredential : (change.cloudCredential ?? undefined);
   const preset =
     credential.preset === undefined ? undefined : facts.presets?.find(candidate => candidate.id === credential.preset);
+  const harnesses = credentialHarnesses(credential);
   if (preset !== undefined) {
     const refusal = presetLoginRefusal(preset, {
       env,
+      halves: harnesses,
       ...(cloudCredential === undefined ? {} : { cloudCredential }),
     });
     if (refusal !== undefined) refuse(refusal);
   }
   const target = draft.credentials[change.id] as Record<string, unknown>;
-  if (Object.keys(env).length === 0) delete target.env;
-  else target.env = env;
+  const split = hasHalves(credential) ? splitHalves(credential, preset, env) : { shared: env };
+  if (Object.keys(split.shared).length === 0) delete target.env;
+  else target.env = split.shared;
+  for (const harness of harnesses) {
+    const half = split[harness];
+    if (half === undefined) continue;
+    const written = { ...(target[harness] as Record<string, unknown>) };
+    if (Object.keys(half).length === 0) delete written.env;
+    else written.env = half;
+    target[harness] = written;
+  }
   if (cloudCredential === undefined) delete target.cloudCredential;
   else target.cloudCredential = cloudCredential;
   const users = runtimesUsingCredential(model, change.id);

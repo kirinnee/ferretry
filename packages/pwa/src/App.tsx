@@ -38,7 +38,7 @@ import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
-import { BuildProfileStep } from './features/fleet/profiles/build-profile-step.tsx';
+import { BuildProfileStep } from './features/fleet/profiles/profile-builder-step.tsx';
 import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
@@ -48,6 +48,9 @@ import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { InstallBannerSlot } from './features/install/install-app.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
+import { useLearningSessionActions } from './features/learning/learning-session-actions.tsx';
+import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from './features/learning/learning-settings.tsx';
+import { usePassiveLearning } from './features/learning/passive-learning.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
 import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
@@ -87,6 +90,7 @@ import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
 import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
+import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
@@ -133,6 +137,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
+  daemonLearningPath,
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
@@ -156,7 +161,7 @@ import {
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
-import { StoreProvider, useAppStore, useConnectionSnapshot, useLockedMachines } from './lib/store.tsx';
+import { StoreProvider, useAppStore, useConnectionSnapshot, useDaemonFetch, useLockedMachines } from './lib/store.tsx';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
 import {
   AppBar,
@@ -719,6 +724,8 @@ function ShellSessionsBar({
     () => store.fleet.getSnapshot(),
   );
   const projects = useProjects(store.projects, connection);
+  // Which ferrets are instructed to learn, for their "Learning: passive" chip.
+  const learning = usePassiveLearning(connection, useDaemonFetch());
   const collapsed = useSyncExternalStore(store.controls.subscribe, () =>
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
@@ -741,6 +748,7 @@ function ShellSessionsBar({
       onNavigate={navigate}
       onOpenPalette={onOpenPalette}
       presentation={shape}
+      learningPassive={learning.passive}
       projects={projects}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       {...(search === undefined ? {} : { search })}
@@ -840,6 +848,20 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const session = fleetSlice?.byId.get(scope.sessionId);
   const openSessions = useContext(SessionsDrawerContext);
   const projects = useKnownProjects(store.projects, daemonId);
+  // Learning's two Actions-menu entries, and the scan dialog and status line they open.
+  const learningActions = useLearningSessionActions({
+    connection,
+    fetcher: useDaemonFetch(),
+    sessions: fleetSlice?.sessions ?? null,
+    projects,
+    accounts: useAccountPickerSlice(store.accountPicker, connection).catalog?.accounts ?? null,
+    onViewLearning: () => navigate(daemonLearningPath(daemonId)),
+  });
+  // Every feature's Actions-menu entries for this ferret: Warden, then Learning.
+  const sessionActions = useMemo(
+    () => [...wardenActions, ...learningActions.contributions],
+    [wardenActions, learningActions.contributions],
+  );
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
@@ -1107,10 +1129,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       <p className="sr-only" role="alert" data-session-error="">
         {sessionIssue ?? ''}
       </p>
+      {learningActions.host}
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
-          actionContributions={wardenActions}
+          actionContributions={sessionActions}
           browserLogin={store.browserLogin}
           attention={attention}
           chatWidth={controls.chatWidth}
@@ -1272,6 +1295,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       speedupsSettingsTab(createDaemonClient),
       securityLogSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
+      { ...LEARNING_SETTINGS_TAB, Surface: LearningSettingsTabSurface },
     ],
     [createDaemonClient, store.clients],
   );
@@ -1375,10 +1399,38 @@ function AnalyticsRoute({ connection }: DaemonPageProps) {
 
 function LearningRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
+  const store = useAppStore();
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  const projects = useProjects(store.projects, connection);
+  const accounts = useAccountPickerSlice(store.accountPicker, connection).catalog?.accounts ?? null;
   return (
     <InsightsFrame current="learning" daemonId={connection.daemonId} onNavigate={navigate}>
-      <LearningPage connection={connection} />
+      <LearningPage
+        connection={connection}
+        sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
+        projects={projects}
+        accounts={accounts}
+        onNavigate={navigate}
+      />
     </InsightsFrame>
+  );
+}
+
+/** Settings › Learning on one machine, its ferrets named from the fleet the app already reads. */
+function LearningSettingsTabSurface({ connection }: { readonly connection: DaemonConnection }) {
+  const store = useAppStore();
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  return (
+    <LearningSettingsSurface
+      connection={connection}
+      sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
+    />
   );
 }
 

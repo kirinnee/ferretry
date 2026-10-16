@@ -1,19 +1,21 @@
 import type { Command } from 'commander';
 import type {
+  LearningApplyOptions,
   LearningCommandOptions,
   LearningController,
   LearningListOptions,
   LearningRejectOptions,
   LearningRunOptions,
+  LearningScanOptions,
 } from './controller.ts';
 
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
-const OVERVIEW = `Learning mines finished sessions for the corrections a human made and turns the
-recurring ones into proposed guidance. Nothing is ever applied automatically:
-a proposal you accept is rendered by "patch" for you to paste into your own
-guidance file.`;
+const OVERVIEW = `Lessons are rules learned from ferrets: filed by a ferret instructed to learn, or found by
+an explicit scan of older transcripts. Nothing is ever applied automatically: accepting a
+lesson writes nothing, and "apply" shows the diff into the global instructions or the
+project's AGENTS.md / CLAUDE.md before it writes.`;
 
 /** Add the shared flags every learning verb carries. */
 function scoped(command: Command): Command {
@@ -83,6 +85,48 @@ export function registerLearningCommands(program: Command, controller: LearningC
       .argument('<rule...>', 'the replacement rule text'),
   ).action(async (id: string, rule: string[], _flags: unknown, command: Command) => {
     await controller.edit(id, rule, merged(command));
+  });
+
+  scoped(
+    learning
+      .command('categorize')
+      .description('change where a lesson goes')
+      .argument('<id>', 'the proposal id')
+      .argument('<category>', 'global (every ferret) or repo (this project)'),
+  ).action(async (id: string, category: string, _flags: unknown, command: Command) => {
+    await controller.categorize(id, category, merged(command));
+  });
+
+  scoped(
+    learning
+      .command('reopen')
+      .description('put an accepted or rejected lesson back in To review')
+      .argument('<id>', 'the proposal id'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.reopen(id, merged(command));
+  });
+
+  scoped(
+    learning
+      .command('apply')
+      .description('write an accepted lesson into its target file, after showing the diff')
+      .argument('<id>', 'the proposal id')
+      .option('--yes', 'write it; without this, only the diff is shown and nothing is written'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.apply(id, merged<LearningApplyOptions>(command));
+  });
+
+  scoped(
+    learning
+      .command('scan')
+      .description('an explicit, estimated read of older ferrets for lessons; never starts by itself')
+      .option('--estimate', 'what a scan would cost, without reading anything (the default)')
+      .option('--start', 'actually run the scan')
+      .option('--sessions <ids>', 'comma-separated session ids; without it, every ferret not instructed to learn')
+      .option('--agent <agent>', 'the login (fleet agent) the miner runs on')
+      .option('--model <model>', 'the model the miner uses'),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.scan(merged<LearningScanOptions>(command));
   });
 
   scoped(

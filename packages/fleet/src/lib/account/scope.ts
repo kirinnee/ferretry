@@ -24,13 +24,15 @@
  * rather than throwing, so a caller holding a draft it built itself always gets an answer.
  */
 import type { HarnessKind } from '../manifest.ts';
+import { credentialHarnesses } from './halves.ts';
 import { modelHarness } from './layering.ts';
 import {
   type AccountModel,
   type ComponentKind,
   type LayerReferenceText,
-  parseLayerReference,
   type ModelSetComponent,
+  parseLayerReference,
+  type Runtime,
 } from './schema.ts';
 
 /** Which harnesses something can be used with: both, or one. */
@@ -180,7 +182,8 @@ export function newlyMisfitRuntimes(
 ): readonly MisfitRuntime[] {
   const fits = (model: typeof next, name: string): MisfitRuntime | undefined => {
     const runtime = model.runtimes[name];
-    const harness = runtime === undefined ? undefined : model.credentials[runtime.credential]?.harness;
+    // A login that drives both CLIs runs the one the profile is scoped to, so it fits either.
+    const harness = runtime === undefined ? undefined : runtimeHarness(model, runtime);
     if (runtime === undefined || harness === undefined) return undefined;
     const scope = profileScope(model, runtime.profile);
     if (scope.kind !== 'scoped' || scopeFits(scope.scope, harness)) return undefined;
@@ -192,4 +195,24 @@ export function newlyMisfitRuntimes(
       const now = fits(next, name);
       return now === undefined || fits(previous, name) !== undefined ? [] : [now];
     });
+}
+
+/**
+ * The CLI a runtime runs (docs/provider-presets.md § One login, both CLIs): its own `harness` when it
+ * names one; else, on a login that drives both, the one its profile is scoped to; else the login's
+ * `harness`. `undefined` only for a runtime whose login does not exist, which the schema refuses.
+ */
+export function runtimeHarness(
+  model: Pick<AccountModel, 'profiles' | 'components' | 'credentials'>,
+  runtime: Pick<Runtime, 'credential' | 'profile' | 'harness'>,
+): HarnessKind | undefined {
+  const credential = model.credentials[runtime.credential];
+  if (credential === undefined) return undefined;
+  if (runtime.harness !== undefined) return runtime.harness;
+  const served = credentialHarnesses(credential);
+  if (served.length > 1) {
+    const scope = profileScope(model, runtime.profile);
+    if (scope.kind === 'scoped' && scope.scope !== 'generic' && served.includes(scope.scope)) return scope.scope;
+  }
+  return credential.harness;
 }

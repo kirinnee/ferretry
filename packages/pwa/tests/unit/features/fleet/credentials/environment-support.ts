@@ -78,3 +78,91 @@ export const ENVIRONMENT: FleetCredentialEnvironment = {
   missingSecrets: ['GW_KEY'],
   test: { available: true, spends: 'nothing', note: 'Reads your quota. Spends nothing.' },
 };
+
+/** A preset with a `claude:` and a `codex:` half: one key, both CLIs. */
+export const DEEPSEEK = preset({
+  id: 'deepseek',
+  label: 'DeepSeek',
+  summary: 'Claude Code and Codex on DeepSeek models with one DeepSeek platform key.',
+  halves: [
+    { harness: 'claude', offered: { available: true }, models: ['deepseek-flash'] },
+    {
+      harness: 'codex',
+      offered: { available: true },
+      docs: 'https://api-docs.deepseek.com/codex',
+      models: ['deepseek-flash'],
+    },
+  ],
+  detect: { hosts: ['api.deepseek.com'], variables: ['DEEPSEEK_*'], keyPrefixes: [] },
+  variables: [
+    {
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      value: 'https://api.deepseek.com/anthropic',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude'],
+    },
+    {
+      name: 'ANTHROPIC_AUTH_TOKEN',
+      kind: 'secret',
+      secret: 'DEEPSEEK_API_KEY',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude'],
+    },
+    {
+      name: 'DEEPSEEK_API_KEY',
+      kind: 'secret',
+      secret: 'DEEPSEEK_API_KEY',
+      required: true,
+      allowEmpty: false,
+      harnesses: ['codex'],
+    },
+  ],
+});
+
+/** Another dual preset on the same host, so a paste can match two. */
+export const DEEPSEEK_MIRROR = preset({
+  id: 'deepseek-mirror',
+  label: 'DeepSeek mirror',
+  halves: [
+    { harness: 'claude', offered: { available: true }, models: [] },
+    { harness: 'codex', offered: { available: false, reason: 'No Responses API.' }, models: [] },
+  ],
+  detect: { hosts: ['api.deepseek.com'], variables: [], keyPrefixes: [] },
+  variables: [{ name: 'MIRROR_KEY', kind: 'secret', secret: 'MIRROR_KEY', required: true, allowEmpty: false }],
+});
+
+/** Codex on an Azure resource: a required value with no default. */
+export const AZURE = preset({
+  id: 'azure-openai',
+  label: 'Azure OpenAI',
+  harness: 'codex',
+  detect: { hosts: ['openai.azure.com'], variables: ['AZURE_OPENAI_*'], keyPrefixes: [] },
+  variables: [
+    {
+      name: 'AZURE_OPENAI_RESOURCE',
+      kind: 'plain',
+      value: '',
+      required: true,
+      allowEmpty: false,
+      description: 'the resource name',
+    },
+    { name: 'AZURE_OPENAI_API_KEY', kind: 'secret', secret: 'AZURE_OPENAI_API_KEY', required: true, allowEmpty: false },
+  ],
+});
+
+/** The custom gateway: no clues, a blank base URL. */
+export const GATEWAY = preset({
+  id: 'custom-gateway',
+  label: 'Custom gateway',
+  variables: [
+    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: '', required: true, allowEmpty: false },
+    { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'GATEWAY_API_KEY', required: true, allowEmpty: false },
+    { name: 'ANTHROPIC_MODEL', kind: 'plain', value: '', required: false, allowEmpty: false },
+  ],
+});
+
+/** The catalogue the one-click suites read: the gateway first, so the grid's reordering shows. */
+export const PROVIDERS = { presets: [GATEWAY, DEEPSEEK, ZAI, ZAI_CODEX, AZURE, DEEPSEEK_MIRROR, BEDROCK] };

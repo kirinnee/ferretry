@@ -34,6 +34,11 @@ export interface TurnPaneEvidence {
   readonly atPrompt: boolean;
   /** A permission (or other choice) prompt nothing moves past until a person answers. */
   readonly permission: boolean;
+  /**
+   * A harness dialog the session is parked on — a one-shot nudge, a trust or theme screen — as the
+   * words a person is shown for it. Like a permission prompt, nothing moves until somebody answers.
+   */
+  readonly prompt?: string | undefined;
 }
 
 /** What the transcript's tail says about the current turn. */
@@ -90,6 +95,8 @@ export interface TurnEvidence {
 export interface TurnObservation {
   readonly state: SessionTurnState;
   readonly confirmed: boolean;
+  /** The harness dialog behind a `needs-input`, when that is what it is. */
+  readonly prompt?: string | undefined;
 }
 
 /**
@@ -101,6 +108,7 @@ export function observeTurn(evidence: TurnEvidence): TurnObservation | undefined
   if (!TURN_STATUSES.has(state.status)) return undefined;
   if (state.status === 'awaiting_question' || (state.pendingQuestion ?? null) !== null)
     return { state: 'needs-input', confirmed: true };
+  if (pane?.prompt !== undefined) return { state: 'needs-input', confirmed: true, prompt: pane.prompt };
   if (pane?.permission === true) return { state: 'needs-input', confirmed: true };
   if (pane?.working === true) return { state: 'working', confirmed: true };
   if (pane?.atPrompt === true) return { state: 'your-turn', confirmed: transcript !== 'working' };
@@ -128,6 +136,20 @@ export function settleTurnState(
   if (observation === undefined) return recorded;
   if (observation.confirmed) return observation.state;
   return previous?.state === observation.state ? observation.state : recorded;
+}
+
+/**
+ * The dialog to RECORD beside `next`: the one a `needs-input` observation saw (none for a permission
+ * prompt), the one already recorded when this observation did not decide the turn, and none for any
+ * turn but `needs-input`.
+ */
+export function settleTurnPrompt(
+  recorded: string | undefined,
+  next: SessionTurnState | undefined,
+  observation: TurnObservation | undefined,
+): string | undefined {
+  if (next !== 'needs-input') return undefined;
+  return observation?.state === 'needs-input' ? observation.prompt : recorded;
 }
 
 /** Whether a status is one this module describes; any other has no turn. */

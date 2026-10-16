@@ -253,3 +253,52 @@ describe('resolveCredentialStore — environment extras', () => {
     should(credentialLaunchArguments(actual)).deepEqual([]);
   });
 });
+
+describe('resolveCredentialStore — halves (docs/provider-presets.md § One login, both CLIs)', () => {
+  const dual = credential({
+    harness: 'claude',
+    store: 'environment',
+    env: { SHARED: 'everyone' },
+    claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+    codex: {
+      env: { OPENROUTER_API_KEY: '${secret:S}' },
+      codexProvider: {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        keyVariable: 'OPENROUTER_API_KEY',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      },
+    },
+  });
+
+  it('should give the Claude half its own environment, the shared variable included', () => {
+    const actual = resolveCredentialStore('glm', dual, PATHS, 'claude');
+    should(credentialLaunchEnvironment(actual)).deepEqual({
+      SHARED: 'everyone',
+      ANTHROPIC_AUTH_TOKEN: '${secret:S}',
+    });
+    should(credentialLaunchArguments(actual)).deepEqual([]);
+  });
+
+  it('should give the Codex half its own environment and its model-provider flags', () => {
+    const actual = resolveCredentialStore('glm', dual, PATHS, 'codex');
+    should(credentialLaunchEnvironment(actual)).deepEqual({ SHARED: 'everyone', OPENROUTER_API_KEY: '${secret:S}' });
+    should(credentialLaunchArguments(actual)).containEql('model_provider="openrouter"');
+  });
+
+  it("should default to the login's own harness when none is given", () => {
+    const actual = resolveCredentialStore('glm', dual, PATHS);
+    should(actual.harness).equal('claude');
+  });
+
+  it('should give a CLI the login does not drive no variables at all', () => {
+    // Only a hand-built model reaches this: the schema refuses a runtime naming a half its login lacks.
+    const claudeOnly = credential({
+      harness: 'claude',
+      store: 'environment',
+      claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+    });
+    const actual = resolveCredentialStore('glm', claudeOnly, PATHS, 'codex');
+    should(credentialLaunchEnvironment(actual)).deepEqual({});
+  });
+});

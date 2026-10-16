@@ -181,12 +181,13 @@ How each kind merges when several layers carry it (the newer layer is "later"):
 
 Per-harness mapping (§8.4 has the launch mechanics):
 
-| Fixed-layer key    | Claude Code                                                                                             | Codex                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Auto mode          | `permissions.defaultMode = auto` (`--permission-mode auto`)                                             | `approval_policy = on-request`, `sandbox_mode = workspace-write`                                                        |
-| Skip all checks    | `permissions.defaultMode = bypassPermissions`, plus `skipDangerousModePermissionPrompt = true`          | `approval_policy = never`, `sandbox_mode = danger-full-access` (what `--dangerously-bypass-approvals-and-sandbox` sets) |
-| trust prompt = off | the launch directory recorded as trusted in the runtime's `.claude.json` (**INFERRED** key, CI-guarded) | `projects."<dir>".trust_level = "trusted"` as a `-c` override (**INFERRED**, CI-guarded)                                |
-| onboarding = done  | `hasCompletedOnboarding = true` in the runtime's `.claude.json`                                         | — (Codex has no onboarding screen that blocks a launch; **INFERRED**)                                                   |
+| Fixed-layer key         | Claude Code                                                                                                                                                                                                                                                 | Codex                                                                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Auto mode               | `permissions.defaultMode = auto` (`--permission-mode auto`)                                                                                                                                                                                                 | `approval_policy = on-request`, `sandbox_mode = workspace-write`                                                        |
+| Skip all checks         | `permissions.defaultMode = bypassPermissions`, plus `skipDangerousModePermissionPrompt = true`                                                                                                                                                              | `approval_policy = never`, `sandbox_mode = danger-full-access` (what `--dangerously-bypass-approvals-and-sandbox` sets) |
+| trust prompt = off      | the launch directory recorded as trusted in the runtime's `.claude.json` (**INFERRED** key, CI-guarded)                                                                                                                                                     | `projects."<dir>".trust_level = "trusted"` as a `-c` override (**INFERRED**, CI-guarded)                                |
+| onboarding = done       | `hasCompletedOnboarding = true` in the runtime's `.claude.json`                                                                                                                                                                                             | — (Codex has no onboarding screen that blocks a launch; **INFERRED**)                                                   |
+| one-shot dialogs = seen | `hasSeenAutoDefaultNudge`, the effort nudge and the fullscreen upsell recorded as seen in `.claude.json`, and the permission mode named again in the `--settings` overlay (**MEASURED**, CI-guarded: the auto-mode dialog otherwise parks a bypass runtime) | `-c notice={hide_…=true}` for the full-access warning, rate-limit nudge and model-migration prompts                     |
 
 The prototype abbreviates the Codex rows to `approval_policy`; the sandbox key belongs to the same
 mapping.
@@ -338,28 +339,32 @@ Four steps. The page title is "Add a runtime".
 4. **Done.** "_name_ is ready to launch" (or "Sign in before you launch"), "Also saved for reuse: …",
    **Back to Runtimes** / **Open _name_**.
 
-### 4.5 Build a profile (also: Edit layers)
+### 4.5 A profile as a bag of components (supersedes the Build a profile stepper)
 
-Eight steps: **Start from → Instructions → MCP → Skills → Settings → Model set → Review layers →
-Name.**
+There is no stepper and no fixed layer slots (R5). A profile is ONE ordered list of contents —
+instructions, MCP servers, skills, settings, hooks, model sets and other profiles, any number of each —
+and order matters only for override: **a later item overrides an earlier one** where both set the same
+key. The profile page and **+ New profile** open the same editor:
 
-- **Start from**: existing profiles as checkboxes (none = start from nothing), with a **Layer order ·
-  later wins** list and ↑/↓ to reorder. While editing, the profile itself and any profile that
-  includes it are disabled ("Would include itself", E19).
-- **Instructions, MCP, Skills, Settings**: pick existing (multi-select), **Create new …** inline
-  ("Save and use it"), or **Skip, add no …**. Badges show scope (Generic, Claude only, Codex only),
-  partial support and warnings; base profiles carry their scope badge too.
-- **Model set**: single choice, or "No model set — use the one from a base layer, or the harness
-  default".
-- **Review layers**: the stack newest on top, the scope it makes, and its **Conflicts** (E18). An
-  empty stack cannot continue, and neither can one that is both Claude only and Codex only: the step
-  says the P7 sentence naming the two layers.
-- **Name**: validated against existing profiles; when this stepper was opened from Add runtime, the
-  hint says "You go back to choosing a profile, with this one picked." **Save profile** / **Save
-  changes**.
+- **Library** (desktop, left): every component and every other profile, with search and a kind filter.
+  Drag a row in (it lands where the line shows) or press its **Add**. On a phone the contents' **Add**
+  opens the same library as a picker sheet.
+- **Contents** (right): the list, numbered. Reorder by drag, or with ↑/↓ (keyboard-accessible; focus
+  stays on the moved row). Remove with ✕ or by dragging the row back onto the library. A row that wins
+  over an earlier one carries an **"overrides ‹X› · ‹key›"** chip.
+- **Resolved**: every final value per tool — MCP servers, skills, settings keys, environment, flags,
+  hooks, the model — with the item it came from and the values it overrode struck through. This and
+  the chips are the daemon's answer (`POST /v1/fleet/profiles/preview`, its additive `resolved`), never
+  a browser re-reading of the merge rules (§3.4). Secret-looking values arrive as `‹hidden›`.
+- **Scope** is derived from the contents. Adding a Claude-only item to a Codex-only profile (or the
+  reverse) is refused at once, naming the items to blame; so is a profile that contains this one
+  ("would contain itself", E19).
+- **Save** sends the whole list as one `profile.put`; **Discard changes** goes back to the saved list.
+  A saved profile also offers **Edit as YAML** on its file, `config/profiles/<name>.yaml`.
 
-Hooks are picked from a profile's Edit layers or added as components; the build stepper does not ask
-for them (the prototype's `BUILD_TYPES`).
+Add runtime's **+ Build a new profile** opens the same editor as a one-step sub-flow, for the login's
+tool, and returns with the new profile picked. Components are created on the Components tab; the
+editor only arranges what exists.
 
 ### 4.6 Add a login
 
@@ -752,12 +757,12 @@ variables and `FY_CREDENTIAL` / `FY_RUNTIME`. An **agent** runtime's wrapper add
 **launch arguments**, which outrank every file the harness or the person can edit — that is what
 makes F1's "always wins" true while the harness rewrites its own settings:
 
-|                                   | Claude Code                                                                      | Codex                                                                                               |
-| --------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| permission mode                   | `--permission-mode auto` or `--permission-mode bypassPermissions`                | `-c approval_policy=… -c sandbox_mode=…` (or `--dangerously-bypass-approvals-and-sandbox` for Skip) |
-| fixed settings                    | `--settings <dir>/.fy/fixed.json` (`skipDangerousModePermissionPrompt` for Skip) | `-c` pairs                                                                                          |
-| trust / onboarding                | `.claude.json` keys re-asserted by the wrapper before `exec` (INFERRED names)    | `-c projects."<cwd>".trust_level="trusted"` (INFERRED)                                              |
-| carried from the old auto variant | `--disallowed-tools=AskUserQuestion` (O3, resolved in §14)                       | `--no-alt-screen`                                                                                   |
+|                                   | Claude Code                                                                                                                                | Codex                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| permission mode                   | `--permission-mode auto` or `--permission-mode bypassPermissions`                                                                          | `-c approval_policy=… -c sandbox_mode=…` (or `--dangerously-bypass-approvals-and-sandbox` for Skip) |
+| fixed settings                    | `--settings <dir>/.fy/fixed.json` (the permission mode; `skipDangerousModePermissionPrompt` for Skip, `skipAutoPermissionPrompt` for Auto) | `-c` pairs                                                                                          |
+| trust / onboarding                | `.claude.json` keys re-asserted by the wrapper before `exec` (INFERRED names)                                                              | `-c projects."<cwd>".trust_level="trusted"` (INFERRED)                                              |
+| carried from the old auto variant | `--disallowed-tools=AskUserQuestion` (O3, resolved in §14)                                                                                 | `--no-alt-screen`                                                                                   |
 
 The machine's Agent permissions is read **at launch**, so a change applies to new sessions only (F5).
 `fy start --agent <runtime>` resolves the runtime by name, then by a recorded old wrapper name, then

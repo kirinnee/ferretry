@@ -94,14 +94,20 @@ describe('LoginTest', () => {
 });
 
 describe('LoginScopeChip', () => {
-  it('names the one CLI a login drives', async () => {
+  it('names the one CLI a login drives, or both', async () => {
     const view = await mount(
       <p>
-        <LoginScopeChip harness="claude" />
-        <LoginScopeChip harness="codex" />
+        <LoginScopeChip harnesses={['claude']} />
+        <LoginScopeChip harnesses={['codex']} />
+        <LoginScopeChip harnesses={['claude', 'codex']} />
       </p>,
     );
-    expect(view.container.textContent).toBe('Claude onlyCodex only');
+    expect(view.container.textContent).toBe('Claude onlyCodex onlyClaude + Codex');
+    expect(
+      Array.from(view.container.querySelectorAll('[data-login-scope]')).map(chip =>
+        chip.getAttribute('data-login-scope'),
+      ),
+    ).toEqual(['claude', 'codex', 'both']);
     await view.unmount();
   });
 });

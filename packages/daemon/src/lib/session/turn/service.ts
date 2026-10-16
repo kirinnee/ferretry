@@ -5,6 +5,7 @@ import type { TranscriptEvent } from '../../transcript/types.ts';
 import {
   isTurnStatus,
   observeTurn,
+  settleTurnPrompt,
   settleTurnState,
   type TurnObservation,
   type TurnPaneEvidence,
@@ -17,13 +18,15 @@ export const TURN_WATCH_INTERVAL_MS = 2_000;
 /** One session as the watcher needs it. */
 export interface TurnWatchSession {
   readonly id: SessionId;
-  readonly state: Pick<SessionState, 'status' | 'turn' | 'pendingQuestion' | 'turnState'>;
+  readonly state: Pick<SessionState, 'status' | 'turn' | 'pendingQuestion' | 'turnState' | 'turnPrompt'>;
 }
 
 /** A recorded change, as the journal and the event stream carry it. */
 export interface TurnStateChange {
   readonly from: SessionTurnState | undefined;
   readonly to: SessionTurnState | undefined;
+  /** The harness dialog behind `to`, recorded as `turnPrompt`; absent clears it. */
+  readonly prompt?: string | undefined;
 }
 
 export interface SessionTurnPorts {
@@ -119,9 +122,10 @@ export class SessionTurnWatcher implements TurnWatchLoop {
       });
     }
     const next = settleTurnState(session.state.turnState, observation, this.previous.get(session.id), live);
+    const prompt = settleTurnPrompt(session.state.turnPrompt, next, observation);
     this.previous.set(session.id, observation);
-    if (next === session.state.turnState) return undefined;
-    const change = { from: session.state.turnState, to: next };
+    if (next === session.state.turnState && prompt === session.state.turnPrompt) return undefined;
+    const change = { from: session.state.turnState, to: next, ...(prompt === undefined ? {} : { prompt }) };
     return (await this.ports.record(session.id, change, this.ports.clock.now())) ? change : undefined;
   }
 }

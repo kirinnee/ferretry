@@ -3,15 +3,20 @@ import should from 'should';
 import {
   AGENT_TOOLS_INSTRUCTION,
   applyFixedLayer,
-  claudeToolsConfig,
-  codexToolsServer,
-  FERRETRY_MCP_ENV_VARS,
   CLAUDE_NO_QUESTIONS_FLAG,
+  CLAUDE_PROMPTS_SEEN,
+  CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
+  claudeToolsConfig,
+  codexNoticeOverride,
+  codexToolsServer,
   codexTrustOverride,
+  FERRETRY_MCP_ENV_VARS,
   type FixedLayer,
   type FixedLayerInput,
   fixedLayerFor,
+  LESSONS_INSTRUCTION,
+  PASSIVE_LEARNING_ENV,
   tomlString,
 } from '../../src/lib/account/fixed-layer.ts';
 import { type ResolvedProfile, resolveProfile } from '../../src/lib/account/layering.ts';
@@ -25,6 +30,19 @@ const CLAUDE_TOOL_ARGS = [
   `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
   `--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}`,
 ];
+/** Every one-shot dialog a Claude agent's `.claude.json` records as seen, as locked entries. */
+const CLAUDE_SEEN_ENTRIES = Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) => ({
+  purpose: 'one-time-prompts',
+  target: 'claude-json',
+  path: [key],
+  key,
+  value,
+}));
+/** The measured `-c notice={…}` table hiding Codex's one-shot notices. */
+const CODEX_NOTICE_ARGS = [
+  '-c',
+  'notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,"hide_gpt-5.1-codex-max_migration_prompt"=true}',
+];
 /** And every Codex agent launch. */
 const CODEX_TOOL_ARGS = [
   '-c',
@@ -32,7 +50,7 @@ const CODEX_TOOL_ARGS = [
   '-c',
   'mcp_servers.ferretry.args=["mcp","serve"]',
   '-c',
-  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]',
+  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE"]',
   '-c',
   `developer_instructions="${AGENT_TOOLS_INSTRUCTION}"`,
 ];
@@ -110,6 +128,14 @@ describe('fixedLayerFor — Claude', () => {
             key: 'hasCompletedOnboarding',
             value: true,
           },
+          ...CLAUDE_SEEN_ENTRIES,
+          {
+            purpose: 'skip-prompt',
+            target: 'settings',
+            path: ['skipAutoPermissionPrompt'],
+            key: 'skipAutoPermissionPrompt',
+            value: true,
+          },
           {
             purpose: 'no-questions',
             target: 'launch',
@@ -135,7 +161,12 @@ describe('fixedLayerFor — Claude', () => {
           },
         ],
         args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion', ...CLAUDE_TOOL_ARGS],
-        claudeJson: { hasCompletedOnboarding: true, projects: { [CWD]: { hasTrustDialogAccepted: true } } },
+        claudeSettingsOverlay: { permissions: { defaultMode: 'auto' }, skipAutoPermissionPrompt: true },
+        claudeJson: {
+          hasCompletedOnboarding: true,
+          ...CLAUDE_PROMPTS_SEEN,
+          projects: { [CWD]: { hasTrustDialogAccepted: true } },
+        },
       },
     });
   });
@@ -157,7 +188,12 @@ describe('fixedLayerFor — Claude', () => {
       '--disallowed-tools=AskUserQuestion',
       ...CLAUDE_TOOL_ARGS,
     ]);
-    should(actual.claudeSettingsOverlay).deepEqual({ skipDangerousModePermissionPrompt: true });
+    // The overlay names the mode too: a flag-settings mode is what keeps the auto-default dialog away.
+    should(actual.claudeSettingsOverlay).deepEqual({
+      permissions: { defaultMode: 'bypassPermissions' },
+      skipDangerousModePermissionPrompt: true,
+    });
+    should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
       ['permission-mode', 'permissions.defaultMode', 'bypassPermissions'],
       ['skip-prompt', 'skipDangerousModePermissionPrompt', true],
@@ -197,8 +233,11 @@ describe('fixedLayerFor — Codex', () => {
       '-c',
       `projects={"${CWD}"={trust_level="trusted"}}`,
       '--no-alt-screen',
+      ...CODEX_NOTICE_ARGS,
       ...CODEX_TOOL_ARGS,
     ]);
+    // One inline table, quoting the one key that is not a bare TOML key: measured to load in codex-cli 0.156.1.
+    should(codexNoticeOverride()).equal(CODEX_NOTICE_ARGS[1]);
     should(actual.claudeJson).be.undefined();
     should(actual.claudeSettingsOverlay).be.undefined();
     should(actual.entries.map(entry => [entry.target, entry.key, entry.value])).deepEqual([
@@ -206,6 +245,11 @@ describe('fixedLayerFor — Codex', () => {
       ['settings', 'sandbox_mode', 'workspace-write'],
       ['settings', `projects."${CWD}".trust_level`, 'trusted'],
       ['launch', CODEX_NO_ALT_SCREEN_FLAG, true],
+      ...CODEX_HIDDEN_NOTICES.map(key => [
+        'settings',
+        `notice.${/^[A-Za-z0-9_-]+$/.test(key) ? key : `"${key}"`}`,
+        true,
+      ]),
       ['settings', 'mcp_servers.ferretry', codexToolsServer(FY)],
       ['settings', 'developer_instructions', AGENT_TOOLS_INSTRUCTION],
     ]);
@@ -266,7 +310,11 @@ describe('applyFixedLayer', () => {
       '--disallowed-tools=AskUserQuestion',
       ...CLAUDE_TOOL_ARGS,
     ]);
-    should(actual.settings).deepEqual({ permissions: { defaultMode: 'auto', allow: ['Bash(ls)'] }, theme: 'dark' });
+    should(actual.settings).deepEqual({
+      permissions: { defaultMode: 'auto', allow: ['Bash(ls)'] },
+      theme: 'dark',
+      skipAutoPermissionPrompt: true,
+    });
     should(actual.fixed).equal(claudeAuto);
     should(actual.overridden).have.length(1);
     should(actual.overridden[0]).containDeep({
@@ -491,5 +539,21 @@ describe('the Ferretry tools in the fixed layer', () => {
     const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
     const plain = applyFixedLayer(profileWith('codex', { body: { model: 'x' } }), codex);
     should(plain.fixed).equal(codex);
+  });
+});
+
+describe('passive learning teaching', () => {
+  it('should hand the per-ferret switch to the tools server and teach the suggest command by name', () => {
+    // Arrange
+    const binary = 'fy';
+
+    // Act
+    const teaching = LESSONS_INSTRUCTION(binary);
+
+    // Assert
+    should(FERRETRY_MCP_ENV_VARS).containEql(PASSIVE_LEARNING_ENV);
+    should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
+    should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
+    should(teaching).containEql('lessons_suggest');
   });
 });

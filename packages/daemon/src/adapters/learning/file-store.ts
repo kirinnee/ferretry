@@ -7,6 +7,7 @@ import type {
   FoundationPaths,
   LearningState,
   LearningStorePort,
+  StoredSessionLearning,
   Observation,
   Proposal,
   RunManifest,
@@ -17,6 +18,7 @@ import {
   LearningStateSchema,
   ObservationSchema,
   StoredProposalSchema,
+  StoredSessionLearningSchema,
   TombstoneSchema,
 } from '../../lib/learning/types.ts';
 
@@ -28,6 +30,7 @@ interface LearningPaths {
   readonly tombstones: string;
   readonly runs: string;
   readonly patches: string;
+  readonly sessions: string;
 }
 
 function createLearningPaths(paths: FoundationPaths): LearningPaths {
@@ -40,6 +43,7 @@ function createLearningPaths(paths: FoundationPaths): LearningPaths {
     tombstones: join(directory, 'tombstones.json'),
     runs: join(directory, 'runs'),
     patches: join(directory, 'patches'),
+    sessions: join(directory, 'sessions.json'),
   };
 }
 
@@ -63,7 +67,7 @@ function decodeOr<T>(text: string | undefined, schema: z.ZodType<T>, fallback: T
 }
 
 /** One malformed record costs that record alone, never the rest of the file. */
-function decodeEach<T>(text: string | undefined, schema: z.ZodType<T>): readonly T[] {
+function decodeEach<T>(text: string | undefined, schema: z.ZodType<T, unknown>): readonly T[] {
   const value = decodeJson(text);
   if (!Array.isArray(value)) return [];
   return value.flatMap(entry => {
@@ -157,6 +161,15 @@ export class FileLearningStore implements LearningStorePort {
       .toSorted()
       .at(-1);
     return newest === undefined ? undefined : await this.readRunManifest(newest);
+  }
+
+  async loadSessionLearning(): Promise<readonly StoredSessionLearning[]> {
+    return decodeEach(await this.files.readText(this.paths.sessions), StoredSessionLearningSchema);
+  }
+
+  async saveSessionLearning(records: readonly StoredSessionLearning[]): Promise<void> {
+    await this.ensureDirectories();
+    await this.files.writeTextAtomic(this.paths.sessions, `${JSON.stringify(records, null, 2)}\n`);
   }
 
   async writePatch(id: string, contents: string): Promise<string> {

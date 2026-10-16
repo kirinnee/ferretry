@@ -27,3 +27,6 @@ test:
 quota:
   source: vercel-credits
   note: The gateway's credit balance.
+detect:
+  hosts: [ai-gateway.vercel.sh]
+  variables: [AI_GATEWAY_*]

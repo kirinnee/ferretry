@@ -74,6 +74,10 @@ describe('sendBadge', () => {
     expect(sendBadge(record({ fate: 'unaccounted' })).detail).toContain('arrival could not be checked');
     for (const reason of ['timeout', 'session_ended', 'composer_discarded', 'pane_unreadable'] as const)
       expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: reason })).detail.length).toBeGreaterThan(30);
+    // A dialog on screen is named as what stopped it, not as an unreadable transcript.
+    const blocked = sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt' })).detail;
+    expect(blocked).toContain('a prompt on the agent’s screen is waiting for an answer');
+    expect(blocked).not.toContain('transcript');
   });
 });
 

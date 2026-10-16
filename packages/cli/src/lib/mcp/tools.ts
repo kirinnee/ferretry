@@ -3,7 +3,9 @@ import {
   AGENT_TOOL_MAX_READ_LINES,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
   type AgentConfigToolName,
+  type AgentLessonToolName,
   type AgentToolName,
+  LESSON_RULE_MAX_CHARS,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
 
@@ -223,6 +225,31 @@ export const MCP_CONFIG_TOOLS: readonly (McpToolDefinition & { readonly configTo
         etag: { type: 'string', description: 'The etag config_read gave you, so a newer edit is never overwritten.' },
       },
       ['path', 'text'],
+    ),
+  },
+];
+
+/**
+ * The `lessons.suggest` tool (docs/learning.md): how a ferret files a lesson for the owner to
+ * review. The daemon derives the session from the credential alone and attaches the evidence — the
+ * owner's own words — itself, so nothing here can name a session or carry a quote.
+ */
+export const MCP_LESSON_TOOLS: readonly (McpToolDefinition & { readonly lessonTool: AgentLessonToolName })[] = [
+  {
+    name: 'lessons_suggest',
+    lessonTool: 'lessons.suggest',
+    description:
+      'File a lesson for the owner to review: a correction they made, or a durable fact about how they want work done. Use scope "repo" for a fact about this project, "global" for one every ferret should follow. File each lesson once; a duplicate merges into the existing one.',
+    inputSchema: object(
+      {
+        rule: {
+          type: 'string',
+          maxLength: LESSON_RULE_MAX_CHARS,
+          description: 'One short imperative rule, e.g. "Run bun install inside the target package."',
+        },
+        scope: { type: 'string', enum: ['global', 'repo'] },
+      },
+      ['rule', 'scope'],
     ),
   },
 ];

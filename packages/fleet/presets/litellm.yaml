@@ -25,3 +25,5 @@ test:
 quota:
   source: litellm-key-info
   note: The key's spend and budget, from the proxy's /key/info.
+detect:
+  variables: [LITELLM_*]

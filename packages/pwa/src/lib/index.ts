@@ -106,15 +106,15 @@ export * from '../features/fleet/setup-api.ts';
 export * from '../features/fleet/shell/index.ts';
 export * from '../features/fleet/sign-in-restart.tsx';
 export * from '../features/install/install-app.tsx';
-export * from '../features/learning/learning-header.tsx';
-export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
-export {
-  LearningPage,
-  LearningReview,
-  learningErrorMessage,
-  learningStrength,
-  ProposalCard,
-} from '../features/learning/learning-page.tsx';
+export * from '../features/learning/apply-diff.tsx';
+export * from '../features/learning/learning-model.ts';
+export * from '../features/learning/learning-page.tsx';
+export * from '../features/learning/learning-session-actions.tsx';
+export * from '../features/learning/learning-settings.tsx';
+export * from '../features/learning/lesson-row.tsx';
+export * from '../features/learning/passive-learning.tsx';
+export * from '../features/learning/scan-dialog.tsx';
+export * from '../features/learning/use-learning-scan.ts';
 export * from '../features/lineage/lineage-name.tsx';
 export * from '../features/lineage/lineage-surface.tsx';
 export * from '../features/lineage/lineage-surface-model.ts';

@@ -92,6 +92,44 @@ describe('the generated wrapper’s first-run seeding', () => {
     });
   });
 
+  it('should record every one-shot dialog as seen, so none parks an agent nobody watches', async () => {
+    await withSandbox(async sandbox => {
+      // Act
+      await sandbox.run();
+
+      // Assert — the auto-mode nudge is the one that blocked every message to a bypass agent.
+      should(await sandbox.config()).match({
+        hasSeenAutoDefaultNudge: true,
+        hasSeenEffortMediumNudge: true,
+        hasSeenEffortMediumNudgeByModel: { 'claude-opus-5': true, 'claude-fable-5-1': true },
+        fullscreenUpsellSeenCount: 3,
+      });
+    });
+  });
+
+  it('should seed the dialogs into a home the harness already wrote, keeping a higher count', async () => {
+    await withSandbox(async sandbox => {
+      // Arrange — a home seeded before this release: every older flag set, the new ones absent.
+      await sandbox.run();
+      const before = (await sandbox.config()) as Record<string, unknown>;
+      const { hasSeenAutoDefaultNudge: _gone, ...older } = before;
+      await Bun.write(
+        path.join(sandbox.home, '.claude.json'),
+        JSON.stringify({ ...older, fullscreenUpsellSeenCount: 7, hasSeenEffortMediumNudgeByModel: { other: true } }),
+      );
+
+      // Act
+      await sandbox.run();
+
+      // Assert
+      should(await sandbox.config()).match({
+        hasSeenAutoDefaultNudge: true,
+        fullscreenUpsellSeenCount: 7,
+        hasSeenEffortMediumNudgeByModel: { other: true, 'claude-opus-5': true },
+      });
+    });
+  });
+
   it('should write the seeded file privately', async () => {
     await withSandbox(async sandbox => {
       // Act
