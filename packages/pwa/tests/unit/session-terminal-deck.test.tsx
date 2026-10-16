@@ -654,6 +654,41 @@ describe('SessionTerminalDeck theming', () => {
     run(() => page.unmount());
     document.documentElement.removeAttribute('data-theme');
   });
+
+  test('draws in the theme’s monospace stack with the bundled face before the generic, and follows a theme', async () => {
+    // `b u n  d e v`: with no installed monospace face the generic resolved to a proportional one, and
+    // xterm padded every narrow glyph out to the width of a `W`. The bundled face must come first.
+    let markTerminalOpened: () => void = () => {};
+    const terminalOpened = new Promise<void>(resolve => {
+      markTerminalOpened = resolve;
+    });
+    const spy = xtermSpy({ onOpen: markTerminalOpened });
+    let repaint: () => void = () => {};
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      loadXterm: async () => spy.modules,
+      watchTheme: callback => {
+        repaint = callback;
+        return () => undefined;
+      },
+    });
+    const root = document.documentElement;
+    root.style.setProperty('--font-mono', "'Geist Mono', monospace");
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    await terminalOpened;
+    const instance = spy.instances[0];
+    if (instance === undefined) throw new Error('no emulator was constructed');
+    expect(instance.font().initial).toBe(`'Geist Mono', "Ferretry Terminal Mono", monospace`);
+
+    // Another family brings another stack; an unchanged one is not reassigned.
+    root.style.setProperty('--font-mono', "'IBM Plex Mono', monospace");
+    run(repaint);
+    expect(instance.font().current).toBe(`'IBM Plex Mono', "Ferretry Terminal Mono", monospace`);
+    run(repaint);
+    expect(instance.font().current).toBe(`'IBM Plex Mono', "Ferretry Terminal Mono", monospace`);
+    run(() => page.unmount());
+    root.style.removeProperty('--font-mono');
+  });
 });
 
 /**

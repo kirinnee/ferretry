@@ -56,6 +56,7 @@ import type {
   FleetAccountChangeOutcome,
   FleetAccountChangePreview,
   FleetAccountChangeView,
+  FleetAgentControl,
   FleetCatalogFormat,
   FleetCatalogRefusalCode,
   FleetComponentCatalog,
@@ -68,7 +69,7 @@ import type {
   FleetRuntimeCatalog,
   SessionStatus,
 } from '@ferretry/protocol';
-import type { CallerGovernance } from '../api/capability.ts';
+import type { CallerGovernance, CapabilityPresentation } from '../api/capability.ts';
 import { ApiError } from '../api/error.ts';
 import {
   type CatalogFacts,
@@ -101,6 +102,35 @@ export class FleetCatalogRefusal extends Error {
     super(message);
     this.name = 'FleetCatalogRefusal';
   }
+}
+
+/**
+ * "What agents may control" turned back ON, from a device this request did not just prove a passkey
+ * for (owner decision, T) — the same "adding access always asks" rule `docs/grants.md` states for
+ * minting a pairing code and widening a device, reused rather than reinvented: a passkey proved FOR
+ * THIS ACT, never the unlock alone and never a step-up merely inside its window. Turning one OFF, and
+ * every act from the machine itself (loopback), never throws this.
+ */
+export class FleetCatalogFreshStepUpRequired extends Error {
+  constructor() {
+    super('turning an agent control back on from a remote device needs a passkey confirmation for it');
+    this.name = 'FleetCatalogFreshStepUpRequired';
+  }
+}
+
+const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = ['terminals', 'browsers', 'files'];
+
+/** Whether `next` turns ON a kind `current` did not already allow — the half of a write that ever
+ *  needs a fresh passkey. Unchanged values and a narrowed kind never count. */
+function agentControlWidened(current: FleetAgentControl, next: FleetAgentControl): boolean {
+  return AGENT_CONTROL_KINDS.some(kind => !current[kind] && next[kind]);
+}
+
+/** What `apply` needs to enforce and spend the fresh-passkey rule above. Absent reads as "no proof
+ *  and nothing to spend" — never as "trust it", so a boundary that forgot to wire this fails closed. */
+export interface FreshStepUpContext {
+  readonly presentation: CapabilityPresentation | undefined;
+  readonly spend: () => void;
 }
 
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
@@ -367,19 +397,39 @@ export class FleetCatalogService {
    *
    * Spend, then await: two applies arriving together must not both find it pending. If it never reaches
    * the host — the configuration moved — it is put back, because nothing about the host changed.
+   *
+   * `freshStepUp` is the one extra rule on top of the ordinary `fleet.configure` step-up: a
+   * `machine.settings` change that turns "what agents may control" back ON, for a caller this host
+   * does not govern, needs a passkey proved for THIS act — mirroring minting a pairing code and
+   * widening a device (`docs/grants.md`). Turning one off, and every act at the machine itself, never
+   * asks for it; `agentControlWidened` is the one test, run against the model as it is RIGHT NOW,
+   * never the one a stale preview was shown against.
    */
-  async apply(id: string, governance: CallerGovernance | undefined): Promise<FleetAccountChangeOutcome> {
+  async apply(
+    id: string,
+    governance: CallerGovernance | undefined,
+    freshStepUp?: FreshStepUpContext,
+  ): Promise<FleetAccountChangeOutcome> {
     if (governance === undefined) {
       throw new ApiError(403, 'this daemon cannot say whether this caller may change the fleet', 'forbidden');
     }
     const record = this.#proposals(() => this.#changes.consume(id));
+    let widensAgentControl = false;
     try {
-      await this.#assertCurrent(record);
+      const model = await this.#assertCurrent(record);
+      if (record.mutation.kind === 'machine.settings') {
+        widensAgentControl = agentControlWidened(model.machine.agentControl, record.mutation.agentControl);
+        if (widensAgentControl && governance.governed && freshStepUp?.presentation?.freshStepUp !== true) {
+          throw new FleetCatalogFreshStepUpRequired();
+        }
+      }
     } catch (error) {
       this.#changes.restore(record);
       throw error;
     }
-    return await this.#execute(record);
+    const outcome = await this.#execute(record);
+    if (widensAgentControl) freshStepUp?.spend();
+    return outcome;
   }
 
   // ── Reading ────────────────────────────────────────────────────────────────────────────────────
@@ -637,13 +687,17 @@ export class FleetCatalogService {
   // ── Applying ───────────────────────────────────────────────────────────────────────────────────
 
   /** Refuse a change whose configuration moved since it was reviewed. */
-  async #assertCurrent(record: ChangeRecord): Promise<void> {
-    if ((await this.#read()).revision !== record.revision) {
+  /** Refuses a change whose configuration moved since it was reviewed; otherwise answers the model
+   *  AS IT IS RIGHT NOW, so `apply` never judges the fresh-step-up rule against a stale one. */
+  async #assertCurrent(record: ChangeRecord): Promise<AccountModel> {
+    const reading = await this.#read();
+    if (reading.revision !== record.revision) {
       throw new FleetCatalogRefusal(
         'fleet_change_stale',
         'the fleet configuration changed on this machine after this change was previewed; review it again',
       );
     }
+    return reading.model;
   }
 
   async #execute(record: ChangeRecord): Promise<FleetAccountChangeOutcome> {

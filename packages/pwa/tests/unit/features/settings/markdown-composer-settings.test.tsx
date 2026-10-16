@@ -71,14 +71,17 @@ describe('MarkdownComposerSettings', () => {
 
       expect(styles().map(style => [style.props.value, style.props.checked])).toEqual([
         ['on', true],
+        ['rich', false],
         ['off', false],
       ]);
       expect(JSON.stringify(renderer.toJSON())).toContain('Markdown, Notion-style');
       expect(JSON.stringify(renderer.toJSON())).toContain('Plain text box');
 
-      run(() => styles()[1]?.props.onChange());
+      run(() => styles()[2]?.props.onChange());
       expect(storage.getItem(MD_COMPOSE_KEY)).toBe('off');
-      expect(styles()[1]?.props.checked).toBe(true);
+      expect(styles()[2]?.props.checked).toBe(true);
+      run(() => styles()[1]?.props.onChange());
+      expect(storage.getItem(MD_COMPOSE_KEY)).toBe('rich');
       run(() => styles()[0]?.props.onChange());
       expect(storage.getItem(MD_COMPOSE_KEY)).toBe('on');
       run(() => renderer.unmount());
@@ -90,7 +93,7 @@ describe('MarkdownComposerSettings', () => {
       const renderer = render(surface());
       const tree = JSON.stringify(renderer.toJSON());
 
-      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('exactly the markdown you typed');
+      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('what you send is markdown');
       expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('markers kept faintly visible');
       expect(tree).toContain('Editor style');
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);

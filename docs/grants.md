@@ -84,12 +84,22 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | capability   | what it covers                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------- |
 | `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them |
-| `terminal`   | opening, writing to and streaming session terminals                                                 |
+| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console) |
 | `browser`    | the human login window and per-session browser control                                              |
 | `filesystem` | reading session working trees and registering projects on the host                                  |
 | `warden`     | supervision status, sweeps and the warden configuration                                             |
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
+
+**The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
+Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed
+identically: ungoverned from loopback; for a paired device, a browser across the network or a relayed session,
+the `terminal` grant plus a current step-up, which the unlock holds by default; an undetermined grant
+document refuses. It is not `/attach`: that route is `privilegedOnly` because it hands back a host tmux
+address, while the Console's answer is a byte count. The pane it writes to is the one the attach proof
+names — the session's single registration, matched on pane id, pid and process start — never a session
+name. The security log records each write as `terminal.input` on the session (`detail.mode: 'console'`),
+folded per window, and never what was typed.
 
 Each has two axes, and they are different questions:
 
@@ -109,8 +119,11 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing` and `secrets` — except minting a code or widening a device, which always want a
-passkey for that act ([design/zero-trust.md](design/zero-trust.md) B1). It needs no setup beyond pairing,
+`browser`, `pairing` and `secrets` — except minting a code, widening a device, or turning "what agents
+may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
+that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
+for more than the ordinary `fleet.configure` step-up — only the ON half of a write does, so a single
+save that turns some off and others on asks once, for the ON half. It needs no setup beyond pairing,
 because the passkey is the one the person already holds.
 
 **What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
@@ -232,9 +245,11 @@ governed device is answered `401 unlock_required` on everything but the routes i
 unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default) for that device.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
-with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code and
-widening another device want a passkey proved for that one act, from any device, unlocked or not
-([design/zero-trust.md](design/zero-trust.md) B6). At the machine, nothing is asked.
+with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code,
+widening another device, and turning "what agents may control" (terminals/browsers/files, T) back ON
+want a passkey proved for that one act, from any device, unlocked or not
+([design/zero-trust.md](design/zero-trust.md) B6) — turning one of those three OFF never does. At the
+machine, nothing is asked.
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's

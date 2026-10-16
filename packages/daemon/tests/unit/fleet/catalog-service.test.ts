@@ -32,6 +32,7 @@ import { ApiError } from '../../../src/lib/api/error.ts';
 import {
   type AccountDocumentReading,
   countRunningSessions,
+  FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   FleetCatalogService,
   type FleetCatalogServiceDeps,
@@ -690,6 +691,169 @@ describe('first-run import and clone', () => {
       { outcome: 'executed', executor: 'clone', summary: 'Cloned 1 runtime' },
     ]);
     should(ran).deepEqual(['setup.import', 'clone.import']);
+  });
+});
+
+describe('applying machine.settings that turns "what agents may control" back on (owner decision, T)', () => {
+  const remote: CallerGovernance = { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) } as never;
+  const loopback: CallerGovernance = {
+    governed: false,
+    decide: () => ({ allowed: true, refusal: 'granted' }),
+  } as never;
+
+  /** The model starts with `terminals` off, so a change can turn exactly that back on. */
+  const offModel = (): AccountModel => ({
+    ...MODEL(),
+    machine: { ...MODEL().machine, agentControl: { terminals: false, browsers: true, files: true } },
+  });
+
+  const stageOff = async (service: FleetCatalogService, overrides: Partial<Record<string, boolean>> = {}) =>
+    await service.propose({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: false, browsers: true, files: true, ...overrides },
+    });
+
+  const stageOn = async (service: FleetCatalogService, overrides: Partial<Record<string, boolean>> = {}) =>
+    await service.propose({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true, ...overrides },
+    });
+
+  it('should apply turning a control OFF remotely with no step-up at all', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: { ...MODEL(), machine: { ...MODEL().machine } } };
+    const staged = await stageOff(service);
+
+    // Act
+    const outcome = await service.apply(staged.id, remote);
+
+    // Assert
+    should(FleetAccountChangeOutcomeSchema.parse(outcome).outcome).equal('applied');
+  });
+
+  it('should refuse turning a control back ON remotely with no step-up, naming the act', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: offModel() };
+    const staged = await stageOn(service);
+
+    // Act
+    const error = await service.apply(staged.id, remote).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
+    should((await service.read(staged.id)).state).equal('pending');
+  });
+
+  it('should refuse the same way with no freshStepUp context at all, never trusting an absent one', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: offModel() };
+    const staged = await stageOn(service);
+
+    // Act
+    const error = await service.apply(staged.id, remote, undefined).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
+  });
+
+  it('should allow turning a control back ON remotely with a fresh step-up, and spend it once', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: offModel() };
+    const staged = await stageOn(service);
+    let spent = 0;
+
+    // Act
+    const outcome = await service.apply(staged.id, remote, {
+      presentation: { loopback: false, adminToken: false, actor: 'device:x', stepUp: true, freshStepUp: true },
+      spend: () => {
+        spent += 1;
+      },
+    });
+
+    // Assert
+    should(FleetAccountChangeOutcomeSchema.parse(outcome).outcome).equal('applied');
+    should(spent).equal(1);
+  });
+
+  it('should refuse a reused or stale step-up on the next widening act', async () => {
+    // Arrange — the first act spends the proof; a real StepUpRegistry would now answer `false`.
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: offModel() };
+    const first = await stageOn(service);
+    let fresh = true;
+    const freshStepUp = {
+      presentation: { loopback: false, adminToken: false, actor: 'device:x', stepUp: true, freshStepUp: fresh },
+      spend: () => {
+        fresh = false;
+      },
+    };
+    await service.apply(first.id, remote, freshStepUp);
+
+    // Act — the device's unlock is still live (`stepUp: true`), but its fresh proof was just spent.
+    state.reading = { ...state.reading, model: offModel() };
+    const second = await stageOn(service);
+    const error = await service
+      .apply(second.id, remote, {
+        presentation: { loopback: false, adminToken: false, actor: 'device:x', stepUp: true, freshStepUp: fresh },
+        spend: () => {
+          throw new Error('must not spend what was refused');
+        },
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+
+    // Assert
+    should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
+  });
+
+  it('should let the machine itself turn a control back on with nothing extra', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: offModel() };
+    const staged = await stageOn(service);
+
+    // Act
+    const outcome = await service.apply(staged.id, loopback);
+
+    // Assert
+    should(FleetAccountChangeOutcomeSchema.parse(outcome).outcome).equal('applied');
+  });
+
+  it('should need no step-up when a single write turns some controls on and the step-up covers it, but refuse without one', async () => {
+    // Arrange — files on (narrowed to unchanged — already true) and terminals on (widened): the ON half rules.
+    const { service, state } = world();
+    state.reading = { ...state.reading, model: offModel() };
+    const staged = await service.propose({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: false, files: true },
+    });
+
+    // Act
+    const error = await service.apply(staged.id, remote).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert — the ON half (terminals) demands the step-up even though browsers also moved OFF in the same write.
+    should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
   });
 });
 

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # The Settings surfaces, proved to fit a 390px phone and a 1440px desktop in BOTH colour schemes — and,
-# for Machines, to share one left edge, pad every panel by the token, and fit the tab bar.
+# for Machines, to share one left edge, pad every panel by the token, and fit the tab bar. And a session
+# terminal, in every theme family, proved to draw one cell per character in a monospace face.
 #
 # WHAT THIS GATE IS ACTUALLY FOR, because it is not "take some screenshots".
 # `packages/pwa/harness/screenshot.ts` has always been able to catch a panel whose widest value pushes
@@ -112,6 +113,11 @@ for scheme in "${schemes[@]}"; do
   # reason: the owner's "be careful of margins" is a gate only while its checks are still reached.
   geometry="$(grep '^✅ machines geometry checks: ' "${log}" || true)"
   [ -z "${geometry}" ] && echo "❌ the ${scheme} run exited 0 without reporting its Machines geometry tally" >&2 && echo "   The harness prints it only once both viewports finish; either the run ended early or the" >&2 && echo "   MACHINES_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
+
+  # The terminal geometry tally (one cell per character, in a monospace face, in every theme family),
+  # required for the same reason: `$ bun dev` shipped as `$  b u n  d e v` with every gate green.
+  terminal="$(grep '^✅ terminal geometry checks: ' "${log}" || true)"
+  [ -z "${terminal}" ] && echo "❌ the ${scheme} run exited 0 without reporting its terminal geometry tally" >&2 && echo "   The harness prints it only once both viewports finish; either the run ended early or the" >&2 && echo "   TERMINAL_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
   # A zero-byte PNG is a capture that failed in a way Playwright did not raise. Cheap to check, and it
   # keeps the artifact honest: a reviewer who opens an empty file learns nothing and blames the viewer.

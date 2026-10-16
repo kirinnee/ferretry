@@ -37,6 +37,7 @@ import { SessionTasksSearchSurface, useSessionSearch } from '../../features/sess
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
 import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
 import type { WorkspaceFormFactor } from '../../features/workspace/phone/phone-tab.ts';
+import type { ConsoleTyper } from '../../features/workspace/console-surface.tsx';
 import {
   type SessionContextRailProps,
   SessionWorkspace,
@@ -70,7 +71,7 @@ import { useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
-import { WorkspaceRailPreferenceStore } from '../workspace-rail-preferences.ts';
+import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -143,8 +144,10 @@ export interface SessionChatPageProps {
   readonly composerFetch?: DaemonFetch;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
-  /** Test seam for the read-only terminal fallback. */
+  /** Test seam for the Console's live capture of the agent's pane. */
   readonly readSnapshot?: PaneSnapshotReader;
+  /** Test seam for typing into the Console; absent, it types through the daemon's own route. */
+  readonly typeIntoConsole?: ConsoleTyper;
   /**
    * The terminal deck's dependencies, bound to this daemon's carrier by the composition root.
    *
@@ -205,7 +208,7 @@ interface SessionContextDependencies {
 }
 
 const defaultWorkspaceLayouts = new WorkspaceLayoutStore();
-const defaultWorkspaceRails = new WorkspaceRailPreferenceStore();
+const defaultWorkspaceRails = workspaceRailPreferences;
 
 /** The tools that used to live in the side pane and are not workspace tabs: each opens in a sheet. */
 type SessionUtility = 'tasks' | 'terminals' | 'lineage' | 'analytics';
@@ -273,6 +276,7 @@ export function SessionChatPage({
   onSessionChange,
   onRefresh,
   readSnapshot,
+  typeIntoConsole,
   deck,
   daemonSessions,
   onNavigate,
@@ -880,6 +884,7 @@ export function SessionChatPage({
           {...(rail === undefined ? {} : { rail })}
           {...(deck === undefined ? {} : { deck })}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
+          {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
           {...(browser === undefined ? {} : { browser })}
         />
         <BottomSheet

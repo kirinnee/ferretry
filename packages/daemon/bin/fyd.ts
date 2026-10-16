@@ -561,6 +561,7 @@ import {
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
+  SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
@@ -6305,6 +6306,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * (docs/design/account-model.md §4.3, §4.7). A package manager runs only inside an install
        * a person asked for; nothing here runs on a timer.
        */
+      // A host attach is authorized by the durable pane registration, never by the session name.
+      // The observer reads the same private tmux server the launch registered, and the service
+      // compares pane id, pid and process-start incarnation before revealing its socket path.
+      const sessionAttach = new SessionAttachService(
+        paths.home,
+        join(paths.home, 'tmux.sock'),
+        {
+          list: async daemonId =>
+            await new DurableTerminalPaneStore(storage, stateFiles, paths).registrations(daemonId),
+        },
+        new ExactTmuxPaneReaper(launchTmux),
+      );
       const fleetSetup = createFleetSetupSubsystem(
         fileFleetSetupDeps({
           catalog: fleetCatalogDeps,
@@ -6661,18 +6674,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
           secretRedactor,
         ),
-        // A host attach is authorized by the durable pane registration, never by the session name.
-        // The observer reads the same private tmux server the launch registered, and the service
-        // compares pane id, pid and process-start incarnation before revealing its socket path.
-        sessionAttach: new SessionAttachService(
-          paths.home,
-          join(paths.home, 'tmux.sock'),
-          {
-            list: async daemonId =>
-              await new DurableTerminalPaneStore(storage, stateFiles, paths).registrations(daemonId),
-          },
-          new ExactTmuxPaneReaper(launchTmux),
-        ),
+        sessionAttach,
+        // The Console types into the pane the attach proof names, on the same private tmux server.
+        sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
         // ONE feed over ONE opened storage: live listeners cannot see another daemon's appends, and
         // the fleet backfill refuses if any indexed session has lost the journal its marker owes.
         fleetEvents: new FleetEventStreamService(

@@ -113,6 +113,7 @@ import {
   type SecretVaultDocument,
 } from '../../../../src/lib/secrets/index.ts';
 import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
+import { SessionConsoleService } from '../../../../src/lib/session/console/index.ts';
 import { FleetEventStreamService } from '../../../../src/lib/session/events/index.ts';
 import {
   defaultSessionHealthSettings,
@@ -1535,6 +1536,28 @@ export function attachSubsystem(world: AttachWorld = {}): SessionAttachService {
     { list: async () => world.registrations ?? [ATTACH_PANE] },
     { observe: async () => observation },
   );
+}
+
+/** Every tmux command a Console fixture ran, and the exit status each one is answered with. */
+export interface ConsoleTmux {
+  readonly commands: (readonly string[])[];
+  code: number;
+  stderr: string;
+}
+
+export const consoleTmux = (): ConsoleTmux => ({ commands: [], code: 0, stderr: '' });
+
+/**
+ * The REAL Console service over the REAL attach service: only the tmux server is replaced, so the
+ * pane a write lands on is the one the production identity rules proved.
+ */
+export function consoleSubsystem(world: AttachWorld = {}, tmux: ConsoleTmux = consoleTmux()): SessionConsoleService {
+  return new SessionConsoleService(attachSubsystem(world), {
+    execute: async command => {
+      tmux.commands.push(command);
+      return { code: tmux.code, stdout: '', stderr: tmux.stderr };
+    },
+  });
 }
 
 /**

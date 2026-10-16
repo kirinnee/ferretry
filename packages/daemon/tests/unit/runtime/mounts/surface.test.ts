@@ -25,6 +25,7 @@ import {
   analyticsSubsystem,
   attachSubsystem,
   attentionService,
+  consoleSubsystem,
   CREDENTIALS,
   emptyFeed,
   FakeBrowserLogin,
@@ -497,6 +498,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     { tag: async () => new Uint8Array(32), matches: async () => false },
   ),
   sessionAttach: attachSubsystem(),
+  sessionConsole: consoleSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   grants: grantSubsystem(),
   audit: {
@@ -545,6 +547,7 @@ describe('the mounted daemon surface', () => {
       1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
+      1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // an agent's rename: a new first name or task title
       6; // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -778,6 +781,7 @@ describe('the mounted daemon surface', () => {
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
+      'POST /v1/sessions/:sessionId/console/input',
     ]);
   });
 

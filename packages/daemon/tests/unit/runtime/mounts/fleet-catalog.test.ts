@@ -19,6 +19,7 @@ import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
+  FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   FleetCatalogService,
   type FleetCatalogServiceDeps,
@@ -251,6 +252,45 @@ describe('the fleet catalogue mount', () => {
     should(jsonBody(applied)).deepEqual({ outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' });
     should(calls.applied.map(call => call.id)).deepEqual([ID, ID]);
     should(calls.applied[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should answer turning an agent control back on with the pairing-style step-up demand (owner decision, T)', async () => {
+    // Arrange
+    const { subsystem } = stub({
+      apply: async () => {
+        throw new FleetCatalogFreshStepUpRequired();
+      },
+    });
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
+
+    // Assert — the SAME wire shape minting a pairing code and widening a device refuse with, so the
+    // PWA's existing transparent step-up retry handles this with no code of its own.
+    should(response.status).equal(403);
+    should(jsonBody(response)).deepEqual({
+      error: 'turning an agent control back on from a remote device needs a passkey confirmation for it',
+      code: 'grant_step_up_required',
+      demand: { capability: 'fleet', axis: 'configure', act: 'enable-agent-control' },
+    });
+  });
+
+  it('should pass this request’s presentation and a spend callback into apply', async () => {
+    // Arrange
+    let seen: { presentation: unknown; spend: () => void } | undefined;
+    const { subsystem } = stub({
+      apply: async (_id, _governance, freshStepUp) => {
+        seen = freshStepUp as never;
+        return { outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' };
+      },
+    });
+
+    // Act
+    await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
+
+    // Assert — a handler with no proven device still gets a callable, harmless spend.
+    should(seen).not.be.undefined();
+    should(() => seen?.spend()).not.throw();
   });
 
   it('should refuse an apply body that names a field, before the service runs', async () => {
