@@ -166,8 +166,9 @@ spends them itself, on the operator's account, through ONE holder:
 
 The dictation clean-up (`POST /v1/stt/enhance`), the Jev guard, the Speed-ups **Test**
 (`POST /v1/speedups/:provider/test`) and an environment login's **Test**
-(`POST /v1/fleet/credentials/:id/test`, [provider-presets.md](provider-presets.md)) all go through it;
-none of them is handed a value. A login Test may reach only a host the login itself sends that key to,
+(`POST /v1/fleet/credentials/:id/test`, [provider-presets.md](provider-presets.md)) and an environment login's
+**provider quota read** ([provider-quotas.md](provider-quotas.md)) all go through it; none of them is handed
+a value. A quota read sends the login's key only to its own provider's quota endpoint, fixed in code. A login Test may reach only a host the login itself sends that key to,
 or one a built-in preset names, and plain `http:` only to this machine (a LiteLLM proxy on localhost). The status read,
 `GET /v1/speedups`, says whether each key is **set** from the store's listing of names — it never opens
 the vault. Both routes are governed as `secrets.use`, and a Test is in the security log as

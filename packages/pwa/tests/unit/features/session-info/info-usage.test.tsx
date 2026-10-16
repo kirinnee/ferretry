@@ -171,6 +171,12 @@ describe('InfoUsage — quota windows', () => {
     expect(root.textContent).toContain('usage unknown');
   });
 
+  it('says the money a credit-billed login has left instead of "usage unknown"', async () => {
+    const root = await show({ quota: { balance: { amount: 5.8, currency: 'USD' } } });
+    expect(root.textContent).toContain('$5.80 left');
+    expect(root.textContent).not.toContain('usage unknown');
+  });
+
   it('shows the 5-hour and weekly windows, each with when it resets', async () => {
     const root = await show({
       quota: {

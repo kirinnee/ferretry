@@ -228,3 +228,42 @@ describe('CredentialUsageSource', () => {
     should(rows).be.undefined();
   });
 });
+
+describe('credentialUsageRows — environment logins (docs/provider-quotas.md)', () => {
+  it('should carry the provider reading: at-limit when the provider says so, and the money it reported', () => {
+    // Arrange
+    const provider = {
+      source: 'deepseek-balance' as const,
+      via: 'endpoint' as const,
+      windows: [],
+      balance: { amount: 0, currency: 'USD' },
+      spend: { amountUsd: 2, since: '2026-10-01T00:00:00.000Z', sessions: 1, unpriced: 0 },
+      exhausted: true,
+      unverified: false,
+      at: '2026-10-16T09:00:00.000Z',
+    };
+    const ds = credential({ id: 'ds', store: 'environment', usage: { fiveHour: {}, weekly: {}, provider } });
+    const { balance: _balance, spend: _spend, ...bare } = provider;
+    const unknown = credential({
+      id: 'quiet',
+      store: 'environment',
+      usage: { fiveHour: {}, weekly: {}, provider: { ...bare, via: 'unknown' } },
+    });
+
+    // Act
+    const rows = credentialUsageRows(
+      manifest(runtime(WRITER_ID, 'claude-writer', 'ds'), runtime(REVIEWER_ID, 'claude-reviewer', 'quiet')),
+      [ds, unknown],
+    );
+
+    // Assert
+    should(rows[0]).containDeep({
+      agent: 'claude-writer',
+      atLimit: true,
+      balance: { amount: 0, currency: 'USD' },
+      spendUsd: 2,
+    });
+    should(rows[1]).containDeep({ agent: 'claude-reviewer', atLimit: false });
+    should(rows[1]).not.have.property('balance');
+  });
+});

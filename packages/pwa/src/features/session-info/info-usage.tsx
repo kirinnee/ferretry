@@ -11,7 +11,7 @@
 import type { AnalyticsAggregateResult, AnalyticsResponse, SessionView } from '@ferretry/protocol';
 import { BarChart3 } from 'lucide-react';
 import type { ResolvedQuota } from '../../lib/usage.ts';
-import { quotaResetsIn } from '../../shell/quota-readout.tsx';
+import { quotaMoneyText, quotaResetsIn } from '../../shell/quota-readout.tsx';
 import { formatTokens, formatUsd } from '../analytics/analytics-overview.ts';
 import { INFO_HINT } from './info-model.ts';
 import { InfoMeter, InfoRow, InfoSection } from './info-parts.tsx';
@@ -116,7 +116,7 @@ export function InfoUsage({ view, analytics, quota, now, onOpenAnalytics }: Info
       <InfoSection title={`Login quota · ${view.config.agent}`}>
         {windows.length === 0 ? (
           <InfoRow hint={INFO_HINT.quota} label="Quota">
-            <span className="fy-info-muted">usage unknown</span>
+            {quotaMoneyText(quota) ?? <span className="fy-info-muted">usage unknown</span>}
           </InfoRow>
         ) : (
           windows

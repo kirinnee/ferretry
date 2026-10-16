@@ -1,7 +1,8 @@
 import type { ResolvedQuota } from '../lib/usage.ts';
+import { quotaMoneyText } from '../shell/quota-readout.tsx';
 
 /** The fields a quota readout needs; a resolved feed row and a session's own reading both carry them. */
-type Quota = Pick<ResolvedQuota, 'fiveHourPercent' | 'weeklyPercent' | 'atLimit' | 'authOk'>;
+type Quota = Pick<ResolvedQuota, 'fiveHourPercent' | 'weeklyPercent' | 'atLimit' | 'authOk' | 'balance' | 'spendUsd'>;
 
 export interface ComposerQuotaProps {
   /** Account use supplied by this session's paired daemon; it is never global. `null` is unknown. */
@@ -25,6 +26,8 @@ export const composerQuotaSpoken = (quota?: Quota | null): string => {
   const five = quota?.fiveHourPercent;
   const week = quota?.weeklyPercent;
   const limit = quota?.atLimit === true ? ' Account is at limit; work is blocked until the window resets.' : '';
+  const money = quotaMoneyText(quota);
+  if (!known(five) && !known(week) && money !== null) return `Account usage: ${money}.${limit}`;
   if (!known(five) && !known(week))
     return `Account usage unknown: the daemon has no reading for this account yet.${limit}`;
   const fiveCopy = known(five) ? `${composerQuotaPercent(five)} used` : 'unknown';
@@ -53,7 +56,7 @@ export function ComposerQuota({ quota }: ComposerQuotaProps) {
   return (
     <span
       className="fy-composer-quota"
-      data-quota={authFailed ? 'auth' : windows.length === 0 ? 'unknown' : 'known'}
+      data-quota={authFailed ? 'auth' : windows.length === 0 && quotaMoneyText(quota) === null ? 'unknown' : 'known'}
       title={spoken}
     >
       <span className="sr-only">{spoken}</span>
@@ -63,7 +66,7 @@ export function ComposerQuota({ quota }: ComposerQuotaProps) {
         </span>
       ) : windows.length === 0 ? (
         <span aria-hidden="true" className={atLimit ? 'fy-quota-error' : 'text-faint'}>
-          {atLimit ? 'at limit' : 'usage unknown'}
+          {atLimit ? 'at limit' : (quotaMoneyText(quota) ?? 'usage unknown')}
         </span>
       ) : (
         <span aria-hidden="true">

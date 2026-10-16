@@ -127,4 +127,5 @@ model catalogue file instead.
   over Entra an Azure token; Ferretry signs none of them. The preset says which CLI command checks it.
 - **No draft Test.** A login is tested once it is saved, so a key always goes where a saved login sends
   it; the app adds the login first, then offers Test.
-- **Quota adapters are separate.** A preset names its quota source; reading it is the usage subsystem's.
+- **Quota adapters are separate.** A preset names its quota source; reading it is the usage subsystem's —
+  [provider-quotas.md](provider-quotas.md).
