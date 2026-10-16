@@ -24,7 +24,7 @@
  * reports on.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Profiler, useCallback, useRef, useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
@@ -34,6 +34,12 @@ import type {
 } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 const renderers: ReactTestRenderer[] = [];
 const originalFetch = globalThis.fetch;

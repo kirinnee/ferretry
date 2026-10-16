@@ -70,9 +70,3 @@ export const formatSnapshotClock = (at: number): string => {
   const pad = (value: number): string => String(value).padStart(2, '0');
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
-
-/** True once the reader is close enough to the end for the pane to stay pinned. */
-export const isPinnedToBottom = (scrollHeight: number, scrollTop: number, clientHeight: number): boolean =>
-  // 4px of slop covers sub-pixel rounding when content height matches the
-  // viewport exactly.
-  scrollHeight - scrollTop - clientHeight < 4;

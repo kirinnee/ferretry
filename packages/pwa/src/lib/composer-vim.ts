@@ -34,10 +34,13 @@
  * ## What this build understands, stated so nothing is silently wrong
  *
  * Modes `insert` and `normal`. `Escape` leaves insert; `i a I A o O` enter it; `h j k l 0 $ w b e`
- * move; `x` deletes the character under the caret; `dd` deletes the line. Everything else a reader
- * can type in normal mode is claimed and inert, so a stray letter is never typed into the draft —
- * but keys with no printable character (Enter, Tab, Backspace, Delete, the arrows) are left to the
- * host, and so is every key held with Ctrl, Meta or Alt.
+ * `gg G` and Enter move; `x` deletes the character under the caret, `dd` the line and `dw` to the
+ * next word, each into the one unnamed register that `p` and `P` put back; `u` undoes the last
+ * change, an insert session counting as one. Everything else a reader can type in normal mode is
+ * claimed and inert, so a stray letter is never typed into the draft — and so are Enter (it moves, it
+ * never sends), Backspace (it moves left, it never deletes) and Escape (it cancels a pending `d` or
+ * `g`). Tab, Delete and the arrows are left to the host, and so is every key held with Ctrl, Meta or
+ * Alt.
  */
 
 /**
@@ -48,19 +51,35 @@
  */
 type VimMode = 'insert' | 'normal';
 
-/** The only operator here. It exists so `dd` can be two keys rather than one. */
-type VimOperator = 'd';
+/** A first key waiting for its second: `d` for `dd` / `dw`, `g` for `gg`. */
+type VimPending = 'd' | 'g';
+
+/** What `x`, `dd` and `dw` cut, and `p` puts back. A linewise cut is a whole line, terminator included. */
+interface VimRegister {
+  readonly text: string;
+  readonly linewise: boolean;
+}
+
+/** The document as it was before one change, which is what `u` restores. */
+interface VimSnapshot {
+  readonly value: string;
+  readonly caret: number;
+}
 
 export interface VimState {
   readonly mode: VimMode;
-  /** An operator waiting for its second key, or `null` when nothing is pending. */
-  readonly operator: VimOperator | null;
+  /** A first key waiting for its second, or `null` when nothing is pending. */
+  readonly operator: VimPending | null;
   /**
    * The column `j` and `k` are trying to hold while travelling across shorter lines, in UTF-16
    * offsets from the line start. `null` outside vertical movement, which is what makes every other
    * command reset it.
    */
   readonly column: number | null;
+  /** The unnamed register, or `null` before anything was cut. */
+  readonly register: VimRegister | null;
+  /** The documents before each change, newest last, so `u` can walk back through them. */
+  readonly history: readonly VimSnapshot[];
 }
 
 /**
@@ -101,7 +120,18 @@ interface VimClaimed extends VimDocument {
 export type VimOutcome = VimClaimed | { readonly handled: false };
 
 /** A composer opens as an ordinary text field; modal editing starts only once a reader asks. */
-export const initialVimState: VimState = { mode: 'insert', operator: null, column: null };
+export const initialVimState: VimState = { mode: 'insert', operator: null, column: null, register: null, history: [] };
+
+/** Normal mode, entered from the indicator rather than with Escape; it keeps the register and history. */
+export const normalVimState = (state: VimState): VimState => ({
+  ...state,
+  mode: 'normal',
+  operator: null,
+  column: null,
+});
+
+/** How many changes `u` can walk back through. */
+const HISTORY_LIMIT = 100;
 
 const ignored: VimOutcome = { handled: false };
 
@@ -172,13 +202,15 @@ const firstNonBlank = (value: string, index: number): number => {
 const onEmptyLine = (value: string, index: number): boolean =>
   lineStartAt(value, index) === index && lineTextEndAt(value, index) === index;
 
-const wordForward = (value: string, index: number): number => {
+const wordForwardRaw = (value: string, index: number): number => {
   let at = index;
   const from = classAt(value, at);
   while (at < value.length && classAt(value, at) === from && from !== 'blank') at = forwardFrom(value, at);
   while (at < value.length && classAt(value, at) === 'blank' && !onEmptyLine(value, at)) at = forwardFrom(value, at);
-  return restOnCharacter(value, at);
+  return at;
 };
+
+const wordForward = (value: string, index: number): number => restOnCharacter(value, wordForwardRaw(value, index));
 
 const wordBackward = (value: string, index: number): number => {
   let at = backFrom(value, index);
@@ -225,80 +257,146 @@ const deleteLine = (value: string, index: number): { readonly value: string; rea
   return { value: next, caret: restOnCharacter(next, firstNonBlank(next, next.length)) };
 };
 
-const claim =
-  (mode: VimMode, operator: VimOperator | null, column: number | null) =>
-  (value: string, caret: number): VimClaimed => ({
-    handled: true,
-    state: { mode, operator, column },
-    value,
-    selectionStart: caret,
-    selectionEnd: caret,
-  });
+/** A claimed outcome: the next state, the text and a collapsed caret. */
+const claimed = (state: VimState, value: string, caret: number): VimClaimed => ({
+  handled: true,
+  state,
+  value,
+  selectionStart: caret,
+  selectionEnd: caret,
+});
 
-const enterInsert = claim('insert', null, null);
-const stayNormal = claim('normal', null, null);
-const awaitMotion = claim('normal', 'd', null);
+/** Records `before` as one change `u` can undo. */
+const remember = (state: VimState, value: string, caret: number): readonly VimSnapshot[] =>
+  [...state.history, { value, caret }].slice(-HISTORY_LIMIT);
 
-/** A key with no printable character — Enter, Tab, the arrows, Escape — belongs to the host. */
+/** A key with no printable character — Tab, the arrows, Delete — belongs to the host. */
 const isPrintable = (key: string): boolean => [...key].length === 1;
 
-const deleteUnderCaret = (value: string, caret: number): VimClaimed => {
-  const textEnd = lineTextEndAt(value, caret);
-  if (caret >= textEnd) return stayNormal(value, caret);
-  const next = value.slice(0, caret) + value.slice(forwardFrom(value, caret));
-  return stayNormal(next, restOnCharacter(next, caret));
-};
+/** Text on one line of the draft, with no terminator. */
+const lineText = (value: string, index: number): string =>
+  value.slice(lineStartAt(value, index), lineTextEndAt(value, index));
 
 const normalKey = (state: VimState, key: string, value: string, caret: number): VimOutcome => {
-  if (state.operator !== null) {
-    if (key !== 'd') return stayNormal(value, caret);
-    const cut = deleteLine(value, caret);
-    return stayNormal(cut.value, cut.caret);
+  const base: VimState = { ...state, mode: 'normal', operator: null, column: null };
+  const move = (to: number): VimClaimed => claimed(base, value, to);
+  /** A change: the document before it is remembered, and the register is whatever it cut. */
+  const change = (next: string, to: number, register: VimRegister | null = state.register): VimClaimed =>
+    claimed({ ...base, register, history: remember(state, value, caret) }, next, to);
+  const insertAt = (next: string, to: number): VimClaimed =>
+    claimed({ ...base, mode: 'insert', history: remember(state, value, caret) }, next, to);
+
+  if (key === 'Escape') return move(caret);
+  if (state.operator === 'g') return key === 'g' ? move(firstNonBlank(value, 0)) : move(caret);
+  if (state.operator === 'd') {
+    if (key === 'd') {
+      const cut = deleteLine(value, caret);
+      return change(cut.value, cut.caret, { text: `${lineText(value, caret)}\n`, linewise: true });
+    }
+    if (key === 'w') {
+      const textEnd = lineTextEndAt(value, caret);
+      const to = Math.min(wordForwardRaw(value, caret), textEnd);
+      if (to <= caret) return move(caret);
+      const next = value.slice(0, caret) + value.slice(to);
+      return change(next, restOnCharacter(next, caret), { text: value.slice(caret, to), linewise: false });
+    }
+    return move(caret);
   }
+  if (key === 'Enter') {
+    const end = lineEndAt(value, caret);
+    return move(end === value.length ? caret : restOnCharacter(value, firstNonBlank(value, end + 1)));
+  }
+  if (key === 'Backspace') return move(Math.max(lineStartAt(value, caret), backFrom(value, caret)));
   if (!isPrintable(key)) return ignored;
   const column = state.column ?? caret - lineStartAt(value, caret);
   switch (key) {
     case 'i':
-      return enterInsert(value, caret);
+      return insertAt(value, caret);
     case 'a':
-      return enterInsert(value, Math.min(forwardFrom(value, caret), lineTextEndAt(value, caret)));
+      return insertAt(value, Math.min(forwardFrom(value, caret), lineTextEndAt(value, caret)));
     case 'I':
-      return enterInsert(value, firstNonBlank(value, caret));
+      return insertAt(value, firstNonBlank(value, caret));
     case 'A':
-      return enterInsert(value, lineTextEndAt(value, caret));
+      return insertAt(value, lineTextEndAt(value, caret));
     case 'o': {
       const at = lineEndAt(value, caret);
-      return enterInsert(`${value.slice(0, at)}\n${value.slice(at)}`, at + 1);
+      return insertAt(`${value.slice(0, at)}\n${value.slice(at)}`, at + 1);
     }
     case 'O': {
       const at = lineStartAt(value, caret);
-      return enterInsert(`${value.slice(0, at)}\n${value.slice(at)}`, at);
+      return insertAt(`${value.slice(0, at)}\n${value.slice(at)}`, at);
     }
     case 'h':
-      return stayNormal(value, Math.max(lineStartAt(value, caret), backFrom(value, caret)));
+      return move(Math.max(lineStartAt(value, caret), backFrom(value, caret)));
     case 'l':
-      return stayNormal(value, restOnCharacter(value, forwardFrom(value, caret)));
+      return move(restOnCharacter(value, forwardFrom(value, caret)));
     case '0':
-      return stayNormal(value, lineStartAt(value, caret));
+      return move(lineStartAt(value, caret));
     case '$':
-      return stayNormal(value, restOnCharacter(value, lineTextEndAt(value, caret)));
+      return move(restOnCharacter(value, lineTextEndAt(value, caret)));
     case 'w':
-      return stayNormal(value, wordForward(value, caret));
+      return move(wordForward(value, caret));
     case 'b':
-      return stayNormal(value, wordBackward(value, caret));
+      return move(wordBackward(value, caret));
     case 'e':
-      return stayNormal(value, wordEnd(value, caret));
+      return move(wordEnd(value, caret));
+    case 'G':
+      return move(restOnCharacter(value, firstNonBlank(value, value.length)));
     case 'j':
-      return claim('normal', null, column)(value, verticalCaret(value, caret, column, 1));
+      return claimed({ ...base, column }, value, verticalCaret(value, caret, column, 1));
     case 'k':
-      return claim('normal', null, column)(value, verticalCaret(value, caret, column, -1));
-    case 'x':
-      return deleteUnderCaret(value, caret);
+      return claimed({ ...base, column }, value, verticalCaret(value, caret, column, -1));
+    case 'x': {
+      const textEnd = lineTextEndAt(value, caret);
+      if (caret >= textEnd) return move(caret);
+      const to = forwardFrom(value, caret);
+      const next = value.slice(0, caret) + value.slice(to);
+      return change(next, restOnCharacter(next, caret), { text: value.slice(caret, to), linewise: false });
+    }
     case 'd':
-      return awaitMotion(value, caret);
+    case 'g':
+      return claimed({ ...base, operator: key }, value, caret);
+    case 'p':
+    case 'P':
+      return put(state, key === 'p', value, caret, change);
+    case 'u': {
+      const previous = state.history.at(-1);
+      if (previous === undefined) return move(caret);
+      return claimed(
+        { ...base, history: state.history.slice(0, -1) },
+        previous.value,
+        restOnCharacter(previous.value, Math.min(previous.caret, previous.value.length)),
+      );
+    }
     default:
-      return stayNormal(value, caret);
+      return move(caret);
   }
+};
+
+/** `p` puts the register after the caret (a whole line: below it); `P` before it (above it). */
+const put = (
+  state: VimState,
+  after: boolean,
+  value: string,
+  caret: number,
+  change: (next: string, to: number) => VimClaimed,
+): VimOutcome => {
+  const register = state.register;
+  if (register === null) return claimed({ ...state, mode: 'normal', operator: null, column: null }, value, caret);
+  if (register.linewise) {
+    const line = register.text.endsWith('\n') ? register.text.slice(0, -1) : register.text;
+    if (after) {
+      const end = lineEndAt(value, caret);
+      const next = `${value.slice(0, end)}\n${line}${value.slice(end)}`;
+      return change(next, firstNonBlank(next, end + 1));
+    }
+    const start = lineStartAt(value, caret);
+    const next = `${value.slice(0, start)}${line}\n${value.slice(start)}`;
+    return change(next, firstNonBlank(next, start));
+  }
+  const at = after && caret < lineTextEndAt(value, caret) ? forwardFrom(value, caret) : caret;
+  const next = value.slice(0, at) + register.text + value.slice(at);
+  return change(next, Math.max(at, at + register.text.length - 1));
 };
 
 /**
@@ -314,7 +412,14 @@ export const vimReduce = (state: VimState, key: VimKey, current: VimDocument): V
   const caret = Math.min(Math.max(current.selectionStart, 0), value.length);
   if (state.mode === 'insert') {
     if (key.key !== 'Escape') return ignored;
-    return stayNormal(value, restOnCharacter(value, Math.max(lineStartAt(value, caret), backFrom(value, caret))));
+    // An insert session that changed nothing is not a change `u` should spend a press on.
+    const last = state.history.at(-1);
+    const history = last !== undefined && last.value === value ? state.history.slice(0, -1) : state.history;
+    return claimed(
+      { ...state, mode: 'normal', operator: null, column: null, history },
+      value,
+      restOnCharacter(value, Math.max(lineStartAt(value, caret), backFrom(value, caret))),
+    );
   }
   return normalKey(state, key.key, value, restOnCharacter(value, caret));
 };

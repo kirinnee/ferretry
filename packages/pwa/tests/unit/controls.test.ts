@@ -68,7 +68,6 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   chatWidth: 'full',
   composerEnterKey: 'send',
   composerPhoneEnterKey: 'send',
-  showDetails: true,
   motion: 'reduced',
   sidebarCollapsed: true,
   suggestionKeys: 'both',
@@ -115,7 +114,6 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // Enter follows the current device until the reader explicitly chooses.
       composerEnterKey: null,
       composerPhoneEnterKey: null,
-      showDetails: false,
       motion: 'system',
       sidebarCollapsed: true,
       // A payload written before the composer fields existed opens suggestions
@@ -193,14 +191,14 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(legacy).not.have.property('directReferenceSuggestions');
   });
 
-  it('reads the phone send key, Show details and motion, defaulting anything unreadable', () => {
+  it('reads the phone send key and motion, defaulting anything unreadable', () => {
     const read = (device: Record<string, unknown>) =>
       parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device;
     should(read({ composerPhoneEnterKey: 'send' }).composerPhoneEnterKey).equal('send');
     should(read({ composerPhoneEnterKey: 'newline' }).composerPhoneEnterKey).equal('newline');
     should(read({ composerPhoneEnterKey: 'toggle' }).composerPhoneEnterKey).be.null();
-    should(read({ showDetails: true }).showDetails).be.true();
-    should(read({ showDetails: 'yes' }).showDetails).be.false();
+    // A blob from before "Show details" was removed still parses; the retired field is ignored.
+    should(Object.keys(read({ showDetails: true }))).not.containEql('showDetails');
     should(read({ motion: 'reduced' }).motion).equal('reduced');
     should(read({ motion: 'none' }).motion).equal('system');
   });

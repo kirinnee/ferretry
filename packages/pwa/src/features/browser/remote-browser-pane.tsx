@@ -144,6 +144,11 @@ export interface RemoteBrowserPaneProps {
    * a pane with no way to navigate it.
    */
   readonly showNavigation?: boolean;
+  /**
+   * False only for a host that already lists this session's pages — the session workspace's page
+   * strip — so a reader is never shown the same pages twice.
+   */
+  readonly showPageTabs?: boolean;
   /** Publishes this pane's engine so a host can label and drive it. */
   readonly onStateChange?: (state: RemoteBrowserPaneState) => void;
   readonly onHumanActivity?: (kind: RemoteHumanActivity) => void;
@@ -165,6 +170,7 @@ export function RemoteBrowserPane({
   streamTicket,
   isActive = true,
   showNavigation = true,
+  showPageTabs = true,
   onStateChange,
   onHumanActivity,
   resizeDebounceMs = REMOTE_BROWSER_RESIZE_DEBOUNCE_MS,
@@ -347,7 +353,7 @@ export function RemoteBrowserPane({
       aria-label="Shared remote browser"
     >
       <RemoteBrowserStatusBar status={status} connection={connection} busy={busy} />
-      <RemoteBrowserPageTabs status={status} busy={busy} onAction={runAction} />
+      {showPageTabs && <RemoteBrowserPageTabs status={status} busy={busy} onAction={runAction} />}
       {showNavigation && (
         <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
       )}

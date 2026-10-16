@@ -8,7 +8,7 @@
  * suite asserts what landed in the textarea and that nothing was sent.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { IFyApiClient } from '@ferretry/protocol';
 import { Composer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -16,6 +16,12 @@ import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { type FakeRecognitionProvider, fakeRecognitionProvider } from '../support/browser-recognition.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',

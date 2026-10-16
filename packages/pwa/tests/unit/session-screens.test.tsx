@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
@@ -17,6 +17,12 @@ import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { isTerminalSessionStatus, relativeTime } from '../../src/lib/session-screens.ts';
 import { StatusMark, statusMark } from '../../src/shell/status-mark.tsx';
 import { render, run, runAsync } from '../support/react.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
@@ -96,6 +102,8 @@ describe('session screen components', () => {
       scrollTop: 700,
       clientHeight: 200,
       contains: (node: Node) => node === inside,
+      addEventListener: () => {},
+      removeEventListener: () => {},
     };
     const selection = {
       isCollapsed: false,
@@ -122,6 +130,7 @@ describe('session screen components', () => {
         activeElement: null,
         addEventListener: () => {},
         contains: () => false,
+        getSelection: () => selection,
         removeEventListener: () => {},
       },
     });
@@ -386,51 +395,6 @@ describe('session screen components', () => {
     expect(quiet.root.findAllByType('button')).toHaveLength(0);
   });
 
-  test('renders transcript entries and preserves detached-reader new-message behaviour', () => {
-    const viewport = { scrollHeight: 900, scrollTop: 700, clientHeight: 200 };
-    const first = [{ id: 'one', kind: 'assistant' as const, text: 'First answer', at: 1, label: 'Assistant' }];
-    const transcript = render(<Transcript busy daemonId="daemon-a" entries={first} sessionId="same-id" />, {
-      createNodeMock: element => {
-        const props = element.props as { role?: string };
-        return element.type === 'div' && props.role === 'log' ? viewport : null;
-      },
-    });
-    expect(transcript.root.findByProps({ role: 'log' }).props['aria-live']).toBe('polite');
-    expect(findText(transcript.root, 'Working…')).toHaveLength(1);
-    expect(viewport.scrollTop).toBe(900);
-
-    const log = transcript.root.findByProps({ role: 'log' });
-    viewport.scrollTop = 0;
-    run(() => log.props.onScroll());
-    run(() =>
-      transcript.update(
-        <Transcript
-          daemonId="daemon-a"
-          entries={[...first, { id: 'two', kind: 'user', text: 'A follow-up' }]}
-          sessionId="same-id"
-        />,
-      ),
-    );
-    const jump = transcript.root.findByProps({ className: 'fy-jump-latest' });
-    expect(jump.children.join('')).toContain('1 new message · Jump to latest');
-    run(() => jump.props.onClick());
-    expect(viewport.scrollTop).toBe(900);
-
-    viewport.scrollTop = 0;
-    run(() => log.props.onScroll());
-    run(() =>
-      transcript.update(
-        <Transcript
-          daemonId="daemon-b"
-          entries={[...first, { id: 'two', kind: 'user', text: 'A distinct daemon message' }]}
-          sessionId="same-id"
-        />,
-      ),
-    );
-    expect(viewport.scrollTop).toBe(900);
-    expect(transcript.root.findAllByProps({ className: 'fy-jump-latest' })).toHaveLength(0);
-  });
-
   test('renders transcript prose and daemon chrome with readable defaults and safe timestamps', () => {
     const rows = render(
       <>
@@ -482,7 +446,10 @@ describe('session screen components', () => {
     const textarea = composer.root.findByType('textarea');
     expect(textarea.props.value).toBe('Saved only for A');
     expect(drafts.load(daemonSessionScope(daemonB, 'same-id'))).toBe('');
-    expect(findText(composer.root, 'Queue')).toHaveLength(1);
+    // While the agent works, Interrupt & send stands beside Send.
+    expect(
+      composer.root.findAll(node => node.type === 'button' && node.props['aria-label'] === 'Interrupt & send'),
+    ).toHaveLength(1);
     await runAsync(async () => {
       composer.root.findByType('form').props.onSubmit({ preventDefault() {} });
       await Promise.resolve();

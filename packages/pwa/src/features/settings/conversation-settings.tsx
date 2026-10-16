@@ -1,8 +1,8 @@
 /**
- * Two small browser-local choices from the session redesign: whether the conversation opens its
- * folded bookkeeping ("Show details"), and whether this device always reduces motion.
+ * A small browser-local choice from the session redesign: whether this device always reduces motion.
  *
- * Both values live in `lib/controls.ts`; this surface holds no state of its own.
+ * The value lives in `lib/controls.ts`; this surface holds no state of its own. (It once shared the
+ * file with "Show details", which went when the transcript stopped showing daemon bookkeeping.)
  */
 
 import { cn } from '../../lib/class-names.ts';
@@ -55,29 +55,6 @@ function ChoiceGroup<Value extends string>({
         </label>
       ))}
     </fieldset>
-  );
-}
-
-const DETAILS: readonly Choice<'hidden' | 'shown'>[] = [
-  { value: 'hidden', label: 'Details hidden', detail: 'Reasoning, token and daemon lines fold behind “Show details”.' },
-  { value: 'shown', label: 'Details shown', detail: 'Every folded run opens by itself.' },
-];
-
-export function ShowDetailsSetting({
-  showDetails,
-  onChange,
-}: {
-  readonly showDetails: boolean;
-  readonly onChange: (showDetails: boolean) => void;
-}) {
-  return (
-    <ChoiceGroup
-      choices={DETAILS}
-      legend="Show details"
-      name="conversation-show-details"
-      onSelect={value => onChange(value === 'shown')}
-      selected={showDetails ? 'shown' : 'hidden'}
-    />
   );
 }
 
