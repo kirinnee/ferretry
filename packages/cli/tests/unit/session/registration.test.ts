@@ -8,6 +8,7 @@ import { SuggestNamesController } from '../../../src/lib/session/name-controller
 import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
 import { ListSessionsController } from '../../../src/lib/session/ps-controller.ts';
 import { registerSessionCommands } from '../../../src/lib/session/registration.ts';
+import { RenameSessionController } from '../../../src/lib/session/rename-controller.ts';
 import { SendMessageController } from '../../../src/lib/session/send-controller.ts';
 import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
 import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
@@ -42,6 +43,7 @@ function harness(
     interrupt: view,
     resume: view,
     signal: view,
+    rename: view,
     upload: attachmentView,
     ...responses,
   });
@@ -61,6 +63,7 @@ function harness(
     interrupt: new InterruptSessionController(api, presenter),
     resume: new ResumeSessionController(api, presenter),
     signal: new SignalSessionController(api, presenter, environment),
+    rename: new RenameSessionController(api, presenter),
   });
   return {
     api,
@@ -389,5 +392,32 @@ describe('registerSessionCommands · the rest of the group', () => {
       { until: '45m', peer: 'ses-peer' },
     ]);
     should(JSON.parse(subject.io.out[0] ?? '')).have.property('state');
+  });
+
+  it('should rename an agent named by its current first name, with a new title', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.run(['rename', 'hayden', 'Marin', '--title', 'Ship It', '--json']);
+
+    // Assert
+    should(subject.api.calls).deepEqual([
+      { method: 'list', args: [] },
+      { method: 'rename', args: ['ses-1', 'Ship It', 'Marin'] },
+    ]);
+    should(JSON.parse(subject.io.out[0] ?? '')).have.property('config');
+  });
+
+  it('should rename only the title when no first name is given', async () => {
+    // Arrange
+    const subject = harness();
+
+    // Act
+    await subject.run(['rename', 'ses-1', '--title', 'Ship It']);
+
+    // Assert
+    should(subject.api.calls[1]).deepEqual({ method: 'rename', args: ['ses-1', 'Ship It', undefined] });
+    should(subject.io.out).deepEqual(['renamed ses-1: Hayden — Fix Transcript Scrolling']);
   });
 });
