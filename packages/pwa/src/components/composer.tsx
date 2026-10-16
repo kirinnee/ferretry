@@ -11,6 +11,13 @@ import {
   composerEnterHint,
   shiftedComposerEnterAction,
 } from '../lib/composer-keybinding.ts';
+import {
+  continueList,
+  type DraftEdit,
+  insideCodeBlock,
+  toggleWrap,
+  wrapMarkerFor,
+} from '../lib/composer-editing.ts';
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
@@ -38,7 +45,7 @@ import {
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
-import { Markdown, type MarkdownProps } from './markdown.tsx';
+import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
@@ -58,6 +65,8 @@ export interface ComposerProps {
   readonly compact?: boolean;
   /** Browser-local bare Enter behaviour. null uses this device’s default. */
   readonly enterKeyPreference?: ComposerEnterKeyPreference | null;
+  /** Browser-local return-key behaviour on a phone or other touch-first device. null = new line. */
+  readonly phoneEnterKeyPreference?: ComposerEnterKeyPreference | null;
   /** Browser-local dictation settings. Absence leaves this optional slot empty. */
   readonly dictationSettings?: SttSettings;
   /** Test/visual seam; production feature-detects the ambient browser. */
@@ -127,70 +136,6 @@ const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 140;
  *  drift. The touch target is the row around it (36px controls plus its padding, 44px tall), not the
  *  bare line, which is what lets an idle composer be a single compact line. */
 const MIN_TEXTAREA_PX = 22;
-
-/**
- * Rendered Markdown belongs beside the editor, never underneath it.
- *
- * Markdown consumes marker bytes and changes wrapping, so it cannot share the
- * textarea's caret-aligned paint layer. This bounded reader uses the exact
- * Markdown/reference pipeline that transcript prose uses while the native
- * textarea remains the only input, selection and IME owner.
- */
-export function ComposerMarkdownPreview({
-  text,
-  className,
-  maxHeightPx = PREVIEW_MAX_PX,
-  ...markdown
-}: MarkdownProps & {
-  /** The reader's remaining vertical budget. A phone with its keyboard up has
-   *  far less of it than a desktop, and the preview must never be the thing
-   *  that pushes the conversation off the screen. */
-  readonly maxHeightPx?: number;
-}) {
-  if (text.trim().length === 0) return null;
-  return (
-    <section
-      aria-label="Rendered Markdown preview"
-      className={`mb-2 min-w-0 max-w-full rounded-control border border-border-soft bg-surface-2 px-2 py-1.5 ${className ?? ''}`}
-      data-composer-markdown-preview=""
-    >
-      <span className="mb-1 block text-meta font-semibold uppercase tracking-wide text-faint">Preview</span>
-      <div
-        className="scroll-thin min-w-0 max-w-full overflow-auto overscroll-contain"
-        style={{ maxHeight: `${maxHeightPx}px` }}
-      >
-        <Markdown className="text-row leading-base text-fg" text={text} {...markdown} />
-      </div>
-    </section>
-  );
-}
-
-/**
- * A draft that is nonblank NOW, rendered no faster than a reader can read it.
- *
- * Markdown parsing, proof and reference transformation are the transcript's own
- * pipeline, and running all of it on every keystroke is what makes a phone drop
- * characters. The delay is deliberately one-directional: the text is published
- * late, but a RESET is immediate — `text` is the identity of the draft, so a
- * session change or a successful send empties the preview in the same commit
- * rather than leaving the previous session's words rendered under the new one.
- */
-function useDeferredDraft(text: string, delayMs: number, sessionKey: string): string {
-  const [deferred, setDeferred] = useState({ key: sessionKey, text });
-  const blank = text.trim() === '';
-  useEffect(() => {
-    if (blank) {
-      setDeferred({ key: sessionKey, text: '' });
-      return;
-    }
-    const timer = setTimeout(() => setDeferred({ key: sessionKey, text }), delayMs);
-    return () => clearTimeout(timer);
-  }, [blank, delayMs, sessionKey, text]);
-  // The key is checked on the way OUT, not only in the effect, because a scope
-  // change re-renders before any effect runs: without this the new session's
-  // composer would paint one frame of the previous session's words.
-  return blank || deferred.key !== sessionKey ? '' : deferred.text;
-}
 
 /**
  * The compact reference strip — every reference-shaped token in the draft, in
@@ -274,24 +219,6 @@ const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
 const VIM_MODE_LABEL: Record<VimState['mode'], string> = { insert: 'Insert', normal: 'Normal' };
 
 /**
- * Long enough that a phone's autocorrect burst renders once, short enough that a
- * reader who stopped typing to LOOK at the preview is not waiting for it.
- */
-const PREVIEW_DEBOUNCE_MS = 200;
-
-/**
- * The preview's own height budget, in the same currency as the textarea's.
- *
- * The keyboard-open phone number is the one that matters: with ~430px of visible
- * viewport, a composer already claiming 140px cannot also spend 144px on a
- * rendering of what it already contains, or the conversation it is about is off
- * the screen entirely.
- */
-const PREVIEW_MAX_PX = 144;
-const COMPACT_PREVIEW_MAX_PX = 112;
-const COMPACT_KEYBOARD_PREVIEW_MAX_PX = 72;
-
-/**
  * A single composer surface. Draft persistence is scoped by the supplied paired
  * daemon and session, and its API client is injected by the host for the same
  * reason: no bundled origin, token, or singleton daemon exists here.
@@ -308,6 +235,7 @@ export function Composer({
   onSent,
   compact = false,
   enterKeyPreference = null,
+  phoneEnterKeyPreference = null,
   dictationSettings,
   dictationRecognition,
   autocompleteSessions,
@@ -449,7 +377,10 @@ export function Composer({
   }, []);
   const keyboardOpen = useKeyboardOpen();
   const inputModality = useInputModality();
-  const bareEnterAction = composerEnterAction(enterKeyPreference, inputModality.enterSends);
+  const bareEnterAction = composerEnterAction(
+    inputModality.enterSends ? enterKeyPreference : phoneEnterKeyPreference,
+    inputModality.enterSends,
+  );
   const maxTextareaPx = !compact
     ? MAX_TEXTAREA_PX
     : keyboardOpen
@@ -636,6 +567,12 @@ export function Composer({
     [setDraft],
   );
 
+  /** An editing rule's result, written through the controlled draft with its caret placed after render. */
+  const applyEdit = (edit: DraftEdit): void => {
+    pendingVimSelection.current = { value: edit.value, start: edit.caret, end: edit.caret };
+    setDraft(edit.value);
+  };
+
   /** Write a Vim outcome back through the controlled draft, never into the DOM. */
   const applyVim = (outcome: { readonly value: string; readonly selectionStart: number; readonly state: VimState }) => {
     setVim(outcome.state);
@@ -654,13 +591,6 @@ export function Composer({
     pendingVimSelection.current = { value: outcome.value, start: outcome.selectionStart, end: outcome.selectionStart };
     setDraft(outcome.value);
   };
-
-  const previewText = useDeferredDraft(draft, PREVIEW_DEBOUNCE_MS, scopeKey);
-  const previewMaxPx = !compact
-    ? PREVIEW_MAX_PX
-    : keyboardOpen
-      ? COMPACT_KEYBOARD_PREVIEW_MAX_PX
-      : COMPACT_PREVIEW_MAX_PX;
 
   const sendLabel = sending ? 'Sending…' : busy ? 'Queue' : 'Send';
 
@@ -690,7 +620,6 @@ export function Composer({
       <label className="sr-only" htmlFor={`${hintId}-input`}>
         Message
       </label>
-      {highlighted ? <ComposerMarkdownPreview maxHeightPx={previewMaxPx} text={previewText} {...references} /> : null}
       {attachments.entries.length === 0 ? null : (
         <PendingAttachmentStrip
           entries={attachments.entries}
@@ -803,8 +732,39 @@ export function Composer({
                   return;
                 }
               }
+              const input = event.currentTarget as unknown as HTMLTextAreaElement;
+              const modified = event.metaKey || event.ctrlKey;
+              // The Notion-style editor's own keys, in markdown mode only: ⌘B/⌘I/⌘E wrap the
+              // selection, and Enter continues a list or stays a line break inside a code block.
+              if (highlighted && modified && !event.shiftKey && !event.altKey) {
+                const marker = wrapMarkerFor(event.key);
+                if (marker !== null) {
+                  event.preventDefault();
+                  applyEdit(toggleWrap(draft, input.selectionStart, input.selectionEnd, marker));
+                  return;
+                }
+              }
               if (event.key !== 'Enter') return;
-              const action = composerEnterAction(enterKeyPreference, readInputModality().enterSends);
+              // ⌘/Ctrl+Enter sends in every mode, on every device.
+              if (modified) {
+                event.preventDefault();
+                void submit();
+                return;
+              }
+              if (highlighted && !event.shiftKey) {
+                if (insideCodeBlock(draft, input.selectionStart)) return;
+                const continued = continueList(draft, input.selectionStart);
+                if (continued !== null) {
+                  event.preventDefault();
+                  applyEdit(continued);
+                  return;
+                }
+              }
+              const enterSends = readInputModality().enterSends;
+              const action = composerEnterAction(
+                enterSends ? enterKeyPreference : phoneEnterKeyPreference,
+                enterSends,
+              );
               const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
               if (!send) return;
               event.preventDefault();
