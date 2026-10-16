@@ -218,7 +218,30 @@ export async function relayFetch(
   return namespace.get(namespace.idFromName(`${RELAY_PROTOCOL_ID}:${route.daemonId}`)).fetch(request);
 }
 
-export default { fetch: relayFetch };
+/**
+ * THE WORKERS ENTRY, AND THE ONLY PLACE THE PLATFORM'S ARGUMENTS MEET OURS.
+ *
+ * Workers calls `fetch(request, env, ctx)`. Exporting `relayFetch` itself handed `ctx` — an
+ * `ExecutionContext` — to the `runtime` parameter, so every hosted upgrade read
+ * `ctx.crypto.randomBytes` and threw before doing any work: 1101 on every rendezvous, for daemon and
+ * browser alike, while discovery kept answering 200 and advertising a relay nobody could reach. The
+ * suites called the export with two arguments and never saw it. So the entry takes exactly the two
+ * values it means and nothing positional the platform adds can reach `runtime`.
+ *
+ * And it FAILS SAFE: an exception that escapes the router is answered with a typed, no-store JSON
+ * error and logged, rather than surfacing as Cloudflare's bare 1101 page that tells an operator
+ * nothing and a client less.
+ */
+async function relayWorkerFetch(request: Request, environment: RelayEnvironment): Promise<Response> {
+  try {
+    return await relayFetch(request, environment);
+  } catch (reason) {
+    console.error('relay worker failed unexpectedly', reason);
+    return jsonError('relay worker failed unexpectedly', 500);
+  }
+}
+
+export default { fetch: relayWorkerFetch };
 
 type RelayMode = 'self-hosted' | 'hosted' | 'invalid';
 

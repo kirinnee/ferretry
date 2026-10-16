@@ -1,12 +1,16 @@
-import { type MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInputModality } from '../hooks/use-input-modality.ts';
+import { useTranscriptHold } from '../hooks/use-live-clock.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
+import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
 import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
-import { detailsLabel, type TranscriptEntry, transcriptIsFollowing, transcriptItems } from '../lib/session-screens.ts';
+import { type TranscriptEntry, transcriptItems } from '../lib/session-screens.ts';
+import { newTailRows, prependedAbove, prependRestoreTarget } from '../lib/transcript-follow.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
+import { JumpToLatest } from './jump-to-latest.tsx';
 import type { SendRetry } from './ledger-message.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
@@ -23,48 +27,15 @@ export interface TranscriptProps {
   readonly activity?: PaneActivity | null;
   /** The daemon's activity sentence, shown when the pane said nothing readable. */
   readonly activityFallback?: string | null;
-  /** Folded runs start open (Settings › Show details). Each can still be toggled on its own. */
-  readonly detailsShown?: boolean;
   /** The agent's own name, which every assistant row is labelled with instead of a harness or account. */
   readonly agentName?: string;
+  /**
+   * Bumped to put the reader back at the tail and re-engage follow — the reader just SENT something,
+   * so they want to watch the reply arrive even if they had scrolled up to re-read while composing.
+   * Opening a session needs no bump: a new daemon or session id does the same thing by itself.
+   */
+  readonly pinSignal?: number;
 }
-
-/**
- * One folded run of bookkeeping rows. Closed it is a single quiet line — "Show details (2 system
- * events)" — and open it lists every row it holds in the transcript's small mono chrome, so nothing
- * the daemon recorded is ever unreachable, only out of the way.
- */
-function TranscriptDetails({
-  entries,
-  open,
-  onToggle,
-}: {
-  readonly entries: readonly TranscriptEntry[];
-  readonly open: boolean;
-  readonly onToggle: () => void;
-}) {
-  return (
-    <div
-      className="fy-transcript-details"
-      data-transcript-density="chrome"
-      data-transcript-details={open ? 'open' : 'closed'}
-    >
-      <button aria-expanded={open} className="fy-transcript-details-toggle" onClick={onToggle} type="button">
-        {open ? 'Hide details' : `Show details (${detailsLabel(entries.length)})`}
-      </button>
-      {open ? (
-        <ul className="fy-transcript-details-list">
-          {entries.map(entry => (
-            <li key={entry.id}>
-              <span className="fy-transcript-details-label">{entry.label}</span> {entry.text}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
 /**
  * An assistant row labelled with the agent's name — "Hadi · 10:11:13" rather than "Assistant", the
  * harness, or the runtime's account. The clock the daemon printed is kept.
@@ -74,8 +45,6 @@ export const withAgentName = (entry: TranscriptEntry, agentName: string): Transc
   const clock = /\u00b7\s*(\d{2}:\d{2}:\d{2})$/u.exec(entry.label ?? '')?.[1];
   return { ...entry, label: clock === undefined ? agentName : `${agentName} · ${clock}` };
 };
-
-type ScrollPort = { scrollHeight: number; scrollTop: number; clientHeight: number };
 
 /** The selection surface needed to decide whether transcript prose is quotable. */
 export interface QuoteSelectionLike {
@@ -101,9 +70,29 @@ export const quotableTranscriptSelectionText = (
 };
 
 /**
- * One scroll controller for transcript content. Its identity includes both
- * daemon and session so a same-named session cannot retain another daemon's
- * scroll/follow state when its host switches connection.
+ * Return `value`, except while `hold` is engaged — then keep returning what it was when the hold
+ * began, and flush to the current one on release.
+ *
+ * A WebKit selection dies when the element it sits in re-renders, and the block a reader selects
+ * from is usually the one still streaming in. So while a selection or a pressed pointer holds the
+ * transcript still, it keeps showing what it had and catches up the instant the reader lets go. A
+ * ref written during render, deliberately: an effect would be a frame late, and a frame late here is
+ * one more mutation under a live selection.
+ */
+function useHeldStill<T>(value: T, hold: boolean): T {
+  const shown = useRef(value);
+  if (!hold) shown.current = value;
+  return shown.current;
+}
+
+/**
+ * One scroll controller for transcript content, following kteam's model (`useStickToBottom`): it
+ * follows the tail until the reader scrolls up, then counts the rows that arrive for the "N new —
+ * jump to latest" pill while the browser's own scroll anchoring holds their place. Rows inserted
+ * ABOVE a detached reader restore their distance from the bottom.
+ *
+ * Its identity includes both daemon and session, so a same-named session cannot inherit another
+ * daemon's scroll state, and a new identity always opens at the latest message.
  */
 export function Transcript({
   daemonId,
@@ -114,98 +103,80 @@ export function Transcript({
   onRetry,
   activity = null,
   activityFallback = null,
-  detailsShown = false,
   agentName,
+  pinSignal = 0,
 }: TranscriptProps) {
-  const viewport = useRef<ScrollPort | null>(null);
-  const viewportElement = useRef<HTMLDivElement | null>(null);
-  const following = useRef(true);
+  const hold = useTranscriptHold();
+  const shown = useHeldStill({ entries, busy, activity, activityFallback }, hold);
+  const items = transcriptItems(shown.entries);
+  const ids = items.map(item => item.entry.id);
+  const lastId = ids.at(-1) ?? null;
+  const firstId = ids[0] ?? null;
+
+  const [newCount, setNewCount] = useState(0);
+  const prevLastId = useRef<string | null>(null);
+  const prevCount = useRef(0);
+  const prevFirstId = useRef<string | null>(null);
+  const clearCount = useCallback(() => setNewCount(0), []);
+  // A new daemon or session is a newly opened transcript; a bumped `pinSignal` is the reader having
+  // just sent something. Either lands at the latest message and follows.
+  const { viewportRef, contentRef, following, gap, detached, onScroll, jumpToLatest, scrollTo } = useStickToBottom({
+    resetKey: `${daemonId}\u0000${sessionId}\u0000${pinSignal}`,
+    contentKeys: [shown.entries, shown.busy],
+    onFollow: clearCount,
+  });
+
+  // ---- DETACHED: count the rows that arrived at the tail, for the pill -----------------------------
+  // Declared after the hook, so a reset in the same commit has already re-engaged follow.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the last id and row count are the trigger
+  useEffect(() => {
+    const added = following.current ? 0 : newTailRows(ids, prevLastId.current, prevCount.current);
+    if (added > 0) setNewCount(count => count + added);
+    prevLastId.current = lastId;
+    prevCount.current = ids.length;
+  }, [lastId, ids.length]);
+
+  // ---- PREPEND: hold a detached reader's content still, before paint -------------------------------
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the first id and row count are the trigger
+  useLayoutEffect(() => {
+    const element = viewportRef.current;
+    if (element !== null && !following.current && prependedAbove(ids, prevFirstId.current)) {
+      const target = prependRestoreTarget(element, gap.current);
+      if (target !== undefined) scrollTo(target);
+    }
+    prevFirstId.current = firstId;
+  }, [firstId, ids.length]);
+
   const lastPointerType = useRef<string | null>(null);
   const quoteTrigger = useRef<HTMLElement | null>(null);
-  const [newCount, setNewCount] = useState(0);
   const [quoteMenu, setQuoteMenu] = useState<{ readonly x: number; readonly y: number; readonly text: string } | null>(
     null,
   );
-  const previousLength = useRef(entries.length);
-  // The runs the reader flipped away from the default, so a setting change re-applies to every other run.
-  const [openDetails, setOpenDetails] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleDetails = useCallback((id: string) => {
-    setOpenDetails(current => {
-      const next = new Set(current);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  }, []);
   const { touchAffected } = useInputModality();
 
-  // Follow position and the unread counter are browser-local state, but their
-  // meaning belongs to the daemon/session transcript currently on screen. A
-  // daemon switch can legitimately keep the same session id, so reset before
-  // the follow effect runs rather than carrying a detached reader into another
-  // daemon's transcript.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: daemon/session are deliberate reset triggers
-  useEffect(() => {
-    following.current = true;
-    previousLength.current = entries.length;
-    setNewCount(0);
-    setOpenDetails(new Set());
-  }, [daemonId, sessionId]);
+  const onQuoteContextMenu = (event: MouseEvent<HTMLDivElement>): void => {
+    const root = viewportRef.current;
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    const text = root
+      ? quotableTranscriptSelectionText(
+          selection as QuoteSelectionLike | null,
+          node => node !== null && root.contains(node),
+        )
+      : '';
+    const allowed = textContextMenuEventAllowed(event.nativeEvent as ContextMenuEventLike, {
+      lastPointerType: lastPointerType.current,
+      touchAffected,
+      hasSelection: text.length > 0,
+    });
 
-  // These deps are the TRIGGER, not inputs. The body reads only refs, so the rule sees them as
-  // unnecessary — but dropping them stops the viewport following new entries, which is the entire
-  // purpose of the effect. Re-running on a daemon or session change also resets the scroll for the
-  // newly shown transcript.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: trigger deps, see comment above
-  useEffect(() => {
-    const element = viewport.current;
-    if (!element || !following.current) return;
-    element.scrollTop = element.scrollHeight;
-  }, [daemonId, sessionId, entries, busy]);
-
-  useEffect(() => {
-    if (entries.length <= previousLength.current) {
-      previousLength.current = entries.length;
-      return;
-    }
-    if (following.current) setNewCount(0);
-    else setNewCount(count => count + entries.length - previousLength.current);
-    previousLength.current = entries.length;
-  }, [entries.length]);
-
-  const jumpToLatest = () => {
-    const element = viewport.current;
-    if (!element) return;
-    following.current = true;
-    setNewCount(0);
-    element.scrollTop = element.scrollHeight;
+    // A phone's long-press is the native text-selection gesture. Leaving this
+    // event alone preserves its handles and copy menu; session-row long-press
+    // handling remains separate in row-context-gesture.ts.
+    if (!allowed || !text) return;
+    event.preventDefault();
+    quoteTrigger.current = event.currentTarget;
+    setQuoteMenu({ x: event.clientX, y: event.clientY, text });
   };
-
-  const onQuoteContextMenu = useCallback(
-    (event: MouseEvent<HTMLDivElement>) => {
-      const root = viewportElement.current;
-      const selection = typeof window === 'undefined' ? null : window.getSelection();
-      const text = root
-        ? quotableTranscriptSelectionText(
-            selection as QuoteSelectionLike | null,
-            node => node !== null && root.contains(node),
-          )
-        : '';
-      const allowed = textContextMenuEventAllowed(event.nativeEvent as ContextMenuEventLike, {
-        lastPointerType: lastPointerType.current,
-        touchAffected,
-        hasSelection: text.length > 0,
-      });
-
-      // A phone's long-press is the native text-selection gesture. Leaving this
-      // event alone preserves its handles and copy menu; session-row long-press
-      // handling remains separate in row-context-gesture.ts.
-      if (!allowed || !text) return;
-      event.preventDefault();
-      quoteTrigger.current = event.currentTarget;
-      setQuoteMenu({ x: event.clientX, y: event.clientY, text });
-    },
-    [touchAffected],
-  );
 
   const quoteMenuItems: readonly ContextMenuItem[] =
     quoteMenu === null
@@ -234,40 +205,23 @@ export function Transcript({
           // MouseEvent. This is the touch press that began its long-press.
           lastPointerType.current = 'touch';
         }}
-        onScroll={() => {
-          const element = viewport.current;
-          if (!element) return;
-          following.current = transcriptIsFollowing(element);
-          if (following.current) setNewCount(0);
-        }}
-        ref={element => {
-          viewport.current = element as unknown as ScrollPort | null;
-          viewportElement.current = element;
-        }}
+        onScroll={onScroll}
+        ref={viewportRef}
         role="log"
         aria-live="polite"
       >
-        <div className="fy-transcript-content">
-          {transcriptItems(entries).map((item, index, items) =>
-            item.kind === 'details' ? (
-              <TranscriptDetails
-                entries={item.entries}
-                key={item.id}
-                onToggle={() => toggleDetails(item.id)}
-                open={detailsShown !== openDetails.has(item.id)}
-              />
-            ) : (
-              <TranscriptRow
-                entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
-                isLast={index === items.length - 1}
-                key={item.entry.id}
-                live={busy}
-                onRetry={onRetry}
-                previous={item.previous}
-              />
-            ),
-          )}
-          {busy ? <LiveActivityLine activity={activity} fallback={activityFallback} /> : null}
+        <div className="fy-transcript-content" ref={contentRef}>
+          {items.map((item, index) => (
+            <TranscriptRow
+              entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
+              isLast={index === items.length - 1}
+              key={item.entry.id}
+              live={shown.busy}
+              onRetry={onRetry}
+              previous={item.previous}
+            />
+          ))}
+          {shown.busy ? <LiveActivityLine activity={shown.activity} fallback={shown.activityFallback} /> : null}
         </div>
       </div>
       <ContextMenu
@@ -279,13 +233,7 @@ export function Transcript({
         touch={touchAffected}
         triggerRef={quoteTrigger}
       />
-      {newCount > 0 ? (
-        <div className="fy-jump-latest-shell">
-          <button className="fy-jump-latest" onClick={jumpToLatest} type="button">
-            {newCount} new {newCount === 1 ? 'message' : 'messages'} · Jump to latest
-          </button>
-        </div>
-      ) : null}
+      {detached ? <JumpToLatest count={newCount} onJump={jumpToLatest} /> : null}
     </section>
   );
 }
