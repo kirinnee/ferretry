@@ -1,7 +1,10 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Plus } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
+import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
+import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import {
   type ComposerEnterKeyPreference,
   composerEnterAction,
@@ -11,21 +14,25 @@ import {
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
-import type { DaemonFetch } from '../lib/runtime-models.ts';
-import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
+import type { DaemonFetch } from '../lib/runtime-models.ts';
+import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
-import { type ComposerSuggestionSwitches, useComposerAutocomplete } from './composer-autocomplete.ts';
+import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
+import {
+  type ComposerSuggestionSwitches,
+  DEFAULT_COMPOSER_SUGGESTIONS,
+  useComposerAutocomplete,
+} from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import {
   type ComposerAttentionItem,
   type ComposerSkillsCatalog,
-  type ComposerTaskSummary,
   createComposerAutocompleteProviders,
 } from './composer-autocomplete-providers.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
@@ -33,6 +40,7 @@ import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
 import { Markdown, type MarkdownProps } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
+import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
@@ -56,8 +64,6 @@ export interface ComposerProps {
   readonly dictationRecognition?: BrowserRecognitionProvider;
   /** One already-read daemon fleet slice, shared with transcript references. */
   readonly autocompleteSessions?: readonly SessionView[];
-  /** The session's already-read task summaries, shared with reference proof. */
-  readonly autocompleteTasks?: readonly ComposerTaskSummary[];
   /** The session's unresolved Attention items, shared with reference proof. */
   readonly autocompleteAttention?: readonly ComposerAttentionItem[];
   /** The session's already-read skills catalog, shared with reference proof. */
@@ -89,6 +95,15 @@ export interface ComposerProps {
   /** Modal editing over the native textarea. Off is the default and the whole
    *  arbitration below collapses to today's behaviour when it is off. */
   readonly vimMode?: boolean;
+  /**
+   * Uploads one attached file to this session. Absent means the composer uploads through
+   * `autocompleteFetcher` — the host's carrier — to its own daemon and session.
+   */
+  readonly uploadAttachment?: ComposerAttachmentUploader;
+  /** The session's runtime chips (model, effort), drawn at the start of the status line. */
+  readonly statusSlot?: ReactNode;
+  /** How full the session's context window is, when the harness reported it. */
+  readonly contextPercent?: number;
 }
 
 /**
@@ -108,9 +123,10 @@ export interface ComposerProps {
 const MAX_TEXTAREA_PX = 148;
 const COMPACT_MAX_TEXTAREA_PX = 160;
 const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 140;
-/** The floor is the touch target, and it is the same 44px `.fy-composer
- *  textarea` already declares — stated here so the two cannot drift. */
-const MIN_TEXTAREA_PX = 44;
+/** ONE LINE at rest, the same 22px `.fy-composer textarea` declares — stated here so the two cannot
+ *  drift. The touch target is the row around it (36px controls plus its padding, 44px tall), not the
+ *  bare line, which is what lets an idle composer be a single compact line. */
+const MIN_TEXTAREA_PX = 22;
 
 /**
  * Rendered Markdown belongs beside the editor, never underneath it.
@@ -245,10 +261,13 @@ function ComposerReferenceStrip({
   );
 }
 
+/** Does a drag or a drop carry files, rather than text or a link? */
+const hasFiles = (transfer: Pick<DataTransfer, 'types'> | null): boolean =>
+  transfer !== null && Array.from(transfer.types).includes('Files');
+
 /** Stable empties, so an unsettled family is a getter that answers rather than a
  *  getter that is missing — and never a new array identity per render. */
 const EMPTY_SESSIONS: readonly SessionView[] = [];
-const EMPTY_TASKS: readonly ComposerTaskSummary[] = [];
 const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
 
 /** The composer's own name for a Vim mode, in words rather than in colour. */
@@ -292,15 +311,25 @@ export function Composer({
   dictationSettings,
   dictationRecognition,
   autocompleteSessions,
-  autocompleteTasks,
   autocompleteAttention,
   autocompleteSkills,
   autocompleteReady,
   autocompleteFetcher,
   suggestions,
   vimMode = false,
+  uploadAttachment,
+  statusSlot,
+  contextPercent,
 }: ComposerProps) {
   const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [daemon, sessionId]);
+  const uploader = useMemo<ComposerAttachmentUploader>(
+    () =>
+      uploadAttachment ?? (file => uploadSessionAttachment(daemon, scope, file, autocompleteFetcher ?? browserFetch)),
+    [autocompleteFetcher, daemon, scope, uploadAttachment],
+  );
+  const attachments = useComposerAttachments(uploader, daemonSessionKey(scope));
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const [dropping, setDropping] = useState(false);
   /**
    * The draft is TAGGED with the session it belongs to, and read back through
    * that tag.
@@ -326,29 +355,27 @@ export function Composer({
   const references = useReferenceSurface();
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // Read as three booleans rather than as one object BECAUSE providers are
+  // Read as four booleans rather than as one object BECAUSE providers are
   // rebuilt from these: a host that passed a fresh literal every render would
   // otherwise abort and re-issue the open list's request on every keystroke.
-  // Absent stays "every family offered", exactly as the stored preference does.
-  const { mentionSuggestions = true, directReferenceSuggestions = true, skillSuggestions = true } = suggestions ?? {};
+  // Absent is the shipped default — the `@` ladder — exactly as the stored preference is.
+  const { mentionSuggestions, ladderSuggestions, directReferenceSuggestions, skillSuggestions } =
+    suggestions ?? DEFAULT_COMPOSER_SUGGESTIONS;
   // A host that supplies any of these owns all four families; a host that
   // supplies none is a standalone composer and keeps the daemon-backed defaults.
   const hosted =
     autocompleteSessions !== undefined ||
-    autocompleteTasks !== undefined ||
     autocompleteAttention !== undefined ||
     autocompleteSkills !== undefined ||
     autocompleteReady !== undefined;
   const hostRef = useRef({
     sessions: autocompleteSessions,
-    tasks: autocompleteTasks,
     attention: autocompleteAttention,
     skills: autocompleteSkills,
     ready: autocompleteReady,
   });
   hostRef.current = {
     sessions: autocompleteSessions,
-    tasks: autocompleteTasks,
     attention: autocompleteAttention,
     skills: autocompleteSkills,
     ready: autocompleteReady,
@@ -368,7 +395,7 @@ export function Composer({
         daemon,
         scope,
         ...(autocompleteFetcher === undefined ? {} : { fetcher: autocompleteFetcher }),
-        suggestions: { mentionSuggestions, directReferenceSuggestions, skillSuggestions },
+        suggestions: { mentionSuggestions, ladderSuggestions, directReferenceSuggestions, skillSuggestions },
         // THE GETTERS ARE UNCONDITIONAL once a host claims these families, and
         // they read the LIVE prop through a ref rather than closing over one
         // render's value. A getter installed only "once the value arrived" is
@@ -379,10 +406,8 @@ export function Composer({
         ...(hosted
           ? {
               getSessions: () => hostRef.current.sessions ?? EMPTY_SESSIONS,
-              getTasks: () => hostRef.current.tasks ?? EMPTY_TASKS,
               getAttentionItems: () => hostRef.current.attention ?? EMPTY_ATTENTION,
               getSkills: () => hostRef.current.skills,
-              waitForTasks: hostWarmup,
               waitForAttentionItems: hostWarmup,
               waitForSkills: hostWarmup,
             }
@@ -398,6 +423,7 @@ export function Composer({
       directReferenceSuggestions,
       hostWarmup,
       hosted,
+      ladderSuggestions,
       mentionSuggestions,
       scope,
       skillSuggestions,
@@ -528,14 +554,25 @@ export function Composer({
     return () => clearTimeout(timer);
   }, [draft, draftStore, scope]);
 
+  const attachmentIds = attachments.readyIds;
+  // Files alone are a message: the send still carries a sentence, because the route requires one and
+  // the agent should be told why a list of paths arrived.
+  const canSubmit =
+    !attachments.uploading &&
+    (canSubmitComposer(draft, disabled, sending) || (attachmentIds.length > 0 && !disabled && !sending));
   const submit = async () => {
-    if (!canSubmitComposer(draft, disabled, sending) || submitLock.current) return;
+    if (!canSubmit || submitLock.current) return;
     submitLock.current = true;
     setSending(true);
     setError(null);
     try {
-      await api.send(sessionId, { message: draft.trim(), now: !busy });
+      await api.send(sessionId, {
+        message: draft.trim() || 'See the attached files.',
+        ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
+        now: !busy,
+      });
       for (const provider of autocompleteProviders) provider.reset?.();
+      attachments.clear();
       setDraft('');
       // The next message starts as text, not as commands.
       setVim(initialVimState);
@@ -625,10 +662,26 @@ export function Composer({
       ? COMPACT_KEYBOARD_PREVIEW_MAX_PX
       : COMPACT_PREVIEW_MAX_PX;
 
+  const sendLabel = sending ? 'Sending…' : busy ? 'Queue' : 'Send';
+
   return (
     <form
       aria-describedby={hintId}
       className="fy-composer"
+      data-composer-dropping={dropping ? '' : undefined}
+      onDragLeave={() => setDropping(false)}
+      onDragOver={event => {
+        // Only a drag that carries files is ours; dragged text keeps the browser's own behaviour.
+        if (!hasFiles(event.dataTransfer)) return;
+        event.preventDefault();
+        setDropping(true);
+      }}
+      onDrop={event => {
+        setDropping(false);
+        if (!hasFiles(event.dataTransfer)) return;
+        event.preventDefault();
+        attachments.add(Array.from(event.dataTransfer.files));
+      }}
       onSubmit={event => {
         event.preventDefault();
         void submit();
@@ -638,6 +691,13 @@ export function Composer({
         Message
       </label>
       {highlighted ? <ComposerMarkdownPreview maxHeightPx={previewMaxPx} text={previewText} {...references} /> : null}
+      {attachments.entries.length === 0 ? null : (
+        <PendingAttachmentStrip
+          entries={attachments.entries}
+          onRemove={attachments.remove}
+          onRetry={attachments.retry}
+        />
+      )}
       <ComposerReferenceStrip
         draft={draft}
         onRemove={(start, end) => {
@@ -650,92 +710,154 @@ export function Composer({
         }}
         surface={references}
       />
-      <div className="fy-composer-input-layer" data-highlighted={String(highlighted)}>
-        <ComposerHighlight enabled={highlighted} overlayRef={overlayRef} text={draft} />
-        <textarea
+      <div className="fy-composer-row">
+        <button
+          aria-label="Attach an image, audio or a file"
+          className="fy-composer-icon"
+          data-composer-attach=""
           disabled={disabled || sending}
-          id={`${hintId}-input`}
+          onClick={() => fileInput.current?.click()}
+          title="Attach an image, audio or a file — or drop or paste one"
+          type="button"
+        >
+          <Plus aria-hidden="true" size={18} />
+        </button>
+        <input
+          aria-hidden="true"
+          className="hidden"
+          multiple
           onChange={event => {
-            const input = event.currentTarget as unknown as HTMLTextAreaElement;
-            setDraft(input.value);
-            autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
-            syncHighlight(input);
+            const input = event.currentTarget as unknown as HTMLInputElement;
+            attachments.add(Array.from(input.files ?? []));
+            // Cleared so choosing the same file again is still a change.
+            input.value = '';
           }}
-          onCompositionEnd={event => {
-            composing.current = false;
-            const input = event.currentTarget as unknown as HTMLTextAreaElement;
-            // Re-read the trigger only now: the bytes are finally the reader's,
-            // so a reference the composition ended on is offered immediately
-            // rather than after one more keystroke.
-            autocomplete.endComposition({ start: input.selectionStart, end: input.selectionEnd });
-          }}
-          onCompositionStart={() => {
-            composing.current = true;
-            autocomplete.startComposition();
-          }}
-          onKeyDown={event => {
-            // ARBITRATION ORDER, and every step of it is load-bearing.
-            //
-            // 0. A composing key belongs to the input method and to nobody else.
-            //    It must not accept a candidate, must not send, and must never
-            //    reach the Vim engine, which would read a Japanese, Chinese or
-            //    Korean composition as commands.
-            // 1. A visible, SELECTED completion gets Enter/Tab; an empty,
-            //    loading or refused list cannot consume either key, and neither
-            //    can a direct-sigil list nobody has chosen a row in.
-            // 2. Escape and the arrows belong to the open list first — which is
-            //    why the FIRST Escape closes it and stays in insert mode.
-            // 3. Vim, when the reader asked for it. A second Escape reaches it
-            //    because the list is now closed.
-            // 4. The reader's configured send/newline behaviour, last. Enter in
-            //    normal mode arrives here unclaimed, so the policy is unchanged.
-            if (composing.current || (event.nativeEvent as { isComposing?: boolean }).isComposing) return;
-            const completionKey = event.key === 'Enter' || event.key === 'Tab';
-            const hasAcceptableCompletion = autocomplete.open && autocomplete.activeIndex >= 0;
-            if (completionKey) {
-              if (hasAcceptableCompletion && autocomplete.handleKeyDown(event)) return;
-            } else if (autocomplete.handleKeyDown(event)) return;
-            if (vimMode) {
-              const input = event.currentTarget as unknown as HTMLTextAreaElement;
-              const outcome = vimReduce(
-                vim,
-                { key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey },
-                { value: draft, selectionStart: input.selectionStart, selectionEnd: input.selectionEnd },
-              );
-              // `handled` is the EVIDENCE for preventDefault, never a request:
-              // an unclaimed key keeps its browser and system meaning.
-              if (outcome.handled) {
-                event.preventDefault();
-                applyVim(outcome);
-                return;
-              }
-            }
-            if (event.key !== 'Enter') return;
-            const action = composerEnterAction(enterKeyPreference, readInputModality().enterSends);
-            const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
-            if (!send) return;
-            event.preventDefault();
-            void submit();
-          }}
-          onScroll={event => syncHighlight(event.currentTarget as unknown as HTMLTextAreaElement)}
-          onSelect={event => {
-            const input = event.currentTarget as unknown as HTMLTextAreaElement;
-            autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
-          }}
-          placeholder={placeholder}
-          ref={inputRef}
-          rows={1}
-          value={draft}
-          {...autocomplete.textareaAria}
+          ref={fileInput}
+          tabIndex={-1}
+          type="file"
         />
-        {/* Anchored to the input layer, opening UPWARD: the composer sits at the
+        <div className="fy-composer-input-layer" data-highlighted={String(highlighted)}>
+          <ComposerHighlight enabled={highlighted} overlayRef={overlayRef} text={draft} />
+          <textarea
+            disabled={disabled || sending}
+            id={`${hintId}-input`}
+            onPaste={event => {
+              // A pasted screenshot is an attachment; pasted text stays the browser's to insert.
+              const files = Array.from(event.clipboardData?.files ?? []);
+              if (files.length === 0) return;
+              event.preventDefault();
+              attachments.add(files);
+            }}
+            onChange={event => {
+              const input = event.currentTarget as unknown as HTMLTextAreaElement;
+              setDraft(input.value);
+              autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
+              syncHighlight(input);
+            }}
+            onCompositionEnd={event => {
+              composing.current = false;
+              const input = event.currentTarget as unknown as HTMLTextAreaElement;
+              // Re-read the trigger only now: the bytes are finally the reader's,
+              // so a reference the composition ended on is offered immediately
+              // rather than after one more keystroke.
+              autocomplete.endComposition({ start: input.selectionStart, end: input.selectionEnd });
+            }}
+            onCompositionStart={() => {
+              composing.current = true;
+              autocomplete.startComposition();
+            }}
+            onKeyDown={event => {
+              // ARBITRATION ORDER, and every step of it is load-bearing.
+              //
+              // 0. A composing key belongs to the input method and to nobody else.
+              //    It must not accept a candidate, must not send, and must never
+              //    reach the Vim engine, which would read a Japanese, Chinese or
+              //    Korean composition as commands.
+              // 1. A visible, SELECTED completion gets Enter/Tab; an empty,
+              //    loading or refused list cannot consume either key, and neither
+              //    can a direct-sigil list nobody has chosen a row in.
+              // 2. Escape and the arrows belong to the open list first — which is
+              //    why the FIRST Escape closes it and stays in insert mode.
+              // 3. Vim, when the reader asked for it. A second Escape reaches it
+              //    because the list is now closed.
+              // 4. The reader's configured send/newline behaviour, last. Enter in
+              //    normal mode arrives here unclaimed, so the policy is unchanged.
+              if (composing.current || (event.nativeEvent as { isComposing?: boolean }).isComposing) return;
+              const completionKey = event.key === 'Enter' || event.key === 'Tab';
+              const hasAcceptableCompletion = autocomplete.open && autocomplete.activeIndex >= 0;
+              if (completionKey) {
+                if (hasAcceptableCompletion && autocomplete.handleKeyDown(event)) return;
+              } else if (autocomplete.handleKeyDown(event)) return;
+              if (vimMode) {
+                const input = event.currentTarget as unknown as HTMLTextAreaElement;
+                const outcome = vimReduce(
+                  vim,
+                  { key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey },
+                  { value: draft, selectionStart: input.selectionStart, selectionEnd: input.selectionEnd },
+                );
+                // `handled` is the EVIDENCE for preventDefault, never a request:
+                // an unclaimed key keeps its browser and system meaning.
+                if (outcome.handled) {
+                  event.preventDefault();
+                  applyVim(outcome);
+                  return;
+                }
+              }
+              if (event.key !== 'Enter') return;
+              const action = composerEnterAction(enterKeyPreference, readInputModality().enterSends);
+              const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
+              if (!send) return;
+              event.preventDefault();
+              void submit();
+            }}
+            onScroll={event => syncHighlight(event.currentTarget as unknown as HTMLTextAreaElement)}
+            onSelect={event => {
+              const input = event.currentTarget as unknown as HTMLTextAreaElement;
+              autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
+            }}
+            placeholder={placeholder}
+            ref={inputRef}
+            rows={1}
+            value={draft}
+            {...autocomplete.textareaAria}
+          />
+          {/* Anchored to the input layer, opening UPWARD: the composer sits at the
             bottom of the session, so a downward list would land off-screen and
             under the on-screen keyboard. */}
-        <ComposerAutocompletePopover surface={autocomplete} />
+          <ComposerAutocompletePopover surface={autocomplete} />
+        </div>
+        {dictationSettings ? (
+          <DictationControl
+            {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
+            className="fy-composer-icon"
+            composerRef={inputRef}
+            daemon={daemon}
+            disabled={disabled || sending}
+            draft={draft}
+            layout="compact"
+            onDraftChange={applyDictation}
+            {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
+            selectionRef={inputRef}
+            sessionId={sessionId}
+            settings={dictationSettings}
+          />
+        ) : null}
+        <button className="fy-composer-send" disabled={!canSubmit} title={sendLabel} type="submit">
+          <ArrowUp aria-hidden="true" size={18} strokeWidth={2.5} />
+          <span className="sr-only">{sendLabel}</span>
+        </button>
       </div>
-      <div className="fy-composer-actions">
+      <div className="fy-composer-actions" data-composer-status="">
+        {statusSlot}
+        {contextPercent === undefined ? null : (
+          <span className="fy-composer-context" title="How full this session's context window is">
+            ctx {Math.round(contextPercent)}%
+          </span>
+        )}
+        <ComposerQuota quota={quota} />
         <p id={hintId}>
           {busy ? 'Queue for the next turn' : composerEnterHint(bareEnterAction, inputModality.touchAffected)}
+          {inputModality.touchAffected ? null : ' · drop files here'}
         </p>
         {vimMode ? (
           <>
@@ -763,30 +885,11 @@ export function Composer({
             </button>
           </>
         ) : null}
-        <ComposerQuota quota={quota} />
-        {dictationSettings ? (
-          <DictationControl
-            {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
-            composerRef={inputRef}
-            daemon={daemon}
-            disabled={disabled || sending}
-            draft={draft}
-            layout={compact ? 'compact' : 'full'}
-            onDraftChange={applyDictation}
-            {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
-            selectionRef={inputRef}
-            sessionId={sessionId}
-            settings={dictationSettings}
-          />
-        ) : null}
         {inputModality.touchAffected && bareEnterAction === 'send' ? (
-          <button type="button" onClick={insertNewline} disabled={disabled || sending}>
+          <button className="fy-composer-chip" type="button" onClick={insertNewline} disabled={disabled || sending}>
             New line
           </button>
         ) : null}
-        <button disabled={!canSubmitComposer(draft, disabled, sending)} type="submit">
-          {sending ? 'Sending…' : busy ? 'Queue' : 'Send'}
-        </button>
       </div>
       {error ? (
         <p className="fy-composer-error" role="alert">

@@ -17,6 +17,8 @@ import {
   type ComposerTriggerMatch,
 } from '../../src/components/composer-autocomplete.ts';
 import {
+  agentStatusTone,
+  autocompleteFooterHint,
   ComposerAutocompletePopover,
   type ComposerAutocompleteSurface,
 } from '../../src/components/composer-autocomplete-popover.tsx';
@@ -141,7 +143,7 @@ describe('composer autocomplete popover', () => {
       'composer-autocomplete-test-option-2',
     ]);
     expect(rows.map(row => row.props['aria-selected'])).toEqual([false, true, false]);
-    expect(rows[1]?.props.className).toContain('bg-accent-soft');
+    expect(rows[1]?.props['data-active']).toBe(true);
     // The heading is decoration; the grouping element carries the name, so a
     // screen reader hears "Skills" once rather than twice.
     expect(view.root.findAllByType('fieldset').map(group => group.props['aria-label'])).toEqual(['Skills', 'Files']);
@@ -165,7 +167,7 @@ describe('composer autocomplete popover', () => {
     const [first, , refused] = options(view);
     expect(refused?.props['aria-disabled']).toBe(true);
     expect(refused?.props.title).toBe('this path is refused by the daemon');
-    expect(refused?.props.className).toContain('cursor-not-allowed');
+    expect(refused?.props.className).toContain('fy-ac-row-refused');
     // The reason replaces the detail line rather than joining it: the files
     // provider already puts the refusal in `detail`, and printing both reads as
     // two separate problems.
@@ -256,11 +258,22 @@ describe('composer autocomplete popover', () => {
       ),
     );
     const chips = view.root.findAll(node => typeof node.type === 'string' && node.props['data-tier'] !== undefined);
-    const active = chips.filter(chip => String(chip.props.className).includes('border-accent'));
+    const active = chips.filter(chip => chip.props['data-active'] === true);
     expect(chips).toHaveLength(COMPOSER_REFERENCE_TIERS.length);
     expect(active).toHaveLength(1);
-    expect(active[0]?.children).toContain('Agents');
+    expect(active[0]?.children).toContain('agents');
     expect(texts(view)).toContain('1 suggestion');
+    // The footer names the keys, what Enter inserts, and what one more @ reaches.
+    expect(texts(view).join(' ')).toContain('type @ again for attention');
+  });
+
+  test('names the keys in the footer and marks an agent’s status as a dot', () => {
+    expect(autocompleteFooterHint(undefined, undefined, undefined)).toBe('↑↓ choose · esc');
+    expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 3, undefined)).toBe('↑↓ choose · esc');
+    expect(agentStatusTone('tool running')).toBe('ok');
+    expect(agentStatusTone('awaiting user')).toBe('warn');
+    expect(agentStatusTone('completed')).toBe('idle');
+    expect(agentStatusTone(undefined)).toBe('idle');
   });
 
   test('keeps the selected row in view and inside the element the dismiss guard knows', async () => {

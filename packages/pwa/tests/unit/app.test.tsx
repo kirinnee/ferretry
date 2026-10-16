@@ -51,8 +51,11 @@ import {
   pairedPushMachines,
   pushMachineLabel,
   routeAnnouncement,
+  sessionsBarPlace,
+  updateOffer,
 } from '../../src/App.tsx';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
+import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
@@ -1766,15 +1769,38 @@ describe('AppShell', () => {
 
     // Act — the daemon republishes the set it can be reached on, which is the ordinary sequel to its
     // first answer and is authoritative over the cache. Same address, same grant, new connection.
+    // EVERY STATE THE REGION PAINTS: an attribute that changes in place, AND a region that arrives
+    // already carrying one — the session bar is rebuilt with the page when the client is replaced, and a
+    // fresh region claiming `live` would be the same lie as an old one keeping it.
     const committed: Array<string | null> = [];
-    const observer = new MutationObserver(records => {
-      for (const record of records) committed.push((record.target as HTMLElement).getAttribute('data-live-stream'));
+    const collect = (records: readonly MutationRecord[]): void => {
+      for (const record of records) {
+        if (record.type === 'attributes') {
+          committed.push((record.target as HTMLElement).getAttribute('data-live-stream'));
+          continue;
+        }
+        for (const node of record.addedNodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          const arrived = node.matches('[data-live-stream]')
+            ? [node]
+            : [...node.querySelectorAll('[data-live-stream]')];
+          for (const region of arrived) committed.push(region.getAttribute('data-live-stream'));
+        }
+      }
+    };
+    const observer = new MutationObserver(collect);
+    observer.observe(view.container, {
+      attributes: true,
+      attributeFilter: ['data-live-stream'],
+      childList: true,
+      subtree: true,
     });
-    observer.observe(view.container, { attributes: true, attributeFilter: ['data-live-stream'], subtree: true });
     await interact(() => {
       store.connections.replaceCarriers(alpha, alphaRelayed.carriers);
     });
     await settle();
+    // Anything still queued is a frame that was painted; disconnecting would discard it unread.
+    collect(observer.takeRecords());
     observer.disconnect();
 
     // THE OTHER TWO THIRDS OF THE OWNER DID NOT MOVE, and saying so is what makes this a test about
@@ -1945,12 +1971,16 @@ describe('AppShell', () => {
       // The deck is not mounted yet, so nothing has asked the daemon about terminals at all.
       expect(carrierRequests.some(url => url.includes('/terminals'))).toBe(false);
 
+      // The terminals open from the session bar's ⋯ menu, which is where the pane openers live now.
+      await interact(() =>
+        must(view.container.querySelector<HTMLButtonElement>('button[data-session-more]'), 'the session menu').click(),
+      );
       await interact(() =>
         must(
-          [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
-            button => button.textContent === 'Terminal',
+          [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+            item => item.textContent === 'Terminal',
           ),
-          'the Terminal pane launcher',
+          'the Terminal menu row',
         ).click(),
       );
       // ACROSS REAL TASK BOUNDARIES, not just microtasks. The chain is module load → listing →
@@ -2059,7 +2089,8 @@ describe('AppShell', () => {
         const scope = daemonSessionScope(alpha, 'shared');
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
-        expect(view.container.querySelector('button[aria-label="Attention"]')).not.toBeNull();
+        // Nothing waiting: the status carries no "needs you", and the board stays one ⋯ row away.
+        expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
         const initialAttentionReads = attentionReads;
@@ -2070,10 +2101,10 @@ describe('AppShell', () => {
         expect(store.attention.store.count(scope)).toBe(1);
 
         const trigger = must(
-          view.container.querySelector<HTMLButtonElement>('button[aria-label="Answer attention (1)"]'),
-          'the refreshed Attention trigger',
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="Needs you: 1 unanswered"]'),
+          'the refreshed "needs you" status',
         );
-        expect(trigger.textContent).toContain('1');
+        expect(trigger.getAttribute('data-needs-you')).toBe('1');
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
       } finally {
         await view.unmount();
@@ -2088,24 +2119,9 @@ describe('AppShell', () => {
     const { reads, transcriptReads, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {
       await settle();
-      const findInterrupt = () =>
-        Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find(button =>
-          button.textContent?.includes('Interrupt turn'),
-        );
-      let interrupt = findInterrupt();
-
-      // This transport test must not depend on the process-global viewport.
-      // Compact truthfully keeps lifecycle actions in Session Details, so reach
-      // the same production control through that presentation when necessary.
-      if (interrupt === undefined) {
-        const details = must(
-          view.container.querySelector<HTMLButtonElement>('button[aria-label="Open session details"]'),
-          'the session details control',
-        );
-        await interact(() => details.click());
-        interrupt = findInterrupt();
-      }
-
+      // Interrupt is on the session bar at every width, so this transport test does not depend on the
+      // process-global viewport.
+      const interrupt = view.container.querySelector<HTMLButtonElement>('button[aria-label="Interrupt turn"]');
       await interact(() => must(interrupt, 'the interrupt control').click());
       await settle();
 
@@ -2228,9 +2244,15 @@ describe('AppShell', () => {
 
   it('keeps Warden evidence daemon-bound, opens the complete report, and calls a failed refresh stale', async () => {
     let reads = 0;
-    let poll: (() => void) | undefined;
-    const restoreInterval = patchGlobal(globalThis, 'setInterval', (callback: () => void) => {
-      poll = callback;
+    // EVERY half-minute refresh on the page, run together: the sessions bar keeps its own list fresh on
+    // an interval too, and which of the Warden page's own timers registers last is a mount-order detail
+    // this test is not about.
+    const halfMinute: (() => void)[] = [];
+    const poll = (): void => {
+      for (const callback of halfMinute) callback();
+    };
+    const restoreInterval = patchGlobal(globalThis, 'setInterval', (callback: () => void, milliseconds?: number) => {
+      if (milliseconds === WARDEN_REFRESH_MS) halfMinute.push(callback);
       return 1;
     });
     const restoreClearInterval = patchGlobal(globalThis, 'clearInterval', () => {});
@@ -2259,7 +2281,7 @@ describe('AppShell', () => {
       await settle();
       expect(view.container.textContent).toContain('Evidence from /state/warden/reports/session-a.md');
 
-      await interact(() => poll?.());
+      await interact(() => poll());
       await settle();
       expect(view.container.textContent).toContain('The latest report check failed; showing the last verified index.');
       await view.unmount();
@@ -3724,10 +3746,97 @@ describe('the full-screen machine setup route', () => {
   });
 });
 
+/** The Warden page's verdict refresh cadence. */
+const WARDEN_REFRESH_MS = 30_000;
+
+describe('the sessions bar', () => {
+  it('words the reload offer as the app bar always has, warning only for a recovery', () => {
+    expect(updateOffer('update')).toEqual({ ...UPDATE_CHIP.update, tone: 'accent' });
+    expect(updateOffer('recovery')).toEqual({ ...UPDATE_CHIP.recovery, tone: 'warn' });
+  });
+
+  it('names the foot place every route belongs to', () => {
+    const at = (kind: string) => sessionsBarPlace({ kind, daemonId: alpha.daemonId } as never);
+    expect(['projects', 'project-detail', 'analytics', 'warden', 'learning', 'settings', 'sessions'].map(at)).toEqual([
+      'projects',
+      'projects',
+      'insights',
+      'insights',
+      'insights',
+      'settings',
+      null,
+    ]);
+  });
+
+  it('stands on every machine page as a column the reader can fold to a rail and back', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId], { sessions: ['one'] });
+    try {
+      await settle();
+      // No top navigation row any more: the bar is the app's navigation.
+      expect(view.container.querySelector('[data-app-bar-destination-row]')).toBeNull();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      expect(column.querySelector('[data-sbar-place="settings"]')?.getAttribute('aria-current')).toBe('page');
+      expect(column.querySelector('[data-sbar-session="one"]')).not.toBeNull();
+
+      await interact(() => must(column.querySelector<HTMLButtonElement>('[data-sbar-collapse]'), 'Collapse').click());
+      const rail = must(view.container.querySelector('[data-sessions-bar="rail"]'), 'the folded rail');
+      await interact(() => must(rail.querySelector<HTMLButtonElement>('[data-sbar-expand]'), 'Expand').click());
+      expect(view.container.querySelector('[data-sessions-bar="column"]')).not.toBeNull();
+
+      // Adding a machine goes to the machine picker, where pairing starts.
+      await interact(() =>
+        must(view.container.querySelector<HTMLButtonElement>('[data-sbar-machine]'), 'machine').click(),
+      );
+      await interact(() =>
+        must(
+          [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+            item => item.textContent === 'Add a machine…',
+          ),
+          'Add a machine',
+        ).click(),
+      );
+      await settle();
+      expect(window.location.pathname).toBe('/');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('carries this session’s own search on a session page, and the finder under a forced rail', async () => {
+    const wide = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], { sessions: ['shared'] });
+    try {
+      await settle();
+      expect(
+        wide.view.container.querySelector('[data-sessions-bar="column"] [data-current-session-search]'),
+      ).not.toBeNull();
+    } finally {
+      await wide.view.unmount();
+    }
+
+    const restore = patchGlobal(window, 'innerWidth', 900);
+    try {
+      const narrow = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], { sessions: ['shared'] });
+      try {
+        await settle();
+        const rail = must(narrow.view.container.querySelector('[data-sessions-bar="rail"]'), 'the forced rail');
+        expect(rail.querySelector('[data-sbar-expand]')).toBeNull();
+        expect(narrow.view.container.querySelector('[data-current-session-search]')).toBeNull();
+        // With nowhere to focus this session's search, the chord opens the finder instead.
+        await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+        expect(document.querySelector('[role="dialog"] [role="combobox"]')).not.toBeNull();
+      } finally {
+        await narrow.view.unmount();
+      }
+    } finally {
+      restore();
+    }
+  });
+});
+
 describe('the phone tab bar', () => {
   const PHONE_WIDTH = 390;
 
-  it('sits under every page but a session, and the top bar offers Find only where it is missing', async () => {
+  it('sits under every page but a session, whose own bar opens the sessions drawer and its finder', async () => {
     const restore = patchGlobal(window, 'innerWidth', PHONE_WIDTH);
     try {
       const sessions = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
@@ -3744,9 +3853,27 @@ describe('the phone tab bar', () => {
       const session = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
       try {
         await settle();
-        // A transcript needs the whole height, so there is no tab bar — and Find moves into the top bar.
+        // A transcript needs the whole height: no tab bar and no top bar. The session's own bar is the
+        // only chrome, and its ☰ opens the sessions drawer, which carries the finder.
         expect(session.view.container.querySelector('[data-app-tab-bar]')).toBeNull();
-        expect(session.view.container.querySelector('[data-app-bar-destination-search]')).not.toBeNull();
+        expect(session.view.container.querySelector('[data-density-region="app-bar"]')).toBeNull();
+        expect(session.view.container.querySelector('[data-app-bar-destination-search]')).toBeNull();
+        await interact(() =>
+          must(
+            session.view.container.querySelector<HTMLButtonElement>('button[data-session-bar-sessions]'),
+            'the session bar ☰',
+          ).click(),
+        );
+        const drawer = must(
+          session.view.container.querySelector<HTMLElement>('[data-sessions-bar="drawer"]'),
+          'the sessions drawer',
+        );
+        expect(drawer.querySelector('[data-app-bar-destination-search]')).not.toBeNull();
+        // Choosing a place closes the drawer over the page it opens.
+        await interact(() =>
+          must(drawer.querySelector<HTMLAnchorElement>('[data-sbar-place="settings"]'), 'Settings').click(),
+        );
+        expect(session.view.container.querySelector('[data-sessions-bar="drawer"]')).toBeNull();
       } finally {
         await session.view.unmount();
       }

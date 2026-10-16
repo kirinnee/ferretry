@@ -102,7 +102,7 @@ export class BrowserSessionService implements BrowserSubsystem {
         const run = await this.ensure(sessionId);
         const result =
           action.action === 'open' && action.url !== undefined ? await run.driver.navigate(action.url) : undefined;
-        if (result) run.snapshot = result;
+        if (result) run.snapshot = pageOf(result);
         return result === undefined ? { status: this.project(run) } : { status: this.project(run), result };
       }
       if (action.action === 'stop') {
@@ -112,7 +112,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       const run = this.running.get(sessionId);
       if (!run) throw new BrowserSessionError('not_running', 'the session browser is not running');
       const result = await this.perform(run, action);
-      run.snapshot = result;
+      run.snapshot = pageOf(result);
       return { status: this.project(run), result };
     });
   }
@@ -367,4 +367,23 @@ export class BrowserSessionService implements BrowserSubsystem {
       if (this.serial.get(sessionId) === next) this.serial.delete(sessionId);
     }
   }
+}
+
+/**
+ * The page a STATUS reports, and nothing an action added to it. What an action acted on, the text it
+ * read and the screenshot it took belong to that one response: carried into the remembered snapshot
+ * they made every later status fail the strict wire schema (`actedPageId` is not a status field), and
+ * kept a multi-megabyte screenshot alive for the life of the browser.
+ */
+function pageOf(result: BrowserPageSnapshot): BrowserPageSnapshot {
+  return {
+    url: result.url,
+    title: result.title,
+    pages: result.pages,
+    activePageId: result.activePageId,
+    pageState: result.pageState,
+    ...(result.pageError === undefined ? {} : { pageError: result.pageError }),
+    canGoBack: result.canGoBack,
+    canGoForward: result.canGoForward,
+  };
 }

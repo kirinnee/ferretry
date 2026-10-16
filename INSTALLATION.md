@@ -1,7 +1,7 @@
 # Installing the CLI
 
-The product is **ferretry**; it ships the **`fy`** CLI and **`fyd`** per-host daemon as
-standalone binaries (no Bun/Node runtime required). Supported targets: linux amd64, linux arm64,
+The product is **ferretry**; it ships the **`fy`** CLI, the **`fyd`** per-host daemon and the daemon's
+**`fyd-browser-worker`** as standalone binaries (no Bun/Node runtime required). Supported targets: linux amd64, linux arm64,
 macOS arm64 (no Intel mac).
 
 > **macOS caveat — unsigned binaries.** The binaries are not code-signed. On macOS, Gatekeeper
@@ -39,7 +39,7 @@ sudo dnf install fy
 
 ## Homebrew (macOS)
 
-The cask lives in this repo (no separate tap repository) and installs both `fy` and `fyd`:
+The cask lives in this repo (no separate tap repository) and installs `fy`, `fyd` and `fyd-browser-worker`:
 
 ```bash
 brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
@@ -73,6 +73,26 @@ outside the store, is left alone, and releases any root an earlier Nix installat
 `fy daemon uninstall` does NOT release the root. Removing supervision does not uninstall the daemon,
 and `fy daemon start` still runs that same executable as a direct child; the message names the root
 so you can remove it by hand if you are uninstalling Ferretry entirely.
+
+## The browser worker and Chrome
+
+The browser pane and the agents' browser tools run a real Chrome, driven by `fyd-browser-worker`.
+Every channel above installs the worker **beside `fyd`** (the archive, the cask, the deb/rpm packages,
+the installer and the Nix package all carry it), and the daemon looks for it there — next to the path
+it was started from and next to that path with symlinks resolved. A daemon with no worker beside it
+says so in one sentence and names the fix: reinstall or upgrade Ferretry.
+
+Chrome itself is not bundled. The daemon finds Google Chrome or Chromium in the usual install
+locations, `/snap/bin`, and on its own `PATH`; when there is none, the browser refuses with the one
+install command for this machine, for example:
+
+```text
+Chrome is not installed on this machine: install it with `brew install --cask google-chrome`, or set FY_CHROME_BIN to its path.
+```
+
+`FY_CHROME_BIN` in the daemon's environment points it at any other Chrome. On Linux the browser draws
+into the daemon's X display when it has one and runs headless when it does not (a server or an
+SSH-only box), so no display server is required.
 
 ## Which daemon runs
 

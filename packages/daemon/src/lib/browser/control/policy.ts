@@ -70,33 +70,93 @@ export function browserEnvironment(
   return result;
 }
 
-export function chromeExecutableCandidates(platform: NodeJS.Platform, override?: string): readonly string[] {
+/**
+ * What the daemon may look at to find a browser beyond the fixed install locations: the home
+ * directory (per-user macOS apps), the PATH the daemon itself was given (Nix profiles, Homebrew
+ * on Linux), and which package managers exist — the last one only to name the right install
+ * command when no browser is found at all.
+ */
+export interface ChromeSearch {
+  readonly home?: string;
+  readonly path?: string;
+  readonly available?: (command: string) => boolean;
+}
+
+const LINUX_BROWSER_NAMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'] as const;
+
+export function chromeExecutableCandidates(
+  platform: NodeJS.Platform,
+  override?: string,
+  search: ChromeSearch = {},
+): readonly string[] {
   if (override?.trim()) return [override.trim()];
   if (platform === 'darwin') {
-    return [
+    const system = [
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       '/Applications/Chromium.app/Contents/MacOS/Chromium',
     ];
+    return search.home
+      ? [...system, `${search.home}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`]
+      : system;
   }
-  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+  const fixed = [...LINUX_BROWSER_NAMES.map(name => `/usr/bin/${name}`), '/snap/bin/chromium'];
+  const onPath = (search.path ?? '')
+    .split(':')
+    .filter(directory => directory.startsWith('/'))
+    .flatMap(directory => LINUX_BROWSER_NAMES.map(name => `${directory.replace(/\/+$/, '')}/${name}`));
+  return [...new Set([...fixed, ...onPath])];
+}
+
+/**
+ * The ONE command that installs a browser here, chosen from the package managers this machine has.
+ * Ordered so the first match is the one that works: Ubuntu ships `chromium` only as a snap, so snap
+ * outranks apt; every Linux manager below installs a Chromium the candidate list then finds.
+ */
+export function chromeInstallCommand(
+  platform: NodeJS.Platform,
+  available: (command: string) => boolean,
+): string | undefined {
+  if (platform === 'darwin') return 'brew install --cask google-chrome';
+  const managers: readonly (readonly [string, string])[] = [
+    ['snap', 'sudo snap install chromium'],
+    ['apt-get', 'sudo apt-get install -y chromium'],
+    ['dnf', 'sudo dnf install -y chromium'],
+    ['pacman', 'sudo pacman -S --noconfirm chromium'],
+    ['zypper', 'sudo zypper install -y chromium'],
+    ['nix', 'nix profile install nixpkgs#chromium'],
+  ];
+  return managers.find(([manager]) => available(manager))?.[1];
 }
 
 export function selectChromeExecutable(
   platform: NodeJS.Platform,
   override: string | undefined,
   exists: (candidate: string) => boolean,
+  search: ChromeSearch = {},
 ): string {
-  const selected = chromeExecutableCandidates(platform, override).find(exists);
+  const selected = chromeExecutableCandidates(platform, override, search).find(exists);
   if (selected) return selected;
+  if (override?.trim()) {
+    throw new BrowserControlError('launch_failed', `FY_CHROME_BIN points at ${override.trim()}, which does not exist.`);
+  }
+  const command = chromeInstallCommand(platform, search.available ?? (() => false));
   throw new BrowserControlError(
     'launch_failed',
-    `Google Chrome was not found for ${platform}; configure FY_CHROME_BIN`,
+    command === undefined
+      ? 'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to its path.'
+      : `Chrome is not installed on this machine: install it with \`${command}\`, or set FY_CHROME_BIN to its path.`,
   );
 }
 
 export interface ChromeLaunchOptions {
   readonly cdp?: boolean;
   readonly initialUrl?: string;
+  /**
+   * Run without a window. Defaults to headless everywhere but Linux, where the browser draws into the
+   * daemon-owned X display so the operator and the screencast see the same pixels; a Linux daemon
+   * with NO display (a server, an SSH-only box) runs it headless instead of failing to start it.
+   */
+  readonly headless?: boolean;
 }
 
 export function chromeLaunchArguments(
@@ -108,9 +168,10 @@ export function chromeLaunchArguments(
   options: ChromeLaunchOptions = {},
 ): readonly string[] {
   const cdp = options.cdp !== false;
+  const headless = options.headless ?? platform !== 'linux';
   const arguments_ = [
     executable,
-    ...(platform === 'linux' ? [] : ['--headless=new']),
+    ...(headless ? ['--headless=new'] : []),
     `--user-data-dir=${profile}`,
     ...(cdp
       ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*']
@@ -124,7 +185,7 @@ export function chromeLaunchArguments(
     ...(platform === 'linux'
       ? [
           '--no-sandbox',
-          '--ozone-platform=x11',
+          ...(headless ? [] : ['--ozone-platform=x11']),
           '--use-gl=angle',
           '--use-angle=swiftshader',
           '--enable-unsafe-swiftshader',

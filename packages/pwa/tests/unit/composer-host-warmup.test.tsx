@@ -29,8 +29,8 @@ import { Profiler, useCallback, useRef, useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import type {
+  ComposerAttentionItem,
   ComposerSkillsCatalog,
-  ComposerTaskSummary,
 } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -56,7 +56,7 @@ const CATALOG: ComposerSkillsCatalog = {
   harness: 'claude',
   skills: [{ name: 'summary', description: 'Give a fast recap' }],
 };
-const TASKS: readonly ComposerTaskSummary[] = [{ id: 'F12', title: 'Ship autocomplete', status: 'in_progress' }];
+const ATTENTION: readonly ComposerAttentionItem[] = [{ id: 'A3', subject: 'Pick a window', source: 'question' }];
 
 const mounted = (element: Parameters<typeof render>[0]): ReactTestRenderer => {
   const renderer = render(element);
@@ -82,10 +82,10 @@ interface MenuFrame {
 
 /** What a reader would see in THIS committed frame: the popover's own text and
  *  how many rows of the family it is offering. */
-const sampleMenu = (view: ReactTestRenderer, family: 'Skills' | 'Tasks'): MenuFrame => {
+const sampleMenu = (view: ReactTestRenderer, family: 'Skills' | 'References'): MenuFrame => {
   const popover = view.root.findAllByProps({ 'data-composer-autocomplete': family })[0];
   return {
-    rows: view.root.findAllByProps({ 'data-kind': family === 'Skills' ? 'skill' : 'task' }).length,
+    rows: view.root.findAllByProps({ 'data-kind': family === 'Skills' ? 'skill' : 'attention' }).length,
     text: popover === undefined ? '' : textOf(popover),
   };
 };
@@ -188,9 +188,9 @@ describe('composer host warm-up handshake', () => {
     expect(requests.filter(url => url.includes('/skills'))).toEqual([]);
   });
 
-  test('never publishes a ready tasks menu that invents an empty family', async () => {
-    let deliver: (tasks: readonly ComposerTaskSummary[]) => void = () => undefined;
-    const read = new Promise<readonly ComposerTaskSummary[]>(resolve => {
+  test('never publishes a ready attention menu that invents an empty family', async () => {
+    let deliver: (items: readonly ComposerAttentionItem[]) => void = () => undefined;
+    const read = new Promise<readonly ComposerAttentionItem[]>(resolve => {
       deliver = resolve;
     });
     const frames: MenuFrame[] = [];
@@ -198,18 +198,18 @@ describe('composer host warm-up handshake', () => {
     holder.view = mounted(
       <CatalogHost
         onCommit={() => {
-          if (holder.view !== undefined) frames.push(sampleMenu(holder.view, 'Tasks'));
+          if (holder.view !== undefined) frames.push(sampleMenu(holder.view, 'References'));
         }}
-        prop={value => (value === undefined ? {} : { autocompleteTasks: value })}
+        prop={value => (value === undefined ? {} : { autocompleteAttention: value })}
         read={read}
       />,
     );
     const view = holder.view;
 
-    type(view, '&F12');
+    type(view, '@@@A3');
     frames.length = 0;
     await runAsync(async () => {
-      deliver(TASKS);
+      deliver(ATTENTION);
       await drain();
     });
 

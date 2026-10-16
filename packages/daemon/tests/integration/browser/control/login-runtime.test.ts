@@ -347,12 +347,19 @@ describe('NodeBrowserLoginRuntime', () => {
       ...base,
       exists: candidate => candidate === '/usr/bin/chromium',
     }).chromeExecutable();
-    const missing = () => new NodeBrowserLoginRuntime({ ...base, exists: () => false }).chromeExecutable();
+    const missing = () =>
+      new NodeBrowserLoginRuntime({
+        ...base,
+        environmentSource: { PATH: '' },
+        exists: () => false,
+      }).chromeExecutable();
 
     // Assert
     should(chosen).equal(override);
     should(discovered).equal('/usr/bin/chromium');
-    should(missing).throw(/Google Chrome was not found/);
+    should(missing).throw(
+      'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to its path.',
+    );
   });
 
   it('should name the missing program rather than spawning whatever answers to its name', async () => {

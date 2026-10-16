@@ -45,6 +45,9 @@ cli_root="${cli_pkg}/$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.js
 daemon_pkg="packages/daemon"
 daemon_name="$(jq -r '.bin | to_entries[0].key' "${daemon_pkg}/package.json")"
 [ -z "${daemon_name}" ] || [ "${daemon_name}" = "null" ] && echo "❌ no .bin entry in ${daemon_pkg}/package.json" >&2 && exit 1
+# EVERY executable the daemon package declares — its own and the helpers that run beside it (the
+# browser worker). Each one must reach every release channel, or the daemon ships without it.
+daemon_bins="$(jq -c '.bin | keys_unsorted' "${daemon_pkg}/package.json")"
 product="$(jq -r '.name' package.json)"
 [ -z "${product}" ] || [ "${product}" = "null" ] && echo "❌ no name in root package.json" >&2 && exit 1
 mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | sort)
@@ -289,15 +292,18 @@ release-artifacts)
     ([.release.extra_files[].glob] | index("scripts/release/install.sh") != null)' >/dev/null
   ;;
 homebrew-cask)
-  # The cask is named after the PRODUCT, installs both shipped executables, lives in THIS repo
-  # (owner repo == project) under Casks/, and strips the quarantine attribute post-install.
-  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --arg daemon "${daemon_name}" --arg product "${product}" '
+  # The cask is named after the PRODUCT, installs every shipped executable, lives in THIS repo
+  # (owner repo == project) under Casks/, and strips the quarantine attribute post-install from
+  # every executable it installs (an unsigned helper left quarantined is refused by Gatekeeper).
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --argjson daemon "${daemon_bins}" --arg product "${product}" '
     (.homebrew_casks | length) > 0 and
     (.homebrew_casks[0].name == $product) and
-    ((.homebrew_casks[0].binaries | sort) == ([$name, $daemon] | sort)) and
+    ((.homebrew_casks[0].binaries | sort) == ([$name] + $daemon | sort)) and
     (.homebrew_casks[0].repository.name == .project_name) and
     (.homebrew_casks[0].directory == "Casks") and
-    ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine"))' >/dev/null
+    ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine")) and
+    ([.homebrew_casks[].hooks.post.install] | join("\n") as $hook |
+      [$name] + $daemon | all(. as $bin | $hook | contains("/" + $bin + "\"")))' >/dev/null
   ;;
 installer-checksum)
   rg -qF 'checksums.txt' scripts/release/install.sh
@@ -335,14 +341,15 @@ installation-parity)
   rg -qF "dnf install ${name}" INSTALLATION.md
   ;;
 release-daemon)
-  # A release archive, package, and cask must carry BOTH independently declared executables.
-  # Check the build IDs transitively so listing a daemon build without distributing it still fails.
-  yq -o=json '.' .goreleaser.yaml | jq -e --arg cli "${name}" --arg daemon "${daemon_name}" '
+  # A release archive, package, and cask must carry EVERY independently declared executable: the CLI,
+  # the daemon, and each helper the daemon package declares beside it (its browser worker). Check the
+  # build IDs transitively so listing a build without distributing it still fails.
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg cli "${name}" --argjson daemon "${daemon_bins}" '
     (.archives[0].ids as $archive_ids |
-      ([.builds[] | select(.id as $id | $archive_ids | index($id)) | .binary] | sort == ([$cli, $daemon] | sort))) and
+      ([.builds[] | select(.id as $id | $archive_ids | index($id)) | .binary] | sort == ([$cli] + $daemon | sort))) and
     (.nfpms[0].ids as $package_ids |
-      ([.builds[] | select(.id as $id | $package_ids | index($id)) | .binary] | sort == ([$cli, $daemon] | sort))) and
-    ((.homebrew_casks[0].binaries | sort) == ([$cli, $daemon] | sort))' >/dev/null
+      ([.builds[] | select(.id as $id | $package_ids | index($id)) | .binary] | sort == ([$cli] + $daemon | sort))) and
+    ((.homebrew_casks[0].binaries | sort) == ([$cli] + $daemon | sort))' >/dev/null
   # The installer intentionally derives install names from verified archive contents. Requiring two
   # executable files stops a CLI-only archive from being reported as a complete normal install.
   rg -qF 'for artifact in "${contents}"/*; do' scripts/release/install.sh
