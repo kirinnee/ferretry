@@ -105,6 +105,7 @@ const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
 const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = {
   'add-device': 'add a device',
   'widen-device': 'give another device more access',
+  'enable-agent-control': 'let agents control that again',
 };
 
 /**

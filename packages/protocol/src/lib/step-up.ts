@@ -222,7 +222,7 @@ export const StepUpDemandSchema = z.strictObject({
    * The ONE act this confirmation is for, when the act is one that adds access to this machine and so
    * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
    */
-  act: z.enum(['add-device', 'widen-device']).optional(),
+  act: z.enum(['add-device', 'widen-device', 'enable-agent-control']).optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
 
@@ -236,6 +236,13 @@ export const STEP_UP_ACTS = {
   addDevice: 'add-device',
   /** Turning on, for another device, something it did not hold. */
   widenDevice: 'widen-device',
+  /**
+   * Turning "what agents may control" back ON (terminals/browsers/files) from a REMOTE device
+   * (owner decision, T). Turning one OFF never needs this — only the ON half of a write does, so a
+   * remote owner who switched one off by accident can always switch it back on again, with a
+   * passkey, without going home.
+   */
+  enableAgentControl: 'enable-agent-control',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

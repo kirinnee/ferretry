@@ -22,7 +22,9 @@ challenge, and a device unused for **30 days** must pair again. Before it may do
 device **unlocks** the machine with a **passkey** — Face ID / Touch ID / a PIN on the phone — that the
 **daemon** verifies; the unlock lasts **8 hours** by default (1–24) across page loads, and inside it
 the device may do everything its grants allow with no further prompt (B1). **Adding access always asks
-again**: minting a pairing code or widening another device needs a passkey proved for that one act.
+again**: minting a pairing code, widening another device, and turning "what agents may control"
+(terminals/browsers/files) back ON from a remote device each need a passkey proved for that one act —
+turning one OFF never does, and the machine itself is never asked (owner decision, T).
 The owner can turn a per-act step-up back on (`stepUpOnActions`). A newly paired device holds every
 capability behind its unlock, or `fleet.use` only when its code was minted `fy pair --limited`; a
 remote device may only narrow a grant or a security setting, and widening is **at the machine**, with
