@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
-import { accessSync, existsSync, constants as fsConstants, statSync, writeSync } from 'node:fs';
+import { accessSync, existsSync, constants as fsConstants, realpathSync, statSync, writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -360,8 +360,10 @@ import {
   type BrowserLoginLifecycle,
   BrowserSessionService,
   type BrowserViewerHost,
+  type BrowserWorkerProgram,
   BrowserViewerStream,
   CALLSIGN_WINDOW_MS,
+  selectBrowserWorker,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -3883,18 +3885,28 @@ function createBrowserLoginWorld(paths: FoundationPaths, closeAgentBrowsers: () 
   };
 }
 
-/** A compiled daemon runs the separately compiled browser worker beside itself; source execution
- * uses Node's WebSocket transport for the TypeScript worker. FY_BROWSER_WORKER_BIN exists for
- * release smoke. */
-function browserWorkerProgram(): { readonly entry: string; readonly executable: boolean } {
-  const source = process.env.FY_BROWSER_WORKER_SOURCE;
-  if (source?.trim()) return { entry: source, executable: false };
-  const forced = process.env.FY_BROWSER_WORKER_BIN;
-  if (forced?.trim()) return { entry: forced, executable: true };
-  const suffix = process.arch === 'arm64' ? 'linux-arm64' : 'linux-x64-baseline';
-  const sibling = join(dirname(process.execPath), `fyd-browser-worker-${suffix}`);
-  if (existsSync(sibling)) return { entry: sibling, executable: true };
-  return { entry: join(import.meta.dir, 'browser-worker.ts'), executable: false };
+/** Where this daemon's browser worker is: beside the daemon in every release channel (under its
+ * installed name or its compile-output name), the TypeScript worker in a source checkout, or —
+ * for a compiled daemon with neither — a plain refusal naming the fix. The executable is looked for
+ * beside the daemon both as invoked and as resolved, because a Homebrew or Nix install reaches it
+ * through a symlink whose directory holds no worker. */
+function browserWorkerProgram(): BrowserWorkerProgram {
+  const invoked = dirname(process.execPath);
+  let resolved = invoked;
+  try {
+    resolved = dirname(realpathSync(process.execPath));
+  } catch {
+    // An executable that cannot be resolved is still searched where it was invoked.
+  }
+  return selectBrowserWorker({
+    sourceOverride: process.env.FY_BROWSER_WORKER_SOURCE,
+    binaryOverride: process.env.FY_BROWSER_WORKER_BIN,
+    executableDirectories: [invoked, resolved],
+    platform: process.platform,
+    arch: process.arch,
+    sourceEntry: join(import.meta.dir, 'browser-worker.ts'),
+    exists: existsSync,
+  });
 }
 
 function createLearningSubsystem(
@@ -6311,14 +6323,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             sessions,
             new NodeSessionBrowserLauncher(
               new BrowserProfileStore(paths.home),
-              browserWorkerProgram().entry,
-              // Bun 1.3's WebSocket client can resolve Chrome's CDP endpoint but times out during
-              // the upgrade. Node's worker-compatible TypeScript loader and WebSocket stack both
-              // work here, including when this daemon is itself a compiled Bun binary.
+              browserWorkerProgram(),
+              // Only the SOURCE worker needs a runtime: it runs through Node, whose WebSocket stack
+              // completes Chrome's CDP upgrade where Bun 1.3's node:http shim does not. The compiled
+              // worker carries its own fix (scripts/release/compile-executable.ts) and runs directly.
               Bun.which('node') ?? process.execPath,
               process.env,
               browserTransport.connectWorker,
-              browserWorkerProgram().executable,
             ),
             () => Date.now(),
           );
