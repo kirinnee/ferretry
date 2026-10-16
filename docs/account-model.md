@@ -7,13 +7,13 @@ where the two disagree, read that one and fix this one.
 
 ## The five things
 
-| Thing          | Is                                                                                                                                                                                            |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`auto` or `skip`) and knows which tools (Claude Code, Codex) are installed.                       |
-| **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`. |
-| **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                |
-| **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins.                                                                                                         |
-| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`). An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last.                    |
+| Thing          | Is                                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`auto` or `skip`) and knows which tools (Claude Code, Codex) are installed.                                 |
+| **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`.           |
+| **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                          |
+| **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins. Its scope — Generic, Claude only or Codex only — is derived from its layers; Claude only + Codex only is refused. |
+| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`). An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last.                              |
 
 A credential's status is one of **Ready**, **Refresh due**, **Needs sign-in** or **Checking**. Ferretry
 never refreshes a login on a timer and never spends a model turn to learn a status. History is one pool
@@ -71,7 +71,7 @@ Settings. The link is `#machines/<name>/<tab>`.
 | `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (logins arrive as empty slots) |
 | `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                       |
 | `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage                                 |
-| `fy profiles` / `fy profile show\|build\|edit\|rm`                                         | profiles                                                       |
+| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                  |
 | `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                     |
 | `fy start --agent <runtime>`                                                               | launch an agent runtime                                        |
 | `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)      |

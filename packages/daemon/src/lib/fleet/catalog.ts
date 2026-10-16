@@ -14,7 +14,10 @@ import {
   applyFixedLayer,
   type ComponentKind,
   type Conflict,
+  COMPONENT_KIND_WORDS,
   componentPartialSupport,
+  componentScope,
+  describeScopeConflict,
   describeConflict,
   describePartialSupport,
   type FixedEntry,
@@ -25,9 +28,13 @@ import {
   HARNESS_DISPLAY_NAMES,
   type HarnessKind,
   type LayerReferenceText,
+  layersScope,
+  layerWords,
   looksSecret,
   parseLayerReference,
   type PartialSupport,
+  type ProfileScope,
+  profileScope,
   type ResolvedProfile,
   resolveProfile,
   type SettingsObject,
@@ -49,6 +56,7 @@ import type {
   FleetMachineView,
   FleetProfileDraftRequest,
   FleetProfileDraftView,
+  FleetProfileScope,
   FleetRuntimeCatalog,
   FleetRuntimeModelSet,
   FleetSettingsEntry,
@@ -376,6 +384,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             kind: group.kind,
             name,
             ...(harness === undefined ? {} : { harness }),
+            scope: componentScope(group.kind, component),
             detail: componentDetail(group.kind, component),
             partial: partial
               .filter(entry => entry.reference === reference)
@@ -486,6 +495,10 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
   };
 }
 
+/** A profile's derived scope as the wire carries it: a mixed one as the sentence naming its layers. */
+const scopeView = (scope: ProfileScope, name: string | undefined): FleetProfileScope =>
+  scope.kind === 'mixed' ? { kind: 'mixed', sentence: describeScopeConflict(scope, name) } : scope;
+
 /** `GET /v1/fleet/profiles`. */
 export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetLayeredProfileCatalog {
   const partial = partialSupportOf(model, facts);
@@ -503,6 +516,7 @@ export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetL
           wouldIncludeItself: Object.keys(model.profiles)
             .filter(other => wouldIncludeItself(model.profiles, name, other))
             .toSorted(byName),
+          scope: scopeView(profileScope(model, name), name),
           harnesses: HARNESSES.map(harness => stackView(resolvedFor(model, name, harness, facts, partial), harness)),
           remove: act(
             usage.direct.length === 0
@@ -649,31 +663,24 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
 
 // ── Layers ───────────────────────────────────────────────────────────────────────────────────────
 
-/** The product's word for each kind, singular, as a sentence uses it. */
-export const KIND_WORDS: Readonly<Record<ComponentKind, string>> = {
-  instructions: 'instructions',
-  mcp: 'MCP server',
-  skills: 'skills',
-  settings: 'settings',
-  hooks: 'hooks',
-  modelSets: 'model set',
-};
+/** The product's word for each kind, singular, as a sentence uses it. The fleet's, so a scope refusal and a layer refusal say a layer the same way. */
+export const KIND_WORDS = COMPONENT_KIND_WORDS;
 
 /** The plain words for a layer in a refusal: "profile base", "instructions main". */
-export const layerWords = (text: string): string => {
-  const reference = parseLayerReference(text);
-  if (reference === undefined) return text;
-  return reference.kind === 'profile'
-    ? `profile ${reference.name}`
-    : `${KIND_WORDS[reference.componentKind]} ${reference.name}`;
-};
+export { layerWords };
 
 /**
  * Why profile `name` cannot have these layers — one that is not a layer, is there twice, does not
- * exist, or would include the profile itself (P3, E19) — or `undefined` when it can. The one reading
- * a save refuses with and a draft preview reports.
+ * exist, would include the profile itself (P3, E19), or would make it both Claude only and Codex only
+ * (P7) — or `undefined` when it can. The one reading a save refuses with and a draft preview reports.
+ * `named` is false for a draft that has no name yet, so its sentence says "A profile".
  */
-export function layersRefusal(model: AccountModel, name: string, layers: readonly string[]): string | undefined {
+export function layersRefusal(
+  model: AccountModel,
+  name: string,
+  layers: readonly string[],
+  named = true,
+): string | undefined {
   const seen = new Set<string>();
   for (const text of layers) {
     const reference = parseLayerReference(text);
@@ -691,7 +698,8 @@ export function layersRefusal(model: AccountModel, name: string, layers: readonl
       return `no ${KIND_WORDS[reference.componentKind]} ${reference.name} exists on this machine`;
     }
   }
-  return undefined;
+  const scope = layersScope(model, layers, name);
+  return scope.kind === 'mixed' ? describeScopeConflict(scope, named ? name : undefined) : undefined;
 }
 
 /** The name a draft that is not an edit stands under: one no profile has. */
@@ -713,9 +721,10 @@ export function profileDraftView(
     profiles: { ...model.profiles, [name]: { layers: [...request.layers] as LayerReferenceText[] } },
   } as AccountModel;
   const partial = partialSupportOf(draft, facts);
-  const refusal = layersRefusal(model, name, request.layers);
+  const refusal = layersRefusal(model, name, request.layers, request.editing !== undefined);
   return {
     harnesses: HARNESSES.map(harness => stackView(resolvedFor(draft, name, harness, facts, partial), harness)),
+    scope: scopeView(layersScope(model, request.layers, name), request.editing),
     ...(refusal === undefined ? {} : { refusal }),
   };
 }

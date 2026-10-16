@@ -1,3 +1,4 @@
+import { HARNESS_SCOPE_WORDS } from '@ferretry/fleet';
 import type { FleetComponentDetail, FleetComponentGroup, FleetComponentView, FleetEnvEntry } from '@ferretry/protocol';
 import { HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 
@@ -33,8 +34,8 @@ function detailLines(detail: FleetComponentDetail): string[] {
   }
 }
 
-const scope = (component: FleetComponentView): string =>
-  component.harness === undefined ? 'both tools' : HARNESS_LABEL[component.harness];
+/** Generic, Claude only or Codex only — the scope a profile using it inherits. */
+const scope = (component: FleetComponentView): string => HARNESS_SCOPE_WORDS[component.scope];
 
 /** One component in full. */
 export function renderComponent(component: FleetComponentView): string {

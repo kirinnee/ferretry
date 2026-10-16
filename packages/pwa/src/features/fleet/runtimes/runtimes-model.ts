@@ -19,7 +19,7 @@ import type {
   FleetMachineView,
   FleetRuntimeView,
 } from '@ferretry/protocol';
-import { HARNESS_NAMES } from '../components/component-model.ts';
+import { HARNESS_NAMES, SCOPE_WORDS } from '../components/component-model.ts';
 import { HARNESS_SHORT, type HarnessKind, otherHarness, plural } from '../credentials/credentials-model.ts';
 
 const NAME_PATTERN = /^[A-Za-z0-9-]+$/u;
@@ -79,8 +79,16 @@ export type ProfileFit =
   | { readonly fits: true; readonly notes: readonly string[] }
   | { readonly fits: false; readonly reason: string };
 
-/** Whether a profile can be used with a login of this harness, and what to say about it (P5, E14). */
+/**
+ * Whether a profile can be used with a login of this harness, and what to say about it (P5, P7, E14).
+ * Its scope decides first: a Generic profile or one for this harness fits; one for the other harness
+ * does not ("Codex only — this login is Claude Code"); a mixed one written before P7 does not either,
+ * and says which layers disagree.
+ */
 export const profileFit = (profile: FleetLayeredProfileView, harness: HarnessKind): ProfileFit => {
+  if (profile.scope.kind === 'mixed') return { fits: false, reason: profile.scope.sentence };
+  if (profile.scope.scope !== 'generic' && profile.scope.scope !== harness)
+    return { fits: false, reason: `${SCOPE_WORDS[profile.scope.scope]} — this login is ${HARNESS_NAMES[harness]}` };
   const stack = profile.harnesses.find(candidate => candidate.harness === harness);
   if (stack === undefined) return { fits: true, notes: [] };
   if (!stack.available.available) return { fits: false, reason: stack.available.reason };
@@ -91,11 +99,22 @@ export const profileFit = (profile: FleetLayeredProfileView, harness: HarnessKin
   return { fits: true, notes };
 };
 
-/** "3 layers · 9 parts" for a profile row. */
+/**
+ * Add runtime's profile choices: every profile with its fit, the ones this login can use first, each
+ * group keeping the catalogue's order — so a Codex-only profile sits below, disabled with its reason.
+ */
+export const profilesFitFirst = (
+  profiles: readonly FleetLayeredProfileView[],
+  harness: HarnessKind,
+): readonly { readonly profile: FleetLayeredProfileView; readonly fit: ProfileFit }[] => {
+  const all = profiles.map(profile => ({ profile, fit: profileFit(profile, harness) }));
+  return [...all.filter(entry => entry.fit.fits), ...all.filter(entry => !entry.fit.fits)];
+};
+
+/** "9 parts" for a profile row; its scope is the badge beside it. */
 export const profileSummary = (profile: FleetLayeredProfileView, harness?: HarnessKind): string => {
   const stack = profile.harnesses.find(candidate => candidate.harness === harness) ?? profile.harnesses[0];
-  const parts = stack === undefined ? '' : ` · ${plural(stack.applied.length + stack.skipped.length, 'part')}`;
-  return `${plural(profile.layers.length, 'layer')}${parts}`;
+  return plural(stack === undefined ? 0 : stack.applied.length + stack.skipped.length, 'part');
 };
 
 /** Whether this runtime's harness is installed here (R5, E29). */

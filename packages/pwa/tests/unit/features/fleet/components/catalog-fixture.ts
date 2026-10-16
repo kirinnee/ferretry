@@ -22,10 +22,12 @@ import type { AccountCatalog } from '../../../../../src/features/fleet/component
 /** A `${secret:NAME}` reference, spelled so it is never mistaken for a template. */
 export const secretRef = (name: string): string => ['$', `{secret:${name}}`].join('');
 
-type ComponentInput = Omit<FleetComponentView, 'partial' | 'warnings' | 'usedBy' | 'editNote' | 'remove'> &
-  Partial<Pick<FleetComponentView, 'partial' | 'warnings' | 'usedBy' | 'editNote' | 'remove'>>;
+type ComponentInput = Omit<FleetComponentView, 'partial' | 'warnings' | 'usedBy' | 'editNote' | 'remove' | 'scope'> &
+  Partial<Pick<FleetComponentView, 'partial' | 'warnings' | 'usedBy' | 'editNote' | 'remove' | 'scope'>>;
 
+/** A component's scope defaults to the harness it names, as the daemon derives it for every kind but a model set. */
 export const component = (input: ComponentInput): FleetComponentView => ({
+  scope: input.harness ?? 'generic',
   partial: [],
   warnings: [],
   usedBy: { profiles: [], runtimes: [] },
@@ -161,6 +163,7 @@ export const profile = (
   usedBy: [],
   baseFor: [],
   wouldIncludeItself: [name],
+  scope: { kind: 'scoped', scope: 'generic' },
   harnesses: [stack('claude', { applied: layers.filter(layer => !layer.startsWith('profile/')) }), stack('codex')],
   remove: { available: true },
   ...overrides,
@@ -190,6 +193,7 @@ export const profileCatalog = (profiles?: readonly FleetLayeredProfileView[]): F
         'Default',
         ['instructions/Main instructions', 'mcp/github', 'settings/Claude settings', 'modelSets/Claude models'],
         {
+          scope: { kind: 'scoped', scope: 'claude' },
           usedBy: ['claude-default'],
           baseFor: ['Agent work', 'Review'],
           wouldIncludeItself: ['Agent work', 'Default', 'Review'],

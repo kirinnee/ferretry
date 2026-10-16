@@ -28,6 +28,7 @@ import {
   AddRow,
   CatalogNote,
   ComponentBadges,
+  Disclosure,
   Hint,
   PickRow,
   Prose,
@@ -42,6 +43,7 @@ import {
   componentBadges,
   componentChange,
   counted,
+  profileScopeBadge,
   draftProblem,
   KIND_MANY,
   KIND_ONE,
@@ -50,7 +52,7 @@ import {
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { currentFlow, returnToParent, type StepperState, saveForReuse, stepForward } from '../shell/stepper-model.ts';
-import { ConflictList, LayerStack } from './layer-stack.tsx';
+import { ConflictList, LayerStack, ProfileSummary } from './layer-stack.tsx';
 import {
   type BuildKind,
   draftFromProfile,
@@ -173,7 +175,9 @@ function BaseStep({ catalog, draft, setDraft, state, onChange, editing }: StepsP
                     <span className="inline-flex items-center gap-1 text-cell text-muted" data-build-loop="">
                       <Lock size={12} aria-hidden="true" /> Would include itself
                     </span>
-                  ) : undefined
+                  ) : (
+                    <ComponentBadges badges={[profileScopeBadge(profile.scope)]} />
+                  )
                 }
                 onChange={on => setDraft(toggleBase(draft, profile.name, on))}
                 data={{ 'data-build-base': profile.name }}
@@ -182,7 +186,11 @@ function BaseStep({ catalog, draft, setDraft, state, onChange, editing }: StepsP
           })}
         </RowList>
       )}
-      {draft.bases.length === 0 ? null : <BaseOrder draft={draft} setDraft={setDraft} />}
+      {draft.bases.length < 2 ? null : (
+        <Disclosure label="Advanced: which base wins" spot="order">
+          <BaseOrder draft={draft} setDraft={setDraft} />
+        </Disclosure>
+      )}
       <NextButton
         label={draft.bases.length > 0 ? 'Next' : 'Next, start from nothing'}
         onNext={() => onChange(stepForward(state))}
@@ -321,9 +329,18 @@ type Preview =
   | { readonly kind: 'ready'; readonly view: FleetProfileDraftView }
   | { readonly kind: 'failed' };
 
-function ReviewStep({ catalog, draft, state, onChange, machineName, connection, createClient, editing }: StepsProps) {
-  const layers = draftLayers(draft);
-  const key = layers.join('\n');
+/**
+ * What the daemon says the draft's layers resolve to — its conflicts and its scope (P7) — asked once
+ * per draft and per Try again. Review layers and Name both read it, so the scope a person saw on
+ * Review is the one Save is held to.
+ */
+function useDraftPreview({
+  draft,
+  editing,
+  connection,
+  createClient,
+}: Pick<StepsProps, 'draft' | 'editing' | 'connection' | 'createClient'>) {
+  const key = draftLayers(draft).join('\n');
   const [preview, setPreview] = useState<Preview>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
   // One read per draft and per Try again: the attempt is part of what is asked for.
@@ -349,6 +366,26 @@ function ReviewStep({ catalog, draft, state, onChange, machineName, connection, 
       live = false;
     };
   }, [ask, editing, connection, createClient]);
+  return { preview, retry: () => setAttempt(attempt + 1) };
+}
+
+/** "This profile will be [Claude only]", or the one sentence that refuses a mixed draft (P7). */
+function DraftScope({ preview }: { preview: Preview }) {
+  if (preview.kind !== 'ready') return null;
+  const { scope, refusal } = preview.view;
+  if (refusal !== undefined) return <CatalogNote tone="warn" spot="refused" role="alert" title={refusal} />;
+  return (
+    <p className="m-0 flex flex-wrap items-center gap-2 text-cell text-fg" data-build-scope="">
+      This profile will be <ComponentBadges badges={[profileScopeBadge(scope)]} />
+    </p>
+  );
+}
+
+function ReviewStep(props: StepsProps) {
+  const { catalog, draft, state, onChange, machineName } = props;
+  const layers = draftLayers(draft);
+  const { preview, retry } = useDraftPreview(props);
+  const components = allComponents(catalog);
 
   if (layers.length === 0)
     return (
@@ -361,27 +398,36 @@ function ReviewStep({ catalog, draft, state, onChange, machineName, connection, 
     );
   return (
     <div className="flex min-w-0 flex-col gap-3" data-build-step="review">
-      <Prose>This is the stack, newest on top. A newer layer wins when two set the same thing.</Prose>
-      <LayerStack
-        layers={layers}
-        components={allComponents(catalog)}
-        profiles={catalog.profiles.profiles}
-        machineName={machineName}
-      />
-      <Section title="Conflicts" spot="conflicts">
-        {preview.kind === 'loading' ? (
-          <Hint>Checking what overrides what…</Hint>
-        ) : preview.kind === 'failed' ? (
-          <ReadFailed
-            reason={`${machineName} did not answer, so the conflicts cannot be shown yet.`}
-            onRetry={() => setAttempt(attempt + 1)}
-          />
-        ) : preview.view.refusal === undefined ? (
-          <ConflictList conflicts={stackConflicts(preview.view.harnesses)} />
-        ) : (
-          <CatalogNote tone="warn" spot="refused" title={preview.view.refusal} />
-        )}
-      </Section>
+      <Prose>This is what the profile gives the agent.</Prose>
+      {preview.kind === 'loading' ? (
+        <Hint>Checking what it gives…</Hint>
+      ) : preview.kind === 'failed' ? (
+        <ReadFailed reason={`${machineName} did not answer, so what it gives cannot be shown yet.`} onRetry={retry} />
+      ) : preview.view.refusal === undefined ? (
+        <ProfileSummary
+          scope={preview.view.scope}
+          stacks={preview.view.harnesses}
+          layers={layers}
+          components={components}
+        />
+      ) : (
+        <CatalogNote tone="warn" spot="refused" role="alert" title={preview.view.refusal} />
+      )}
+      <Disclosure label="Advanced: how these combine" spot="layers">
+        <LayerStack
+          layers={layers}
+          components={components}
+          profiles={catalog.profiles.profiles}
+          machineName={machineName}
+        />
+        <Section title="Conflicts" spot="conflicts">
+          {preview.kind === 'ready' && preview.view.refusal === undefined ? (
+            <ConflictList conflicts={stackConflicts(preview.view.harnesses)} />
+          ) : (
+            <Hint>Shown once the profile can be saved.</Hint>
+          )}
+        </Section>
+      </Disclosure>
       <NextButton
         label="Next"
         disabled={preview.kind === 'ready' && preview.view.refusal !== undefined}
@@ -395,6 +441,8 @@ function NameStep(props: StepsProps) {
   const { catalog, draft, setDraft, state, machineName, connection, createClient, editing } = props;
   const id = useId();
   const changes = useAccountChanges({ connection, createClient });
+  const { preview } = useDraftPreview(props);
+  const refused = preview.kind === 'ready' && preview.view.refusal !== undefined;
   const problem = editing === undefined ? profileNameProblem(draft.name, catalog.profiles.profiles) : undefined;
   const save = () =>
     void changes.apply(profileChange(draft, editing)).then(result => {
@@ -427,6 +475,7 @@ function NameStep(props: StepsProps) {
           Saving the new layers of <span className="font-semibold">{editing}</span>.
         </Prose>
       )}
+      <DraftScope preview={preview} />
       <Hint>
         {counted(draftLayers(draft).length, 'layer')}.
         {props.openedFromAddRuntime ? ' You go back to choosing a profile, with this one picked.' : ''}
@@ -438,7 +487,7 @@ function NameStep(props: StepsProps) {
         refusal={changes.refusal}
         submitLabel={editing === undefined ? 'Save profile' : 'Save changes'}
         busyLabel="Saving…"
-        disabled={problem !== undefined}
+        disabled={problem !== undefined || refused}
         onSubmit={save}
       />
     </div>

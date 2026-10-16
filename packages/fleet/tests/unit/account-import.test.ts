@@ -14,6 +14,7 @@ import {
   planImport,
   scannedMcpServers,
 } from '../../src/lib/account/import.ts';
+import { profileScope } from '../../src/lib/account/scope.ts';
 import { FLEET_STARTER_MODELS } from '../../src/lib/defaults.ts';
 
 /** Placeholder secret values: shaped like real ones so detection fires, worthless as credentials. */
@@ -241,27 +242,44 @@ describe('planImport — a machine with both harnesses set up', () => {
     should(component(plan, 'modelSets', 'codex-models')).deepEqual({ models: ['gpt-5.6'], default: 'gpt-5.6' });
   });
 
-  it('should build a Default profile in the design order and agent runtimes on it (O2)', () => {
-    should(plan.profiles.default?.layers).deepEqual([
-      'instructions/main',
-      'mcp/github',
-      'mcp/notes',
-      'mcp/docs',
-      'mcp/linear',
-      'skills/skills',
-      'skills/claude-skills',
-      'skills/codex-skills',
-      'settings/claude-settings',
-      'settings/codex-settings',
-      'hooks/claude-hooks',
-      'hooks/codex-hooks',
-      'modelSets/claude-models',
-      'modelSets/codex-models',
-    ]);
-    should(plan.runtimes).deepEqual({
-      'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
-      'codex-default': { credential: 'codex-you', profile: 'default', agent: true },
+  it('should build one profile per harness in the design order, never one mixing both (P7, O2)', () => {
+    should(plan.profiles).deepEqual({
+      'claude-default': {
+        layers: [
+          'instructions/main',
+          'mcp/github',
+          'mcp/notes',
+          'mcp/docs',
+          'skills/skills',
+          'skills/claude-skills',
+          'settings/claude-settings',
+          'hooks/claude-hooks',
+          'modelSets/claude-models',
+        ],
+      },
+      'codex-default': {
+        layers: [
+          'instructions/main',
+          'mcp/github',
+          'mcp/linear',
+          'skills/skills',
+          'skills/codex-skills',
+          'settings/codex-settings',
+          'hooks/codex-hooks',
+          'modelSets/codex-models',
+        ],
+      },
     });
+    should(plan.runtimes).deepEqual({
+      'claude-default': { credential: 'claude-you', profile: 'claude-default', agent: true },
+      'codex-default': { credential: 'codex-you', profile: 'codex-default', agent: true },
+    });
+  });
+
+  it('should leave every profile it makes Claude only or Codex only', () => {
+    const model = mergeImport(undefined, plan);
+    should(profileScope(model, 'claude-default')).deepEqual({ kind: 'scoped', scope: 'claude' });
+    should(profileScope(model, 'codex-default')).deepEqual({ kind: 'scoped', scope: 'codex' });
   });
 
   it('should merge into a document the schema accepts', () => {
@@ -271,7 +289,8 @@ describe('planImport — a machine with both harnesses set up', () => {
   });
 
   it('should record what it made so Import again can tell what changed', () => {
-    should(plan.record.profile).equal('default');
+    should(plan.record.profile).be.undefined();
+    should(plan.record.profiles).deepEqual({ claude: 'claude-default', codex: 'codex-default' });
     should(plan.record.components['instructions/main']?.sources).deepEqual([
       '/h/.claude/CLAUDE.md',
       '/h/.codex/AGENTS.md',
@@ -408,7 +427,10 @@ describe('planImport — nothing found (E5)', () => {
     const plan = planImport([claude(), codex()], { digest });
 
     // Assert
-    should(plan.profiles).deepEqual({ starter: { layers: ['modelSets/claude-models', 'modelSets/codex-models'] } });
+    should(plan.profiles).deepEqual({
+      'claude-starter': { layers: ['modelSets/claude-models'] },
+      'codex-starter': { layers: ['modelSets/codex-models'] },
+    });
     should(component(plan, 'modelSets', 'claude-models')).deepEqual({
       models: [FLEET_STARTER_MODELS.claude],
       default: FLEET_STARTER_MODELS.claude,
@@ -421,7 +443,7 @@ describe('planImport — nothing found (E5)', () => {
 
   it('should treat an empty instructions file or settings document as nothing', () => {
     const plan = planImport([claude({ instructions: text('/c', '  \n'), settings: text('/s', '   ') })], { digest });
-    should(Object.keys(plan.profiles)).deepEqual(['starter']);
+    should(Object.keys(plan.profiles)).deepEqual(['claude-starter']);
   });
 });
 
@@ -568,7 +590,7 @@ describe('planImport — Import again (O6)', () => {
   it('should add a duplicate runtime when asked to anyway', () => {
     const again = planImport(fullScans(), { digest, existing, record: first.record, addDuplicates: ['claude'] });
     should(again.runtimes).deepEqual({
-      'claude-default-2': { credential: 'claude-you', profile: 'default', agent: true },
+      'claude-default-2': { credential: 'claude-you', profile: 'claude-default', agent: true },
     });
   });
 
@@ -655,7 +677,7 @@ describe('planImport — Import again (O6)', () => {
       harness: 'claude',
       file: 'components/settings/claude-settings-2.json',
     });
-    should(Object.keys(plan.profiles)).deepEqual(['default-3']);
+    should(Object.keys(plan.profiles)).deepEqual(['claude-default-3']);
     should(plan.credentials).deepEqual({});
     should(Object.keys(plan.runtimes)).deepEqual(['claude-default-3']);
   });
@@ -691,7 +713,7 @@ describe('planImport — Import again (O6)', () => {
 
     // Assert
     should(again.profiles).deepEqual({
-      default: { layers: ['instructions/main', 'modelSets/claude-models', 'skills/skills'] },
+      'claude-default': { layers: ['instructions/main', 'modelSets/claude-models', 'skills/skills'] },
     });
   });
 });
@@ -793,5 +815,81 @@ describe('secret names', () => {
       ['S__TOKEN', 'settings.json · env._TOKEN'],
       ['S__TOKEN_2', 'claude MCP server a · a.env._TOKEN'],
     ]);
+  });
+});
+
+describe('planImport — one profile per harness (P7)', () => {
+  it('should make a profile for a harness imported for the first time from what an earlier import made', () => {
+    // Arrange — Claude alone first, so its instructions are generic and its profile is Claude only.
+    const first = planImport([claude({ instructions: text('/c', 'shared words') })], { digest });
+    const existing = mergeImport(undefined, first);
+
+    // Act
+    const again = planImport([claude({ instructions: text('/c', 'shared words') }), codex()], {
+      digest,
+      existing,
+      record: first.record,
+      include: ['codex'],
+    });
+
+    // Assert — Codex gets the generic instructions the first import made, and its own model set.
+    should(again.profiles).deepEqual({
+      'codex-default': { layers: ['instructions/main', 'modelSets/codex-models'] },
+    });
+    should(again.runtimes).deepEqual({
+      'codex-default': { credential: 'codex-you', profile: 'codex-default', agent: true },
+    });
+    should(again.record.profiles).deepEqual({ claude: 'claude-default', codex: 'codex-default' });
+  });
+
+  it('should make a Starter for a harness with nothing found, beside a model set the person made', () => {
+    // Arrange — a Starter for Claude, whose model set is all a record holds.
+    const first = planImport([claude()], { digest });
+    const existing = mergeImport(undefined, first);
+
+    // Act — Codex arrives with nothing found, and the person already has a set under the name it wants.
+    const own = {
+      ...existing,
+      components: {
+        ...existing.components,
+        modelSets: { ...existing.components.modelSets, 'codex-models': { models: ['gpt-6'], default: 'gpt-6' } },
+      },
+    };
+    const again = planImport([claude(), codex()], { digest, existing: own, record: first.record, include: ['codex'] });
+
+    // Assert
+    should(again.profiles).deepEqual({ 'codex-starter': { layers: ['modelSets/codex-models-2'] } });
+  });
+
+  it('should still extend the ONE shared profile a record written before P7 names', () => {
+    // Arrange — the old shape: one Default holding both harnesses' parts, recorded as `profile`.
+    const first = planImport(fullScans(), { digest });
+    const shared = mergeImport(undefined, first);
+    const legacyLayers = [
+      ...(shared.profiles['claude-default']?.layers ?? []),
+      ...(shared.profiles['codex-default']?.layers ?? []),
+    ].filter((layer, index, all) => all.indexOf(layer) === index && layer !== 'mcp/linear');
+    const { linear: _linear, ...mcp } = shared.components.mcp;
+    const { 'mcp/linear': _recorded, ...components } = first.record.components;
+    const existing = {
+      ...shared,
+      components: { ...shared.components, mcp },
+      profiles: { default: { layers: legacyLayers } },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
+        'codex-default': { credential: 'codex-you', profile: 'default', agent: true },
+      },
+    };
+    const record = { version: 1 as const, components, profile: 'default' };
+
+    // Act — Codex's "linear" server is new since that import.
+    const again = planImport(fullScans(), { digest, existing, record });
+
+    // Assert — the legacy profile takes what is new; no per-harness profile appears beside it.
+    should(again.profiles.default?.layers.at(-1)).equal('mcp/linear');
+    should(Object.keys(again.profiles)).deepEqual(['default']);
+    should(again.record.profile).equal('default');
+    should(again.record.profiles).deepEqual({ claude: 'default', codex: 'default' });
+    should(again.duplicates.map(duplicate => duplicate.existing)).deepEqual(['claude-default', 'codex-default']);
   });
 });

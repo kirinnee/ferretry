@@ -12,6 +12,7 @@ export * from './account/import.ts';
 export * from './account/layering.ts';
 export * from './account/materialise.ts';
 export * from './account/schema.ts';
+export * from './account/scope.ts';
 export * from './assets.ts';
 export * from './config.ts';
 export * from './defaults.ts';

@@ -4,8 +4,8 @@
  * and `compBadges`). One set, so the two tabs read as one surface.
  */
 
-import { ChevronRight, Lock, TriangleAlert } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronDown, ChevronRight, Lock, TriangleAlert } from 'lucide-react';
+import { type ReactNode, useId, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import { Badge } from '../../../shell/primitives.tsx';
 import type { ComponentBadge } from './component-model.ts';
@@ -288,5 +288,35 @@ export function LinkRow({
         <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
       </a>
     </li>
+  );
+}
+
+/**
+ * What a page keeps out of the way until it is asked for — "Advanced: how these combine". A real
+ * button that says whether it is open, and the part it opens is only rendered while it is.
+ */
+export function Disclosure({ label, spot, children }: { label: string; spot: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <div className="flex min-w-0 flex-col gap-3" data-disclosure={spot}>
+      <button
+        type="button"
+        className="kt-btn kt-btn--flush-start self-start"
+        data-variant="ghost"
+        aria-expanded={open}
+        aria-controls={id}
+        data-disclosure-toggle={spot}
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
+        {label}
+      </button>
+      {open ? (
+        <div id={id} className="flex min-w-0 flex-col gap-4" data-disclosure-body={spot}>
+          {children}
+        </div>
+      ) : null}
+    </div>
   );
 }

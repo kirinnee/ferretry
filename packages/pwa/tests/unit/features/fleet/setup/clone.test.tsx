@@ -47,6 +47,7 @@ const PROFILE = {
   usedBy: [],
   baseFor: [],
   wouldIncludeItself: [],
+  scope: { kind: 'scoped', scope: 'generic' },
   harnesses: [],
   remove: { available: true },
 };

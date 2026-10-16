@@ -58,10 +58,11 @@ const COMPONENTS = {
           reference: 'instructions/Main instructions',
           kind: 'instructions',
           name: 'Main instructions',
+          scope: 'generic',
           detail: { kind: 'instructions', file: 'components/instructions/Main instructions.md' },
           content: {
             form: 'text',
-            text: '# How we work\n- Keep pull requests small and focused.\n- Run the tests before you push.\n- Ask before deleting anything you did not create.',
+            text: '# How we work\n- Keep pull requests small and focused.\n- Run the tests before you push.\n- Ask before deleting anything you did not create.\n\n## Checks\n\nRun these before a pull request:\n\n```sh\nbun test\nbun run lint\n```',
             redacted: false,
           },
           usedBy: USED_WIDELY,
@@ -78,6 +79,7 @@ const COMPONENTS = {
           reference: 'mcp/github',
           kind: 'mcp',
           name: 'github',
+          scope: 'generic',
           detail: {
             kind: 'mcp',
             command: 'npx',
@@ -90,6 +92,7 @@ const COMPONENTS = {
           reference: 'mcp/notes',
           kind: 'mcp',
           name: 'notes',
+          scope: 'generic',
           detail: {
             kind: 'mcp',
             command: 'uvx',
@@ -114,6 +117,7 @@ const COMPONENTS = {
           reference: 'skills/My skills',
           kind: 'skills',
           name: 'My skills',
+          scope: 'generic',
           detail: { kind: 'skills', items: ['release-notes', 'pr-review', 'changelog', 'db-migrate'] },
           partial: [
             {
@@ -134,6 +138,7 @@ const COMPONENTS = {
           kind: 'settings',
           name: 'Claude settings',
           harness: 'claude',
+          scope: 'claude',
           detail: { kind: 'settings', file: 'components/settings/Claude settings.json', env: [] },
           content: {
             form: 'entries',
@@ -149,8 +154,19 @@ const COMPONENTS = {
           kind: 'settings',
           name: 'Agent settings',
           harness: 'claude',
+          scope: 'claude',
           detail: { kind: 'settings', file: 'components/settings/Agent settings.json', env: [] },
           content: { form: 'entries', entries: [{ key: 'permissions.defaultMode', value: 'acceptEdits' }] },
+        }),
+        component({
+          reference: 'settings/Codex settings',
+          kind: 'settings',
+          name: 'Codex settings',
+          harness: 'codex',
+          scope: 'codex',
+          detail: { kind: 'settings', file: 'components/settings/Codex settings.toml', env: [] },
+          content: { form: 'entries', entries: [{ key: 'approval_policy', value: 'on-request' }] },
+          usedBy: { profiles: ['Codex', 'Old mix'], runtimes: ['codex-default'] },
         }),
       ],
     },
@@ -169,7 +185,15 @@ const COMPONENTS = {
           reference: 'modelSets/Claude models',
           kind: 'modelSets',
           name: 'Claude models',
+          scope: 'claude',
           detail: { kind: 'modelSets', models: ['claude-opus-5', 'claude-sonnet-5'], default: 'claude-sonnet-5' },
+        }),
+        component({
+          reference: 'modelSets/Codex models',
+          kind: 'modelSets',
+          name: 'Codex models',
+          scope: 'codex',
+          detail: { kind: 'modelSets', models: ['gpt-6'], default: 'gpt-6' },
         }),
       ],
     },
@@ -185,6 +209,27 @@ const DEFAULT_LAYERS = [
   'modelSets/Claude models',
 ];
 
+/** The generic parts both tools share, as a base the Codex profile builds on. */
+const SHARED_LAYERS = ['instructions/Main instructions', 'mcp/github', 'skills/My skills'];
+
+const MIXED_SENTENCE =
+  "Profile Old mix can't be both Claude only and Codex only: settings Claude settings is Claude only and settings Codex settings is Codex only.";
+
+/** Each layer's scope as the daemon derives it, so a draft reads Generic, one tool's, or mixed. */
+const LAYER_SCOPES: Readonly<Record<string, 'claude' | 'codex' | 'mixed'>> = {
+  'settings/Claude settings': 'claude',
+  'settings/Agent settings': 'claude',
+  'modelSets/Claude models': 'claude',
+  'settings/Codex settings': 'codex',
+  'modelSets/Codex models': 'codex',
+  'profile/Agent': 'claude',
+  'profile/Agent work': 'claude',
+  'profile/Default': 'claude',
+  'profile/Review': 'claude',
+  'profile/Codex': 'codex',
+  'profile/Old mix': 'mixed',
+};
+
 const PROFILES = {
   format: 'version-2',
   profiles: [
@@ -194,6 +239,7 @@ const PROFILES = {
       usedBy: [],
       baseFor: ['Agent work'],
       wouldIncludeItself: ['Agent', 'Agent work'],
+      scope: { kind: 'scoped', scope: 'claude' },
       harnesses: [stack('claude', { applied: ['settings/Agent settings'] }), stack('codex')],
       remove: { available: false, reason: 'It is a base for Agent work. Remove it from that profile first.' },
     },
@@ -203,6 +249,7 @@ const PROFILES = {
       usedBy: ['claude-agent'],
       baseFor: [],
       wouldIncludeItself: ['Agent work'],
+      scope: { kind: 'scoped', scope: 'claude' },
       harnesses: [
         stack('claude', { applied: [...DEFAULT_LAYERS, 'settings/Agent settings'], conflicts: [CONFLICT] }),
         stack('codex'),
@@ -212,9 +259,10 @@ const PROFILES = {
     {
       name: 'Default',
       layers: DEFAULT_LAYERS,
-      usedBy: ['claude-default', 'claude-work', 'codex-default'],
+      usedBy: ['claude-default', 'claude-work'],
       baseFor: ['Agent work', 'Review'],
       wouldIncludeItself: ['Agent work', 'Default', 'Review'],
+      scope: { kind: 'scoped', scope: 'claude' },
       harnesses: [
         stack('claude', { applied: DEFAULT_LAYERS }),
         stack('codex', {
@@ -238,7 +286,45 @@ const PROFILES = {
       usedBy: ['claude-review'],
       baseFor: [],
       wouldIncludeItself: ['Review'],
+      scope: { kind: 'scoped', scope: 'claude' },
       harnesses: [stack('claude', { applied: DEFAULT_LAYERS }), stack('codex')],
+      remove: { available: true },
+    },
+    {
+      name: 'Shared',
+      layers: SHARED_LAYERS,
+      usedBy: [],
+      baseFor: ['Codex'],
+      wouldIncludeItself: ['Codex', 'Shared'],
+      scope: { kind: 'scoped', scope: 'generic' },
+      harnesses: [stack('claude', { applied: SHARED_LAYERS }), stack('codex', { applied: SHARED_LAYERS })],
+      remove: { available: false, reason: 'It is a base for Codex. Remove it from that profile first.' },
+    },
+    {
+      name: 'Codex',
+      layers: ['profile/Shared', 'settings/Codex settings', 'modelSets/Codex models'],
+      usedBy: ['codex-default'],
+      baseFor: [],
+      wouldIncludeItself: ['Codex'],
+      scope: { kind: 'scoped', scope: 'codex' },
+      harnesses: [
+        stack('claude', { applied: SHARED_LAYERS }),
+        stack('codex', { applied: [...SHARED_LAYERS, 'settings/Codex settings', 'modelSets/Codex models'] }),
+      ],
+      remove: { available: true },
+    },
+    {
+      // Written before profiles had a scope: still readable, and the badge says what to fix.
+      name: 'Old mix',
+      layers: ['settings/Claude settings', 'settings/Codex settings'],
+      usedBy: [],
+      baseFor: [],
+      wouldIncludeItself: ['Old mix'],
+      scope: { kind: 'mixed', sentence: MIXED_SENTENCE },
+      harnesses: [
+        stack('claude', { applied: ['settings/Claude settings'] }),
+        stack('codex', { applied: ['settings/Codex settings'] }),
+      ],
       remove: { available: true },
     },
   ],
@@ -265,7 +351,7 @@ const RUNTIMES = {
     runtime('claude-default', 'claude', 'Default', 'claude-personal'),
     runtime('claude-review', 'claude', 'Review', 'claude-personal'),
     runtime('claude-work', 'claude', 'Default', 'claude-work'),
-    runtime('codex-default', 'codex', 'Default', 'codex'),
+    runtime('codex-default', 'codex', 'Codex', 'codex'),
   ],
 };
 
@@ -306,7 +392,16 @@ const APPLIED = {
 const draftView = (init: RequestInit | undefined) => {
   const layers = (JSON.parse(String(init?.body ?? '{}')) as { layers?: string[] }).layers ?? [];
   const conflicts = layers.includes('profile/Default') && layers.includes('profile/Agent') ? [CONFLICT] : [];
-  return { harnesses: [stack('claude', { applied: layers, conflicts }), stack('codex')] };
+  const harnesses = [stack('claude', { applied: layers, conflicts }), stack('codex')];
+  const claude = layers.find(layer => LAYER_SCOPES[layer] === 'claude' || LAYER_SCOPES[layer] === 'mixed');
+  const codex = layers.find(layer => LAYER_SCOPES[layer] === 'codex' || LAYER_SCOPES[layer] === 'mixed');
+  if (claude !== undefined && codex !== undefined) {
+    const words = (layer: string) => layer.replace('/', ' ').replace('modelSets', 'model set');
+    const sentence = `A profile can't be both Claude only and Codex only: ${words(claude)} is Claude only and ${words(codex)} is Codex only.`;
+    return { harnesses, scope: { kind: 'mixed', sentence }, refusal: sentence };
+  }
+  const scope = claude !== undefined ? 'claude' : codex !== undefined ? 'codex' : 'generic';
+  return { harnesses, scope: { kind: 'scoped', scope } };
 };
 
 /** The catalogue's answer for `path`, or `undefined` when it is not a catalogue path. */

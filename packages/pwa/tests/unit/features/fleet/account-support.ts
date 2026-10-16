@@ -141,6 +141,7 @@ export const profile = (overrides: Partial<FleetLayeredProfileView> & { name: st
   usedBy: [],
   baseFor: [],
   wouldIncludeItself: [],
+  scope: { kind: 'scoped', scope: 'generic' },
   harnesses: [stack('claude'), stack('codex')],
   remove: { available: true },
   ...overrides,
@@ -198,6 +199,7 @@ const component = (
   usedBy: { profiles: [], runtimes: [] },
   editNote: 'Saving changes it everywhere.',
   remove: { available: true },
+  scope: overrides.harness ?? 'generic',
   ...overrides,
 });
 

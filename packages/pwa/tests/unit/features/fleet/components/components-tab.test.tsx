@@ -5,7 +5,7 @@ import { ComponentsSurface, ComponentsTab } from '../../../../../src/features/fl
 import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
-import { type Mounted, mount } from '../../../../support/dom.ts';
+import { type Mounted, mount, must } from '../../../../support/dom.ts';
 import {
   claudeSettings,
   component,
@@ -149,6 +149,53 @@ describe('ComponentsTab — a component’s page', () => {
     await click(root, '[data-catalog-back]');
     await toDetail(root, 'hooks', 'hooks/Format on save');
     expect(root.textContent).toContain('{"PostToolUse": []}');
+  });
+
+  it('reads instructions as Markdown — headings, lists, code — with no raw HTML, and View source shows the text', async () => {
+    const markdown = [
+      '# How we work',
+      '',
+      '- Small PRs.',
+      '- Run the tests.',
+      '',
+      '```sh',
+      'bun test',
+      '```',
+      '',
+      '<img src=x onerror="alert(1)"><script>alert(2)</script>',
+    ].join('\n');
+    const catalog = studioCatalog({
+      components: componentCatalog({
+        instructions: [
+          component({
+            ...instructions,
+            reference: 'instructions/Rich',
+            name: 'Rich',
+            content: { form: 'text', text: markdown, redacted: false },
+          }),
+        ],
+      }),
+    });
+    const root = await open(scriptedMachine({ catalog }));
+    await toDetail(root, 'instructions', 'instructions/Rich');
+    const rendered = must(root.querySelector('[data-component-rendered]'), 'rendered markdown');
+    expect(rendered.querySelector('h1')?.textContent).toBe('How we work');
+    expect([...rendered.querySelectorAll('li')].map(item => item.textContent)).toEqual([
+      'Small PRs.',
+      'Run the tests.',
+    ]);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('bun test');
+    expect(rendered.querySelector('img')).toBeNull();
+    expect(rendered.querySelector('script')).toBeNull();
+    expect(root.querySelector('[data-component-source]')).toBeNull();
+    expect(text(root, '[data-component-view-source]')).toBe('View source');
+
+    await click(root, '[data-component-view-source]');
+    expect(root.querySelector('[data-component-rendered]')).toBeNull();
+    expect(must(root.querySelector('[data-component-source]'), 'source').textContent).toBe(markdown);
+    expect(text(root, '[data-component-view-source]')).toBe('View formatted');
+    await click(root, '[data-component-view-source]');
+    expect(root.querySelector('[data-component-rendered] h1')).not.toBeNull();
   });
 
   it('says what it cannot show: an empty settings file, a hooks folder, unreadable text', async () => {

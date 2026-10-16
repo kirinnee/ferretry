@@ -66,6 +66,7 @@ const DRAFT: FleetProfileDraftView = {
       partial: [],
     },
   ],
+  scope: { kind: 'scoped', scope: 'generic' },
   refusal: 'no profile ghost exists on this machine',
 };
 

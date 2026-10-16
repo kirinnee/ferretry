@@ -198,11 +198,47 @@ describe('deriveAccountChange: runtime.put', () => {
     should(refusalOf(runtimePut({ profile: 'nothing' }))).equal('no profile nothing exists on this machine');
   });
 
-  it('should refuse a profile with nothing for the login’s harness (P5, E14)', () => {
+  it('should refuse a profile that is only for the other harness (P7)', () => {
     // Act + Assert
     should(refusalOf(runtimePut({ profile: 'only-codex' }))).equal(
-      'Nothing in profile only-codex applies on Claude Code. Pick a different profile.',
+      'Profile only-codex is Codex only and spare is a Claude Code login. Pick a Generic or Claude only profile.',
     );
+  });
+
+  it('should refuse a generic profile with nothing for the login’s harness (P5, E14)', () => {
+    // Arrange — a model set of ids neither harness runs is generic, and applies nowhere.
+    const model = modelOf({
+      components: {
+        ...modelOf().components,
+        modelSets: { odd: { models: ['llama-9'], default: 'llama-9' } },
+      },
+      profiles: { ...modelOf().profiles, odd: { layers: ['modelSets/odd'] } },
+    });
+
+    // Act + Assert
+    should(refusalOf(runtimePut({ profile: 'odd' }), model)).equal(
+      'Nothing in profile odd applies on Claude Code. Pick a different profile.',
+    );
+  });
+
+  it('should refuse moving a runtime onto a profile mixed before P7, and keep one already on it', () => {
+    // Arrange
+    const model = modelOf({
+      profiles: { ...modelOf().profiles, legacy: { layers: ['settings/tuned', 'instructions/codex-only'] } },
+      runtimes: { ...modelOf().runtimes, old: { credential: 'spare', profile: 'legacy', agent: false } },
+    });
+
+    // Act + Assert
+    should(refusalOf(runtimePut({ profile: 'legacy' }), model)).equal(
+      "Profile legacy can't be both Claude only and Codex only: settings tuned is Claude only and instructions codex-only is Codex only.",
+    );
+    should(
+      derive(runtimePut({ name: 'old', profile: 'legacy', agent: true, create: false }), model).model.runtimes.old,
+    ).deepEqual({
+      credential: 'spare',
+      profile: 'legacy',
+      agent: true,
+    });
   });
 
   it('should accept a profile whose layers the harness can read', () => {
@@ -333,6 +369,23 @@ describe('deriveAccountChange: profile.put', () => {
     should(edit.summary).equal('Change the layers of profile only-codex');
     should(edit.model.profiles['only-codex']).deepEqual({ layers: ['instructions/main'] });
     should(edit.consequences).deepEqual([]);
+  });
+
+  it('should refuse a profile that is both Claude only and Codex only, naming both layers (P7)', () => {
+    // Act + Assert
+    should(refusalOf(profilePut({ layers: ['instructions/main', 'hooks/guard', 'instructions/codex-only'] }))).equal(
+      "Profile fresh can't be both Claude only and Codex only: hooks guard is Claude only and instructions codex-only is Codex only.",
+    );
+    should(refusalOf(profilePut({ layers: ['profile/team', 'profile/only-codex'] }))).equal(
+      "Profile fresh can't be both Claude only and Codex only: profile team is Claude only and profile only-codex is Codex only.",
+    );
+  });
+
+  it('should refuse a base edit that would make a profile built on it mixed (P7)', () => {
+    // Act + Assert — team is Claude only through settings tuned; base becoming Codex only mixes it.
+    should(refusalOf(profilePut({ name: 'base', layers: ['instructions/codex-only'], create: false }))).equal(
+      "Profile team can't be both Claude only and Codex only: settings tuned is Claude only and profile base is Codex only.",
+    );
   });
 
   it('should say where an edit of a used profile lands (E20)', () => {
@@ -509,6 +562,30 @@ describe('deriveAccountChange: profile.remove', () => {
 });
 
 describe('deriveAccountChange: component.put', () => {
+  it('should refuse narrowing a component when that leaves a runtime on a profile for the other harness (P7)', () => {
+    // Arrange — gamma, a Claude login, runs profile other, whose only layer is skills review.
+    const model = modelOf({
+      runtimes: { ...modelOf().runtimes, gamma: { credential: 'spare', profile: 'other', agent: false } },
+    });
+
+    // Act + Assert
+    should(
+      refusalOf(
+        componentPut({ kind: 'skills', items: ['review'], harness: 'codex' }, { name: 'review', create: false }),
+        model,
+      ),
+    ).equal(
+      'Runtime gamma uses a Claude Code login, and this change would make its profile other Codex only. Move it to another profile first.',
+    );
+  });
+
+  it('should refuse narrowing a component when that makes a profile mixed (P7)', () => {
+    // Act + Assert — team is Claude only; the instructions in its base becoming Codex only mixes it.
+    should(refusalOf(componentPut({ kind: 'instructions', harness: 'codex' }, { name: 'main', create: false }))).equal(
+      "Profile team can't be both Claude only and Codex only: settings tuned is Claude only and profile base is Codex only.",
+    );
+  });
+
   it('should add instructions and write the markdown file the daemon names', () => {
     // Act
     const edit = derive(componentPut({ kind: 'instructions' }, { content: '# Rules' }));
