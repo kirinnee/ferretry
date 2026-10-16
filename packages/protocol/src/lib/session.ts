@@ -168,6 +168,25 @@ export const RuntimeControlRequestSchema = z.discriminatedUnion('action', [
 ]);
 export type RuntimeControlRequest = z.infer<typeof RuntimeControlRequestSchema>;
 
+/**
+ * WHOSE TURN IT IS in a live session — the one fact the spinner, the status dots and the
+ * notifications all read.
+ *
+ * `status` cannot answer it: `running` means the agent's terminal is live, and nothing moved it off
+ * `running` when a turn ended. The daemon's turn watcher owns this field and derives it from the
+ * harness's own evidence — its transcript's turn boundaries and the live pane (its spinner line, an
+ * idle prompt, a permission prompt) — never from "a message was sent".
+ *
+ *   * `working` — the agent is mid-turn.
+ *   * `your-turn` — the agent is idle at its prompt, waiting for the next message.
+ *   * `needs-input` — the agent is blocked on a person: a permission prompt or a question.
+ *
+ * Absent for a session that is not live (not launched yet, or finished), and from a daemon that
+ * predates the watcher.
+ */
+export const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
+export type SessionTurnState = z.infer<typeof SessionTurnStateSchema>;
+
 export const SessionStatusSchema = z.enum([
   'created',
   'starting',
@@ -460,6 +479,10 @@ export const SessionStateSchema = z.object({
   quota: QuotaSchema.optional(),
   retryAttempt: NonNegativeIntegerSchema.optional(),
   turnCompleted: z.boolean().optional(),
+  /** Whose turn it is; see {@link SessionTurnStateSchema}. */
+  turnState: SessionTurnStateSchema.optional(),
+  /** When `turnState` last CHANGED — a new value here is a new turn boundary, once. */
+  turnStateAt: InstantSchema.optional(),
   waiting: DeclaredWaitSchema.optional(),
   waitingCreditSeconds: NonNegativeFiniteSchema.optional(),
 });

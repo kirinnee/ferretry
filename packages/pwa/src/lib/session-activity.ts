@@ -44,3 +44,21 @@ export const sessionAtPrompt = (view: SessionView, pane: PaneReading): boolean =
   if (state.promptReady === false) return false;
   return state.promptReady === true || state.turn === 0;
 };
+
+/** Whose turn it is in a live session, as every surface renders it. */
+export type SessionTurn = 'working' | 'your-turn' | 'needs-input';
+
+/**
+ * Whose turn it is, or `null` for a session that is not live (finished, parked, not launched).
+ *
+ * THE DAEMON'S `turnState` IS THE ANSWER whenever it sent one: its turn watcher is the one owner of
+ * this fact, and the spinner, the status dots and the notifications all read the same field. Only a
+ * daemon that predates the watcher sends none — then the page falls back to the evidence it can see
+ * itself ({@link sessionAtPrompt}), so an older daemon still never spins over an idle prompt.
+ */
+export const sessionTurn = (view: SessionView, pane: PaneReading = UNREAD_PANE): SessionTurn | null => {
+  const { state } = view;
+  if (state.turnState !== undefined) return state.turnState;
+  if (state.status !== 'running') return null;
+  return sessionAtPrompt(view, pane) ? 'your-turn' : 'working';
+};

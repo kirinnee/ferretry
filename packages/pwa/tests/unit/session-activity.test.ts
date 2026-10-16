@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
-import { type PaneReading, sessionAtPrompt, UNREAD_PANE } from '../../src/lib/session-activity.ts';
+import { type PaneReading, sessionAtPrompt, sessionTurn, UNREAD_PANE } from '../../src/lib/session-activity.ts';
 import { sessionView } from '../support/sessions.ts';
 
 /**
@@ -39,5 +39,21 @@ describe('sessionAtPrompt', () => {
   test('only a running session is ever called ready; every other status already says what it is', () => {
     for (const status of ['starting', 'thinking', 'waiting', 'awaiting_user', 'completed', 'stopped'] as const)
       expect(sessionAtPrompt(view({ status, turn: 0 }), idleFrame)).toBe(false);
+  });
+});
+
+describe('sessionTurn', () => {
+  test("is the daemon's turn fact whenever it sent one, whatever the pane shows", () => {
+    expect(sessionTurn(view({ status: 'running', turn: 3, turnState: 'needs-input' }), workingFrame)).toBe(
+      'needs-input',
+    );
+    expect(sessionTurn(view({ status: 'running', turn: 3, turnState: 'your-turn' }), workingFrame)).toBe('your-turn');
+    expect(sessionTurn(view({ status: 'running', turn: 3, turnState: 'working' }), idleFrame)).toBe('working');
+  });
+
+  test('falls back to the evidence on screen for a daemon without one, and is null for a session not live', () => {
+    expect(sessionTurn(view({ status: 'running', turn: 0 }))).toBe('your-turn');
+    expect(sessionTurn(view({ status: 'running', turn: 3 }), workingFrame)).toBe('working');
+    expect(sessionTurn(view({ status: 'completed', turn: 3 }))).toBeNull();
   });
 });

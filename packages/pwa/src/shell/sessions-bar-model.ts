@@ -33,6 +33,7 @@ export const needsYou = (view: SessionView): boolean => {
   return (
     state.status === 'awaiting_user' ||
     state.status === 'awaiting_question' ||
+    state.turnState === 'needs-input' ||
     (state.pendingQuestion ?? null) !== null ||
     (state.needsHuman ?? '') !== ''
   );

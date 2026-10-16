@@ -26,6 +26,7 @@ import { displayCallsign } from '../lib/callsign.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../shell/context-menu.tsx';
 import { StatusMark } from '../shell/status-mark.tsx';
+import type { SessionTurn } from '../lib/session-activity.ts';
 
 /**
  * The name a person calls this session by: its callsign, else whatever the session was labelled,
@@ -40,6 +41,13 @@ export const sessionDisplayName = (session: SessionView): string => {
 export const sessionRuntimeLine = (session: SessionView): string =>
   [session.config.agent, session.config.mode, session.config.id].filter(part => part !== '').join(' · ');
 
+/** The status word for each turn: the person's words, not the daemon's. */
+const TURN_WORD: Readonly<Record<SessionTurn, string>> = {
+  working: 'working',
+  'your-turn': 'your turn',
+  'needs-input': 'needs input',
+};
+
 export interface SessionTopBarProps {
   readonly session: SessionView;
   /** The project this session's folder belongs to, or null when it cannot be named. */
@@ -51,11 +59,11 @@ export interface SessionTopBarProps {
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
-   * The page read the agent's pane (or the daemon's turn record) and found it idle at its prompt.
-   * The daemon's `running` only says the terminal is live, so without this a session nobody had
-   * asked anything yet read as Running.
+   * Whose turn it is (`lib/session-activity.ts`), or `null` for a session that is not live. The
+   * daemon's `running` only says the terminal is live, so without this an idle session read as
+   * Running.
    */
-  readonly atPrompt?: boolean;
+  readonly turn?: SessionTurn | null;
   /** Everything else this session offers, in ⋯. */
   readonly menuItems: readonly ContextMenuItem[];
   /** Phone only: opens the sessions drawer. */
@@ -68,7 +76,7 @@ export function SessionTopBar({
   compact,
   actions,
   status,
-  atPrompt = false,
+  turn = null,
   menuItems,
   onOpenSessions,
 }: SessionTopBarProps) {
@@ -107,12 +115,12 @@ export function SessionTopBar({
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
         <span
           className="fy-session-bar__status"
-          data-session-activity={atPrompt ? 'ready' : undefined}
+          data-session-activity={turn ?? undefined}
           data-session-status={session.state.status}
         >
-          <StatusMark ready={atPrompt} view={session} />
+          <StatusMark ready={turn === 'your-turn' && session.state.turnState === undefined} view={session} />
           <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>
-            {atPrompt ? 'ready' : sessionStatusLabel(session.state.status)}
+            {turn === null ? sessionStatusLabel(session.state.status) : TURN_WORD[turn]}
           </span>
           {status}
         </span>

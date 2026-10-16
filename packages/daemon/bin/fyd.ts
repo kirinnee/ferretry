@@ -231,6 +231,7 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
+import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
@@ -586,6 +587,7 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
+  SessionTurnWatcher,
   SessionPlanner,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
@@ -6657,6 +6659,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
+        // Whose turn it is, from the transcript and the live pane — read through the SAME tmux server
+        // the launch path addresses, and the same proved transcript file every other read uses.
+        turns: new SessionTurnWatcher(
+          new StorageTurnPorts(
+            storage,
+            createSessionTranscriptTail(storage),
+            (() => {
+              const resolver = createTranscriptFileResolver(storage);
+              return async (id: SessionId) => await resolver.file(id);
+            })(),
+            launchTmux,
+            clock,
+          ),
+        ),
         sessionMigrate,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
@@ -7276,6 +7292,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   subsystems.monitor.arm();
   await subsystems.monitor.run();
   const waitTicks = setInterval(() => void subsystems.monitor.run(), subsystems.monitor.intervalMs);
+  // Whose turn it is: a local pane capture and a transcript stat per live session, every couple of
+  // seconds, so a finished turn reads as finished — and notifies — within seconds. Spends no tokens.
+  void subsystems.turns.run();
+  const turnTicks = setInterval(() => void subsystems.turns.run(), subsystems.turns.intervalMs);
+  cleanups.push(() => clearInterval(turnTicks));
   cleanups.push(async () => {
     clearInterval(waitTicks);
     await subsystems.monitor.close();

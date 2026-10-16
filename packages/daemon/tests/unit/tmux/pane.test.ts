@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { paneShowsActiveWork, promptIsReady } from '../../../src/lib/index.ts';
+import { paneShowsActiveWork, paneShowsPermissionPrompt, promptIsReady } from '../../../src/lib/index.ts';
 
 /**
  * Frames taken from the two harnesses this daemon launches. The point of every case here is that a
@@ -119,5 +119,44 @@ describe('pane readiness', () => {
       },
       'readiness follows the cursor when tmux reports one, and the last 30 lines when it does not',
     );
+  });
+});
+
+describe('paneShowsPermissionPrompt', () => {
+  it("should recognise Claude's and Codex's permission prompts", () => {
+    const claude = [
+      '⏺ Bash(rm -rf build)',
+      '',
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again for rm commands',
+      '   3. No, and tell Claude what to do differently (esc)',
+    ].join('\n');
+    const codex = [
+      'Would you like to run the following command?',
+      '  $ git push',
+      '› 1. Yes, proceed',
+      '  2. No, and tell Codex what to do differently',
+    ].join('\r\n');
+    should(paneShowsPermissionPrompt(claude)).be.true();
+    should(paneShowsPermissionPrompt(codex)).be.true();
+  });
+
+  it('should not read prose, a lone choice, or a list without a question as a prompt', () => {
+    should(paneShowsPermissionPrompt('Do you want to know more? I can explain.')).be.false();
+    should(paneShowsPermissionPrompt('Do you want to proceed?\n❯ 1. Yes')).be.false();
+    should(paneShowsPermissionPrompt('Steps:\n1. build\n2. test\n3. ship')).be.false();
+  });
+
+  it('should ignore a prompt that has scrolled out of the bottom of the frame', () => {
+    const old = 'Do you want to proceed?\n❯ 1. Yes\n  2. No';
+    should(paneShowsPermissionPrompt([old, ...Array.from({ length: 30 }, () => 'output')].join('\n'))).be.false();
+  });
+});
+
+describe('paneShowsPermissionPrompt on a tall pane', () => {
+  it('should find a prompt drawn near the top of a pane padded with blank rows', () => {
+    const frame = `Do you want to proceed?\n❯ 1. Yes\n  2. No${'\n'.repeat(40)}`;
+    should(paneShowsPermissionPrompt(frame)).be.true();
   });
 });

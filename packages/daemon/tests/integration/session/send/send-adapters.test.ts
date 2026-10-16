@@ -182,12 +182,42 @@ describe('the storage send repository', () => {
     should(actual).match({ status: 'running', turn: 4, promptReady: false });
     const state = (await opened.storage.readState(ID)) as Record<string, unknown>;
     should(state).match({ status: 'running', turn: 4, health: 'healthy', turnCompleted: false });
+    // The turn is the agent's now, stamped with the instant it started.
+    should(state).match({ turnState: 'working', turnStateAt: NOW });
     should(state.startedAt).equal(NOW);
     should(state.lastActivityAt).equal(NOW);
     // CLEARED MEANS ABSENT: a `null` in an optional field makes the document stop satisfying the
     // protocol, and every surface that parses before serving then drops the session it just saw.
     should(state).not.have.property('nudgedAt');
     should(state).not.have.property('reason');
+    await opened.storage.close();
+  });
+
+  it('should leave a turn already recorded as working with the instant it started', async () => {
+    // Arrange — a send queued behind a turn that is still running restarts the clock, not the turn.
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    await opened.storage.writeState(ID, {
+      id: 'session-1',
+      status: 'running',
+      turn: 3,
+      turnState: 'working',
+      turnStateAt: '2026-07-31T00:00:00.000Z',
+    });
+
+    // Act
+    await new StorageSendRepository(opened.storage, clock).transition(ID, {
+      event: 'turn.started',
+      status: 'running',
+      turn: 4,
+      restartTurnClock: true,
+    });
+
+    // Assert
+    should((await opened.storage.readState(ID)) as Record<string, unknown>).match({
+      turnState: 'working',
+      turnStateAt: '2026-07-31T00:00:00.000Z',
+    });
     await opened.storage.close();
   });
 

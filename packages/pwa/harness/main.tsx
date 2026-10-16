@@ -2683,6 +2683,11 @@ const HARNESS_LIVE_PANE = [
 const NEW_SESSION_HARNESS: 'claude' | 'codex' =
   new URLSearchParams(window.location.search).get('harness') === 'codex' ? 'codex' : 'claude';
 const NEW_SESSION_ID = 'harness-new-session';
+/** `?turn=working|your-turn|needs-input`: the daemon's turn fact for the page; absent is a brand-new session. */
+const NEW_SESSION_TURN = ((value: string | null) =>
+  value === 'working' || value === 'your-turn' || value === 'needs-input' ? value : undefined)(
+  new URLSearchParams(window.location.search).get('turn'),
+);
 const HARNESS_IDLE_PANES: Readonly<Record<'claude' | 'codex', string>> = {
   claude: [
     ' ✻ Welcome to Claude Code!',
@@ -2724,7 +2729,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (method === 'GET' && sessionRoute?.rest === 'snapshot')
     return new Response(
-      sessionRoute.sessionId === NEW_SESSION_ID ? HARNESS_IDLE_PANES[NEW_SESSION_HARNESS] : HARNESS_LIVE_PANE,
+      sessionRoute.sessionId === NEW_SESSION_ID && NEW_SESSION_TURN !== 'working'
+        ? HARNESS_IDLE_PANES[NEW_SESSION_HARNESS]
+        : NEW_SESSION_HARNESS === 'codex' && sessionRoute.sessionId === NEW_SESSION_ID
+          ? '• Working (1m 12s • Esc to interrupt)\n\n› '
+          : HARNESS_LIVE_PANE,
       { headers: { 'content-type': 'text/plain; charset=utf-8' } },
     );
   // An attachment upload answers with the daemon's own view of the file it now holds.
@@ -7371,9 +7380,25 @@ const NEW_SESSION: SessionView = {
     createdAt: '2026-10-16T06:00:00.000Z',
     updatedAt: '2026-10-16T06:00:00.000Z',
   },
-  state: { id: NEW_SESSION_ID, status: 'running', turn: 0, startedAt: '2026-10-16T06:00:00.000Z' },
+  state: {
+    id: NEW_SESSION_ID,
+    status: 'running',
+    turn: NEW_SESSION_TURN === undefined ? 0 : 3,
+    startedAt: '2026-10-16T06:00:00.000Z',
+    ...(NEW_SESSION_TURN === undefined ? {} : { turnState: NEW_SESSION_TURN, turnStateAt: '2026-10-16T06:05:00.000Z' }),
+  },
   directory: '/Users/kirin/.config/home-manager',
 } as unknown as SessionView;
+/** A short conversation for the turn frames: one ask, one answer. */
+const NEW_SESSION_ENTRIES: readonly TranscriptEntry[] = [
+  { id: 'ns-user', kind: 'user', label: 'You', text: 'Bump the flake inputs and rebuild.' },
+  {
+    id: 'ns-agent',
+    kind: 'assistant',
+    label: 'Gabriela',
+    text: 'Updated `flake.lock` (nixpkgs, home-manager). Running `hms` now to check the rebuild.',
+  },
+];
 const NEW_SESSION_USAGE = harnessUsage([
   { agent: 'claude-auto-gabriela', five: 18, week: 42 },
   { agent: 'codex-auto-gabriela', five: 7, week: 23 },
@@ -7404,7 +7429,7 @@ function NewSessionHarness() {
           client={NEW_SESSION_CLIENT}
           connection={daemon}
           dictationSettings={DEFAULT_STT_SETTINGS}
-          entries={[]}
+          entries={NEW_SESSION_TURN === undefined ? [] : NEW_SESSION_ENTRIES}
           onSessionChange={setSession}
           presentation={presentation}
           project="home-manager"
