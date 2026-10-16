@@ -1073,6 +1073,8 @@ describe('runtimeCatalog', () => {
       { key: 'trust prompt', value: 'off' },
       { key: 'onboarding screens', value: 'off' },
       { key: '--disallowed-tools=AskUserQuestion', value: 'true' },
+      { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
+      { key: 'Ferretry tools instruction', value: 'on' },
     ]);
   });
 
@@ -1088,6 +1090,8 @@ describe('runtimeCatalog', () => {
       { key: 'sandbox_mode', value: 'workspace-write' },
       { key: 'trust prompt', value: 'off' },
       { key: '--no-alt-screen', value: 'true' },
+      { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
+      { key: 'Ferretry tools instruction', value: 'on' },
     ]);
   });
 
@@ -1107,6 +1111,8 @@ describe('runtimeCatalog', () => {
       { key: 'trust prompt', value: 'off' },
       { key: 'onboarding screens', value: 'off' },
       { key: '--disallowed-tools=AskUserQuestion', value: 'true' },
+      { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
+      { key: 'Ferretry tools instruction', value: 'on' },
     ]);
     should(runtimeNamed(actual, 'agent-claude').launch).deepEqual({ available: true });
   });

@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AGENT_TOOLS_INSTRUCTION } from '../../src/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../src/lib/account/ids.ts';
 import {
   FIXED_SETTINGS_FILE,
@@ -568,7 +569,7 @@ describe('materialiseFleet', () => {
       // Assert
       should(wrapper).containEql('FY_SEED_FIRST_RUN');
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--disallowed-tools=AskUserQuestion' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--disallowed-tools=AskUserQuestion' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}' "$@"\n`,
       );
       should(wrapper).not.containEql('--settings');
       should(at(result, `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`)).be.empty();
@@ -585,7 +586,7 @@ describe('materialiseFleet', () => {
       // Assert
       const overlay = `${HOME_A}/.fy/fixed.json`;
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--disallowed-tools=AskUserQuestion' '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--disallowed-tools=AskUserQuestion' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}' '--settings' '${overlay}' "$@"\n`,
       );
       should(only(result, overlay)).eql({
         kind: 'file',
@@ -606,7 +607,7 @@ describe('materialiseFleet', () => {
 
       // Assert
       should(wrapper).endWith(
-        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' "$@"\n`,
+        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]' '-c' 'developer_instructions="${AGENT_TOOLS_INSTRUCTION}"' "$@"\n`,
       );
       should(wrapper).containEql('set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"');
       should(wrapper).not.containEql('ferretry-launch-folder');
