@@ -169,7 +169,7 @@ export const profile = (
   ...overrides,
 });
 
-export const CONFLICT = {
+const CONFLICT = {
   harness: 'claude',
   field: 'settings',
   key: 'permissions.defaultMode',

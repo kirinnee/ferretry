@@ -146,8 +146,9 @@ const WALKS_SETTINGS = !(
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
  * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
  * its callback port held by another program, finishing), the old pairing a reset left, two Add a login steps,
- * eighteen Profiles and Components pages (a profile page, its Advanced part open, a mixed profile, a
- * delete card, three stepper steps including a refused mixed draft, a component with every badge, a
+ * eighteen Profiles and Components pages (a profile page, a delete card, a refused mix, an override chip,
+ * the Resolved view, Edit as YAML, a mixed profile, a new profile built by drag and drop — and on a phone its
+ * Add picker too, the one frame a desktop has no equivalent of — a component with every badge, a
  * Settings list with scope badges, instructions as Markdown and as source, two edit forms), and seven other-machine states (offline; the first run that opens by
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
@@ -173,18 +174,21 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 154;
+const SETTINGS_SIDEWAYS_CHECKS = 155;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
  * Machines frame, at each viewport — fifty-five frames (the section itself is measured once
  * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
  * machine: 55 + 54 (P3 added an environment login's quota page). Profile scope (P7) added six: a profile's Advanced part open, a mixed profile, a refused
- * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Same tripwire as the number above, for the same reason — a check
+ * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Profiles
+ * as a bag of components (R5) replaced the profile page's Advanced part, its layer editor and the three
+ * Build a profile steps with the drag-and-drop editor's frames — a refused mix, an override chip, the
+ * Resolved view, Edit as YAML and a new profile — plus the phone's Add picker: one more in all. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 109;
+const MACHINES_GEOMETRY_CHECKS = 110;
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -2695,46 +2699,72 @@ try {
           await accountShot('profiles', 'Profiles list');
           await themedShot('profiles');
           await profilesPanel.locator('[data-profile-row="Default"]').click();
-          await profilesPanel.locator('[data-profile-summary]').waitFor({ state: 'visible' });
+          await profilesPanel
+            .locator('[data-profile-editor="Default"] [data-profile-item]')
+            .first()
+            .waitFor({ state: 'visible' });
           await accountShot('profile', 'profile page');
           await themedShot('profile');
-          await profilesPanel.locator('[data-disclosure-toggle="layers"]').click();
-          await profilesPanel.locator('[data-layer-stack]').waitFor({ state: 'visible' });
-          await accountShot('profile-layers', 'profile page with Advanced open');
           await profilesPanel.locator('[data-profile-delete]').click();
           await profilesPanel.locator('[data-catalog-note="delete"]').scrollIntoViewIfNeeded();
           await accountShot('profile-delete', 'profile delete card');
           await profilesPanel.locator('[data-profile-keep]').click();
-          await profilesPanel.locator('[data-profile-edit]').click();
-          await profilesPanel.locator('[data-build-loop]').first().waitFor({ state: 'visible' });
-          await accountShot('profile-edit', 'Edit layers start');
-          await profilesPanel.locator('[data-stepper-cancel]').click();
-          await profilesPanel.locator('[data-stepper-stop]').click();
+          // Mixing tools is refused on drop (or on Add), naming the items to blame (R5).
+          if (viewport.name === 'mobile') {
+            await profilesPanel.locator('[data-profile-pick]').click();
+            const picker = page.locator('[data-profile-picker]');
+            await picker.locator('[data-library-add="profile/Codex"]').click();
+            await picker.locator('[data-catalog-note="picker-refused"]').waitFor({ state: 'visible' });
+            await accountShot('profile-refused', 'profile refusing a mix in the picker');
+            await picker.locator('[data-picker-done]').click();
+            await picker.waitFor({ state: 'detached' });
+          } else {
+            await profilesPanel.locator('[data-library-add="profile/Codex"]').click();
+            await profilesPanel.locator('[data-catalog-note="refused"]').waitFor({ state: 'visible' });
+            await accountShot('profile-refused', 'profile refusing a mix');
+            await profilesPanel.locator('[data-refusal-dismiss]').click();
+          }
+          await profilesPanel.locator('[data-catalog-back]').click();
+          // Agent work: Agent comes later than Default, so it overrides one key — the chip and Resolved.
+          await profilesPanel.locator('[data-profile-row="Agent work"]').click();
+          await profilesPanel.locator('[data-override-chip]').first().waitFor({ state: 'visible' });
+          await accountShot('profile-overrides', 'profile contents with an override chip');
+          await themedShot('profile-overrides');
+          await profilesPanel.locator('[data-profile-view="resolved"]').click();
+          await profilesPanel.locator('[data-resolved-overridden]').first().waitFor({ state: 'visible' });
+          await accountShot('profile-resolved', 'profile Resolved view');
+          await themedShot('profile-resolved');
+          await profilesPanel.locator('[data-profile-yaml]').click();
+          await page.locator('[data-config-editor-text]').waitFor({ state: 'visible' });
+          await accountShot('profile-yaml', 'profile Edit as YAML');
+          await page.locator('[data-config-cancel]').click();
+          await page.locator('[data-config-editor]').waitFor({ state: 'detached' });
           await profilesPanel.locator('[data-catalog-back]').click();
           await profilesPanel.locator('[data-profile-row="Old mix"]').click();
           await profilesPanel.locator('[data-catalog-note="mixed"]').waitFor({ state: 'visible' });
           await accountShot('profile-mixed', 'mixed profile page');
           await profilesPanel.locator('[data-catalog-back]').click();
-          await profilesPanel.locator('[data-profile-build]').click();
-          await profilesPanel.locator('[data-build-base="Default"]').click();
-          await profilesPanel.locator('[data-build-base="Agent"]').click();
-          await profilesPanel.locator('[data-disclosure-toggle="order"]').click();
-          await profilesPanel.locator('[data-build-order]').waitFor({ state: 'visible' });
-          await accountShot('build-start', 'Build a profile start');
-          for (let step = 0; step < 6; step += 1) await profilesPanel.locator('[data-build-next]').click();
-          await profilesPanel.locator('[data-profile-summary]').waitFor({ state: 'visible' });
-          await accountShot('build-review', 'Build a profile review');
-          await profilesPanel.locator('[data-stepper-cancel]').click();
-          await profilesPanel.locator('[data-stepper-stop]').click();
-          // A draft that layers a Claude-only and a Codex-only base is refused in one sentence (P7).
-          await profilesPanel.locator('[data-profile-build]').click();
-          await profilesPanel.locator('[data-build-base="Default"]').click();
-          await profilesPanel.locator('[data-build-base="Codex"]').click();
-          for (let step = 0; step < 6; step += 1) await profilesPanel.locator('[data-build-next]').click();
-          await profilesPanel.locator('[data-catalog-note="refused"]').waitFor({ state: 'visible' });
-          await accountShot('build-mixed', 'Build a profile refusing a mixed draft');
-          await profilesPanel.locator('[data-stepper-cancel]').click();
-          await profilesPanel.locator('[data-stepper-stop]').click();
+          await profilesPanel.locator('[data-profile-new]').click();
+          await profilesPanel.locator('[data-profile-name]').fill('Docs');
+          if (viewport.name === 'mobile') {
+            await profilesPanel.locator('[data-profile-pick]').click();
+            const picker = page.locator('[data-profile-picker]');
+            await picker.locator('[data-library-add="profile/Shared"]').click();
+            await picker.locator('[data-library-add="mcp/notes"]').click();
+            await accountShot('profile-picker', 'new profile Add picker');
+            await picker.locator('[data-picker-done]').click();
+            await picker.waitFor({ state: 'detached' });
+          } else {
+            await profilesPanel
+              .locator('[data-library-item="profile/Shared"]')
+              .dragTo(profilesPanel.locator('[data-profile-contents]'));
+            await profilesPanel
+              .locator('[data-library-item="mcp/notes"]')
+              .dragTo(profilesPanel.locator('[data-profile-item="profile/Shared"]'));
+            await profilesPanel.locator('[data-profile-item="mcp/notes"]').waitFor({ state: 'visible' });
+          }
+          await accountShot('profile-new', 'new profile built by drag and drop');
+          await profilesPanel.locator('[data-profile-cancel]').click();
 
           await machinesSurface.locator('[data-machine-tab="components"]').click();
           const componentsPanel = machinesSurface.locator('[data-machine-tab-panel="components"]');
