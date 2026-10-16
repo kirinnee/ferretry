@@ -117,6 +117,32 @@ jobs:
             echo "preserving existing hosted relay runtime configuration"
           fi
 
+          # Smoke the route that matters. Discovery answering 200 proved nothing the day every
+          # rendezvous upgrade threw (Cloudflare 1101) and the advertisement kept pointing devices at
+          # it. The Worker answers EVERY well-formed upgrade with 101 — a session, or an in-band
+          # refusal such as "no daemon holds this rendezvous" — so anything else is this deploy broken.
+          # The fingerprint is a fixed fake: no real daemon's identity belongs in a public log.
+          smoke_daemon_id="fy_daemon_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          smoke_status=""
+          for _ in 1 2 3 4 5 6; do
+            # A successful upgrade holds the socket open, so curl exits on --max-time; the status
+            # line it already received is what --write-out reports.
+            smoke_status="$(
+              curl --http1.1 --silent --output /dev/null --max-time 5 --write-out '%{http_code}' \
+                --header 'Connection: Upgrade' --header 'Upgrade: websocket' \
+                --header 'Sec-WebSocket-Version: 13' --header 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+                "$HOSTED_RELAY_ORIGIN/v1/rendezvous/$smoke_daemon_id/client" || true
+            )"
+            [[ "$smoke_status" == "101" ]] && break
+            sleep 5
+          done
+          if [[ "$smoke_status" != "101" ]]; then
+            echo "hosted relay rendezvous upgrade answered ${smoke_status:-nothing}, not 101:" \
+              "no daemon or browser can hold a session on this deploy" >&2
+            exit 1
+          fi
+          echo "hosted relay rendezvous upgrade answered 101"
+
   control:
     name: Runtime Control
     if: >-
