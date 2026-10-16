@@ -427,8 +427,9 @@ export function CommandPalette({
           )}
         </div>
 
-        {/* Key hints are for a keyboard: a touch reader opened this with a tap and has no ↑↓, ↵ or esc. */}
-        {latchedTouch.current ? null : <Footer shortcutAvailable={shortcutAvailable} />}
+        {/* Key hints are for a keyboard. A phone opened this with a tap and has no ↑↓, ↵ or esc; a touch
+            laptop (touch-affected, but wide) still has its keyboard, so it keeps them. */}
+        {latchedTouch.current && layout === 'drawer' ? null : <Footer shortcutAvailable={shortcutAvailable} />}
 
         {/* Spoken, never shown. `sr-only` and not `hidden`, which would take it
             straight back out of the accessibility tree. */}
