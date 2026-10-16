@@ -40,6 +40,8 @@ export interface ConsoleSurfaceProps {
   readonly interceptInput?: (data: string) => string;
   /** Hands the host a way to type into, and focus, the Console — the phone key bar. */
   readonly onInputPort?: (port: TerminalInputPort | null) => void;
+  /** The agent's first name; without one the Console speaks of "the agent". */
+  readonly agentName?: string;
 }
 
 /** A refusal in the grant's own words when it is one; the daemon's message otherwise. */
@@ -59,7 +61,10 @@ export function ConsoleSurface({
   typeInto,
   interceptInput = passInput,
   onInputPort,
+  agentName = '',
 }: ConsoleSurfaceProps) {
+  const whom = agentName === '' ? 'the agent' : agentName;
+  const whose = `${whom}’s`;
   const fetcher = useDaemonFetch();
   const reader = useMemo<PaneSnapshotReader>(
     () => readSnapshot ?? ((daemon, at) => readPaneSnapshot(daemon, at, undefined, fetcher, true)),
@@ -129,8 +134,8 @@ export function ConsoleSurface({
   return (
     <section aria-label="Console" className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-workspace-console="">
       <p className="m-0 text-ui text-muted">
-        The agent’s own CLI pane, live. What you type below goes straight into it, key by key — Chat is still the place
-        to send the agent a turn.
+        {agentName === '' ? 'The agent’s' : whose} own CLI pane, live. What you type below goes straight into it, key by
+        key — Chat is still the place to send {whom} a turn.
       </p>
       <TerminalSnapshotView
         daemon={connection}
@@ -145,7 +150,7 @@ export function ConsoleSurface({
           ›
         </span>
         <input
-          aria-label="Type into the Console"
+          aria-label={`Type into ${whose} Console`}
           autoCapitalize="off"
           autoComplete="off"
           autoCorrect="off"
@@ -160,7 +165,7 @@ export function ConsoleSurface({
           }}
           onInput={onInput}
           onKeyDown={onKeyDown}
-          placeholder="Type here — keys go to the agent’s pane as you press them"
+          placeholder={`Type here — keys go to ${whose} pane as you press them`}
           ref={inputRef}
           spellCheck={false}
           type="text"

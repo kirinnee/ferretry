@@ -26,6 +26,7 @@ import {
 } from '../../components/session-terminal-deck.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
+import { displayCallsign } from '../../lib/callsign.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   activateWorkspaceTab,
@@ -150,6 +151,8 @@ export function SessionWorkspace({
   const [railPreview, setRailPreview] = useState<number | null>(null);
   const railWidths = useSyncExternalStore(rails.subscribe, rails.snapshot, rails.snapshot);
   const tabs = visibleTabsInOrder(layout);
+  // The agent's first name (#497 names every agent), for the Console's words and the agent tabs' titles.
+  const agentName = displayCallsign(session.config.teammate);
 
   // A new tab lands in the focused workspace pane — the layout's own rule — and pressing a pane's ＋
   // focuses that pane first, so it lands where it was asked for.
@@ -201,6 +204,7 @@ export function SessionWorkspace({
     if (tab.kind === 'console')
       return (
         <ConsoleSurface
+          agentName={agentName}
           connection={connection}
           onInputPort={registerPort(tab.id)}
           scope={scope}
@@ -328,6 +332,7 @@ export function SessionWorkspace({
 
   const view = (
     <WorkspaceView
+      agentName={agentName}
       drivenTabIds={driving.drivenTabIds}
       layout={layout}
       onLayoutChange={setLayout}

@@ -189,6 +189,18 @@ describe('WorkspaceView', () => {
     await again.unmount();
   });
 
+  it('titles the agent’s own tabs with its name, and leaves every other tab and the label alone', async () => {
+    const view = await host(withTabs(dev), { agentName: 'Hadi' });
+    expect(view.q('[data-tab-id="chat"]').getAttribute('title')).toBe('Chat with Hadi');
+    expect(view.q('[data-tab-id="console"]').getAttribute('title')).toBe('Hadi’s own CLI, live');
+    expect(view.q('[data-tab-id="console"]').getAttribute('aria-label')).toBe('Console');
+    expect(view.q(`[data-tab-id="${dev.id}"]`).getAttribute('title')).toBe(dev.title);
+    await view.unmount();
+    const unnamed = await host(withTabs(dev), { agentName: '' });
+    expect(unnamed.q('[data-tab-id="console"]').getAttribute('title')).toBe("The agent's own CLI, live");
+    await unnamed.unmount();
+  });
+
   it('dismisses the close choice with Escape and closes nothing', async () => {
     const view = await host(withTabs(dev), { onEndTerminal: () => undefined });
     await interact(() => pressKey(view.q(`[data-tab-id="${dev.id}"]`), 'Delete'));

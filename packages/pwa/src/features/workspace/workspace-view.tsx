@@ -75,6 +75,8 @@ export interface WorkspaceViewProps {
    * a close only closes the tab, as it always did.
    */
   readonly onEndTerminal?: (tab: WorkspaceTab) => void;
+  /** The agent's first name, when it has one: the Chat and Console tabs say whose they are. */
+  readonly agentName?: string;
   readonly drivenTabIds?: ReadonlySet<WorkspaceTabId>;
   readonly maxPanes?: number;
   /** Smallest share either side of a divider may shrink to. */
@@ -135,7 +137,10 @@ const layoutControls = (context: ViewContext, pane: WorkspacePaneNode): Workspac
 function PaneView({ context, pane }: { readonly context: ViewContext; readonly pane: WorkspacePaneNode }) {
   const { layout, change, idPrefix } = context;
   const agentPane = pane.id === AGENT_PANE_ID;
-  const tabs = pane.tabs.map(id => layout.tabs[id]).filter((tab): tab is WorkspaceTab => tab !== undefined);
+  const tabs = pane.tabs
+    .map(id => layout.tabs[id])
+    .filter((tab): tab is WorkspaceTab => tab !== undefined)
+    .map(tab => agentTitled(tab, context.agentName));
   const bodies = tabs.filter(tab => tab.id === pane.active || RETAINED_KINDS.has(tab.kind));
   return (
     <section
@@ -185,6 +190,18 @@ function PaneView({ context, pane }: { readonly context: ViewContext; readonly p
 }
 
 const flexShare = (share: number): CSSProperties => ({ flex: `${share} 1 0` });
+
+/**
+ * The agent's own tabs, titled with its name. Only the hover title and accessible description change —
+ * the label stays "Chat" / "Console", the words the spec and every other session use — and the layout
+ * is not touched, because a name belongs to the session and the layout is remembered per daemon.
+ */
+const agentTitled = (tab: WorkspaceTab, agentName: string | undefined): WorkspaceTab => {
+  if (agentName === undefined || agentName === '') return tab;
+  if (tab.kind === 'chat') return { ...tab, title: `Chat with ${agentName}` };
+  if (tab.kind === 'console') return { ...tab, title: `${agentName}’s own CLI, live` };
+  return tab;
+};
 
 function NodeView({ context, node }: { readonly context: ViewContext; readonly node: WorkspaceNode }) {
   if (node.type === 'pane') return <PaneView context={context} pane={node} />;

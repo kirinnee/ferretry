@@ -184,6 +184,35 @@ describe('the Console surface', () => {
     expect(ports.at(-1)).toBeNull();
   });
 
+  it('names the agent whose pane it is, and speaks of "the agent" when it has no name', async () => {
+    const named = await mount(
+      <ConsoleSurface
+        agentName="Hadi"
+        connection={daemon}
+        readSnapshot={async () => ''}
+        scope={scope}
+        typeInto={async () => undefined}
+      />,
+    );
+    mounted.push(named);
+    expect(named.container.textContent).toContain('Hadi’s own CLI pane, live.');
+    expect(named.container.textContent).toContain('send Hadi a turn');
+    const field = must(named.container.querySelector<HTMLInputElement>('[data-console-input]'), 'the field');
+    expect(field.getAttribute('aria-label')).toBe('Type into Hadi’s Console');
+    expect(field.placeholder).toContain('keys go to Hadi’s pane');
+    const unnamed = await mount(
+      <ConsoleSurface
+        connection={daemon}
+        readSnapshot={async () => ''}
+        scope={scope}
+        typeInto={async () => undefined}
+      />,
+    );
+    mounted.push(unnamed);
+    expect(unnamed.container.textContent).toContain('The agent’s own CLI pane, live.');
+    expect(unnamed.container.textContent).toContain('send the agent a turn');
+  });
+
   it('reads and types through the daemon itself when nothing is injected', async () => {
     const calls: string[] = [];
     const original = globalThis.fetch;
