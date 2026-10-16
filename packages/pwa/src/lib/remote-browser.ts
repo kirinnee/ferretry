@@ -1,4 +1,5 @@
 import {
+  assembleBrowserStream,
   BROWSER_MAX_PAGE_ID_LENGTH,
   type BrowserAction,
   type BrowserActionResult,
@@ -7,11 +8,15 @@ import {
   type BrowserPageSummary,
   type BrowserStatus,
   BrowserStatusSchema,
+  type BrowserStreamAssembly,
+  EMPTY_BROWSER_STREAM_ASSEMBLY,
   FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
+import type { RelayStreamRequest } from './relay-carrier.ts';
+import { type RelayClientSession, type RelayStreamFrame, RelayStreamRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 /**
@@ -113,22 +118,154 @@ export const runRemoteBrowserAction = async (
 };
 
 /**
- * Builds a viewer URL from a per-connection ticket.
+ * The live display's transport, seen from the viewer: the four things a WebSocket does.
  *
- * DECLARED GAP: the remote-browser viewer is not mounted in the app yet, and it still speaks the
- * ticketed WebSocket it was written against. A paired device can no longer buy a ticket — every stream
- * it opens is a session the device key opened — so mounting the viewer needs it to take a stream
- * session the way the terminal deck does (`docs/design/zero-trust.md`, PR A).
+ * A PORT, NOT A `WebSocket`. The display is a §14 stream session on whichever carrier reaches the
+ * daemon — its own address or a rendezvous — so there is no bare socket to hand back; this shape is
+ * what lets the viewer stay ignorant of which carrier it is on (and lets a test drive it).
  */
-export const remoteBrowserStreamUrl = (daemon: DaemonConnection, scope: DaemonSessionScope, ticket: string): string => {
-  assertScopeDaemon(daemon, scope);
-  if (ticket.trim() === '') throw new Error('browser stream ticket must not be empty');
-  const url = new URL(`${browserPath(scope)}/stream`, `${daemon.baseUrl}/`);
-  if (url.origin !== new URL(daemon.baseUrl).origin) throw new Error('browser stream must remain on the paired daemon');
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.searchParams.set('ticket', ticket);
-  return url.toString();
-};
+export interface RemoteBrowserSocket {
+  readonly readyState: number;
+  binaryType: BinaryType;
+  addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+export type RemoteBrowserSocketFactory = (daemon: DaemonConnection, scope: DaemonSessionScope) => RemoteBrowserSocket;
+
+/** Opens one §14 stream session on whichever carrier reaches the daemon — the router's own method. */
+export type RemoteBrowserStreamOpener = (
+  daemon: DaemonConnection,
+  request: RelayStreamRequest,
+) => Promise<RelayClientSession>;
+
+/**
+ * The close a refused display reports: `1008` for a refusal asking again cannot change — the caller
+ * is not allowed — and `1011` for one that can, such as a page that has not opened yet. The viewer
+ * retries the second and never the first, for the reason the terminal deck gives: a viewer that
+ * retried a `403` would ask a permanent refusal the same question forever.
+ */
+const refusalClose = (status: number): number => (status === 401 || status === 403 ? 1008 : 1011);
+
+const SOCKET_CONNECTING = 0;
+const SOCKET_OPEN = 1;
+const SOCKET_CLOSED = 3;
+
+/**
+ * One browser display stream as the socket the viewer reads.
+ *
+ * Bytes are `FYBC` chunks (`@ferretry/protocol`'s `browser-stream.ts`) and are reassembled here into
+ * the `FYBF` envelopes the viewer has always decoded, one `message` event per whole frame. A stream
+ * whose framing breaks is ended with `1003` — the route's own repair is a fresh attach — rather than
+ * painted from bytes nobody can attribute to a page.
+ */
+class RemoteBrowserStreamSocket implements RemoteBrowserSocket {
+  readyState = SOCKET_CONNECTING;
+  binaryType: BinaryType = 'arraybuffer';
+  readonly #listeners = new Map<string, ((event: Event) => void)[]>();
+  #session: RelayClientSession | undefined;
+  #assembly: BrowserStreamAssembly = EMPTY_BROWSER_STREAM_ASSEMBLY;
+  #leave: { readonly code: number; readonly reason: string } | undefined;
+
+  addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void {
+    this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener]);
+  }
+
+  /** Input is JSON text, one complete event per record. A send that cannot go is simply not sent. */
+  send(data: string): void {
+    if (this.readyState !== SOCKET_OPEN) return;
+    try {
+      this.#session?.sendStream({ kind: 'text', text: data });
+    } catch {
+      // The session ended under this send; its close is already on the way to the viewer.
+    }
+  }
+
+  close(code = 1000, reason = 'viewer detached'): void {
+    if (this.readyState === SOCKET_CLOSED) return;
+    this.readyState = SOCKET_CLOSED;
+    // A viewer that leaves before the stream opened still leaves on the wire, once it can.
+    if (this.#session === undefined) this.#leave = { code, reason };
+    else this.#session.closeStream(code, reason);
+  }
+
+  attach(opening: Promise<RelayClientSession>): void {
+    opening.then(
+      session => {
+        if (this.#leave !== undefined) {
+          session.closeStream(this.#leave.code, this.#leave.reason);
+          return;
+        }
+        this.#session = session;
+        session.onStreamClosed(closed => this.#ended(closed.code, closed.reason));
+        this.#opened();
+      },
+      (reason: unknown) => {
+        if (this.readyState === SOCKET_CLOSED) return;
+        this.#emit('error', new Event('error'));
+        if (reason instanceof RelayStreamRefusedError) this.#ended(refusalClose(reason.status), reason.body);
+        else this.#ended(1006, reason instanceof Error ? reason.message : 'the display stream did not open');
+      },
+    );
+  }
+
+  receive(frame: RelayStreamFrame): void {
+    // The display is server-to-client bytes; text from the daemon is a shape this stream does not have.
+    if (this.readyState === SOCKET_CLOSED || frame.kind !== 'bytes') return;
+    this.#opened();
+    const step = assembleBrowserStream(this.#assembly, frame.bytes);
+    if (!step.ok) {
+      this.close(1003, 'the viewer could not read this stream');
+      this.#emit('close', new CloseEvent('close', { code: 1003, reason: step.message }));
+      return;
+    }
+    this.#assembly = step.assembly;
+    for (const envelope of step.envelopes) {
+      // A genuine ArrayBuffer of exactly the envelope: the viewer reads `event.data` as one.
+      const data = envelope.buffer.slice(envelope.byteOffset, envelope.byteOffset + envelope.byteLength);
+      this.#emit('message', new MessageEvent('message', { data }));
+    }
+  }
+
+  #opened(): void {
+    if (this.readyState !== SOCKET_CONNECTING) return;
+    this.readyState = SOCKET_OPEN;
+    this.#emit('open', new Event('open'));
+  }
+
+  #ended(code: number, reason: string): void {
+    if (this.readyState === SOCKET_CLOSED) return;
+    this.readyState = SOCKET_CLOSED;
+    this.#emit('close', new CloseEvent('close', { code, reason }));
+  }
+
+  #emit(type: string, event: Event): void {
+    for (const listener of this.#listeners.get(type) ?? []) listener(event);
+  }
+}
+
+/**
+ * The live display as a §14 stream session: no ticket, either carrier.
+ *
+ * NO TICKET EXISTS any more. A paired device opens its streams inside its own session, where the
+ * credential is the device's signed proof, so the display rides a rendezvous exactly as it rides the
+ * daemon's own address — which is what lets a phone away from home watch the page at all.
+ */
+export const remoteBrowserStreamSocketFactory =
+  (openStream: RemoteBrowserStreamOpener): RemoteBrowserSocketFactory =>
+  (daemon, scope) => {
+    assertScopeDaemon(daemon, scope);
+    const socket = new RemoteBrowserStreamSocket();
+    // COMPOSED AT THE CALL, credential-free, so the route-agreement gate sees this dial.
+    socket.attach(
+      openStream(daemon, {
+        path: `/v1/sessions/${encodeURIComponent(scope.sessionId)}/browser/stream`,
+        onData: frame => socket.receive(frame),
+      }),
+    );
+    return socket;
+  };
 
 /**
  * Decodes the daemon's atomic page-id/JPEG frame envelope, failing closed on

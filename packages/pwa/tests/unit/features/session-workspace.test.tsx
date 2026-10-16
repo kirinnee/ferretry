@@ -236,7 +236,7 @@ describe('SessionWorkspace on a desktop', () => {
       // The terminal and the browser stay mounted behind the selected Files tab, as live bodies do.
       const terminal = page.root.findByType(SessionTerminalDeck);
       expect(terminal.props).toMatchObject({ focusTerminalId: TERMINAL, solo: true });
-      expect(page.root.findByType(UnifiedBrowserSurface).props).toMatchObject({ isActive: false, streamTicket: null });
+      expect(page.root.findByType(UnifiedBrowserSurface).props).toMatchObject({ isActive: false });
       const picker = page.root.findByType(FilesTab);
       expect(picker.props.cwd).toBe('/work/shared');
 

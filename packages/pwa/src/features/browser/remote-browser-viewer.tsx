@@ -1,8 +1,9 @@
 /**
  * Daemon-scoped remote browser display and its input channel.
  *
- * The stream ticket is supplied by the pairing/runtime host. It is intentionally
- * not retained here (or in a module cache): a PWA page can switch daemons while
+ * The display is a §14 stream session the carrier router opens — on the daemon's own address or a
+ * rendezvous, whichever reaches it — so it works the same from a phone away from home as on the LAN.
+ * Nothing about it is retained here or in a module cache: a PWA page can switch daemons while
  * preserving the same session id, and a stale viewer must never remain live.
  */
 
@@ -24,23 +25,18 @@ import {
   type RemoteClickRun,
   type RemoteKeyEvent,
   type RemotePointerButton,
-  remoteBrowserStreamUrl,
+  type RemoteBrowserSocket,
+  type RemoteBrowserSocketFactory,
+  remoteBrowserStreamSocketFactory,
   remoteCanvasPoint,
   remoteInputModifiers,
   remoteKeyInput,
   remoteKeyRelease,
   remotePointerButton,
 } from '../../lib/remote-browser.ts';
+import { useDaemonStreamOpener } from '../../lib/store.tsx';
 
-export interface RemoteBrowserSocket {
-  readonly readyState: number;
-  binaryType: BinaryType;
-  addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void;
-  send(data: string): void;
-  close(code?: number, reason?: string): void;
-}
-
-export type RemoteBrowserSocketFactory = (url: string) => RemoteBrowserSocket;
+export type { RemoteBrowserSocket, RemoteBrowserSocketFactory };
 
 /** The frame's on-screen box; a DOM fact, so it is injectable for tests. */
 export interface RemoteFrameRect {
@@ -75,8 +71,6 @@ export interface RemoteBrowserViewerProps {
   readonly ref?: Ref<RemoteBrowserViewerHandle>;
   readonly daemon: DaemonConnection;
   readonly scope: DaemonSessionScope;
-  /** A short-lived, daemon-issued credential; never store it in page memory. */
-  readonly streamTicket: string | null;
   readonly status: BrowserStatus | null;
   readonly isActive?: boolean;
   /** Off by default: a read-only viewer must not be able to drive the page. */
@@ -87,6 +81,7 @@ export interface RemoteBrowserViewerProps {
   readonly showHeader?: boolean;
   readonly stallAfterMs?: number;
   readonly reconnectAfterMs?: number;
+  /** The display's transport; the carrier router's stream session unless a host substitutes one. */
   readonly socketFactory?: RemoteBrowserSocketFactory;
   readonly createObjectUrl?: (frame: Blob) => string;
   readonly revokeObjectUrl?: (url: string) => void;
@@ -100,7 +95,27 @@ export interface RemoteBrowserViewerProps {
   readonly now?: () => number;
 }
 
-const defaultSocketFactory: RemoteBrowserSocketFactory = url => new WebSocket(url);
+/**
+ * The longest text one input event carries. A text record is one complete frame and never split
+ * (§14), so a long paste goes as several `insertText` events in order. 8000 UTF-16 units stays under
+ * one record even when JSON escapes every one of them as `\\u00XX`.
+ */
+const INSERT_TEXT_CHUNK_UNITS = 8_000;
+
+/** Splits text at the chunk size, never between the two halves of a surrogate pair. */
+const insertTextChunks = (text: string): readonly string[] => {
+  const chunks: string[] = [];
+  let current = '';
+  for (const character of text) {
+    if (current.length + character.length > INSERT_TEXT_CHUNK_UNITS) {
+      chunks.push(current);
+      current = '';
+    }
+    current += character;
+  }
+  chunks.push(current);
+  return chunks;
+};
 const defaultCreateObjectUrl = (frame: Blob): string => URL.createObjectURL(frame);
 const defaultRevokeObjectUrl = (url: string): void => URL.revokeObjectURL(url);
 
@@ -117,13 +132,11 @@ interface ViewerTransport {
   readonly connection: DaemonConnection;
   readonly scopeDaemonId: string;
   readonly sessionId: string;
-  readonly streamTicket: string | null;
 }
 
 const sameViewerTransport = (left: ViewerTransport, right: ViewerTransport): boolean =>
   left.scopeDaemonId === right.scopeDaemonId &&
   left.sessionId === right.sessionId &&
-  left.streamTicket === right.streamTicket &&
   sameDaemonConnection(left.connection, right.connection);
 
 /**
@@ -135,7 +148,6 @@ export function RemoteBrowserViewer({
   ref,
   daemon,
   scope,
-  streamTicket,
   status,
   isActive = true,
   interactive = false,
@@ -143,7 +155,7 @@ export function RemoteBrowserViewer({
   showHeader = true,
   stallAfterMs = 4_000,
   reconnectAfterMs = 1_200,
-  socketFactory = defaultSocketFactory,
+  socketFactory: injectedSocketFactory,
   createObjectUrl = defaultCreateObjectUrl,
   revokeObjectUrl = defaultRevokeObjectUrl,
   measureFrame,
@@ -171,6 +183,17 @@ export function RemoteBrowserViewer({
   const pressedPointersRef = useRef(new Map<number, RemotePointerButton>());
   const clickRunRef = useRef<RemoteClickRun | null>(null);
   const [inputRect, setInputRect] = useState<RemoteFrameRect | null>(null);
+  const openStream = useDaemonStreamOpener();
+  const socketFactory = useMemo(
+    () => injectedSocketFactory ?? remoteBrowserStreamSocketFactory(openStream),
+    [injectedSocketFactory, openStream],
+  );
+  // Read by the attach effect, which is keyed on the transport GENERATION rather than these objects: a
+  // host that rebuilds an equal scope every render must not reconnect the display every render.
+  const daemonRef = useRef(daemon);
+  const scopeRef = useRef(scope);
+  daemonRef.current = daemon;
+  scopeRef.current = scope;
 
   const running = status?.state === 'running';
   const currentPageId = activePageId(status);
@@ -182,7 +205,6 @@ export function RemoteBrowserViewer({
     connection: daemon,
     scopeDaemonId: scope.daemonId,
     sessionId: scope.sessionId,
-    streamTicket: streamTicket ?? null,
   };
   if (transportRef.current === null || !sameViewerTransport(transportRef.current.identity, currentTransport)) {
     transportRef.current = { identity: currentTransport, generation: (transportRef.current?.generation ?? 0) + 1 };
@@ -217,10 +239,6 @@ export function RemoteBrowserViewer({
   identityRef.current = transportIdentity;
   activePageRef.current = currentPageId;
 
-  const streamUrl = useMemo(
-    () => (streamTicket && running ? remoteBrowserStreamUrl(daemon, scope, streamTicket) : null),
-    [daemon, running, scope, streamTicket],
-  );
   const viewport = status?.viewport;
   const canInteract = interactive && running && displayState !== 'idle';
 
@@ -273,7 +291,8 @@ export function RemoteBrowserViewer({
   const insertText = useCallback(
     (text: string, activity: RemoteHumanActivity = 'paste'): boolean => {
       if (text === '') return false;
-      const delivered = sendInput({ kind: 'insertText', text });
+      let delivered = false;
+      for (const chunk of insertTextChunks(text)) delivered = sendInput({ kind: 'insertText', text: chunk });
       if (delivered) onHumanActivity?.(activity);
       return delivered;
     },
@@ -384,7 +403,7 @@ export function RemoteBrowserViewer({
   }, [currentPageId, revokeObjectUrl]);
 
   useEffect(() => {
-    if (!isActive || streamUrl === null) {
+    if (!isActive || !running) {
       setDisplayState('idle');
       return;
     }
@@ -397,7 +416,7 @@ export function RemoteBrowserViewer({
     // event can still arrive in between, and it must be judged against the live
     // scope rather than the one that attached the listener.
     const superseded = (): boolean => disposed || identityRef.current !== transportIdentity;
-    const socket = socketFactory(streamUrl);
+    const socket = socketFactory(daemonRef.current, scopeRef.current);
     socket.binaryType = 'arraybuffer';
     socketRef.current = socket;
     setDisplayState('connecting');
@@ -436,6 +455,11 @@ export function RemoteBrowserViewer({
       if (superseded()) return;
       setDisplayState('disconnected');
       if (event instanceof CloseEvent && event.code === 1000) return;
+      // A refusal asking again cannot change: say so, and leave the retry to the person.
+      if (event instanceof CloseEvent && event.code === 1008) {
+        setError(event.reason === '' ? 'The daemon refused the remote display.' : event.reason);
+        return;
+      }
       setError('Remote display disconnected; reconnecting…');
       reconnectTimer = setTimeout(() => {
         if (!disposed) setRetry(value => value + 1);
@@ -456,11 +480,11 @@ export function RemoteBrowserViewer({
     releasePressedKeys,
     retry,
     revokeObjectUrl,
+    running,
     socketFactory,
-    streamUrl,
-    // Two daemons can share one origin, which makes the stream URL alone an
-    // unsafe identity: without this the superseded gate would silently freeze a
-    // socket that is still attached but no longer speaks for this pane.
+    // The generation is the daemon, grant and session this display speaks for,
+    // read through the refs above: without it the superseded gate would silently
+    // freeze a stream that is still attached but no longer speaks for this pane.
     transportIdentity,
   ]);
 

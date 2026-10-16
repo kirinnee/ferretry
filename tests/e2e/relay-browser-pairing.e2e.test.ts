@@ -52,7 +52,7 @@
  * and is also printed on failure, because a report in a directory nobody looks in is not a report.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'bun:test';
@@ -67,6 +67,7 @@ import {
   clickFirstPresent,
   describeControls,
   deviceGrantForLeakSearchOnly,
+  evidenceScreenshot,
   harnessTeardown,
   HOSTED_RELAY_PUBLIC_PATH,
   launchChrome,
@@ -602,7 +603,60 @@ const STEPS: readonly LedgerStep[] = [
     claim:
       'the returning daemon is picked back up unaided, in the same never-reloaded document, whose cursor never rewound',
   },
+  {
+    id: 'browser-live-view-over-relay',
+    claim:
+      "a session browser page streams live into Chrome's workspace over the rendezvous — frames that change as the page does",
+  },
+  {
+    id: 'browser-live-view-sealed',
+    claim: 'the live view crossed only as sealed records: no page title, page id or typed text is relay-observable',
+  },
 ];
+
+/**
+ * Where the daemon's own Chrome finds fonts, when the host has no system font configuration.
+ *
+ * The environment gives the daemon an isolated HOME, and a host whose only fonts live under the real
+ * user's `~/.local/share/fonts` (no `/etc/fonts` at all — a Nix-profile Chrome on a bare machine)
+ * then leaves Chrome with none, and Chrome aborts on its first text run. That is this harness hiding
+ * the machine's fonts, not a product defect, so the real font directories are named in a generated
+ * `fonts.conf`. An explicit `FONTCONFIG_FILE` or a system configuration is left alone.
+ */
+async function fontconfigFor(root: string): Promise<Readonly<Record<string, string>>> {
+  if ((process.env.FONTCONFIG_FILE ?? '') !== '' || (await Bun.file('/etc/fonts/fonts.conf').exists())) return {};
+  const home = process.env.HOME ?? '';
+  const directories = [
+    '/usr/share/fonts',
+    '/usr/local/share/fonts',
+    join(home, '.local/share/fonts'),
+    join(home, '.fonts'),
+  ];
+  const file = join(root, 'fonts.conf');
+  await writeFile(
+    file,
+    `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n${directories
+      .map(directory => `  <dir>${directory}</dir>`)
+      .join('\n')}\n  <cachedir>${join(root, 'fontconfig-cache')}</cachedir>\n</fontconfig>\n`,
+    'utf8',
+  );
+  return { FONTCONFIG_FILE: file };
+}
+
+/**
+ * A page whose pixels change twice a second, so a live view and a frozen one look different, and
+ * which reports what it is typed back to the server that served it — titled with a per-run marker a
+ * relay must never be able to read.
+ */
+function liveTestPage(marker: string): string {
+  return `<!doctype html><html><head><title>${marker}</title><style>
+body{margin:0;font:600 28px system-ui;display:grid;place-items:center;height:100vh;color:#fff;transition:background .2s}
+input{font:inherit;padding:8px;border-radius:8px;border:0}</style></head><body>
+<main><h1>Live over the relay</h1><p>tick <span id="t">0</span></p><input id="i" autofocus placeholder="type here"></main>
+<script>let n=0;setInterval(()=>{n+=1;document.getElementById('t').textContent=String(n);
+document.body.style.background='hsl('+(n*37%360)+' 60% 35%)'},500);
+document.getElementById('i').addEventListener('input',e=>{fetch('/typed?v='+encodeURIComponent(e.target.value))})</script></body></html>`;
+}
 
 async function reportAndRethrow(error: unknown, report: string): Promise<never> {
   const written = await readFile(report, 'utf8').catch(() => '');
@@ -803,7 +857,14 @@ describe('a real browser, a compiled daemon and a real relay', () => {
 
         const sinkhole = await startDirectSinkhole(teardown);
         const distDir = await buildPwaBundle(directory.origin);
-        const origin = await startPwaOrigin(distDir, teardown);
+        /**
+         * Opened at `localhost`, never `127.0.0.1`: the remote-browser steps confirm with a passkey, and
+         * Chrome refuses every WebAuthn ceremony on an IP-address origin (a relying-party id must be a
+         * domain). `localhost` is still loopback and a secure context — the same choice the product
+         * journeys make.
+         */
+        const served = await startPwaOrigin(distDir, teardown);
+        const origin = { ...served, origin: served.origin.replace('//127.0.0.1:', '//localhost:') };
         const configPath = join(environment.paths.root, 'daemon.json');
         await writeFile(
           configPath,
@@ -1416,7 +1477,12 @@ describe('a real browser, a compiled daemon and a real relay', () => {
           command: [compiledDaemon(), '--config', configPath],
           readyUrl: environment.httpUrl('/v1/health'),
           timeoutMs: 30_000,
-          env: { FY_RELAY_DIRECTORY_ORIGIN: directory.origin },
+          // The restarted daemon is also the one whose browser the live-view steps open.
+          env: {
+            FY_RELAY_DIRECTORY_ORIGIN: directory.origin,
+            FY_CHROME_BIN: chromeExecutable(),
+            ...(await fontconfigFor(environment.paths.root)),
+          },
         });
         await waitForDaemonAtRendezvous(rendezvous);
 
@@ -1574,6 +1640,260 @@ describe('a real browser, a compiled daemon and a real relay', () => {
             `${String(lifetime.minCursor)} and its highest ${String(lifetime.maxCursor)}. What this CANNOT see is ` +
             `the \`after\` value the resumed subscription put on the wire — the relay's records are sealed to every ` +
             `observer including this journey — so the exact resumption cursor is proved in the unit suite instead`,
+        );
+
+        /**
+         * THE REMOTE BROWSER'S LIVE VIEW, OVER THE SAME RENDEZVOUS.
+         *
+         * The view used to dial a ticketed WebSocket nobody could buy, so a phone away from home saw
+         * the agent's browser only as a status line. It is a §14 stream session now, opened by the
+         * same carrier walk: direct (the sinkhole) first, then this rendezvous. The page below ticks
+         * twice a second, so a view that is LIVE paints more than one distinct frame, and one that
+         * painted once and froze does not pass.
+         */
+        const browserPageMarker = runMarker('Page');
+        let typedIntoPage = '';
+        const testPage = Bun.serve({
+          hostname: '127.0.0.1',
+          port: 0,
+          fetch: request => {
+            const url = new URL(request.url);
+            if (url.pathname === '/typed') {
+              typedIntoPage = url.searchParams.get('v') ?? '';
+              return new Response(null, { status: 204 });
+            }
+            return new Response(liveTestPage(browserPageMarker), {
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+            });
+          },
+        });
+        teardown.add('live-view test page', () => testPage.stop(true));
+        const hostToken = (await readFile(join(environment.paths.fyHome, 'api-token'), 'utf8')).trim();
+        const opened = await fetch(environment.httpUrl(`/v1/sessions/${session.sessionId}/browser`), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${hostToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'open', url: `http://127.0.0.1:${String(testPage.port)}/` }),
+        });
+        if (!opened.ok) {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `the restarted daemon could not open the session browser (HTTP ${String(opened.status)}): ${(await opened.text()).slice(0, 400)}. ` +
+              `Daemon stderr: ${environment.daemonOutput().err.slice(-1500)}`,
+          );
+        }
+        /**
+         * THE REMOTE BROWSER ASKS FOR A PASSKEY, and this journey answers with a real one.
+         *
+         * Opening the browser from a paired device is a step-up act (`docs/design/zero-trust.md` B3), and
+         * the seeded unlock-off home makes every such act ask on its own. A CDP virtual authenticator
+         * with user verification answers each ceremony the way a fingerprint would: the browser still
+         * runs real WebAuthn, the daemon still verifies a real signature — over this same relay — and
+         * nothing is short-circuited. Every prompt is answered as it appears, in the background, so
+         * the steps below read as what a person does rather than as a script of dialogs.
+         */
+        const shotsRoot = join(process.env.FY_E2E_SHOTS_ROOT ?? join(tmpdir(), 'fy-e2e-shots'), 'relay-browser-live');
+        await mkdir(shotsRoot, { recursive: true });
+        const devtools = await browser.cdp();
+        await devtools.send('WebAuthn.enable', { enableUI: false });
+        const { authenticatorId } = await devtools.send<{ authenticatorId: string }>(
+          'WebAuthn.addVirtualAuthenticator',
+          {
+            options: {
+              protocol: 'ctap2',
+              transport: 'internal',
+              hasResidentKey: true,
+              hasUserVerification: true,
+              isUserVerified: true,
+              automaticPresenceSimulation: true,
+            },
+          },
+        );
+        // A device adds its first passkey inside a window only the owner at the machine can open — the
+        // compiled CLI, here — and then registers it where a person would, in Settings › Security.
+        const passkeyWindow = await environment.runFy(['passkey', 'window', String(pairedName)], {
+          FY_URL: environment.httpUrl(),
+        });
+        if (passkeyWindow.code !== 0) {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `\`fy passkey window\` refused (exit ${String(passkeyWindow.code)}): ${passkeyWindow.err.trim() || passkeyWindow.out.trim()}`,
+          );
+        }
+        await browser.page.goto(`${origin.origin}/d/${fingerprint}/settings#security`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
+        // The settings page reads step-up panels too, and with no passkey yet that prompt cannot succeed.
+        await browser.page
+          .click('[data-step-up-dialog] button:has-text("Cancel")', { timeout: 5_000 })
+          .catch(() => undefined);
+        await browser.page
+          .click('[data-security-card] [data-security-add]', { timeout: 20_000 })
+          .catch(async (error: unknown) => {
+            await evidenceScreenshot(browser.page, join(shotsRoot, 'fail-add-passkey.png'));
+            ledger.fail(
+              'browser-live-view-over-relay',
+              `Settings › Security offered no way to add a passkey: ${String(error).split('\n')[0]}`,
+            );
+          });
+        await browser.page
+          .waitForSelector('[data-security-card] [data-security-passkey]', { timeout: 30_000 })
+          .catch(async () => {
+            await evidenceScreenshot(browser.page, join(shotsRoot, 'fail-passkey-listed.png'));
+            ledger.fail('browser-live-view-over-relay', 'the passkey the virtual authenticator made was never listed');
+          });
+        await browser.page.goto(`${origin.origin}/d/${fingerprint}/session/${session.sessionId}`, {
+          waitUntil: 'networkidle',
+          timeout: 30_000,
+        });
+        let answering = true;
+        let promptsAnswered = 0;
+        const confirmControl = '[data-step-up-dialog] [data-step-up-confirm]';
+        const answerer = (async () => {
+          while (answering) {
+            const asked = await browser.page
+              .evaluate<boolean>(`document.querySelector(${JSON.stringify(confirmControl)}) !== null`)
+              .catch(() => false);
+            if (asked) {
+              await browser.page.click(confirmControl, { timeout: 5_000 }).catch(() => undefined);
+              await browser.page
+                .waitForSelector('[data-step-up-dialog]', { state: 'detached', timeout: 20_000 })
+                .then(() => {
+                  promptsAnswered += 1;
+                })
+                .catch(() => undefined);
+            }
+            await Bun.sleep(250);
+          }
+        })();
+        teardown.add('step-up answerer', async () => {
+          answering = false;
+          await answerer;
+        });
+
+        const arrivalsBeforeView = (await rendezvous.arrivals()).filter(
+          entry => entry.role === 'client' && entry.daemonId === fingerprint,
+        ).length;
+        const directBeforeView = sinkhole.attempts();
+
+        // The reader's own path: the workspace pane's ＋ menu, "New browser", then the page the agent has open.
+        const openBrowserTab = async (): Promise<void> => {
+          // The workspace pane sits beside the agent's own; its ＋ is where new tabs come from.
+          await browser.page
+            .click('button[aria-label="Show workspace pane"]', { timeout: 5_000 })
+            .catch(() => undefined);
+          await browser.page.click('button[aria-label="Open a tab or change the layout"]', { timeout: 15_000 });
+          await browser.page.click('[role="menuitem"]:has-text("New browser")', { timeout: 15_000 });
+        };
+        await openBrowserTab().catch(async (error: unknown) => {
+          await evidenceScreenshot(browser.page, join(shotsRoot, 'fail-open-browser-tab.png'));
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `the session workspace offered no way to open a Browser tab: ${String(error).split('\n')[0]}. ` +
+              `It offers: ${await describeControls(browser.page, 'body')}`,
+          );
+        });
+        await browser.page.click('[data-browser-page]', { timeout: 30_000 }).catch(async (error: unknown) => {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `the Browser tab never listed the page the daemon opened: ${String(error).split('\n')[0]}. ` +
+              `The page renders: ${await renderedDataAttributes(browser.page)}`,
+          );
+        });
+        const liveFrame = '.fy-remote-browser[data-display-state="live"] img[alt="Live remote browser frame"]';
+        const painted = await browser.page
+          .waitForSelector(liveFrame, { timeout: 60_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!painted) {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `the remote display never painted a live frame; it reads data-display-state=` +
+              `${String(await attributeNow(browser.page, '.fy-remote-browser', 'data-display-state'))}. ` +
+              `Console: ${browser.console.slice(-6).join(' | ') || 'silent'}`,
+          );
+        }
+        const frameSources = new Set<string>();
+        const watchUntil = Date.now() + 8_000;
+        while (Date.now() < watchUntil && frameSources.size < 3) {
+          const source = await browser.page
+            .evaluate<string>(`document.querySelector(${JSON.stringify(liveFrame)})?.getAttribute('src') ?? ''`)
+            .catch(() => '');
+          if (source !== '') frameSources.add(source);
+          await Bun.sleep(150);
+        }
+        if (frameSources.size < 2) {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `the display painted ${String(frameSources.size)} distinct frame(s) in eight seconds of a page that ticks ` +
+              'twice a second, so it is not live',
+          );
+        }
+        const arrivalsWithView = await waitForClientArrivals(rendezvous, fingerprint, arrivalsBeforeView + 1).catch(
+          () => arrivalsBeforeView,
+        );
+        if (arrivalsWithView <= arrivalsBeforeView) {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            'frames painted but no new client session arrived at the rendezvous, so the view did not cross the relay',
+          );
+        }
+
+        // A person's keystrokes travel back the same way: typed on the frame's own input surface, carried
+        // up the stream, dispatched into the page's focused field, and reported by the page itself.
+        const typed = runMarker('Typed');
+        await browser.page.focus('.fy-remote-browser-input');
+        await browser.page.keyboard.type(typed);
+        const typedDeadline = Date.now() + 15_000;
+        while (Date.now() < typedDeadline && typedIntoPage !== typed) await Bun.sleep(150);
+        if (typedIntoPage !== typed) {
+          ledger.fail(
+            'browser-live-view-over-relay',
+            `keystrokes typed on the live view did not reach the page: it reported ${JSON.stringify(typedIntoPage)}`,
+          );
+        }
+
+        const shots: string[] = [];
+        for (const [label, width, height] of [
+          ['390', 390, 844],
+          ['1280', 1_280, 900],
+        ] as const) {
+          await browser.page.setViewportSize({ width, height });
+          for (const scheme of ['light', 'dark'] as const) {
+            await browser.page.emulateMedia({ colorScheme: scheme });
+            await browser.page.waitForSelector(liveFrame, { timeout: 15_000 }).catch(() => undefined);
+            await Bun.sleep(600);
+            const path = join(shotsRoot, `browser-live-over-relay-${label}-${scheme}.png`);
+            const missed = await evidenceScreenshot(browser.page, path);
+            if (missed === null) shots.push(path);
+            else console.warn(`e2e evidence: no screenshot ${path}: ${missed}`);
+          }
+        }
+        await browser.page.setViewportSize({ width: 1_280, height: 900 });
+        answering = false;
+        await answerer;
+        const passkeys = (
+          await devtools.send<{ credentials: unknown[] }>('WebAuthn.getCredentials', { authenticatorId })
+        ).credentials.length;
+        ledger.prove(
+          'browser-live-view-over-relay',
+          `with the direct address still a sinkhole (${String(sinkhole.attempts() - directBeforeView)} more attempt(s), none ` +
+            `answered), the workspace's Browser tab painted ${String(frameSources.size)} distinct live frames of the ` +
+            `agent's page, keystrokes typed on it reached the page's own field, and the rendezvous carried a new client session for it (${String(arrivalsBeforeView)} → ` +
+            `${String(arrivalsWithView)}). The device confirmed ${String(promptsAnswered)} step-up prompt(s) with a ` +
+            `real WebAuthn passkey (${String(passkeys)} held by the virtual authenticator), over the same relay. ` +
+            `Screenshots: ${shots.join(', ') || 'none captured'}`,
+        );
+
+        const viewLeaks = plaintextLeaks(await rendezvous.observations(), {
+          'the page title': browserPageMarker,
+          'what the person typed': typed,
+        });
+        if (viewLeaks.length !== 0) ledger.fail('browser-live-view-sealed', viewLeaks.join('; '));
+        ledger.prove(
+          'browser-live-view-sealed',
+          `the page title ${browserPageMarker} and the typed ${typed} are absent from all ` +
+            `${String((await rendezvous.observations()).length)} frames the rendezvous handled`,
         );
 
         // A noted step does not abort, so the journey can reach here with one still unproven. It is

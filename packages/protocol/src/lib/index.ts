@@ -12,6 +12,7 @@ export * from './analytics-query.ts';
 export * from './attention.ts';
 export * from './audit.ts';
 export * from './browser.ts';
+export * from './browser-stream.ts';
 export * from './browser-login.ts';
 export * from './carriers.ts';
 export * from './catalog.ts';

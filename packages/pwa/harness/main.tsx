@@ -5660,7 +5660,6 @@ function Shell() {
           <RemoteBrowserPane
             daemon={daemon}
             scope={scope}
-            streamTicket="harness-ticket"
             transport={HARNESS_BROWSER_TRANSPORT}
             schedule={HARNESS_BROWSER_SCHEDULE}
             socketFactory={HARNESS_BROWSER_SOCKET_FACTORY}
@@ -6542,7 +6541,6 @@ function Shell() {
             onOpenLoginWindow={async () => ({ state: 'opening', profilePrimed: false })}
             presentation="pane"
             scope={UNIFIED_PREVIEW_SCOPE}
-            streamTicket={null}
             titleId="harness-unified-browser-preview-title"
           />
         </section>
@@ -6567,7 +6565,6 @@ function Shell() {
             onClose={() => {}}
             presentation="pane"
             scope={UNIFIED_REMOTE_SCOPE}
-            streamTicket="harness-ticket"
             titleId="harness-unified-browser-real-title"
           />
         </section>
@@ -7788,7 +7785,6 @@ function BrowserFullViewportHarness() {
               onClose={onClose}
               presentation={surfacePresentation}
               scope={FULL_VIEWPORT_BROWSER_SCOPE}
-              streamTicket="harness-ticket"
               titleId={titleId}
             />
           ) : (

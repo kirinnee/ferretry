@@ -273,7 +273,6 @@ const surface = (overrides: Partial<UnifiedBrowserSurfaceProps> = {}) => (
   <UnifiedBrowserSurface
     daemon={daemonA}
     scope={scopeA}
-    streamTicket="ticket-1"
     presentation="pane"
     titleId="browser-title"
     onClose={() => undefined}
@@ -336,7 +335,6 @@ describe('the unified browser surface', () => {
       UnifiedBrowserSurface({
         daemon: daemonA,
         scope: scopeB,
-        streamTicket: null,
         presentation: 'pane',
         titleId: 'browser-title',
         onClose: () => undefined,
@@ -448,7 +446,6 @@ describe('the unified browser surface', () => {
     const props = remote.props();
     expect(props.daemon).toBe(daemonA);
     expect(props.scope).toBe(scopeA);
-    expect(props.streamTicket).toBe('ticket-1');
     expect(props.isActive).toBe(true);
     // The surface owns the shared chrome, so the pane's own address row is off.
     expect(props.showNavigation).toBe(false);

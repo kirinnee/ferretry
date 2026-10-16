@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'bun:test';
 import type { BrowserStatus } from '@ferretry/protocol';
-import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
+import { encodeBrowserStreamChunks, FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import {
+  type RelayClientSession,
+  type RelayStreamFrame,
+  RelayStreamRefusedError,
+} from '../../src/lib/relay-session.ts';
 import {
   decodeRemoteBrowserFrame,
   fetchRemoteBrowserStatus,
   isLocalPasteChord,
   nextRemoteClickRun,
   REMOTE_MAX_CLICK_COUNT,
+  type RemoteBrowserSocket,
   type RemoteKeyEvent,
-  remoteBrowserStreamUrl,
+  remoteBrowserStreamSocketFactory,
   remoteCanvasPoint,
   remoteInputModifiers,
   remoteKeyInput,
@@ -38,6 +44,47 @@ const status = {
   capacity: { running: 0, maximum: 3 },
 } satisfies BrowserStatus;
 const response = (body: unknown, statusCode = 200) => new Response(JSON.stringify(body), { status: statusCode });
+
+/** The three things the display asks of a §14 stream session, recorded. */
+const fakeStreamSession = () => {
+  const sent: RelayStreamFrame[] = [];
+  const closes: { code: number; reason: string }[] = [];
+  const listeners: ((closed: { code: number; reason: string }) => void)[] = [];
+  const fake = {
+    sent,
+    closes,
+    onData: undefined as ((frame: RelayStreamFrame) => void) | undefined,
+    endStream: (code: number, reason: string) => {
+      for (const listener of listeners) listener({ code, reason });
+    },
+    session: {
+      sendStream: (frame: RelayStreamFrame) => {
+        sent.push(frame);
+      },
+      closeStream: (code: number, reason: string) => {
+        closes.push({ code, reason });
+      },
+      onStreamClosed: (listener: (closed: { code: number; reason: string }) => void) => {
+        listeners.push(listener);
+      },
+    } as unknown as RelayClientSession,
+  };
+  return fake;
+};
+
+/** Every event a display socket raised, in order. */
+const recordEvents = (socket: RemoteBrowserSocket) => {
+  const types: string[] = [];
+  const messages: unknown[] = [];
+  const closes: { code: number; reason: string }[] = [];
+  for (const type of ['open', 'message', 'close', 'error'] as const)
+    socket.addEventListener(type, event => {
+      types.push(type);
+      if (event instanceof MessageEvent) messages.push(event.data);
+      if (event instanceof CloseEvent) closes.push({ code: event.code, reason: event.reason });
+    });
+  return { types, messages, closes };
+};
 
 describe('remote browser transport', () => {
   it('binds status and actions to a paired daemon and rejects a crossed scope', async () => {
@@ -98,18 +145,159 @@ describe('remote browser transport', () => {
     ).rejects.toThrow('daemon returned another session');
   });
 
-  it('builds a ticket-only browser stream URL on the paired daemon', () => {
-    expect(remoteBrowserStreamUrl(daemon, scope, 'one-time')).toBe(
-      'wss://daemon.example.test/v1/sessions/same%2Fsession/browser/stream?ticket=one-time',
-    );
-    expect(
-      remoteBrowserStreamUrl(
-        daemonConnection({ daemonId: 'loop', baseUrl: 'http://127.0.0.1:7431', deviceId: 'x' }),
-        daemonSessionScope({ daemonId: 'loop' as never }, 'x'),
-        't',
+  it('opens the display as a stream session on the paired daemon, with no ticket', async () => {
+    const opened: { daemon: unknown; path: string; query: unknown }[] = [];
+    const fake = fakeStreamSession();
+    const socket = remoteBrowserStreamSocketFactory(async (paired, request) => {
+      opened.push({ daemon: paired, path: request.path, query: request.query });
+      fake.onData = request.onData;
+      return fake.session;
+    })(daemon, scope);
+    const events = recordEvents(socket);
+    expect(socket.readyState).toBe(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(opened).toEqual([{ daemon, path: '/v1/sessions/same%2Fsession/browser/stream', query: undefined }]);
+    expect(socket.readyState).toBe(1);
+    expect(events.types).toEqual(['open']);
+
+    // A frame cut into chunks arrives as one whole envelope; text from the daemon is ignored.
+    const envelope = Uint8Array.of(0x46, 0x59, 0x42, 0x46, 1, 0, 1, 0x70, 9, 8, 7);
+    fake.onData?.({ kind: 'text', text: 'not a frame' });
+    for (const chunk of encodeBrowserStreamChunks(3, envelope, 25)) fake.onData?.({ kind: 'bytes', bytes: chunk });
+    expect(events.types).toEqual(['open', 'message']);
+    expect([...new Uint8Array(events.messages[0] as ArrayBuffer)]).toEqual([...envelope]);
+
+    // Input is one JSON text record; a viewer leaving says so on the wire.
+    socket.send('{"kind":"insertText","text":"hi"}');
+    expect(fake.sent).toEqual([{ kind: 'text', text: '{"kind":"insertText","text":"hi"}' }]);
+    socket.close(1000, 'viewer detached');
+    expect(fake.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
+    expect(socket.readyState).toBe(3);
+    socket.send('late');
+    socket.close();
+    expect(fake.sent).toHaveLength(1);
+    expect(fake.closes).toHaveLength(1);
+  });
+
+  it('reports the stream close the daemon sealed, and a frame that arrives before the open resolves', async () => {
+    const fake = fakeStreamSession();
+    let resolveOpen: ((session: typeof fake.session) => void) | undefined;
+    const socket = remoteBrowserStreamSocketFactory(async (_paired, request) => {
+      fake.onData = request.onData;
+      return await new Promise(resolve => {
+        resolveOpen = resolve;
+      });
+    })(daemon, scope);
+    const events = recordEvents(socket);
+    await Promise.resolve();
+    // Sent before the session promise exists: the stream is open by the evidence of its data.
+    for (const chunk of encodeBrowserStreamChunks(0, Uint8Array.of(1, 2, 3), 100))
+      fake.onData?.({ kind: 'bytes', bytes: chunk });
+    expect(events.types).toEqual(['open', 'message']);
+    socket.send('dropped: no session yet');
+    resolveOpen?.(fake.session);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fake.sent).toHaveLength(0);
+    fake.endStream(1013, 'browser viewer fell behind');
+    expect(events.types).toEqual(['open', 'message', 'close']);
+    expect(events.closes).toEqual([{ code: 1013, reason: 'browser viewer fell behind' }]);
+    fake.endStream(1000, 'twice');
+    expect(events.closes).toHaveLength(1);
+  });
+
+  it('ends a stream whose framing broke instead of painting it', async () => {
+    const fake = fakeStreamSession();
+    const socket = remoteBrowserStreamSocketFactory(async (_paired, request) => {
+      fake.onData = request.onData;
+      return fake.session;
+    })(daemon, scope);
+    const events = recordEvents(socket);
+    await Promise.resolve();
+    await Promise.resolve();
+    fake.onData?.({ kind: 'bytes', bytes: new Uint8Array(30) });
+    expect(events.closes).toEqual([{ code: 1003, reason: 'browser stream chunk magic does not match' }]);
+    expect(fake.closes).toEqual([{ code: 1003, reason: 'the viewer could not read this stream' }]);
+    fake.onData?.({ kind: 'bytes', bytes: new Uint8Array(30) });
+    expect(events.types.filter(type => type === 'close')).toHaveLength(1);
+  });
+
+  it('leaves on the wire once the stream opens, when the viewer left while it was opening', async () => {
+    const fake = fakeStreamSession();
+    let resolveOpen: ((session: typeof fake.session) => void) | undefined;
+    const socket = remoteBrowserStreamSocketFactory(
+      async () =>
+        await new Promise(resolve => {
+          resolveOpen = resolve;
+        }),
+    )(daemon, scope);
+    const events = recordEvents(socket);
+    await Promise.resolve();
+    socket.close(1000, 'viewer detached');
+    resolveOpen?.(fake.session);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fake.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
+    expect(events.types).toEqual([]);
+  });
+
+  it('tells a refusal it may retry from one it may not, and a carrier that failed from both', async () => {
+    const closeFor = async (reason: unknown) => {
+      const socket = remoteBrowserStreamSocketFactory(async () => {
+        throw reason;
+      })(daemon, scope);
+      const events = recordEvents(socket);
+      await Promise.resolve();
+      await Promise.resolve();
+      return events;
+    };
+    const forbidden = await closeFor(new RelayStreamRefusedError(403, 'browser use is not granted'));
+    expect(forbidden.types).toEqual(['error', 'close']);
+    expect(forbidden.closes).toEqual([{ code: 1008, reason: 'browser use is not granted' }]);
+    expect((await closeFor(new RelayStreamRefusedError(401, 'who'))).closes[0]?.code).toBe(1008);
+    expect((await closeFor(new RelayStreamRefusedError(409, 'no page yet'))).closes).toEqual([
+      { code: 1011, reason: 'no page yet' },
+    ]);
+    expect((await closeFor(new Error('no carrier reached the daemon'))).closes).toEqual([
+      { code: 1006, reason: 'no carrier reached the daemon' },
+    ]);
+    expect((await closeFor('odd')).closes).toEqual([{ code: 1006, reason: 'the display stream did not open' }]);
+
+    // A viewer that already left hears nothing about the failed open.
+    let fail: ((reason: unknown) => void) | undefined;
+    const socket = remoteBrowserStreamSocketFactory(
+      async () =>
+        await new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    )(daemon, scope);
+    const events = recordEvents(socket);
+    socket.close();
+    fail?.(new Error('late'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events.types).toEqual([]);
+  });
+
+  it('swallows an input send the ended session refuses', async () => {
+    const fake = fakeStreamSession();
+    fake.session.sendStream = () => {
+      throw new Error('this relay session is not carrying a stream');
+    };
+    const socket = remoteBrowserStreamSocketFactory(async () => fake.session)(daemon, scope);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(() => socket.send('{}')).not.toThrow();
+  });
+
+  it('refuses a scope that belongs to another daemon', () => {
+    expect(() =>
+      remoteBrowserStreamSocketFactory(async () => fakeStreamSession().session)(
+        daemon,
+        daemonSessionScope({ daemonId: 'other' as never }, 'x'),
       ),
-    ).toBe('ws://127.0.0.1:7431/v1/sessions/x/browser/stream?ticket=t');
-    expect(() => remoteBrowserStreamUrl(daemon, scope, ' ')).toThrow('browser stream ticket must not be empty');
+    ).toThrow('browser scope must belong to the requested daemon');
   });
 });
 

@@ -9,11 +9,10 @@
  * static PWA bundle that could guess a daemon URL would silently drive whichever
  * daemon happened to answer.
  *
- * The stream ticket is a REQUIRED runtime input, not something this component
- * can obtain. The daemon exposes no ticket endpoint yet, so the host that owns
- * pairing must supply one; `null` is the honest value until then, and the pane
- * stays fully usable — lifecycle, tabs, navigation and viewport all work over
- * HTTP, and only the live display waits for a ticket.
+ * The live display is a §14 stream session the carrier router opens, on the
+ * daemon's own address or a rendezvous — there is no ticket to obtain. Lifecycle,
+ * tabs, navigation and viewport work over requests on the same carrier, so the
+ * pane is the same from a phone away from home as on the LAN.
  */
 
 import type { BrowserAction, BrowserStatus } from '@ferretry/protocol';
@@ -130,12 +129,6 @@ export interface RemoteBrowserPaneProps {
   readonly daemon: DaemonConnection;
   /** Must name `daemon`; a scope from another daemon is a programming error. */
   readonly scope: DaemonSessionScope;
-  /**
-   * The daemon-issued stream credential. There is no endpoint that mints one
-   * yet, so the host passes `null` until pairing can supply it and the display
-   * stays idle instead of inventing a URL.
-   */
-  readonly streamTicket: string | null;
   /** A hidden retained pane detaches; the daemon-side browser survives. */
   readonly isActive?: boolean;
   /**
@@ -167,7 +160,6 @@ export interface RemoteBrowserPaneProps {
 export function RemoteBrowserPane({
   daemon,
   scope,
-  streamTicket,
   isActive = true,
   showNavigation = true,
   showPageTabs = true,
@@ -420,7 +412,6 @@ export function RemoteBrowserPane({
           ref={viewerRef}
           daemon={daemon}
           scope={scope}
-          streamTicket={streamTicket}
           status={status}
           isActive={isActive}
           interactive

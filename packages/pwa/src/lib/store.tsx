@@ -37,7 +37,7 @@ import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './da
 import { daemonRequest } from './daemon-transport.ts';
 import { type DeviceKeyStore, IndexedDbDeviceKeyStore, mintDeviceKey } from './device-keys.ts';
 import { documentDraftStore } from './drafts.ts';
-import { DaemonEventTransport } from './event-transport.ts';
+import { DaemonEventTransport, type DaemonStreamOpener } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { KeyRotation } from './key-rotation.ts';
 import { DeviceNotificationFilterStore } from './notification-filter.ts';
@@ -945,6 +945,25 @@ export function useDaemonFetch(): DaemonFetch {
   // bound one per read) would otherwise restart every read on every render, forever.
   return useMemo<DaemonFetch>(
     () => (store === null ? browserFetch : async (input, init) => await store.carrier.fetch(input, init)),
+    [store],
+  );
+}
+
+/**
+ * Opens one §14 stream session through the carrier router — direct first, then each rendezvous.
+ *
+ * One identity per store, for the reason `useDaemonFetch` gives. Outside a store there is no router
+ * and no device key to open a stream with, so the opener refuses rather than reaching for the network.
+ */
+export function useDaemonStreamOpener(): DaemonStreamOpener {
+  const store = useContext(StoreContext);
+  return useMemo<DaemonStreamOpener>(
+    () =>
+      store === null
+        ? async () => {
+            throw new Error('no paired carrier is available to open this stream');
+          }
+        : async (daemon, request) => await store.carrier.openStream(daemon, request),
     [store],
   );
 }
