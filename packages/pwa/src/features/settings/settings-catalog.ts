@@ -84,9 +84,9 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
   {
     id: 'composer-markdown',
-    label: 'Composer editing',
+    label: 'Editor style',
     description:
-      'Colour Markdown markers in the native message textarea and show a separate live rendered preview with proven, clickable references — off by default pending a mobile Safari pass. Optional Vim-style modal keys live here too; the native textarea stays the input owner either way.',
+      'Markdown, Notion-style (the default) shapes the line as you type — headings, lists that continue on Enter, checklists, quotes, code — with the markers kept faintly visible, or choose a plain text box. Either way you send exactly the markdown you typed. Optional Vim-style modal keys live here too.',
     keywords: [
       'composer',
       'markdown',
@@ -109,10 +109,10 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
   {
     id: 'composer-enter-key',
-    label: 'Enter key',
+    label: 'Send key',
     description:
-      'Choose whether Enter sends or starts a new line in the transcript composer. The other action stays reachable with Shift+Enter on a keyboard or the visible composer controls on touch.',
-    keywords: ['enter', 'return', 'send', 'newline', 'new line', 'shift enter', 'composer', 'keyboard'],
+      'Choose, separately for a keyboard and for a phone, whether Enter sends or starts a new line. On a keyboard ↵ sends and ⇧↵ starts a line by default; on a phone return starts a line and the ↑ button sends. ⌘/Ctrl+↵ always sends.',
+    keywords: ['enter', 'return', 'send', 'send key', 'newline', 'new line', 'shift enter', 'composer', 'keyboard', 'phone'],
   },
   {
     id: 'composer-suggestions',

@@ -127,6 +127,13 @@ describe('the Notion-style composer keys', () => {
     expect(view.sent).toHaveLength(1);
   });
 
+  test('a reference chip’s remove button takes exactly its token out of the draft', () => {
+    const view = mountComposer('see @src/app.ts now');
+    const remove = view.view.root.findByProps({ 'aria-label': 'Remove @src/app.ts from this message' });
+    run(() => remove.props.onClick());
+    expect(view.textarea().props.value).toBe('see  now');
+  });
+
   test('the plain text box keeps Enter and ⌘B to the browser', () => {
     writeMdComposePref('off');
     const view = mountComposer('- first');

@@ -100,7 +100,7 @@ describe('shared settings catalog', () => {
     expect(settingsPaletteEntries(alpha, 'motion')[0]?.settingId).toBe('motion');
     expect(settingsPaletteEntries(alpha, 'show details')[0]?.settingId).toBe('show-details');
     expect(settingsPaletteEntries(alpha, 'balanced')[0]?.settingId).toBe('chat-width');
-    expect(settingsPaletteEntries(alpha, 'markdown preview')[0]?.settingId).toBe('composer-markdown');
+    expect(settingsPaletteEntries(alpha, 'editor style')[0]?.settingId).toBe('composer-markdown');
     expect(settingsPaletteEntries(alpha, 'shift enter')[0]?.settingId).toBe('composer-enter-key');
     // Vim shares the composer-editing control rather than hiding in a new page.
     for (const query of ['vim', 'modal', 'hjkl', 'normal mode']) {
