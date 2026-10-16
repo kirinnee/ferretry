@@ -5,7 +5,10 @@
  *
  *  - polling is gated on the document being visible, so a backgrounded tab
  *    costs the daemon nothing;
- *  - sticky scroll stays put unless the reader is already pinned to the bottom;
+ *  - it sticks to the bottom unless the reader scrolled up — kteam's follow model
+ *    (`useStickToBottom`), shared with the Chat transcript: it opens at the tail,
+ *    follows each new capture, stops only for a scroll-up the reader made, and
+ *    resumes when they come back down or press "jump to latest";
  *  - the header states the tmux session plus a "cached · updated <n>s ago"
  *    hint, so freshness is never a guess.
  *
@@ -15,15 +18,16 @@
  */
 
 import { Terminal } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { useDaemonFetch } from '../lib/store.tsx';
+import { JumpToLatest } from './jump-to-latest.tsx';
 import {
   describeSnapshotError,
   formatSnapshotAge,
   formatSnapshotClock,
-  isPinnedToBottom,
   readPaneSnapshot,
 } from './terminal-snapshot-model.ts';
 
@@ -74,9 +78,6 @@ export const TerminalSnapshotView = ({
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [tick, setTick] = useState(() => now());
 
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const pinnedRef = useRef(true);
-
   // The whole pane belongs to exactly one (daemon, session): switching either
   // must not leave the previous daemon's text on screen for even one frame.
   // Adjusting during render rather than in an effect is what makes that true —
@@ -89,8 +90,16 @@ export const TerminalSnapshotView = ({
     setStale(false);
     setErrorMessage(null);
     setLastUpdatedAt(null);
-    pinnedRef.current = true;
   }
+  // STICK TO THE BOTTOM, NEVER TO THE LEFT. New output arrives at the end, and a reader who is there
+  // wants to stay there; a new (daemon, session) opens at the tail. The horizontal offset is the
+  // reader's: a terminal line is routinely wider than the pane, and resetting `scrollLeft` yanked
+  // anyone reading the right-hand end of a line back to column 0 every poll. The pin is a layout
+  // effect on the new text, so it reaches the height the new capture actually laid out to.
+  const { viewportRef, contentRef, detached, onScroll, jumpToLatest } = useStickToBottom({
+    resetKey: key,
+    contentKeys: [text],
+  });
 
   const poll = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return;
@@ -100,17 +109,6 @@ export const TerminalSnapshotView = ({
       setLastUpdatedAt(now());
       setStale(false);
       setErrorMessage(null);
-      const element = scrollerRef.current;
-      // STICK TO THE BOTTOM, NEVER TO THE LEFT.
-      //
-      // Sticky-bottom is a real behaviour: new output arrives at the end, and a
-      // reader who is already there wants to stay there. Sticky-LEFT is not —
-      // this pane polls every 3s, and a terminal line is routinely wider than
-      // the pane (measured: a 640px `<pre>` in a 370px sheet), so resetting
-      // `scrollLeft` here yanked anyone reading the right-hand end of a line
-      // back to column 0 before they could finish it. The horizontal offset is
-      // the reader's; only the vertical one tracks the tail.
-      if (element && pinnedRef.current) element.scrollTop = element.scrollHeight;
     } catch (error) {
       // Keep the last good content and say so: a momentarily unreachable
       // daemon is not an empty terminal.
@@ -155,14 +153,6 @@ export const TerminalSnapshotView = ({
     return () => clearInterval(timer);
   }, [now]);
 
-  // Read from the event's own element rather than the ref: the scroller that
-  // fired is by definition mounted, so there is no absent-element case to
-  // invent a behaviour for.
-  const onScroll = useCallback((event: { currentTarget: HTMLDivElement }) => {
-    const element = event.currentTarget;
-    pinnedRef.current = isPinnedToBottom(element.scrollHeight, element.scrollTop, element.clientHeight);
-  }, []);
-
   const age = lastUpdatedAt === null ? '—' : formatSnapshotAge(tick - lastUpdatedAt);
   const absolute = lastUpdatedAt === null ? '' : formatSnapshotClock(lastUpdatedAt);
 
@@ -192,18 +182,23 @@ export const TerminalSnapshotView = ({
           )}
         </span>
       </div>
-      <div
-        ref={scrollerRef}
-        onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-auto bg-code-bg text-fg-soft"
-        data-testid="terminal-snapshot-scroller"
-      >
-        <pre
-          className="mono m-0 min-w-max whitespace-pre px-3 py-2 text-[12px] leading-[1.5]"
-          {...(fontFamily === undefined ? {} : { style: { fontFamily } })}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={viewportRef}
+          onScroll={onScroll}
+          className="min-h-0 flex-1 overflow-auto bg-code-bg text-fg-soft"
+          data-testid="terminal-snapshot-scroller"
         >
-          {text || '(no snapshot yet)'}
-        </pre>
+          <div className="min-w-max" ref={contentRef}>
+            <pre
+              className="mono m-0 min-w-max whitespace-pre px-3 py-2 text-[12px] leading-[1.5]"
+              {...(fontFamily === undefined ? {} : { style: { fontFamily } })}
+            >
+              {text || '(no snapshot yet)'}
+            </pre>
+          </div>
+        </div>
+        {detached ? <JumpToLatest onJump={jumpToLatest} /> : null}
       </div>
     </div>
   );

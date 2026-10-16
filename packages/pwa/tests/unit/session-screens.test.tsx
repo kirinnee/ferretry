@@ -102,6 +102,8 @@ describe('session screen components', () => {
       scrollTop: 700,
       clientHeight: 200,
       contains: (node: Node) => node === inside,
+      addEventListener: () => {},
+      removeEventListener: () => {},
     };
     const selection = {
       isCollapsed: false,
@@ -128,6 +130,7 @@ describe('session screen components', () => {
         activeElement: null,
         addEventListener: () => {},
         contains: () => false,
+        getSelection: () => selection,
         removeEventListener: () => {},
       },
     });
@@ -390,51 +393,6 @@ describe('session screen components', () => {
     );
     expect(findText(quiet.root, 'Session fallback')).toHaveLength(1);
     expect(quiet.root.findAllByType('button')).toHaveLength(0);
-  });
-
-  test('renders transcript entries and preserves detached-reader new-message behaviour', () => {
-    const viewport = { scrollHeight: 900, scrollTop: 700, clientHeight: 200 };
-    const first = [{ id: 'one', kind: 'assistant' as const, text: 'First answer', at: 1, label: 'Assistant' }];
-    const transcript = render(<Transcript busy daemonId="daemon-a" entries={first} sessionId="same-id" />, {
-      createNodeMock: element => {
-        const props = element.props as { role?: string };
-        return element.type === 'div' && props.role === 'log' ? viewport : null;
-      },
-    });
-    expect(transcript.root.findByProps({ role: 'log' }).props['aria-live']).toBe('polite');
-    expect(findText(transcript.root, 'Working…')).toHaveLength(1);
-    expect(viewport.scrollTop).toBe(900);
-
-    const log = transcript.root.findByProps({ role: 'log' });
-    viewport.scrollTop = 0;
-    run(() => log.props.onScroll());
-    run(() =>
-      transcript.update(
-        <Transcript
-          daemonId="daemon-a"
-          entries={[...first, { id: 'two', kind: 'user', text: 'A follow-up' }]}
-          sessionId="same-id"
-        />,
-      ),
-    );
-    const jump = transcript.root.findByProps({ className: 'fy-jump-latest' });
-    expect(jump.children.join('')).toContain('1 new message · Jump to latest');
-    run(() => jump.props.onClick());
-    expect(viewport.scrollTop).toBe(900);
-
-    viewport.scrollTop = 0;
-    run(() => log.props.onScroll());
-    run(() =>
-      transcript.update(
-        <Transcript
-          daemonId="daemon-b"
-          entries={[...first, { id: 'two', kind: 'user', text: 'A distinct daemon message' }]}
-          sessionId="same-id"
-        />,
-      ),
-    );
-    expect(viewport.scrollTop).toBe(900);
-    expect(transcript.root.findAllByProps({ className: 'fy-jump-latest' })).toHaveLength(0);
   });
 
   test('renders transcript prose and daemon chrome with readable defaults and safe timestamps', () => {

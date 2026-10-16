@@ -1,6 +1,7 @@
 import type { SessionStatus } from '@ferretry/protocol';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
+import type { SlashCommand } from './slash-commands.ts';
 import type { ToolResultData, ToolUseData } from './tool-extract.ts';
 
 /**
@@ -23,13 +24,15 @@ export interface ToolCall {
 /** A browser-safe, display-only transcript row. Content remains daemon-owned. */
 export interface TranscriptEntry {
   readonly id: string;
-  readonly kind: 'user' | 'assistant' | 'tool' | 'notice' | 'ledger';
+  readonly kind: 'user' | 'assistant' | 'tool' | 'command' | 'notice' | 'ledger';
   readonly text: string;
   readonly at?: number;
   readonly label?: string;
   /** Consecutive tool calls this row stands for. A `tool` row carrying calls
    *  renders as the collapsed tool group instead of a text line. */
   readonly tools?: readonly ToolCall[];
+  /** The slash command a `command` row stands for: `/model opus[1m] → Set model to …`. */
+  readonly command?: SlashCommand;
   /** The durable send attempt a `ledger` row stands for — an attempt the loaded
    *  transcript carries no proof row for, shown so it cannot go quiet. */
   readonly ledger?: LedgerSendRecord;
@@ -37,54 +40,35 @@ export interface TranscriptEntry {
   readonly placement?: LedgerBlockPlacement;
   /** The delivered send a `user` row IS, so the row can wear its chip. */
   readonly send?: LedgerSendRecord;
-  /**
-   * Bookkeeping — reasoning, token usage, turn and settings records. Kept, but folded behind
-   * "Show details" so the conversation reads as a conversation.
-   */
-  readonly detail?: boolean;
-  /** A failure the reader must see: a notice that never folds behind "Show details". */
+  /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }
 
 /**
- * Does this row fold behind "Show details"? Bookkeeping always does, and so does every daemon notice
- * except an alert — "Browser automation stays unavailable" is context, not conversation.
+ * Is this row left out of the conversation? Every daemon notice except an alert is — "Browser
+ * automation stays unavailable" is context, not conversation, and the transcript no longer keeps a
+ * "Show details" fold to file it under.
  */
-export const foldsIntoDetails = (entry: TranscriptEntry): boolean =>
-  entry.detail === true || (entry.kind === 'notice' && entry.alert !== true);
+export const hiddenFromTranscript = (entry: TranscriptEntry): boolean =>
+  entry.kind === 'notice' && entry.alert !== true;
 
-/** One rendered transcript item: a row, or a folded run of consecutive detail rows. */
-export type TranscriptItem =
-  | { readonly kind: 'entry'; readonly entry: TranscriptEntry; readonly previous?: TranscriptEntry }
-  | { readonly kind: 'details'; readonly id: string; readonly entries: readonly TranscriptEntry[] };
+/** One rendered transcript row and the last VISIBLE row before it, which is what its rhythm reads. */
+export interface TranscriptItem {
+  readonly entry: TranscriptEntry;
+  readonly previous?: TranscriptEntry;
+}
 
-/**
- * Folds every run of consecutive detail rows into one item, keeping order. A run is keyed by its first
- * row, so expanding one stays expanded while the tail of the transcript grows underneath it. `previous`
- * is the last VISIBLE row before an entry, which is what the transcript's rhythm reads.
- */
+/** The rows a reader sees, in order, each paired with the visible row before it. */
 export const transcriptItems = (entries: readonly TranscriptEntry[]): readonly TranscriptItem[] => {
   const items: TranscriptItem[] = [];
   let previous: TranscriptEntry | undefined;
-  let run: TranscriptEntry[] | null = null;
   for (const entry of entries) {
-    if (foldsIntoDetails(entry)) {
-      if (run === null) {
-        run = [];
-        items.push({ kind: 'details', id: `details:${entry.id}`, entries: run });
-      }
-      run.push(entry);
-      continue;
-    }
-    run = null;
-    items.push(previous === undefined ? { kind: 'entry', entry } : { kind: 'entry', entry, previous });
+    if (hiddenFromTranscript(entry)) continue;
+    items.push(previous === undefined ? { entry } : { entry, previous });
     previous = entry;
   }
   return items;
 };
-
-/** "2 system events" — the fold's own count, in words. */
-export const detailsLabel = (count: number): string => `${count} system ${count === 1 ? 'event' : 'events'}`;
 
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'stopped';
@@ -127,12 +111,6 @@ export const sessionNavigation = (daemonId: string, sessionId: string): readonly
   daemonId,
   sessionId,
 ];
-
-export const transcriptIsFollowing = (element: {
-  scrollHeight: number;
-  scrollTop: number;
-  clientHeight: number;
-}): boolean => element.scrollHeight - element.clientHeight - element.scrollTop <= 24;
 
 export const composerUsesEnterToSend = (pointerFine: boolean, canHover: boolean): boolean => pointerFine && canHover;
 
