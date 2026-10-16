@@ -9,17 +9,17 @@ wire).
 
 ## Layout
 
-| File                            | Holds                                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `machine.yaml`                  | Agent permissions, the default runtime, what agents may control, the advanced block                                |
-| `logins/<id>.yaml`              | one login (a credential): `harness`, `store`, `label`, `env`                                                       |
-| `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                     |
-| `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                      |
-| `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                      |
-| `warden.yaml`                   | the Warden: on, rules-only triage and its caps — see [The Warden](#the-warden); the rest default                   |
-| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                         |
-| `voice.yaml`                    | who cleans up dictated text — transcription is chosen per device ([voice.md](voice.md)) and is not configured here |
-| `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))  |
+| File                            | Holds                                                                                                                                                                                               |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `machine.yaml`                  | Agent permissions, the default runtime, what agents may control, the advanced block                                                                                                                 |
+| `logins/<id>.yaml`              | one login (a credential): `harness`, `store`, `label`, `env`                                                                                                                                        |
+| `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                                                                                                      |
+| `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                                                                                                       |
+| `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                                                                                                       |
+| `warden.yaml`                   | the Warden: on, rules-only triage and its caps — see [The Warden](#the-warden); the rest default                                                                                                    |
+| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                          |
+| `voice.yaml`                    | who cleans up dictated text, and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device |
+| `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                   |
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
