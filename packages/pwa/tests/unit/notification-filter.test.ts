@@ -275,4 +275,31 @@ describe('DeviceNotificationFilterStore', () => {
     expect(store.get()).toEqual(DEFAULT_NOTIFICATION_FILTER_PREFERENCES);
     expect(store.set({ categories: { failed: false } }).categories.failed).toBe(false);
   });
+
+  it('mirrors every change for the service worker, fire-and-forget', async () => {
+    const written: DeviceNotificationFilterPreferences[] = [];
+    const mirror = { write: async (value: DeviceNotificationFilterPreferences) => void written.push(value) };
+    const store = new DeviceNotificationFilterStore(null, mirror);
+
+    const next = store.set({ categories: { failed: false } });
+    // `set` returns before the mirror write settles — it is explicitly fire-and-forget.
+    await Promise.resolve();
+
+    expect(written).toEqual([next]);
+  });
+
+  it('never lets a rejected mirror write escape set() or break the localStorage-backed answer', async () => {
+    const store = new DeviceNotificationFilterStore(null, {
+      write: async () => {
+        throw new Error('IndexedDB is denied');
+      },
+    });
+
+    const next = store.set({ categories: { failed: false } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(next.categories.failed).toBe(false);
+    expect(store.get().categories.failed).toBe(false);
+  });
 });

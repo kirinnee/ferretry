@@ -112,6 +112,24 @@ export const listDaemonPushDevices = async (
   PushDeviceListResponseSchema.parse(await pushJson(daemon, '/v1/push/subscriptions', { method: 'GET' }, fetcher))
     .devices;
 
+/**
+ * TEMPORARY VERSION-SKEW SHIM — remove once every daemon in the field has upgraded past the release
+ * that required `prefs` on a registration (track via `docs/standards/semantic-release` or just the
+ * next time this file changes for an unrelated reason).
+ *
+ * This daemon's own schema stopped requiring (and reading) `prefs` — see
+ * `@ferretry/protocol`'s `RegisterPushDeviceRequestSchema` doc — but the PWA and the daemon upgrade
+ * independently, and an OLDER, not-yet-upgraded daemon's schema still demands the field. Sending
+ * this placeholder costs nothing against a new daemon (named and ignored there too) and keeps
+ * registration working against an old one. The values chosen are "hear about everything": if they
+ * ever do reach an old daemon that still enforces them, that is the closest match to the new default
+ * of "every machine sends every event; the device decides what to show."
+ */
+const LEGACY_PREFS_PLACEHOLDER = {
+  events: { attention: true, question: true, failed: true, completed: true },
+  interactiveOnly: false,
+};
+
 /** Enrols this browser with one daemon under a reader-chosen device name. */
 export const registerDaemonPushDevice = async (
   daemon: DaemonConnection,
@@ -122,6 +140,7 @@ export const registerDaemonPushDevice = async (
   const body = RegisterPushDeviceRequestSchema.parse({
     deviceName,
     subscription: pushSubscriptionJson(subscription),
+    prefs: LEGACY_PREFS_PLACEHOLDER,
   });
   return PushDeviceViewSchema.parse(
     await pushJson(daemon, '/v1/push/subscriptions', { method: 'POST', body: JSON.stringify(body) }, fetcher),

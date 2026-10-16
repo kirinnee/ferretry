@@ -81,12 +81,18 @@ describe('daemon push enrolment', () => {
     expect(calls[0]?.init?.method).toBe('POST');
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
+    // `prefs` is a temporary version-skew placeholder (an old, not-yet-upgraded daemon's schema
+    // still requires it) — see `registerDaemonPushDevice`'s own doc.
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       deviceName: 'kirin phone',
       subscription: {
         endpoint: 'https://fcm.googleapis.com/x',
         expirationTime: null,
         keys: { p256dh: P256DH, auth: AUTH },
+      },
+      prefs: {
+        events: { attention: true, question: true, failed: true, completed: true },
+        interactiveOnly: false,
       },
     });
   });

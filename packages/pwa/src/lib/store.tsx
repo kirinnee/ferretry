@@ -41,6 +41,7 @@ import { DaemonEventTransport } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { KeyRotation } from './key-rotation.ts';
 import { DeviceNotificationFilterStore } from './notification-filter.ts';
+import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import type { CredentialsPort } from './passkeys.ts';
@@ -557,7 +558,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const stt = new SttSettingsStore(browserStorage);
   const workspaceLayouts = new WorkspaceLayoutStore();
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
-  const notificationFilter = new DeviceNotificationFilterStore(browserStorage);
+  const notificationFilter = new DeviceNotificationFilterStore(browserStorage, browserNotificationFilterMirror());
   const pushDevices = new DaemonPushDevices(browserStorage);
   const pushService = daemonPushService(carried);
   const connections = await DaemonConnectionStore.open({

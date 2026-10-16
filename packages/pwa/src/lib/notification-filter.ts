@@ -28,18 +28,18 @@
  * shown, the same way they can switch off `failed` without unsubscribing from anything. A daemon id
  * absent from the map is on, so a newly paired machine is heard from immediately.
  *
- * WHERE THIS IS APPLIED, AND WHERE IT IS NOT (DECLARED, NOT DISCOVERED). The in-app live watch
- * (`notification-ledger.ts`) calls this on every transition it is about to show, because the page
- * already holds this device's preferences in memory. The service worker's `push` handler does NOT:
- * a service worker cannot read `localStorage`, and a push that is received but shows nothing is a
- * pattern browsers can revoke a subscription over — see the worker's own comment. Until this
- * preference is mirrored into storage the worker can reach (IndexedDB), Web Push stays what it always
- * was here — every enrolled device is shown every push while the app is backgrounded or closed — and
- * only the foreground, in-app path reflects these four switches, the per-machine list, and quiet
- * hours today. That gap is deliberate and declared, not an oversight.
+ * WHERE THIS IS APPLIED. The in-app live watch (`notification-ledger.ts`) calls this directly on
+ * every transition it is about to show, because the page already holds this device's preferences in
+ * memory. The service worker's `push` handler (`worker/service-worker.ts`) calls the SAME function
+ * too, but cannot read `localStorage` at all — a service worker has no DOM storage — so every write
+ * this store makes is also mirrored into IndexedDB (`notification-filter-mirror.ts`), which both
+ * contexts can reach. A push the filter would hide still has to show SOMETHING: a push that is
+ * received but shows nothing is a pattern browsers can revoke a subscription over. The worker's own
+ * comment names the least-bad compliant answer it picked.
  */
 
 import type { PushNotificationKind } from '@ferretry/protocol';
+import type { NotificationFilterMirrorWriter } from './notification-filter-mirror.ts';
 
 /**
  * Every protocol notification kind, exhaustively. `notificationCategoryFor` below is the real
@@ -295,11 +295,13 @@ export interface NotificationFilterStorage {
  */
 export class DeviceNotificationFilterStore {
   readonly #storage: NotificationFilterStorage | null;
+  readonly #mirror: NotificationFilterMirrorWriter | null;
   readonly #listeners = new Set<() => void>();
   #snapshot: DeviceNotificationFilterPreferences;
 
-  constructor(storage: NotificationFilterStorage | null = null) {
+  constructor(storage: NotificationFilterStorage | null = null, mirror: NotificationFilterMirrorWriter | null = null) {
     this.#storage = storage;
+    this.#mirror = mirror;
     let raw: string | null = null;
     try {
       raw = storage?.getItem(NOTIFICATION_FILTER_PREFERENCES_KEY) ?? null;
@@ -316,6 +318,9 @@ export class DeviceNotificationFilterStore {
     const next = mergeNotificationFilterPreferences(this.#snapshot, patch);
     this.#snapshot = next;
     this.#persist(next);
+    // Fire-and-forget: the worker reads whatever the mirror last held, and `localStorage` above is
+    // already the correct, durable answer for this page regardless of whether this write lands.
+    void this.#mirror?.write(next).catch(() => undefined);
     for (const listener of [...this.#listeners]) listener();
     return next;
   }

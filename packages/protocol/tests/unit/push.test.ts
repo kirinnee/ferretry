@@ -417,4 +417,31 @@ describe('push schemas', () => {
     // Act + Assert
     assertRejects(cases);
   });
+
+  it('should tolerate a legacy prefs bundle at both wire boundaries, version skew', () => {
+    // Arrange: an un-upgraded PWA still sending the preference bundle this endpoint used to require.
+    const legacyPrefs = {
+      events: { attention: true, question: true, failed: true, completed: true },
+      interactiveOnly: false,
+    };
+    const legacyRegistration = { ...registration, prefs: legacyPrefs };
+    // An un-upgraded daemon's response still carrying the field the new PWA stopped reading.
+    const legacyDeviceView = { ...deviceView, prefs: legacyPrefs };
+
+    // Act
+    const parsedRegistration = push.RegisterPushDeviceRequestSchema.parse(legacyRegistration);
+    const parsedDeviceView = push.PushDeviceViewSchema.parse(legacyDeviceView);
+
+    // Assert — accepted, and the legacy field carries no meaning: nothing downstream ever reads
+    // `.prefs` off either parsed value (`PushService.register`, `pushDeviceView`), so a value this
+    // permissive (`z.unknown()`) is exactly as safe as dropping it outright.
+    should(parsedRegistration.deviceName).equal(registration.deviceName);
+    should(parsedRegistration.prefs).deepEqual(legacyPrefs);
+    should(parsedDeviceView).deepEqual(deviceView);
+    should(Object.hasOwn(parsedDeviceView, 'prefs')).be.false();
+
+    // An unrelated unknown field — one with no version-skew story — is still refused outright: the
+    // tolerance above is for exactly one named legacy field, not a general relaxation.
+    should(push.RegisterPushDeviceRequestSchema.safeParse({ ...registration, deviceId: DEVICE_ID }).success).be.false();
+  });
 });
