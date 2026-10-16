@@ -401,7 +401,7 @@ export function Composer({
   // keystrokes the IME reports, and this covers the window between them, which
   // is where a menu would otherwise open over the candidate list.
   const composing = useRef(false);
-  const pendingVimSelection = useRef<{ readonly value: string; readonly start: number; readonly end: number } | null>(
+  const pendingSelection = useRef<{ readonly value: string; readonly start: number; readonly end: number } | null>(
     null,
   );
   const keyboardOpen = useKeyboardOpen();
@@ -453,17 +453,28 @@ export function Composer({
         ...scope,
         draft: () => draftRef.current,
         replaceDraft: next => {
-          setDraft(next);
           // A quote or an "Add to chat" delivery is a reader who is about to
           // TYPE. Landing them in normal mode would answer their next letter
           // with a command, so every programmatic draft delivery returns to
           // insert — the same rule dictation follows below.
           setVim(initialVimState);
+          // THE CARET GOES AFTER THE RENDER, as for every other programmatic edit.
+          // Placed now it would land in the OLD draft: the live editor (Markdown and
+          // Rich text) clamps it to the old text and keeps it there through the
+          // repaint, so the reader's next word went in FRONT of the delivered
+          // reference and welded onto it. A draft that does not change has no render
+          // to wait for, so its caret goes now.
+          const changed = next !== draftRef.current;
+          if (changed) {
+            pendingSelection.current = { value: next, start: next.length, end: next.length };
+            setDraft(next);
+          }
           const input = inputRef.current;
           if (input === null) return;
           input.focus();
-          // A detached or hidden textarea can refuse a selection; the value still
-          // landed, so the caret is a nicety rather than part of the contract.
+          if (changed) return;
+          // A detached or hidden textarea can refuse a selection; the draft is
+          // unchanged either way, so the caret is a nicety rather than the contract.
           try {
             input.setSelectionRange(next.length, next.length);
           } catch {
@@ -490,14 +501,15 @@ export function Composer({
     if (!vimMode) setVim(initialVimState);
   }, [vimMode]);
 
-  // The caret half of a Vim outcome, applied after the controlled value that
+  // The caret half of a programmatic edit (Vim, list continuation, a removed chip,
+  // an Add to chat or quote delivery), applied after the controlled value that
   // carries it has actually rendered. Setting it before that would place it in
   // the OLD text and the browser would clamp it somewhere else entirely.
   useLayoutEffect(() => {
-    const pending = pendingVimSelection.current;
+    const pending = pendingSelection.current;
     const input = inputRef.current;
     if (pending === null || input === null || pending.value !== draft || input.value !== draft) return;
-    pendingVimSelection.current = null;
+    pendingSelection.current = null;
     try {
       input.setSelectionRange(pending.start, pending.end);
     } catch {
@@ -636,7 +648,7 @@ export function Composer({
 
   /** An editing rule's result, written through the controlled draft with its caret placed after render. */
   const applyEdit = (edit: DraftEdit): void => {
-    pendingVimSelection.current = { value: edit.value, start: edit.caret, end: edit.caret };
+    pendingSelection.current = { value: edit.value, start: edit.caret, end: edit.caret };
     setDraft(edit.value);
   };
 
@@ -655,7 +667,7 @@ export function Composer({
       syncAutocompleteSelection.current({ start: outcome.selectionStart, end: outcome.selectionStart });
       return;
     }
-    pendingVimSelection.current = { value: outcome.value, start: outcome.selectionStart, end: outcome.selectionStart };
+    pendingSelection.current = { value: outcome.value, start: outcome.selectionStart, end: outcome.selectionStart };
     setDraft(outcome.value);
   };
 
@@ -820,7 +832,7 @@ export function Composer({
           // Exactly the token's own bytes, and nothing either side of them: the
           // offsets come from the shared parser that found it.
           const next = `${draft.slice(0, start)}${draft.slice(end)}`;
-          pendingVimSelection.current = { value: next, start, end: start };
+          pendingSelection.current = { value: next, start, end: start };
           setDraft(next);
           inputRef.current?.focus();
         }}
