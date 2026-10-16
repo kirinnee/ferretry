@@ -1,6 +1,5 @@
-import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
-import { LedgerMessage } from './ledger-message.tsx';
+import { LedgerMessage, SendChip, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
 import { ToolGroup } from './tool-group.tsx';
@@ -14,10 +13,8 @@ export interface TranscriptRowProps {
   readonly live?: boolean;
   /** This row is the final block in the transcript. */
   readonly isLast?: boolean;
-  /** The instant the row reads its badges against; injectable for tests. */
-  readonly asOf?: number;
-  /** Offered on a ledger row, and only when a resend is possible at all. */
-  readonly onResend?: (record: LedgerSendRecord) => Promise<boolean>;
+  /** Offered on a ledger row, and only when a retry is possible at all. */
+  readonly onRetry?: SendRetry;
 }
 
 /**
@@ -27,12 +24,12 @@ export interface TranscriptRowProps {
  * renders as the collapsed tool group; attachments remain owned by a later
  * port.
  */
-export function TranscriptRow({ entry, previous, live = false, isLast = false, asOf, onResend }: TranscriptRowProps) {
+export function TranscriptRow({ entry, previous, live = false, isLast = false, onRetry }: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
-        <LedgerMessage asOf={asOf} onResend={onResend} placement={entry.placement} record={entry.ledger} />
+        <LedgerMessage onRetry={onRetry} placement={entry.placement} record={entry.ledger} />
       </div>
     );
   }
@@ -67,6 +64,7 @@ function TranscriptTextRow({
       <header>
         <span>{label}</span>
         {validTimestamp ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleTimeString()}</time> : null}
+        {entry.send === undefined ? null : <SendChip record={entry.send} />}
       </header>
       {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
     </article>

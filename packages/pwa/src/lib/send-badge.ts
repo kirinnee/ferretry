@@ -1,89 +1,86 @@
 import type { SendUnaccountedReason } from '@ferretry/protocol';
-import { isLedgerUnconfirmed, type LedgerSendRecord } from './send-ledger.ts';
+import type { LedgerSendRecord } from './send-ledger.ts';
 
 export interface SendBadge {
   readonly label: string;
   /** Utility classes. Never error-red for an unconfirmed row — see below. */
   readonly tone: string;
-  /** Long-form explanation, used for `title` AND for the screen-reader text, so
-   *  the state is never carried by colour alone. */
+  /** Long-form explanation, used for `title`, the tap-to-read line AND the screen-reader text, so the
+   *  state is never carried by colour alone. */
   readonly detail: string;
 }
 
-const ACCEPTED_TONE = 'border-warn-border bg-warn-bg text-warn';
+const WAITING_TONE = 'border-warn-border bg-warn-bg text-warn';
+const QUIET_TONE = 'border-border bg-surface-2 text-muted';
 
-// UNCONFIRMED IS NOT AN ERROR, AND MUST NOT LOOK LIKE ONE.
-//
-// A red "failed" badge tells the reader the message did not arrive. That is a
-// claim the daemon cannot make: the measured harness dwell between accepting a
-// message and the transcript proving it has a p99 of 4.3 minutes and a maximum
-// of 19.2 minutes, and the timeout sits generously above that — so a row that
-// times out has very often STILL LANDED and we merely lost sight of it. The
-// muted tone plus "may still have landed" wording is the honest rendering, and
-// it is also the actionable one: red invites a resend, which on a message that
-// did arrive means the agent is told the same thing twice.
-const UNACCOUNTED_TONE = 'border-border bg-surface-2 text-muted';
+/**
+ * Why a send settled without proof, in plain words. Each says what is KNOWN — never more.
+ */
+const REASONS: Readonly<Record<SendUnaccountedReason, string>> = {
+  timeout: 'the agent was still holding it after a long wait',
+  session_ended: 'the session ended before it arrived',
+  composer_discarded: 'the agent’s queue let go of it before reading it',
+  transcript_unreadable: 'the agent’s transcript could not be read, so arrival could not be checked',
+  pane_unreadable: 'the agent’s screen could not be read, so arrival could not be checked',
+  not_delivered: 'it never reached the agent',
+};
 
-const UNACCOUNTED_COPY: Readonly<Record<SendUnaccountedReason | 'unknown', string>> = {
-  timeout: 'unconfirmed — this cannot be proved to have reached the agent; it may still have landed',
-  session_ended: 'unconfirmed — the session ended before this was confirmed (kept durably; resend to try again)',
-  composer_discarded:
-    'unconfirmed — the session was interrupted before this was confirmed; it may or may not have been read',
-  unknown: 'unconfirmed — this cannot be proved to have reached the agent; it may still have landed',
+const reasonOf = (record: LedgerSendRecord): string =>
+  record.unaccountedReason === undefined ? 'arrival could not be checked' : REASONS[record.unaccountedReason];
+
+const attempts = (record: LedgerSendRecord): string => {
+  const count = record.attempt ?? 1;
+  return count === 1 ? '1 attempt' : `${count} attempts`;
 };
 
 /**
- * The chip for a durable send row. Labels stay short — they sit inside a row of
- * metadata — while the sentence lives in `detail`.
+ * The chip for a send. Every word is a claim the daemon has PROVEN:
  *
- * ACCEPTED MEANS ONE THING: a durable record was written. That record is
- * appended BEFORE any keystroke reaches the pane, so at that point nothing is
- * known about injection either. Wording like "sent" or "delivered to the pane"
- * overclaims during exactly the window where the uncertainty lives — the same
- * mistake as a green "delivered" on an HTTP 200 — so every branch below stays
- * on this side of the boundary.
+ *   * `sending` — the daemon has it and is checking where it went. Nothing more is known yet.
+ *   * `queued` — the agent's own queue is holding it (its transcript or its screen says so), and it
+ *     will be read when the current turn ends. Never shown for a merely busy agent.
+ *   * `delivered` — the agent's transcript shows the message.
+ *   * `not delivered` — proven absent after every attempt; Retry is safe because it cannot duplicate.
+ *   * `unconfirmed` — could be proven neither way. NOT an error, and never red: it may well have
+ *     landed, and red invites a resend that would make the agent read it twice.
  */
-export const sendBadge = (record: LedgerSendRecord, nowMs: number = Date.now()): SendBadge => {
-  if (isLedgerUnconfirmed(record, nowMs)) {
-    return {
-      label: 'unconfirmed',
-      tone: UNACCOUNTED_TONE,
-      detail: UNACCOUNTED_COPY[record.unaccountedReason ?? 'unknown'] ?? UNACCOUNTED_COPY.unknown,
-    };
-  }
-  if (record.fate === 'delivered') {
+export const sendBadge = (record: LedgerSendRecord): SendBadge => {
+  if (record.fate === 'delivered')
     return {
       label: 'delivered',
       tone: 'border-ok-border bg-ok-bg text-ok',
-      detail: 'the harness transcript confirms this message entered the conversation',
+      detail: 'the agent’s transcript shows this message',
     };
-  }
-  // A held row waits on a human action, not on the harness.
-  if (record.held === true) {
+  if (record.fate === 'timed_out')
+    return {
+      label: 'not delivered',
+      tone: 'border-err-border bg-err-bg text-err',
+      detail: `timed out — ${reasonOf(record)} (${attempts(record)})`,
+    };
+  if (record.fate === 'unaccounted')
+    return {
+      label: 'unconfirmed',
+      tone: QUIET_TONE,
+      detail: `unconfirmed — ${reasonOf(record)}; it may still have landed`,
+    };
+  if (record.held === true)
     return {
       label: 'held for revive',
-      tone: ACCEPTED_TONE,
-      detail: 'kept durably; it will be delivered when this session is explicitly revived',
+      tone: WAITING_TONE,
+      detail: 'kept safely; it will be delivered when this session is revived',
     };
-  }
-  // "queued for next turn" is a claim about the HARNESS's input queue, so it is
-  // only true on the native queue paths — a direct, turn-file or revive send was
-  // never queued in that sense, and saying so would describe a mechanism that
-  // did not happen. And once a consumption OPPORTUNITY has passed (the daemon
-  // stamps `opportunityAt`), even that wording is stale: the next turn came and
-  // went. A badge that ages truthfully is the difference between one a reader
-  // trusts and one they learn to ignore.
-  const nativeQueue = record.path === 'native-inline' || record.path === 'native-file';
-  if (nativeQueue && record.opportunityAt === undefined) {
+  if (record.fate === 'queued')
     return {
-      label: 'queued for next turn',
-      tone: ACCEPTED_TONE,
-      detail: 'accepted and stored durably; it delivers at the next prompt-ready boundary',
+      label: 'queued',
+      tone: WAITING_TONE,
+      detail: 'the agent is holding it in its own queue and will read it when its current turn ends',
     };
-  }
   return {
-    label: 'accepted — awaiting confirmation',
-    tone: ACCEPTED_TONE,
-    detail: 'stored durably; waiting for harness transcript proof',
+    label: 'sending',
+    tone: QUIET_TONE,
+    detail:
+      (record.attempt ?? 1) > 1
+        ? `sending again (${attempts(record)}) — the first try was proven not to have arrived`
+        : 'the daemon has it and is checking that it reached the agent',
   };
 };

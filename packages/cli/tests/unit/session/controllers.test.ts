@@ -1,5 +1,5 @@
-import type { SendResult } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
+import type { SendRecord, SendResult } from '@ferretry/protocol';
 import should from 'should';
 import { AnswerQuestionController } from '../../../src/lib/session/answer-controller.ts';
 import { InterruptSessionController, ResumeSessionController } from '../../../src/lib/session/lifecycle-controllers.ts';
@@ -7,10 +7,18 @@ import { SuggestNamesController } from '../../../src/lib/session/name-controller
 import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
 import { ListSessionsController } from '../../../src/lib/session/ps-controller.ts';
 import { SendMessageController } from '../../../src/lib/session/send-controller.ts';
+import { describeDisposition, describeFate } from '../../../src/lib/session/send-plan.ts';
 import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
 import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
 import { SessionStatusController } from '../../../src/lib/session/status-controller.ts';
-import { attachmentView, capturedPresenter, FakeFiles, RecordingApi } from './controller-doubles.ts';
+import {
+  attachmentView,
+  capturedPresenter,
+  FakeFiles,
+  RecordingApi,
+  SteppedClock,
+  WAIT_CLOCK,
+} from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
 
 const HERE: SessionEnvironment = { cwd: '/work/repo' };
@@ -183,7 +191,7 @@ describe('SendMessageController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new SendMessageController(api, files, presenter, HERE).execute('ses-1', {
+    await new SendMessageController(api, files, presenter, HERE, WAIT_CLOCK).execute('ses-1', {
       message: 'look at this',
       attachmentPaths: ['shot.png'],
     });
@@ -201,7 +209,7 @@ describe('SendMessageController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new SendMessageController(api, files, presenter, HERE).execute('ses-1', {
+    await new SendMessageController(api, files, presenter, HERE, WAIT_CLOCK).execute('ses-1', {
       message: 'heads up',
       messageFile: '/tmp/msg.md',
     });
@@ -217,7 +225,7 @@ describe('SendMessageController', () => {
     const { presenter } = capturedPresenter();
 
     // Act
-    const failure = await new SendMessageController(api, new FakeFiles(), presenter, HERE)
+    const failure = await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK)
       .execute('ses-1', { message: 'and you?', ask: true, attachmentPaths: ['shot.png'] })
       .catch((error: Error) => error);
 
@@ -232,7 +240,7 @@ describe('SendMessageController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE).execute('Hayden', {
+    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE, WAIT_CLOCK).execute('Hayden', {
       message: 'and you?',
       ask: true,
       until: '2h',
@@ -256,7 +264,7 @@ describe('SendMessageController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act — resolving, not rejecting: a script that retried a non-zero exit would send it twice.
-    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE).execute('Hayden', {
+    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE, WAIT_CLOCK).execute('Hayden', {
       message: 'and you?',
       ask: true,
     });
@@ -277,7 +285,7 @@ describe('SendMessageController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE).execute('Hayden', {
+    await new SendMessageController(api, new FakeFiles(), presenter, IN_PANE, WAIT_CLOCK).execute('Hayden', {
       message: 'and you?',
       ask: true,
     });
@@ -293,13 +301,112 @@ describe('SendMessageController', () => {
     const { presenter } = capturedPresenter();
 
     // Act
-    await new SendMessageController(api, new FakeFiles(), presenter, HERE).execute('ses-1', {
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, WAIT_CLOCK).execute('ses-1', {
       message: 'stop',
       now: true,
     });
 
     // Assert
     should(api.calls[0]?.args[1]).containDeep({ now: true });
+  });
+});
+
+describe('SendMessageController --wait', () => {
+  const row = (fate: SendRecord['fate'], extra: Partial<SendRecord> = {}): SendRecord => ({
+    v: 1,
+    sendId: 'req-1',
+    acceptedAt: '2026-08-01T12:00:00.000Z',
+    acceptedTurn: 1,
+    path: 'direct',
+    message: 'hi',
+    attachmentIds: [],
+    fate,
+    ...extra,
+  });
+  const tracked = (disposition: SendResult['disposition'] = 'sent'): SendResult => ({
+    ...sendResult(disposition),
+    sendId: 'req-1',
+    fate: 'accepted',
+  });
+
+  it('should poll the send until it is delivered, and say so', async () => {
+    // Arrange
+    const api = new RecordingApi({ send: tracked(), sendStatus: [row('accepted'), row('queued'), row('delivered')] });
+    const { io, presenter } = capturedPresenter();
+    const clock = new SteppedClock();
+
+    // Act
+    await new SendMessageController(api, new FakeFiles(), presenter, HERE, clock).execute('ses-1', {
+      message: 'hi',
+      wait: true,
+    });
+
+    // Assert
+    should(api.methods()).deepEqual(['send', 'sendStatus', 'sendStatus', 'sendStatus']);
+    should(api.calls[1]?.args).deepEqual(['ses-1', 'req-1']);
+    should(clock.slept).deepEqual([2_000, 2_000]);
+    should(io.err.join('\n')).match(/delivered — the agent’s transcript shows the message/);
+  });
+
+  it('should fail a send proven not delivered, and only report an unconfirmed one', async () => {
+    // Arrange
+    const lost = new RecordingApi({
+      send: tracked(),
+      sendStatus: [row('timed_out', { unaccountedReason: 'not_delivered', attempt: 2 })],
+    });
+    const unsure = new RecordingApi({ send: tracked(), sendStatus: [row('unaccounted')] });
+    const unsureIo = capturedPresenter();
+
+    // Act
+    const failure = await new SendMessageController(
+      lost,
+      new FakeFiles(),
+      capturedPresenter().presenter,
+      HERE,
+      WAIT_CLOCK,
+    )
+      .execute('ses-1', { message: 'hi', wait: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await new SendMessageController(unsure, new FakeFiles(), unsureIo.presenter, HERE, WAIT_CLOCK).execute('ses-1', {
+      message: 'hi',
+      wait: true,
+    });
+
+    // Assert
+    should((failure as Error).message).equal(
+      'not delivered (not delivered) after 2 attempt(s); it is safe to send it again',
+    );
+    should(unsureIo.io.err.join('\n')).match(/unconfirmed \(timeout\) — it may still have landed/);
+  });
+
+  it('should stop waiting after five minutes, and cannot wait on a daemon that names no send', async () => {
+    // Arrange
+    const slow = new RecordingApi({ send: tracked(), sendStatus: [row('queued')] });
+    const slowIo = capturedPresenter();
+    const old = new RecordingApi({ send: sendResult('delivered') });
+    const oldIo = capturedPresenter();
+
+    // Act
+    await new SendMessageController(slow, new FakeFiles(), slowIo.presenter, HERE, new SteppedClock()).execute(
+      'ses-1',
+      { message: 'hi', wait: true },
+    );
+    await new SendMessageController(old, new FakeFiles(), oldIo.presenter, HERE, WAIT_CLOCK).execute('ses-1', {
+      message: 'hi',
+      wait: true,
+    });
+
+    // Assert
+    should(slow.methods().filter(method => method === 'sendStatus')).have.length(151);
+    should(slowIo.io.err.join('\n')).match(
+      /still queued — the agent is holding it until its current turn ends after 5m/,
+    );
+    should(oldIo.io.err.join('\n')).match(/cannot be waited on/);
+    should(describeFate(row('accepted'))).equal('accepted — not yet proven anywhere');
+    should(describeDisposition('sent')).match(/not yet proven queued/);
   });
 });
 

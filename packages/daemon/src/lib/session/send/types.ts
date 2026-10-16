@@ -1,4 +1,11 @@
-import type { SendDisposition, SessionHealth, SessionStatus } from '@ferretry/protocol';
+import type {
+  SendDisposition,
+  SendEvidence,
+  SendQueueProof,
+  SendUnaccountedReason,
+  SessionHealth,
+  SessionStatus,
+} from '@ferretry/protocol';
 import type { SessionId } from '../../session-id.ts';
 
 /**
@@ -48,12 +55,20 @@ export type SendPath =
  * What the daemon KNOWS about a send, as distinct from what it hoped.
  *
  * `accepted` is written before any keystroke, so a crash mid-transport leaves evidence rather than
- * silence. Nothing in this slice ever writes `delivered`: proving consumption means matching the
- * payload against what the harness transcript shows the agent actually received, and that matcher
- * belongs to the monitor loop (survey section F), which does not exist yet. A ledger that marked its
- * own sends delivered would be asserting exactly the thing it cannot observe.
+ * silence. Every later fate is written by the tracker (`tracker.ts`) and ONLY on proof:
+ *
+ *   * `queued` — the harness itself is holding it: a Claude queue record in the transcript, or the
+ *     pane still showing the payload after the queue key. A busy pane alone proves nothing.
+ *   * `delivered` — the message appears as a user turn in the transcript.
+ *   * `timed_out` — proven ABSENT after every attempt: not in the transcript, not held by the
+ *     harness, not in the composer. Only this fate may be re-attempted under the same id freely.
+ *   * `unaccounted` — it could be proven neither way. It may have landed.
+ *   * `withdrawn` — nothing was ever typed; the id may honestly start over.
  */
-export type SendFate = 'accepted' | 'delivered' | 'withdrawn';
+export type SendFate = 'accepted' | 'queued' | 'delivered' | 'unaccounted' | 'timed_out' | 'withdrawn';
+
+/** Who asked for a send, which decides who may retry it: a person by hand, the daemon for an agent. */
+export type SendSenderKind = 'human' | 'agent' | 'daemon';
 
 /** The wire word for each transport path. The only place the two vocabularies meet. */
 const DISPOSITIONS: Readonly<Record<SendPath, SendDisposition>> = {
@@ -65,17 +80,23 @@ const DISPOSITIONS: Readonly<Record<SendPath, SendDisposition>> = {
   'revive-queue': 'queued-for-revive',
 };
 
-/** What the client is told happened, given how the message physically travelled. */
-export function dispositionOf(path: SendPath): SendDisposition {
-  return DISPOSITIONS[path];
+/**
+ * What the client is told happened, given how the message physically travelled.
+ *
+ * A busy-pane send is `queued` ONLY when the harness was proven to be holding it; one that merely went
+ * into a busy pane is `sent`, and the ledger fate says where it settles.
+ */
+export function dispositionOf(path: SendPath, held = true): SendDisposition {
+  const disposition = DISPOSITIONS[path];
+  return disposition === 'queued' && !held ? 'sent' : disposition;
 }
 
 /**
  * One send, durably, from the instant it was accepted.
  *
- * `matchText` is what a future consumption matcher will look for in the transcript — the composer
- * text for a direct send, the turn instruction for a turn-file one. It is recorded now, by the only
- * code that knows which of the two was typed, so the monitor unit does not have to re-derive it.
+ * `matchText` is what the tracker looks for in the transcript — the composer text for a direct send,
+ * the turn instruction for a turn-file one. It is recorded by the only code that knows which of the
+ * two was typed, so the tracker does not have to re-derive it.
  */
 export interface SendRecord {
   /** The caller's idempotency key. A retry with the same one must never become a second message. */
@@ -88,9 +109,11 @@ export interface SendRecord {
   readonly matchText?: string | undefined;
   /** The turn this send STARTS, when it starts one. Absent for a native-queue ride. */
   readonly turn?: number | undefined;
+  readonly attachmentIds?: readonly string[] | undefined;
   /** The sending session, present only for peer-to-peer messages. Its absence means a human sent it. */
   readonly from?: string | undefined;
   readonly fromName?: string | undefined;
+  readonly senderKind?: SendSenderKind | undefined;
   /** The sender is parked on a reply, so the receiver is told the exact command that unblocks them. */
   readonly replyExpected?: boolean | undefined;
   /** The file a file-backed payload was written to, so a failed transport does not lose the text. */
@@ -98,7 +121,44 @@ export interface SendRecord {
   /** Retained for an explicit revive rather than transported now. */
   readonly held?: boolean | undefined;
   readonly fate: SendFate;
+  /** When the current fate was proven. */
+  readonly fateAt?: string | undefined;
+  /** The transcript record a `delivered` fate cites. */
+  readonly evidence?: SendEvidence | undefined;
+  /** Why an `unaccounted` or `timed_out` send settled where it did. */
+  readonly unaccountedReason?: SendUnaccountedReason | undefined;
+  readonly queuedAt?: string | undefined;
+  readonly queueProof?: SendQueueProof | undefined;
+  /** 1 for the first transport; each re-attempt under the same id adds one. */
+  readonly attempt?: number | undefined;
+  readonly attemptAt?: string | undefined;
+  /** An extended re-check instant, written when the harness is still visibly holding the message. */
+  readonly deadlineAt?: string | undefined;
+  /** True only on a `timed_out` send the daemon proved absent and a re-attempt could reach. */
+  readonly retryable?: boolean | undefined;
 }
+
+/** The fields the tracker and a re-attempt may move on an existing record. */
+export type SendSettlement = Partial<
+  Pick<
+    SendRecord,
+    | 'fate'
+    | 'fateAt'
+    | 'evidence'
+    | 'unaccountedReason'
+    | 'queuedAt'
+    | 'queueProof'
+    | 'attempt'
+    | 'attemptAt'
+    | 'deadlineAt'
+    | 'retryable'
+    | 'held'
+    | 'path'
+    | 'matchText'
+    | 'turn'
+    | 'payloadFile'
+  >
+>;
 
 /** What the pane itself shows, independent of what any record claims. */
 export interface SendPaneObservation {
@@ -207,7 +267,17 @@ export interface SendLedger {
    * would invite a duplicate retry into a pane that may already hold the message.
    */
   withdraw(id: SessionId, sendId: string, reason: string): Promise<SendRecord | undefined>;
+  /** Every send this session holds, the latest line for each, oldest acceptance first. */
+  list(id: SessionId): Promise<readonly SendRecord[]>;
+  /**
+   * Appends a new snapshot of an existing send with `patch` applied — a proven fate, a re-attempt, an
+   * extended deadline. A field set to `undefined` is cleared. A withdrawn send is never settled.
+   */
+  settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined>;
 }
+
+/** What a busy-pane transport proved: the harness is HOLDING the text, or the keys merely went in. */
+export type SendQueueOutcome = 'held' | 'unproven';
 
 /** The terminal side of a send. Every address goes through the daemon's own isolated tmux socket. */
 export interface SendTerminal {
@@ -215,11 +285,21 @@ export interface SendTerminal {
   /** Types into a prompt-ready composer and submits, proving the payload left the composer. */
   deliver(id: SessionId, text: string): Promise<void>;
   /** Types into a BUSY composer so the harness holds it until the turn boundary. */
-  queue(id: SessionId, text: string): Promise<void>;
+  queue(id: SessionId, text: string): Promise<SendQueueOutcome>;
   /** Sends the safe stop key, waits for the turn to wind down, and re-reads the pane. */
   stopActiveTurn(id: SessionId): Promise<SendPaneObservation>;
   /** Sends the safe stop key once, with no readiness wait. Exactly one keystroke per call. */
   pressStopKey(id: SessionId): Promise<void>;
+  /**
+   * Whether the pane still shows `text` held — in the composer or the harness's visible queue.
+   * Throws when the pane cannot be read: an unread pane proves nothing either way.
+   */
+  holds(id: SessionId, text: string): Promise<boolean>;
+}
+
+/** Where a send's fate is decided, told each time a transport finishes so it can look. */
+export interface SendTracking {
+  track(id: SessionId): void;
 }
 
 /** Where a tracked send leaves the documents an agent and a supervisor read. */

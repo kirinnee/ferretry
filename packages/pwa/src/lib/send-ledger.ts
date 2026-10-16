@@ -21,7 +21,7 @@
 // ledger — the reader would see no trace of a message that exists. So unknown
 // values degrade field by field, and the row survives.
 
-import type { SendFate, SendPath, SendUnaccountedReason } from '@ferretry/protocol';
+import type { SendFate, SendPath, SendSenderKind, SendUnaccountedReason } from '@ferretry/protocol';
 
 /**
  * Slack when joining a durable row to the optimistic row that caused it. The
@@ -66,6 +66,7 @@ export interface LedgerSendRecord {
   readonly turn?: number;
   readonly from?: string;
   readonly fromName?: string;
+  readonly senderKind?: SendSenderKind;
   readonly replyExpected?: true;
   readonly held?: true;
   readonly withdrawn?: true;
@@ -76,6 +77,12 @@ export interface LedgerSendRecord {
   readonly hardDeadline?: string;
   readonly timeoutFrozenAt?: string;
   readonly evidence?: LedgerSendEvidence;
+  readonly queuedAt?: string;
+  /** 1 for the first transport; each re-attempt under the same id adds one. */
+  readonly attempt?: number;
+  readonly attemptAt?: string;
+  /** True only on a send the daemon PROVED never arrived, so retrying it cannot duplicate it. */
+  readonly retryable?: true;
 }
 
 /**
@@ -133,14 +140,18 @@ export const nextLedgerViewDeadline = (
  * so what a reader sees is always something the daemon confirmed on disk.
  * `send_withdrawn` is included because a synchronous injection failure
  * tombstones the record: the row must retract, and a refresh is what retracts
- * it. The legacy `send_queued`/`send_consumed` pair is deliberately absent —
- * treating those compat emissions as ledger signals would reintroduce a second,
- * disagreeing source.
+ * it. Every fate the daemon's tracker proves — queued, delivered, timed out,
+ * unconfirmed — and every re-attempt or release journals one of these, so a
+ * reader sees a send move the moment the daemon has proof.
  */
 const SEND_LEDGER_EVENTS: ReadonlySet<string> = new Set([
   'control.send_accepted',
+  'control.send_queued',
   'control.send_delivered',
   'control.send_unaccounted',
+  'control.send_timed_out',
+  'control.send_retried',
+  'control.send_released',
   'control.send_withdrawn',
 ]);
 
@@ -151,7 +162,7 @@ const SEND_LEDGER_EVENTS: ReadonlySet<string> = new Set([
  */
 export const isSendLedgerEvent = (event: { readonly type: string }): boolean => SEND_LEDGER_EVENTS.has(event.type);
 
-const FATES: ReadonlySet<string> = new Set<SendFate>(['accepted', 'delivered', 'unaccounted']);
+const FATES: ReadonlySet<string> = new Set<SendFate>(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out']);
 const PATHS: ReadonlySet<string> = new Set<SendPath>([
   'direct',
   'turn-file',
@@ -160,7 +171,15 @@ const PATHS: ReadonlySet<string> = new Set<SendPath>([
   'revive',
   'revive-queue',
 ]);
-const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>(['timeout', 'session_ended', 'composer_discarded']);
+const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
+  'timeout',
+  'session_ended',
+  'composer_discarded',
+  'transcript_unreadable',
+  'pane_unreadable',
+  'not_delivered',
+]);
+const SENDERS: ReadonlySet<string> = new Set<SendSenderKind>(['human', 'agent', 'daemon']);
 
 const str = (value: unknown): string | undefined => (typeof value === 'string' && value.length > 0 ? value : undefined);
 
@@ -232,6 +251,7 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
     ...optional('turn', num(row['turn'])),
     ...optional('from', str(row['from'])),
     ...optional('fromName', str(row['fromName'])),
+    ...optional('senderKind', literal(row['senderKind'], [...SENDERS] as SendSenderKind[])),
     ...(row['replyExpected'] === true ? { replyExpected: true as const } : {}),
     ...(row['held'] === true ? { held: true as const } : {}),
     ...(row['withdrawn'] === true ? { withdrawn: true as const } : {}),
@@ -242,6 +262,10 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
     ...optional('hardDeadline', str(row['hardDeadline'])),
     ...optional('timeoutFrozenAt', str(row['timeoutFrozenAt'])),
     ...optional('evidence', parseEvidence(row['evidence'])),
+    ...optional('queuedAt', str(row['queuedAt'])),
+    ...optional('attempt', num(row['attempt'])),
+    ...optional('attemptAt', str(row['attemptAt'])),
+    ...(row['retryable'] === true ? { retryable: true as const } : {}),
   };
 };
 
@@ -266,10 +290,11 @@ export const parseLedgerSendsResponse = (raw: unknown): LedgerSendRecord[] => {
 
 /**
  * Fate ordering. Within one delivery attempt a send only moves up this ladder:
- * accepted → unaccounted (we gave up looking) → delivered (proof arrived).
- * Nothing legitimately moves down.
+ * accepted → queued (the harness holds it) → unaccounted or timed out (the
+ * daemon settled it unproven) → delivered (proof arrived). Nothing legitimately
+ * moves down within an attempt; a RE-attempt starts the ladder again.
  */
-const FATE_RANK: Record<SendFate, number> = { accepted: 0, unaccounted: 1, delivered: 2 };
+const FATE_RANK: Record<SendFate, number> = { accepted: 0, queued: 1, unaccounted: 2, timed_out: 2, delivered: 3 };
 
 /**
  * Should `incoming` replace `existing` for the same sendId?
@@ -290,6 +315,11 @@ const supersedes = (incoming: LedgerSendRecord, existing: LedgerSendRecord): boo
   const existingAt = Date.parse(existing.acceptedAt);
   if (Number.isFinite(incomingAt) && Number.isFinite(existingAt) && incomingAt !== existingAt)
     return incomingAt > existingAt;
+  // The same send typed again under its own id is a NEWER attempt: it may move
+  // a settled row back to sending, which is the truth about a re-attempt.
+  const incomingAttempt = incoming.attempt ?? 1;
+  const existingAttempt = existing.attempt ?? 1;
+  if (incomingAttempt !== existingAttempt) return incomingAttempt > existingAttempt;
   // Same attempt. A tombstone is sticky: the caller was told synchronously and
   // still holds the message, so only a genuinely newer attempt may undo it.
   if (existing.withdrawn === true && incoming.withdrawn !== true) return false;

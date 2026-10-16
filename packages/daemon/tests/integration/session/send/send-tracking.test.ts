@@ -1,0 +1,368 @@
+import { afterEach, describe, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import should from 'should';
+import { FileSendLedger } from '../../../../src/adapters/index.ts';
+import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import {
+  AgentSendFailureNotifier,
+  defaultSendTrackerSettings,
+  defaultSessionSendSettings,
+  ReviveRefusedForSend,
+  type SendPaneObservation,
+  type SendQueueOutcome,
+  type SendRecord,
+  type SendRepository,
+  type SendTarget,
+  type SendTerminal,
+  SendTracker,
+  SessionSendService,
+} from '../../../../src/lib/session/send/index.ts';
+import {
+  ClaudeObservedInputObserver,
+  CodexObservedInputObserver,
+} from '../../../../src/lib/transcript/observed-input.ts';
+
+/**
+ * The whole chain, end to end, against a FAKE HARNESS: the real send service types into a terminal
+ * that behaves like Claude or Codex — holding text typed mid-turn, writing the records each harness
+ * really writes — and the real tracker, over the real file ledger, decides where every send went.
+ */
+
+const ID = parseSessionId('session-1');
+const SENDER = parseSessionId('session-2');
+const T0 = Date.parse('2026-08-01T12:00:00.000Z');
+
+const homes: string[] = [];
+afterEach(async () => {
+  await Promise.all(homes.splice(0).map(async home => await rm(home, { recursive: true, force: true })));
+});
+
+/** A terminal that behaves like a harness TUI, and writes that harness's transcript records. */
+class FakeHarness implements SendTerminal {
+  readonly transcript: unknown[] = [];
+  readonly typed: string[] = [];
+  busy = false;
+  alive = true;
+  /** The keys go in and nothing happens — the pane repainted, the agent crashed mid-submit. */
+  drops = false;
+  /** What the harness is visibly holding, in its composer or its queue. */
+  private held: string[] = [];
+
+  constructor(
+    private readonly harness: 'claude' | 'codex',
+    private readonly clock: () => string,
+  ) {}
+
+  async observe(): Promise<SendPaneObservation> {
+    return { alive: this.alive, dead: false, promptReady: !this.busy, activeWork: this.busy };
+  }
+
+  async deliver(_id: SessionId, text: string): Promise<void> {
+    this.typed.push(text);
+    if (!this.drops) this.userTurn(text);
+  }
+
+  async queue(_id: SessionId, text: string): Promise<SendQueueOutcome> {
+    this.typed.push(text);
+    if (this.drops) return 'unproven';
+    this.held.push(text);
+    if (this.harness === 'claude')
+      this.transcript.push({ type: 'queue-operation', operation: 'enqueue', timestamp: this.clock(), content: text });
+    return 'held';
+  }
+
+  async stopActiveTurn(): Promise<SendPaneObservation> {
+    return await this.observe();
+  }
+
+  async pressStopKey(): Promise<void> {}
+
+  async holds(_id: SessionId, text: string): Promise<boolean> {
+    return this.held.includes(text);
+  }
+
+  /** The turn ends: the harness submits everything it was holding, in order. */
+  finishTurn(): void {
+    this.busy = false;
+    for (const text of this.held.splice(0)) {
+      if (this.harness === 'claude')
+        this.transcript.push({ type: 'queue-operation', operation: 'dequeue', timestamp: this.clock() });
+      this.userTurn(text);
+    }
+  }
+
+  private userTurn(text: string): void {
+    const index = this.transcript.length;
+    this.transcript.push(
+      this.harness === 'claude'
+        ? { type: 'user', uuid: `u-${index}`, timestamp: this.clock(), message: { role: 'user', content: text } }
+        : {
+            type: 'response_item',
+            timestamp: this.clock(),
+            payload: { type: 'message', id: `c-${index}`, role: 'user', content: [{ type: 'input_text', text }] },
+          },
+    );
+  }
+}
+
+const inline: SerialExecutor = { run: async (_key, work) => await work(), runExclusive: async work => await work() };
+
+class Rig {
+  nowMs = T0;
+  readonly clock: ClockPort = { now: () => new Date(this.nowMs).toISOString() };
+  readonly harness: FakeHarness;
+  readonly sender = new FakeHarness('claude', () => this.clock.now());
+  readonly targets = new Map<SessionId, SendTarget>([
+    [ID, { id: ID, status: 'running', mode: 'auto', turn: 1 }],
+    [SENDER, { id: SENDER, status: 'running', mode: 'auto', turn: 1, teammate: 'hadi' }],
+  ]);
+  readable = true;
+  refuseRevive = false;
+  readonly ledger: FileSendLedger;
+  readonly service: SessionSendService;
+  readonly tracker: SendTracker;
+
+  constructor(harness: 'claude' | 'codex', home: string) {
+    this.harness = new FakeHarness(harness, () => this.clock.now());
+    this.ledger = new FileSendLedger(id => join(home, id), this.clock);
+    const terminals = new Map<SessionId, FakeHarness>([
+      [ID, this.harness],
+      [SENDER, this.sender],
+    ]);
+    const terminal = (id: SessionId): FakeHarness => terminals.get(id) as FakeHarness;
+    const routed: SendTerminal = {
+      observe: async id => await terminal(id).observe(),
+      deliver: async (id, text) => await terminal(id).deliver(id, text),
+      queue: async (id, text) => await terminal(id).queue(id, text),
+      stopActiveTurn: async id => await terminal(id).stopActiveTurn(),
+      pressStopKey: async () => undefined,
+      holds: async (id, text) => await terminal(id).holds(id, text),
+    };
+    const repository: SendRepository = {
+      read: async id => this.targets.get(id),
+      resolveSender: async reference => this.targets.get(reference as SessionId),
+      journal: async () => undefined,
+      transition: async (id, change) => {
+        const next = {
+          ...(this.targets.get(id) as SendTarget),
+          ...(change.turn === undefined ? {} : { turn: change.turn }),
+        };
+        this.targets.set(id, next);
+        return next;
+      },
+    };
+    let service: SessionSendService | undefined;
+    this.tracker = this.trackerOver(repository, routed, () => service as SessionSendService);
+    service = new SessionSendService(
+      {
+        repository,
+        ledger: this.ledger,
+        terminal: routed,
+        turns: {
+          writeTurn: async (_id, turn) => `/state/turns/turn-${turn}.md`,
+          writeQueuedPayload: async (_id, sendId) => `/state/channel/queued-${sendId}.md`,
+          clearMarkers: async () => undefined,
+        },
+        channel: { recordInbound: async () => undefined, recordOutbound: async () => undefined },
+        gate: { launching: () => false, awaitSettled: async () => true },
+        reviver: {
+          revive: async () => {
+            if (this.refuseRevive) throw new ReviveRefusedForSend('a duplicate session holds this checkout');
+          },
+        },
+        peerWaits: { endPeerWait: async () => undefined },
+        serial: inline,
+        clock: this.clock,
+        tracking: this.tracker,
+      },
+      defaultSessionSendSettings,
+    );
+    this.service = service;
+    this.repository = repository;
+    this.routed = routed;
+  }
+
+  readonly repository: SendRepository;
+  readonly routed: SendTerminal;
+
+  /** A tracker over this rig's ledger and harness — a second one is what a restarted daemon builds. */
+  trackerOver(repository: SendRepository, terminal: SendTerminal, service: () => SessionSendService): SendTracker {
+    return new SendTracker(
+      {
+        ledger: this.ledger,
+        evidence: {
+          read: async id => {
+            const harness = id === ID ? this.harness : this.sender;
+            const observer =
+              harness === this.harness && this.harnessKind() === 'codex'
+                ? new CodexObservedInputObserver()
+                : new ClaudeObservedInputObserver();
+            return {
+              readable: this.readable,
+              inputs: harness.transcript.flatMap((record, index) =>
+                observer.observe(record, { source: `/${id}.jsonl`, byteOffset: index, byteLength: 1 }),
+              ),
+            };
+          },
+        },
+        terminal,
+        repository,
+        attempts: { reattempt: async (id, sendId) => await service().reattempt(id, sendId, { by: 'daemon' }) },
+        notifier: new AgentSendFailureNotifier(
+          { send: async request => await service().send(request) },
+          repository,
+          'fy',
+        ),
+        scheduler: { schedule: () => undefined, cancelAll: () => undefined },
+        roster: { sessions: () => [ID, SENDER] },
+        serial: inline,
+        clock: this.clock,
+      },
+      defaultSendTrackerSettings,
+    );
+  }
+
+  private harnessKind(): 'claude' | 'codex' {
+    return (this.harness as unknown as { harness: 'claude' | 'codex' }).harness;
+  }
+
+  async at(ms: number, id: SessionId = ID): Promise<SendRecord> {
+    this.nowMs = T0 + ms;
+    await this.tracker.check(id);
+    return await this.record('send-1', id);
+  }
+
+  async record(sendId: string, id: SessionId = ID): Promise<SendRecord> {
+    return (await this.ledger.list(id)).find(entry => entry.sendId === sendId) as SendRecord;
+  }
+}
+
+async function rig(harness: 'claude' | 'codex'): Promise<Rig> {
+  const home = await mkdtemp(join(tmpdir(), 'ferretry-send-tracking-'));
+  homes.push(home);
+  return new Rig(harness, home);
+}
+
+describe('a send to a busy agent', () => {
+  for (const harness of ['claude', 'codex'] as const) {
+    it(`is queued only on proof, then delivered when ${harness} submits it at the turn boundary`, async () => {
+      const subject = await rig(harness);
+      subject.harness.busy = true;
+
+      const outcome = await subject.service.send({ id: ID, sendId: 'send-1', message: 'also update the docs' });
+      const queued = await subject.at(1_000);
+      const waiting = await subject.at(61_000);
+      subject.harness.finishTurn();
+      const delivered = await subject.at(62_000);
+
+      should(outcome.disposition).equal('queued');
+      should(queued.fate).equal('queued');
+      should(waiting).match({ fate: 'queued', attempt: 1 });
+      should(delivered).match({ fate: 'delivered', attempt: 1 });
+      should(subject.harness.typed).eql(['also update the docs']);
+    });
+  }
+});
+
+describe('a send to an idle agent', () => {
+  for (const harness of ['claude', 'codex'] as const)
+    it(`is delivered once ${harness} records the user turn`, async () => {
+      const subject = await rig(harness);
+
+      const outcome = await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+      const record = await subject.at(2_000);
+
+      should(outcome.disposition).equal('delivered');
+      should(record).match({ fate: 'delivered', evidence: { tier: 'exact-text' } });
+    });
+});
+
+describe('a send that never arrived', () => {
+  it('is retyped once when proven absent, then timed out, and a person’s Retry under the same id lands it', async () => {
+    const subject = await rig('claude');
+    subject.harness.drops = true;
+
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+    const retried = await subject.at(60_000);
+    const timedOut = await subject.at(120_000);
+    subject.harness.drops = false;
+    await subject.service.reattempt(ID, 'send-1', { by: 'person' });
+    const delivered = await subject.at(121_000);
+
+    should(retried).match({ fate: 'accepted', attempt: 2 });
+    should(timedOut).match({ fate: 'timed_out', unaccountedReason: 'not_delivered', retryable: true });
+    should(delivered).match({ fate: 'delivered', attempt: 3 });
+    should(subject.harness.typed).eql(['run the tests', 'run the tests', 'run the tests']);
+  });
+
+  it('is unconfirmed, with its reason, when the transcript cannot be read — and never silently retyped', async () => {
+    const subject = await rig('codex');
+    subject.readable = false;
+
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+    const record = await subject.at(60_000);
+    const refused = await subject.service
+      .reattempt(ID, 'send-1', { by: 'person' })
+      .catch((error: unknown) => (error as Error).message);
+
+    should(record).match({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
+    should(refused).match(/send it again anyway/);
+    should(subject.harness.typed).have.length(1);
+  });
+});
+
+describe('a message held for a revive', () => {
+  it('is delivered exactly once when the session comes back', async () => {
+    const subject = await rig('claude');
+    subject.targets.set(ID, { id: ID, status: 'stopped', mode: 'auto', turn: 1 });
+    subject.refuseRevive = true;
+
+    const outcome = await subject.service.send({ id: ID, sendId: 'send-1', message: 'pick this up when back' });
+    subject.targets.set(ID, { id: ID, status: 'running', mode: 'auto', turn: 1 });
+    const released = [await subject.service.releaseHeld(ID), await subject.service.releaseHeld(ID)];
+    const record = await subject.at(2_000);
+
+    should(outcome.disposition).equal('queued-for-revive');
+    should(released).eql([1, 0]);
+    should(subject.harness.typed).eql(['pick this up when back']);
+    should(record).match({ fate: 'delivered', held: false });
+  });
+});
+
+describe('a daemon restart', () => {
+  it('re-derives an in-flight send from the transcript and re-types nothing', async () => {
+    const subject = await rig('claude');
+    subject.harness.busy = true;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'also update the docs' });
+    subject.harness.finishTurn();
+
+    // A fresh tracker over the same ledger file is exactly what a restarted daemon builds.
+    const restarted = subject.trackerOver(subject.repository, subject.routed, () => subject.service);
+    subject.nowMs = T0 + 600_000;
+    restarted.arm();
+    await Bun.sleep(10);
+
+    should(await subject.record('send-1')).match({ fate: 'delivered', attempt: 1 });
+    should(subject.harness.typed).have.length(1);
+  });
+});
+
+describe('an agent-to-agent send', () => {
+  it('is retried briefly, then the sending agent is told in its own session', async () => {
+    const subject = await rig('codex');
+    subject.harness.drops = true;
+
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'take the auth task', senderReference: SENDER });
+    for (const ms of [15_000, 30_000, 60_000]) should((await subject.at(ms)).fate).equal('accepted');
+    const final = await subject.at(75_000);
+    await subject.at(77_000, SENDER);
+    const notice = await subject.record(`send-failed:${ID}:send-1`, SENDER);
+
+    should(final).match({ fate: 'timed_out', attempt: 4, senderKind: 'agent', from: SENDER });
+    should(subject.harness.typed).have.length(4);
+    should(notice).match({ senderKind: 'daemon', fate: 'delivered' });
+    should(subject.sender.typed[0]).match(/Your message to session-1 \(send send-1\) did not reach it/);
+  });
+});

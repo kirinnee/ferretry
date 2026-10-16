@@ -811,7 +811,10 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
     start: new StartSessionController(api, files, presenter, environment, BINARY_NAME),
     list: new ListSessionsController(api, presenter),
     status: new SessionStatusController(api, presenter),
-    send: new SendMessageController(api, files, presenter, environment),
+    send: new SendMessageController(api, files, presenter, environment, {
+      nowMs: () => Date.now(),
+      sleep: milliseconds => Bun.sleep(milliseconds),
+    }),
     answer: new AnswerQuestionController(api, presenter),
     names: new SuggestNamesController(api, presenter),
     interrupt: new InterruptSessionController(api, presenter),

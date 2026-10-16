@@ -8,6 +8,7 @@ import type {
   PwaConfigView,
   ScratchPlanView,
   ScratchSweepView,
+  SendRecord,
   SendResult,
   SessionAttachTarget,
   SessionView,
@@ -65,6 +66,19 @@ export const sendResult = {
   ...sessionView,
   disposition: 'delivered',
 } satisfies SendResult;
+
+export const sendRecord = {
+  v: 1,
+  sendId: 'send-1',
+  acceptedAt: INSTANT,
+  acceptedTurn: 1,
+  path: 'direct',
+  message: 'hello',
+  attachmentIds: [],
+  fate: 'timed_out',
+  unaccountedReason: 'not_delivered',
+  retryable: true,
+} satisfies SendRecord;
 
 export const taskBoardGrantRequestView = {
   requestId: 'grant-1',

@@ -1,5 +1,6 @@
 import type {
   AttachmentView,
+  SendRecord,
   SendRequest,
   SendResult,
   SessionView,
@@ -35,6 +36,8 @@ export interface ISessionApi {
   suggestNames(count: number): Promise<string[]>;
   start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
   send(id: string, input: SendRequest): Promise<SendResult>;
+  /** Where one send settled — the ledger fate the daemon has proven. */
+  sendStatus(id: string, sendId: string): Promise<SendRecord>;
   answer(id: string, toolUseId: string, labels: string[], other?: string, responses?: string[]): Promise<SessionView>;
   interrupt(id: string): Promise<SessionView>;
   resume(id: string, message?: string): Promise<SessionView>;
@@ -47,6 +50,12 @@ export interface ISessionApi {
 /** Wall-clock port — the liveness ledger renders ages, so the clock is injected, never ambient. */
 export interface IClock {
   nowMs(): number;
+}
+
+/** The clock a `send --wait` polls on, injected so the wait is testable without real time passing. */
+export interface SendWaitClock {
+  nowMs(): number;
+  sleep(milliseconds: number): Promise<void>;
 }
 
 /** Filesystem reads the session commands need: `--prompt-file`, `--message-file`, attachments. */

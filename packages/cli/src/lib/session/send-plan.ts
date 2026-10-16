@@ -1,4 +1,4 @@
-import type { SendDisposition } from '@ferretry/protocol';
+import type { SendDisposition, SendRecord } from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment } from './ports.ts';
 
@@ -61,6 +61,7 @@ export function planSend(flags: SendFlags, environment: SessionEnvironment): Sen
 const DISPOSITION_NOTES: Readonly<Record<SendDisposition, string>> = {
   delivered: 'delivered',
   queued: "queued in the agent's own queue (it auto-submits at the turn boundary)",
+  sent: "typed into the busy agent's prompt; not yet proven queued — the daemon is watching where it lands",
   revived: 'revived the session with the message',
   'queued-for-revive': 'queued durably in the session inbox; an explicit resume remains available',
 };
@@ -88,4 +89,21 @@ export function describePark(input: { disposition: SendDisposition; peer: string
     parked: true,
     note: `parked awaiting a reply from ${input.peer}${deadline} — the daemon wakes this session when the reply arrives`,
   };
+}
+
+/** The fates a `send --wait` stops at: where a send has SETTLED, one way or the other. */
+export const SETTLED_SEND_FATES: ReadonlySet<SendRecord['fate']> = new Set(['delivered', 'timed_out', 'unaccounted']);
+
+/** Where a send settled, in words — and, for the two that did not land, what the sender may do. */
+export function describeFate(record: SendRecord): string {
+  const reason = (record.unaccountedReason ?? 'timeout').replaceAll('_', ' ');
+  const attempts = record.attempt ?? 1;
+  if (record.fate === 'delivered') return 'delivered — the agent’s transcript shows the message';
+  if (record.fate === 'timed_out')
+    return `not delivered (${reason}) after ${attempts} attempt(s); it is safe to send it again`;
+  if (record.fate === 'unaccounted')
+    return `unconfirmed (${reason}) — it may still have landed, so do not resend it blindly`;
+  return record.fate === 'queued'
+    ? 'queued — the agent is holding it until its current turn ends'
+    : 'accepted — not yet proven anywhere';
 }

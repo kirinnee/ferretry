@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   type SessionWorkspaceRefreshEnvironment,
+  sendRetrier,
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
@@ -145,6 +146,44 @@ const environment = (initiallyVisible = true) => {
 };
 
 describe('startSessionWorkspaceRefresh', () => {
+  test('reads the send ledger beside the transcript, keeping the last rows when that read fails', async () => {
+    const browser = environment();
+    const sends: unknown[] = [];
+    let fail = false;
+    const row = {
+      v: 1 as const,
+      sendId: 'send-1',
+      acceptedAt: '2026-07-31T10:00:00.000Z',
+      acceptedTurn: 1,
+      path: 'direct' as const,
+      message: 'hi',
+      attachmentIds: [],
+      fate: 'queued' as const,
+    };
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => '',
+        get: async () => sessionView('s-1'),
+        sends: async () => {
+          if (fail) throw new Error('older daemon');
+          return [row];
+        },
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onSends: rows => sends.push(rows),
+      onError: () => undefined,
+    });
+
+    await control.initial;
+    fail = true;
+    await control.refresh();
+    control.stop();
+
+    expect(sends).toEqual([[row]]);
+  });
   test('loads transcript and session immediately, then clears a previous error', async () => {
     const browser = environment();
     const transcript: unknown[] = [];
@@ -321,5 +360,22 @@ describe('startSessionWorkspaceRefresh', () => {
     await control.initial;
     await control.refresh();
     expect(painted).toEqual([]);
+  });
+});
+
+describe('sendRetrier', () => {
+  test('re-sends under the original id and refreshes, and does nothing without a client', async () => {
+    const calls: unknown[] = [];
+    let refreshed = 0;
+    const retry = sendRetrier(
+      { retrySend: async (...args) => void calls.push(args) as never },
+      's-1',
+      () => (refreshed += 1),
+    );
+
+    expect(await retry({ sendId: 'send-1' }, true)).toBe(true);
+    expect(await sendRetrier(null, 's-1', () => (refreshed += 1))({ sendId: 'send-1' }, false)).toBe(false);
+    expect(calls).toEqual([['s-1', 'send-1', true]]);
+    expect(refreshed).toBe(1);
   });
 });

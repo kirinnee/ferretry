@@ -13,7 +13,14 @@ import { SendMessageController } from '../../../src/lib/session/send-controller.
 import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
 import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
 import { SessionStatusController } from '../../../src/lib/session/status-controller.ts';
-import { attachmentView, type CapturedIo, capturedPresenter, FakeFiles, RecordingApi } from './controller-doubles.ts';
+import {
+  attachmentView,
+  type CapturedIo,
+  capturedPresenter,
+  FakeFiles,
+  RecordingApi,
+  WAIT_CLOCK,
+} from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
 
 const view = sessionView({ teammate: 'Hayden' });
@@ -57,7 +64,7 @@ function harness(
     start: new StartSessionController(api, files, presenter, environment, 'fy'),
     list: new ListSessionsController(api, presenter),
     status: new SessionStatusController(api, presenter),
-    send: new SendMessageController(api, files, presenter, environment),
+    send: new SendMessageController(api, files, presenter, environment, WAIT_CLOCK),
     answer: new AnswerQuestionController(api, presenter),
     names: new SuggestNamesController(api, presenter),
     interrupt: new InterruptSessionController(api, presenter),

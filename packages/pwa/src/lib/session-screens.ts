@@ -35,6 +35,8 @@ export interface TranscriptEntry {
   readonly ledger?: LedgerSendRecord;
   /** Where that attempt sits relative to the loaded transcript. */
   readonly placement?: LedgerBlockPlacement;
+  /** The delivered send a `user` row IS, so the row can wear its chip. */
+  readonly send?: LedgerSendRecord;
   /**
    * Bookkeeping — reasoning, token usage, turn and settings records. Kept, but folded behind
    * "Show details" so the conversation reads as a conversation.

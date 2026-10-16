@@ -206,6 +206,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   },
   {
     method: 'POST',
+    path: '/v1/sessions/:sessionId/sends/:sendId/retry',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'send-retry' },
+  },
+  {
+    method: 'POST',
     path: '/v1/sessions/:sessionId/answer',
     event: 'agent.prompted',
     subject: 'sessionId',

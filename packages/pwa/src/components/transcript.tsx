@@ -5,9 +5,9 @@ import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/c
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
-import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import { detailsLabel, type TranscriptEntry, transcriptIsFollowing, transcriptItems } from '../lib/session-screens.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
+import type { SendRetry } from './ledger-message.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
@@ -17,10 +17,8 @@ export interface TranscriptProps {
   readonly entries: readonly TranscriptEntry[];
   readonly busy?: boolean;
   readonly label?: string;
-  /** The instant ledger rows read their badges against; injectable for tests. */
-  readonly asOf?: number;
-  /** Offered on ledger rows. Absent means resend is not available here. */
-  readonly onResend?: (record: LedgerSendRecord) => Promise<boolean>;
+  /** Offered on ledger rows. Absent means retry is not available here. */
+  readonly onRetry?: SendRetry;
   /** The harness's own live status line while `busy`, when its pane could be read. */
   readonly activity?: PaneActivity | null;
   /** The daemon's activity sentence, shown when the pane said nothing readable. */
@@ -113,8 +111,7 @@ export function Transcript({
   entries,
   busy = false,
   label = 'Transcript',
-  asOf,
-  onResend,
+  onRetry,
   activity = null,
   activityFallback = null,
   detailsShown = false,
@@ -261,12 +258,11 @@ export function Transcript({
               />
             ) : (
               <TranscriptRow
-                asOf={asOf}
                 entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
                 isLast={index === items.length - 1}
                 key={item.entry.id}
                 live={busy}
-                onResend={onResend}
+                onRetry={onRetry}
                 previous={item.previous}
               />
             ),

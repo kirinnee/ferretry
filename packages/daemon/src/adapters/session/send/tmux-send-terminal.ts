@@ -1,6 +1,6 @@
+import type { SendPaneObservation, SendQueueOutcome, SendTerminal } from '../../../lib/session/send/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import type { SendPaneObservation, SendTerminal } from '../../../lib/session/send/types.ts';
-import { paneShowsActiveWork, type TmuxController } from '../../../lib/tmux/index.ts';
+import { composerEvidence, paneShowsActiveWork, type TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
 
@@ -39,8 +39,20 @@ export class TmuxSendTerminal implements SendTerminal {
     await this.delivery.deliver(await this.session(id), text);
   }
 
-  async queue(id: SessionId, text: string): Promise<void> {
-    await this.queueDelivery.queue(await this.session(id), text);
+  async queue(id: SessionId, text: string): Promise<SendQueueOutcome> {
+    return (await this.queueDelivery.queue(await this.session(id), text)) === 'held' ? 'held' : 'unproven';
+  }
+
+  /**
+   * Whether the visible pane still shows the payload — in the composer or the harness's queue.
+   *
+   * A collapsed-paste placeholder counts: a long payload is shown as one, and calling it absent would
+   * license a retype into a composer that already holds the message.
+   */
+  async holds(id: SessionId, text: string): Promise<boolean> {
+    const state = await this.tmux.state(await this.session(id));
+    const seen = composerEvidence(state.visible, text);
+    return seen.chars > 0 || seen.placeholders > 0;
   }
 
   /**

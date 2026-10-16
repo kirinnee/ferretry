@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { PaneQueueError, TmuxPaneQueue } from '../../../src/adapters/index.ts';
-import { TmuxController, type TmuxCommandPort, type TmuxCommandResult } from '../../../src/lib/index.ts';
+import { type TmuxCommandPort, type TmuxCommandResult, TmuxController } from '../../../src/lib/index.ts';
 
 const SESSION = 'fy-session-1';
 
@@ -94,11 +94,29 @@ describe('tmux pane queue', () => {
     const { subject } = queue(pane);
 
     // Act
-    await subject.queue(SESSION, 'read the queued brief');
+    const outcome = await subject.queue(SESSION, 'read the queued brief');
 
     // Assert
+    should(outcome).equal('held');
     should(pane.keysSent()).deepEqual(['Enter']);
     should(pane.queued).be.true();
+  });
+
+  it('should report a pane that is only working as working, never as holding the message', async () => {
+    // Enter took the text and the composer is empty, but the agent is visibly busy. That is a pane
+    // about to consume or queue it — not proof the harness is holding it — so nothing calls it queued.
+    // Arrange
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        const answer = await super.execute(argv);
+        if (argv[0] === 'send-keys' && argv.at(-1) === 'Enter') this.composer = '';
+        return answer;
+      }
+    })(false, true);
+    const { subject } = queue(pane);
+
+    // Act / Assert
+    should(await subject.queue(SESSION, 'read the queued brief')).equal('working');
   });
 
   it('should press the queue key only when the pane asks for it', async () => {

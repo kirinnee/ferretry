@@ -51,6 +51,10 @@ export class FySessionApi implements ISessionApi {
     return (await this.client()).send(id, input);
   }
 
+  async sendStatus(id: string, sendId: string): ReturnType<ISessionApi['sendStatus']> {
+    return (await this.client()).sendStatus(id, sendId);
+  }
+
   async answer(
     id: string,
     toolUseId: string,
