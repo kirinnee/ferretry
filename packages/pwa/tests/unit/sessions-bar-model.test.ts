@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  inSessionsBar,
   isRunning,
   needsYou,
-  RECENTLY_FINISHED_MS,
+  sessionsBarDirectory,
   sessionsBarSubline,
   sessionsBarView,
 } from '../../src/shell/sessions-bar-model.ts';
@@ -11,6 +10,7 @@ import { sessionView } from '../support/sessions.ts';
 
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');
 const ago = (milliseconds: number): string => new Date(NOW - milliseconds).toISOString();
+const DAY = 24 * 60 * 60 * 1000;
 
 describe('who needs the reader', () => {
   test('a session parked on a person, by any of the three ways it can say so', () => {
@@ -40,21 +40,21 @@ describe('who needs the reader', () => {
 });
 
 describe('which sessions the bar lists', () => {
-  test('everything alive, anything finished in the last day, and the open one whatever its age', () => {
-    const alive = sessionView('alive', { state: { lastActivityAt: ago(10 * RECENTLY_FINISHED_MS) } });
-    const fresh = sessionView('fresh', { state: { status: 'completed', lastActivityAt: ago(60_000) } });
-    const old = sessionView('old', { state: { status: 'completed', lastActivityAt: ago(2 * RECENTLY_FINISHED_MS) } });
+  test('every session, however long ago it finished — nothing is cut by age', () => {
+    const alive = sessionView('alive', { state: { lastActivityAt: ago(10 * DAY) } });
+    const old = sessionView('old', { state: { status: 'completed', lastActivityAt: ago(30 * DAY) } });
     const undated = sessionView('undated', {
       config: { updatedAt: undefined as never },
       state: { status: 'stopped', lastActivityAt: undefined as never },
     });
 
-    expect(inSessionsBar(alive, NOW, null)).toBe(true);
-    expect(inSessionsBar(fresh, NOW, null)).toBe(true);
-    expect(inSessionsBar(old, NOW, null)).toBe(false);
-    expect(inSessionsBar(old, NOW, 'old')).toBe(true);
-    // No sign of life at all reads as long ago rather than as now.
-    expect(inSessionsBar(undated, NOW, null)).toBe(false);
+    const view = sessionsBarView([alive, old, undated], [], 'all');
+    expect(view.counts.all).toBe(3);
+    expect(view.groups.flatMap(group => group.rows.map(row => row.config.id)).sort()).toEqual([
+      'alive',
+      'old',
+      'undated',
+    ]);
   });
 
   test('groups by project, newest first, and counts each filter over the same pool', () => {
@@ -65,24 +65,23 @@ describe('which sessions the bar lists', () => {
         state: { status: 'awaiting_user', lastActivityAt: ago(1_000) },
       }),
       sessionView('c', { config: { cwd: '/work/nitroso' }, state: { status: 'waiting', lastActivityAt: ago(2_000) } }),
-      sessionView('gone', { state: { status: 'completed', lastActivityAt: ago(3 * RECENTLY_FINISHED_MS) } }),
+      sessionView('gone', {
+        config: { cwd: '/work/nitroso' },
+        state: { status: 'completed', lastActivityAt: ago(3 * DAY) },
+      }),
     ];
     const projects = [{ name: 'ferretry', path: '/work/ferretry' }];
 
-    const all = sessionsBarView(sessions, projects, 'all', NOW, null);
-    expect(all.counts).toEqual({ all: 3, 'needs-you': 1, running: 1 });
+    const all = sessionsBarView(sessions, projects, 'all');
+    expect(all.counts).toEqual({ all: 4, 'needs-you': 1, running: 1 });
     expect(all.groups.map(group => [group.name, group.rows.map(row => row.config.id)])).toEqual([
       ['ferretry', ['b', 'a']],
-      ['nitroso', ['c']],
+      ['nitroso', ['c', 'gone']],
     ]);
 
-    expect(sessionsBarView(sessions, projects, 'needs-you', NOW, null).groups.map(group => group.name)).toEqual([
-      'ferretry',
-    ]);
+    expect(sessionsBarView(sessions, projects, 'needs-you').groups.map(group => group.name)).toEqual(['ferretry']);
     expect(
-      sessionsBarView(sessions, projects, 'running', NOW, null).groups.flatMap(group =>
-        group.rows.map(row => row.config.id),
-      ),
+      sessionsBarView(sessions, projects, 'running').groups.flatMap(group => group.rows.map(row => row.config.id)),
     ).toEqual(['a']);
   });
 
@@ -90,5 +89,17 @@ describe('which sessions the bar lists', () => {
     expect(sessionsBarSubline(sessionView('a', { config: { label: 'Fix the sign-in' } }))).toBe('Fix the sign-in');
     expect(sessionsBarSubline(sessionView('b', { config: { name: 'Session b' } }))).toBe('Session b');
     expect(sessionsBarSubline(sessionView('c', { config: { name: undefined as never } }))).toBe('/work/c');
+  });
+
+  test('the directory line is the folder, with a home directory written as ~', () => {
+    expect(sessionsBarDirectory(sessionView('a', { config: { cwd: '/home/kirin/Workspace/ferretry' } }))).toBe(
+      '~/Workspace/ferretry',
+    );
+    expect(sessionsBarDirectory(sessionView('b', { config: { cwd: '/Users/erng/code' } }))).toBe('~/code');
+    expect(sessionsBarDirectory(sessionView('c', { config: { cwd: '/home/kirin' } }))).toBe('~');
+    expect(sessionsBarDirectory(sessionView('d', { config: { cwd: '/tmp/wt-session-layout' } }))).toBe(
+      '/tmp/wt-session-layout',
+    );
+    expect(sessionsBarDirectory(sessionView('e', { config: { cwd: '/homestead/kirin' } }))).toBe('/homestead/kirin');
   });
 });

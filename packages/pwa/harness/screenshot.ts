@@ -32,6 +32,7 @@
  *   bun harness/screenshot.ts --pairing-failures-only   # the two pairing failures that are one sentence
  *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
+ *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
 
@@ -43,6 +44,7 @@ import type { Locator, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
+import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -100,6 +102,8 @@ const PROJECTS_FRAMES = ['hub', 'empty', 'loading', 'error', 'refused', 'registe
 const FILES_ONLY = process.argv.includes('--files-only');
 /** Just the two pairing failures whose sentence is the remedy, at both viewports and in both themes. */
 const PAIRING_FAILURES_ONLY = process.argv.includes('--pairing-failures-only');
+/** Just the session page's layout geometry (`session-layout-geometry.ts`), capturing its evidence frames. */
+const SESSION_LAYOUT_ONLY = process.argv.includes('--session-layout-only');
 
 /**
  * Whether this invocation walks the Settings block at all, which decides which tally it owes.
@@ -121,7 +125,8 @@ const WALKS_SETTINGS = !(
   TASK_BOARD_ONLY ||
   PROJECTS_ONLY ||
   PAIRING_FAILURES_ONLY ||
-  MCP_SIGN_IN_ONLY
+  MCP_SIGN_IN_ONLY ||
+  SESSION_LAYOUT_ONLY
 );
 
 /**
@@ -1747,7 +1752,7 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of VIEWPORTS) {
+    for (const viewport of SESSION_LAYOUT_ONLY ? [] : VIEWPORTS) {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -3511,6 +3516,29 @@ try {
         await context.close();
       }
     }
+
+    // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
+    // every theme family. Its own contexts and viewports, so it runs after both viewport passes.
+    const owesSessionLayout = WALKS_SETTINGS || SESSION_LAYOUT_ONLY;
+    const sessionLayoutChecks = owesSessionLayout
+      ? await runSessionLayoutGeometry({
+          browser,
+          rootUrl: server.url.toString(),
+          scheme: SCHEME,
+          phone: PHONE_CONTEXT,
+          fail,
+          ...(SESSION_LAYOUT_ONLY ? { captureDir: outDir, captureFamilies: ['studio', 'neo', 'wayfinding'] } : {}),
+        })
+      : 0;
+    if (owesSessionLayout && sessionLayoutChecks !== SESSION_LAYOUT_GEOMETRY_CHECKS)
+      fail(
+        `the run made ${sessionLayoutChecks} session layout geometry checks instead of the ` +
+          `${SESSION_LAYOUT_GEOMETRY_CHECKS} it owes — a theme family or a mode was skipped`,
+      );
+    if (owesSessionLayout)
+      process.stdout.write(
+        `✅ session layout geometry checks: ${sessionLayoutChecks}/${SESSION_LAYOUT_GEOMETRY_CHECKS} in ${SCHEME}\n`,
+      );
 
     // THE CLOSING LINE, and the only one the CI script insists on. It is reached after both viewports
     // have completed, so a run that died halfway prints nothing here and the job goes red on a

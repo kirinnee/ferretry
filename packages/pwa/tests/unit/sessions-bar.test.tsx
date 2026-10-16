@@ -21,7 +21,12 @@ const SESSIONS = [
     state: { status: 'awaiting_user', lastActivityAt: recent },
   }),
   sessionView('nameless', {
-    config: { teammate: undefined as never, label: undefined as never, cwd: '/work/home-manager' },
+    config: {
+      teammate: undefined as never,
+      label: undefined as never,
+      name: undefined as never,
+      cwd: '/work/home-manager',
+    },
     state: { status: 'waiting', lastActivityAt: recent },
   }),
 ];
@@ -46,7 +51,6 @@ const bar = (props: Partial<BarProps> = {}) => {
         { daemonId: DAEMON, name: 'work-mac' },
         { daemonId: 'beta' as DaemonId, name: 'kirin-box' },
       ]}
-      now={() => NOW}
       onAddMachine={() => calls.push('add-machine')}
       onCollapse={() => calls.push('collapse')}
       onNavigate={to => calls.push(`navigate:${to}`)}
@@ -76,6 +80,11 @@ describe('SessionsBar as a column', () => {
     expect(open.getAttribute('aria-current')).toBe('page');
     expect(open.querySelector('.fy-sbar__name')?.textContent).toBe('Hadi');
     expect(open.querySelector('.fy-sbar__sub')?.textContent).toBe('Fix the stuck sign-in');
+    expect(open.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/ferretry');
+    // A session with no task of its own shows its folder once, not twice.
+    const nameless = must(view.container.querySelector('[data-sbar-session="nameless"]'), 'the nameless session');
+    expect(nameless.querySelector('.fy-sbar__sub')).toBeNull();
+    expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
     expect(view.container.querySelector('[data-sbar-session="maryah-1"] [data-sbar-needs-you]')).not.toBeNull();
     expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-needs-you]')).toBeNull();
     // A session with no callsign and no label falls back to its id rather than an empty row.
@@ -253,7 +262,7 @@ describe('SessionsBar as a rail', () => {
     expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1', 'expand', 'palette']);
   });
 
-  test('draws no expand control where the viewport forces the rail', async () => {
+  test('draws no expand control when its host offers none', async () => {
     const { element } = bar({ presentation: 'rail', sessions: null });
     view = await mount(element);
     expect(view.container.querySelector('[data-sbar-expand]')).toBeNull();

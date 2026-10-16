@@ -478,28 +478,8 @@
   height: 44px;
   width: 44px;
 }
-/* THE CHAT MEASURE, on the transcript's own rows.
- *
- * `styles/index.css` already ships the surface half of this (`.kt-chat-surface
- * [data-chat-width]`), but that only caps the SURFACE. kteam's other half caps
- * the transcript's content box (`.kt-content`), and this port's transcript is
- * `.fy-transcript`, which nothing was capping — so the reader's `balanced` and
- * `readable` choices narrowed nothing on the session page. These three rules
- * are the shipped ones, keyed to this port's class: the default measure applies,
- * and `full`/`balanced` remove it exactly where the source removes it (`full`
- * is uncapped by design; `balanced` caps the surface instead). The composer
- * needs no rule of its own — it is inside the same surface, so both narrow
- * together, which is the whole point of the setting. */
-.kt-chat-surface .fy-transcript-content {
-  margin-inline: auto;
-  width: 100%;
-  max-width: var(--chat-measure-content, 880px);
-}
-.kt-chat-surface[data-chat-width='full'] .fy-transcript-content,
-.kt-chat-surface[data-chat-width='balanced'] .fy-transcript-content {
-  max-width: none;
-}
-
+/* THE CHAT MEASURE lives in `styles/index.css` (`.kt-chat-surface`), beside the composer's half of
+ * it: one owner, so the text column and the composer cannot drift apart. */
 .fy-transcript-shell {
   display: flex;
   flex-direction: column;

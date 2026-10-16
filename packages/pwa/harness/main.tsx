@@ -195,7 +195,7 @@ import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/
 import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
 import { DaemonAttentionClient } from '../src/lib/attention-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
-import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
+import { type ChatWidthPreference, type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
@@ -6991,6 +6991,11 @@ const WORKSPACE_LAYOUTS = (() => {
   return store;
 })();
 const WORKSPACE_ATTENTION = new DaemonAttentionClient();
+/** `?chat-width=readable|balanced|full` picks the conversation measure, as Settings › Appearance does. */
+const WORKSPACE_CHAT_WIDTH: ChatWidthPreference = (() => {
+  const asked = new URLSearchParams(window.location.search).get('chat-width');
+  return asked === 'balanced' || asked === 'full' ? asked : 'readable';
+})();
 
 function SessionWorkspaceHarness() {
   useAppViewport();
@@ -7024,10 +7029,10 @@ function SessionWorkspaceHarness() {
       className={`kt-shell flex overflow-hidden ${layout === 'drawer' ? 'flex-col' : 'flex-row'}`}
       id="harness-session-workspace-page"
     >
-      {layout === 'drawer' ? null : bar(layout === 'rail' ? 'rail' : 'column')}
+      {layout === 'drawer' ? null : bar('column')}
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
-          chatWidth="readable"
+          chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_CLIENT}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}

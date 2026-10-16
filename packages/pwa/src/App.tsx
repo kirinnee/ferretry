@@ -710,7 +710,7 @@ function ShellSessionsBar({
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
-  // A desktop column the reader may fold to a rail; a rail the viewport forces is not theirs to unfold.
+  // The desktop column, folded to its icon rail only when the reader folded it.
   const shape: SessionsBarPresentation = presentation === 'column' && collapsed ? 'rail' : presentation;
   return (
     <SessionsBar
@@ -1799,7 +1799,7 @@ export function AppShell() {
    * WHERE THIS SESSION'S SEARCH IS MOUNTED: in the sessions bar's full column, on a session page. A rail
    * and a phone have no room for it, so there Cmd/Ctrl+K opens the finder instead of focusing nothing.
    */
-  const barSessionSearch = currentSessionScope !== null && layout === 'full' && !sidebarCollapsed;
+  const barSessionSearch = currentSessionScope !== null && layout !== 'drawer' && !sidebarCollapsed;
   const pageKey = routePageKey(effectiveRoute);
   const routeAnnouncer = useRef<HTMLParagraphElement>(null);
   // Seed the previous key during render instead of latching the first effect.
@@ -1900,7 +1900,9 @@ export function AppShell() {
       <SessionSearchProvider connection={connection} focusSignal={sessionSearchFocusSignal} scope={currentSessionScope}>
         <SessionsDrawerContext.Provider value={phone ? openSessionsDrawer : null}>
           <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`}>
-            {phone ? null : sessionsBar(layout === 'rail' ? 'rail' : 'column')}
+            {/* EXPANDED BY DEFAULT at every width above a phone: the column folds to its icon rail only
+                when the reader folds it (remembered per device), never because the window is narrow. */}
+            {phone ? null : sessionsBar('column')}
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* A phone keeps its top bar off the session page only: there the session's own bar
                   carries ☰, and every other page still needs a way to the drawer and the finder. */}

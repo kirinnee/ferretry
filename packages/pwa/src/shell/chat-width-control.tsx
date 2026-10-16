@@ -3,10 +3,15 @@
  *
  * Ported from kteam `ui/src/components/ChatWidthControl.tsx`.
  *
- * Full-bleed is already the persisted default, and all three choices are
- * intentionally identical below the readable cap. Showing their proportions
- * beside the radios is what stops selecting a mode on a phone looking like a
- * dead control — the preview moves even when the conversation cannot.
+ * Three measures for the conversation's TEXT COLUMN — the transcript's messages
+ * and the composer under them, which always share one width and one pair of
+ * edges: Compact (720px), 1200px, and Full (the pane). The pane, its tab strip
+ * and the scroller never narrow. All three are maximums, so in a pane narrower
+ * than a measure they look the same; the preview beside the radios still moves,
+ * which is what stops a mode chosen on a phone looking like a dead control.
+ *
+ * The persisted ids are unchanged (`readable`, `balanced`, `full`), so a choice
+ * made before the measures were retuned keeps its place in the order.
  */
 
 import { useId } from 'react';
@@ -28,37 +33,37 @@ export interface ChatWidthOption {
 export const CHAT_WIDTH_OPTIONS: readonly ChatWidthOption[] = [
   {
     id: 'readable',
-    label: 'Comfortable',
-    description: 'Default. About 75 characters a line, centred.',
+    label: 'Compact',
+    description: 'Default. A 720px column, centred — easiest to read.',
   },
   {
     id: 'balanced',
-    label: 'Wide',
-    description: 'Caps wide conversations at 900px, with room for code and tables.',
+    label: '1200px',
+    description: 'A 1200px column, with room for code and wide tables.',
   },
   {
     id: 'full',
     label: 'Full',
-    description: 'Expands the conversation to the available desktop width.',
+    description: 'The whole width of the conversation pane.',
   },
 ];
 
 const PREVIEW_LABEL: Readonly<Record<ChatWidth, string>> = {
-  readable: 'Comfortable · ~75 characters · default',
-  balanced: 'Wide · 900px max',
+  readable: 'Compact · 720px · default',
+  balanced: '1200px · room for code',
   full: 'Full · the whole pane',
 };
 
 const PREVIEW_WIDTH_CLASS: Readonly<Record<ChatWidth, string>> = {
   full: 'w-full',
-  balanced: 'w-5/6 max-w-[220px]',
-  readable: 'w-2/3 max-w-[180px]',
+  balanced: 'w-3/4',
+  readable: 'w-5/12',
 };
 
 const ACTIVE_EXPLANATION: Readonly<Record<ChatWidth, string>> = {
-  full: 'Full is active: the conversation uses the whole pane.',
-  balanced: 'Wide is active. It keeps wide conversations within 900px without narrowing to Comfortable.',
-  readable: 'Comfortable is active. Wide and Full use extra width in a wider conversation.',
+  full: 'Full is active: messages and the composer use the whole pane.',
+  balanced: '1200px is active: messages and the composer stay within a 1200px column.',
+  readable: 'Compact is active: messages and the composer stay within a 720px column.',
 };
 
 export interface ChatWidthControlProps {
@@ -135,8 +140,8 @@ export function ChatWidthControl({ value, onChange }: ChatWidthControlProps) {
       </div>
 
       <p id={explanationId} aria-live="polite" className="mt-2 text-meta leading-base text-faint">
-        {ACTIVE_EXPLANATION[value]} When the conversation pane is 768px wide or narrower, all three choices look the
-        same.
+        {ACTIVE_EXPLANATION[value]} In a pane narrower than the column — a phone, or beside a split pane — the choices
+        look the same.
       </p>
     </>
   );

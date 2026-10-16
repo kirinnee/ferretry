@@ -1,0 +1,267 @@
+/**
+ * THE SESSION PAGE'S LAYOUT, MEASURED IN A REAL BROWSER — three defects that shipped with every gate
+ * green, each now a geometry assertion rather than a screenshot somebody has to notice:
+ *
+ *   1. CONVERSATION WIDTH (Settings › Appearance). The setting narrows the conversation's text column
+ *      and nothing else: Compact is 720px, 1200px is 1200px, Full is the scroller — each capped by the
+ *      room there is. The composer's column has EXACTLY the text column's left and right edges. Before,
+ *      the setting capped the whole surface, the composer sat a padding and a scrollbar off the text,
+ *      and in a 1150px pane the three modes were almost indistinguishable.
+ *   2. THE TAB STRIP. The strip spans its pane edge to edge, the first tab starts on the pane's left
+ *      edge, every tab shares one top and one bottom (the strip's), and none is scrolled or clipped out
+ *      of the tab list. A negative margin used to drop the selected tab one stroke below its neighbours
+ *      and past a scrollport that clips vertically — "Chat sits offset and clipped" in every theme.
+ *   3. NOTHING RUNS UNDER A PANE. With a split pane and the context rail open in a 1100px window, the
+ *      chat — its text, its composer, its scroller — ends at the agent pane's right edge, and the pane
+ *      itself overflows nothing. A centred surface sized to its content used to stay ~280px wide in a
+ *      237px pane and draw the conversation underneath the terminal beside it.
+ *
+ * Every theme family is measured for the two layout-shape checks (1 at Compact, 2 and 3), because a
+ * family changes strokes, radii, paddings and type — exactly what moves an edge. The width arithmetic
+ * of the other two modes, and the phone, are theme-independent and measured once, in Studio.
+ *
+ * COUNTED AND ASSERTED, like every other tally in `screenshot.ts`: a check that stops being reached
+ * reads exactly like a check that passed, so the run owes `SESSION_LAYOUT_GEOMETRY_CHECKS` of them.
+ */
+
+import { join } from 'node:path';
+import type { Browser, BrowserContextOptions, Page } from 'playwright-core';
+import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
+
+type ChatWidth = 'readable' | 'balanced' | 'full';
+
+/** What each mode caps the text column at. */
+const COLUMN_CAP: Readonly<Record<ChatWidth, number>> = {
+  readable: 720,
+  balanced: 1_200,
+  full: Number.POSITIVE_INFINITY,
+};
+
+/** Sub-pixel rounding between two boxes laid out in one pass. */
+const EPSILON = 1;
+
+/** Per family: Compact at 1440 (width + tabs), and the split at 1100 (overlap + tabs). Plus four in Studio. */
+export const SESSION_LAYOUT_GEOMETRY_CHECKS = THEME_FAMILIES.length * 4 + 4;
+
+const DESKTOP = { width: 1_440, height: 900 } as const;
+/** Wide enough that 1200px and Full are different widths beside the sessions column. */
+const WIDE = { width: 1_920, height: 1_080 } as const;
+/** Where the overlap reproduced: a split pane and the context rail in a window just wide enough for both. */
+const NARROW = { width: 1_100, height: 800 } as const;
+
+export interface SessionLayoutRun {
+  readonly browser: Browser;
+  readonly rootUrl: string;
+  readonly scheme: 'light' | 'dark';
+  /** Applied to every context: the caller's phone emulation, colour scheme and motion. */
+  readonly phone: BrowserContextOptions;
+  readonly fail: (message: string) => never;
+  /** Present: also capture the evidence frames into this directory. */
+  readonly captureDir?: string;
+  /** The families whose frames are captured; every family is still measured. */
+  readonly captureFamilies?: readonly string[];
+}
+
+interface Box {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+  readonly width: number;
+}
+
+interface Reading {
+  readonly pane: Box;
+  readonly strip: Box | null;
+  readonly tablist: (Box & { readonly scrollLeft: number }) | null;
+  readonly tabs: readonly Box[];
+  readonly scroller: Box & { readonly clientWidth: number };
+  readonly column: Box;
+  readonly input: Box;
+  readonly composer: Box | null;
+  readonly next: Box | null;
+  readonly rail: Box | null;
+  readonly paneOverflow: number;
+}
+
+/** Every box the checks read, in one evaluation so they come from one layout. */
+const read = async (page: Page): Promise<Reading> =>
+  await page.evaluate(() => {
+    const box = (element: Element | null) => {
+      if (element === null) return null;
+      const r = element.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width };
+    };
+    const must = (selector: string, root: ParentNode = document) => {
+      const element = root.querySelector(selector);
+      if (element === null) throw new Error(`no ${selector} on the session page`);
+      return element;
+    };
+    const surface = must('.kt-chat-surface');
+    const pane = surface.closest('.fy-ws-pane') ?? must('[data-phone-workspace-body]');
+    const scroller = must('.fy-transcript', surface) as HTMLElement;
+    const tablist = pane.querySelector<HTMLElement>(':scope > .fy-ws-strip .fy-ws-tabs');
+    const split = pane.closest('.fy-ws-split-child') as HTMLElement | null;
+    const neighbour = split?.nextElementSibling?.nextElementSibling ?? null;
+    return {
+      pane: box(pane) as Box,
+      strip: box(pane.querySelector(':scope > .fy-ws-strip')),
+      tablist: tablist === null ? null : { ...(box(tablist) as Box), scrollLeft: tablist.scrollLeft },
+      tabs: [...pane.querySelectorAll(':scope > .fy-ws-strip .fy-ws-tab')].map(tab => box(tab) as Box),
+      scroller: { ...(box(scroller) as Box), clientWidth: scroller.clientWidth },
+      column: box(must('.fy-transcript-content', surface)) as Box,
+      input: box(must('.fy-chat-input__column', surface)) as Box,
+      composer: box(surface.querySelector('[data-session-input] form')),
+      next: neighbour instanceof HTMLElement && !neighbour.hidden ? box(neighbour) : null,
+      rail: box(document.querySelector('[data-context-rail-frame]')),
+      paneOverflow: split === null ? 0 : split.scrollWidth - split.clientWidth,
+    };
+  });
+
+export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<number> {
+  const { browser, rootUrl, scheme } = run;
+  // Annotated, not destructured: a `never` call narrows only through a name with an explicit type.
+  const fail: (message: string) => never = run.fail;
+  let checks = 0;
+  const near = (a: number, b: number, tolerance = EPSILON): boolean => Math.abs(a - b) <= tolerance;
+
+  const open = async (
+    viewport: { readonly width: number; readonly height: number } | 'phone',
+    family: string,
+    query: string,
+    work: (page: Page, where: string) => Promise<void>,
+  ): Promise<void> => {
+    const where = `${family}-${scheme} ${viewport === 'phone' ? 'phone' : `${viewport.width}px`} ?${query}`;
+    const context = await browser.newContext({
+      ...(viewport === 'phone' ? run.phone : { viewport }),
+      colorScheme: scheme,
+      reducedMotion: 'reduce',
+    });
+    try {
+      await context.route('**/*', async route => {
+        if (new URL(route.request().url()).origin !== new URL(rootUrl).origin) await route.abort();
+        else await route.continue();
+      });
+      await context.addInitScript(
+        ([id, mode]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode })),
+        [family, scheme] as const,
+      );
+      const page = await context.newPage();
+      await page.goto(`${rootUrl}?${query}&family=${family}#session-workspace`);
+      await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+      await page.locator('#harness-session-workspace-page .kt-chat-surface').waitFor({ state: 'attached' });
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+        for (const animation of document.getAnimations()) animation.finish();
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      });
+      const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+      if (theme !== `${family}-${scheme}`)
+        fail(`the session layout pass asked for ${family}-${scheme} and got ${theme}`);
+      await work(page, where);
+      const families = run.captureFamilies ?? [];
+      if (run.captureDir !== undefined && families.includes(family)) {
+        const name = `session-layout-${family}-${scheme}-${viewport === 'phone' ? 'phone' : viewport.width}-${query.replaceAll(/[=&]/gu, '-')}.png`;
+        await page.screenshot({ path: join(run.captureDir, name), animations: 'disabled' });
+        process.stdout.write(`📸 session layout ${where} -> ${name}\n`);
+      }
+    } finally {
+      await context.close();
+    }
+  };
+
+  /** 1. The text column is the mode's measure, and the composer's column has its exact edges. */
+  const assertColumn = async (page: Page, where: string, mode: ChatWidth): Promise<void> => {
+    const r = await read(page);
+    const room = r.scroller.clientWidth;
+    const expected = Math.min(COLUMN_CAP[mode], room);
+    if (!near(r.column.width, expected))
+      fail(`${where}: the ${mode} text column is ${r.column.width}px, not ${expected}px (room ${room}px)`);
+    if (!near(r.input.left, r.column.left) || !near(r.input.right, r.column.right))
+      fail(
+        `${where}: the composer column [${r.input.left}, ${r.input.right}] does not share the text column's ` +
+          `edges [${r.column.left}, ${r.column.right}]`,
+      );
+    if (r.composer !== null && (r.composer.left < r.input.left - EPSILON || r.composer.right > r.input.right + EPSILON))
+      fail(`${where}: the composer [${r.composer.left}, ${r.composer.right}] leaves its column`);
+    process.stdout.write(
+      `   session layout ${where}: ${mode} column ${r.column.width.toFixed(0)}px of ${room}px, composer aligned\n`,
+    );
+    checks += 1;
+  };
+
+  /** 2. The strip spans the pane, the first tab sits on its edge, all tabs share one top and bottom. */
+  const assertTabs = async (page: Page, where: string): Promise<void> => {
+    const r = await read(page);
+    const { strip, tablist, tabs } = r;
+    if (strip === null || tablist === null || tabs.length === 0) fail(`${where}: the agent pane has no tab strip`);
+    if (!near(strip.left, r.pane.left, 0.5) || !near(strip.right, r.pane.right, 0.5))
+      fail(`${where}: the tab strip [${strip.left}, ${strip.right}] is not its pane [${r.pane.left}, ${r.pane.right}]`);
+    const first = tabs[0] as Box;
+    if (!near(first.left, r.pane.left, 0.5))
+      fail(`${where}: the first tab starts at ${first.left}px, not on the pane's edge at ${r.pane.left}px`);
+    if (tablist.scrollLeft !== 0) fail(`${where}: the tab list is scrolled ${tablist.scrollLeft}px, clipping Chat`);
+    for (const [index, tab] of tabs.entries()) {
+      if (!near(tab.bottom, strip.bottom, 0.5))
+        fail(`${where}: tab ${index} ends at ${tab.bottom}px, not on the strip's bottom at ${strip.bottom}px`);
+      if (!near(tab.top, first.top, 0.5))
+        fail(`${where}: tab ${index} starts at ${tab.top}px, offset from the first tab's ${first.top}px`);
+      if (tab.left < tablist.left - 0.5 || tab.bottom > tablist.bottom + 0.5)
+        fail(`${where}: tab ${index} is clipped by its tab list`);
+    }
+    checks += 1;
+  };
+
+  /** 3. Beside a split pane and the context rail, nothing of the chat crosses the agent pane's edge. */
+  const assertNoOverlap = async (page: Page, where: string): Promise<void> => {
+    const r = await read(page);
+    if (r.next === null) fail(`${where}: no second pane is open beside the chat`);
+    if (r.rail === null) fail(`${where}: the context rail is not open`);
+    const edge = r.pane.right;
+    if (edge > r.next.left + 0.5) fail(`${where}: the agent pane ends at ${edge}px, inside the next pane`);
+    if (r.next.right > r.rail.left + 0.5) fail(`${where}: the split runs under the context rail`);
+    for (const [name, part] of [
+      ['scroller', r.scroller],
+      ['text column', r.column],
+      ['composer column', r.input],
+      ['composer', r.composer],
+    ] as const)
+      if (part !== null && part.right > edge + 0.5)
+        fail(`${where}: the chat's ${name} ends at ${part.right}px, under the pane beside it (edge ${edge}px)`);
+    if (r.paneOverflow > 0) fail(`${where}: the agent pane overflows sideways by ${r.paneOverflow}px`);
+    process.stdout.write(`   session layout ${where}: chat ends at ${edge}px; next pane at ${r.next.left}px\n`);
+    checks += 1;
+  };
+
+  for (const { id: family } of THEME_FAMILIES) {
+    await open(DESKTOP, family, 'chat-width=readable', async (page, where) => {
+      await assertColumn(page, where, 'readable');
+      await assertTabs(page, where);
+    });
+    await open(NARROW, family, 'split&chat-width=readable', async (page, where) => {
+      await assertNoOverlap(page, where);
+      await assertTabs(page, where);
+    });
+  }
+  for (const mode of ['readable', 'balanced', 'full'] as const)
+    await open(WIDE, 'studio', `chat-width=${mode}`, async (page, where) => await assertColumn(page, where, mode));
+  await open(
+    'phone',
+    'studio',
+    'chat-width=readable',
+    async (page, where) => await assertColumn(page, where, 'readable'),
+  );
+
+  // EVIDENCE ONLY, never counted: the frames a reviewer compares — every width option where they differ,
+  // the split pane with the context rail at a common desktop size, and the phone with a pane open.
+  const nothing = async (): Promise<void> => undefined;
+  if (run.captureDir !== undefined)
+    for (const family of run.captureFamilies ?? []) {
+      for (const mode of ['readable', 'balanced', 'full'] as const)
+        if (family !== 'studio') await open(WIDE, family, `chat-width=${mode}`, nothing);
+      await open(DESKTOP, family, 'split&chat-width=readable', nothing);
+      if (family !== 'studio') await open('phone', family, 'chat-width=readable', nothing);
+      await open('phone', family, 'split&chat-width=readable', nothing);
+    }
+  return checks;
+}

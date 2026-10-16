@@ -37,11 +37,19 @@
 }
 
 /* ---- strip ------------------------------------------------------------ */
+/* THE STRIP SPANS ITS PANE EXACTLY, and its first tab starts ON the pane's left edge.
+   The rule under the tabs is an INSET SHADOW rather than a border, and the selected tab no longer
+   pulls itself over that rule with a negative margin. That margin pushed the selected tab one stroke
+   lower than its neighbours and past the bottom of a scrollport that clips vertically, so Chat read as
+   offset and cut off in every theme with a thick stroke. A parent's inset shadow is painted beneath
+   its descendants, so the selected tab's own background still covers the rule — the folder-tab join —
+   while every tab keeps one bottom edge, the strip's. */
 .fy-ws-strip {
   display: flex;
   flex-shrink: 0;
   align-items: stretch;
-  border-bottom: var(--stroke) solid var(--border);
+  min-width: 0;
+  box-shadow: inset 0 calc(-1 * var(--stroke)) 0 var(--border);
   background: var(--surface-2);
 }
 .fy-ws-tabs {
@@ -50,7 +58,7 @@
   align-items: flex-end;
   gap: 2px;
   min-width: 0;
-  padding: var(--gap-xs) var(--gap-xs) 0;
+  padding: var(--gap-xs) var(--gap-xs) 0 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -80,7 +88,6 @@
   color: var(--fg);
 }
 .fy-ws-tab[aria-selected='true'] {
-  margin-bottom: calc(-1 * var(--stroke));
   border-color: var(--border);
   background: var(--surface);
   color: var(--fg);

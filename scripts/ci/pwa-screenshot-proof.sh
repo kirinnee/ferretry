@@ -119,6 +119,11 @@ for scheme in "${schemes[@]}"; do
   terminal="$(grep '^✅ terminal geometry checks: ' "${log}" || true)"
   [ -z "${terminal}" ] && echo "❌ the ${scheme} run exited 0 without reporting its terminal geometry tally" >&2 && echo "   The harness prints it only once both viewports finish; either the run ended early or the" >&2 && echo "   TERMINAL_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
+  # The session page's layout tally (conversation width, the tab strip, nothing under a split pane, in
+  # every theme family), required for the same reason: each of the three shipped with every gate green.
+  layout="$(grep '^✅ session layout geometry checks: ' "${log}" || true)"
+  [ -z "${layout}" ] && echo "❌ the ${scheme} run exited 0 without reporting its session layout geometry tally" >&2 && echo "   The harness prints it only once the pass finishes; either the run ended early or the" >&2 && echo "   SESSION_LAYOUT_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
+
   # A zero-byte PNG is a capture that failed in a way Playwright did not raise. Cheap to check, and it
   # keeps the artifact honest: a reviewer who opens an empty file learns nothing and blames the viewer.
   empty="$(find packages/pwa/harness/out -maxdepth 1 -name '*.png' -size 0 -print -quit)"

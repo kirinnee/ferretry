@@ -191,6 +191,7 @@ export * from '../hooks/use-account-picker.ts';
 export * from '../hooks/use-active-carrier.ts';
 export * from '../hooks/use-app-viewport.ts';
 export * from '../hooks/use-attention.ts';
+export * from '../hooks/use-chat-scrollbar-gutter.ts';
 export * from '../hooks/use-dashboard-view.ts';
 export * from '../hooks/use-debounce.ts';
 export * from '../hooks/use-density.ts';
