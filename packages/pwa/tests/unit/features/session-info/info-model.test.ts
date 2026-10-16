@@ -6,6 +6,7 @@ import {
   INFO_HINT,
   INFO_TAB_LABEL,
   INFO_TABS,
+  learningLabel,
   lineage,
   loginScope,
   modelFacts,
@@ -194,5 +195,18 @@ describe('lineage', () => {
 
   it('has no children when no sessions were handed in at all', () => {
     expect(lineage(sessionView('solo'), undefined)).toEqual({ parent: null, children: [] });
+  });
+});
+
+describe('learningLabel', () => {
+  it('says what the ferret was told to do, not what it has done', () => {
+    expect(learningLabel(true)).toBe('On · instructed to file lessons');
+    expect(learningLabel(false)).toBe('Off · not instructed');
+  });
+
+  it('explains the row in one line that points at Actions', () => {
+    expect(INFO_HINT.learning).toBe(
+      'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
+    );
   });
 });

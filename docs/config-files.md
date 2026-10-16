@@ -9,17 +9,17 @@ wire).
 
 ## Layout
 
-| File                            | Holds                                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `machine.yaml`                  | Agent permissions, the default runtime, what agents may control, the advanced block                                |
-| `logins/<id>.yaml`              | one login (a credential): `harness`, `store`, `label`, `env`                                                       |
-| `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                     |
-| `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                      |
-| `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                      |
-| `warden.yaml`                   | the Warden: on, rules-only triage and its caps — see [The Warden](#the-warden); the rest default                   |
-| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                         |
-| `voice.yaml`                    | who cleans up dictated text — transcription is chosen per device ([voice.md](voice.md)) and is not configured here |
-| `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))  |
+| File                            | Holds                                                                                                                                                                                               |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `machine.yaml`                  | Agent permissions, the default runtime, what agents may control, the advanced block                                                                                                                 |
+| `logins/<id>.yaml`              | one login (a credential): `harness`, `store`, `label`, `env`                                                                                                                                        |
+| `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                                                                                                      |
+| `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                                                                                                       |
+| `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                                                                                                       |
+| `warden.yaml`                   | the Warden: on, rules-only triage and its caps — see [The Warden](#the-warden); the rest default                                                                                                    |
+| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                          |
+| `voice.yaml`                    | who cleans up dictated text, and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device |
+| `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                   |
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
@@ -158,6 +158,26 @@ accounts:
 and the blessing, joins the queue ahead of the sweep's own flags, and still waits for a slot and counts
 against today's cap. `GET /v1/warden/attention` is the Needs-you feed: the session attention boards, the
 verdicts that ask for you, the flags nothing has judged and the acts held for you.
+
+## Copy and Export
+
+Because the files are the settings, moving settings between machines is moving files — minus secrets, which
+no file holds and no route returns.
+
+- **Copy settings from another machine** (Settings › a machine › Machine › Setup, and New machine setup's
+  _Start from_ step) runs in the browser, which holds both pairings. It reads `warden.yaml`, `learning.yaml`
+  and `voice.yaml` from the source with `GET /v1/config/file` and writes each here with `PUT /v1/config/file`
+  against this machine's current etag, so the loosening rule applies exactly as to any other editor: a copied
+  file that loosens (a Warden that turns on the Jev guard) is written and **held** until the owner confirms
+  it. Profiles, components, runtimes and logins travel as the reviewed `clone.import` change, and agent
+  controls and the default runtime as one `machine.settings` change — `machine.yaml` is not copied whole,
+  because its `advanced` block names this machine's own paths. Before anything is written the preview lists
+  every secret and sign-in the copied settings need (`${secret:NAME}` references, the Jev, Groq or Cerebras key
+  a copied Warden or voice setting spends, a login that arrives empty), each marked when this machine already
+  holds it, with a field to store it through `POST /v1/secrets`.
+- **Export settings** zips every file `GET /v1/config/status` lists, read one by one, under `config/`. A file
+  the daemon refused is **left out and named**: a pasted key is exactly what makes a file invalid, and an
+  invalid file is still on disk as typed.
 
 ## Agents
 

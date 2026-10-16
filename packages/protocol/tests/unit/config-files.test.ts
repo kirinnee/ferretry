@@ -320,6 +320,36 @@ describe('voice.yaml', () => {
     should(actual.success).be.true();
   });
 
+  it('should name the two speech engines a machine can default to', () => {
+    // Assert
+    should([...config.VOICE_ENGINES]).deepEqual(['parakeet', 'browser']);
+  });
+
+  it.each(['parakeet', 'browser'])('should accept defaultEngine %s and keep it', engine => {
+    // Act
+    const actual = config.VoiceConfigSchema.safeParse({ defaultEngine: engine });
+
+    // Assert
+    should(actual.success).be.true();
+    should(actual.data?.defaultEngine).equal(engine);
+  });
+
+  it('should leave defaultEngine unset when the file names none', () => {
+    // Act
+    const actual = config.VoiceConfigSchema.parse({ postProcessing: { provider: 'off' } });
+
+    // Assert
+    should(actual.defaultEngine).be.undefined();
+  });
+
+  it.each(['whisper', '', 'Parakeet'])('should refuse defaultEngine %p', engine => {
+    // Act
+    const actual = config.VoiceConfigSchema.safeParse({ defaultEngine: engine });
+
+    // Assert
+    should(actual.success).be.false();
+  });
+
   it('should refuse provider login with no login, naming the missing key', () => {
     // Act
     const actual = config.VoiceConfigSchema.safeParse({ postProcessing: { provider: 'login' } });
@@ -380,7 +410,13 @@ const cases: SchemaCase[] = [
     value: { enabled: true, failover: { cooldownMinutes: 5 } },
   },
   { name: 'LearningFileSchema', schema: config.LearningFileSchema, value: { batchSize: 3 } },
+  { name: 'VoiceEngineSchema', schema: config.VoiceEngineSchema, value: 'parakeet' },
   { name: 'VoiceConfigSchema', schema: config.VoiceConfigSchema, value: { postProcessing: { provider: 'groq' } } },
+  {
+    name: 'VoiceConfigSchema with a default engine',
+    schema: config.VoiceConfigSchema,
+    value: { defaultEngine: 'browser', postProcessing: { provider: 'off' } },
+  },
   { name: 'ConfigIssueSeveritySchema', schema: config.ConfigIssueSeveritySchema, value: 'warning' },
   { name: 'ConfigIssueSchema', schema: config.ConfigIssueSchema, value: issue },
   {

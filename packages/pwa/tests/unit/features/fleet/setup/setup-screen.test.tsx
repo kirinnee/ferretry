@@ -1,17 +1,24 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import { MachineSetupScreen } from '../../../../../src/features/fleet/setup/setup-screen.tsx';
+import { ONBOARDING_START } from '../../../../../src/features/fleet/setup/onboarding-model.ts';
 import {
+  MACHINE_SETUP_PROGRESS_KEY,
+  readMachineSetupProgress,
   readSetupProgress,
   SETUP_PROGRESS_KEY,
+  writeMachineSetupProgress,
   writeSetupProgress,
 } from '../../../../../src/features/fleet/setup/setup-progress.ts';
+import { MachineSetupScreen } from '../../../../../src/features/fleet/setup/setup-screen.tsx';
+import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
+import { CREDENTIALS, PROFILES, RUNTIMES } from '../account-support.ts';
 import { pairing } from '../shell/machine-support.ts';
-import { FRESH_MACHINE, machineView, runtimes, scan, scriptedClient } from './setup-support.ts';
+import { FRESH_MACHINE, machineView, scan, scriptedClient } from './setup-support.ts';
 
 const studio = pairing('studio', 'studio mac');
+const work = pairing('work', 'work linux');
 
 const memory = () => {
   const values = new Map<string, string>();
@@ -24,16 +31,25 @@ const memory = () => {
 
 const settle = async (): Promise<void> => {
   await interact(async () => {
-    for (let i = 0; i < 30; i += 1) await Promise.resolve();
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
   });
+};
+
+/** The reads the Logins step's list makes, on top of the machine itself. */
+const loginReads = {
+  '/v1/fleet/credentials': CREDENTIALS,
+  '/v1/fleet/runtimes': RUNTIMES,
+  '/v1/fleet/profiles': PROFILES,
 };
 
 const freshClient = (): FleetClient =>
   scriptedClient({
     '/v1/fleet/machine': FRESH_MACHINE,
     '/v1/fleet/setup/scan': scan({ tools: scan().tools }),
-    '/v1/fleet/runtimes': runtimes([]),
+    ...loginReads,
   });
+
+const setUpClient = (): FleetClient => scriptedClient({ '/v1/fleet/machine': machineView(), ...loginReads });
 
 interface Screen {
   readonly view: Mounted;
@@ -42,20 +58,28 @@ interface Screen {
   readonly click: (selector: string) => Promise<void>;
 }
 
+const mounted: Mounted[] = [];
+
+afterEach(async () => {
+  for (const view of mounted.splice(0)) await view.unmount();
+});
+
 const open = async (
   client: FleetClient | (() => Promise<FleetClient>),
   storage: ReturnType<typeof memory> | null = memory(),
+  connections: readonly DaemonConnectionRecord[] = [studio],
 ): Promise<Screen> => {
   const went: string[] = [];
   const view = await mount(
     <MachineSetupScreen
       connection={studio}
-      connections={[studio]}
+      connections={connections}
       createClient={typeof client === 'function' ? client : async () => client}
       onNavigate={to => went.push(to)}
       storage={storage}
     />,
   );
+  mounted.push(view);
   await settle();
   const q = (selector: string) => view.container.querySelector(selector);
   return {
@@ -70,137 +94,163 @@ const open = async (
   };
 };
 
-const step = (screen: Screen): string | null | undefined =>
-  screen.q('[data-first-run-step]')?.getAttribute('data-first-run-step');
+const at = (screen: Screen): string | null | undefined =>
+  screen.q('[data-machine-onboarding]')?.getAttribute('data-onboarding-at');
 
 describe('MachineSetupScreen', () => {
   it('says it is checking the machine until it answers', async () => {
     const screen = await open(() => new Promise<FleetClient>(() => undefined));
     expect(screen.q('[data-setup-message] h1')?.textContent).toBe('Checking studio mac…');
-    await screen.view.unmount();
+    expect(screen.q('[data-machine-onboarding]')).toBeNull();
   });
 
-  it('runs the first run full screen, and Finish later goes back to the machine with the step kept', async () => {
+  it('opens the onboarding on its first real choice, with this machine’s name', async () => {
+    const screen = await open(freshClient());
+    expect(screen.q('[data-machine-setup]')).not.toBeNull();
+    expect(screen.q('[data-machine-onboarding="studio"]')).not.toBeNull();
+    expect(at(screen)).toBe('start');
+    expect(screen.q('#machine-onboarding-title')?.textContent).toBe('Start from…');
+    expect(screen.q('[data-machine-setup] p.kt-label')?.textContent).toContain('studio mac');
+  });
+
+  it('opens the onboarding for a machine that is already set up, with Logins as Import again', async () => {
+    const screen = await open(setUpClient());
+    expect(screen.q('[data-setup-message]')).toBeNull();
+    await interact(() =>
+      (screen.q('[data-onboarding-rail="column"] [data-onboarding-go="logins"]') as HTMLElement).click(),
+    );
+    await settle();
+    expect(at(screen)).toBe('logins');
+    expect(screen.q('[data-setup-section="logins-import"]')).toBeNull();
+    expect(screen.q('[data-setup-section="logins-list"]')).not.toBeNull();
+  });
+
+  it('keeps the rail’s place per daemon in storage, and resumes there', async () => {
     const storage = memory();
     const screen = await open(freshClient(), storage);
-    expect(screen.q('[data-machine-setup]')).not.toBeNull();
-    expect(screen.q('[data-machine-stepper="first-run"]')?.getAttribute('data-presentation')).toBe('screen');
-    expect(step(screen)).toBe('tools');
-    await screen.click('[data-step-next]');
-    expect(step(screen)).toBe('claude');
-    await screen.click('[data-harness-import]');
-    expect(step(screen)).toBe('codex');
-    expect(readSetupProgress(storage, studio.daemonId)).toEqual({
+    await screen.click('[data-onboarding-next]');
+    expect(at(screen)).toBe('logins');
+    expect(readMachineSetupProgress(storage, studio.daemonId)).toEqual({
+      at: 'logins',
+      states: { pair: 'done', start: 'done' },
+      start: 'fresh',
+    });
+    expect(Object.keys(JSON.parse(storage.values.get(MACHINE_SETUP_PROGRESS_KEY) ?? '{}'))).toEqual(['studio']);
+    await screen.view.unmount();
+    mounted.length = 0;
+
+    const again = await open(freshClient(), storage);
+    expect(at(again)).toBe('logins');
+    expect(again.q('[data-onboarding-count]')?.textContent).toBe('2 of 8 set');
+  });
+
+  it('keeps another daemon’s place separate', async () => {
+    const storage = memory();
+    writeMachineSetupProgress(storage, work.daemonId, { ...ONBOARDING_START, at: 'warden' });
+    const screen = await open(freshClient(), storage);
+    expect(at(screen)).toBe('start');
+    expect(readMachineSetupProgress(storage, work.daemonId)?.at).toBe('warden');
+  });
+
+  it('keeps the Logins step’s own first-run progress under its own key', async () => {
+    const storage = memory();
+    writeSetupProgress(storage, studio.daemonId, {
       at: 'codex',
       answers: { choices: { claude: 'import' }, names: {}, make: {}, accepted: [] },
     });
-    await screen.click('[data-stepper-finish-later]');
-    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/runtimes']);
-    await screen.view.unmount();
-
-    // Coming back resumes on that step, with the answer it had.
-    const again = await open(freshClient(), storage);
-    expect(step(again)).toBe('codex');
-    await again.click('[data-stepper-back]');
-    expect(step(again)).toBe('claude');
-    await again.view.unmount();
-  });
-
-  it('starts from the top when the kept step no longer exists, and forgets the progress once done', async () => {
-    const storage = memory();
-    writeSetupProgress(storage, studio.daemonId, {
-      at: 'names',
-      answers: { choices: {}, names: {}, make: {}, accepted: [] },
-    });
     const screen = await open(freshClient(), storage);
-    // Nothing was chosen to import, so there is no Name step to return to.
-    expect(step(screen)).toBe('tools');
-    await screen.click('[data-step-next]');
-    await screen.click('[data-harness-skip]');
-    await screen.click('[data-harness-skip]');
-    expect(screen.q('[data-first-run-result="nothing"]')).not.toBeNull();
-    expect(storage.values.get(SETUP_PROGRESS_KEY)).toBe('{}');
-    await screen.click('[data-first-run-finish]');
-    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/runtimes']);
-    await screen.view.unmount();
-  });
-
-  it('stays on the first run through its import, so Done shows even though the machine is now set up', async () => {
-    // The machine is checked again right after the import, and then answers that it IS set up.
-    let imported = false;
-    const client = scriptedClient({
-      '/v1/fleet/machine': () => (imported ? machineView() : FRESH_MACHINE),
-      '/v1/fleet/setup/scan': scan(),
-      '/v1/fleet/runtimes': runtimes([]),
-      '/v1/fleet/proposals': (call: { body: unknown }) => ({
-        id: 'fy_fprop_abcdefghijklmnopqrstuv',
-        revision: 'absent',
-        change: (call.body as { change: unknown }).change,
-        summary: 'Import this machine’s setup',
-        consequences: [],
-        expiresAt: '2026-10-13T08:15:00.000Z',
-        state: 'pending',
-        preview: { kind: 'executor', executor: 'setup', description: 'Imports Claude Code and Codex.' },
-      }),
-      '/v1/fleet/proposals/fy_fprop_abcdefghijklmnopqrstuv/apply': () => {
-        imported = true;
-        return { outcome: 'executed', executor: 'setup', summary: 'studio mac is ready' };
-      },
-    });
-    const screen = await open(client);
-    await screen.click('[data-step-next]');
-    await screen.click('[data-harness-import]');
-    await screen.click('[data-harness-skip]');
-    expect(step(screen)).toBe('names');
-    await screen.click('[data-change-submit]');
-    expect(imported).toBe(true);
-    expect(step(screen)).toBe('done');
-    expect(screen.q('[data-setup-message]')).toBeNull();
-    await screen.click('[data-first-run-finish]');
-    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/runtimes']);
-    await screen.view.unmount();
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="logins"]');
+    expect(screen.q('[data-first-run-step]')?.getAttribute('data-first-run-step')).toBe('codex');
+    await screen.click('[data-stepper-back]');
+    expect(readSetupProgress(storage, studio.daemonId)?.at).toBe('claude');
+    expect(storage.values.has(SETUP_PROGRESS_KEY)).toBe(true);
+    expect(storage.values.has(MACHINE_SETUP_PROGRESS_KEY)).toBe(true);
   });
 
   it('works without storage: it only cannot resume', async () => {
     const screen = await open(freshClient(), null);
-    expect(step(screen)).toBe('tools');
-    await screen.view.unmount();
+    expect(at(screen)).toBe('start');
+    await screen.click('[data-onboarding-next]');
+    expect(at(screen)).toBe('logins');
   });
 
-  it('says a machine that is already set up is, and offers its sessions or Settings', async () => {
-    const screen = await open(scriptedClient({ '/v1/fleet/machine': machineView() }));
-    expect(screen.q('[data-setup-message] h1')?.textContent).toBe('studio mac is already set up');
-    expect(screen.q('[data-machine-stepper]')).toBeNull();
-    const [sessions, settings] = [
-      ...screen.view.container.querySelectorAll<HTMLButtonElement>('[data-setup-message] button'),
-    ];
-    await interact(() => must(sessions, 'sessions').click());
-    await interact(() => must(settings, 'settings').click());
-    expect(screen.went).toEqual(['/d/studio', '/d/studio/settings#machines/studio%20mac/runtimes']);
-    await screen.view.unmount();
+  it('Finish later goes back to the machine, and the place is kept', async () => {
+    const storage = memory();
+    const screen = await open(freshClient(), storage);
+    await screen.click('[data-onboarding-later-all]');
+    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/machine']);
+    expect(readMachineSetupProgress(storage, studio.daemonId)).toEqual(ONBOARDING_START);
   });
 
-  it('says why it cannot set up a machine that would not share its setup', async () => {
+  it('Finish setup goes to the machine’s sessions and forgets the place', async () => {
+    const storage = memory();
+    const screen = await open(freshClient(), storage);
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="done"]');
+    await screen.click('[data-onboarding-finish]');
+    expect(screen.went).toEqual(['/d/studio']);
+    expect(readMachineSetupProgress(storage, studio.daemonId)).toBeNull();
+  });
+
+  it('offers every OTHER paired machine to clone from, never this one', async () => {
+    const screen = await open(freshClient(), memory(), [studio, work]);
+    await screen.click('[data-setup-choice="clone"] input');
+    expect(screen.q('[data-setup-choice="work"]')).not.toBeNull();
+    expect(screen.q('[data-setup-choice="studio"]')).toBeNull();
+  });
+
+  it('says why it cannot set up a machine that would not share its setup, and Open in Settings goes to it', async () => {
     const screen = await open(
       scriptedClient({ '/v1/fleet/machine': new FyHttpError('older daemon', 404, 'not_found') }),
     );
     expect(screen.q('[data-setup-message] h1')?.textContent).toBe('Can’t set up studio mac here');
     expect(screen.q('[data-setup-message] p')?.textContent).toContain('older Ferretry');
+    expect(screen.q('[data-machine-onboarding]')).toBeNull();
     await screen.click('[data-setup-message] button');
-    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/runtimes']);
-    await screen.view.unmount();
+    expect(screen.went).toEqual(['/d/studio/settings#machines/studio%20mac/machine']);
   });
 
-  it('pauses on a machine that is asleep, and Retry asks it again', async () => {
+  it('still renders the onboarding when the machine is asleep, paused inside the steps that need it', async () => {
     let asked = 0;
     const screen = await open(async () => {
       asked += 1;
       return scriptedClient({});
     });
+    expect(screen.q('[data-setup-message]')).toBeNull();
+    expect(screen.q('[data-machine-onboarding]')).not.toBeNull();
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="logins"]');
     expect(screen.q('[data-stepper-paused]')).not.toBeNull();
     const before = asked;
     await screen.click('[data-stepper-retry]');
     expect(asked).toBeGreaterThan(before);
-    await screen.view.unmount();
+  });
+
+  it('stays mounted, on the same step, when the machine is checked again after a step changes it', async () => {
+    // The machine is checked again right after an import, and answers "checking" first.
+    let imported = false;
+    let release = (): void => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const client = scriptedClient({
+      '/v1/fleet/machine': () => (imported ? machineView() : FRESH_MACHINE),
+      '/v1/fleet/setup/scan': scan({ tools: scan().tools }),
+      ...loginReads,
+    });
+    let held = false;
+    const screen = await open(async () => {
+      if (held) await gate;
+      return client;
+    });
+    expect(at(screen)).toBe('start');
+    await screen.click('[data-onboarding-next]');
+    held = true;
+    imported = true;
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="speedups"]');
+    await screen.click('[data-onboarding-rail="column"] [data-onboarding-go="logins"]');
+    expect(screen.q('[data-setup-message]')).toBeNull();
+    expect(at(screen)).toBe('logins');
+    await interact(() => release());
+    await settle();
+    expect(at(screen)).toBe('logins');
   });
 });

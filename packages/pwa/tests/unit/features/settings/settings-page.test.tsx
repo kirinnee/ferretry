@@ -7,7 +7,7 @@ import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-r
 import type { MachineTabProps, MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../../../../src/features/settings/daemon-settings-frame.tsx';
-import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
+import { SettingsPage, SettingsScope } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
@@ -330,7 +330,7 @@ describe('SettingsPage on a phone: one level per screen', () => {
     // The open section is still what a desktop shows beside the sidebar, and nothing on a phone.
     expect(must(section.parentElement, 'the section column').className).toContain('hidden md:block');
 
-    expect(home.textContent).toContain('This phone');
+    expect(home.textContent).toContain('This device');
     expect(home.textContent).toContain('Machines · 2');
     expect(
       [...home.querySelectorAll('[data-settings-machine]')].map(row => row.getAttribute('data-settings-machine')),
@@ -371,6 +371,67 @@ describe('SettingsPage on a phone: one level per screen', () => {
   });
 });
 
+describe('SettingsScope', () => {
+  const scope = async (element: ReturnType<typeof SettingsScope>): Promise<HTMLElement> => {
+    const view = await mount(element);
+    return must(view.container.querySelector<HTMLElement>('[data-settings-scope]'), 'the scope line');
+  };
+
+  it('says a machine’s settings are its daemon’s, shared by every device paired to it', async () => {
+    const line = await scope(<SettingsScope scope="machine" machineName="Alpha workstation" />);
+    expect(line.getAttribute('data-settings-scope')).toBe('machine');
+    expect(line.textContent).toBe(
+      'This machineAlpha workstation’s daemon settings, shared by every device paired to it.',
+    );
+  });
+
+  it('says the same without a name when none is known', async () => {
+    const line = await scope(<SettingsScope scope="machine" />);
+    expect(line.textContent).toBe('This machineDaemon settings, shared by every device paired to it.');
+  });
+
+  it('says a device’s settings are stored in this browser only and never copied to a machine', async () => {
+    const line = await scope(<SettingsScope scope="device" />);
+    expect(line.getAttribute('data-settings-scope')).toBe('device');
+    expect(line.textContent).toBe('This deviceStored in this browser only, and never copied to another machine.');
+  });
+});
+
+describe('SettingsPage scope lines', () => {
+  it('marks Appearance and Behaviour as this device’s, under the section header', async () => {
+    for (const hash of ['#appearance', '#behaviour']) {
+      window.history.replaceState({}, '', `/d/daemon-alpha/settings${hash}`);
+      const view = await mount(page());
+      const header = must(view.container.querySelector<HTMLElement>('[data-settings-section] header'), 'the header');
+      expect(header.querySelector('[data-settings-scope="device"]')?.textContent).toContain('This device');
+      expect(view.container.querySelector('[data-settings-scope="machine"]')).toBeNull();
+      await view.unmount();
+    }
+  });
+
+  it('marks the Machines section as the routed machine’s, by name, above its surface', async () => {
+    window.history.replaceState({}, '', `/d/daemon-alpha/settings${ALPHA_MACHINE}`);
+    const view = await mount(panelsPage());
+    await settle();
+    const line = must(view.container.querySelector<HTMLElement>('[data-settings-scope="machine"]'), 'the machine line');
+    expect(line.textContent).toContain('Alpha workstation’s daemon settings, shared by every device paired to it.');
+    expect(view.container.querySelector('[data-settings-scope="device"]')).toBeNull();
+    const surface = must(view.container.querySelector('[data-daemon-panel="warden"]'), 'the panels');
+    expect(line.compareDocumentPosition(surface) & Node.DOCUMENT_POSITION_FOLLOWING).toBeGreaterThan(0);
+    await view.unmount();
+  });
+
+  it('says it without a name when the routed daemon is not paired here', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines');
+    const view = await mount(panelsPage({ current: alpha, connections: [beta] }));
+    await settle();
+    expect(view.container.querySelector('[data-settings-scope="machine"]')?.textContent).toContain(
+      'Daemon settings, shared by every device paired to it.',
+    );
+    await view.unmount();
+  });
+});
+
 describe('SettingsPage legacy Daemons addresses', () => {
   it('rewrites #daemons in place to this machine’s Machine tab', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
@@ -400,6 +461,10 @@ describe('SettingsPage legacy Daemons addresses', () => {
     'carrier',
     'host-checks',
     'files',
+    'speedups',
+    'learning',
+    'clone',
+    'export',
   ])('rewrites the old #%s panel anchor to that panel on the Machine tab', async panel => {
     const view = await mount(panelsPage());
     await visit(`#${panel}`);

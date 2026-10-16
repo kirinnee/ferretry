@@ -3,7 +3,8 @@
  *
  * The shell's address is `#machines/<machine>/<tab>`; something the Machine tab opens adds one word:
  * `#machines/<machine>/machine/setup` is the first run (the Runtimes tab links here when a machine
- * is not set up), `/import` is Import again, `/clone` is Clone from another machine, and
+ * is not set up), `/import` is Import again, `/clone` is Copy settings from another machine, `/export`
+ * is Export settings, and
  * `/install-claude` or `/install-codex` installs one tool. Any other word names one of the paired
  * daemon's own panels — `/security`, `/warden`, `/devices` — which used to be a separate Daemons section.
  * The shell ignores the extra word, so it stays on the Machine tab while the tab reads it itself.
@@ -12,7 +13,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { MACHINES_SECTION, type MachineTabId, machineHash } from '../shell/machine-route.ts';
 
-export const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'install-claude', 'install-codex'] as const;
+export const SETTINGS_FLOWS = ['setup', 'import', 'clone', 'export', 'install-claude', 'install-codex'] as const;
 
 export type SettingsFlow = (typeof SETTINGS_FLOWS)[number];
 

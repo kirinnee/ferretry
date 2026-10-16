@@ -26,6 +26,7 @@ import {
   SlidersHorizontal,
   Smartphone,
   Stethoscope,
+  Zap,
 } from 'lucide-react';
 import { type ComponentType, type ReactNode, useMemo } from 'react';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
@@ -92,6 +93,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   files: <FileCode2 size={16} aria-hidden="true" />,
   // What new ferrets are instructed to learn, and each ferret's own switch.
   learning: <GraduationCap size={16} aria-hidden="true" />,
+  // A bolt, because the panel holds the optional keys that make the Warden and dictation faster.
+  speedups: <Zap size={16} aria-hidden="true" />,
 };
 
 /**
@@ -345,7 +348,7 @@ export function DaemonSettingsFrame({
           Connection and security
         </h4>
         <p className="mb-0 mt-0.5 text-meta leading-base text-muted">
-          Shared by every browser paired to {name}; your appearance and behaviour choices stay on this browser.
+          This machine: shared by every device paired to {name}. Appearance and behaviour stay on each device.
         </p>
       </div>
       <ul className="kt-groupcard m-0 list-none p-0" aria-label={`${name} connection and security`}>

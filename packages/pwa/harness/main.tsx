@@ -160,7 +160,6 @@ import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemo
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
-import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.tsx';
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
 import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
@@ -171,6 +170,7 @@ import { SecurityLogSurface } from '../src/features/settings/security-log-settin
 import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
+import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.tsx';
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
 import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from '../src/features/step-up/step-up-dialog.tsx';
@@ -180,12 +180,12 @@ import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
+import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
 import {
   type WardenClientFactory,
   WardenConfigCard,
   WardenConfigSurface,
 } from '../src/features/warden/warden-config-card.tsx';
-import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
 import { WardenOverview } from '../src/features/warden/warden-overview.tsx';
 import { WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
@@ -284,6 +284,7 @@ import {
   LearningSettingsHarness,
   useHarnessLearningActions,
 } from './learning-hub.tsx';
+import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -1216,6 +1217,8 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
         connection={record}
         connections={connections}
         createClient={HARNESS_MACHINE_CLIENT}
+        createPairingClient={HARNESS_PAIRING_CLIENT}
+        voice={HARNESS_PARAKEET_ABSENT}
         storage={storage}
         onNavigate={to => {
           const target = new URL(to, window.location.href);
@@ -1743,6 +1746,9 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   const setUp = connection.daemonId === daemon.daemonId || connection.daemonId === cloneSourceDaemon.daemonId;
   const answer = (path: string, init?: RequestInit): unknown => {
+    // New machine setup and Copy settings: Speed-ups, Warden, Learning, secret names, settings files.
+    const setup = machineSetupAnswer(String(connection.daemonId), setUp, path, init);
+    if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);
@@ -1763,7 +1769,7 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   return {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) =>
       // A profile's Edit as YAML reads its file through the same client, as it does from a real daemon.
-      path.startsWith('/v1/config/')
+      path.startsWith('/v1/config/') && machineSetupAnswer(String(connection.daemonId), setUp, path, init) === undefined
         ? (await HARNESS_CONFIG_FILES_CLIENT(connection)).request(path, schema as never, init)
         : schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
   };
@@ -7650,6 +7656,7 @@ function SessionWorkspaceHarness() {
           chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_PAGE_CLIENT}
           actionContributions={[...WORKSPACE_ACTIONS, ...learningActions.contributions]}
+          infoLearning={learningActions.passiveFor(session.config.id)}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}

@@ -1,7 +1,7 @@
 /**
  * Level two of Settings: which part of Settings is open, in the two forms the approved proposal draws.
  *
- * - DESKTOP — a sidebar list grouped "This browser" (Appearance, Behaviour) and "Machines" (each paired
+ * - DESKTOP — a sidebar list grouped "This device" (Appearance, Behaviour) and "Machines" (each paired
  *   machine by name with a status line, then "Add a machine"). The selected row is a soft filled pill
  *   with its own ink and a thin outline, never a side bar (`.kt-navpill`).
  * - PHONE — the same groups as inset cards on a recessed ground, one level per screen: a row opens its
@@ -58,7 +58,7 @@ export function SettingsSidebar({
     <nav aria-label="Settings" className="flex min-w-0 flex-col gap-3" data-settings-sidebar="">
       <div>
         <p className="kt-navgroup__title m-0" id="settings-group-browser">
-          This browser
+          This device
         </p>
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0" aria-labelledby="settings-group-browser">
           {BROWSER_SECTIONS.map(section => (
@@ -145,7 +145,7 @@ export function SettingsHome({
     <nav aria-label="Settings" className="flex flex-col gap-5 py-2" data-settings-home="">
       <section className="flex flex-col gap-1.5" aria-labelledby="settings-home-browser">
         <h2 id="settings-home-browser" className="kt-navgroup__title m-0 px-1.5 py-0">
-          This phone
+          This device
         </h2>
         <ul className="kt-groupcard m-0 list-none p-0">
           {BROWSER_SECTIONS.map(section => (
@@ -159,7 +159,9 @@ export function SettingsHome({
             </li>
           ))}
         </ul>
-        <p className="m-0 px-1.5 text-meta leading-base text-muted">Only this phone. Your machines aren’t affected.</p>
+        <p className="m-0 px-1.5 text-meta leading-base text-muted">
+          Stored on this device only, never copied to a machine.
+        </p>
       </section>
 
       <section className="flex flex-col gap-1.5" aria-labelledby="settings-home-machines">

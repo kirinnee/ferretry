@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { FyApiClient } from '@ferretry/protocol/client';
 import {
   DictationControl,
   type DictationControlProps,
@@ -7,7 +8,7 @@ import {
 } from '../../src/components/dictation-control.tsx';
 import type { ShortcutHost } from '../../src/hooks/use-dictation-shortcut.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
+import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
@@ -16,6 +17,7 @@ import {
   unsupportedRecognitionProvider,
 } from '../support/browser-recognition.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { settleUntil } from '../support/settle.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'http://127.0.0.1:1', deviceId: 'token-a' });
 
@@ -377,6 +379,81 @@ describe('<DictationControl> names the engine that will listen', () => {
     expect(micButton(view.container).getAttribute('title')).toContain(
       'Choose a voice engine in Settings › Voice first',
     );
+    await view.unmount();
+  });
+});
+
+describe('<DictationControl> machine default engine', () => {
+  const parakeetStore = () => {
+    const voice = { support: { available: true } } as unknown as ParakeetVoice;
+    return { voice, carrier: { fetch: async () => new Response() } } as unknown as AppStore;
+  };
+
+  const machineClient = (text: string, reads: string[]) => async () =>
+    ({
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        reads.push(path);
+        return schema.parse({
+          path: 'voice.yaml',
+          absolutePath: '/state/config/voice.yaml',
+          kind: 'voice',
+          schema: 'voice',
+          exists: true,
+          text,
+          etag: 'etag-voice',
+          state: 'ok',
+          issues: [],
+        });
+      },
+    }) as unknown as FyApiClient;
+
+  const settledTitle = async (container: HTMLElement, wanted: string): Promise<string> => {
+    await settleUntil(
+      () => (micButton(container).getAttribute('title') ?? '').includes(wanted),
+      `the mic title to name "${wanted}"`,
+      interact,
+    );
+    return micButton(container).getAttribute('title') ?? '';
+  };
+
+  it("dictates with the machine's default engine when this device has picked none", async () => {
+    const reads: string[] = [];
+    const view = await mount(
+      <StoreProvider store={parakeetStore()}>
+        <DaemonClientProvider client={machineClient('defaultEngine: parakeet\n', reads)}>
+          <DictationControl {...controlProps({ settings: settingsWith({ engine: null }) })} />
+        </DaemonClientProvider>
+      </StoreProvider>,
+    );
+    expect(await settledTitle(view.container, 'Parakeet transcribes on this device')).not.toContain('Choose a voice');
+    expect(reads).toEqual(['/v1/config/file?path=voice.yaml']);
+    await view.unmount();
+  });
+
+  it('still asks for a choice when the machine names no default', async () => {
+    const reads: string[] = [];
+    const view = await mount(
+      <DaemonClientProvider client={machineClient('postProcessing:\n  provider: off\n', reads)}>
+        <DictationControl {...controlProps({ settings: settingsWith({ engine: null }) })} />
+      </DaemonClientProvider>,
+    );
+    await settleUntil(() => reads.length === 1, "the machine's voice.yaml to be read", interact);
+    expect(micButton(view.container).getAttribute('title')).toContain(
+      'Choose a voice engine in Settings › Voice first',
+    );
+    await view.unmount();
+  });
+
+  it("never reads the machine's default once this device has picked an engine", async () => {
+    const reads: string[] = [];
+    const view = await mount(
+      <DaemonClientProvider client={machineClient('defaultEngine: parakeet\n', reads)}>
+        <DictationControl {...controlProps({ settings: settingsWith({ engine: 'browser' }) })} />
+      </DaemonClientProvider>,
+    );
+    await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
+    expect(reads).toEqual([]);
+    expect(micButton(view.container).getAttribute('title')).not.toContain('Parakeet');
     await view.unmount();
   });
 });

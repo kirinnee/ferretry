@@ -1494,14 +1494,16 @@ body {
   font-size: var(--text-xs);
   font-weight: var(--weight-normal);
 }
-.kt-navpill[aria-current='page'] {
+.kt-navpill[aria-current='page'],
+.kt-navpill[aria-current='step'] {
   border-color: var(--nav-sel-edge, var(--accent-border));
   background: var(--nav-sel-bg, var(--accent-soft));
   box-shadow: var(--nav-sel-shadow, none);
   color: var(--nav-sel-fg, var(--accent));
   font-weight: var(--weight-strong);
 }
-.kt-navpill[aria-current='page'] .kt-navpill__sub {
+.kt-navpill[aria-current='page'] .kt-navpill__sub,
+.kt-navpill[aria-current='step'] .kt-navpill__sub {
   color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));
 }
 .kt-navpill--add {
