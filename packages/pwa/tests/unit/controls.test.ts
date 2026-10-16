@@ -194,7 +194,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
   });
 
   it('reads the phone send key, Show details and motion, defaulting anything unreadable', () => {
-    const read = (device: Record<string, unknown>) => parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device;
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device;
     should(read({ composerPhoneEnterKey: 'send' }).composerPhoneEnterKey).equal('send');
     should(read({ composerPhoneEnterKey: 'newline' }).composerPhoneEnterKey).equal('newline');
     should(read({ composerPhoneEnterKey: 'toggle' }).composerPhoneEnterKey).be.null();

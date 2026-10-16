@@ -34,7 +34,9 @@ function ChoiceGroup<Value extends string>({
         <label
           className={cn(
             'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-            choice.value === selected ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
+            choice.value === selected
+              ? 'border-accent bg-accent-soft'
+              : 'border-border bg-surface-2 hover:border-accent',
           )}
           key={choice.value}
         >
@@ -91,5 +93,7 @@ export function MotionSetting({
   readonly motion: MotionPreference;
   readonly onChange: (motion: MotionPreference) => void;
 }) {
-  return <ChoiceGroup choices={MOTION} legend="Motion" name="appearance-motion" onSelect={onChange} selected={motion} />;
+  return (
+    <ChoiceGroup choices={MOTION} legend="Motion" name="appearance-motion" onSelect={onChange} selected={motion} />
+  );
 }

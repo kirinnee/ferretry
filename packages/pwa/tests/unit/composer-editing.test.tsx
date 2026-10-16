@@ -70,7 +70,11 @@ const mountComposer = (draft: string) => {
     />,
   );
   const textarea = () => view.root.findByType('textarea');
-  run(() => textarea().props.onChange({ currentTarget: { value: draft, selectionStart: draft.length, selectionEnd: draft.length } }));
+  run(() =>
+    textarea().props.onChange({
+      currentTarget: { value: draft, selectionStart: draft.length, selectionEnd: draft.length },
+    }),
+  );
   const key = (init: Record<string, unknown>, field?: { selectionStart: number; selectionEnd: number }) => {
     let prevented = false;
     run(() =>

@@ -66,7 +66,8 @@ describe('MarkdownComposerSettings', () => {
     withBrowser(storage => {
       writeMdComposePref('on');
       const renderer = render(surface());
-      const styles = () => renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-editor-style');
+      const styles = () =>
+        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-editor-style');
 
       expect(styles().map(style => [style.props.value, style.props.checked])).toEqual([
         ['on', true],

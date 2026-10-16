@@ -42,7 +42,10 @@ describe('conversation and motion settings', () => {
     expect(options.map(option => option.props.checked)).toEqual([true, false]);
     for (const option of options) run(() => option.props.onChange());
     expect(changes).toEqual([false, true]);
-    expect(radios(render(<ShowDetailsSetting onChange={() => {}} showDetails />), 'conversation-show-details')[1]?.props.checked).toBe(true);
+    expect(
+      radios(render(<ShowDetailsSetting onChange={() => {}} showDetails />), 'conversation-show-details')[1]?.props
+        .checked,
+    ).toBe(true);
   });
 
   test('motion follows the system unless reduced is chosen', () => {

@@ -62,7 +62,9 @@ function SendKeyGroup({
             key={option.id}
             className={cn(
               'flex min-h-[52px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors has-[:focus-visible]:outline-focus has-[:focus-visible]:outline-offset-focus',
-              checked ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg hover:border-accent',
+              checked
+                ? 'border-accent bg-accent-soft text-accent'
+                : 'border-border bg-surface-2 text-fg hover:border-accent',
             )}
           >
             <input

@@ -11,13 +11,7 @@ import {
   composerEnterHint,
   shiftedComposerEnterAction,
 } from '../lib/composer-keybinding.ts';
-import {
-  continueList,
-  type DraftEdit,
-  insideCodeBlock,
-  toggleWrap,
-  wrapMarkerFor,
-} from '../lib/composer-editing.ts';
+import { continueList, type DraftEdit, insideCodeBlock, toggleWrap, wrapMarkerFor } from '../lib/composer-editing.ts';
 import { initialVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
@@ -764,10 +758,7 @@ export function Composer({
                 }
               }
               const enterSends = readInputModality().enterSends;
-              const action = composerEnterAction(
-                enterSends ? enterKeyPreference : phoneEnterKeyPreference,
-                enterSends,
-              );
+              const action = composerEnterAction(enterSends ? enterKeyPreference : phoneEnterKeyPreference, enterSends);
               const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
               if (!send) return;
               event.preventDefault();
