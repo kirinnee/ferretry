@@ -868,6 +868,49 @@ describe('materialiseFleet', () => {
       ]);
     });
 
+    it('should run one Claude and one Codex runtime off one dual login, each on its own half', () => {
+      // Arrange — docs/provider-presets.md § One login, both CLIs: one secret, two runtimes
+      const model = modelOf({
+        credentials: {
+          glm: {
+            harness: 'claude',
+            store: 'environment',
+            claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+            codex: {
+              env: { OPENROUTER_API_KEY: '${secret:S}' },
+              codexProvider: {
+                id: 'openrouter',
+                name: 'OpenRouter',
+                keyVariable: 'OPENROUTER_API_KEY',
+                baseUrl: 'https://openrouter.ai/api/v1',
+              },
+            },
+          },
+        },
+        runtimes: {
+          'claude-default': { credential: 'glm', profile: 'default', harness: 'claude' },
+          'codex-default': { credential: 'glm', profile: 'default', harness: 'codex' },
+        },
+      });
+
+      // Act
+      const result = plan(model);
+
+      // Assert — each runtime's wrapper and home carry only its own half
+      const claudeWrapper = wrapperOf(result, 'claude-default');
+      should(claudeWrapper).containEql('${ANTHROPIC_AUTH_TOKEN:?ferretry: ANTHROPIC_AUTH_TOKEN is not set');
+      should(claudeWrapper).not.containEql('OPENROUTER_API_KEY');
+      should(claudeWrapper).endWith(`exec claude '--model' 'claude-opus-5-5' "$@"\n`);
+
+      const codexWrapper = wrapperOf(result, 'codex-default');
+      should(codexWrapper).containEql('${OPENROUTER_API_KEY:?ferretry: OPENROUTER_API_KEY is not set');
+      should(codexWrapper).not.containEql('ANTHROPIC_AUTH_TOKEN');
+      should(codexWrapper).containEql('model_provider="openrouter"');
+
+      should(result.manifest.accounts.map(account => account.kind)).deepEqual(['claude', 'codex']);
+      should(result.manifest.accounts.every(account => account.available)).be.true();
+    });
+
     it('should refuse a hand-built model whose runtime names a profile that does not exist', () => {
       // Arrange: the schema refuses this, so only a model built without parsing can get here.
       const model = {

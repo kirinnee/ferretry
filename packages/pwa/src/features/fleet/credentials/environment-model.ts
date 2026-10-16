@@ -17,28 +17,40 @@ import type {
 } from '@ferretry/protocol';
 import type { HarnessKind } from './credentials-model.ts';
 
-/** The preset groups, in the order the select lists them. */
-export const PRESET_GROUPS: readonly { readonly harness: HarnessKind; readonly label: string }[] = [
-  { harness: 'claude', label: 'Claude Code' },
-  { harness: 'codex', label: 'Codex' },
-];
+/** One CLI a preset has a half for, and whether that half is offered here. */
+export type PresetHalf = NonNullable<FleetProviderPresetView['halves']>[number];
 
-/** The presets of one harness, in the daemon's order. */
-export const presetsOf = (
-  presets: readonly FleetProviderPresetView[],
-  harness: HarnessKind,
-): readonly FleetProviderPresetView[] => presets.filter(preset => preset.harness === harness);
+/** Every half of a preset. A daemon that predates halves sends none: the preset's one CLI is its half. */
+export const presetHalves = (preset: FleetProviderPresetView): readonly PresetHalf[] =>
+  preset.halves ?? [{ harness: preset.harness, offered: preset.offered, models: preset.models }];
 
-/** The first preset that may add a login, for a harness when one is fixed. */
-export const firstOffered = (
+/** The CLIs a login made from this preset drives: every offered half, Claude Code first. None when not offered. */
+export const offeredHarnesses = (preset: FleetProviderPresetView): readonly HarnessKind[] =>
+  preset.offered.available
+    ? presetHalves(preset)
+        .filter(half => half.offered.available)
+        .map(half => half.harness)
+    : [];
+
+/** What a preset's scope chip says: its offered halves, or — when none is — the CLI it is for. */
+export const presetScope = (preset: FleetProviderPresetView): readonly HarnessKind[] => {
+  const offered = offeredHarnesses(preset);
+  return offered.length === 0 ? [preset.harness] : offered;
+};
+
+/**
+ * The presets to offer, in the daemon's order. Opened for one CLI (from Add a runtime), only the ones
+ * with an offered half for it — the login still gets every half the preset offers.
+ */
+export const presetsFor = (
   presets: readonly FleetProviderPresetView[],
   harness?: HarnessKind,
-): FleetProviderPresetView | undefined =>
-  presets.find(preset => preset.offered.available && (harness === undefined || preset.harness === harness));
+): readonly FleetProviderPresetView[] =>
+  harness === undefined ? presets : presets.filter(preset => offeredHarnesses(preset).includes(harness));
 
-/** One select option's words: a preset that is not offered says why. */
-export const presetOptionLabel = (preset: FleetProviderPresetView): string =>
-  preset.offered.available ? preset.label : `${preset.label} — not offered: ${preset.offered.reason}`;
+/** The `credential.add` CLI: the first offered half (the login gets the rest), else the preset's own. */
+export const loginHarness = (preset: FleetProviderPresetView): HarnessKind =>
+  offeredHarnesses(preset)[0] ?? preset.harness;
 
 /** What a person is filling in: each variable's value, or the secret name it is stored under. */
 export interface EnvironmentDraft {
@@ -78,12 +90,13 @@ export const secretRef = (name: string): string => `\${secret:${name}}`;
 
 /**
  * Why the draft cannot be added yet, or `null`. Names the first thing to fix. A required plain value may
- * be empty only where the preset means it to be (`allowEmpty`, as `ANTHROPIC_API_KEY: ""`).
+ * be empty only where the preset means it to be (`allowEmpty`, as `ANTHROPIC_API_KEY: ""`). `ready` is
+ * every secret name the store holds or that was pasted to be stored on Add.
  */
 export const environmentDraftProblem = (
   preset: FleetProviderPresetView,
   draft: EnvironmentDraft,
-  stored: ReadonlySet<string>,
+  ready: ReadonlySet<string>,
 ): string | null => {
   if (!/^[a-z0-9][a-z0-9-]*$/u.test(draft.name)) return 'Name it with lowercase letters, digits and dashes.';
   for (const variable of preset.variables) {
@@ -93,14 +106,17 @@ export const environmentDraftProblem = (
       continue;
     }
     const secret = draft.secrets[variable.name] ?? '';
-    if (variable.required && !stored.has(secret)) return `Store ${secret} first.`;
+    if (variable.required && !ready.has(secret)) return `Paste ${secret}.`;
   }
   if (preset.cloudCredential !== undefined && draft.cloudCredential.trim() === '')
     return 'Fill in the cloud credential reference.';
   return null;
 };
 
-/** The reviewed change that adds the login. An optional variable left empty is left out. */
+/**
+ * The reviewed change that adds the login: ONE flat set of every half's variables, so a preset with two
+ * offered halves makes one login that drives both. An optional variable left empty is left out.
+ */
 export const environmentChange = (
   preset: FleetProviderPresetView,
   draft: EnvironmentDraft,
@@ -121,7 +137,7 @@ export const environmentChange = (
   return {
     kind: 'credential.add',
     id: draft.name,
-    harness: preset.harness,
+    harness: loginHarness(preset),
     store: 'environment',
     preset: preset.id,
     env,

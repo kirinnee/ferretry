@@ -236,6 +236,8 @@ export interface FakeAnswers {
   check: () => FleetCredentialView;
   test: () => FleetCredentialTestResult;
   presets: () => FleetProviderPresetCatalog;
+  secretNames: () => ReadonlySet<string>;
+  putSecret: () => void;
   stage: (change: FleetAccountChange) => FleetAccountChangeView;
   apply: () => FleetAccountChangeOutcome;
   scan: () => FleetSetupScan;
@@ -268,6 +270,8 @@ class FakeGateway implements IAccountGateway {
         at: LATER,
       }),
       presets: () => ({ presets: [] }),
+      secretNames: () => new Set<string>(),
+      putSecret: () => undefined,
       stage: change => changeView(change),
       apply: () => committed(),
       scan: () => scan(),
@@ -317,6 +321,12 @@ class FakeGateway implements IAccountGateway {
   }
   presets() {
     return this.#record('presets', [], this.answers.presets);
+  }
+  secretNames() {
+    return this.#record('secretNames', [], this.answers.secretNames);
+  }
+  putSecret(name: string, value: string) {
+    return this.#record('putSecret', [name, value], this.answers.putSecret);
   }
   stage(change: FleetAccountChange) {
     return this.#record('stage', [change], () => this.answers.stage(change));
@@ -380,15 +390,24 @@ class FakeOutput {
   }
 }
 
-/** Scripted answers, in order; every question is recorded. */
+/** Scripted answers, in order; every question is recorded — visible and hidden ones separately. */
 class FakePrompt {
   readonly questions: string[] = [];
+  readonly hiddenQuestions: string[] = [];
 
-  constructor(private readonly answers: string[] = []) {}
+  constructor(
+    private readonly answers: string[] = [],
+    private readonly hiddenAnswers: string[] = [],
+  ) {}
 
   async ask(message: string): Promise<string> {
     this.questions.push(message);
     return this.answers.shift() ?? '';
+  }
+
+  async askHidden(message: string): Promise<string> {
+    this.hiddenQuestions.push(message);
+    return this.hiddenAnswers.shift() ?? '';
   }
 }
 
@@ -406,14 +425,19 @@ export function fakeWorld(
   options: {
     gateway?: Partial<FakeAnswers>;
     answers?: string[];
+    hiddenAnswers?: string[];
     interactive?: boolean;
     files?: Record<string, string>;
     now?: () => number;
+    /** `fy login add --from-env` reads this (docs/provider-presets.md). Default: nothing set. */
+    env?: Record<string, string | undefined>;
+    /** What a one-click add reads off stdin when exactly one secret is missing off a terminal. */
+    secretValue?: string;
   } = {},
 ): FakeWorld {
   const gateway = new FakeGateway(options.gateway);
   const out = new FakeOutput();
-  const prompt = new FakePrompt(options.answers);
+  const prompt = new FakePrompt(options.answers, options.hiddenAnswers);
   const files = new Map(Object.entries(options.files ?? {}));
   const slept: number[] = [];
   const deps: AccountCommandDeps = {
@@ -431,6 +455,11 @@ export function fakeWorld(
       slept.push(milliseconds);
     },
     now: options.now ?? (() => Date.parse(AT)),
+    env: options.env ?? {},
+    readSecretValue: async () => {
+      if (options.secretValue === undefined) throw new Error('no secret value is on stdin for this test');
+      return options.secretValue;
+    },
   };
   return { deps, gateway, out, prompt, files, slept };
 }

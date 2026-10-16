@@ -63,7 +63,7 @@ function LoginKindChoice({
         {(
           [
             ['signin', 'Sign in', 'OAuth or a device code; the CLI keeps the login.'],
-            ['environment', 'Environment', 'A provider preset: base URL, key, models — GLM, DeepSeek, Bedrock…'],
+            ['environment', 'Environment', 'A provider and its key — GLM, DeepSeek, OpenRouter, Bedrock…'],
           ] as const
         ).map(([value, title, sub]) => (
           <label

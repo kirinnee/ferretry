@@ -759,3 +759,126 @@ describe('CredentialSchema — environment logins (docs/provider-presets.md)', (
     );
   });
 });
+
+describe('CredentialSchema — halves (docs/provider-presets.md § One login, both CLIs)', () => {
+  const env = (credential: Record<string, unknown>) =>
+    messagesOf(documentWith({ credentials: { 'claude-you': credential } }));
+
+  it('should accept a login with a claude half and a codex half, harness naming one of them', () => {
+    should(
+      env({
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+        codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
+      }),
+    ).deepEqual([]);
+  });
+
+  it('should refuse a harness that names neither of the login’s halves', () => {
+    should(
+      env({
+        harness: 'codex',
+        store: 'environment',
+        claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+      }),
+    ).matchAny(/"harness: codex" must name one of this login's halves \(claude\)/u);
+  });
+
+  it('should refuse a top-level codexProvider on a halved login', () => {
+    should(
+      env({
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { A: '1' } },
+        codexProvider: { id: 'ollama' },
+      }),
+    ).matchAny(/"codexProvider" goes inside "codex:" when the login has halves/u);
+  });
+
+  it('should refuse a codexProvider placed in the claude half', () => {
+    should(
+      env({
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { A: '1' }, codexProvider: { id: 'ollama' } },
+      }),
+    ).matchAny(/"codexProvider" points Codex at a model provider — it goes in "codex:", not "claude:"/u);
+  });
+
+  it('should refuse a halved login whose codex provider’s key variable is not set in the codex half', () => {
+    should(
+      env({
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { A: '1' } },
+        codex: {
+          env: { OTHER: '1' },
+          codexProvider: {
+            id: 'kimi',
+            name: 'Kimi',
+            keyVariable: 'KIMI_API_KEY',
+            baseUrl: 'https://api.moonshot.ai/v1',
+          },
+        },
+      }),
+    ).matchAny(/sends its key from KIMI_API_KEY, so "env" must set KIMI_API_KEY/u);
+  });
+
+  it('should require a halved login to say which variables authenticate it, across every half', () => {
+    should(env({ harness: 'claude', store: 'environment', claude: {}, codex: {} })).matchAny(
+      /must say which variables authenticate it/u,
+    );
+  });
+
+  it('should accept a halved login whose shared cloud credential variable is not repeated in a half', () => {
+    should(
+      env({
+        harness: 'claude',
+        store: 'environment',
+        env: { CLAUDE_CODE_USE_BEDROCK: '1' },
+        cloudCredential: 'aws-profile:acme',
+        claude: { env: { A: '1' } },
+      }),
+    ).deepEqual([]);
+  });
+});
+
+describe('RuntimeSchema.harness (docs/provider-presets.md § One login, both CLIs)', () => {
+  const dualDocument = (runtime: Record<string, unknown>) =>
+    documentWith({
+      credentials: {
+        glm: {
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+          codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
+        },
+      },
+      runtimes: { 'claude-default': { credential: 'glm', profile: 'default', ...runtime } },
+    });
+
+  it('should accept a runtime naming the half of a dual login it runs', () => {
+    should(messagesOf(dualDocument({ harness: 'codex' }))).deepEqual([]);
+  });
+
+  it('should refuse a runtime naming a half its login does not drive', () => {
+    should(
+      messagesOf(
+        documentWith({
+          runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', harness: 'codex' } },
+        }),
+      ),
+    ).deepEqual([
+      'runtimes.claude-default.harness: runtime "claude-default" runs codex, but login "claude-you" drives only claude',
+    ]);
+  });
+
+  it('should default a runtime with no harness to its login’s own', () => {
+    should(parseAccountModel(dualDocument({})).runtimes['claude-default']).deepEqual({
+      credential: 'glm',
+      profile: 'default',
+      agent: false,
+    });
+  });
+});

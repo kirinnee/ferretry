@@ -29,3 +29,6 @@ quota:
   source: transcript-pricing
   note: Azure reports quota in the portal only, so cost is counted from the transcript.
 pricing: openai
+detect:
+  hosts: [openai.azure.com]
+  variables: [AZURE_OPENAI_*]

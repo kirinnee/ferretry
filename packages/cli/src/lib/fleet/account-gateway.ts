@@ -40,6 +40,8 @@ import {
   HarnessLoginSubmissionSchema,
   HarnessLoginSubmitRequestSchema,
 } from '@ferretry/protocol';
+import { ProtocolSecretGateway } from '../secrets/gateway.ts';
+import type { ISecretGateway } from '../secrets/ports.ts';
 import type { AccountHarness, IAccountGateway } from './account-ports.ts';
 import type { FleetApiClient } from './ports.ts';
 
@@ -70,7 +72,12 @@ const segment = (value: string): string => encodeURIComponent(value);
  * daemon governs a caller by how it arrived, and a caller on this machine is ungoverned.
  */
 export class ProtocolAccountGateway implements IAccountGateway {
-  constructor(private readonly client: FleetApiClient) {}
+  /** The secret store, through the very same client: one daemon, one session, two surfaces over it. */
+  private readonly secrets: ISecretGateway;
+
+  constructor(private readonly client: FleetApiClient) {
+    this.secrets = new ProtocolSecretGateway(this.client);
+  }
 
   async machine(): Promise<FleetMachineView> {
     return await this.client.request(FLEET_MACHINE_PATH, FleetMachineViewSchema);
@@ -110,6 +117,15 @@ export class ProtocolAccountGateway implements IAccountGateway {
 
   async presets(): Promise<FleetProviderPresetCatalog> {
     return await this.client.request(FLEET_PRESETS_PATH, FleetProviderPresetCatalogSchema, GET);
+  }
+
+  async secretNames(): Promise<ReadonlySet<string>> {
+    const list = await this.secrets.list();
+    return new Set(list.health === 'damaged' ? [] : list.secrets.map(entry => entry.name));
+  }
+
+  async putSecret(name: string, value: string): Promise<void> {
+    await this.secrets.put(name, value);
   }
 
   async stage(change: FleetAccountChange): Promise<FleetAccountChangeView> {

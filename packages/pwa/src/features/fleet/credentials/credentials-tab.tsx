@@ -28,10 +28,11 @@ import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
   credentialEmail,
   credentialExplanation,
+  credentialGroups,
+  credentialHarnesses,
   credentialName,
-  credentialsOf,
   credentialUse,
-  HARNESSES,
+  harnessesName,
   hasSharedEmails,
   plural,
   signedInSentence,
@@ -85,7 +86,7 @@ export function CredentialBadges({ credential }: { readonly credential: FleetCre
   const slot = slotBadge(credential);
   return (
     <span className="flex min-w-0 flex-wrap gap-1" data-credential-badges="">
-      <LoginScopeChip harness={credential.harness} />
+      <LoginScopeChip harnesses={credentialHarnesses(credential)} />
       {credential.environment === undefined ? null : (
         <Badge tone="accent" className="max-w-full !whitespace-normal" data-credential-environment-chip="">
           {environmentChip(credential.environment)}
@@ -193,7 +194,7 @@ function CredentialPage({
           Credentials
         </Button>
         <h3 className="m-0 mt-2 font-display text-title font-semibold tracking-display text-fg">
-          {HARNESS_NAMES[credential.harness]} login
+          {harnessesName(credentialHarnesses(credential))} login
         </h3>
         <p className="m-0 mt-1 break-all font-mono text-cell text-muted">{credentialName(credential)}</p>
         <div className="mt-2">
@@ -544,26 +545,22 @@ export function CredentialsTab({
               Add a login
             </Button>
           </div>
-          {HARNESSES.map(harness => {
-            const list = credentialsOf(data.credentials, harness);
-            if (list.length === 0) return null;
-            return (
-              <div key={harness} data-credentials-group={harness}>
-                <h4 className="m-0 text-meta font-semibold uppercase text-muted">{HARNESS_NAMES[harness]}</h4>
-                <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
-                  {list.map(item => (
-                    <li key={item.id}>
-                      <CredentialRow
-                        credential={item}
-                        href={machineDetailHash(machineName, 'credentials', item.id)}
-                        now={now()}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
+          {credentialGroups(data.credentials).map(group => (
+            <div key={group.scope} data-credentials-group={group.scope}>
+              <h4 className="m-0 text-meta font-semibold uppercase text-muted">{group.title}</h4>
+              <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+                {group.credentials.map(item => (
+                  <li key={item.id}>
+                    <CredentialRow
+                      credential={item}
+                      href={machineDetailHash(machineName, 'credentials', item.id)}
+                      now={now()}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
           {hasSharedEmails(data.credentials) ? (
             <p className="m-0 text-cell leading-base text-muted" data-credentials-labels-hint="">
               Two logins share an email, so each has a label you chose. Change a label from the login’s page.

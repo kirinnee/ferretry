@@ -22,7 +22,14 @@ import { ComponentBadges } from '../components/catalog-ui.tsx';
 import { HARNESS_NAMES, profileScopeBadge } from '../components/component-model.ts';
 import { ADD_LOGIN_FLOW_KIND, AddLoginStep, addLoginFlowInput } from '../credentials/add-login.tsx';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
-import { credentialEmail, HARNESSES, type HarnessKind, plural } from '../credentials/credentials-model.ts';
+import {
+  credentialEmail,
+  credentialHarnesses,
+  HARNESSES,
+  type HarnessKind,
+  harnessesName,
+  plural,
+} from '../credentials/credentials-model.ts';
 import { LoginScopeChip } from '../credentials/login-scope-chip.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
@@ -39,8 +46,10 @@ import {
 import type { MachineData } from './machine-data.ts';
 import {
   harnessInstalled,
+  profileFit,
   profileSummary,
   profilesFitFirst,
+  runsHarness,
   runtimeNameProblem,
   sameLoginAndProfile,
   suggestedRuntimeName,
@@ -97,6 +106,8 @@ export interface AddRuntimeDraft {
   readonly made: string | null;
   /** The harness a "Sign in to …" button opened Add a login for. */
   readonly loginHarness: HarnessKind | null;
+  /** **Runs**: the CLI the person chose for a login that drives both. `null`: not chosen. */
+  readonly runs: HarnessKind | null;
 }
 
 export const EMPTY_ADD_RUNTIME: AddRuntimeDraft = {
@@ -107,6 +118,7 @@ export const EMPTY_ADD_RUNTIME: AddRuntimeDraft = {
   addAnother: false,
   made: null,
   loginHarness: null,
+  runs: null,
 };
 
 export interface AddRuntimeProps {
@@ -232,7 +244,11 @@ export function AddRuntime({
   const credentials = data.credentials.credentials;
   const runtimes = data.runtimes.runtimes;
   const credential = credentials.find(candidate => candidate.id === draft.credentialId);
-  const harness = credential?.harness;
+  // A login that drives both CLIs runs the one chosen under Runs, else the one its profile is scoped to.
+  const harnesses = credential === undefined ? [] : credentialHarnesses(credential);
+  const dual = harnesses.length > 1;
+  const chosenProfile = data.profiles.profiles.find(candidate => candidate.name === draft.profile);
+  const harness = credential === undefined ? undefined : runsHarness(harnesses, draft.runs, chosenProfile);
   const set = (patch: Partial<AddRuntimeDraft>): void => onDraft({ ...draft, ...patch });
 
   const openLogin = (fixed?: HarnessKind): void => {
@@ -248,7 +264,7 @@ export function AddRuntime({
         state={state}
         onChange={onState}
         onAdded={(id, next) => {
-          onDraft({ ...draft, credentialId: id, profile: null, name: '', addAnother: false });
+          onDraft({ ...draft, credentialId: id, profile: null, name: '', addAnother: false, runs: null });
           onState(next);
         }}
         {...(fixed === undefined ? {} : { harness: fixed })}
@@ -322,36 +338,38 @@ export function AddRuntime({
           <p className="m-0 text-ui leading-base text-fg">Which login should this runtime use?</p>
           <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
             <legend className="sr-only">Login</legend>
-            {HARNESSES.flatMap(candidate => credentials.filter(item => item.harness === candidate)).map(item => (
-              <Choice
-                key={item.id}
-                name="add-runtime-credential"
-                checked={item.id === draft.credentialId}
-                onChoose={() =>
-                  item.id === draft.credentialId
-                    ? undefined
-                    : set({ credentialId: item.id, profile: null, name: '', addAnother: false })
-                }
-                title={
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono">{credentialEmail(item)}</span>
-                    <LoginScopeChip harness={item.harness} />
-                    {item.label === undefined ? null : <Badge tone="accent">{item.label}</Badge>}
-                  </span>
-                }
-                sub={
-                  <span className="inline-flex flex-wrap items-center gap-1">
-                    {HARNESS_NAMES[item.harness]} ·
-                    <AccountStatus word={item.status.word} showLabel /> · used by{' '}
-                    {plural(item.usedBy.length, 'runtime')}
-                    {harnessInstalled(machine, item.harness)
-                      ? ''
-                      : ` · ${HARNESS_NAMES[item.harness]} isn’t installed here`}
-                  </span>
-                }
-                data={{ 'data-add-runtime-credential': item.id }}
-              />
-            ))}
+            {HARNESSES.flatMap(candidate => credentials.filter(item => item.harness === candidate)).map(item => {
+              const drives = credentialHarnesses(item);
+              const missing = drives.filter(candidate => !harnessInstalled(machine, candidate));
+              return (
+                <Choice
+                  key={item.id}
+                  name="add-runtime-credential"
+                  checked={item.id === draft.credentialId}
+                  onChoose={() =>
+                    item.id === draft.credentialId
+                      ? undefined
+                      : set({ credentialId: item.id, profile: null, name: '', addAnother: false, runs: null })
+                  }
+                  title={
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono">{credentialEmail(item)}</span>
+                      <LoginScopeChip harnesses={drives} />
+                      {item.label === undefined ? null : <Badge tone="accent">{item.label}</Badge>}
+                    </span>
+                  }
+                  sub={
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      {harnessesName(drives)} ·
+                      <AccountStatus word={item.status.word} showLabel /> · used by{' '}
+                      {plural(item.usedBy.length, 'runtime')}
+                      {missing.length === 0 ? '' : ` · ${harnessesName(missing)} isn’t installed here`}
+                    </span>
+                  }
+                  data={{ 'data-add-runtime-credential': item.id }}
+                />
+              );
+            })}
           </fieldset>
           <AddRow label="Add a new login" data="login" onClick={() => openLogin()} />
           {credential?.status.word === 'needs_sign_in' ? (
@@ -381,12 +399,45 @@ export function AddRuntime({
           Which profile should it use with <span className="font-mono">{credentialEmail(credential)}</span> on{' '}
           {HARNESS_NAMES[harness]}?
         </p>
+        {dual ? (
+          <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-add-runtime-runs={harness}>
+            <legend className="mb-1 text-ui font-semibold text-fg">Runs</legend>
+            <p className="m-0 text-cell leading-base text-muted">
+              This login drives both CLIs. The runtime runs one of them
+              {draft.runs === null ? ' — picked from the profile until you choose' : ''}.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {harnesses.map(candidate => (
+                <label
+                  key={candidate}
+                  className={cn(
+                    'kt-panel flex min-h-control min-w-0 cursor-pointer items-center gap-2 px-3 py-2',
+                    candidate === harness && 'border-accent',
+                  )}
+                  data-add-runtime-runs-option={candidate}
+                >
+                  <input
+                    type="radio"
+                    name="add-runtime-runs"
+                    checked={candidate === harness}
+                    onChange={() => {
+                      const keeps =
+                        chosenProfile !== undefined && profileFit(chosenProfile, candidate).fits ? draft.profile : null;
+                      set({ runs: candidate, profile: keeps, name: '', addAnother: false });
+                    }}
+                  />
+                  <span className="text-row font-semibold text-fg">{HARNESS_NAMES[candidate]}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
         {profiles.length === 0 ? (
           <p className="m-0 text-cell text-muted">There are no profiles on {machineName} yet.</p>
         ) : (
           <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
             <legend className="sr-only">Profile</legend>
-            {profilesFitFirst(profiles, harness).map(({ profile, fit }) => {
+            {profilesFitFirst(profiles, harnesses, draft.runs).map(({ profile, fit }) => {
               return (
                 <Choice
                   key={profile.name}
@@ -468,6 +519,7 @@ export function AddRuntime({
         name: draft.name,
         credential: credential.id,
         profile,
+        ...(dual && harness !== undefined ? { harness } : {}),
         agent: draft.agent,
         create: true,
         ...(draft.addAnother ? { addAnother: true } : {}),
@@ -484,7 +536,7 @@ export function AddRuntime({
           <span className="flex min-w-0 flex-col">
             <span className="truncate font-mono text-row text-fg">{credentialEmail(credential)}</span>
             <span className="text-cell text-muted">
-              {HARNESS_NAMES[credential.harness]} · {profile} profile
+              {HARNESS_NAMES[harness ?? credential.harness]} · {profile} profile
             </span>
           </span>
         </div>
@@ -562,7 +614,7 @@ export function AddRuntime({
           <p className="m-0 text-cell leading-base text-muted">
             {madeCredential === undefined
               ? ''
-              : `${HARNESS_NAMES[madeCredential.harness]} · ${credentialEmail(madeCredential)} · `}
+              : `${HARNESS_NAMES[made?.harness ?? madeCredential.harness]} · ${credentialEmail(madeCredential)} · `}
             {draft.profile} profile{signInFirst ? '. Sign in before you launch.' : '.'}
           </p>
         </div>

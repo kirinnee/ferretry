@@ -30,3 +30,5 @@ quota:
   source: transcript-pricing
   note: Foundry documents no usage endpoint, so cost is counted from the transcript.
 pricing: anthropic
+detect:
+  variables: [CLAUDE_CODE_USE_FOUNDRY, ANTHROPIC_FOUNDRY_RESOURCE]

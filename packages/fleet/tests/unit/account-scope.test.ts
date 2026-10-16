@@ -11,6 +11,7 @@ import {
   newlyMisfitRuntimes,
   newlyMixedProfiles,
   profileScope,
+  runtimeHarness,
   scopeFits,
 } from '../../src/lib/account/scope.ts';
 
@@ -207,5 +208,90 @@ describe('newlyMisfitRuntimes', () => {
       runtimes: { ...base.runtimes, ghost: { credential: 'nobody', profile: 'legacy', agent: false } },
     } as AccountModel;
     should(newlyMisfitRuntimes(base, broken)).deepEqual([]);
+  });
+
+  it('should leave a runtime on a dual login fitting either way, since it always fits one of them', () => {
+    // Arrange — "glm" drives both CLIs; narrowing its profile to Codex only still fits (D)
+    const parsed = model(
+      { tools: { layers: ['mcp/github'] } },
+      { 'claude-tools': { credential: 'claude-you', profile: 'tools' } },
+    );
+    const before = {
+      ...parsed,
+      credentials: {
+        ...parsed.credentials,
+        glm: {
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+          codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
+        },
+      },
+      runtimes: { glm: { credential: 'glm', profile: 'tools', agent: false } },
+    } as AccountModel;
+    const after = {
+      ...before,
+      components: {
+        ...before.components,
+        mcp: { ...before.components.mcp, github: { command: 'gh', harness: 'codex' } },
+      },
+    } as AccountModel;
+    should(newlyMisfitRuntimes(before, after)).deepEqual([]);
+  });
+});
+
+describe('runtimeHarness', () => {
+  const dual = model(
+    { claudeScoped: { layers: ['settings/claude-settings'] }, codexScoped: { layers: ['settings/codex-settings'] } },
+    {},
+  );
+  const withCredentials = (credentials: AccountModel['credentials']): AccountModel => ({ ...dual, credentials });
+
+  it("should be a runtime's own harness when it names one", () => {
+    const withGlm = withCredentials({
+      ...dual.credentials,
+      glm: {
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+        codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
+      },
+    });
+    should(runtimeHarness(withGlm, { credential: 'glm', profile: 'claudeScoped', harness: 'codex' })).equal('codex');
+  });
+
+  it("should follow a dual login's profile scope when the runtime names none", () => {
+    const withGlm = withCredentials({
+      ...dual.credentials,
+      glm: {
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+        codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
+      },
+    });
+    should(runtimeHarness(withGlm, { credential: 'glm', profile: 'codexScoped' })).equal('codex');
+    should(runtimeHarness(withGlm, { credential: 'glm', profile: 'claudeScoped' })).equal('claude');
+  });
+
+  it("should fall back to the login's own harness when a dual login's profile is generic", () => {
+    const withGlm = withCredentials({
+      ...dual.credentials,
+      glm: {
+        harness: 'claude',
+        store: 'environment',
+        claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+        codex: { env: { OPENROUTER_API_KEY: '${secret:S}' } },
+      },
+    });
+    should(runtimeHarness(withGlm, { credential: 'glm', profile: 'default' })).equal('claude');
+  });
+
+  it("should be a one-CLI login's own harness regardless of profile", () => {
+    should(runtimeHarness(dual, { credential: 'claude-you', profile: 'codexScoped' })).equal('claude');
+  });
+
+  it('should be undefined for a runtime whose login does not exist', () => {
+    should(runtimeHarness(dual, { credential: 'nobody', profile: 'default' })).be.undefined();
   });
 });

@@ -3,6 +3,8 @@ import type { FleetCredentialList } from '@ferretry/protocol';
 import {
   credentialEmail,
   credentialExplanation,
+  credentialGroups,
+  credentialHarnesses,
   credentialName,
   credentialsOf,
   credentialUse,
@@ -10,12 +12,15 @@ import {
   HARNESS_COMMANDS,
   HARNESS_SHORT,
   HARNESSES,
+  harnessesName,
   hasSharedEmails,
+  LOGIN_SCOPE_WORDS,
   labelsError,
   nextCredentialId,
   otherHarness,
   plural,
   sameEmailLogin,
+  scopeOfHarnesses,
   signedInSentence,
   signInCoverage,
   slotBadge,
@@ -195,11 +200,46 @@ describe('usage bars', () => {
   });
 });
 
+const DUAL = credential({ id: 'deepseek', store: 'environment', email: undefined, harnesses: ['claude', 'codex'] });
+
+describe('a login’s scope', () => {
+  it('drives its harnesses, or its one harness from a daemon that predates halves', () => {
+    expect(credentialHarnesses(DUAL)).toEqual(['claude', 'codex']);
+    expect(credentialHarnesses(credential({ id: 'codex', harness: 'codex' }))).toEqual(['codex']);
+  });
+
+  it('says one CLI, or both', () => {
+    expect(scopeOfHarnesses(['claude'])).toBe('claude');
+    expect(scopeOfHarnesses(['codex'])).toBe('codex');
+    expect(scopeOfHarnesses(['codex', 'claude'])).toBe('both');
+    expect(scopeOfHarnesses([])).toBe('claude');
+    expect(LOGIN_SCOPE_WORDS.both).toBe('Claude + Codex');
+    expect(harnessesName(['claude', 'codex'])).toBe('Claude Code + Codex');
+    expect(credentialEmail(DUAL)).toBe('Claude Code + Codex login');
+  });
+});
+
 describe('lists of logins', () => {
   it('filters by harness in the order the daemon listed them', () => {
     expect(credentialsOf(CREDENTIALS, 'claude').map(entry => entry.id)).toEqual(['claude-personal', 'claude-work']);
     expect(credentialsOf(CREDENTIALS, 'codex').map(entry => entry.id)).toEqual(['codex']);
     expect(credentialsOf(listOf(), 'claude')).toEqual([]);
+  });
+
+  it('offers a login that drives both CLIs for either', () => {
+    const list = listOf(credential({ id: 'claude' }), DUAL, credential({ id: 'codex', harness: 'codex' }));
+    expect(credentialsOf(list, 'claude').map(entry => entry.id)).toEqual(['claude', 'deepseek']);
+    expect(credentialsOf(list, 'codex').map(entry => entry.id)).toEqual(['deepseek', 'codex']);
+  });
+
+  it('groups the tab by CLI and lists a login that drives both once, in its own group', () => {
+    const list = listOf(credential({ id: 'claude' }), DUAL, credential({ id: 'codex', harness: 'codex' }));
+    expect(credentialGroups(list).map(group => [group.scope, group.title, group.credentials.map(c => c.id)])).toEqual([
+      ['claude', 'Claude Code', ['claude']],
+      ['codex', 'Codex', ['codex']],
+      ['both', 'Claude Code + Codex', ['deepseek']],
+    ]);
+    expect(credentialGroups(listOf(DUAL)).map(group => group.scope)).toEqual(['both']);
   });
 
   it('knows when emails are shared, from a flag or from the logins themselves', () => {

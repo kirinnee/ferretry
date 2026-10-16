@@ -25,3 +25,6 @@ quota:
   source: transcript-pricing
   note: Model Studio documents no quota endpoint for this key, so cost is counted from the transcript.
 pricing: qwen
+detect:
+  hosts: [dashscope.aliyuncs.com, dashscope-intl.aliyuncs.com]
+  variables: [DASHSCOPE_*]
