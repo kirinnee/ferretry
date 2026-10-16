@@ -124,6 +124,10 @@ export interface SessionChatPageProps {
   readonly chatWidth?: ChatWidthPreference;
   /** Browser-local transcript composer key preference. */
   readonly composerEnterKey?: ComposerEnterKeyPreference | null;
+  /** Browser-local return-key preference on a phone. */
+  readonly composerPhoneEnterKey?: ComposerEnterKeyPreference | null;
+  /** Whether the transcript's folded bookkeeping starts open (Settings › Show details). */
+  readonly showDetails?: boolean;
   /** Browser-local dictation settings; supplied by the application store. */
   readonly dictationSettings?: SttSettings;
   /**
@@ -258,8 +262,10 @@ export function SessionChatPage({
   presentation,
   canControl = true,
   refreshError = null,
-  chatWidth = 'full',
+  chatWidth = 'readable',
   composerEnterKey,
+  composerPhoneEnterKey = null,
+  showDetails = false,
   composerSuggestions,
   composerVimMode = false,
   composerFetch,
@@ -754,6 +760,8 @@ export function SessionChatPage({
         <Transcript
           activity={paneActivity}
           activityFallback={session.state.activity ?? null}
+          agentName={agentName}
+          detailsShown={showDetails}
           busy={busy}
           daemonId={connection.daemonId}
           entries={entries}
@@ -801,6 +809,7 @@ export function SessionChatPage({
             vimMode={composerVimMode}
             {...(dictationSettings === undefined ? {} : { dictationSettings })}
             enterKeyPreference={composerEnterKey}
+            phoneEnterKeyPreference={composerPhoneEnterKey}
             daemon={connection}
             disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
             onSent={onRefresh}

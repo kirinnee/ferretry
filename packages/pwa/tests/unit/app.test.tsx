@@ -2025,12 +2025,19 @@ describe('AppShell', () => {
     const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     await settle();
     const surface = must(view.container.querySelector('[data-chat-width]'), 'the chat-width surface');
-    expect(surface.getAttribute('data-chat-width')).toBe('full');
+    // Comfortable is the shipped default.
+    expect(surface.getAttribute('data-chat-width')).toBe('readable');
 
-    await interact(() => store.controls.setDeviceControls({ chatWidth: 'readable' }));
+    await interact(() => store.controls.setDeviceControls({ chatWidth: 'full' }));
 
     expect(view.container.querySelector('[data-chat-width]')).toBe(surface);
-    expect(surface.getAttribute('data-chat-width')).toBe('readable');
+    expect(surface.getAttribute('data-chat-width')).toBe('full');
+
+    // Settings › Appearance › Motion › Reduced marks the document; System clears it again.
+    await interact(() => store.controls.setDeviceControls({ motion: 'reduced' }));
+    expect(document.documentElement.dataset.motion).toBe('reduced');
+    await interact(() => store.controls.setDeviceControls({ motion: 'system' }));
+    expect(document.documentElement.dataset.motion).toBeUndefined();
     await view.unmount();
   });
 

@@ -212,7 +212,7 @@ describe('SettingsPage sections', () => {
       'behaviour',
     ]);
     expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined]);
-    expect(settingIds(view)).toEqual(['text-size', 'theme', 'density', 'chat-width']);
+    expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width', 'show-details']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
     run(() => view.unmount());
@@ -267,14 +267,22 @@ describe('SettingsPage sections', () => {
     expect(controls.snapshot().device.skillSuggestions).toBe(true);
     expect(settingSwitches(view, 'composer-suggestions').map(control => control.props['aria-checked'])).toEqual([true]);
 
-    // Vim shares the composer-editing control with Markdown highlighting, and
-    // is the second switch there rather than a page of its own.
+    // Vim shares the composer-editing control with the editor style, and is
+    // the one switch there rather than a page of its own.
     const editing = settingSwitches(view, 'composer-markdown');
-    expect(editing).toHaveLength(2);
-    expect(editing[1]?.props['aria-checked']).toBe(false);
-    run(() => editing[1]?.props.onClick());
+    expect(editing).toHaveLength(1);
+    expect(editing[0]?.props['aria-checked']).toBe(false);
+    run(() => editing[0]?.props.onClick());
     expect(controls.snapshot().device.composerVimMode).toBe(true);
-    expect(settingSwitches(view, 'composer-markdown')[1]?.props['aria-checked']).toBe(true);
+    expect(settingSwitches(view, 'composer-markdown')[0]?.props['aria-checked']).toBe(true);
+
+    // The phone's return key persists the same way.
+    const radio = (id: string, name: string, value: string) =>
+      view.root
+        .findByProps({ 'data-setting-id': id })
+        .findAll(node => node.type === 'input' && node.props.name === name && node.props.value === value)[0];
+    run(() => radio('composer-enter-key', 'composer-phone-enter-key', 'send')?.props.onChange());
+    expect(controls.snapshot().device.composerPhoneEnterKey).toBe('send');
 
     // Both are properties of this screen: they survive a reload and read the
     // same for a daemon this page never named.

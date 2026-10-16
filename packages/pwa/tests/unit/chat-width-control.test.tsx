@@ -20,7 +20,8 @@ describe('ChatWidthControl', () => {
     expect(root.findByType('legend').props.children).toBe('Conversation width');
     expect(radiosOf(root)).toHaveLength(3);
     expect(radiosOf(root).every(radio => radio.props.name === 'chat-width')).toBe(true);
-    expect(CHAT_WIDTH_OPTIONS.map(option => option.id)).toEqual(['full', 'balanced', 'readable']);
+    expect(CHAT_WIDTH_OPTIONS.map(option => option.id)).toEqual(['readable', 'balanced', 'full']);
+    expect(CHAT_WIDTH_OPTIONS.map(option => option.label)).toEqual(['Comfortable', 'Wide', 'Full']);
   });
 
   it('checks exactly the mode in force, and dresses the same card as selected', () => {
@@ -42,7 +43,7 @@ describe('ChatWidthControl', () => {
     radios[1]?.props.onChange();
     radios[2]?.props.onChange();
 
-    expect(chosen).toEqual(['balanced', 'readable']);
+    expect(chosen).toEqual(['balanced', 'full']);
   });
 
   /**
@@ -87,7 +88,7 @@ describe('ChatWidthControl', () => {
       return spans.map(span => span.props.children).find(child => typeof child === 'string' && child.includes('·'));
     });
 
-    expect(labels).toEqual(['Full-bleed · default', 'Balanced · 900px max', 'Readable · 768px max']);
+    expect(labels).toEqual(['Full · the whole pane', 'Wide · 900px max', 'Comfortable · ~75 characters · default']);
   });
 
   it('names the mode in force politely, and admits the three look the same when narrow', () => {
@@ -96,7 +97,7 @@ describe('ChatWidthControl', () => {
 
     expect(paragraph.props['aria-live']).toBe('polite');
     expect(paragraph.props.id).toBe(root.findByType('fieldset').props['aria-describedby']);
-    expect(String(paragraph.props.children[0])).toContain('Readable column is active');
+    expect(String(paragraph.props.children[0])).toContain('Comfortable is active');
     expect(String(paragraph.props.children[1])).toContain('768px wide or narrower');
   });
 

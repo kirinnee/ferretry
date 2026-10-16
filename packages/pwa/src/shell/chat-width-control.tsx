@@ -27,26 +27,26 @@ export interface ChatWidthOption {
 
 export const CHAT_WIDTH_OPTIONS: readonly ChatWidthOption[] = [
   {
-    id: 'full',
-    label: 'Full-bleed',
-    description: 'Default. Expands the conversation to the available desktop width.',
+    id: 'readable',
+    label: 'Comfortable',
+    description: 'Default. About 75 characters a line, centred.',
   },
   {
     id: 'balanced',
-    label: 'Balanced',
+    label: 'Wide',
     description: 'Caps wide conversations at 900px, with room for code and tables.',
   },
   {
-    id: 'readable',
-    label: 'Readable column',
-    description: 'Caps the conversation at 768px and centres it.',
+    id: 'full',
+    label: 'Full',
+    description: 'Expands the conversation to the available desktop width.',
   },
 ];
 
 const PREVIEW_LABEL: Readonly<Record<ChatWidth, string>> = {
-  full: 'Full-bleed · default',
-  balanced: 'Balanced · 900px max',
-  readable: 'Readable · 768px max',
+  readable: 'Comfortable · ~75 characters · default',
+  balanced: 'Wide · 900px max',
+  full: 'Full · the whole pane',
 };
 
 const PREVIEW_WIDTH_CLASS: Readonly<Record<ChatWidth, string>> = {
@@ -56,9 +56,9 @@ const PREVIEW_WIDTH_CLASS: Readonly<Record<ChatWidth, string>> = {
 };
 
 const ACTIVE_EXPLANATION: Readonly<Record<ChatWidth, string>> = {
-  full: 'Full-bleed is already active. Choosing it again will not change the conversation.',
-  balanced: 'Balanced is active. It keeps wide conversations within 900px without narrowing to the Readable column.',
-  readable: 'Readable column is active. Balanced and Full-bleed will use extra width in a wider conversation.',
+  full: 'Full is active: the conversation uses the whole pane.',
+  balanced: 'Wide is active. It keeps wide conversations within 900px without narrowing to Comfortable.',
+  readable: 'Comfortable is active. Wide and Full use extra width in a wider conversation.',
 };
 
 export interface ChatWidthControlProps {

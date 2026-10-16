@@ -1067,6 +1067,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           attention={attention}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
+          composerPhoneEnterKey={controls.composerPhoneEnterKey}
+          showDetails={controls.showDetails}
           composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
@@ -1917,6 +1919,7 @@ export function AppShell() {
   return (
     <NotificationControlsContext.Provider value={notificationControlsHost}>
       <ThemeFollower />
+      <MotionFollower />
       {release.notice === null ? null : (
         <ReleaseNoticeDock>
           <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
@@ -1986,6 +1989,21 @@ function ReleaseNoticeDock({ children }: { readonly children: ReactNode }) {
  */
 function ThemeFollower() {
   useTheme();
+  return null;
+}
+
+/**
+ * Keeps `<html data-motion>` following Settings › Appearance › Motion on every page: `reduced` stills
+ * every animation in this browser (`styles/index.css`), `system` leaves it to prefers-reduced-motion.
+ */
+function MotionFollower() {
+  const store = useAppStore();
+  const motion = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot().device.motion);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (motion === 'reduced') root.dataset.motion = 'reduced';
+    else delete root.dataset.motion;
+  }, [motion]);
   return null;
 }
 

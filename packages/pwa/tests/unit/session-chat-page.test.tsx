@@ -789,7 +789,6 @@ describe('SessionChatPage', () => {
     };
 
     const shipped = surface('pane', 'full');
-    // `full` is the shipped default and is uncapped, exactly as the source is.
     expect(shipped.node.props['data-chat-width']).toBe('full');
     // ONE surface holds both, which is what makes the two measures agree.
     expect(shipped.node.findAllByType(Transcript)).toHaveLength(1);
