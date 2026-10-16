@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { FleetMachineView, SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
+import type { ConfigFileView, FleetMachineView, SpeedupStatus, SpeedupsView } from '@ferretry/protocol';
 import type { z } from 'zod';
 import type { FleetClient, FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
 import {
@@ -13,10 +13,12 @@ import {
 import type { PairingClientFactory } from '../../../../../src/features/settings/add-device-settings.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import type { DaemonConnection } from '../../../../../src/lib/daemon-connection.ts';
+import type { ParakeetInstallSnapshot, ParakeetVoice } from '../../../../../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../../src/lib/stt/stt-settings.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { config as learningConfig } from '../../../../support/learning.ts';
 import { wardenConfig } from '../../../../support/warden.ts';
+import { fileView } from '../../config-files/config-files-support.ts';
 import { CREDENTIALS, PROFILES, RUNTIMES } from '../account-support.ts';
 import {
   APPLY_PATH,
@@ -57,6 +59,23 @@ const speedups = (jevSet: boolean): SpeedupsView => ({
     speedupStatus({}),
   ],
 });
+
+const voiceFile = (text: string): ConfigFileView =>
+  fileView({ path: 'voice.yaml', kind: 'voice', schema: 'voice', text });
+
+const installedVoice = (): ParakeetVoice => {
+  const snapshot: ParakeetInstallSnapshot = {
+    phase: 'installed',
+    totalBytes: 683_000_000,
+    downloadedBytes: 683_000_000,
+    version: 'test-version',
+  };
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => undefined,
+    refresh: async () => undefined,
+  } as unknown as ParakeetVoice;
+};
 
 const wardenView = () => ({ config: wardenConfig(), accounts: wardenConfig().accounts, warnings: [] });
 
@@ -415,25 +434,41 @@ describe('MachineOnboarding · steps that save through their own surface', () =>
     expect(screen.text('[data-onboarding-count]')).toBe('2 of 8 set');
   });
 
-  it('passes the voice engine and the clean-up choice through to the Voice step', async () => {
+  it('passes the clean-up choice through to the Voice step, and reads the machine default for it', async () => {
     const updates: unknown[] = [];
     const screen = await render({
-      props: {
-        voiceEngine: <p data-test-engine="">Parakeet, from the engine</p>,
-        voiceCleanup: { settings: DEFAULT_STT_SETTINGS, update: patch => updates.push(patch) },
-      },
+      routes: { ...SET_UP_READS, '/v1/config/file?path=voice.yaml': voiceFile('defaultEngine: browser\n') },
+      props: { voiceCleanup: { settings: DEFAULT_STT_SETTINGS, update: patch => updates.push(patch) } },
     });
     await screen.rail('voice');
-    expect(screen.q('[data-test-engine]')).not.toBeNull();
-    expect(screen.q('[data-onboarding-voice-engine]')).toBeNull();
+    expect((screen.q('input[type="radio"][value="browser"]') as HTMLInputElement).checked).toBe(true);
     await screen.click('[data-setup-choice="groq"] input');
     expect(updates).toEqual([{ enhancementProvider: 'groq' }]);
   });
 
-  it('names the browser engine and points at Settings when the voice seams are not supplied', async () => {
-    const screen = await render();
+  it('passes the voice service through to the Voice step', async () => {
+    const screen = await render({
+      routes: { ...SET_UP_READS, '/v1/config/file?path=voice.yaml': voiceFile('') },
+      props: { voice: installedVoice() },
+    });
     await screen.rail('voice');
-    expect(screen.q('[data-onboarding-voice-engine="browser"]')).not.toBeNull();
+    expect(screen.text('[data-onboarding-step-body="voice"]')).toContain('Installed on this device.');
+  });
+
+  it('shows Parakeet as unavailable when the voice service is explicitly null', async () => {
+    const screen = await render({
+      routes: { ...SET_UP_READS, '/v1/config/file?path=voice.yaml': voiceFile('') },
+      props: { voice: null },
+    });
+    await screen.rail('voice');
+    expect(screen.text('[data-onboarding-step-body="voice"]')).not.toContain('Installed on this device.');
+  });
+
+  it('points at Settings for the clean-up when no clean-up choice is supplied', async () => {
+    const screen = await render({
+      routes: { ...SET_UP_READS, '/v1/config/file?path=voice.yaml': voiceFile('') },
+    });
+    await screen.rail('voice');
     expect(screen.q('[data-onboarding-voice-cleanup="settings"]')).not.toBeNull();
   });
 

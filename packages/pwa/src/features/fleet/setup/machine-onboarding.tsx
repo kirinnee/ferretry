@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { Button } from '../../../shell/primitives.tsx';
+import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
@@ -67,13 +68,10 @@ export interface MachineOnboardingProps extends MachineTabProps {
   readonly onLeave: () => void;
   /** Go to an address in the app (Done's "Set up later" links). */
   readonly onNavigate: (to: string) => void;
-  /**
-   * THE VOICE ENGINE SEAM: Parakeet's install and the engine choice, supplied by the Parakeet engine
-   * once it is in this build. Without it the Voice step names the engine this device uses today.
-   */
-  readonly voiceEngine?: React.ReactNode;
   /** This device's dictation settings, for the Voice step's clean-up choice. */
   readonly voiceCleanup?: VoiceCleanupPort;
+  /** Parakeet on this device for the Voice step; the app's own unless the harness or a test hands one in. */
+  readonly voice?: ParakeetVoice | null;
   /** The harness and tests hand in a pairing client, so no capture ever holds a real code. */
   readonly createPairingClient?: PairingClientFactory;
 }
@@ -118,8 +116,8 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
     onFinish,
     onLeave,
     onNavigate,
-    voiceEngine,
     voiceCleanup,
+    voice,
     createPairingClient,
     ...tab
   } = props;
@@ -191,7 +189,8 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
       case 'voice':
         return (
           <OnboardingVoiceStep
-            {...(voiceEngine === undefined ? {} : { engine: voiceEngine })}
+            tab={tab}
+            {...(voice === undefined ? {} : { voice })}
             {...(voiceCleanup === undefined ? {} : { cleanup: voiceCleanup })}
           />
         );

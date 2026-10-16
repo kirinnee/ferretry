@@ -34,6 +34,7 @@
  * bundle only says which one is listening.
  */
 
+import { useMachineVoiceEngine } from '../features/fleet/setup/voice-default.ts';
 import type { IFyApiClient } from '@ferretry/protocol';
 import { Mic } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -176,7 +177,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const {
     draft,
     onDraftChange,
-    settings,
+    settings: deviceSettings,
     disabled,
     layout = 'compact',
     className,
@@ -184,6 +185,15 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     now = () => performance.now(),
     clockIntervalMs = 250,
   } = props;
+  // A device that has not picked an engine dictates with its machine's default (voice.yaml), if it names one.
+  const machineEngine = useMachineVoiceEngine(deviceSettings.engine === null ? props.daemon : undefined);
+  const settings = useMemo(
+    () =>
+      deviceSettings.engine === null && machineEngine !== null
+        ? { ...deviceSettings, engine: machineEngine }
+        : deviceSettings,
+    [deviceSettings, machineEngine],
+  );
 
   const [open, setOpen] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);

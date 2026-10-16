@@ -1217,6 +1217,7 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
         connections={connections}
         createClient={HARNESS_MACHINE_CLIENT}
         createPairingClient={HARNESS_PAIRING_CLIENT}
+        voice={HARNESS_PARAKEET_ABSENT}
         storage={storage}
         onNavigate={to => {
           const target = new URL(to, window.location.href);

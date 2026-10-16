@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type {
+  ConfigFileView,
   FleetMachineView,
   LearningConfig,
   PairedDevicesView,
@@ -27,9 +28,11 @@ import type { MachineTabProps } from '../../../../../src/features/fleet/shell/ma
 import type { PairingClientFactory } from '../../../../../src/features/settings/add-device-settings.tsx';
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettingsPatch } from '../../../../../src/lib/stt/stt-settings.ts';
+import { AVAILABLE_RECOGNITION } from '../../../../support/browser-recognition.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../../support/dom.ts';
 import { config as learningConfig } from '../../../../support/learning.ts';
 import { wardenConfig } from '../../../../support/warden.ts';
+import { fileView } from '../../config-files/config-files-support.ts';
 import {
   type Call,
   credentials,
@@ -340,22 +343,122 @@ describe('OnboardingVoiceStep', () => {
     update: patch => patches.push(patch),
   });
 
-  it('renders the engine it is handed, and points at Settings when there is no clean-up port', async () => {
-    await show(<OnboardingVoiceStep engine={<p data-fake-engine="">Parakeet</p>} />);
-    expect(text('[data-setup-section="voice-engine"]')).toContain('Parakeet');
-    expect(q('[data-onboarding-voice-engine]')).toBeNull();
+  const VOICE_FILE_PATH = '/v1/config/file?path=voice.yaml';
+  const PUT_PATH = '/v1/config/file';
+  const voiceFile = (text: string, etag = 'etag-voice-1'): ConfigFileView =>
+    fileView({ path: 'voice.yaml', kind: 'voice', schema: 'voice', text, etag });
+  const PUT_RESULT = { path: 'voice.yaml', etag: 'etag-voice-2', outcome: 'applied' };
+  const engineInput = (engine: 'parakeet' | 'browser') => q(`input[type="radio"][value="${engine}"]`);
+  const writes = (calls: readonly Call[]) => calls.filter(call => call.path === PUT_PATH);
+
+  const voiceStep = (tab: MachineTabProps, extra: { cleanup?: VoiceCleanupPort } = {}) => (
+    <OnboardingVoiceStep tab={tab} voice={null} browserSupport={AVAILABLE_RECOGNITION} {...extra} />
+  );
+
+  it('says it is reading while the machine answers, and offers no engine yet', async () => {
+    const never = new Promise<void>(() => undefined);
+    const { tab } = tabFor({ [VOICE_FILE_PATH]: voiceFile('') }, { hold: () => never });
+    await show(voiceStep(tab));
+    expect(text('[data-onboarding-reading="voice"]')).toBe('Reading studio-mac’s voice settings…');
+    expect(engineInput('parakeet')).toBeNull();
+    expect(q('[data-onboarding-voice-problem]')).toBeNull();
+  });
+
+  it('shows the default voice.yaml names as checked', async () => {
+    const { tab, calls } = tabFor({ [VOICE_FILE_PATH]: voiceFile('# mine\ndefaultEngine: parakeet\n') });
+    await show(voiceStep(tab));
+    expect(q('[data-onboarding-reading="voice"]')).toBeNull();
+    expect(engineInput('parakeet')).toHaveProperty('checked', true);
+    expect(engineInput('browser')).toHaveProperty('checked', false);
+    expect(q('[data-onboarding-voice-problem]')).toBeNull();
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('shows nothing checked when voice.yaml names no default', async () => {
+    const { tab } = tabFor({ [VOICE_FILE_PATH]: voiceFile('') });
+    await show(voiceStep(tab));
+    expect(engineInput('parakeet')).toHaveProperty('checked', false);
+    expect(engineInput('browser')).toHaveProperty('checked', false);
+  });
+
+  it('writes the chosen default into voice.yaml against the etag it read, keeping the rest of the file', async () => {
+    const { tab, calls } = tabFor({
+      [VOICE_FILE_PATH]: voiceFile('# mine\ndefaultEngine: parakeet\n', 'etag-voice-7'),
+      [PUT_PATH]: PUT_RESULT,
+    });
+    await show(voiceStep(tab));
+    await click(engineInput('browser'), 'Phone/browser voice');
+    const put = writes(calls);
+    expect(put).toHaveLength(1);
+    expect(put[0]?.body).toEqual({ path: 'voice.yaml', text: '# mine\ndefaultEngine: browser\n' });
+    expect(put[0]?.headers['if-match']).toBe('etag-voice-7');
+    expect(engineInput('browser')).toHaveProperty('checked', true);
+    expect(q('[data-onboarding-voice-problem]')).toBeNull();
+  });
+
+  it('adds the default line when voice.yaml had none', async () => {
+    const { tab, calls } = tabFor({ [VOICE_FILE_PATH]: voiceFile('# mine'), [PUT_PATH]: PUT_RESULT });
+    await show(voiceStep(tab));
+    await click(engineInput('parakeet'), 'Parakeet');
+    expect(writes(calls)[0]?.body).toEqual({ path: 'voice.yaml', text: '# mine\ndefaultEngine: parakeet\n' });
+  });
+
+  it('shows an alert, and the choice with nothing selected, when voice.yaml cannot be read', async () => {
+    const { tab } = tabFor({ [VOICE_FILE_PATH]: refusal() });
+    await show(voiceStep(tab));
+    expect(text('[data-onboarding-voice-problem]')).toBe('The machine refused.');
+    expect(q('[data-onboarding-voice-problem]')?.getAttribute('role')).toBe('alert');
+    expect(q('[data-onboarding-reading="voice"]')).toBeNull();
+    expect(engineInput('parakeet')).toHaveProperty('checked', false);
+    expect(engineInput('browser')).toHaveProperty('checked', false);
+  });
+
+  it('shows an alert when the write is refused, and clears it on the next choice', async () => {
+    let refuse = true;
+    const { tab } = tabFor({
+      [VOICE_FILE_PATH]: voiceFile('defaultEngine: parakeet\n'),
+      [PUT_PATH]: () => (refuse ? refusal() : PUT_RESULT),
+    });
+    await show(voiceStep(tab));
+    await click(engineInput('browser'), 'Phone/browser voice');
+    expect(text('[data-onboarding-voice-problem]')).toBe('The machine refused.');
+    refuse = false;
+    await click(engineInput('parakeet'), 'Parakeet');
+    expect(q('[data-onboarding-voice-problem]')).toBeNull();
+  });
+
+  it('shows an alert when the file cannot be read again at the moment of writing', async () => {
+    let reads = 0;
+    const { tab, calls } = tabFor({
+      [VOICE_FILE_PATH]: () => {
+        reads += 1;
+        return reads === 1 ? voiceFile('') : refusal();
+      },
+    });
+    await show(voiceStep(tab));
+    await click(engineInput('browser'), 'Phone/browser voice');
+    expect(text('[data-onboarding-voice-problem]')).toBe('The machine refused.');
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it('uses the app’s own voice service and the page’s own speech support when none are handed in', async () => {
+    const { tab } = tabFor({ [VOICE_FILE_PATH]: voiceFile('') });
+    await show(<OnboardingVoiceStep tab={tab} />);
+    expect(engineInput('parakeet')).not.toBeNull();
+    expect(engineInput('browser')).not.toBeNull();
+  });
+
+  it('points at Settings when there is no clean-up port', async () => {
+    const { tab } = tabFor({ [VOICE_FILE_PATH]: voiceFile('') });
+    await show(voiceStep(tab));
     expect(text('[data-onboarding-voice-cleanup="settings"]')).toContain('Settings › Behaviour › Dictation');
     expect(q('[data-setup-choices="voice-cleanup"]')).toBeNull();
   });
 
-  it('says this device uses browser voice when no engine is handed in', async () => {
-    await show(<OnboardingVoiceStep />);
-    expect(text('[data-onboarding-voice-engine="browser"]')).toContain('phone’s or browser’s own speech recognition');
-  });
-
   it('shows the saved clean-up choice, and choosing another updates the dictation settings', async () => {
     const patches: SttSettingsPatch[] = [];
-    await show(<OnboardingVoiceStep cleanup={port('groq', patches)} />);
+    const { tab } = tabFor({ [VOICE_FILE_PATH]: voiceFile('') });
+    await show(voiceStep(tab, { cleanup: port('groq', patches) }));
     expect(q('[data-onboarding-voice-cleanup]')).toBeNull();
     expect(q('[data-setup-choice="groq"] input')).toHaveProperty('checked', true);
     expect(q('[data-setup-choice="local"] input')).toHaveProperty('checked', false);

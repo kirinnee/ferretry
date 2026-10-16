@@ -15,6 +15,7 @@ import { type ReactNode, useCallback, useMemo, useRef } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { daemonSessionsPath, daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { Button } from '../../../shell/primitives.tsx';
+import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { distinctDaemonName } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
@@ -37,10 +38,10 @@ export interface MachineSetupScreenProps {
   readonly onNavigate: (to: string) => void;
   /** Where Finish later keeps progress; `null` when this browser has no storage to keep it in. */
   readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null;
-  /** The Voice step's engine choice, supplied by the Parakeet engine (see `MachineOnboardingProps`). */
-  readonly voiceEngine?: ReactNode;
   /** This device's dictation settings, for the Voice step's clean-up choice. */
   readonly voiceCleanup?: VoiceCleanupPort;
+  /** Parakeet on this device for the Voice step; the app's own unless the harness hands one in. */
+  readonly voice?: ParakeetVoice | null;
   /** The harness hands in a pairing client, so no capture ever holds a real code. */
   readonly createPairingClient?: PairingClientFactory;
 }
@@ -72,8 +73,8 @@ export function MachineSetupScreen({
   createClient,
   onNavigate,
   storage,
-  voiceEngine,
   voiceCleanup,
+  voice,
   createPairingClient,
 }: MachineSetupScreenProps) {
   const daemonId = connection.daemonId;
@@ -145,8 +146,8 @@ export function MachineSetupScreen({
         onFinish={() => onNavigate(daemonSessionsPath(daemonId))}
         onLeave={toMachine}
         onNavigate={onNavigate}
-        {...(voiceEngine === undefined ? {} : { voiceEngine })}
         {...(voiceCleanup === undefined ? {} : { voiceCleanup })}
+        {...(voice === undefined ? {} : { voice })}
         {...(createPairingClient === undefined ? {} : { createPairingClient })}
       />
     );

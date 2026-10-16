@@ -8,7 +8,8 @@
  * - **Logins** — the Claude Code and Codex check (`first-run.tsx`) while the machine has no runtime, then
  *   Settings › Logins itself (`credentials-tab.tsx`), whose Add login is the one-tap provider grid.
  * - **Speed-ups** — Settings › Speed-ups (`speedups-surface.tsx`): paste → Test → "set ✓".
- * - **Voice** — the engine choice is a SLOT the Parakeet engine fills; clean-up is this device's.
+ * - **Voice** — Settings › Dictation's engine choice (Parakeet, with its download size and optional install,
+ *   or phone/browser voice), saved as the MACHINE's default in `voice.yaml`; clean-up is this device's.
  * - **Warden** — Settings › Warden's card, with the Jev guard preselected only when a Jev key was added.
  * - **Learning** — the passive-learning default for new ferrets.
  * - **Agent controls** — the Machine tab's own controls and default runtime sections.
@@ -17,16 +18,22 @@
 import {
   LearningConfigSchema,
   type SpeedupsView,
+  type VoiceEngine,
   type WardenConfig,
   type WardenConfigPatch,
   type WardenConfigView,
   WardenConfigViewSchema,
 } from '@ferretry/protocol';
 import { QrCode } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useLayoutMode } from '../../../hooks/use-layout-mode.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
+import { useParakeetVoice } from '../../../lib/store.tsx';
+import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../../lib/stt/browser-recognition.ts';
+import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import type { SttSettings, SttSettingsPatch } from '../../../lib/stt/stt-settings.ts';
+import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
+import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { PairPhoneSheet } from '../../settings/pair-phone.tsx';
@@ -43,6 +50,7 @@ import { MachineFirstRun } from './first-run.tsx';
 import type { MachineSetupStart, OnboardingDoneRow } from './onboarding-model.ts';
 import { wardenStartingDraft } from './onboarding-model.ts';
 import { useSetupAccess } from './setup-access.ts';
+import { machineVoiceEngine, VOICE_FILE, withMachineVoiceEngine } from './voice-default.ts';
 import type { FirstRunProgressPort } from './setup-progress.ts';
 import { RadioChoices, SetupNote, SetupSection } from './setup-ui.tsx';
 
@@ -212,29 +220,82 @@ export interface VoiceCleanupPort {
 }
 
 export function OnboardingVoiceStep({
-  engine,
+  tab,
   cleanup,
+  voice,
+  browserSupport,
 }: {
-  /**
-   * THE SEAM for the speech engine choice: Parakeet (download once, private) or phone/browser voice (no
-   * download; audio goes to the vendor). The Parakeet engine supplies it; without it the step says
-   * which engine this device uses today.
-   */
-  readonly engine?: ReactNode;
+  readonly tab: MachineTabProps;
   /** This device's clean-up choice; without it the step points at Settings › Dictation. */
   readonly cleanup?: VoiceCleanupPort;
+  /** Parakeet on this device; the app's own unless a test or the harness hands one in. */
+  readonly voice?: ParakeetVoice | null;
+  /** Whether the phone/browser engine works on this page; production reads the page. */
+  readonly browserSupport?: BrowserRecognitionSupport;
 }) {
+  const { connection, createClient, machineName } = tab;
+  const contextVoice = useParakeetVoice();
+  const parakeet = voice === undefined ? contextVoice : voice;
+  const detected = useMemo(() => browserRecognitionProvider().support, []);
+  const support = browserSupport ?? detected;
+  /** The machine default as `voice.yaml` names it: `undefined` while reading. */
+  const [engine, setEngine] = useState<VoiceEngine | null | undefined>(undefined);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void createClient(connection)
+      .then(async client => machineVoiceEngine((await readConfigFile(client, VOICE_FILE)).text))
+      .then(
+        found => {
+          if (live) setEngine(found);
+        },
+        (cause: unknown) => {
+          if (live) {
+            setEngine(null);
+            setProblem(changeRefusalSentence(cause));
+          }
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, [connection, createClient]);
+
+  /** Write the default into voice.yaml against what is there now, keeping the rest of the file. */
+  const choose = (next: VoiceEngine): void => {
+    setProblem(null);
+    setEngine(next);
+    void (async () => {
+      try {
+        const client = await createClient(connection);
+        const file = await readConfigFile(client, VOICE_FILE);
+        await writeConfigFile(client, VOICE_FILE, withMachineVoiceEngine(file.text, next), file.etag);
+      } catch (cause) {
+        setProblem(changeRefusalSentence(cause));
+      }
+    })();
+  };
+
   return (
     <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="voice">
-      <SetupSection title="Speech to text, on this device" name="voice-engine">
-        {engine ?? (
-          <SetupNote name="voice-engine-browser" title="Phone/browser voice">
-            <span data-onboarding-voice-engine="browser">
-              This device uses its phone’s or browser’s own speech recognition: nothing to download, but Chrome, Android
-              and Safari send the audio to Google or Apple to turn it into text. Parakeet, which runs privately in the
-              browser after a one-time download, is chosen here once this app has it.
-            </span>
-          </SetupNote>
+      <SetupSection title="Speech to text" name="voice-engine">
+        <p className="m-0 text-cell leading-base text-muted">
+          The default for every device paired to {machineName}: a device uses it until you pick another engine on that
+          device in Settings › Dictation. Speech always turns into text on the device itself. The download is optional —
+          skip it and choose later.
+        </p>
+        {engine === undefined ? (
+          <p role="status" className="m-0 text-cell text-muted" data-onboarding-reading="voice">
+            Reading {machineName}’s voice settings…
+          </p>
+        ) : (
+          <VoiceEngineChoice value={engine} onChange={choose} voice={parakeet} browserSupport={support} />
+        )}
+        {problem === null ? null : (
+          <p role="alert" className="m-0 text-ui text-err" data-onboarding-voice-problem="">
+            {problem}
+          </p>
         )}
       </SetupSection>
       <SetupSection title="Clean-up of the transcript" name="voice-cleanup">
