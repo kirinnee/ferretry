@@ -801,3 +801,50 @@ describe('evaluateConfigFiles: unreadable paths', () => {
     should(actual.files.map(entry => entry.state)).deepEqual(['invalid']);
   });
 });
+
+describe('evaluateConfigFiles: provider presets (docs/provider-presets.md)', () => {
+  const PRESET = [
+    'label: My gateway',
+    'harness: claude',
+    'summary: Claude Code through my gateway.',
+    'docs: https://gateway.example.com/docs',
+    'verified: "2026-10-16"',
+    'env:',
+    '  ANTHROPIC_BASE_URL:',
+    '    value: https://gateway.example.com',
+    '  ANTHROPIC_AUTH_TOKEN:',
+    '    secretName: GATEWAY_API_KEY',
+    'test:',
+    '  kind: none',
+    '  reason: no test yet',
+    'quota:',
+    '  source: transcript-pricing',
+    '  note: counted from the transcript',
+    '',
+  ].join('\n');
+
+  it("should put a machine's own preset in effect by its file name, apart from the fleet", () => {
+    // Act
+    const actual = evaluate([file('presets/my-gateway.yaml', PRESET)]);
+
+    // Assert
+    should(actual.effective.presets['my-gateway']).containDeep({
+      id: 'my-gateway',
+      origin: 'file',
+      label: 'My gateway',
+    });
+    should(actual.fleetFiles).equal(0);
+    should(actual.files).deepEqual([
+      { path: 'presets/my-gateway.yaml', kind: 'preset', schema: 'preset', state: 'ok' },
+    ]);
+  });
+
+  it('should report a broken preset where it is, and offer nothing from it', () => {
+    // Act
+    const actual = evaluate([file('presets/broken.yaml', 'label: Broken\n')]);
+
+    // Assert
+    should(actual.effective.presets).deepEqual({});
+    should(actual.issues.map(issue => issue.path)).containEql('presets/broken.yaml');
+  });
+});

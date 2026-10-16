@@ -1,0 +1,24 @@
+# Codex on an OpenAI API key, billed per token.
+label: OpenAI API key
+harness: codex
+summary: Codex with an OpenAI platform API key, billed per token, through the Responses API.
+docs: https://developers.openai.com/codex/config-advanced
+verified: '2026-10-16'
+env:
+  OPENAI_API_KEY:
+    secretName: OPENAI_API_KEY
+codexProvider:
+  id: openai-api
+  name: OpenAI API
+  baseUrl: https://api.openai.com/v1
+  keyVariable: OPENAI_API_KEY
+models: []
+test:
+  kind: request
+  url: https://api.openai.com/v1/models
+  keyVariable: OPENAI_API_KEY
+  note: Lists the models the key can use. Spends nothing.
+quota:
+  source: transcript-pricing
+  note: OpenAI reports usage only to an admin key, so cost is counted from the transcript at OpenAI's prices.
+pricing: openai

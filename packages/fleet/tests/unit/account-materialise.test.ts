@@ -409,6 +409,98 @@ describe('materialiseFleet', () => {
     });
   });
 
+  it("should start a Codex environment login on its model provider, before the profile's own flags", () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'host' },
+        'codex-work': {
+          harness: 'codex',
+          store: 'environment',
+          env: { KIMI_API_KEY: '${secret:MOONSHOT_API_KEY}' },
+          codexProvider: {
+            id: 'kimi',
+            name: 'Kimi',
+            baseUrl: 'https://api.moonshot.ai/v1',
+            keyVariable: 'KIMI_API_KEY',
+            model: 'kimi-k3',
+          },
+        },
+      },
+      profiles: { default: { layers: DEFAULT_LAYERS }, bare: { layers: ['instructions/main'] } },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'codex-default': { credential: 'codex-work', profile: 'default' },
+        'codex-bare': { credential: 'codex-work', profile: 'bare' },
+      },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert — a profile that names a model keeps it; one that names none starts on the provider's
+    const named = wrapperOf(result, 'codex-default');
+    should(named).containEql(
+      `'-c' 'model_providers.kimi.base_url="https://api.moonshot.ai/v1"' '-c' 'model_providers.kimi.env_key="KIMI_API_KEY"'`,
+    );
+    should(named).containEql(`'model="gpt-6"'`);
+    should(named).not.containEql('kimi-k3');
+    should(wrapperOf(result, 'codex-bare')).containEql(`'-c' 'model_provider="kimi"' '-c' 'model="kimi-k3"'`);
+    should(result.manifest.accounts.find(account => account.displayName === 'codex-default')?.secretEnv).eql({
+      GITHUB_TOKEN: '${secret:GH_TOKEN}',
+      KIMI_API_KEY: '${secret:MOONSHOT_API_KEY}',
+    });
+  });
+
+  it('should keep a runtime from launching when its Codex provider cannot be put together, and say why', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'host' },
+        'codex-work': {
+          harness: 'codex',
+          store: 'environment',
+          env: { RESOURCE: 'not a host', AZURE_OPENAI_API_KEY: '${secret:AZURE_OPENAI_API_KEY}' },
+          codexProvider: {
+            id: 'azure-openai',
+            name: 'Azure OpenAI',
+            baseUrl: 'https://{RESOURCE}.openai.azure.com/openai/v1',
+            keyVariable: 'AZURE_OPENAI_API_KEY',
+          },
+        },
+      },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    const row = result.manifest.accounts.find(account => account.kind === 'codex');
+    should(row?.available).be.false();
+    should(row?.unavailableReason).match(/its login "codex-work" cannot launch: .*RESOURCE/u);
+  });
+
+  it('should hand a cloud credential reference over by name, never a copy', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'claude-you': {
+          harness: 'claude',
+          store: 'environment',
+          env: { CLAUDE_CODE_USE_BEDROCK: '1', AWS_REGION: 'us-east-1' },
+          cloudCredential: 'aws-profile:acme',
+        },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+    });
+
+    // Act
+    const wrapper = wrapperOf(plan(model), 'claude-default');
+
+    // Assert
+    should(wrapper).containEql(`export AWS_PROFILE='acme'`);
+  });
+
   it('should publish each runtime and a version-1 account row beside it', () => {
     // Act
     const result = plan(

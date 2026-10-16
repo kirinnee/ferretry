@@ -117,8 +117,167 @@ const CREDENTIALS = {
       email: 'you@team.example.com',
       checkNow: { available: false, reason: 'Sign in first. There is nothing to check yet.' },
     }),
+    // An ENVIRONMENT login (docs/provider-presets.md): GLM through Z.ai's Anthropic-compatible endpoint.
+    // Its key is a secret NAME with "set ✓"; there is no sign-in and nothing to check.
+    login({
+      id: 'glm-env',
+      word: 'ready',
+      store: 'environment',
+      usedBy: ['glm-agent'],
+      status: {
+        word: 'ready',
+        label: 'Ready',
+        reason: 'from_environment',
+        explanation: 'This login comes from environment variables, so there is no sign-in to check.',
+        lastCheckInconclusive: false,
+      },
+      signIn: {
+        available: false,
+        reason: '"glm-env" is authenticated by its environment variables, so there is nothing to sign in to.',
+      },
+      checkNow: {
+        available: false,
+        reason: 'This login comes from environment variables, so there is nothing to check.',
+      },
+      signOut: {
+        available: false,
+        sentence: 'Sign out of glm-env? 1 runtime will need sign-in.',
+        runtimesAffected: 1,
+        signsOutTerminal: false,
+      },
+      environment: {
+        preset: { id: 'zai-glm', label: 'GLM / Z.ai', docs: 'https://docs.z.ai/devpack/tool/claude' },
+        variables: [
+          { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['ZAI_API_KEY'], set: true },
+          { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic' },
+          { name: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', kind: 'plain', value: 'glm-5.3-flash' },
+          { name: 'ANTHROPIC_DEFAULT_OPUS_MODEL', kind: 'plain', value: 'glm-5.3' },
+        ],
+        quotaSource: 'zai-coding-plan',
+        missingSecrets: [],
+        test: { available: true, spends: 'nothing', note: 'Reads your Coding Plan quota. Spends nothing.' },
+      },
+    }),
   ],
 };
+
+/** The secret NAMES this harness's store holds. A Store adds the name; no value is kept anywhere. */
+const heldSecrets = new Set<string>(['ANTHROPIC_API_KEY', 'ZAI_API_KEY']);
+
+const presetVariable = (fields: Record<string, unknown> & { readonly name: string }) => ({
+  kind: 'plain',
+  required: true,
+  allowEmpty: false,
+  ...fields,
+});
+
+const preset = (fields: Record<string, unknown> & { readonly id: string; readonly label: string }) => ({
+  harness: 'claude',
+  summary: 'Claude Code through an Anthropic-compatible endpoint.',
+  docs: 'https://docs.example.com',
+  origin: 'built-in',
+  variables: [],
+  models: [],
+  test: { available: true, spends: 'nothing', note: 'Lists the models the key can use. Spends nothing.' },
+  quota: { source: 'transcript-pricing', note: 'Counted from the transcript.' },
+  unverified: [],
+  verified: '2026-10-16',
+  offered: { available: true },
+  ...fields,
+});
+
+/** A slice of the built-in provider presets, as `GET /v1/fleet/presets` answers them. */
+const PRESETS = {
+  presets: [
+    preset({
+      id: 'zai-glm',
+      label: 'GLM / Z.ai',
+      summary: 'Claude Code on GLM models with a Z.ai Coding Plan key.',
+      docs: 'https://docs.z.ai/devpack/tool/claude',
+      unverified: [
+        'The quota endpoint the Test and usage read is described by community tools, not by Z.ai’s own documentation.',
+      ],
+      variables: [
+        presetVariable({ name: 'ANTHROPIC_BASE_URL', value: 'https://api.z.ai/api/anthropic' }),
+        presetVariable({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'ZAI_API_KEY' }),
+        presetVariable({ name: 'API_TIMEOUT_MS', value: '3000000', required: false }),
+        presetVariable({ name: 'ANTHROPIC_DEFAULT_OPUS_MODEL', value: 'glm-5.3' }),
+        presetVariable({ name: 'ANTHROPIC_DEFAULT_HAIKU_MODEL', value: 'glm-5.3-flash' }),
+        // Not part of Z.ai's preset: a second, unstored secret, so a review sees both secret states at once.
+        presetVariable({
+          name: 'ZAI_QUOTA_TOKEN',
+          kind: 'secret',
+          secret: 'ZAI_QUOTA_KEY',
+          required: false,
+          description: 'harness only',
+        }),
+      ],
+      models: ['glm-5.3', 'glm-5.3-flash'],
+      test: { available: true, spends: 'nothing', note: 'Reads your Coding Plan quota. Spends nothing.' },
+      quota: { source: 'zai-coding-plan', note: 'Z.ai’s Coding Plan quota — a 5-hour and a weekly window.' },
+    }),
+    preset({
+      id: 'amazon-bedrock',
+      label: 'Amazon Bedrock (AWS profile)',
+      cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
+      variables: [
+        presetVariable({ name: 'CLAUDE_CODE_USE_BEDROCK', value: '1' }),
+        presetVariable({ name: 'AWS_REGION', value: 'us-east-1' }),
+      ],
+      test: { available: false, reason: 'Bedrock needs AWS request signing, which Ferretry does not do.' },
+    }),
+    preset({
+      id: 'openrouter',
+      label: 'OpenRouter',
+      variables: [
+        presetVariable({ name: 'ANTHROPIC_BASE_URL', value: 'https://openrouter.ai/api' }),
+        presetVariable({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'OPENROUTER_API_KEY' }),
+        presetVariable({ name: 'ANTHROPIC_API_KEY', value: '', allowEmpty: true }),
+      ],
+    }),
+    preset({ id: 'deepseek-codex', label: 'DeepSeek', harness: 'codex' }),
+    preset({
+      id: 'zai-glm-codex',
+      label: 'GLM / Z.ai',
+      harness: 'codex',
+      offered: {
+        available: false,
+        reason: 'Codex only runs GLM with a model catalogue file Ferretry would have to write.',
+      },
+    }),
+  ],
+};
+
+/** The answer for an environment-login path (presets, the secret names, a Test), or `undefined`. */
+function environmentAnswer(path: string, init?: RequestInit): unknown {
+  if (path === '/v1/fleet/presets') return PRESETS;
+  if (path === '/v1/secrets' && init?.method === 'POST') {
+    const { name } = JSON.parse(String(init.body ?? '{}')) as { name: string };
+    heldSecrets.add(name);
+    return { name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  }
+  if (path === '/v1/secrets') {
+    const at = '2026-10-16T08:00:00.000Z';
+    return {
+      v: 1,
+      health: 'ready',
+      secrets: [...heldSecrets].map(name => ({ name, createdAt: at, updatedAt: at })),
+      references: [],
+    };
+  }
+  const test = /^\/v1\/fleet\/credentials\/([^/]+)\/test$/u.exec(path);
+  if (test !== null)
+    return {
+      credentialId: decodeURIComponent(test[1] ?? ''),
+      ok: true,
+      code: 'ok',
+      message: 'The provider accepted this login.',
+      spent: 'nothing',
+      latencyMs: 212,
+      at: new Date().toISOString(),
+    };
+  return undefined;
+}
 
 const stack = (harness: 'claude' | 'codex', fields: Record<string, unknown> = {}) => ({
   harness,
@@ -291,6 +450,8 @@ const CODEX_PORTS_HELD = {
 
 /** The answer for a Runtimes or Credentials path, or `undefined` when it is not one of theirs. */
 export function harnessCredentialAnswer(path: string, init?: RequestInit): unknown {
+  const environment = environmentAnswer(path, init);
+  if (environment !== undefined) return environment;
   if (path === '/v1/fleet/credentials') return CREDENTIALS;
   if (path === '/v1/fleet/runtimes') return RUNTIMES;
   if (path === '/v1/fleet/login' && init?.method === 'POST') {

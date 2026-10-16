@@ -163,6 +163,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     check: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    test: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    presets: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
   },
   fleetCatalog: {
     machine: async () => {
@@ -565,6 +571,7 @@ describe('the mounted daemon surface', () => {
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       2 + // the account model's credential list and its Check now
+      2 + // an environment login's Test, and the provider presets one is made from (docs/provider-presets.md)
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
       3 + // the setup scan, tool install and the clone export
@@ -644,6 +651,10 @@ describe('the mounted daemon surface', () => {
       // sign-out or label route, because both are reviewed changes.
       'GET /v1/fleet/credentials',
       'POST /v1/fleet/credentials/:credentialId/check',
+      // Environment logins: the preset catalogue a login is made from, and a login's Test, which spends
+      // its key once through the outbound holder and answers a code — never the key, never the reply.
+      'POST /v1/fleet/credentials/:credentialId/test',
+      'GET /v1/fleet/presets',
       // The account model's catalogue and its reviewed changes. Every write is a staged change and its
       // explicit apply; there is no route that edits the configuration directly.
       'GET /v1/fleet/machine',

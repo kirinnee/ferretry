@@ -1,0 +1,37 @@
+# Claude Code on Amazon Bedrock, signed in with an AWS profile this machine already has.
+label: Amazon Bedrock (AWS profile)
+harness: claude
+summary: Claude Code through Amazon Bedrock, using an AWS profile from ~/.aws on this machine. The profile is named, never copied.
+docs: https://code.claude.com/docs/en/amazon-bedrock
+verified: '2026-10-16'
+unverified:
+  - No free read proves Bedrock invoke rights; ListInferenceProfiles proves the profile signs in, not that it may run a model.
+env:
+  CLAUDE_CODE_USE_BEDROCK:
+    value: '1'
+  AWS_REGION:
+    value: us-east-1
+    description: the region Bedrock is called in
+  ANTHROPIC_DEFAULT_OPUS_MODEL:
+    value: us.anthropic.claude-opus-5-5
+    required: false
+  ANTHROPIC_DEFAULT_SONNET_MODEL:
+    value: us.anthropic.claude-sonnet-4-6
+    required: false
+  ANTHROPIC_DEFAULT_HAIKU_MODEL:
+    value: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    required: false
+cloudCredential:
+  kinds: [aws-profile]
+  suggested: aws-profile:default
+models:
+  - us.anthropic.claude-opus-5-5
+  - us.anthropic.claude-sonnet-4-6
+  - us.anthropic.claude-haiku-4-5-20251001-v1:0
+test:
+  kind: none
+  reason: Bedrock needs AWS request signing, which Ferretry does not do. Check the profile with `aws sts get-caller-identity --profile <name>`.
+quota:
+  source: transcript-pricing
+  note: AWS Service Quotas reports limits, not what is used, so cost is counted from the transcript at Bedrock's prices.
+pricing: anthropic

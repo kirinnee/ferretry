@@ -1,4 +1,9 @@
-import type { FleetCredentialList, FleetCredentialUsageWindow, FleetCredentialView } from '@ferretry/protocol';
+import type {
+  FleetCredentialList,
+  FleetCredentialUsageWindow,
+  FleetCredentialView,
+  FleetProviderPresetCatalog,
+} from '@ferretry/protocol';
 import { HARNESS_LABEL, indent, listOrNone } from '../fleet/account-render.ts';
 
 const window = (name: string, usage: FleetCredentialUsageWindow): string =>
@@ -23,6 +28,7 @@ export function renderCredentialRow(credential: FleetCredentialView): string[] {
       `Usage: ${window('5-hour', credential.usage.fiveHour)} · ${window('weekly', credential.usage.weekly)}`,
       `Used by: ${listOrNone(credential.usedBy, 'no runtime yet')}`,
       `Login: ${whereKept(credential)}`,
+      ...environmentLines(credential),
       ...(credential.needsLabel ? ['Another login has the same email: give one a label to tell them apart.'] : []),
     ]),
   ];
@@ -45,4 +51,44 @@ export function renderCredentialList(list: FleetCredentialList, binaryName: stri
     );
   }
   return lines.join('\n').trimEnd();
+}
+
+/** The provider presets, one line each, grouped by tool, with why a hidden one is not offered. */
+export function renderPresetList(catalog: FleetProviderPresetCatalog, binaryName: string): string {
+  const lines: string[] = [];
+  for (const harness of ['claude', 'codex'] as const) {
+    const presets = catalog.presets.filter(preset => preset.harness === harness);
+    if (presets.length === 0) continue;
+    lines.push(`${HARNESS_LABEL[harness]}:`);
+    for (const preset of presets) {
+      const test = preset.test.available
+        ? `test: ${preset.test.spends === 'nothing' ? 'free' : 'one token'}`
+        : 'no test';
+      lines.push(
+        ...indent([
+          `${preset.id}  ${preset.label}  — ${test}, quota: ${preset.quota.source}`,
+          ...(preset.offered.available ? [] : indent([`Not offered: ${preset.offered.reason}`])),
+        ]),
+      );
+    }
+    lines.push('');
+  }
+  lines.push(`Add one: ${binaryName} login add claude --preset <id> --env NAME=VALUE`);
+  return lines.join('\n');
+}
+
+/** An environment login's variables, preset and needs: values only where they are plain. */
+function environmentLines(credential: FleetCredentialView): string[] {
+  const environment = credential.environment;
+  if (environment === undefined) return [];
+  return [
+    ...(environment.preset === undefined ? [] : [`Preset: ${environment.preset.label}`]),
+    ...environment.variables.map(variable => {
+      if (variable.kind === 'plain') return `${variable.name}=${variable.value}`;
+      if (variable.kind === 'hidden') return `${variable.name}=(hidden)`;
+      return `${variable.name}=\${secret:${variable.secrets.join('}, ${secret:')}}${variable.set ? ' (set)' : ' (not set)'}`;
+    }),
+    ...(environment.cloudCredential === undefined ? [] : [environment.cloudCredential.sentence]),
+    ...(environment.missingSecrets.length === 0 ? [] : [`Needs: ${environment.missingSecrets.join(', ')}`]),
+  ];
 }

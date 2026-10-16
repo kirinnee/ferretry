@@ -181,3 +181,18 @@ describe('allowed destinations', () => {
     should(actual).deepEqual({ exact: true, subdomain: false, suffix: false, port: false, listedPort: true });
   });
 });
+
+describe('allowed destinations on this machine', () => {
+  it('should let a key reach a listed server on this machine over plain HTTP, and nowhere else over it', () => {
+    // Act
+    const actual = {
+      loopback: allowedDestination('http://localhost:4000/v1/models', ['localhost:4000']),
+      loopbackIp: allowedDestination('http://127.0.0.1:4000/v1/models', ['127.0.0.1:4000']),
+      unlisted: allowedDestination('http://localhost:4001/v1/models', ['localhost:4000']),
+      remote: allowedDestination('http://gateway.example.com/v1', ['gateway.example.com']),
+    };
+
+    // Assert
+    should(actual).deepEqual({ loopback: true, loopbackIp: true, unlisted: false, remote: false });
+  });
+});

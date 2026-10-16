@@ -112,6 +112,139 @@ export const FleetCredentialSignOutSchema = z.strictObject({
 });
 export type FleetCredentialSignOut = z.infer<typeof FleetCredentialSignOutSchema>;
 
+// ── Environment logins (docs/provider-presets.md) ───────────────────────────────────────────────
+
+/**
+ * Where an environment login's quota or spend is read from, as its preset declares it. The adapters
+ * that read each one belong to the usage subsystem; this is only the closed set they agree on.
+ *
+ * - `transcript-pricing` — no provider endpoint: tokens counted from the transcript times known prices.
+ * - `none` — nothing to read (a local model): "usage unknown", never a made-up number.
+ */
+export const ProviderQuotaSourceSchema = z.enum([
+  'zai-coding-plan',
+  'moonshot-balance',
+  'deepseek-balance',
+  'minimax-token-plan',
+  'openrouter-key',
+  'litellm-key-info',
+  'vercel-credits',
+  'transcript-pricing',
+  'none',
+]);
+export type ProviderQuotaSource = z.infer<typeof ProviderQuotaSourceSchema>;
+
+/**
+ * A reference to a cloud credential this machine already has, kept as a REFERENCE and never copied:
+ * `aws-profile:<name>`, `gcloud-adc` (the default application-default credentials), `gcloud-adc:<path>`
+ * (a credentials file somewhere else) or `azure-cli` (whoever `az login` signed in).
+ */
+export const CLOUD_CREDENTIAL_KINDS = ['aws-profile', 'gcloud-adc', 'azure-cli'] as const;
+export const CloudCredentialKindSchema = z.enum(CLOUD_CREDENTIAL_KINDS);
+export type CloudCredentialKind = z.infer<typeof CloudCredentialKindSchema>;
+
+/** One variable of an environment login, as it may travel: a value, or a secret's NAME and whether it is set. */
+export const FleetEnvironmentVariableSchema = z.discriminatedUnion('kind', [
+  /** A plain value — a base URL, a region, a model id. Shown as it is. */
+  z.strictObject({ name: NonEmptyStringSchema, kind: z.literal('plain'), value: z.string() }),
+  /**
+   * A value made from the secret store: `${secret:NAME}`, possibly inside a template. The value is
+   * never read; `set` says whether the store holds every secret it names.
+   */
+  z.strictObject({
+    name: NonEmptyStringSchema,
+    kind: z.literal('secret'),
+    secrets: z.array(NonEmptyStringSchema).min(1).readonly(),
+    set: z.boolean(),
+  }),
+  /** A value that looks like a credential and is not a reference. Never shown. */
+  z.strictObject({ name: NonEmptyStringSchema, kind: z.literal('hidden') }),
+]);
+export type FleetEnvironmentVariable = z.infer<typeof FleetEnvironmentVariableSchema>;
+
+/** A cloud credential reference, said in words. */
+export const FleetCloudCredentialViewSchema = z.strictObject({
+  reference: NonEmptyStringSchema,
+  kind: CloudCredentialKindSchema,
+  /** "Your AWS profile acme-dev on this machine". */
+  sentence: NonEmptyStringSchema,
+  /** The variable it is given to the CLI as, when it is given as one (`AWS_PROFILE`). */
+  variable: NonEmptyStringSchema.optional(),
+});
+export type FleetCloudCredentialView = z.infer<typeof FleetCloudCredentialViewSchema>;
+
+/** What a Test of this login would cost, and whether one is offered. */
+export const FleetCredentialTestActSchema = z.discriminatedUnion('available', [
+  z.strictObject({
+    available: z.literal(true),
+    /** `nothing`: a read such as a model list. `one-token`: one inference capped at one token, asked first. */
+    spends: z.enum(['nothing', 'one-token']),
+    /** What the Test does, in one sentence a person reads before pressing it. */
+    note: NonEmptyStringSchema,
+  }),
+  z.strictObject({ available: z.literal(false), reason: NonEmptyStringSchema }),
+]);
+export type FleetCredentialTestAct = z.infer<typeof FleetCredentialTestActSchema>;
+
+/** The parts of a login that only an environment login has. */
+export const FleetCredentialEnvironmentSchema = z.strictObject({
+  /** The preset it was made from, when there was one and it still exists. */
+  preset: z
+    .strictObject({ id: NonEmptyStringSchema, label: NonEmptyStringSchema, docs: NonEmptyStringSchema })
+    .optional(),
+  /** A preset id the login names that this machine no longer has. */
+  missingPreset: NonEmptyStringSchema.optional(),
+  variables: z.array(FleetEnvironmentVariableSchema).readonly(),
+  cloudCredential: FleetCloudCredentialViewSchema.optional(),
+  /** Codex only: the model provider it points Codex at. */
+  codexProvider: z
+    .strictObject({ id: NonEmptyStringSchema, name: NonEmptyStringSchema, baseUrl: NonEmptyStringSchema.optional() })
+    .optional(),
+  quotaSource: ProviderQuotaSourceSchema,
+  /** Every secret it names that the store does not hold: "needs: GLM_API_KEY". */
+  missingSecrets: z.array(NonEmptyStringSchema).readonly(),
+  test: FleetCredentialTestActSchema,
+});
+export type FleetCredentialEnvironment = z.infer<typeof FleetCredentialEnvironmentSchema>;
+
+/**
+ * `POST /v1/fleet/credentials/:id/test`. `allowInference` is the person's consent to a one-token
+ * inference, for a provider with no free authenticated read; without it such a Test is refused with
+ * `consent_required` and nothing is sent.
+ */
+export const FleetCredentialTestRequestSchema = z.strictObject({ allowInference: z.boolean().optional() });
+export type FleetCredentialTestRequest = z.infer<typeof FleetCredentialTestRequestSchema>;
+
+/** What one Test proved, as a closed set a screen can branch on. */
+export const FleetCredentialTestCodeSchema = z.enum([
+  'ok',
+  'not_set',
+  'rejected',
+  'rate_limited',
+  'timeout',
+  'unreachable',
+  'provider_error',
+  'malformed',
+  'vault_damaged',
+  'consent_required',
+  'not_testable',
+  'refused',
+]);
+export type FleetCredentialTestCode = z.infer<typeof FleetCredentialTestCodeSchema>;
+
+export const FleetCredentialTestResultSchema = z.strictObject({
+  credentialId: FleetCredentialIdSchema,
+  ok: z.boolean(),
+  code: FleetCredentialTestCodeSchema,
+  /** One fixed sentence per code. Never a provider body: that could echo anything. */
+  message: NonEmptyStringSchema,
+  /** What the Test spent. `nothing` when nothing was sent. */
+  spent: z.enum(['nothing', 'one-token']),
+  latencyMs: z.number().finite().min(0).optional(),
+  at: InstantSchema,
+});
+export type FleetCredentialTestResult = z.infer<typeof FleetCredentialTestResultSchema>;
+
 /** One credential, as the Credentials tab shows it. */
 export const FleetCredentialViewSchema = z.strictObject({
   id: FleetCredentialIdSchema,
@@ -141,6 +274,8 @@ export const FleetCredentialViewSchema = z.strictObject({
   /** Whether `POST /v1/fleet/credentials/:id/check` can run. */
   checkNow: FleetCredentialActSchema,
   signOut: FleetCredentialSignOutSchema,
+  /** `store: environment` only: its variables, its preset, what it still needs and its Test. */
+  environment: FleetCredentialEnvironmentSchema.optional(),
 });
 export type FleetCredentialView = z.infer<typeof FleetCredentialViewSchema>;
 
@@ -161,3 +296,61 @@ export type FleetCredentialList = z.infer<typeof FleetCredentialListSchema>;
 /** A person's **Check now**. Empty: a governed caller's confirmation is the `fleet.configure` step-up. */
 export const FleetCredentialCheckRequestSchema = z.strictObject({});
 export type FleetCredentialCheckRequest = z.infer<typeof FleetCredentialCheckRequestSchema>;
+
+// ── Provider presets ─────────────────────────────────────────────────────────────────────────────
+
+/** One variable a preset fills in. */
+export const FleetPresetVariableSchema = z.strictObject({
+  name: NonEmptyStringSchema,
+  kind: z.enum(['plain', 'secret']),
+  /** A plain variable's value as the preset fills it in; empty when the person must type one. */
+  value: z.string().optional(),
+  /** A secret variable's suggested secret NAME. */
+  secret: NonEmptyStringSchema.optional(),
+  /** Whether the login needs it. An optional variable left empty is left out. */
+  required: z.boolean(),
+  /** Whether an empty value is a deliberate value (`ANTHROPIC_API_KEY: ""`, so a token is the one sent). */
+  allowEmpty: z.boolean(),
+  /** What it is for, in a few words. */
+  description: NonEmptyStringSchema.optional(),
+});
+export type FleetPresetVariable = z.infer<typeof FleetPresetVariableSchema>;
+
+/** A preset, as the Add a login flow offers it. */
+export const FleetProviderPresetViewSchema = z.strictObject({
+  id: NonEmptyStringSchema,
+  label: NonEmptyStringSchema,
+  harness: HarnessKindSchema,
+  summary: NonEmptyStringSchema,
+  docs: NonEmptyStringSchema,
+  /** Shipped with Ferretry, or a file in this machine's `config/presets/`. */
+  origin: z.enum(['built-in', 'file']),
+  variables: z.array(FleetPresetVariableSchema).readonly(),
+  /** The cloud credential references it accepts, and the one it suggests. */
+  cloudCredential: z
+    .strictObject({ kinds: z.array(CloudCredentialKindSchema).min(1).readonly(), suggested: NonEmptyStringSchema })
+    .optional(),
+  /** Model ids the provider recommends, for display. */
+  models: z.array(NonEmptyStringSchema).readonly(),
+  test: FleetCredentialTestActSchema,
+  quota: z.strictObject({ source: ProviderQuotaSourceSchema, note: NonEmptyStringSchema }),
+  /** What could not be confirmed against the provider's own documentation, said plainly. */
+  unverified: z.array(NonEmptyStringSchema).readonly(),
+  /** When its facts were last checked against the provider's documentation (YYYY-MM-DD). */
+  verified: NonEmptyStringSchema,
+  /** Whether it can be used to add a login here, and why not when it cannot. */
+  offered: FleetCredentialActSchema,
+});
+export type FleetProviderPresetView = z.infer<typeof FleetProviderPresetViewSchema>;
+
+/**
+ * `GET /v1/fleet/presets`: every preset this machine offers — the built-in catalogue, then each preset
+ * file in `config/presets/` that checks (a broken one is reported by `GET /v1/config/status`).
+ */
+export const FleetProviderPresetCatalogSchema = z.strictObject({
+  presets: z.array(FleetProviderPresetViewSchema).readonly(),
+});
+export type FleetProviderPresetCatalog = z.infer<typeof FleetProviderPresetCatalogSchema>;
+
+/** The daemon address of the preset catalogue. */
+export const FLEET_PRESETS_PATH = '/v1/fleet/presets';

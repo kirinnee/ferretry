@@ -140,3 +140,33 @@ describe('ProtocolAccountGateway Codex method', () => {
     should(body(fake.sent[3])).eql({ credentialId: 'codex-you' });
   });
 });
+
+describe('ProtocolAccountGateway environment logins', () => {
+  it('should read the presets and test a login, sending consent only when it is given', async () => {
+    // Arrange
+    const result = {
+      credentialId: 'glm',
+      ok: true,
+      code: 'ok',
+      message: 'The provider accepted this login.',
+      spent: 'nothing',
+      at: '2026-10-16T09:00:00.000Z',
+    };
+    const fake = client({ '/v1/fleet/presets': { presets: [] }, '/v1/fleet/credentials/glm/test': result });
+    const gateway = new ProtocolAccountGateway(fake);
+
+    // Act
+    await gateway.presets();
+    await gateway.test('glm', false);
+    await gateway.test('glm', true);
+
+    // Assert
+    should(fake.sent.map(sent => [sent.path, sent.init?.method])).deepEqual([
+      ['/v1/fleet/presets', 'GET'],
+      ['/v1/fleet/credentials/glm/test', 'POST'],
+      ['/v1/fleet/credentials/glm/test', 'POST'],
+    ]);
+    should(body(fake.sent[1])).deepEqual({});
+    should(body(fake.sent[2])).deepEqual({ allowInference: true });
+  });
+});

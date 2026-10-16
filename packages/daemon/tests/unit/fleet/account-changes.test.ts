@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { type AccountModel, parseAccountModel } from '@ferretry/fleet';
+import { type AccountModel, builtInPresets, parseAccountModel } from '@ferretry/fleet';
 import should from 'should';
 import {
   type AccountChangeFacts,
@@ -1523,3 +1523,225 @@ describe('deriveAccountChange: settings by entry', () => {
     );
   });
 });
+
+describe('deriveAccountChange: environment logins (docs/provider-presets.md)', () => {
+  const PRESET_FACTS: AccountChangeFacts = { ...FACTS, presets: builtInPresets() };
+  const GLM_ENV = {
+    ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+    ANTHROPIC_AUTH_TOKEN: secretRef('ZAI_API_KEY'),
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash',
+    API_TIMEOUT_MS: '',
+  };
+  const addGlm = (overrides: Record<string, unknown> = {}): AccountPlanChange =>
+    ({
+      kind: 'credential.add',
+      id: 'glm',
+      harness: 'claude',
+      store: 'environment',
+      preset: 'zai-glm',
+      env: GLM_ENV,
+      ...overrides,
+    }) as AccountPlanChange;
+
+  it('should add a login from a preset, leaving an empty optional variable out', () => {
+    // Act
+    const edit = derive(addGlm({ label: 'GLM' }), modelOf(), PRESET_FACTS);
+
+    // Assert
+    should(edit.model.credentials.glm).deepEqual({
+      harness: 'claude',
+      store: 'environment',
+      preset: 'zai-glm',
+      label: 'GLM',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+        ANTHROPIC_AUTH_TOKEN: secretRef('ZAI_API_KEY'),
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash',
+      },
+    });
+    should(edit.summary).equal('Add a Claude Code login glm from GLM / Z.ai');
+    should(edit.consequences).matchAny(/never written anywhere/u);
+  });
+
+  it('should give a Codex login its preset’s model provider', () => {
+    const edit = derive(
+      {
+        kind: 'credential.add',
+        id: 'kimi',
+        harness: 'codex',
+        store: 'environment',
+        preset: 'kimi-codex',
+        env: { KIMI_API_KEY: secretRef('MOONSHOT_API_KEY') },
+      },
+      modelOf(),
+      PRESET_FACTS,
+    );
+    should(edit.model.credentials.kimi?.codexProvider?.id).equal('kimi');
+  });
+
+  it('should add a login from its variables alone when no preset is named', () => {
+    // Act
+    const edit = derive(
+      {
+        kind: 'credential.add',
+        id: 'raw',
+        harness: 'claude',
+        store: 'environment',
+        env: { CLAUDE_CODE_USE_FOUNDRY: '1' },
+        cloudCredential: 'azure-cli',
+      },
+      modelOf(),
+      PRESET_FACTS,
+    );
+
+    // Assert
+    should(edit.model.credentials.raw).deepEqual({
+      harness: 'claude',
+      store: 'environment',
+      env: { CLAUDE_CODE_USE_FOUNDRY: '1' },
+      cloudCredential: 'azure-cli',
+    });
+    should(edit.summary).equal('Add a Claude Code login raw from its environment');
+  });
+
+  it('should refuse a raw key, an unknown preset, a preset of the other tool, and what the preset needs', () => {
+    should(
+      refusalOf(
+        addGlm({ env: { ...GLM_ENV, ANTHROPIC_AUTH_TOKEN: 'sk-ant-api03-abcdefghijklmnopq' } }),
+        modelOf(),
+        PRESET_FACTS,
+      ),
+    ).match(/ANTHROPIC_AUTH_TOKEN in login glm looks like a secret/u);
+    should(refusalOf(addGlm({ preset: 'nope' }), modelOf(), PRESET_FACTS)).equal('there is no preset nope on studio');
+    should(refusalOf(addGlm({ preset: 'zai-glm' }), modelOf(), FACTS)).equal('there is no preset zai-glm on studio');
+    should(refusalOf(addGlm({ harness: 'codex' }), modelOf(), PRESET_FACTS)).equal(
+      'GLM / Z.ai is a Claude Code preset, not Codex',
+    );
+    should(
+      refusalOf(addGlm({ env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic' } }), modelOf(), PRESET_FACTS),
+    ).match(/ANTHROPIC_AUTH_TOKEN is needed for GLM \/ Z.ai/u);
+  });
+
+  it('should refuse a preset, variables or a reference on a login that signs in', () => {
+    should(refusalOf({ kind: 'credential.add', id: 'x', harness: 'claude', preset: 'zai-glm' })).equal(
+      'a preset, variables and a cloud credential belong only to an environment login',
+    );
+  });
+
+  it('should change an environment login’s variables, keep a hidden one, and say who starts with them', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        glm: { harness: 'claude', store: 'environment', preset: 'zai-glm', env: GLM_ENV_STORED },
+        work: { harness: 'claude', store: 'ferretry' },
+      },
+      runtimes: { alpha: { credential: 'glm', profile: 'base', agent: false } },
+      advanced: {},
+    });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'credential.env',
+        id: 'glm',
+        env: { ...GLM_ENV_STORED, ANTHROPIC_AUTH_TOKEN: { keep: true }, API_TIMEOUT_MS: '600000' },
+      },
+      model,
+      PRESET_FACTS,
+    );
+
+    // Assert
+    should(edit.model.credentials.glm?.env).containDeep({
+      ANTHROPIC_AUTH_TOKEN: secretRef('ZAI_API_KEY'),
+      API_TIMEOUT_MS: '600000',
+    });
+    should(edit.summary).equal('Change the variables of login glm');
+    should(edit.consequences).deepEqual([
+      'alpha starts with the new variables next launch. Running sessions keep the old ones until restarted.',
+    ]);
+  });
+
+  it('should set and remove a cloud credential reference, and empty a login of its variables', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        foundry: {
+          harness: 'claude',
+          store: 'environment',
+          env: { CLAUDE_CODE_USE_FOUNDRY: '1' },
+          cloudCredential: 'azure-cli',
+        },
+      },
+      runtimes: {},
+      advanced: {},
+    });
+
+    // Act
+    const kept = derive(
+      { kind: 'credential.env', id: 'foundry', env: { CLAUDE_CODE_USE_FOUNDRY: '1' } },
+      model,
+      PRESET_FACTS,
+    );
+    const removed = refusalOf(
+      { kind: 'credential.env', id: 'foundry', env: {}, cloudCredential: null },
+      model,
+      PRESET_FACTS,
+    );
+    const emptied = derive({ kind: 'credential.env', id: 'foundry', env: {} }, model, PRESET_FACTS);
+    const unset = derive(
+      { kind: 'credential.env', id: 'foundry', env: { CLAUDE_CODE_USE_FOUNDRY: '1' }, cloudCredential: null },
+      model,
+      PRESET_FACTS,
+    );
+
+    // Assert
+    should(kept.model.credentials.foundry?.cloudCredential).equal('azure-cli');
+    should(kept.consequences).matchAny(/never written anywhere/u);
+    should(removed).match(/must say which variables/u);
+    should(emptied.model.credentials.foundry).not.have.property('env');
+    should(unset.model.credentials.foundry).not.have.property('cloudCredential');
+  });
+
+  it('should refuse to change the variables of a login that signs in, or of no login', () => {
+    should(refusalOf({ kind: 'credential.env', id: 'work', env: { A: '1' } })).match(
+      /is signed in, not made from environment variables/u,
+    );
+    should(refusalOf({ kind: 'credential.env', id: 'nobody', env: {} })).equal(
+      'no login nobody exists on this machine',
+    );
+  });
+
+  it('should refuse a change that leaves a preset login without what the preset needs', () => {
+    const model = modelOf({
+      credentials: { glm: { harness: 'claude', store: 'environment', preset: 'zai-glm', env: GLM_ENV_STORED } },
+      runtimes: {},
+      advanced: {},
+    });
+    should(
+      refusalOf(
+        { kind: 'credential.env', id: 'glm', env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic' } },
+        model,
+        PRESET_FACTS,
+      ),
+    ).match(/ANTHROPIC_AUTH_TOKEN is needed/u);
+    should(
+      refusalOf(
+        { kind: 'credential.env', id: 'glm', env: { ...GLM_ENV_STORED, EXTRA: 'sk-ant-api03-abcdefghijklmnopq' } },
+        model,
+        PRESET_FACTS,
+      ),
+    ).match(/looks like a secret/u);
+  });
+});
+
+const GLM_ENV_STORED = {
+  ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+  ANTHROPIC_AUTH_TOKEN: secretRef('ZAI_API_KEY'),
+  ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3',
+  ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash',
+};

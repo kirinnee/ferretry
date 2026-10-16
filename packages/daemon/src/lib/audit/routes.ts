@@ -183,6 +183,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseNames: 'secretName',
     detail: { action: 'speedup-test' },
   },
+  // A login Test spends that login's key once on the operator's account; the login is the subject.
+  {
+    method: 'POST',
+    path: '/v1/fleet/credentials/:credentialId/test',
+    event: 'secrets.used',
+    subject: 'credentialId',
+    detail: { action: 'login-test' },
+  },
   {
     method: 'POST',
     path: '/v1/secrets',

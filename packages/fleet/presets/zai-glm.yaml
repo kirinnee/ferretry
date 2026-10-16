@@ -1,0 +1,32 @@
+# Claude Code on Z.ai's GLM Coding Plan, through its Anthropic-compatible endpoint.
+label: GLM / Z.ai
+harness: claude
+summary: Claude Code on GLM models with a Z.ai Coding Plan key.
+docs: https://docs.z.ai/devpack/tool/claude
+verified: '2026-10-16'
+unverified:
+  - The quota endpoint the Test and usage read is described by community tools, not by Z.ai's own documentation.
+env:
+  ANTHROPIC_BASE_URL:
+    value: https://api.z.ai/api/anthropic
+  ANTHROPIC_AUTH_TOKEN:
+    secretName: ZAI_API_KEY
+  API_TIMEOUT_MS:
+    value: '3000000'
+    required: false
+  ANTHROPIC_DEFAULT_OPUS_MODEL:
+    value: glm-5.3
+  ANTHROPIC_DEFAULT_SONNET_MODEL:
+    value: glm-5.3
+  ANTHROPIC_DEFAULT_HAIKU_MODEL:
+    value: glm-5.3-flash
+models: [glm-5.3, glm-5.3-flash]
+test:
+  kind: request
+  url: https://api.z.ai/api/monitor/usage/quota/limit
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Reads your Coding Plan quota. Spends nothing.
+quota:
+  source: zai-coding-plan
+  note: Z.ai's Coding Plan quota — a 5-hour and a weekly window.
+pricing: zai

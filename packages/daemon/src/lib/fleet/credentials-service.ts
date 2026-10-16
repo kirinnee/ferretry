@@ -50,6 +50,7 @@ import {
   HOST_CLAUDE_SECURE_STORAGE,
   type LocalCredentialReading,
   type PassiveUsageRecord,
+  type ProviderPreset,
   resolveCredentialStore,
   type StoredCredentialResolution,
 } from '@ferretry/fleet';
@@ -58,11 +59,15 @@ import {
   type FleetCredentialList,
   FleetCredentialListSchema,
   type FleetCredentialSignOut,
+  type FleetCredentialTestResult,
   type FleetCredentialUsageWindow,
   type FleetCredentialView,
   FleetCredentialViewSchema,
+  type FleetProviderPresetCatalog,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
+import { credentialEnvironmentView } from '../provider-probe/environment-view.ts';
+import type { ProviderProbeSubject } from '../provider-probe/service.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -410,6 +415,12 @@ export interface FleetCredentialsServiceDeps {
   run(spec: CredentialHarnessRun): Promise<number>;
   /** The environment a harness child starts from, already sanitized of inherited provider state. */
   baseEnvironment(): Readonly<Record<string, string | undefined>>;
+  /**
+   * What an environment login's row and its Test need (docs/provider-presets.md): the presets this
+   * machine offers, the secret NAMES the store holds (`undefined` when it cannot be listed), and the
+   * Test itself. Absent on a daemon that has none, where an environment login shows no variables.
+   */
+  readonly environment?: CredentialEnvironmentDeps;
 }
 
 /** The harness's own sign-out arguments. Neither touches a model. */
@@ -417,6 +428,18 @@ const LOGOUT_ARGV: Readonly<Record<HarnessKind, readonly string[]>> = {
   claude: ['auth', 'logout'],
   codex: ['logout'],
 };
+
+/** The environment-login half of the credentials surface. */
+export interface CredentialEnvironmentDeps {
+  /** The catalogue the Add a login flow offers. */
+  catalog(): Promise<FleetProviderPresetCatalog>;
+  presets(): Promise<readonly ProviderPreset[]>;
+  secretNames(): Promise<ReadonlySet<string> | undefined>;
+  test(
+    subject: ProviderProbeSubject,
+    consent: { readonly allowInference: boolean },
+  ): Promise<FleetCredentialTestResult>;
+}
 
 export type FleetCredentialSignOutOutcome =
   | { readonly outcome: 'signed-out'; readonly credential: FleetCredentialView }
@@ -429,9 +452,10 @@ export class FleetCredentialsService {
   async list(): Promise<FleetCredentialList> {
     const { format, entries } = await this.deps.catalog.entries();
     const emails = await this.#emails(entries);
+    const environment = await this.#environmentFacts(entries);
     const credentials: FleetCredentialView[] = [];
     for (const entry of entries) {
-      credentials.push(this.#row(entry, await this.deps.status.view(subjectOf(entry)), emails, entries));
+      credentials.push(this.#row(entry, await this.deps.status.view(subjectOf(entry)), emails, entries, environment));
     }
     return FleetCredentialListSchema.parse({ format, machine: this.deps.machineName(), credentials });
   }
@@ -528,6 +552,48 @@ export class FleetCredentialsService {
     };
   }
 
+  /**
+   * A person's **Test** of an environment login: one request, the cheapest its provider allows. Governed
+   * like Check now — it spends the operator's key — so a caller off this machine needs `fleet.configure`
+   * and so a passkey step-up.
+   */
+  async test(
+    id: string,
+    consent: { readonly allowInference: boolean },
+    governance: CallerGovernance | undefined,
+  ): Promise<FleetCredentialTestResult> {
+    if (governance === undefined) {
+      throw new FleetCredentialRefusal(
+        'fleet_credential_unauthorized',
+        'this daemon cannot say whether this caller may test this machine’s logins',
+      );
+    }
+    const environment = this.deps.environment;
+    const entry = await this.deps.catalog.entry(id);
+    if (environment === undefined || entry.credential.store !== 'environment') {
+      throw new FleetCredentialRefusal(
+        'fleet_credential_unavailable',
+        'Only a login made from environment variables has a Test. Use Check now for a sign-in.',
+      );
+    }
+    const presets = await environment.presets();
+    const preset =
+      entry.credential.preset === undefined ? undefined : presets.find(p => p.id === entry.credential.preset);
+    return await environment.test({ id, credential: entry.credential, preset }, consent);
+  }
+
+  /** The provider presets this machine offers (docs/provider-presets.md); none on a daemon without them. */
+  async presets(): Promise<FleetProviderPresetCatalog> {
+    return (await this.deps.environment?.catalog()) ?? { presets: [] };
+  }
+
+  /** The presets and secret names every environment row needs, read once per list. */
+  async #environmentFacts(entries: readonly CredentialEntry[]): Promise<EnvironmentFacts | undefined> {
+    const environment = this.deps.environment;
+    if (environment === undefined || !entries.some(entry => entry.credential.store === 'environment')) return undefined;
+    return { presets: await environment.presets(), held: await environment.secretNames() };
+  }
+
   async #emails(entries: readonly CredentialEntry[]): Promise<ReadonlyMap<string, string>> {
     const found = new Map<string, string>();
     for (const entry of entries) {
@@ -544,6 +610,7 @@ export class FleetCredentialsService {
     view: CredentialStatusView,
     emails: ReadonlyMap<string, string>,
     entries: readonly CredentialEntry[],
+    environment?: EnvironmentFacts,
   ): FleetCredentialView {
     const email = emails.get(entry.id);
     const status = view.status;
@@ -574,6 +641,9 @@ export class FleetCredentialsService {
       signIn: signInAct(this.deps.catalog.signInTarget(entry)),
       checkNow: checkAct(entry),
       signOut: signOutSentence(entry, email, this.deps.machineName()),
+      ...(environment === undefined || entry.credential.store !== 'environment'
+        ? {}
+        : { environment: credentialEnvironmentView(entry.credential, environment.presets, environment.held) }),
     });
   }
 }
@@ -597,6 +667,12 @@ function needsLabel(
       emails.get(other.id) === email &&
       (label === undefined || other.credential.label === label),
   );
+}
+
+/** What every environment row of one list reads. */
+interface EnvironmentFacts {
+  readonly presets: readonly ProviderPreset[];
+  readonly held: ReadonlySet<string> | undefined;
 }
 
 const subjectOf = (entry: CredentialEntry): CredentialSubject => ({ id: entry.id, resolution: entry.resolution });

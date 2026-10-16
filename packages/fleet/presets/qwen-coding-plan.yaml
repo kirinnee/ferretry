@@ -1,0 +1,27 @@
+# Claude Code on Qwen with an Alibaba Cloud Model Studio Coding Plan key.
+label: Qwen (Alibaba Coding Plan)
+harness: claude
+summary: Claude Code on Qwen models with a Model Studio Coding Plan key. A Token Plan or pay-as-you-go key uses a different base URL — change it here.
+docs: https://www.alibabacloud.com/help/en/model-studio/claude-code
+verified: '2026-10-16'
+env:
+  ANTHROPIC_BASE_URL:
+    value: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic
+  ANTHROPIC_AUTH_TOKEN:
+    secretName: DASHSCOPE_API_KEY
+  ANTHROPIC_MODEL:
+    value: qwen3.7-plus
+models: [qwen3.7-plus, qwen3.7-max, qwen3.6-flash]
+test:
+  kind: inference
+  url: '{ANTHROPIC_BASE_URL}/v1/messages'
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  headers:
+    anthropic-version: '2023-06-01'
+    content-type: application/json
+  body: '{"model":"{ANTHROPIC_MODEL}","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}'
+  note: The endpoint serves only messages, so the Test sends one capped at one output token — a fraction of a cent.
+quota:
+  source: transcript-pricing
+  note: Model Studio documents no quota endpoint for this key, so cost is counted from the transcript.
+pricing: qwen

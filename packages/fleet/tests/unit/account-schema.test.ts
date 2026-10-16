@@ -693,3 +693,69 @@ describe('the component kinds', () => {
     should([...COMPONENT_KINDS]).deepEqual(['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelSets']);
   });
 });
+
+describe('CredentialSchema — environment logins (docs/provider-presets.md)', () => {
+  const env = (credential: Record<string, unknown>) =>
+    messagesOf(documentWith({ credentials: { 'claude-you': credential } }));
+
+  it('should accept a login with a preset, a cloud credential reference and no variables of its own', () => {
+    should(
+      env({
+        harness: 'claude',
+        store: 'environment',
+        preset: 'microsoft-foundry-azure-cli',
+        cloudCredential: 'azure-cli',
+      }),
+    ).deepEqual([]);
+  });
+
+  it.each(['preset', 'cloudCredential', 'codexProvider'])('should refuse %s on a login that signs in', field => {
+    const value = field === 'codexProvider' ? { id: 'ollama' } : field === 'preset' ? 'kimi' : 'azure-cli';
+    should(env({ harness: 'claude', store: 'ferretry', [field]: value })).matchAny(
+      new RegExp(`"${field}" belongs only to a credential with store: environment`, 'u'),
+    );
+  });
+
+  it('should refuse a Codex model provider on a Claude Code login', () => {
+    should(env({ harness: 'claude', store: 'environment', codexProvider: { id: 'ollama' } })).matchAny(
+      /points Codex at a model provider — this login is for Claude Code/u,
+    );
+  });
+
+  it('should refuse a Codex provider whose key variable the login does not set', () => {
+    should(
+      env({
+        harness: 'codex',
+        store: 'environment',
+        env: { OTHER: '1' },
+        codexProvider: { id: 'kimi', name: 'Kimi', baseUrl: 'https://api.moonshot.ai/v1', keyVariable: 'KIMI_API_KEY' },
+      }),
+    ).matchAny(/sends its key from KIMI_API_KEY, so "env" must set KIMI_API_KEY/u);
+  });
+
+  it('should refuse a Codex provider whose base URL names a variable the login does not set', () => {
+    should(
+      env({
+        harness: 'codex',
+        store: 'environment',
+        codexProvider: { id: 'azure', name: 'Azure', baseUrl: 'https://{RESOURCE}.openai.azure.com' },
+      }),
+    ).matchAny(/names \{RESOURCE\}, so "env" must set RESOURCE/u);
+  });
+
+  it("should accept Codex's own Ollama provider with no variables at all", () => {
+    should(env({ harness: 'codex', store: 'environment', codexProvider: { id: 'ollama' } })).deepEqual([]);
+  });
+
+  it('should refuse a variable its cloud credential reference already sets', () => {
+    should(
+      env({ harness: 'claude', store: 'environment', env: { AWS_PROFILE: 'x' }, cloudCredential: 'aws-profile:acme' }),
+    ).matchAny(/AWS_PROFILE comes from "cloudCredential" \(aws-profile:acme\) — leave it out of "env"/u);
+  });
+
+  it('should refuse something that is not a cloud credential reference', () => {
+    should(env({ harness: 'claude', store: 'environment', cloudCredential: 'aws:acme' })).matchAny(
+      /is not a cloud credential reference/u,
+    );
+  });
+});
