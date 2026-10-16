@@ -4,7 +4,14 @@ import type { ReactTestInstance } from 'react-test-renderer';
 import { FileInstanceSurface } from '../../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../../src/components/files-tab.tsx';
 import { SessionTerminalDeck } from '../../../src/components/session-terminal-deck.tsx';
+import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
+import { BrowserSurfaceList } from '../../../src/features/browser/browser-surface-list.tsx';
+import {
+  browserEngineForSession,
+  resetBrowserSurfaceSessions,
+} from '../../../src/features/browser/unified-browser-model.ts';
 import { UnifiedBrowserSurface } from '../../../src/features/browser/unified-browser-surface.tsx';
+import type { SessionBrowser } from '../../../src/features/browser/use-session-browser.ts';
 import { ContextRail } from '../../../src/features/context-rail/context-rail.tsx';
 import { ContextRailBody } from '../../../src/features/context-rail/context-rail-body.tsx';
 import { SessionSearchProvider } from '../../../src/features/session-search/session-search.tsx';
@@ -292,6 +299,7 @@ describe('SessionWorkspace on a desktop', () => {
       takenOver: () => false,
       takeOver: tabId => intents.push(`take:${tabId}`),
       handBack: tabId => intents.push(`back:${tabId}`),
+      failure: 'Could not take over dev: refused',
     };
     const store = new WorkspaceLayoutStore(NO_STORAGE);
     store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL)));
@@ -304,6 +312,141 @@ describe('SessionWorkspace on a desktop', () => {
       run(() => marker.props.onTakeOver());
       run(() => marker.props.onHandBack());
       expect(intents).toEqual([`take:terminal:${TERMINAL}`, `back:terminal:${TERMINAL}`]);
+      // Over a shell the marker has a strip of its own, and a refused control is said as an alert.
+      expect(marker.props.inline).toBe(true);
+      expect(page.root.findAllByProps({ className: 'fy-ws-marker-row' })).toHaveLength(1);
+      const alerts = page.root.findAll(node => node.props.role === 'alert' && node.type === 'p').map(textOf);
+      expect(alerts).toContain('Could not take over dev: refused');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});
+
+const browserPage = (id: string, extra: Partial<BrowserPageSummary> = {}): BrowserPageSummary => ({
+  id,
+  url: `https://example.test/${id.toLowerCase()}`,
+  title: `Title ${id}`,
+  ownerSessionId: 'shared',
+  ownerName: 'Hadi',
+  ...extra,
+});
+const runningBrowser = (pages: readonly BrowserPageSummary[], active = pages[0]?.id): BrowserStatus =>
+  ({
+    sessionId: 'shared',
+    state: 'running',
+    pages: [...pages],
+    activePageId: active,
+    url: pages[0]?.url,
+    title: pages[0]?.title,
+    pageState: 'ready',
+    canGoBack: false,
+    canGoForward: false,
+    viewport: { width: 1280, height: 800 },
+    viewers: 1,
+    persistentProfile: true,
+    idleTimeoutSeconds: 900,
+    capacity: { running: pages.length, maximum: 60 },
+  }) as BrowserStatus;
+
+/** A scripted session browser: records what the workspace asks of it, answers what the test says. */
+const fakeSessionBrowser = (status: BrowserStatus | null, answer: (action: BrowserAction) => BrowserStatus | null) => {
+  const activated: string[] = [];
+  const acted: BrowserAction[] = [];
+  const pages: SessionBrowser = {
+    status,
+    activatePage: pageId => activated.push(pageId),
+    act: async action => {
+      acted.push(action);
+      return answer(action);
+    },
+  };
+  return { pages, activated, acted };
+};
+
+describe('browser tabs', () => {
+  afterEach(() => resetBrowserSurfaceSessions());
+
+  test('lists the session pages over a browser tab, and a page tab brings its page into view in the real engine', async () => {
+    // Arrange
+    const APP = browserPage('PAGE1', { name: 'app' });
+    const PR = browserPage('PAGE3');
+    const NEW = browserPage('PAGE4');
+    let next: BrowserStatus | null = runningBrowser([APP, PR, NEW], 'PAGE4');
+    const browser = fakeSessionBrowser(runningBrowser([APP, PR]), action =>
+      action.action === 'new-page' ? next : runningBrowser([PR]),
+    );
+    const driving: SurfaceDriving = {
+      ...NO_SURFACE_DRIVING,
+      driverFor: tabId => (tabId === 'browser:app' || tabId === 'browser:PAGE1' ? { name: 'Hadi' } : null),
+    };
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    store.update(scope, layout =>
+      [workspaceTab('browser', 'b1', { label: 'Browser' }), workspaceTab('browser', 'app', { label: 'app' })].reduce(
+        (layoutSoFar, tab) => openWorkspaceTab(layoutSoFar, tab),
+        layout,
+      ),
+    );
+
+    // Act
+    const { page, captured } = mountWorkspace(
+      'desktop',
+      { browser: browserEngine, browserPages: browser.pages, driving },
+      store,
+    );
+    try {
+      await settle();
+
+      // Assert — both tabs carry the strip; only the page tab names a page, and it is brought into view.
+      const lists = page.root.findAllByType(BrowserSurfaceList);
+      expect(lists).toHaveLength(2);
+      expect(lists.map(list => list.props.selectedPageId).sort()).toEqual(['PAGE1', undefined]);
+      expect(browser.activated).toEqual(['PAGE1']);
+      expect(browserEngineForSession(scope)).toBe('remote');
+      const surfaces = page.root.findAllByType(UnifiedBrowserSurface);
+      expect(surfaces.every(surface => surface.props.showPageTabs === false)).toBe(true);
+      const list = lists.find(candidate => candidate.props.selectedPageId === 'PAGE1') as ReactTestInstance;
+      expect(list.props.driverFor(APP)).toEqual({ name: 'Hadi' });
+      expect(list.props.takenOver(APP)).toBe(false);
+      // The page tab's marker sits inline at the end of the strip.
+      const markers = list.findAllByType(AgentControlMarker);
+      expect(markers.map(marker => [marker.props.inline, marker.props.driver])).toEqual([[true, { name: 'Hadi' }]]);
+
+      // A chip opens that page's own tab: by name when it has one, else by id, labelled for a reader.
+      run(() => list.props.onOpenPage(PR));
+      expect(store.snapshot(scope).tabs['browser:PAGE3']?.label).toBe('Title PAGE3');
+      run(() => list.props.onClosePage(APP));
+      await settle();
+      expect(browser.acted).toContainEqual({ action: 'close-page', pageId: 'PAGE1' });
+
+      // New page asks the daemon, then opens the page it made.
+      run(() => page.root.findAllByType(BrowserSurfaceList)[0]?.props.onNewPage());
+      await settle();
+      expect(browser.acted).toContainEqual({ action: 'new-page' });
+      expect(store.snapshot(scope).tabs['browser:PAGE4']).toBeDefined();
+
+      // A refused new page says so.
+      next = null;
+      run(() => page.root.findAllByType(BrowserSurfaceList)[0]?.props.onNewPage());
+      await settle();
+      const alerts = page.root.findAll(node => node.props.role === 'alert' && node.type === 'p').map(textOf);
+      expect(alerts).toContain('Could not open a new page in this session’s browser.');
+      expect(captured.workspace.layout).toBe(store.snapshot(scope));
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('without a page list, a browser tab keeps the engine page tabs and a floating marker', async () => {
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('browser', 'b1', { label: 'Browser' })));
+    const { page } = mountWorkspace('desktop', { browser: browserEngine }, store);
+    try {
+      await settle();
+      expect(page.root.findAllByType(BrowserSurfaceList)).toHaveLength(0);
+      expect(page.root.findByType(UnifiedBrowserSurface).props.showPageTabs).toBe(true);
+      expect(page.root.findByType(AgentControlMarker).props.inline).toBe(false);
+      expect(browserEngineForSession(scope)).toBe('preview');
     } finally {
       run(() => page.unmount());
     }
@@ -475,10 +618,10 @@ describe('SessionWorkspace on a phone and a tablet', () => {
 });
 
 describe('workspace seams', () => {
-  test('the driving stub reports nobody driving and ignores both intents', () => {
+  test('the driving seam reports nobody driving and ignores both intents without a daemon client', () => {
     let seen: SurfaceDriving | undefined;
     function Probe() {
-      seen = useSurfaceDriving(scope);
+      seen = useSurfaceDriving(scope, alpha);
       return null;
     }
     const page = render(<Probe />);

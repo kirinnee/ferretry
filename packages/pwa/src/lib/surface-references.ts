@@ -32,17 +32,16 @@
  * a name and for every reference written before names existed. A name can never look like an id —
  * the protocol refuses twelve hex characters as a name — so one key can never mean two terminals.
  *
- * BROWSER PAGES ARE DELIBERATELY UNPROVABLE HERE. The daemon serves
- * `/v1/sessions/:id/browser` for real now and its status carries a page list, but
- * nothing hands that list to this module. So a `%browser:…` token resolves to
- * NOTHING — not to a link, and not to a tombstone either, because this module has
- * no authoritative page list and must not report a page as closed on no evidence.
- * Teaching this resolver to read that status is the whole remaining change: the
- * token, the envelope, the identity, the picker row and the tombstone are all
- * key-agnostic already.
+ * A BROWSER PAGE IS PROVED AGAINST THE SESSION'S BROWSER STATUS. `GET /v1/sessions/:id/browser` lists
+ * every page that belongs to the session — the agent's and the person's, popups included — by id and,
+ * when it was opened with one, by name, so `%browser:app` proves the way `%terminal:dev` does. The
+ * status is a complete enumeration only in a SETTLED state: `running`, `stopping` and `stopped` (a
+ * stopped browser holds no pages — they end with it). `starting` and `error` prove nothing either
+ * way, and neither does a status for another session or no status at all: a page is then neither open
+ * nor demonstrably closed, and its token stays prose.
  */
 
-import type { SurfaceOpener, TerminalListView, TerminalView } from '@ferretry/protocol';
+import type { BrowserStatus, SurfaceOpener, TerminalListView, TerminalView } from '@ferretry/protocol';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonSessionKey } from './daemon-scope.ts';
 import { formatReference, type SurfaceKind, type SurfaceProof, type SurfaceReferenceResolver } from './references.ts';
@@ -141,36 +140,49 @@ export const sessionSurfaces = (
     }),
   );
 
+/** The browser states whose page list is complete: every other one proves nothing. */
+const SETTLED_BROWSER_STATES: ReadonlySet<BrowserStatus['state']> = new Set(['running', 'stopping', 'stopped']);
+
+/** The browser status, but only when it may be read as a complete list of THIS scope's pages. */
+const browserEvidenceFor = (
+  scope: DaemonSessionScope,
+  browser: BrowserStatus | null | undefined,
+): BrowserStatus | null =>
+  browser !== null &&
+  browser !== undefined &&
+  browser.sessionId === scope.sessionId &&
+  SETTLED_BROWSER_STATES.has(browser.state)
+    ? browser
+    : null;
+
+/** Every key a listing answers to: each surface's id, and its name when it has one. */
+const keysOf = (surfaces: readonly { readonly id: string; readonly name?: string }[] | undefined): Set<string> =>
+  new Set(surfaces?.flatMap(surface => (surface.name === undefined ? [surface.id] : [surface.id, surface.name])));
+
 /**
- * Builds one immutable resolver from an already-fetched terminal listing.
+ * Builds one immutable resolver from an already-fetched terminal listing and browser status.
  *
- * A null listing (never fetched, or a failed request) resolves NOTHING: the
+ * A null listing (never fetched, or a failed request) resolves NOTHING for its kind: the
  * caller has no evidence, and inventing either answer from that is the failure
  * mode this migration has hit three times.
  */
 export const createSurfaceReferenceResolver = (
   scope: DaemonSessionScope,
   terminals: TerminalListView | null | undefined,
+  browser?: BrowserStatus | null,
 ): SurfaceReferenceResolver => {
-  const evidence = evidenceFor(scope, terminals);
-  const open = new Set(
-    evidence?.terminals.flatMap(terminal =>
-      terminal.name === undefined ? [terminal.id] : [terminal.id, terminal.name],
-    ) ?? [],
-  );
+  const evidence = { terminal: evidenceFor(scope, terminals), browser: browserEvidenceFor(scope, browser) };
+  const open = { terminal: keysOf(evidence.terminal?.terminals), browser: keysOf(evidence.browser?.pages) };
 
   return lookup => {
     // No authoritative listing means no answer, in either direction.
-    if (evidence === null) return undefined;
-    // Pages have no evidence source on this daemon, so they are unproved rather
-    // than closed. See the module comment.
-    if (lookup.surface !== 'terminal') return undefined;
-    if (!open.has(lookup.key)) return { state: 'closed' } satisfies SurfaceProof;
+    if (evidence[lookup.surface] === null) return undefined;
+    if (!open[lookup.surface].has(lookup.key)) return { state: 'closed' } satisfies SurfaceProof;
     return {
       state: 'open',
       daemonId: scope.daemonId,
       sessionId: scope.sessionId,
-      surface: 'terminal',
+      surface: lookup.surface,
       key: lookup.key,
     } satisfies SurfaceProof;
   };
@@ -189,12 +201,16 @@ export const createSurfaceReferenceResolver = (
 export const surfaceReferenceIdentityKey = (
   scope: DaemonSessionScope,
   terminals: TerminalListView | null | undefined,
+  browser?: BrowserStatus | null,
 ): string => {
   const evidence = evidenceFor(scope, terminals);
+  const pages = browserEvidenceFor(scope, browser);
   return [
     daemonSessionKey(scope),
     evidence === null ? 'unlisted' : 'listed',
     ...(evidence?.terminals.map(terminal => `${terminal.id}=${terminal.name ?? ''}`) ?? []),
+    pages === null ? 'pages-unlisted' : 'pages-listed',
+    ...(pages?.pages.map(page => `${page.id}=${page.name ?? ''}`) ?? []),
   ].join('\u0001');
 };
 
