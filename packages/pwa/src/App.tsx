@@ -47,6 +47,7 @@ import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
+import { useLearningSessionActions } from './features/learning/learning-session-actions.tsx';
 import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from './features/learning/learning-settings.tsx';
 import { usePassiveLearning } from './features/learning/passive-learning.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -132,6 +133,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
+  daemonLearningPath,
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
@@ -840,6 +842,15 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const session = fleetSlice?.byId.get(scope.sessionId);
   const openSessions = useContext(SessionsDrawerContext);
   const projects = useKnownProjects(store.projects, daemonId);
+  // Learning's two Actions-menu entries, and the scan dialog and status line they open.
+  const learningActions = useLearningSessionActions({
+    connection,
+    fetcher: useDaemonFetch(),
+    sessions: fleetSlice?.sessions ?? null,
+    projects,
+    accounts: useAccountPickerSlice(store.accountPicker, connection).catalog?.accounts ?? null,
+    onViewLearning: () => navigate(daemonLearningPath(daemonId)),
+  });
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
@@ -1107,6 +1118,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       <p className="sr-only" role="alert" data-session-error="">
         {sessionIssue ?? ''}
       </p>
+      {learningActions.host}
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
@@ -1154,6 +1166,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           session={session}
           surfaceEvents={surfaceEvents}
           usage={store.usage}
+          actionContributions={learningActions.contributions}
         />
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">

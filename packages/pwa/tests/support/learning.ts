@@ -163,6 +163,7 @@ export const fakeLearningDaemon = (lessons: readonly ProposalView[] = [lesson()]
         since: AT,
         setBy: 'owner',
       };
+      state.sessions = [...state.sessions.filter(entry => entry.sessionId !== learning.sessionId), learning];
       return { body: { learning, reinstructed: true, sendId: 'send-1', note: 'Re-instructed; it costs one turn.' } };
     }
     const match = /^\/v1\/learning\/proposals\/([^/]+)(\/apply-preview|\/apply)?$/u.exec(path);

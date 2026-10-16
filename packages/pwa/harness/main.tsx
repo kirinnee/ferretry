@@ -86,7 +86,6 @@ import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/c
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
-import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
@@ -120,6 +119,7 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import { ConfigFilesSurface } from '../src/features/config-files/config-files-settings.tsx';
 import { type NewDeviceNoticeClients, NewDeviceNotices } from '../src/features/device-notice/new-device-notice.tsx';
 import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
@@ -145,8 +145,8 @@ import { ProjectsHub } from '../src/features/projects/projects-hub.tsx';
 import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
+import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
-import { ConfigFilesSurface } from '../src/features/config-files/config-files-settings.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -210,8 +210,8 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.t
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
-import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
+import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
@@ -272,8 +272,16 @@ import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
-import { LEARNING_PASSIVE, LearningHubHarness, LearningSettingsHarness } from './learning-hub.tsx';
 import { harnessConfigFilesClient } from './config-files-fixture.ts';
+import {
+  LEARNING_PASSIVE,
+  LearningHubHarness,
+  LearningSettingsHarness,
+  useHarnessLearningActions,
+} from './learning-hub.tsx';
+import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
+import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
+import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 import {
   WARDEN_FIXTURE_ATTENTION,
   WARDEN_FIXTURE_CONFIG,
@@ -281,9 +289,6 @@ import {
   WARDEN_FIXTURE_STATUS,
   wardenFixtureRequest,
 } from './warden-fixture.ts';
-import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
-import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
-import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -7477,6 +7482,7 @@ function SessionWorkspaceHarness() {
     config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
   } as SessionView);
   const [drawer, setDrawer] = useState(window.location.search.includes('drawer'));
+  const learningActions = useHarnessLearningActions(daemon, WORKSPACE_FLEET);
   const bar = (shape: 'column' | 'rail' | 'drawer') => (
     <SessionsBar
       active={null}
@@ -7527,9 +7533,11 @@ function SessionWorkspaceHarness() {
             createFleetClient: harnessDaemonClient,
             machineName: 'AMER-D22HXVF42W',
           }}
+          actionContributions={learningActions.contributions}
         />
       </div>
       {layout === 'drawer' && drawer ? bar('drawer') : null}
+      {learningActions.host}
     </div>
   );
 }

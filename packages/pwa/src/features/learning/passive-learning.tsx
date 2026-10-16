@@ -6,7 +6,7 @@
  * which is why every switch here surfaces the note rather than a sentence of its own.
  */
 
-import type { LearningScanScope, SessionLearning, SessionLearningPatchResult } from '@ferretry/protocol';
+import type { SessionLearning, SessionLearningPatchResult } from '@ferretry/protocol';
 import { GraduationCap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -91,70 +91,3 @@ export function PassiveLearningChip() {
   );
 }
 
-// ── The session Actions menu's two entries ──────────────────────────────────────────────────────
-
-export type LearningSessionActionId = 'passive-learning' | 'scan-ferret';
-
-export type LearningSessionAction =
-  | {
-      readonly id: 'passive-learning';
-      readonly kind: 'toggle';
-      readonly label: string;
-      readonly checked: boolean;
-      readonly detail: string;
-      readonly run: () => void;
-    }
-  | {
-      readonly id: 'scan-ferret';
-      readonly kind: 'action';
-      readonly label: string;
-      readonly detail: string;
-      readonly run: () => void;
-    };
-
-export interface LearningSessionActionHandlers {
-  /** Switches this ferret's passive learning to the value given. */
-  readonly onTogglePassive: (passive: boolean) => void;
-  /** Opens the scan dialog with this scope. */
-  readonly onScan: (scope: LearningScanScope) => void;
-}
-
-/**
- * What a ferret's Actions menu offers for learning, ready for the action registry to list as-is: the
- * Passive learning switch (`menuitemcheckbox`) and "Scan this ferret for lessons…". `learning` is this
- * ferret's entry from `GET /v1/learning/sessions`, absent when the daemon has none for it (off).
- */
-export const learningSessionActions = (
-  sessionId: string,
-  learning: SessionLearning | undefined,
-  handlers: LearningSessionActionHandlers,
-): readonly LearningSessionAction[] => {
-  const on = learning?.passive === true;
-  return [
-    {
-      id: 'passive-learning',
-      kind: 'toggle',
-      label: 'Passive learning',
-      checked: on,
-      detail: on
-        ? 'On — re-instructs this ferret to stop filing lessons (costs it one turn).'
-        : 'Off — re-instructs this ferret to file lessons (costs it one turn).',
-      run: () => handlers.onTogglePassive(!on),
-    },
-    {
-      id: 'scan-ferret',
-      kind: 'action',
-      label: 'Scan this ferret for lessons…',
-      detail: 'Shows an estimate first. Nothing runs until you press Start.',
-      run: () => handlers.onScan({ kind: 'sessions', sessionIds: [sessionId] }),
-    },
-  ];
-};
-
-/** The toggle handler behind the switch: switch one ferret and hand back the daemon's note. */
-export const switchPassiveLearning = async (
-  connection: DaemonConnection,
-  sessionId: string,
-  passive: boolean,
-  fetcher: DaemonFetch,
-): Promise<string> => (await patchSessionLearning(connection, sessionId, passive, fetcher)).note;

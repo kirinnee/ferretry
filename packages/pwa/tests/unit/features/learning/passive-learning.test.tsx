@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { LearningScanScope } from '@ferretry/protocol';
-import {
-  learningSessionActions,
-  PassiveLearningChip,
-  type PassiveLearningState,
-  switchPassiveLearning,
-  usePassiveLearning,
-} from '../../../../src/features/learning/passive-learning.tsx';
+import { PassiveLearningChip, type PassiveLearningState, usePassiveLearning } from '../../../../src/features/learning/passive-learning.tsx';
 import { interact, mount } from '../../../support/dom.ts';
 import { AT, fakeLearningDaemon, learningDaemon } from '../../../support/learning.ts';
 import { textOf, waitFor } from '../../../support/learning-dom.ts';
@@ -57,27 +50,4 @@ describe('passive learning per ferret', () => {
     await view.unmount();
   });
 
-  it('describes the two Actions-menu entries and runs their handlers', async () => {
-    const toggled: boolean[] = [];
-    const scans: LearningScanScope[] = [];
-    const handlers = { onTogglePassive: (next: boolean) => toggled.push(next), onScan: (s: LearningScanScope) => scans.push(s) };
-    const off = learningSessionActions('s-1', undefined, handlers);
-    expect(off.map(action => [action.id, action.kind, action.label])).toEqual([
-      ['passive-learning', 'toggle', 'Passive learning'],
-      ['scan-ferret', 'action', 'Scan this ferret for lessons…'],
-    ]);
-    const [toggle, scan] = off;
-    expect(toggle?.kind === 'toggle' && toggle.checked).toBe(false);
-    expect(toggle?.detail).toContain('Off');
-    toggle?.run();
-    scan?.run();
-    const on = learningSessionActions('s-1', { sessionId: 's-1', passive: true, since: AT, setBy: 'owner' }, handlers);
-    expect(on[0]?.detail).toContain('On');
-    on[0]?.run();
-    expect(toggled).toEqual([true, false]);
-    expect(scans).toEqual([{ kind: 'sessions', sessionIds: ['s-1'] }]);
-    expect(await switchPassiveLearning(learningDaemon, 's-1', true, fakeLearningDaemon().fetch)).toBe(
-      'Re-instructed; it costs one turn.',
-    );
-  });
 });

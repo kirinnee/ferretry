@@ -13,6 +13,7 @@ import type {
 } from '@ferretry/protocol';
 import { useMemo } from 'react';
 import { LearningPage } from '../src/features/learning/learning-page.tsx';
+import { useLearningSessionActions } from '../src/features/learning/learning-session-actions.tsx';
 import { LearningSettingsSurface } from '../src/features/learning/learning-settings.tsx';
 import type { PickerAccount } from '../src/lib/account-picker-catalog.ts';
 import type { DaemonConnection } from '../src/lib/daemon-connection.ts';
@@ -285,4 +286,10 @@ export function LearningSettingsHarness({
 }) {
   const fetcher = useMemo(() => harnessLearningFetch(false), []);
   return <LearningSettingsSurface connection={connection} sessions={sessions} fetcher={fetcher} />;
+}
+
+/** Learning's Actions-menu entries for the workspace harness, answered by the same in-page daemon. */
+export function useHarnessLearningActions(connection: DaemonConnection, sessions: readonly SessionView[]) {
+  const fetcher = useMemo(() => harnessLearningFetch(false), []);
+  return useLearningSessionActions({ connection, fetcher, sessions, accounts: ACCOUNTS });
 }

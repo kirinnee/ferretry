@@ -107,6 +107,7 @@ export * from '../features/fleet/sign-in-restart.tsx';
 export * from '../features/learning/apply-diff.tsx';
 export * from '../features/learning/learning-model.ts';
 export * from '../features/learning/learning-page.tsx';
+export * from '../features/learning/learning-session-actions.tsx';
 export * from '../features/learning/learning-settings.tsx';
 export * from '../features/learning/lesson-row.tsx';
 export * from '../features/learning/passive-learning.tsx';
