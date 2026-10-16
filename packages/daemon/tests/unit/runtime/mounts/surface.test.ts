@@ -313,6 +313,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
+  sessionAddresses: {
+    has: id => id === 's1',
+    candidates: async () => [{ id: 's1', name: 'aniya', status: 'running' }],
+  },
   catalogs: {
     projects: async () => [],
     registerProject: async () => {
@@ -911,6 +915,8 @@ describe('the mounted daemon surface', () => {
     const gc = await dispatcher.dispatch(request({ path: '/v1/gc', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
     const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
+    // The same session by its agent's NAME, in any case: the table resolves it before the read runs.
+    const named = await dispatcher.dispatch(request({ path: '/v1/sessions/Aniya', headers: human }));
     const projects = await dispatcher.dispatch(request({ path: '/v1/projects', headers: human }));
     const skills = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/skills', headers: human }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
@@ -984,6 +990,8 @@ describe('the mounted daemon surface', () => {
     should(sessions.status).equal(200);
     // The id pattern is reached rather than shadowed by the deeper per-session routes below it.
     should(session.status).equal(200);
+    should(named.status).equal(200);
+    should(named.body).equal(session.body);
     should(projects.status).equal(200);
     should(skills.status).equal(200);
     // The session is unknown to this fixture, which still proves the route is mounted and reached.

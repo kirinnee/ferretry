@@ -413,6 +413,7 @@ export * from './tool-extract.ts';
 export * from './transcript-follow.ts';
 export * from './usage.ts';
 export * from './usage-store.ts';
+export * from './user-message.ts';
 export * from './web-terminals.ts';
 export * from './workspace-layout.ts';
 export * from './workspace-layout-store.ts';

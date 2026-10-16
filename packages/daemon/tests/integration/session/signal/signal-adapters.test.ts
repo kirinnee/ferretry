@@ -397,24 +397,28 @@ describe('resolving the peer a wait names', () => {
     await opened.storage.close();
   });
 
-  it('should not resolve a callsign whose claim instant is unreadable, but still resolve its id', async () => {
-    // The callsign window is the names domain's own rule: a claim it cannot date is a claim it cannot
-    // prove is current, and resolving one would risk pointing a park at a session that recycled the
-    // name. The refusal is recoverable — the id always works — and it is honest, which an unwakeable
-    // park would not be.
+  it('should resolve a name to its live holder, and refuse to pin a wait on a tie', async () => {
+    // A name freed by an aged-out session can be held twice: the dormant agent that aged out and the
+    // live one that took it. The live one is the peer; two live holders are a guess nobody may make,
+    // and the id always still works.
     // Arrange
     const { opened } = await openStorage();
-    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris', createdAt: 'not an instant' }));
+    await opened.storage.writeConfig(ID, config({ id: 'session-1', teammate: 'iris' }));
+    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped' });
+    await opened.storage.writeConfig(PEER, config({ id: 'session-2', teammate: 'iris' }));
     await opened.storage.writeState(PEER, { id: 'session-2', status: 'running' });
     const subject = new StorageSignalRepository(opened.storage, clock);
 
     // Act
-    const byCallsign = await subject.resolvePeer('iris');
-    const byId = await subject.resolvePeer('session-2');
+    const live = await subject.resolvePeer('iris');
+    await opened.storage.writeState(ID, { id: 'session-1', status: 'running' });
+    const tie = await subject.resolvePeer('iris');
+    const byId = await subject.resolvePeer('session-1');
 
     // Assert
-    should(byCallsign).be.undefined();
-    should(byId?.id).equal(PEER);
+    should(live?.id).equal(PEER);
+    should(tie).be.undefined();
+    should(byId?.id).equal(ID);
     await opened.storage.close();
   });
 });

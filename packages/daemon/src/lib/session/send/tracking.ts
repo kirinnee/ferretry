@@ -1,4 +1,4 @@
-import type { SendEvidence } from '@ferretry/protocol';
+import { ferretryNotice, type SendEvidence } from '@ferretry/protocol';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
 import type { SendRecord, SendSenderKind } from './types.ts';
 
@@ -170,8 +170,8 @@ export function sendFailureNotice(recipient: string, record: SendRecord, clientN
     record.fate === 'timed_out'
       ? `it was not delivered (${(record.unaccountedReason ?? 'not_delivered').replaceAll('_', ' ')}) after ${record.attempt ?? 1} attempt(s)`
       : `it could not be confirmed (${(record.unaccountedReason ?? 'timeout').replaceAll('_', ' ')}) — it may still have landed`;
-  return (
-    `[ferretry] Your message to ${recipient} (send ${record.sendId}) did not reach it: ${why}. ` +
-    `Decide whether to send it again with \`${clientName} send ${recipient} …\`.`
+  return ferretryNotice(
+    `Your message to ${recipient} (send ${record.sendId}) did not reach it: ${why}. ` +
+      `Decide whether to send it again with \`${clientName} send ${recipient} …\`.`,
   );
 }

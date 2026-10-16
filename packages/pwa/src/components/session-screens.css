@@ -1431,3 +1431,114 @@
     max-height: min(calc(4 * 44px + 8px), max(96px, calc(var(--app-h, 100dvh) * 0.3)));
   }
 }
+/* A MESSAGE FROM ANOTHER AGENT. It arrives on the user channel but is not the person, so it sits on
+   the left like the assistant's side of the conversation, in a card of its own with the sender's
+   monogram and name, never as a right-hand "You" bubble. Every colour is a theme token. */
+.fy-message-peer {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-left: 3px solid var(--fy-accent);
+  border-radius: 3px 12px 12px 12px;
+  margin-right: auto;
+  max-width: min(85%, 640px);
+  padding: 8px 12px 10px;
+}
+.fy-message-peer header {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  justify-content: flex-start;
+}
+.fy-peer-chip {
+  align-items: center;
+  color: var(--fy-fg);
+  display: inline-flex;
+  font-weight: 600;
+  gap: 6px;
+}
+.fy-peer-avatar {
+  align-items: center;
+  background: var(--accent-soft, var(--fy-surface-2));
+  border: 1px solid var(--fy-border);
+  border-radius: 50%;
+  color: var(--fy-accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+.fy-peer-reference {
+  display: inline-block;
+  width: auto;
+}
+.fy-peer-reference p {
+  display: inline;
+  margin: 0;
+}
+.fy-peer-awaiting {
+  background: var(--warn-bg, var(--fy-surface-2));
+  border: 1px solid var(--warn-border, var(--fy-border));
+  border-radius: 999px;
+  color: var(--warn, var(--fy-fg));
+  font-size: 11px;
+  padding: 0 8px;
+}
+.fy-peer-clock {
+  margin-left: auto;
+}
+.fy-peer-body {
+  margin-top: 6px;
+}
+.fy-peer-note {
+  color: var(--fy-muted);
+  font-size: 11.5px;
+  margin-top: 6px;
+}
+.fy-peer-note summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.fy-peer-note p {
+  margin: 4px 0 0;
+}
+/* A NOTICE FROM FERRETRY ITSELF: the chrome tier, one compact line with its source named. */
+.fy-message-system {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin: 2px 0;
+}
+.fy-system-label {
+  color: var(--fy-fg);
+  font-weight: 600;
+}
+.fy-system-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.fy-system-text p {
+  display: inline;
+  margin: 0;
+}
+/* The folded delivery note keeps the transcript's density on a touch screen: the summary stays its own
+   size and gets the same invisible, centred 44px hit area the transcript's other disclosures get. */
+@media (pointer: coarse) {
+  .fy-message-peer .fy-peer-note summary {
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+  }
+  .fy-message-peer .fy-peer-note summary::after {
+    content: '';
+    height: var(--target-floor);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: var(--target-floor);
+  }
+}

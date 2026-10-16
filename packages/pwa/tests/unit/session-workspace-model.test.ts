@@ -474,3 +474,59 @@ describe('sendRetrier', () => {
     expect(refreshed).toBe(1);
   });
 });
+
+describe('transcriptEntriesFromLog · who a user record is from', () => {
+  /** Aniya's transcript as the daemon renders it: the paste block Claude wrapped the peer send in. */
+  const peerLog = [
+    '[10:01:02] user/message: <pasted_content id="1fd4">',
+    '    [peer message from teammate torrey (session mvb0sw7d-27f71326) — not from the human lead]',
+    '    No reply is required; torrey has carried on. Reply with `fy send torrey "…"` if useful.',
+    '    ',
+    "    Hey! How's your day going?",
+    '    </pasted_content id="1fd4">',
+  ].join('\n');
+
+  test("renders another agent's message as FROM that agent, never as You", () => {
+    const [entry] = transcriptEntriesFromLog(peerLog);
+    expect(entry).toMatchObject({
+      kind: 'user',
+      text: "Hey! How's your day going?",
+      label: '10:01:02',
+      peer: { name: 'torrey', sessionId: 'mvb0sw7d-27f71326', replyExpected: false },
+    });
+  });
+
+  test('keeps the id the record would have had, whatever it was read as', () => {
+    const [peer] = transcriptEntriesFromLog(peerLog);
+    const [plain] = transcriptEntriesFromLog(peerLog.replace('[10:01:02] ', ''));
+    expect(peer?.id).toMatch(/^log:0:/);
+    expect(plain?.label).toBeUndefined();
+    expect(plain?.peer?.name).toBe('torrey');
+  });
+
+  test("renders Ferretry's own notice as a system row", () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        '[10:05:00] user/message: [ferretry] Your message to aniya (send s-1) did not reach it.',
+        'user/message: [ferretry] A notice with no clock.',
+      ].join('\n'),
+    );
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: 'system',
+        text: 'Your message to aniya (send s-1) did not reach it.',
+        label: '10:05:00',
+      }),
+      expect.objectContaining({ kind: 'system', text: 'A notice with no clock.' }),
+    ]);
+    expect(entries[1]).not.toHaveProperty('label');
+  });
+
+  test("shows a person's own paste without its markup, still as You", () => {
+    const [entry] = transcriptEntriesFromLog(
+      '[10:06:00] user/message: <pasted_content id="aa">\n    first line\n    second line\n    </pasted_content>',
+    );
+    expect(entry).toMatchObject({ kind: 'user', label: 'You · 10:06:00', text: 'first line\nsecond line' });
+    expect(entry).not.toHaveProperty('peer');
+  });
+});

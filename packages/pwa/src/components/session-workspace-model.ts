@@ -2,6 +2,7 @@ import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
 
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
+import { readUserMessage } from '../lib/user-message.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
 import { fieldHash } from './session-chat-model.ts';
 
@@ -66,6 +67,23 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
     label: recordLabel(record),
     ...(record.kind === 'error' ? { alert: true } : {}),
   };
+};
+
+/**
+ * A person's message, another agent's, or Ferretry's own notice — the user channel carries all three.
+ *
+ * The id is taken from the record as written, so a row keeps its identity whatever this reading of it
+ * decides. A peer or notice row is not labelled "You": who sent it is the row's own chrome, so its label
+ * carries only the record's clock.
+ */
+const userEntryFor = (record: LogRecord, index: number): TranscriptEntry => {
+  const entry = entryFor(record, index);
+  const message = readUserMessage(entry.text);
+  if (message.kind === 'human') return { ...entry, text: message.text };
+  const clock = record.clock === undefined ? {} : { label: record.clock };
+  return message.kind === 'notice'
+    ? { id: entry.id, kind: 'system', text: message.text, ...clock }
+    : { id: entry.id, kind: 'user', text: message.body, peer: message.from, ...clock };
 };
 
 /** `Read({"path":"src/App.tsx"})` — the daemon's rendering of one tool call. */
@@ -182,7 +200,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       entries.push(commandEntry(id, withCommandOutput({ name: '', tone: 'ok' }, command)));
       return;
     }
-    entries.push(entryFor(record, index));
+    entries.push(recordKind(record) === 'user' ? userEntryFor(record, index) : entryFor(record, index));
   });
   flush();
   return entries;

@@ -1,4 +1,5 @@
 import type { TranscriptEntry } from '../lib/session-screens.ts';
+import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
 import { LedgerMessage, SendChip, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
@@ -48,6 +49,9 @@ export function TranscriptRow({ entry, previous, live = false, isLast = false, o
       </div>
     );
   }
+  if (entry.kind === 'user' && entry.peer !== undefined)
+    return <PeerMessageRow entry={entry} peer={entry.peer} rhythm={rhythm} />;
+  if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
 }
 
@@ -102,7 +106,9 @@ function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
   return entry.kind === 'user' || entry.kind === 'assistant' || entry.kind === 'ledger' ? 'message' : 'chrome';
 }
 
-function speakerOf(entry: TranscriptEntry): 'user' | 'assistant' | undefined {
+function speakerOf(entry: TranscriptEntry): string | undefined {
+  // Another agent is its own speaker, so a peer message after yours reads as a change of turn.
+  if (entry.kind === 'user' && entry.peer !== undefined) return `peer:${entry.peer.name}`;
   if (entry.kind === 'user' || entry.kind === 'ledger') return 'user';
   return entry.kind === 'assistant' ? 'assistant' : undefined;
 }
@@ -129,19 +135,15 @@ function AssistantProse({ text }: { readonly text: string }) {
   return <Markdown enableFyRender text={text} {...useReferenceSurface()} />;
 }
 
-const defaultLabel = (kind: TranscriptEntry['kind']): string => {
-  switch (kind) {
-    case 'user':
-      return 'You';
-    case 'assistant':
-      return 'Assistant';
-    case 'tool':
-      return 'Tool';
-    case 'command':
-      return 'Command';
-    case 'notice':
-      return 'Daemon';
-    case 'ledger':
-      return 'Send ledger';
-  }
+/** What a row with no label of its own is headed by. */
+const DEFAULT_LABELS: Readonly<Record<TranscriptEntry['kind'], string>> = {
+  user: 'You',
+  assistant: 'Assistant',
+  tool: 'Tool',
+  command: 'Command',
+  notice: 'Daemon',
+  system: 'Ferretry',
+  ledger: 'Send ledger',
 };
+
+const defaultLabel = (kind: TranscriptEntry['kind']): string => DEFAULT_LABELS[kind];
