@@ -178,12 +178,12 @@ import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
+import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
 import {
   type WardenClientFactory,
   WardenConfigCard,
   WardenConfigSurface,
 } from '../src/features/warden/warden-config-card.tsx';
-import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
 import { WardenOverview } from '../src/features/warden/warden-overview.tsx';
 import { WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
@@ -280,6 +280,7 @@ import {
   LearningSettingsHarness,
   useHarnessLearningActions,
 } from './learning-hub.tsx';
+import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -1175,6 +1176,7 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
         connection={record}
         connections={connections}
         createClient={HARNESS_MACHINE_CLIENT}
+        createPairingClient={HARNESS_PAIRING_CLIENT}
         storage={storage}
         onNavigate={to => {
           const target = new URL(to, window.location.href);
@@ -1702,6 +1704,9 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
   const setUp = connection.daemonId === daemon.daemonId || connection.daemonId === cloneSourceDaemon.daemonId;
   const answer = (path: string, init?: RequestInit): unknown => {
+    // New machine setup and Copy settings: Speed-ups, Warden, Learning, secret names, settings files.
+    const setup = machineSetupAnswer(String(connection.daemonId), setUp, path, init);
+    if (setup !== undefined) return setup;
     if (path === '/v1/fleet/export') return HARNESS_CLONE_EXPORT;
     if (path === '/v1/fleet/setup/scan') return setUp ? HARNESS_SETUP_SCAN : HARNESS_FIRST_RUN_SCAN;
     if (path !== '/v1/fleet/machine') return harnessCatalogAnswer(path, init);

@@ -23,6 +23,7 @@ import { useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import { CloneMachine } from '../setup/clone.tsx';
+import { ExportSettings } from '../setup/export-settings.tsx';
 import { MachineFirstRun } from '../setup/first-run.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
 import { type SettingsFlow, useSettingsFlow } from '../setup/settings-route.ts';
@@ -115,7 +116,7 @@ function NavRow({
   );
 }
 
-function AgentPermissionsSection({
+export function AgentPermissionsSection({
   machine,
   machineName,
   access,
@@ -207,7 +208,7 @@ function useAgentRuntimeNames(machine: FleetMachineView, access: SetupAccess): r
   return names;
 }
 
-function DefaultRuntimeSection({
+export function DefaultRuntimeSection({
   machine,
   machineName,
   access,
@@ -275,7 +276,7 @@ function DefaultRuntimeSection({
 
 const AGENT_CONTROL_KINDS: readonly AgentControlKind[] = ['terminals', 'browsers', 'files', 'ferretrySettings'];
 
-function AgentControlSection({
+export function AgentControlSection({
   machine,
   machineName,
   access,
@@ -343,6 +344,10 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
   if (flow === 'setup' || flow === 'import')
     return <MachineFirstRun key={flow} {...props} mode={flow} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'clone') return <CloneMachine {...props} sources={sources} onDone={toRuntimes} onLeave={leave} />;
+  if (flow === 'export')
+    return (
+      <ExportSettings connection={connection} machineName={machineName} createClient={createClient} onLeave={leave} />
+    );
   if (flow === 'install-claude' || flow === 'install-codex')
     return (
       <InstallTool key={flow} {...props} harness={flow === 'install-claude' ? 'claude' : 'codex'} onLeave={leave} />
@@ -413,6 +418,18 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
       </SetupSection>
 
       <SetupSection title="Setup" name="setup">
+        {/* New machine setup is revisitable: every step skipped the first time is one tap away here. */}
+        <NavRow
+          name="setup"
+          title={machine.setUp ? 'New machine setup' : `Set up ${machineName}`}
+          detail={
+            machine.setUp
+              ? 'Walk through logins, speed-ups, voice, the Warden, learning and agent controls again.'
+              : 'Pair, start fresh or copy another machine, then logins, speed-ups and the Warden.'
+          }
+          // The setup is a full screen of its own; the in-tab flow is kept only for an old link.
+          onClick={() => (props.onSetUp === undefined ? route.open('setup') : props.onSetUp())}
+        />
         {machine.setUp ? (
           <NavRow
             name="import"
@@ -420,20 +437,18 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
             detail={`Read Claude Code and Codex on ${machineName} again and add anything new.`}
             onClick={() => route.open('import')}
           />
-        ) : (
-          <NavRow
-            name="setup"
-            title={`Set up ${machineName}`}
-            detail="Check the tools, then bring in your Claude Code and Codex setup."
-            // The first run is a full screen of its own; the in-tab flow is kept only for an old link.
-            onClick={() => (props.onSetUp === undefined ? route.open('setup') : props.onSetUp())}
-          />
-        )}
+        ) : null}
         <NavRow
           name="clone"
-          title="Clone from another machine"
-          detail="Copy components, model sets, profiles and runtimes once. Logins and history stay behind."
+          title="Copy settings from another machine…"
+          detail="Warden, learning, voice, agent controls, profiles and runtimes, copied once. Secrets and logins never travel."
           onClick={() => route.open('clone')}
+        />
+        <NavRow
+          name="export"
+          title="Export settings"
+          detail="A zip of this machine’s configuration files, without secrets."
+          onClick={() => route.open('export')}
         />
       </SetupSection>
 

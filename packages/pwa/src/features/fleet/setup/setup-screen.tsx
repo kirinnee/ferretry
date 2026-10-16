@@ -1,39 +1,51 @@
 /**
- * "Set up ‹machine›" — a new machine's first run as a FULL SCREEN of its own, outside Settings and with
- * no app chrome (the approved usability proposal).
+ * "New machine setup" — a machine's setup as a FULL SCREEN of its own, outside Settings and with no app
+ * chrome (the approved usability proposal; spec R4).
  *
  * Pairing a machine that is not set up opens this (`first-run-landing.ts`); pairing another phone to a
- * machine that IS set up never does. Setting a machine up is a one-time guided job, and showing it as a
- * page four levels deep in Settings, with every app menu around it, is what made it read as just more
- * settings. "Import again" later stays where it was, on the machine's Machine tab.
+ * machine that IS set up never does. It stays revisitable: Settings › Machine › Setup opens it again
+ * for a machine that is set up, with Logins as Import again, so a step skipped the first time is one
+ * tap away. The steps and the rail are `machine-onboarding.tsx`.
  *
- * "Finish later" leaves at once — nothing is imported before the last step — and the answers and the
- * step are kept in this browser (`setup-progress.ts`), so coming back resumes there; Settings shows a
- * "Finish setting up ‹machine›" banner until the machine is set up.
+ * "Finish later" leaves at once — every step saves through its own surface as it goes — and the rail's
+ * place is kept in this browser (`setup-progress.ts`), so coming back resumes there.
  */
 
-import { useCallback, useMemo, useRef } from 'react';
+import { type ReactNode, useCallback, useMemo, useRef } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import { daemonSessionsPath, daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { Button } from '../../../shell/primitives.tsx';
+import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { distinctDaemonName } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { machineHash } from '../shell/machine-route.ts';
 import { useMachineReach } from '../shell/use-machine-reach.ts';
-import { MachineFirstRun } from './first-run.tsx';
-import { readSetupProgress, writeSetupProgress } from './setup-progress.ts';
+import { MachineOnboarding } from './machine-onboarding.tsx';
+import type { VoiceCleanupPort } from './onboarding-steps.tsx';
+import {
+  readMachineSetupProgress,
+  readSetupProgress,
+  writeMachineSetupProgress,
+  writeSetupProgress,
+} from './setup-progress.ts';
 
 export interface MachineSetupScreenProps {
   readonly connection: DaemonConnectionRecord;
-  /** Every pairing, so a machine that shares a name is told apart. */
+  /** Every pairing, so a machine that shares a name is told apart, and the others can be cloned from. */
   readonly connections: readonly DaemonConnectionRecord[];
   readonly createClient: FleetClientFactory;
   readonly onNavigate: (to: string) => void;
   /** Where Finish later keeps progress; `null` when this browser has no storage to keep it in. */
   readonly storage: Pick<Storage, 'getItem' | 'setItem'> | null;
+  /** The Voice step's engine choice, supplied by the Parakeet engine (see `MachineOnboardingProps`). */
+  readonly voiceEngine?: ReactNode;
+  /** This device's dictation settings, for the Voice step's clean-up choice. */
+  readonly voiceCleanup?: VoiceCleanupPort;
+  /** The harness hands in a pairing client, so no capture ever holds a real code. */
+  readonly createPairingClient?: PairingClientFactory;
 }
 
-/** A one-sentence screen for the states that are not a step: checking, already set up, unreadable. */
+/** A one-sentence screen for the states that are not a step: checking, unreadable. */
 function SetupMessage({
   title,
   detail,
@@ -41,7 +53,7 @@ function SetupMessage({
 }: {
   readonly title: string;
   readonly detail?: string;
-  readonly action?: React.ReactNode;
+  readonly action?: ReactNode;
 }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-panel" data-setup-message="">
@@ -60,17 +72,35 @@ export function MachineSetupScreen({
   createClient,
   onNavigate,
   storage,
+  voiceEngine,
+  voiceCleanup,
+  createPairingClient,
 }: MachineSetupScreenProps) {
   const daemonId = connection.daemonId;
   const machineName = distinctDaemonName(connection, connections);
   const only = useMemo(() => [connection], [connection]);
+  const sources = useMemo(
+    () => connections.filter(candidate => candidate.daemonId !== daemonId),
+    [connections, daemonId],
+  );
   const reach = useMachineReach({ daemonId, connections: only, createClient });
   const shown = reach.reachOf(daemonId);
   const toMachine = useCallback(
-    (): void => onNavigate(`${daemonSettingsPath(daemonId)}${machineHash(machineName, 'runtimes')}`),
+    (): void => onNavigate(`${daemonSettingsPath(daemonId)}${machineHash(machineName, 'machine')}`),
     [daemonId, machineName, onNavigate],
   );
   const progress = useMemo(
+    () =>
+      storage === null
+        ? undefined
+        : {
+            saved: readMachineSetupProgress(storage, daemonId),
+            save: (next: Parameters<typeof writeMachineSetupProgress>[2]) =>
+              writeMachineSetupProgress(storage, daemonId, next),
+          },
+    [daemonId, storage],
+  );
+  const firstRunProgress = useMemo(
     () =>
       storage === null
         ? undefined
@@ -81,9 +111,8 @@ export function MachineSetupScreen({
     [daemonId, storage],
   );
 
-  // ONCE THE FIRST RUN IS ON SCREEN IT STAYS THERE. Its last step imports, and the machine is checked
-  // again right after — which answers "checking", then "set up". Either would replace the run with a
-  // message before it can show its own Done step, so a run that has started is only ever paused.
+  // ONCE THE SETUP IS ON SCREEN IT STAYS THERE. A step imports or copies, and the machine is checked
+  // again right after — which answers "checking" first. That must not replace the step it came from.
   const started = useRef(false);
   const body = (() => {
     if (!started.current && (shown.kind === 'checking' || shown.kind === 'locked'))
@@ -100,28 +129,9 @@ export function MachineSetupScreen({
           }
         />
       );
-    if (!started.current && shown.kind === 'online' && shown.machine.setUp)
-      return (
-        <SetupMessage
-          title={`${machineName} is already set up`}
-          detail="To bring in new Claude Code or Codex setup, use Import again on its Machine tab."
-          action={
-            <>
-              <Button type="button" variant="primary" onClick={() => onNavigate(daemonSessionsPath(daemonId))}>
-                Go to sessions
-              </Button>
-              <Button type="button" onClick={toMachine}>
-                Open in Settings
-              </Button>
-            </>
-          }
-        />
-      );
     started.current = true;
     return (
-      <MachineFirstRun
-        mode="setup"
-        presentation="screen"
+      <MachineOnboarding
         connection={connection}
         machineName={machineName}
         machine={shown.kind === 'online' ? shown.machine : null}
@@ -129,9 +139,15 @@ export function MachineSetupScreen({
         checking={shown.kind === 'checking'}
         onRetry={() => reach.check(daemonId)}
         createClient={createClient}
+        sources={sources}
         {...(progress === undefined ? {} : { progress })}
-        onDone={toMachine}
+        {...(firstRunProgress === undefined ? {} : { firstRunProgress })}
+        onFinish={() => onNavigate(daemonSessionsPath(daemonId))}
         onLeave={toMachine}
+        onNavigate={onNavigate}
+        {...(voiceEngine === undefined ? {} : { voiceEngine })}
+        {...(voiceCleanup === undefined ? {} : { voiceCleanup })}
+        {...(createPairingClient === undefined ? {} : { createPairingClient })}
       />
     );
   })();

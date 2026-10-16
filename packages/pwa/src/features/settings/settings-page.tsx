@@ -24,7 +24,7 @@ import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
-import { Button } from '../../shell/primitives.tsx';
+import { Badge, Button } from '../../shell/primitives.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 import { machineItemHash } from '../fleet/setup/settings-route.ts';
@@ -57,7 +57,7 @@ import {
   settingsSectionDefinition,
   settingsSectionForSetting,
 } from './settings-catalog.ts';
-import { type SettingsMachineEntry, SettingsHome, SettingsSidebar } from './settings-navigation.tsx';
+import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
@@ -84,6 +84,11 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'carrier',
   'host-checks',
   'files',
+  // Named by New machine setup's "Set up later" links and by the palette: two panels and two flows.
+  'speedups',
+  'learning',
+  'clone',
+  'export',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));
@@ -148,6 +153,36 @@ export function SettingsSection({ definition, children }: SettingsSectionProps) 
       <p className="mt-1 text-cell leading-base text-muted">{definition.description}</p>
       <div className="mt-3">{children}</div>
     </section>
+  );
+}
+
+/**
+ * WHERE A SETTING LIVES, said on every section (spec R6): "This machine" settings are the daemon's,
+ * shared by every device paired to it and copied by Copy settings from another machine; "This device"
+ * settings are this browser's alone and are never copied. A reader should never have to guess whether
+ * changing something here changes it for their phone too.
+ */
+export function SettingsScope({
+  scope,
+  machineName,
+}: {
+  readonly scope: 'machine' | 'device';
+  readonly machineName?: string | undefined;
+}) {
+  return (
+    <p
+      className="mb-0 mt-2 flex flex-wrap items-center gap-2 text-meta leading-base text-muted"
+      data-settings-scope={scope}
+    >
+      <Badge tone={scope === 'machine' ? 'accent' : 'pend'}>
+        {scope === 'machine' ? 'This machine' : 'This device'}
+      </Badge>
+      <span>
+        {scope === 'machine'
+          ? `${machineName === undefined ? 'Daemon' : `${machineName}’s daemon`} settings, shared by every device paired to it.`
+          : 'Stored in this browser only, and never copied to another machine.'}
+      </span>
+    </p>
   );
 }
 
@@ -585,7 +620,9 @@ export function SettingsPage({
             data-settings-section={section.id}
             className="min-w-0"
           >
-            {section.id === 'machines' ? null : (
+            {section.id === 'machines' ? (
+              <SettingsScope scope="machine" machineName={selectedName} />
+            ) : (
               <header className="mb-3">
                 <h2
                   id={`settings-section-heading-${section.id}`}
@@ -594,6 +631,7 @@ export function SettingsPage({
                   {section.label}
                 </h2>
                 <p className="mb-0 mt-1 text-cell leading-base text-muted">{section.description}</p>
+                <SettingsScope scope="device" />
               </header>
             )}
 

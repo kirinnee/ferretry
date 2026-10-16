@@ -9,7 +9,7 @@
  */
 
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import { daemonSettingsPath } from '../../lib/pages/routes.ts';
+import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/routes.ts';
 
 export type SettingId =
   | 'text-size'
@@ -234,13 +234,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     id: 'appearance',
     label: 'Appearance',
-    description: 'Text, colour, density, and conversation layout on this browser.',
+    description: 'Text, colour, density, and conversation layout on this device.',
     settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width'],
   },
   {
     id: 'behaviour',
     label: 'Behaviour',
-    description: 'How composing, dictation, and notifications behave on this browser.',
+    description: 'How composing, dictation, and notifications behave on this device.',
     settingIds: ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
   },
   {
@@ -475,6 +475,40 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'waiting',
       'invalid',
     ],
+  },
+  {
+    // What a person types to go through setup again: the step names, and "onboarding" and "wizard".
+    id: 'machine-setup',
+    label: 'New machine setup',
+    description:
+      'Walk through pairing, logins, speed-ups, voice, the Warden, learning and agent controls again; every step can be skipped. On this machine.',
+    href: daemon => daemonMachineSetupPath(daemon),
+    keywords: ['setup', 'set up', 'onboarding', 'wizard', 'first run', 'new machine', 'getting started', 'skipped'],
+  },
+  {
+    id: 'copy-settings',
+    label: 'Copy settings from another machine',
+    description:
+      'Copy the Warden, learning, voice, agent controls, profiles and runtimes from a machine you are paired with. Secrets and logins never travel. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#clone`,
+    keywords: ['clone', 'copy', 'import', 'another machine', 'migrate', 'transfer', 'same settings'],
+  },
+  {
+    id: 'export-settings',
+    label: 'Export settings',
+    description:
+      'A zip of this machine’s configuration files, without secrets, for a backup or to edit by hand. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#export`,
+    keywords: ['export', 'zip', 'backup', 'download', 'yaml', 'config', 'save'],
+  },
+  {
+    // The keys' own names, because that is what somebody with a key in hand types.
+    id: 'speedups',
+    label: 'Speed-ups',
+    description:
+      'Optional Jev, Groq and Cerebras keys: cheaper Warden triage and dictation clean-up. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#speedups`,
+    keywords: ['speed-ups', 'speedups', 'jev', 'groq', 'cerebras', 'api key', 'key', 'faster', 'cheaper'],
   },
 ] as const;
 
