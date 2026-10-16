@@ -2,15 +2,15 @@
  * The content of "This folder" without any chrome: the four sub-tabs, each with its search and chips,
  * and the list under them.
  *
- * The desktop rail wraps it with a title and a collapse control (`context-rail.tsx`); the phone's
- * context sheet puts it in a bottom sheet. Both show the same sub-tabs, the same filters and the same
- * rows because both render THIS — there is no second phone list to drift from the desktop one.
+ * Info › Folder draws it with the Files, Docs, Skills and MCP sub-tabs, in Info's right panel on a desktop
+ * and its bottom sheet on a phone. Both show the same sub-tabs, the same filters and the same rows because
+ * both render THIS — there is no second phone list to drift from the desktop one.
  *
  * Search text and the chosen chip are kept per sub-tab, and a sub-tab's rows are read the first time it
  * is shown and kept, so moving between sub-tabs neither forgets what the reader typed nor reads again.
  */
 
-import { useId, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
 import type { SkillsCatalog } from '../skills/skills-catalog.ts';
@@ -47,6 +47,14 @@ export interface ContextRailBodyProps {
   /** The shown sub-tab, when the host keeps it (the phone sheet remembers it between openings). */
   readonly tab?: ContextRailTab;
   readonly onTabChange?: (tab: ContextRailTab) => void;
+  /** Which sub-tabs, in order. Default: the rail's Signals, MCP, Skills, Docs. */
+  readonly tabs?: readonly ContextRailTab[];
+  /** The tab strip's accessible name. */
+  readonly label?: string;
+  /** The Files sub-tab's body: the workspace's own Files picker, handed in by the host. */
+  readonly renderFiles?: () => ReactNode;
+  /** MCP's "Add…": opens Actions › Add MCP server. */
+  readonly onAddMcp?: () => void;
   readonly now?: () => number;
   readonly searchDebounceMs?: number;
 }
@@ -76,12 +84,16 @@ export function ContextRailBody({
   mcpSignIn,
   tab: shownTab,
   onTabChange,
+  tabs = CONTEXT_RAIL_TABS,
+  label = 'This folder',
+  renderFiles,
+  onAddMcp,
   now = Date.now,
   searchDebounceMs,
 }: ContextRailBodyProps) {
   const signalsRead = useContextSignals(port);
   const id = useId().replace(/:/gu, '');
-  const [ownTab, setOwnTab] = useState<ContextRailTab>('signals');
+  const [ownTab, setOwnTab] = useState<ContextRailTab>(tabs[0] ?? 'signals');
   const tab = shownTab ?? ownTab;
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const mcp = useContextRead(loadMcp, tab === 'mcp');
@@ -93,11 +105,11 @@ export function ContextRailBody({
     onTabChange?.(next);
   };
   const setQuery =
-    <T extends ContextRailTab>(key: T) =>
+    <T extends keyof Filters>(key: T) =>
     (query: string): void =>
       setFilters(previous => ({ ...previous, [key]: { ...previous[key], query } }));
   const setChip =
-    <T extends ContextRailTab>(key: T) =>
+    <T extends keyof Filters>(key: T) =>
     (chip: Filters[T]['chip']): void =>
       setFilters(previous => ({ ...previous, [key]: { ...previous[key], chip } }));
 
@@ -108,11 +120,11 @@ export function ContextRailBody({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-context-rail-body="">
       <SheetTabs
         sheetId={id}
-        label="This folder"
+        label={label}
         current={tab}
-        order={CONTEXT_RAIL_TABS}
+        order={tabs}
         onChange={choose}
-        tabs={CONTEXT_RAIL_TABS.map(key => ({
+        tabs={tabs.map(key => ({
           key,
           label: CONTEXT_RAIL_TAB_LABEL[key],
           ...(key === 'signals' && openCount > 0
@@ -133,7 +145,9 @@ export function ContextRailBody({
         className="min-h-0 min-w-0 flex-1 overflow-y-auto p-sm"
         data-context-panel={tab}
       >
-        {tab === 'signals' ? (
+        {tab === 'files' ? (
+          (renderFiles?.() ?? null)
+        ) : tab === 'signals' ? (
           <ContextSignalsPanel
             port={port}
             read={signalsRead}
@@ -154,6 +168,7 @@ export function ContextRailBody({
             onChipChange={setChip('mcp')}
             now={now}
             {...(mcpSignIn === undefined ? {} : { signIn: mcpSignIn })}
+            {...(onAddMcp === undefined ? {} : { onAdd: onAddMcp })}
             {...shared}
           />
         ) : tab === 'skills' ? (

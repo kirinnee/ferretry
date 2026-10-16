@@ -3124,7 +3124,7 @@ try {
 
           // THE SESSION BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves the bar's share of
           // the viewport; this tighter image makes its spacing legible. It is ONE row now — the agent's
-          // name, project and status, the lifecycle buttons and ⋯ — and the height is printed so a
+          // name, project and status, the lifecycle buttons, ⓘ Info and Actions ▾ — and the height is printed so a
           // regression back to two rows of chrome is a number, not an impression.
           const sessionBar = page.locator('[data-session-bar]');
           const sessionBarTarget = join(outDir, `session-bar-${viewport.name}.png`);
@@ -3179,12 +3179,11 @@ try {
             fail(`the composer sits below the viewport at ${viewport.name}`);
           }
 
-          // THEN the Console — the agent's own pane — shown through the page's own ⋯ › Console, the
+          // THEN the Console — the agent's own pane — shown through the agent pane's own Console tab, the
           // control a reader clicks. It resolves entirely from the harness snapshot reader, so the
           // capture is the agent pane's second tab rather than a network error.
           const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
-          await page.locator('[data-session-more]').click();
-          await page.getByRole('menuitem', { name: 'Console', exact: true }).click();
+          await page.getByRole('tab', { name: 'Console' }).first().click();
           await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
           await page.screenshot({ path: workspacePaneTarget });
           process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);

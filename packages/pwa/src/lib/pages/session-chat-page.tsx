@@ -16,8 +16,6 @@ import {
   type RuntimeModelCatalogSource,
   RuntimeModelControls,
 } from '../../components/runtime-controls.tsx';
-import { SessionDetails } from '../../components/session-details.tsx';
-import { SessionSurfaceReferences } from '../../components/session-surface-references.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
@@ -32,18 +30,38 @@ import {
   instructionDocsLoader,
   sessionSkillsLoader,
 } from '../../features/context-rail/context-rail-ports.ts';
+import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
-import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
+import { FilesTab } from '../../components/files-tab.tsx';
+import { ActionsMenu } from '../../features/session-actions/actions-menu.tsx';
+import { AddMcpForm, type AddMcpPorts } from '../../features/session-actions/add-mcp-form.tsx';
+import {
+  CORE_SESSION_ACTIONS,
+  type CoreActionContext,
+  SESSION_ACTION_IDS,
+} from '../../features/session-actions/core-actions.ts';
+import { ForkForm } from '../../features/session-actions/fork-form.tsx';
+import {
+  type SessionActionContribution,
+  sessionActionSections,
+} from '../../features/session-actions/registry.ts';
+import { RenameForm } from '../../features/session-actions/rename-form.tsx';
+import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
+import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
+import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
+import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
+import type { InfoTab } from '../../features/session-info/info-model.ts';
+import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
+import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
+import { useInfoQuota } from '../../features/session-info/use-info-quota.ts';
+import { daemonSessionPath } from './routes.ts';
+import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
 import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
 import type { WorkspaceFormFactor } from '../../features/workspace/phone/phone-tab.ts';
 import type { ConsoleTyper } from '../../features/workspace/console-surface.tsx';
-import {
-  type SessionContextRailProps,
-  SessionWorkspace,
-  useContextPlacement,
-} from '../../features/workspace/session-workspace.tsx';
+import { type SessionInfoSlot, SessionWorkspace } from '../../features/workspace/session-workspace.tsx';
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
@@ -51,7 +69,6 @@ import { browserPageLabel } from '../../features/browser/browser-surface-list.ts
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import type { ContextMenuItem } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
@@ -207,6 +224,20 @@ export interface SessionChatPageProps {
    * AGENT marker and Take over / Hand back at once. Absent, the page still reads them on a poll.
    */
   readonly surfaceEvents?: SurfaceEventFeed;
+  /**
+   * More rows for Actions ▾, from features that are not the page's: the Warden's "Ask the Warden to
+   * investigate", Learning's "Passive learning" and "Scan this ferret". Each is a registry contribution
+   * built against the same context the core actions read; absent, Actions offers the core set only.
+   */
+  readonly actionContributions?: readonly SessionActionContribution<CoreActionContext>[];
+  /**
+   * The model and effort pickers for Info › Runtime, when the host has them. Absent, Runtime shows the
+   * requested and observed model and the effort as facts, and the composer's chips stay the way to
+   * change them.
+   */
+  readonly infoRuntimeControls?: ReactNode;
+  /** Info open on this tab from the first frame. Absent: Info starts shut. */
+  readonly initialInfo?: InfoTab;
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
@@ -220,15 +251,15 @@ interface SessionContextDependencies {
 const defaultWorkspaceLayouts = new WorkspaceLayoutStore();
 const defaultWorkspaceRails = workspaceRailPreferences;
 
-/** The tools that used to live in the side pane and are not workspace tabs: each opens in a sheet. */
-type SessionUtility = 'tasks' | 'terminals' | 'lineage' | 'analytics';
+/** The two tools Info opens in a sheet of their own: this ferret's tasks and its full analytics. */
+type SessionUtility = 'tasks' | 'analytics';
 
 const UTILITY_LABEL: Readonly<Record<SessionUtility, string>> = {
   tasks: 'Tasks',
-  terminals: 'Terminal references',
-  lineage: 'Lineage',
   analytics: 'Analytics for this session',
 };
+
+const NO_CONTRIBUTIONS: readonly SessionActionContribution<CoreActionContext>[] = [];
 
 /** The browser's clipboard, or a refusal a reader can be told about. */
 const browserCopyText = async (text: string): Promise<void> => {
@@ -301,13 +332,17 @@ export function SessionChatPage({
   context: contextDependencies,
   browser,
   surfaceEvents,
+  actionContributions = NO_CONTRIBUTIONS,
+  infoRuntimeControls,
+  initialInfo,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
   // A drawer layout is a phone whatever the window measures: the app shell has already decided so.
   const formFactor = formFactorOverride ?? (presentation === 'sheet' ? 'phone' : measuredFormFactor);
   const workspace = useSessionWorkspace(workspaceLayouts, scope);
-  const placement = useContextPlacement(formFactor);
+  const info = useInfoPlacement(initialInfo);
+  const [actionForm, setActionForm] = useState<string | null>(null);
   // Who drives which terminal and page, and the session's pages: both through the daemon client, so a
   // relay-only machine answers them as surely as one on the LAN.
   const daemonClient = useDaemonClient();
@@ -380,7 +415,7 @@ export function SessionChatPage({
     return true;
   }, [showAgentTab]);
   const openTasks = useCallback(() => setUtility('tasks'), []);
-  const { reveal } = placement;
+  const { show: showInfo } = info;
   // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
   // behaviour still — Markdown calls the surface — with these as its destinations.
   const referenceDestinations = useMemo(
@@ -399,9 +434,9 @@ export function SessionChatPage({
         else openSurface('browser', page.name ?? page.id, browserPageLabel(page));
       },
       openTasks,
-      openSkills: () => reveal('skills'),
+      openSkills: () => showInfo('folder', 'skills'),
     }),
-    [openFile, openSurface, openTasks, reveal, terminals, browserPages.status],
+    [openFile, openSurface, openTasks, showInfo, terminals, browserPages.status],
   );
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
@@ -453,8 +488,6 @@ export function SessionChatPage({
       referenceDestinations,
     ],
   );
-  const detailsId = useId();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   // Bumped when the reader sends: they want to watch the reply arrive, so the transcript returns to
   // the tail and follows again even if they had scrolled up to re-read while composing.
   const [pinSignal, setPinSignal] = useState(0);
@@ -473,7 +506,7 @@ export function SessionChatPage({
   // and action state, even though the body only writes React state.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger
   useEffect(() => {
-    setDetailsOpen(false);
+    setActionForm(null);
     setMigrateOpen(false);
     setConfirmStop(false);
     setPendingAction(null);
@@ -688,40 +721,6 @@ export function SessionChatPage({
       setActionError(`could not copy the session id: ${actionFailureMessage(reason)}`),
     );
   };
-  /**
-   * ⋯ — everything that used to sit on screen permanently. Files opens the workspace's Files picker and
-   * Console shows the agent's own pane; the tools that are not workspace tabs (tasks, lineage,
-   * analytics) open in a sheet. Stop is here on a phone only, where the bar keeps one button.
-   */
-  const menuItems: readonly ContextMenuItem[] = [
-    { key: 'files', label: 'Files', onSelect: workspace.openFilePicker },
-    { key: 'console', label: 'Console', onSelect: () => showAgentTab('console') },
-    ...(['tasks', 'terminals', 'lineage', 'analytics'] as const).map(key => ({
-      key,
-      label: UTILITY_LABEL[key],
-      onSelect: () => setUtility(key),
-    })),
-    ...(attention === undefined ? [] : [{ key: 'attention', label: 'Attention', onSelect: () => openAttention(null) }]),
-    ...actions
-      .filter(spec => spec.action === 'migrate')
-      .map(spec => ({
-        key: spec.action,
-        label: 'Move to another login…',
-        onSelect: () => void runAction(spec.action),
-      })),
-    { key: 'copy-id', label: 'Copy session id', onSelect: copySessionId },
-    { key: 'details', label: 'Session details', onSelect: () => setDetailsOpen(true) },
-    ...(compact
-      ? actions
-          .filter(spec => spec.action === 'stop')
-          .map(spec => ({
-            key: spec.action,
-            label: spec.label,
-            danger: true,
-            onSelect: () => void runAction(spec.action),
-          }))
-      : []),
-  ];
   const needsYou =
     attention === undefined || attentionItems.length === 0 ? null : (
       <button
@@ -738,43 +737,210 @@ export function SessionChatPage({
       </button>
     );
 
-  // Keyed on the session's NAME and RUNTIME rather than the view: a status tick rebuilds the view, and
-  // a fresh loader identity would re-read every sub-tab of the rail for nothing.
   const agentName = sessionDisplayName(session);
   const runtime = session.config.agent;
-  const rail = useMemo<SessionContextRailProps | undefined>(
-    () =>
-      contextDependencies === undefined
-        ? undefined
+  const routedClient = useDaemonClient();
+
+  /**
+   * ACTIONS ▾ — every DO for this ferret, from the registry. The core rows are the page's own daemon
+   * calls; a host adds more (`actionContributions`) without the menu learning anything new.
+   */
+  const restart = useCallback(async (): Promise<void> => {
+    const daemon = await routedClient(connection);
+    publish(await restartWithResume(daemon, session, `restart-${session.config.id}-${session.state.turn}-${Date.now()}`));
+  }, [connection, publish, routedClient, session]);
+  const mcpPorts = useMemo<AddMcpPorts>(
+    () => ({
+      listing: signal => readSessionMcp(connection, scope, referenceFetch, signal),
+      preview: (mcpScope, request) => previewSessionMcp(connection, scope, mcpScope, request, referenceFetch),
+      add: (mcpScope, request) => addSessionMcp(connection, scope, mcpScope, request, referenceFetch),
+      reload: restart,
+      ...(daemonSessions === undefined
+        ? {}
         : {
-            agentName,
-            signals: attentionSignalsPort(contextDependencies.attention, connection, scope),
-            loadMcp: fleetMcpLoader(connection, contextDependencies.createFleetClient, runtime),
-            loadSkills: sessionSkillsLoader(skills.load, scope),
-            loadDocs: instructionDocsLoader(connection, scope, referenceFetch),
-            onInsertSkill: invocation => {
-              addSkillInvocationToComposer(invocation, scope);
+            reloadOthers: async () => {
+              const daemon = await routedClient(connection);
+              const others = daemonSessions.filter(
+                other =>
+                  other.config.id !== session.config.id &&
+                  other.config.agent === runtime &&
+                  !TERMINAL_STATUSES.has(other.state.status),
+              );
+              for (const other of others)
+                await restartWithResume(daemon, other, `restart-${other.config.id}-${other.state.turn}-${Date.now()}`);
             },
-            onOpenFile: path => openFile(path),
-            mcpSignIn: {
+          }),
+      ...(contextDependencies === undefined
+        ? {}
+        : {
+            signIn: {
               connection,
               createClient: contextDependencies.createFleetClient,
               machineName: contextDependencies.machineName,
             },
-          },
-    [contextDependencies, connection, scope, skills.load, referenceFetch, openFile, agentName, runtime],
+          }),
+    }),
+    [connection, scope, referenceFetch, restart, daemonSessions, routedClient, session.config.id, runtime, contextDependencies],
   );
-  const header = (contextButton: ReactNode): ReactNode => (
+  const coreContext: CoreActionContext = {
+    view: session,
+    name: agentName,
+    canControl,
+    copyId: copySessionId,
+    openMigrate: () => setMigrateOpen(true),
+    restart,
+    stop: async () => {
+      publish(await client.stop(session.config.id, 'stopped from the PWA session workspace'));
+    },
+    resume: async () => {
+      publish(await client.resume(session.config.id));
+    },
+    renderRename: host => (
+      <RenameForm
+        host={host}
+        rename={async patch => {
+          const daemon = await routedClient(connection);
+          const renamed = await daemon.rename(session.config.id, patch.name, patch.teammate, patch.clearParent);
+          publish(renamed);
+          return renamed;
+        }}
+        view={session}
+      />
+    ),
+    renderFork: host => (
+      <ForkForm
+        fork={async teammate =>
+          await forkThroughLatest(
+            await routedClient(connection),
+            session,
+            teammate,
+            `fork-${session.config.id}-${Date.now()}`,
+          )
+        }
+        host={host}
+        onForked={outcome => onNavigate?.(daemonSessionPath(connection.daemonId, outcome.session.id))}
+        view={session}
+      />
+    ),
+    renderAddMcp: host => (
+      <AddMcpForm
+        agentName={agentName}
+        host={host}
+        login={runtime}
+        ports={mcpPorts}
+        project={project}
+      />
+    ),
+  };
+  const actionSections = sessionActionSections([...CORE_SESSION_ACTIONS, ...actionContributions], coreContext);
+  const actionsMenu = (
+    <ActionsMenu
+      compact={compact}
+      form={actionForm}
+      name={agentName}
+      onFailure={sentence => setActionError(sentence)}
+      onFormChange={setActionForm}
+      sections={actionSections}
+    />
+  );
+
+  /**
+   * INFO — every LOOK for this ferret. The Folder tab is the old "This folder" rail (Files, Docs, Skills
+   * and MCP, with each MCP server's scope), and Signals adds the Warden's verdicts to its attention.
+   * Keyed on the session's NAME and RUNTIME rather than the view: a status tick rebuilds the view, and a
+   * fresh loader identity would re-read every tab for nothing.
+   */
+  const infoPorts = useMemo<SessionInfoPorts | undefined>(() => {
+    if (contextDependencies === undefined) return undefined;
+    const loginMcp = fleetMcpLoader(connection, contextDependencies.createFleetClient, runtime);
+    return {
+      worktrees: async signal =>
+        (await (await routedClient(connection)).request('/v1/worktrees', WorktreeListResponseSchema, { signal })).worktrees,
+      verdicts: async () => await (await routedClient(connection)).wardenVerdicts(),
+      analytics: async () =>
+        await fetchSessionAnalytics(connection, scope, `sum ${analyticsIdQuery(scope.sessionId)}`, referenceFetch),
+      folder: {
+        agentName,
+        signals: attentionSignalsPort(contextDependencies.attention, connection, scope),
+        loadMcp: async signal => {
+          const [login, project] = await Promise.all([
+            loginMcp(signal),
+            readSessionMcp(connection, scope, referenceFetch, signal).catch(() => null),
+          ]);
+          return scopedMcpServers(login, project?.project?.servers ?? null);
+        },
+        loadSkills: sessionSkillsLoader(skills.load, scope),
+        loadDocs: instructionDocsLoader(connection, scope, referenceFetch),
+        onInsertSkill: invocation => {
+          addSkillInvocationToComposer(invocation, scope);
+        },
+        onOpenFile: path => openFile(path),
+        mcpSignIn: {
+          connection,
+          createClient: contextDependencies.createFleetClient,
+          machineName: contextDependencies.machineName,
+        },
+        onAddMcp: () => setActionForm(SESSION_ACTION_IDS.addMcp),
+      },
+    };
+  }, [contextDependencies, connection, scope, skills.load, referenceFetch, openFile, agentName, runtime, routedClient]);
+  const quota = useInfoQuota(usage, connection.daemonId, session);
+  const infoSlot: SessionInfoSlot | undefined =
+    infoPorts === undefined
+      ? undefined
+      : {
+          open: info.open,
+          onClose: info.close,
+          sheetSize: info.sheetSize,
+          render: (presentation, titleId) => (
+            <SessionInfo
+              browser={browserPages.status}
+              driving={driving}
+              name={agentName}
+              onOpenAnalytics={() => setUtility('analytics')}
+              onOpenPage={page => openSurface('browser', page.name ?? page.id, browserPageLabel(page))}
+              onOpenTasks={openTasks}
+              onOpenTerminal={(id, label) => openSurface('terminal', id, label)}
+              placement={info}
+              ports={{
+                ...infoPorts,
+                folder: {
+                  ...infoPorts.folder,
+                  renderFiles: () => (
+                    <FilesTab
+                      daemon={connection}
+                      markdown={references}
+                      onOpenFile={(path, selection) => openFile(path, selection)}
+                      scope={scope}
+                      {...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd })}
+                    />
+                  ),
+                },
+              }}
+              presentation={presentation}
+              project={project}
+              quota={quota}
+              terminals={terminals}
+              titleId={titleId}
+              view={session}
+              write={copyText}
+              {...(daemonSessions === undefined ? {} : { sessions: daemonSessions })}
+              {...(canControl ? { onRename: () => setActionForm(SESSION_ACTION_IDS.rename) } : {})}
+              {...(onNavigate === undefined
+                ? {}
+                : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
+              {...(infoRuntimeControls === undefined ? {} : { runtimeControls: infoRuntimeControls })}
+            />
+          ),
+        };
+
+  const header = (): ReactNode => (
     <>
       <SessionTopBar
-        actions={
-          <>
-            {lifecycleActions}
-            {contextButton}
-          </>
-        }
+        actions={lifecycleActions}
         compact={compact}
-        menuItems={menuItems}
+        infoOpen={info.open}
+        menu={actionsMenu}
         project={project}
         session={session}
         status={
@@ -786,6 +952,7 @@ export function SessionChatPage({
             {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} quiet />}
           </>
         }
+        {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
       />
       {/* NOT a live region. App.tsx owns the single announcement for a refresh
@@ -921,7 +1088,6 @@ export function SessionChatPage({
         <SessionWorkspace
           chat={chat}
           connection={connection}
-          context={placement}
           driving={driving}
           formFactor={formFactor}
           references={references}
@@ -929,7 +1095,7 @@ export function SessionChatPage({
           rails={workspaceRails}
           session={session}
           workspace={workspace}
-          {...(rail === undefined ? {} : { rail })}
+          {...(infoSlot === undefined ? {} : { info: infoSlot })}
           {...(deck === undefined ? {} : { deck })}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
           {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
@@ -946,38 +1112,8 @@ export function SessionChatPage({
         >
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
             {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
-            {/* Every shell this session holds, with the token that names it and Add to chat. */}
-            {utility === 'terminals' ? (
-              <div className="p-panel">
-                <SessionSurfaceReferences connection={connection} scope={scope} />
-              </div>
-            ) : null}
             {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
-            {utility === 'lineage' ? (
-              daemonSessions === undefined ? (
-                <p className="m-3 text-ui text-muted" role="status">
-                  Loading lineage…
-                </p>
-              ) : (
-                <LineageSurfaceContent
-                  daemonId={connection.daemonId}
-                  sessionId={session.config.id}
-                  sessions={daemonSessions}
-                  {...(onNavigate === undefined ? {} : { onNavigate })}
-                />
-              )
-            ) : null}
           </div>
-        </BottomSheet>
-        <BottomSheet
-          ariaLabel="Session details"
-          closeLabel="Close session details"
-          id={detailsId}
-          onClose={() => setDetailsOpen(false)}
-          open={detailsOpen}
-          panelClassName="kt-details bg-surface"
-        >
-          <SessionDetails daemonId={connection.daemonId} onClose={() => setDetailsOpen(false)} session={session} />
         </BottomSheet>
         {/* Inside the reference provider, so Attention prose reads the SAME
             grammar the transcript does — including a `!A3` that re-targets

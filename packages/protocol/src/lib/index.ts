@@ -35,6 +35,7 @@ export * from './service.ts';
 export * from './session.ts';
 export * from './session-filesystem.ts';
 export * from './session-fork.ts';
+export * from './session-mcp.ts';
 export * from './session-search.ts';
 export * from './session-transcript.ts';
 export * from './session-transfer.ts';

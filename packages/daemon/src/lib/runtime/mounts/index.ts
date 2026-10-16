@@ -66,6 +66,7 @@ import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
 import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
+import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
@@ -210,6 +211,9 @@ export interface MountedSubsystems {
   /** Renaming an agent: a new first name, claimed through the same allocator a start uses, and a new
    *  task title. */
   readonly sessionRename: SessionRenameSubsystem;
+  /** Adding an MCP server for one ferret: to its project's `.mcp.json` (`filesystem`), or to its
+   *  login's profile (`fleet`), each previewed before it is written. */
+  readonly sessionMcp: SessionMcpSubsystem;
   /** The declared-wait watcher: the tick that makes `signal waiting` end. It serves no route — a park
    *  is ended by a timer, not by a request — and it is a mounted subsystem for exactly that reason.
    *  A background loop nothing constructs is the same absent capability as an unserved route, and
@@ -452,6 +456,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
       // Same shape and depth as the signal: a one-segment pattern whose final literal (`rename`) no other
       // route uses, so it can neither shadow nor be shadowed.
       ...sessionRenameRoutes(subsystems.sessionRename),
+      // Every path ends in literals under `mcp`, which no other route uses, and the subsystem registers its
+      // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
+      ...sessionMcpRoutes(subsystems.sessionMcp),
       // The send and the interrupt register with the rest of the write surface, for the reason the
       // revive, the migration and the signal all do: each is a one-segment pattern under
       // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be

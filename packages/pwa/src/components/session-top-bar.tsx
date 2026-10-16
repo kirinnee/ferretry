@@ -9,10 +9,13 @@
  *   - the ferret's name (the callsign) and the project it is working in — nothing else identifies it;
  *   - its status as a dot and a word, which is also where "needs you" and a dead live feed show up;
  *   - Interrupt and Stop/Start, beside the name rather than in a row below it;
- *   - ⋯, which holds everything that used to be on screen permanently: runtime, mode and id, Files, the
- *     terminals, moving to another login, this session's analytics, copying the id, and the details.
+ *   - ⓘ Info, which is for LOOKING: a resizable right panel on a desktop, a bottom sheet on a phone;
+ *   - Actions ▾, which is for DOING: one grouped dropdown on every width.
  *
- * On a phone the bar is ☰ (the sessions drawer), the name, the status dot, the primary action and ⋯.
+ * That is the header's one rule, LOOK vs DO. The old ⋯ menu and the panel-toggle icon are gone: what
+ * they held is now either a fact in Info or an action in Actions.
+ *
+ * On a phone the bar is ☰ (the sessions drawer), the name, the status dot, the primary action, ⓘ and ▾.
  *
  * PRESENTATIONAL ONLY. The page owns every action and every piece of state; this file draws what it is
  * handed, so a test can mount it with plain values and the page cannot end up with two owners of the
@@ -20,11 +23,10 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { Ellipsis, Menu } from 'lucide-react';
-import { type ReactNode, useRef, useState } from 'react';
+import { Info, Menu } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
-import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../shell/context-menu.tsx';
 import { StatusMark } from '../shell/status-mark.tsx';
 
 /**
@@ -36,10 +38,6 @@ export const sessionDisplayName = (session: SessionView): string => {
   return displayCallsign(config.teammate) || config.label || config.name || config.id;
 };
 
-/** The ⋯ menu's first line: what is running, in which mode, under which id. */
-export const sessionRuntimeLine = (session: SessionView): string =>
-  [session.config.agent, session.config.mode, session.config.id].filter(part => part !== '').join(' · ');
-
 export interface SessionTopBarProps {
   readonly session: SessionView;
   /** The project this session's folder belongs to, or null when it cannot be named. */
@@ -50,8 +48,12 @@ export interface SessionTopBarProps {
   readonly actions: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
-  /** Everything else this session offers, in ⋯. */
-  readonly menuItems: readonly ContextMenuItem[];
+  /** Whether Info is open. */
+  readonly infoOpen?: boolean;
+  /** The ⓘ that opens or closes Info. Absent: this host shows no Info, and draws no ⓘ. */
+  readonly onToggleInfo?: () => void;
+  /** Actions ▾, rendered by the page that owns every action. */
+  readonly menu?: ReactNode;
   /** Phone only: opens the sessions drawer. */
   readonly onOpenSessions?: () => void;
 }
@@ -62,25 +64,13 @@ export function SessionTopBar({
   compact,
   actions,
   status,
-  menuItems,
+  infoOpen = false,
+  onToggleInfo,
+  menu,
   onOpenSessions,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
-  const moreRef = useRef<HTMLButtonElement | null>(null);
-  const [menu, setMenu] = useState<MenuAnchor | null>(null);
-  const openMenu = (): void => {
-    const rect = moreRef.current?.getBoundingClientRect();
-    setMenu({ x: rect?.right ?? 0, y: rect?.bottom ?? 0 });
-  };
-  // The runtime line is a fact, not an action: a disabled first row reads it out with the menu and
-  // cannot be activated.
-  const runtime: ContextMenuItem = {
-    key: 'runtime',
-    label: sessionRuntimeLine(session),
-    disabled: true,
-    onSelect: () => undefined,
-  };
 
   return (
     <header className="fy-session-bar" data-compact={compact ? '' : undefined} data-session-bar="">
@@ -109,27 +99,20 @@ export function SessionTopBar({
       <div className="fy-session-bar__actions" data-session-actions="">
         {actions}
       </div>
-      <button
-        aria-expanded={menu !== null}
-        aria-haspopup="menu"
-        aria-label="More session actions"
-        className="fy-session-bar__icon"
-        data-session-more=""
-        onClick={openMenu}
-        ref={moreRef}
-        type="button"
-      >
-        <Ellipsis aria-hidden="true" size={18} />
-      </button>
-      <ContextMenu
-        anchor={menu ?? { x: 0, y: 0 }}
-        ariaLabel={`${name} actions`}
-        items={[runtime, ...menuItems]}
-        onClose={() => setMenu(null)}
-        open={menu !== null}
-        touch={compact}
-        triggerRef={moreRef}
-      />
+      {onToggleInfo === undefined ? null : (
+        <button
+          aria-label={compact ? 'Info' : undefined}
+          aria-pressed={infoOpen}
+          className={compact ? 'fy-session-bar__icon' : 'fy-session-bar__info kt-btn kt-btn--sm'}
+          data-session-info-toggle=""
+          onClick={onToggleInfo}
+          type="button"
+        >
+          <Info aria-hidden="true" size={compact ? 18 : 14} />
+          {compact ? null : <span>Info</span>}
+        </button>
+      )}
+      {menu}
     </header>
   );
 }

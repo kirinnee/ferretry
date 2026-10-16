@@ -78,6 +78,7 @@ import {
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
 import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
+import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
@@ -664,6 +665,8 @@ import {
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
 import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
+import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
+import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import {
   ConversationLeases,
@@ -6449,7 +6452,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           };
         },
       };
-      return {
+      const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         health: createHealthSubsystem(health, scratch),
         doctor: {
           report: async () => {
@@ -6805,6 +6808,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock: new SystemGrantClock(),
           clientName: CLIENT_NAME,
           changed: () => deviceConnections.recheckAll(),
+        }),
+      };
+      return {
+        ...mounted,
+        // Built after the rest because it reads three of them: the session directory, and the project
+        // catalogue and worktree service that say which folders are KNOWN roots a project write may use.
+        // The fleet half goes through the very catalogue service Settings applies reviewed changes with.
+        sessionMcp: createSessionMcpSubsystem({
+          sessions: mounted.sessions,
+          projectRoots: knownProjectRoots(mounted.catalogs, mounted.worktrees),
+          files: new FileMcpProjectFiles(),
+          fleet: mounted.fleetCatalog,
         }),
       };
     },

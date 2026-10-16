@@ -88,6 +88,7 @@ import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/c
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
+import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
@@ -2675,6 +2676,108 @@ const HARNESS_LIVE_PANE = [
   '> ',
 ].join('\n');
 
+
+/**
+ * INFO AND ACTIONS, ANSWERED IN THE PAGE. The workspace session works in a managed worktree with
+ * uncommitted changes; the Warden nudged it once; its analytics are priced; its project `.mcp.json`
+ * declares `playwright`, and an Add MCP server preview answers with the diff the daemon would make.
+ */
+const HARNESS_MCP_PROJECT_FILE = '/work/ferretry/.mcp.json';
+const harnessInfoAnswer = (method: string, url: URL, body: string): unknown => {
+  const path = url.pathname;
+  if (method === 'GET' && path === '/v1/worktrees')
+    return {
+      worktrees: [
+        {
+          path: '/work/ferretry',
+          branch: 'feat/session-workspace',
+          repositoryRoot: '/work/ferretry',
+          commonDirectory: '/work/ferretry/.git',
+          relativeCwd: '',
+          createdAt: '2026-07-31T09:00:00.000Z',
+          initialHead: 'a'.repeat(40),
+          branchPreexisted: false,
+          ownerActive: true,
+          sharedWith: [],
+          live: {
+            branch: 'feat/session-workspace',
+            detached: false,
+            undetermined: [],
+            status: {
+              staged: false,
+              unstaged: true,
+              untracked: false,
+              ignored: false,
+              conflicted: false,
+              dirtySubmodule: false,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    };
+  if (method === 'GET' && path === '/v1/warden/verdicts')
+    return [
+      {
+        at: '2026-07-31T11:40:00.000Z',
+        targetSession: HARNESS_WORKSPACE_SESSION,
+        teammate: 'hadi',
+        anomalyKind: 'unattended_question',
+        verdict: 'nudged',
+        reason: 'It asked which account to use and nobody had answered for 20 minutes.',
+        reportPath: 'warden/reports/harness-workspace-1.md',
+      },
+    ];
+  if (method === 'GET' && path === '/v1/analytics')
+    return {
+      ...ANALYTICS,
+      query: 'sum {id="harness-workspace"}',
+      results: [{ ...ANALYTICS.results[0], labels: {}, sessions: 1 }],
+    };
+  if (method === 'GET' && path === '/v1/fleet/components') return harnessCatalogAnswer(path);
+  if (method === 'GET' && path === '/v1/fleet/mcp-auth') return { connections: [] };
+  const route = harnessSessionRoute(path);
+  if (route?.sessionId !== HARNESS_WORKSPACE_SESSION) return null;
+  if (method === 'GET' && route.rest === 'mcp')
+    return {
+      project: {
+        path: HARNESS_MCP_PROJECT_FILE,
+        etag: 'b'.repeat(64),
+        servers: [{ name: 'playwright', transport: 'command' }],
+      },
+    };
+  const request = JSON.parse(body) as { name?: string };
+  const name = request.name ?? 'server';
+  if (method === 'POST' && route.rest === 'mcp/project/preview')
+    return {
+      scope: 'project',
+      path: HARNESS_MCP_PROJECT_FILE,
+      etag: 'b'.repeat(64),
+      replaces: false,
+      diff: [
+        { kind: 'context', text: '{' },
+        { kind: 'context', text: '  "mcpServers": {' },
+        { kind: 'context', text: '    "playwright": {' },
+        { kind: 'context', text: '…' },
+        { kind: 'remove', text: '    }' },
+        { kind: 'add', text: '    },' },
+        { kind: 'add', text: `    "${name}": {` },
+        { kind: 'add', text: '      "command": "npx",' },
+        { kind: 'add', text: '      "args": ["-y", "@sentry/mcp-server"],' },
+        { kind: 'add', text: `      "env": { "SENTRY_TOKEN": "${'$'}{SENTRY_TOKEN}" }` },
+        { kind: 'add', text: '    }' },
+        { kind: 'context', text: '  }' },
+        { kind: 'context', text: '}' },
+      ],
+    };
+  if (method === 'POST' && route.rest === 'mcp/login/preview')
+    return { scope: 'login', runtime: 'claude-default', profile: 'Default', replaces: false, ferrets: 3 };
+  if (method === 'POST' && route.rest === 'mcp/project')
+    return { scope: 'project', name, path: HARNESS_MCP_PROJECT_FILE, etag: 'c'.repeat(64) };
+  if (method === 'POST' && route.rest === 'mcp/login')
+    return { scope: 'login', name, runtime: 'claude-default', profile: 'Default' };
+  return null;
+};
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
@@ -2723,7 +2826,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname.includes('/fs')) {
     const path = url.searchParams.get('path') ?? '';
     if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
-    if (!url.pathname.endsWith('/fs/file')) return harnessJson(HARNESS_FS_LISTINGS[path] ?? { entries: [] });
+    if (!url.pathname.endsWith('/fs/file'))
+      return harnessJson({ root: '/work/ferretry', path, ...(HARNESS_FS_LISTINGS[path] ?? { entries: [] }) });
     if (url.searchParams.get('format') === 'base64') return harnessJson(HARNESS_FS_PREVIEWS[path] ?? { path });
     const driven = HARNESS_DRIVEN_READS[path];
     if (driven !== undefined) {
@@ -2746,6 +2850,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // purpose: this page keeps no store, so inventing a receipt for one would show
   // a saved secret that nothing holds. Anything else still leaves, where the
   // driver's abort of non-loopback traffic remains the real guarantee.
+  // Info and Actions on the workspace session: its worktree, the Warden's verdicts, its analytics and
+  // the session MCP routes (Info › Folder › MCP and Actions › Add MCP server), all in the page.
+  const infoAnswer = harnessInfoAnswer(method, url, String(init?.body ?? '{}'));
+  if (infoAnswer !== null) return harnessJson(infoAnswer);
   const read = method === 'GET' ? HARNESS_DAEMON_READS[url.pathname] : undefined;
   if (read !== undefined) return harnessJson(read);
   return await harnessFetch(input, init);
@@ -6882,17 +6990,21 @@ const WORKSPACE_SESSION = {
     label: 'Assemble the session workspace',
     model: 'claude-opus-5',
     modelHint: 'opus-5',
-    agent: 'claude',
+    agent: 'claude-default',
     harness: 'claude',
     mode: 'auto',
     cwd: '/work/ferretry',
+    createdAt: '2026-07-31T09:00:00.000Z',
     updatedAt: '2026-07-31T10:00:00.000Z',
   },
   state: {
     id: 'harness-workspace',
     status: 'running',
     turn: 12,
+    startedAt: '2026-07-31T09:00:05.000Z',
     lastActivityAt: '2026-07-31T10:00:00.000Z',
+    observedModel: 'claude-opus-5-20260915',
+    observedReasoningEffort: 'high',
     contextPercent: 61,
     quota: { fiveHourPercent: 23, weeklyPercent: 41 },
     activity: 'Editing session-chat-page.tsx',
@@ -7235,6 +7347,13 @@ const WORKSPACE_CHAT_WIDTH: ChatWidthPreference = (() => {
   return asked === 'balanced' || asked === 'full' ? asked : 'readable';
 })();
 
+/** `?info` opens Info on Overview, `?info=usage` on that tab — the frames Info's screenshots need. */
+const WORKSPACE_INFO: InfoTab | undefined = (() => {
+  const asked = new URLSearchParams(window.location.search).get('info');
+  if (asked === null) return undefined;
+  return (INFO_TABS as readonly string[]).includes(asked) ? (asked as InfoTab) : 'overview';
+})();
+
 function SessionWorkspaceHarness() {
   useAppViewport();
   const layout = useLayoutMode();
@@ -7286,6 +7405,7 @@ function SessionWorkspaceHarness() {
           deck={WORKSPACE_TERMINAL_DECK}
           browser={HARNESS_WORKSPACE_BROWSER_DEPENDENCIES}
           workspaceLayouts={WORKSPACE_LAYOUTS}
+          {...(WORKSPACE_INFO === undefined ? {} : { initialInfo: WORKSPACE_INFO })}
           context={{
             attention: WORKSPACE_ATTENTION,
             createFleetClient: harnessDaemonClient,
