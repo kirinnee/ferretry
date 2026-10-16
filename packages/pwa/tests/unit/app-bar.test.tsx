@@ -717,17 +717,32 @@ describe('AppBar phone title', () => {
     expect(appBarTitle(null)).toBeNull();
   });
 
-  it('shows the title beside the sidebar opener on a phone, and not on a desktop', async () => {
+  it('gives a phone one page title: "Insights" for its views, the last crumb everywhere else', async () => {
     setViewport(PHONE);
-    const phone = await mount(bar({ active: 'warden', onOpenSidebar: () => {}, sessionCount: 7, tabBarShown: true }));
-    expect(phone.container.querySelector('[data-app-bar-title]')?.textContent).toBe('Insights');
+    const titles = (container: HTMLElement) =>
+      [...container.querySelectorAll('[data-app-bar-title]')].map(title => title.textContent);
+    const phone = await mount(
+      bar({
+        active: 'warden',
+        crumbs: [{ label: 'Warden' }],
+        onOpenSidebar: () => {},
+        sessionCount: 7,
+        tabBarShown: true,
+      }),
+    );
+    expect(titles(phone.container)).toEqual(['Insights']);
     await phone.unmount();
-    const elsewhere = await mount(bar({ active: 'settings', tabBarShown: true }));
-    expect(elsewhere.container.querySelector('[data-app-bar-title]')).toBeNull();
+    const elsewhere = await mount(bar({ active: 'settings', crumbs: [{ label: 'Settings' }], tabBarShown: true }));
+    expect(titles(elsewhere.container)).toEqual(['Settings']);
     await elsewhere.unmount();
+    const uncrumbed = await mount(bar({ active: 'learning', crumbs: [] }));
+    expect(titles(uncrumbed.container)).toEqual(['Insights']);
+    await uncrumbed.unmount();
+    // A desktop shows the breadcrumb, and the stylesheet hides the title from 480px up.
     setViewport(DESKTOP);
     const desktop = await mount(bar({ active: 'analytics' }));
-    expect(desktop.container.querySelector('[data-app-bar-title]')).toBeNull();
+    const title = desktop.container.querySelector('[data-app-bar-title]') as HTMLElement;
+    expect(title.className).toContain('min-[480px]:hidden');
     await desktop.unmount();
   });
 });
