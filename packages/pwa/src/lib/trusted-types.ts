@@ -15,9 +15,11 @@
  *   `>` is left: that is the whole shape highlight.js emits, because it escapes the source it
  *   tokenizes. Anything else is refused by the policy itself, and {@link trustedHighlight} escapes
  *   such a string first, so a broken highlighter shows its markup as text rather than running it.
- * - `fy-worker` makes the script URL of the app's own signed service worker, which every registration
- *   names (`sw.verified.js`, with a machine label for a push registration). A registration is a script
- *   sink to the browser, so without a policy no worker could be registered at all.
+ * - `fy-worker` makes the script URL of the app's own workers, and only two exist: the signed service
+ *   worker every registration names (`sw.verified.js`, with a machine label for a push registration),
+ *   and the on-device speech worker the build emits beside the app (`/assets/parakeet-worker-<hash>.js`,
+ *   or its dev-server address). A registration and a `new Worker` are script sinks to the browser, so
+ *   without a policy neither could start at all.
  *
  * Where the browser has no Trusted Types (Safari, Firefox, the unit tests) both helpers return the
  * same string, checked by the same rules, so behaviour never forks on the engine.
@@ -54,13 +56,20 @@ const WORKER_SCRIPT = new RegExp(
   'u',
 );
 
-/** Whether a URL is one the app may register a service worker from. */
-export const isWorkerScriptUrl = (url: string): boolean => WORKER_SCRIPT.test(url);
+/**
+ * The speech worker (`src/worker/parakeet-worker.ts`): Vite's content-hashed build output, or the
+ * address its dev server serves the same module at. Nothing else under `/assets/` is a worker.
+ */
+const SPEECH_WORKER_SCRIPT =
+  /^(?:\/assets\/parakeet-worker-[A-Za-z0-9_-]+\.js|\/src\/worker\/parakeet-worker\.ts\?worker_file&type=module)$/u;
+
+/** Whether a URL is one of the app's own worker scripts: the service worker or the speech worker. */
+export const isWorkerScriptUrl = (url: string): boolean => WORKER_SCRIPT.test(url) || SPEECH_WORKER_SCRIPT.test(url);
 
 export interface TrustedTypes {
   /** Highlighter output as a value `innerHTML` accepts; anything not highlighter-shaped is escaped first. */
   readonly html: (markup: string) => TrustedHTML | string;
-  /** The app's own worker URL as a value a registration accepts. Throws for any other URL. */
+  /** The app's own worker URL as a value a registration or a `new Worker` accepts. Throws for any other URL. */
   readonly scriptUrl: (url: string) => string;
 }
 
@@ -103,5 +112,5 @@ export const trustedTypes = (): TrustedTypes => {
 /** Highlighter output, ready for `dangerouslySetInnerHTML`. */
 export const trustedHighlight = (markup: string): TrustedHTML | string => trustedTypes().html(markup);
 
-/** The app's own worker URL, ready for `navigator.serviceWorker.register`. */
+/** The app's own worker URL, ready for `navigator.serviceWorker.register` or `new Worker`. */
 export const trustedWorkerUrl = (url: string): string => trustedTypes().scriptUrl(url);

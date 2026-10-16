@@ -30,7 +30,8 @@
     "./features/task-dag-graph": "./src/features/tasks/task-dag-graph.tsx",
     "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
     "./session-screens.css": "./src/components/session-screens.css",
-    "./worker": "./src/worker/service-worker.ts"
+    "./worker": "./src/worker/service-worker.ts",
+    "./parakeet-worker": "./src/worker/parakeet-worker.ts"
   },
   "types": "./src/lib/index.ts",
   "scripts": {
@@ -47,6 +48,8 @@
     "@xterm/xterm": "^6.0.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",
+    "onnxruntime-web": "1.24.1",
+    "parakeet.js": "1.4.4",
     "qrcode-generator": "^2.0.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

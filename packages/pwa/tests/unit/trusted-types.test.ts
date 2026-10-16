@@ -63,6 +63,21 @@ describe('isHighlightMarkup', () => {
 });
 
 describe('isWorkerScriptUrl', () => {
+  it('accepts the speech worker the build emits, and its dev-server address', () => {
+    expect(isWorkerScriptUrl('/assets/parakeet-worker-D-Ue--TH.js')).toBe(true);
+    expect(isWorkerScriptUrl('/src/worker/parakeet-worker.ts?worker_file&type=module')).toBe(true);
+    for (const url of [
+      '/assets/parakeet-worker-.js',
+      '/assets/parakeet-worker-abc.js?x=1',
+      'https://evil.test/assets/parakeet-worker-abc.js',
+      '/app/assets/parakeet-worker-abc.js',
+      '/assets/other-worker-abc.js',
+      '/src/worker/parakeet-worker.ts',
+    ]) {
+      expect(isWorkerScriptUrl(url)).toBe(false);
+    }
+  });
+
   it('accepts only the app’s own worker, under its base path, with a machine label at most', () => {
     expect(isWorkerScriptUrl('/sw.verified.js')).toBe(true);
     expect(isWorkerScriptUrl('/app/sw.verified.js')).toBe(true);

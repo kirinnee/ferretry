@@ -104,6 +104,21 @@ export default defineConfig({
       },
     },
   },
+  /**
+   * ON-DEVICE DICTATION's worker (`src/worker/parakeet-worker.ts`).
+   *
+   * A MODULE worker, because its bundle has a lazy chunk (parakeet.js reaches ONNX Runtime through a
+   * dynamic import) and Vite's default classic-worker format cannot split one.
+   *
+   * `onnxruntime-web` resolves to its WASM-ONLY build. parakeet.js imports the bare package, whose
+   * default entry is the WebGPU/JSEP build — a second, 25 MB runtime binary this app never runs,
+   * because the pinned int8 encoder cannot run on WebGPU. The alias makes the library and the worker
+   * share the one 12 MB build the worker configures.
+   */
+  worker: { format: 'es' },
+  resolve: {
+    alias: [{ find: /^onnxruntime-web$/u, replacement: 'onnxruntime-web/wasm' }],
+  },
   css: {
     postcss: {
       plugins: [tailwindcss(tailwindConfig), autoprefixer()],

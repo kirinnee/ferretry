@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  BROWSER_MODE_SUMMARY,
-  BROWSER_SERVICE_DISCLOSURE,
   DICTATION_DISABLED_EXPLANATION,
   DICTATION_SAFETY_NOTE,
   DictationSettings,
@@ -17,7 +15,14 @@ import {
   LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
   USER_CONTEXT_EXPLANATION,
 } from '../../../../src/features/settings/dictation-settings.tsx';
-import type { BrowserRecognitionSupport } from '../../../../src/lib/stt/browser-recognition.ts';
+import {
+  BROWSER_ACTIVE_NOTE,
+  BROWSER_ENGINE_DISCLOSURE,
+  BROWSER_ENGINE_LABEL,
+  NO_ENGINE_NOTE,
+  PARAKEET_ACTIVE_NOTE,
+  PARAKEET_ENGINE_LABEL,
+} from '../../../../src/features/settings/voice-engine-choice.tsx';
 import { DEFAULT_STT_SETTINGS, type SttSettings, type SttSettingsPatch } from '../../../../src/lib/stt/stt-settings.ts';
 import { AVAILABLE_RECOGNITION, UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -54,46 +59,28 @@ const switchNamed = (container: HTMLElement, label: string): HTMLButtonElement =
     `the ${label} switch`,
   );
 
-const availability = (container: HTMLElement): HTMLElement =>
-  must(container.querySelector('section[aria-label="Browser dictation availability"]'), 'the availability section');
+const engineSection = (container: HTMLElement): HTMLElement =>
+  must(container.querySelector('section[aria-label="Voice engine"]'), 'the voice engine section');
+
+const radio = (container: HTMLElement, value: string): HTMLInputElement =>
+  must(container.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`), `the ${value} radio`);
 
 describe('<DictationSettings>', () => {
-  it('reports the browser capability it actually detected', async () => {
+  it('offers both engines side by side, the browser one labelled with where its audio goes', async () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
-    const section = availability(view.container);
-    expect(section.textContent).toContain('Available in this browser');
-    expect(section.textContent).toContain('standard speech recognition is exposed on this page');
+    const section = engineSection(view.container);
+    expect(section.textContent).toContain(PARAKEET_ENGINE_LABEL);
+    expect(section.textContent).toContain(`${BROWSER_ENGINE_LABEL} (${BROWSER_ENGINE_DISCLOSURE})`);
+    // Nobody has chosen yet, so nothing is picked for them.
+    expect(radio(view.container, 'parakeet').checked).toBe(false);
+    expect(radio(view.container, 'browser').checked).toBe(false);
+    expect(section.textContent).toContain(NO_ENGINE_NOTE);
     await view.unmount();
   });
 
-  it('names the prefixed WebKit implementation rather than calling it standard', async () => {
-    const webkit: BrowserRecognitionSupport = {
-      available: true,
-      availability: 'available',
-      implementation: 'webkit',
-    };
-    const view = await mount(<DictationSettings {...settingsProps({ recognitionSupport: webkit })} />);
-    expect(availability(view.container).textContent).toContain('WebKit speech recognition');
-    await view.unmount();
-  });
-
-  it('fails closed with the browser-specific reason instead of an empty panel', async () => {
+  it('fails the browser engine closed with its own reason instead of an empty option', async () => {
     const view = await mount(<DictationSettings {...settingsProps({ recognitionSupport: UNSUPPORTED_RECOGNITION })} />);
-    const section = availability(view.container);
-    expect(section.textContent).toContain('Unavailable in this browser');
-    expect(section.textContent).toContain('does not support dictation for web apps');
-    await view.unmount();
-  });
-
-  it('carries the installed-iOS refusal verbatim, with its way out', async () => {
-    const homeScreen: BrowserRecognitionSupport = {
-      available: false,
-      availability: 'ios-home-screen',
-      implementation: 'webkit',
-      reason: 'Dictation is unavailable in an iPhone Home Screen app. Open Ferretry in Safari to dictate.',
-    };
-    const view = await mount(<DictationSettings {...settingsProps({ recognitionSupport: homeScreen })} />);
-    expect(availability(view.container).textContent).toContain('Open Ferretry in Safari');
+    expect(engineSection(view.container).textContent).toContain('does not support dictation for web apps');
     await view.unmount();
   });
 
@@ -101,19 +88,38 @@ describe('<DictationSettings>', () => {
     // happy-dom exposes no SpeechRecognition, so detection must refuse rather
     // than throw on a constructor that is not there.
     const view = await mount(<DictationSettings {...{ ...settingsProps(), recognitionSupport: undefined }} />);
-    expect(availability(view.container).textContent).toContain('Unavailable in this browser');
+    // happy-dom is not a secure context either, and that is the first refusal detection names.
+    expect(engineSection(view.container).textContent).toContain('Dictation needs a secure HTTPS page in this browser.');
     await view.unmount();
   });
 
-  it('states both audio boundaries, and names no daemon transcription', async () => {
+  it('reads Parakeet from the app store, and says so when there is none', async () => {
+    // Outside a store (this suite) the on-device engine is honestly unavailable, never a crash.
     const view = await mount(<DictationSettings {...settingsProps()} />);
-    expect(view.container.textContent).toContain(BROWSER_MODE_SUMMARY);
-    expect(view.container.textContent).toContain(BROWSER_SERVICE_DISCLOSURE);
-    // The retired per-device download and daemon model install must be gone,
-    // not merely unreachable.
-    expect(view.container.textContent).not.toContain('Prepare this device');
-    expect(view.container.textContent).not.toContain('speech model');
-    expect(view.container.textContent).not.toContain('Download');
+    expect(engineSection(view.container).textContent).toContain('Parakeet is not available in this copy of Ferretry.');
+    await view.unmount();
+  });
+
+  it('records the chosen engine through the one update port', async () => {
+    const patches: SttSettingsPatch[] = [];
+    const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
+    await interact(() => radio(view.container, 'parakeet').click());
+    await interact(() => radio(view.container, 'browser').click());
+    expect(patches).toEqual([{ engine: 'parakeet' }, { engine: 'browser' }]);
+    await view.unmount();
+  });
+
+  it('promises the audio stays here only while Parakeet is the active engine', async () => {
+    const view = await mount(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'browser' } })} />,
+    );
+    expect(view.container.textContent).not.toContain('audio never leaves');
+    expect(view.container.textContent).toContain(BROWSER_ACTIVE_NOTE);
+
+    await view.render(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'parakeet' } })} />,
+    );
+    expect(view.container.textContent).toContain(PARAKEET_ACTIVE_NOTE);
     await view.unmount();
   });
 
@@ -127,8 +133,6 @@ describe('<DictationSettings>', () => {
     const view = await mount(<DictationSettings {...settingsProps()} />);
     for (const copy of [
       DICTATION_SAFETY_NOTE,
-      BROWSER_MODE_SUMMARY,
-      BROWSER_SERVICE_DISCLOSURE,
       DICTATION_DISABLED_EXPLANATION,
       ENHANCEMENT_TOGGLE_EXPLANATION,
       ENHANCEMENT_EXPLANATION,
@@ -181,7 +185,7 @@ describe('<DictationSettings>', () => {
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enabled: false } })} />,
     );
     expect(view.container.textContent).toContain('Dictation is disabled.');
-    expect(view.container.querySelector('section[aria-label="Browser dictation availability"]')).toBeNull();
+    expect(view.container.querySelector('section[aria-label="Voice engine"]')).toBeNull();
     expect(view.container.querySelector('#stt-dictionary')).toBeNull();
     await view.unmount();
   });

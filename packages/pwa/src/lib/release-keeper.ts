@@ -22,20 +22,21 @@
 import { z } from 'zod';
 import { type ReleaseHeaderRule, releaseHeadersFor } from './release-headers.ts';
 import {
-  type ReleaseManifest,
-  type ReleaseRewrite,
+  isDeferredReleaseFile,
   RELEASE_MANIFEST_FILE,
   RELEASE_SIGNATURE_FILE,
+  type ReleaseManifest,
+  type ReleaseRewrite,
   releasePathForRequest,
 } from './release-manifest.ts';
 import {
+  checkReleaseSignature,
   type InstalledOrder,
+  RELEASE_REFUSAL_WORDS,
   type ReleaseRefusal,
+  releaseKeyChain,
   type SignatureCheck,
   type SignedRelease,
-  RELEASE_REFUSAL_WORDS,
-  checkReleaseSignature,
-  releaseKeyChain,
   sha256Base64Url,
   verifyReleaseFile,
   verifyReleaseManifest,
@@ -327,6 +328,8 @@ export class ReleaseKeeper {
    * Every listed file, checked. An unchanged file is reused from the installed release only if its
    * cached bytes STILL hash to the listed value; a copy a page rewrote is fetched again, so a
    * tampered cache can neither poison the new release nor make a good release look like a bad deploy.
+   *
+   * A DEFERRED file (`isDeferredReleaseFile`) is skipped here: it is verified when something asks for it.
    */
   async #fetchAll(
     manifest: ReleaseManifest,
@@ -334,6 +337,7 @@ export class ReleaseKeeper {
   ): Promise<Map<string, Uint8Array> | 'unreachable' | 'hash-mismatch'> {
     const files = new Map<string, Uint8Array>();
     for (const path of Object.keys(manifest.files)) {
+      if (isDeferredReleaseFile(path)) continue;
       const reusable = active !== null && active.manifest.files[path] === manifest.files[path];
       const cached = reusable ? await this.options.caches.get(active.cacheName, path) : null;
       const intact = cached !== null && (await verifyReleaseFile(manifest, path, cached)) ? cached : null;
@@ -395,7 +399,8 @@ export class ReleaseKeeper {
         return { status: 200, bytes: cached, headers: releaseHeadersFor(pathname, path, headers) };
       const fresh = await network.get(path);
       if (fresh !== null && (await verifyReleaseFile(release.manifest, path, fresh))) {
-        await caches.put(release.cacheName, path, fresh);
+        // A deferred file is answered, never kept: the one copy that matters is the speech engine's.
+        if (!isDeferredReleaseFile(path)) await caches.put(release.cacheName, path, fresh);
         return { status: 200, bytes: fresh, headers: releaseHeadersFor(pathname, path, headers) };
       }
     }

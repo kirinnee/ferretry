@@ -218,6 +218,8 @@ export type BrowserRecognitionErrorCode =
   | 'recognition-unavailable'
   | 'bad-audio'
   | 'recognition-failed'
+  /** The on-device engine was chosen, but its model is not on this device. */
+  | 'model-not-installed'
   | 'aborted';
 
 export class BrowserRecognitionError extends Error {

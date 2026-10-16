@@ -163,6 +163,7 @@ import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemo
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
+import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.tsx';
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
 import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
@@ -235,6 +236,8 @@ import {
   type SpeechRecognitionLike,
   type SpeechRecognitionResultEventLike,
 } from '../src/lib/stt/browser-recognition.ts';
+import { PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '../src/lib/stt/parakeet-model.ts';
+import type { ParakeetInstallSnapshot, ParakeetVoice } from '../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
@@ -590,6 +593,42 @@ const HARNESS_RECOGNITION_IOS_HOME_SCREEN: BrowserRecognitionSupport = {
   reason: 'Home Screen apps cannot use dictation on iPhone or iPad. Open Ferretry in Safari instead.',
 };
 
+/**
+ * Parakeet's install in each state the Voice settings show, frozen. A static snapshot rather than the
+ * real service: the gallery is about what each state LOOKS like, and nothing here may download.
+ */
+const harnessParakeetVoice = (snapshot: ParakeetInstallSnapshot): ParakeetVoice =>
+  ({
+    support: { available: snapshot.phase !== 'unsupported' },
+    getSnapshot: () => snapshot,
+    subscribe: () => () => undefined,
+    refresh: async () => undefined,
+    install: async () => undefined,
+    cancel: () => undefined,
+    remove: async () => undefined,
+    createSession: () => {
+      throw new Error('the harness never dictates through Parakeet');
+    },
+  }) as unknown as ParakeetVoice;
+
+const HARNESS_PARAKEET_ABSENT = harnessParakeetVoice({
+  phase: 'absent',
+  totalBytes: PARAKEET_TOTAL_BYTES,
+  downloadedBytes: 0,
+});
+const HARNESS_PARAKEET_INSTALLING = harnessParakeetVoice({
+  phase: 'installing',
+  totalBytes: PARAKEET_TOTAL_BYTES,
+  downloadedBytes: 281_000_000,
+  label: 'Encoder',
+});
+const HARNESS_PARAKEET_INSTALLED = harnessParakeetVoice({
+  phase: 'installed',
+  totalBytes: PARAKEET_TOTAL_BYTES,
+  downloadedBytes: PARAKEET_TOTAL_BYTES,
+  version: PARAKEET_VERSION_LABEL,
+  installedAt: '2026-10-16T09:30:00.000Z',
+});
 /** Available and silent: the mic-button card is about the button's two layouts. */
 const harnessSilentRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_AVAILABLE);
 
@@ -950,6 +989,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         update: patch => setSettings(current => ({ ...current, ...patch })),
         persisted: true,
         recognitionSupport: HARNESS_RECOGNITION_AVAILABLE,
+        voice: HARNESS_PARAKEET_ABSENT,
       }}
       notifications={
         <NotificationSettingsView
@@ -5756,6 +5796,31 @@ function Shell() {
         </Card>
       ),
     },
+    ...(
+      [
+        ['Voice settings — not installed', 'harness-voice-absent', HARNESS_PARAKEET_ABSENT, 'parakeet'],
+        ['Voice settings — installing', 'harness-voice-installing', HARNESS_PARAKEET_INSTALLING, 'parakeet'],
+        ['Voice settings — installed', 'harness-voice-installed', HARNESS_PARAKEET_INSTALLED, 'parakeet'],
+        ['Voice settings — browser voice', 'harness-voice-browser', HARNESS_PARAKEET_INSTALLED, 'browser'],
+      ] as const
+    ).map(([label, id, voice, engine]) => ({
+      label,
+      render: () => (
+        <Card aria-label={label} className="min-w-0" id={id}>
+          <PanelHeader>
+            <Label>Voice</Label>
+          </PanelHeader>
+          <PanelBody>
+            <VoiceEngineChoice
+              value={engine}
+              onChange={() => undefined}
+              voice={voice}
+              browserSupport={HARNESS_RECOGNITION_AVAILABLE}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    })),
     {
       label: 'Dictation shortcut settings',
       render: () => (

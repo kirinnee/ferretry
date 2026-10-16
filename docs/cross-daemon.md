@@ -21,13 +21,14 @@ summary is [security.md](security.md).
 
 ## 2. Script in the app
 
-- **2a. Daemon data → script: no path found.** CSP `script-src 'self'` with two fixed hashes,
-  markdown without raw HTML, highlighter-only `innerHTML`, sandboxed `fy-render` frames.
+- **2a. Daemon data → script: no path found.** CSP `script-src 'self'` with two fixed hashes (plus
+  `'wasm-unsafe-eval'`, which lets WebAssembly compile for on-device dictation and enables no `eval` —
+  [voice.md](voice.md)), markdown without raw HTML, highlighter-only `innerHTML`, sandboxed `fy-render` frames.
 - **2b. Trusted Types — closed (Chromium).** `public/_headers` now says
   `require-trusted-types-for 'script'; trusted-types fy-highlight fy-worker`. Chromium refuses a plain
   string at every script sink, and only two policies may exist (`src/lib/trusted-types.ts`):
   `fy-highlight` accepts only highlight.js's own `<span class="…">` markup, and `fy-worker` accepts only
-  the app's own signed worker URL. The harness gallery runs under the same directives and fails on any
+  the app's own signed worker URL and its own hashed speech worker (`/assets/parakeet-worker-<hash>.js`). The harness gallery runs under the same directives and fails on any
   violation; `tests/integration/release-worker.test.ts` proves the installed page enforces them.
   Safari and Firefox ignore the directive, and the same checks run on plain strings there.
 - **2c. If script DID run, it reaches every machine — open by design.** The app's origin is shared by

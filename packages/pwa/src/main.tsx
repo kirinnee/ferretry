@@ -9,8 +9,16 @@
  * provider stack, the notification watch — belongs to `App.tsx`, which owns its
  * own composition. kteam stacked four providers here, and that made the entry
  * point a second, invisible place where the app's shape was decided. Here the
- * entry point knows exactly two things: where the document's mount point is, and
- * that the stylesheet is part of the bundle.
+ * entry point knows exactly three things: where the document's mount point is,
+ * that the stylesheet is part of the bundle, and where the bundler put the
+ * on-device speech worker and its runtime (docs/voice.md).
+ *
+ * Those two are Vite-only imports, which is why they live HERE and nowhere a
+ * test loads. `?worker&url` bundles `worker/parakeet-worker.ts` as a module
+ * worker and returns its hashed URL as a STRING — what Trusted Types needs; a
+ * `new Worker(new URL(…))` would hand the browser an object no policy made.
+ * `?url` emits ONNX Runtime's WebAssembly binary under `/assets/`; only someone
+ * who installs Parakeet ever downloads it.
  *
  * The CSS import is what pulls `styles/index.css` (and, through its `@import`s,
  * the theme tokens and every component stylesheet) into the build as a real
@@ -22,6 +30,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
+import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
+import workerUrl from './worker/parakeet-worker.ts?worker&url';
 import './styles/index.css';
 
 const host = document.getElementById('root');
@@ -32,6 +42,6 @@ if (!host) throw new Error('missing #root — the host document is not this app�
 
 createRoot(host).render(
   <StrictMode>
-    <App />
+    <App speechAssets={{ workerUrl, runtimeUrl }} />
   </StrictMode>,
 );
