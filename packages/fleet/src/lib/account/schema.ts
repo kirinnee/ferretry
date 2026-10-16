@@ -90,9 +90,41 @@ export const isRuntimeName = (value: string): boolean => RuntimeNameSchema.safeP
 export const AgentPermissionsSchema = z.enum(['auto', 'skip']);
 export type AgentPermissions = z.infer<typeof AgentPermissionsSchema>;
 
+/**
+ * "What agents may control" (T, session-spec.html Settings): the three things a person can switch
+ * off independently for every agent runtime on this machine. All default on, because the product
+ * starts open and the switch is the escape hatch (same posture as `docs/grants.md`'s permissive
+ * defaults) — never read as a security boundary against the operator's own agents, only as a kill
+ * switch for one kind of thing they do.
+ */
+export const AgentControlSchema = z
+  .strictObject({
+    terminals: z.boolean().default(true),
+    browsers: z.boolean().default(true),
+    files: z.boolean().default(true),
+  })
+  .prefault({});
+export type AgentControl = z.infer<typeof AgentControlSchema>;
+
+/**
+ * The runtime name Ferretry's first run gives the first Claude Code it imports (§4.3 step 4's
+ * suggestion). Not a schema default — a machine that never imported this way has no such runtime —
+ * but the one name {@link resolveDefaultRuntime} tries when the machine named no default itself.
+ */
+export const DEFAULT_RUNTIME_NAME = 'claude-default';
+
 export const MachineSchema = z
   .strictObject({
     agentPermissions: AgentPermissionsSchema.default('auto'),
+    /**
+     * "Default runtime for new agents" (T): the runtime a session starts on when nobody names one.
+     * Unset rather than defaulted to {@link DEFAULT_RUNTIME_NAME} here, so a machine with no such
+     * runtime still parses — {@link resolveDefaultRuntime} is where the fallback actually happens.
+     * When set, it must name an agent runtime on this machine (checked below, by `AccountModelSchema`,
+     * where the runtimes it is checked against are in scope).
+     */
+    defaultRuntime: RuntimeNameSchema.optional(),
+    agentControl: AgentControlSchema,
   })
   .prefault({});
 export type Machine = z.infer<typeof MachineSchema>;
@@ -587,6 +619,23 @@ export const AccountModelSchema = z
       }
     }
 
+    // T: "Default runtime for new agents" must name an agent runtime actually on this machine —
+    // refused here, by name, the same way an unknown credential or profile is.
+    if (model.machine.defaultRuntime !== undefined) {
+      const named = model.runtimes[model.machine.defaultRuntime];
+      if (named === undefined || !named.agent) {
+        const agentRuntimes = Object.entries(model.runtimes)
+          .filter(([, runtime]) => runtime.agent)
+          .map(([runtimeName]) => runtimeName);
+        push({
+          code: 'custom',
+          message: `the default runtime for new agents, "${model.machine.defaultRuntime}", is not an agent runtime on this machine (agent runtimes: ${listOf(agentRuntimes)})`,
+          input: model.machine.defaultRuntime,
+          path: ['machine', 'defaultRuntime'],
+        });
+      }
+    }
+
     for (const [name, runtime] of Object.entries(model.runtimes)) {
       if (model.credentials[runtime.credential] === undefined) {
         push({
@@ -642,4 +691,15 @@ export type AccountModelDocument = z.input<typeof AccountModelSchema>;
  */
 export function parseAccountModel(input: unknown): AccountModel {
   return AccountModelSchema.parse(input);
+}
+
+/**
+ * "Default runtime for new agents" (T), resolved: the machine's own setting when it has one — the
+ * schema above already refused anything that is not an agent runtime here — or else
+ * {@link DEFAULT_RUNTIME_NAME} when THAT is an agent runtime on this machine, or else `undefined`
+ * when neither resolves, which a start without an explicit runtime must then refuse in its own words.
+ */
+export function resolveDefaultRuntime(model: AccountModel): string | undefined {
+  if (model.machine.defaultRuntime !== undefined) return model.machine.defaultRuntime;
+  return model.runtimes[DEFAULT_RUNTIME_NAME]?.agent === true ? DEFAULT_RUNTIME_NAME : undefined;
 }

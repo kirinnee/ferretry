@@ -74,6 +74,33 @@ describe('resolveStartAccount', () => {
     should(resolved).deepEqual({ account: auto, executable: auto.wrapper });
   });
 
+  it('should resolve by the machine default when no agent was named', async () => {
+    // Act
+    const resolved = await resolveStartAccount(inventory(auto), undefined, host, 'fy', async () => 'claude-auto-one');
+
+    // Assert
+    should(resolved).deepEqual({ account: auto, executable: auto.wrapper });
+  });
+
+  it('should refuse plainly when no agent was named and the machine has no default either', async () => {
+    // Act
+    const error = await refusal(resolveStartAccount(inventory(auto), undefined, host, 'fy', async () => undefined));
+
+    // Assert
+    should(error.failure).equal('unknown_agent');
+    should(error.message).equal(
+      'no runtime was named, and this machine has no default runtime for new agents — name one with -a/--agent, or set a default with `fy machine set default-runtime <name>`',
+    );
+  });
+
+  it('should refuse the same way when no agent was named and no default resolver was given at all', async () => {
+    // Act
+    const error = await refusal(resolveStartAccount(inventory(auto), undefined, host, 'fy'));
+
+    // Assert
+    should(error.failure).equal('unknown_agent');
+  });
+
   it('should resolve an account by its opaque id', async () => {
     // Act
     const resolved = await resolveStartAccount(inventory(auto), 'account-1', host, 'fy');

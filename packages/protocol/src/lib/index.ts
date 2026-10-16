@@ -1,4 +1,5 @@
 export * from './address.ts';
+export * from './agent-tools.ts';
 export * from './advertisement.ts';
 export * from './analytics.ts';
 export * from './analytics-model-identity.ts';

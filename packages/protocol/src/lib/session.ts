@@ -488,6 +488,31 @@ export const SessionAttachTargetSchema = z.strictObject({
 });
 export type SessionAttachTarget = z.infer<typeof SessionAttachTargetSchema>;
 
+/**
+ * The most a single Console write may carry, in UTF-16 code units. A keystroke is one to a handful; a
+ * paste is the large case, and a client splits anything longer into ordered writes rather than the
+ * daemon accepting an unbounded body into a tmux argument vector.
+ */
+export const SESSION_CONSOLE_INPUT_MAX = 4_096;
+
+/**
+ * Typing into a session's OWN pane — the agent's Claude / Codex CLI — from wherever the reader is.
+ *
+ * `data` is exactly what a terminal would send: printable text, `\r` for Enter, escape sequences for
+ * arrows and the rest. The daemon writes the bytes and keeps nothing of them; the security log counts
+ * the writes per session and never records what they said.
+ */
+export const SessionConsoleInputRequestSchema = z.strictObject({
+  data: z.string().min(1).max(SESSION_CONSOLE_INPUT_MAX),
+});
+export type SessionConsoleInputRequest = z.infer<typeof SessionConsoleInputRequestSchema>;
+
+/** How many bytes reached the pane: the UTF-8 length of `data`, never the bytes themselves. */
+export const SessionConsoleInputResultSchema = z.strictObject({
+  written: PositiveIntegerSchema,
+});
+export type SessionConsoleInputResult = z.infer<typeof SessionConsoleInputResultSchema>;
+
 export const NameSuggestionsSchema = z.array(z.string().min(1));
 export type NameSuggestions = z.infer<typeof NameSuggestionsSchema>;
 
@@ -577,7 +602,12 @@ const HarnessFlagSchema = z
   .refine(value => !/\p{Cc}/u.test(value), 'a harness flag may not contain a control character');
 
 const StartSessionBaseSchema = z.strictObject({
-  agent: z.string().min(1),
+  /**
+   * The runtime to start on. Omitted, a start uses this machine's "Default runtime for new agents"
+   * (T, session-spec.html Settings) — resolved daemon-side, never guessed by a client — and is
+   * refused when nothing resolves (`unknown_agent`, naming the machine setting to use instead).
+   */
+  agent: z.string().min(1).optional(),
   name: z.string().min(1).optional(),
   teammate: z.string().min(1).optional(),
   teammateFallback: z.boolean().optional(),

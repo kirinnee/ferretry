@@ -8,6 +8,7 @@ import {
   describeSurfaceOwnership,
   sessionSurfaces,
   surfaceReferenceIdentityKey,
+  terminalIdForSurfaceKey,
 } from '../../src/lib/surface-references.ts';
 
 const daemonA = 'daemon-a' as DaemonId;
@@ -199,6 +200,37 @@ describe('surfaceReferenceIdentityKey', () => {
     // Assert
     should(surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'x')]))).not.equal(
       surfaceReferenceIdentityKey(scopeB, listing([terminal(FIRST, 'x')])),
+    );
+  });
+});
+
+describe('terminal names as reference keys', () => {
+  const named = { ...terminal(FIRST, 'Terminal 1'), name: 'dev' };
+
+  test('should offer a named terminal by its name, the handle a person and an agent share', () => {
+    should(sessionSurfaces(scopeA, listing([named]))[0]).match({ key: 'dev', token: '%terminal:dev' });
+  });
+
+  test('should prove a terminal by its name and by its id, and nothing else', () => {
+    // Arrange
+    const resolve = createSurfaceReferenceResolver(scopeA, listing([named]));
+
+    // Act + Assert
+    should(resolve({ kind: 'surface', surface: 'terminal', key: 'dev' })).match({ state: 'open', key: 'dev' });
+    should(resolve({ kind: 'surface', surface: 'terminal', key: FIRST })).match({ state: 'open', key: FIRST });
+    should(resolve({ kind: 'surface', surface: 'terminal', key: 'web' })).deepEqual({ state: 'closed' });
+  });
+
+  test('should find the terminal id a name or an id addresses', () => {
+    should(terminalIdForSurfaceKey(listing([named]), 'dev')).equal(FIRST);
+    should(terminalIdForSurfaceKey(listing([named]), FIRST)).equal(FIRST);
+    should(terminalIdForSurfaceKey(listing([named]), 'web')).be.undefined();
+    should(terminalIdForSurfaceKey(null, 'dev')).be.undefined();
+  });
+
+  test('should change the identity key when a terminal is opened with a name', () => {
+    should(surfaceReferenceIdentityKey(scopeA, listing([named]))).not.equal(
+      surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'Terminal 1')])),
     );
   });
 });

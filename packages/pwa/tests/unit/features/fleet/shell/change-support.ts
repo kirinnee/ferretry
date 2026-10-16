@@ -24,6 +24,8 @@ export const machineAnswer = (overrides: Partial<FleetMachineAuthority> = {}): F
   format: 'version-2',
   setUp: true,
   agentPermissions: 'auto',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true },
   tools: [],
   runtimeCount: 1,
   runningSessions: 0,
@@ -33,7 +35,12 @@ export const machineAnswer = (overrides: Partial<FleetMachineAuthority> = {}): F
 export const STAGED: FleetAccountChangeView = {
   id: CHANGE_ID,
   revision: 'absent',
-  change: { kind: 'machine.settings', agentPermissions: 'skip' },
+  change: {
+    kind: 'machine.settings',
+    agentPermissions: 'skip',
+    defaultRuntime: 'claude-default',
+    agentControl: { terminals: true, browsers: true, files: true },
+  },
   summary: 'Set agent permissions to Skip all permission checks',
   consequences: ['Applies to new sessions.'],
   expiresAt: '2026-10-13T08:15:00.000Z',

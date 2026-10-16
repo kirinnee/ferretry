@@ -102,6 +102,15 @@ describe('buildStartRequest', () => {
     ]);
   });
 
+  it('should leave agent off the wire entirely when none was named (T: the daemon resolves its own default)', () => {
+    // Arrange / Act
+    const plan = buildStartRequest({ mode: 'auto', prompt: 'do the thing' }, HERE);
+
+    // Assert
+    should(plan.request).not.have.property('agent');
+    should(StartSessionRequestSchema.safeParse(plan.request).success).be.true();
+  });
+
   it('should prefer an explicit --cwd over the working directory', () => {
     // Arrange / Act
     const plan = buildStartRequest({ ...auto, cwd: '/elsewhere' }, HERE);

@@ -53,7 +53,17 @@ import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
+import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
+import {
+  AgentToolsClient,
+  type AgentToolsGateways,
+  AgentToolsController,
+  registerBrowserPageCommands,
+  registerTerminalCommands,
+} from '../src/lib/agent-tools';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { McpServer, registerMcpCommands } from '../src/lib/mcp';
+import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
@@ -616,6 +626,30 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
       }),
     ),
+  // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
+  // the browser group, because `browser page` mounts onto it.
+  ({ program, world, client, ownSessionId }) => {
+    const toolsClient = new AgentToolsClient(agentToolsGateways(world, client), {
+      ...(world.environment.FY_SESSION_BOARD_CAPABILITY === undefined
+        ? {}
+        : { capability: world.environment.FY_SESSION_BOARD_CAPABILITY }),
+      ...(ownSessionId === undefined ? {} : { ownSessionId }),
+    });
+    const tools = new AgentToolsController(toolsClient, world.io, new FileScreenshotWriter());
+    registerTerminalCommands(program, tools);
+    registerBrowserPageCommands(program, tools);
+    // The same client, as the MCP server every agent runtime starts: it acts only as the agent session
+    // whose credential is in its environment. Stdout carries nothing but protocol.
+    registerMcpCommands(program, async () => {
+      await serveMcpOverStdio(
+        new McpServer(toolsClient, { name: PRODUCT_NAME, version: assertSemver(pkg.version) }),
+        Bun.stdin.stream(),
+        line => {
+          process.stdout.write(line);
+        },
+      );
+    });
+  },
   ({ program, world, client }) =>
     registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
   ({ program, world, client }) =>
@@ -774,6 +808,24 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // booting daemon never sets a machine up, and these are how a person (or a script) does.
   ({ program, world, client }) => registerSetupCommands(program, accountCommandDeps(world, client)),
 ];
+
+/**
+ * The agent tools' two ways to the daemon. A person's is the shared client. An agent's carries its
+ * session credential ONLY — it never reads the host's admin token — and talks only to this machine.
+ */
+function agentToolsGateways(world: CliWorld, client: SharedDaemonClient): AgentToolsGateways {
+  const environment = world.environment;
+  return {
+    person: client,
+    agent: new SessionCredentialGateway(
+      async () =>
+        await daemonBaseUrl(
+          environment,
+          resolveDaemonStateHome(world.homeDirectory, environment.FY_HOME, PRODUCT_NAME),
+        ),
+    ),
+  };
+}
 
 /**
  * The session command group's collaborators.

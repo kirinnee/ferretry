@@ -96,6 +96,10 @@ describe('grant vocabulary', () => {
     expect(stepUpAct({ capability: 'pairing', axis: 'use', act: 'widen-device' })).toBe(
       'give another device more access',
     );
+    // Turning "what agents may control" back on remotely (T, owner decision): same rail, its own verb.
+    expect(stepUpAct({ capability: 'fleet', axis: 'configure', act: 'enable-agent-control' })).toBe(
+      'let agents control that again',
+    );
     expect(stepUpAct({ capability: 'browser', axis: 'use' })).toBe('open the remote browser');
     expect(stepUpAct({ capability: 'pairing', axis: 'use' })).toBe('add or manage a paired device');
     expect(stepUpAct({ capability: 'secrets', axis: 'use' })).toBe('run a command with a stored secret');

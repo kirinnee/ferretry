@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AGENT_TOOLS_INSTRUCTION,
   applyFixedLayer,
+  claudeToolsConfig,
+  codexToolsServer,
+  FERRETRY_MCP_ENV_VARS,
   CLAUDE_NO_QUESTIONS_FLAG,
   CODEX_NO_ALT_SCREEN_FLAG,
   codexTrustOverride,
@@ -15,6 +19,23 @@ import { parseAccountModel } from '../../src/lib/account/schema.ts';
 import type { HarnessKind } from '../../src/lib/manifest.ts';
 
 const CWD = '/home/me/work.repo';
+const FY = '/opt/fy/bin/fy';
+/** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
+const CLAUDE_TOOL_ARGS = [
+  `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
+  `--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}`,
+];
+/** And every Codex agent launch. */
+const CODEX_TOOL_ARGS = [
+  '-c',
+  `mcp_servers.ferretry.command="${FY}"`,
+  '-c',
+  'mcp_servers.ferretry.args=["mcp","serve"]',
+  '-c',
+  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]',
+  '-c',
+  `developer_instructions="${AGENT_TOOLS_INSTRUCTION}"`,
+];
 
 const layerOf = (input: FixedLayerInput): FixedLayer => {
   const result = fixedLayerFor(input);
@@ -57,6 +78,7 @@ describe('fixedLayerFor — Claude', () => {
       harness: 'claude',
       agentPermissions: 'auto',
       cwd: CWD,
+      fyCommand: FY,
       acceptsAutoPermissionMode: true,
     });
 
@@ -95,8 +117,24 @@ describe('fixedLayerFor — Claude', () => {
             key: CLAUDE_NO_QUESTIONS_FLAG,
             value: true,
           },
+          {
+            purpose: 'tools',
+            target: 'launch',
+            path: ['--mcp-config'],
+            key: '--mcp-config',
+            value: {
+              mcpServers: { ferretry: { type: 'stdio', command: FY, args: ['mcp', 'serve'], env: { FY_TOKEN: '' } } },
+            },
+          },
+          {
+            purpose: 'instructions',
+            target: 'launch',
+            path: ['--append-system-prompt'],
+            key: '--append-system-prompt',
+            value: AGENT_TOOLS_INSTRUCTION,
+          },
         ],
-        args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion'],
+        args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion', ...CLAUDE_TOOL_ARGS],
         claudeJson: { hasCompletedOnboarding: true, projects: { [CWD]: { hasTrustDialogAccepted: true } } },
       },
     });
@@ -104,10 +142,21 @@ describe('fixedLayerFor — Claude', () => {
 
   it('should launch Skip as bypassPermissions with the warning suppressed by an overlay', () => {
     // Act
-    const actual = layerOf({ harness: 'claude', agentPermissions: 'skip', cwd: CWD, acceptsAutoPermissionMode: false });
+    const actual = layerOf({
+      harness: 'claude',
+      agentPermissions: 'skip',
+      cwd: CWD,
+      fyCommand: FY,
+      acceptsAutoPermissionMode: false,
+    });
 
     // Assert — Skip needs no Auto support
-    should(actual.args).deepEqual(['--permission-mode', 'bypassPermissions', '--disallowed-tools=AskUserQuestion']);
+    should(actual.args).deepEqual([
+      '--permission-mode',
+      'bypassPermissions',
+      '--disallowed-tools=AskUserQuestion',
+      ...CLAUDE_TOOL_ARGS,
+    ]);
     should(actual.claudeSettingsOverlay).deepEqual({ skipDangerousModePermissionPrompt: true });
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
       ['permission-mode', 'permissions.defaultMode', 'bypassPermissions'],
@@ -121,6 +170,7 @@ describe('fixedLayerFor — Claude', () => {
       harness: 'claude',
       agentPermissions: 'auto',
       cwd: CWD,
+      fyCommand: FY,
       acceptsAutoPermissionMode: false,
     });
 
@@ -136,7 +186,7 @@ describe('fixedLayerFor — Claude', () => {
 describe('fixedLayerFor — Codex', () => {
   it('should map Auto mode to on-request in the workspace, with the measured trust table', () => {
     // Act
-    const actual = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD });
+    const actual = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
 
     // Assert
     should(actual.args).deepEqual([
@@ -147,6 +197,7 @@ describe('fixedLayerFor — Codex', () => {
       '-c',
       `projects={"${CWD}"={trust_level="trusted"}}`,
       '--no-alt-screen',
+      ...CODEX_TOOL_ARGS,
     ]);
     should(actual.claudeJson).be.undefined();
     should(actual.claudeSettingsOverlay).be.undefined();
@@ -155,12 +206,14 @@ describe('fixedLayerFor — Codex', () => {
       ['settings', 'sandbox_mode', 'workspace-write'],
       ['settings', `projects."${CWD}".trust_level`, 'trusted'],
       ['launch', CODEX_NO_ALT_SCREEN_FLAG, true],
+      ['settings', 'mcp_servers.ferretry', codexToolsServer(FY)],
+      ['settings', 'developer_instructions', AGENT_TOOLS_INSTRUCTION],
     ]);
   });
 
   it('should map Skip to never with full access', () => {
     // Act
-    const actual = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD });
+    const actual = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD, fyCommand: FY });
 
     // Assert
     should(actual.args.slice(0, 4)).deepEqual([
@@ -190,9 +243,10 @@ describe('applyFixedLayer', () => {
     harness: 'claude',
     agentPermissions: 'auto',
     cwd: CWD,
+    fyCommand: FY,
     acceptsAutoPermissionMode: true,
   });
-  const codexSkip = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD });
+  const codexSkip = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD, fyCommand: FY });
 
   it('should append the fixed arguments last and write its settings over the profile', () => {
     // Arrange
@@ -205,7 +259,13 @@ describe('applyFixedLayer', () => {
     const actual = applyFixedLayer(profile, claudeAuto);
 
     // Assert
-    should(actual.args).deepEqual(['--verbose', '--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion']);
+    should(actual.args).deepEqual([
+      '--verbose',
+      '--permission-mode',
+      'auto',
+      '--disallowed-tools=AskUserQuestion',
+      ...CLAUDE_TOOL_ARGS,
+    ]);
     should(actual.settings).deepEqual({ permissions: { defaultMode: 'auto', allow: ['Bash(ls)'] }, theme: 'dark' });
     should(actual.fixed).equal(claudeAuto);
     should(actual.overridden).have.length(1);
@@ -277,6 +337,7 @@ describe('applyFixedLayer', () => {
       '--permission-mode',
       'auto',
       '--disallowed-tools=AskUserQuestion',
+      ...CLAUDE_TOOL_ARGS,
     ]);
     should(actual.overridden.map(entry => entry.kind === 'flag' && entry.tokens)).deepEqual([
       ['--permission-mode', 'plan'],
@@ -334,5 +395,101 @@ describe('applyFixedLayer', () => {
       ['-c', 'approval_policy="untrusted"'],
       ['--config=sandbox_mode=read-only'],
     ]);
+  });
+});
+
+describe('the Ferretry tools in the fixed layer', () => {
+  it('should hand Claude the tools server as a JSON string, so no file has to exist', () => {
+    should(JSON.parse(CLAUDE_TOOL_ARGS[0]?.slice('--mcp-config='.length) ?? '')).deepEqual(claudeToolsConfig(FY));
+  });
+
+  it('should never hand the tools server the host admin token', () => {
+    // Claude passes a stdio server the whole environment, so its entry blanks the token; Codex passes
+    // only what is named, and the token is not named.
+    should(claudeToolsConfig(FY)).match({ mcpServers: { ferretry: { env: { FY_TOKEN: '' } } } });
+    should(FERRETRY_MCP_ENV_VARS).not.containEql('FY_TOKEN');
+    should(codexToolsServer(FY).env_vars).not.containEql('FY_TOKEN');
+  });
+
+  it('should APPEND to a profile’s own Claude instruction, in either spelling, and report nothing overridden', () => {
+    // Arrange
+    const claude = layerOf({
+      harness: 'claude',
+      agentPermissions: 'auto',
+      cwd: CWD,
+      fyCommand: FY,
+      acceptsAutoPermissionMode: true,
+    });
+    const spaced = profileWith('claude', { flags: ['--append-system-prompt', 'be terse', '--mcp-config=extra.json'] });
+    const joined = profileWith('claude', { flags: ['--append-system-prompt=always test'] });
+
+    // Act
+    const one = applyFixedLayer(spaced, claude);
+    const two = applyFixedLayer(joined, claude);
+
+    // Assert — the person's own MCP servers and instruction both stay; theirs first, then Ferretry's.
+    should(one.args).containEql('--mcp-config=extra.json');
+    should(one.args.filter(arg => arg.startsWith('--append-system-prompt'))).deepEqual([
+      `--append-system-prompt=be terse\n\n${AGENT_TOOLS_INSTRUCTION}`,
+    ]);
+    should(one.args).not.containEql('be terse');
+    should(one.overridden).deepEqual([]);
+    should(two.args).containEql(`--append-system-prompt=always test\n\n${AGENT_TOOLS_INSTRUCTION}`);
+    should(one.fixed.entries.find(entry => entry.purpose === 'instructions')?.value).equal(
+      `be terse\n\n${AGENT_TOOLS_INSTRUCTION}`,
+    );
+  });
+
+  it('should APPEND to a profile’s Codex instructions from settings or a -c flag, and still own the tools server', () => {
+    // Arrange
+    const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
+    const fromSettings = profileWith('codex', {
+      body: {
+        developer_instructions: 'prefer bun',
+        mcp_servers: { ferretry: { command: '/evil' }, github: { command: 'gh' } },
+      },
+    });
+    const fromFlags = profileWith('codex', {
+      flags: [
+        '-c',
+        'developer_instructions="be terse"',
+        '--config=developer_instructions=plain',
+        '--config=developer_instructions="tab\\q"',
+        '-c',
+        'mcp_servers.ferretry.command="/evil"',
+        '--config=mcp_servers.ferretry={command="/evil"}',
+        '-c',
+        'mcp_servers.github.command="gh"',
+        '-c',
+        'developer_instructions="broken',
+      ],
+    });
+
+    // Act
+    const settings = applyFixedLayer(fromSettings, codex);
+    const flags = applyFixedLayer(fromFlags, codex);
+
+    // Assert
+    should(settings.settings).containDeep({
+      developer_instructions: `prefer bun\n\n${AGENT_TOOLS_INSTRUCTION}`,
+      mcp_servers: { ferretry: codexToolsServer(FY), github: { command: 'gh' } },
+    });
+    should(settings.overridden.map(entry => (entry.kind === 'setting' ? entry.key : ''))).deepEqual([
+      'mcp_servers.ferretry.command',
+    ]);
+    should(flags.args).containEql('mcp_servers.github.command="gh"');
+    should(flags.args).containEql(
+      `developer_instructions=${tomlString(`be terse\n\nplain\n\ntab\\q\n\n"broken\n\n${AGENT_TOOLS_INSTRUCTION}`)}`,
+    );
+    should(flags.overridden.map(entry => entry.kind === 'flag' && entry.tokens)).deepEqual([
+      ['-c', 'mcp_servers.ferretry.command="/evil"'],
+      ['--config=mcp_servers.ferretry={command="/evil"}'],
+    ]);
+  });
+
+  it('should leave the layer untouched when the person has no instruction of their own', () => {
+    const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
+    const plain = applyFixedLayer(profileWith('codex', { body: { model: 'x' } }), codex);
+    should(plain.fixed).equal(codex);
   });
 });

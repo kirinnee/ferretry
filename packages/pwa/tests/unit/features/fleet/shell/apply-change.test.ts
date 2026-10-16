@@ -10,7 +10,12 @@ import {
 } from '../../../../../src/features/fleet/shell/apply-change.ts';
 import { APPLY_PATH, type Call, machineAnswer, OUTCOME, STAGED, scriptedClient } from './change-support.ts';
 
-const CHANGE = { kind: 'machine.settings', agentPermissions: 'skip' } as const;
+const CHANGE = {
+  kind: 'machine.settings',
+  agentPermissions: 'skip',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true },
+} as const;
 const ROUTES = { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME };
 
 const paths = (calls: readonly Call[]): string[] => calls.map(call => call.path);

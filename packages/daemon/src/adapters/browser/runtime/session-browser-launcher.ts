@@ -11,10 +11,14 @@ import type { BrowserAutomation } from '../../../lib/browser/transport/index.ts'
 import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/worker-client.ts';
 
-/** Launches the private Chrome that one session's worker drives. The profile lease is held until both
+/** Launches the machine's ONE agent Chrome — headless on every platform, over the dedicated agent
+ * profile, shared by every session — and the worker that drives it. The profile lease is held until both
  * Chrome and the worker are gone, so a login window can never open over a live automation browser —
  * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
  * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it. */
+/** Who holds the agent profile's lease: the machine's agent browser, not any one session. */
+const AGENT_BROWSER_HOLDER = 'agent-browser';
+
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   constructor(
     private readonly profile: BrowserProfilePort,
@@ -25,10 +29,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       BrowserWorkerClient.connect(options),
   ) {}
 
-  async launch(
-    sessionId: string,
-    viewport: { readonly width: number; readonly height: number },
-  ): Promise<BrowserAutomation> {
+  async launch(viewport: { readonly width: number; readonly height: number }): Promise<BrowserAutomation> {
     // Both preconditions are checked BEFORE the profile is leased: a machine with no worker or no
     // browser has nothing to clean up, and the refusal is the one plain sentence that names the fix.
     if (this.worker.kind === 'missing') throw new BrowserControlError('launch_failed', this.worker.message);
@@ -37,20 +38,17 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       path: this.environment.PATH,
       available: command => Bun.which(command, { PATH: this.environment.PATH ?? '' }) !== null,
     });
-    const display = process.platform === 'linux' ? this.environment.DISPLAY : undefined;
-    const lease = await this.profile.acquire({ sessionId });
+    const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
     let chrome: ReturnType<typeof Bun.spawn> | undefined;
     try {
       const port = await freePort();
       chrome = Bun.spawn({
         cmd: [
-          ...chromeLaunchArguments(executable, lease.profile, port, viewport, process.platform, {
-            headless: process.platform !== 'linux' || !display,
-          }),
+          // HEADLESS EVERYWHERE: a headed browser renders only the window that has focus, and every
+          // agent's window — and the page a person is watching — must keep painting at once.
+          ...chromeLaunchArguments(executable, lease.profile, port, viewport, process.platform, { headless: true }),
         ],
-        // Linux Chrome draws into the display composition supplied so the operator and screencast see
-        // the same pixels, and runs headless when there is none; never an ambient display invented here.
-        env: defined(browserEnvironment(display, this.environment)),
+        env: defined(browserEnvironment(undefined, this.environment)),
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',
@@ -105,25 +103,23 @@ class LeasedBrowser implements BrowserAutomation {
       return code;
     });
   }
-  navigate = (url: string) => this.worker.navigate(url);
-  click = (selector: string) => this.worker.click(selector);
-  type = (selector: string, text: string) => this.worker.type(selector, text);
-  read = (selector?: string) => this.worker.read(selector);
-  screenshot = () => this.worker.screenshot();
-  back = () => this.worker.back();
-  forward = () => this.worker.forward();
-  reload = () => this.worker.reload();
-  location = () => this.worker.location();
-  newPage = (url?: string) => this.worker.newPage(url);
-  activatePage = (id: string) => this.worker.activatePage(id);
-  closePage = (id: string) => this.worker.closePage(id);
-  resize = (viewport: { width: number; height: number }) => this.worker.resize(viewport);
-  startScreencast = (
-    viewport: { width: number; height: number },
-    listener: Parameters<BrowserAutomation['startScreencast']>[1],
-  ) => this.worker.startScreencast(viewport, listener);
-  stopScreencast = () => this.worker.stopScreencast();
-  dispatchInput = (input: Parameters<BrowserAutomation['dispatchInput']>[0]) => this.worker.dispatchInput(input);
+  navigate: BrowserAutomation['navigate'] = (pageId, url) => this.worker.navigate(pageId, url);
+  click: BrowserAutomation['click'] = (pageId, selector) => this.worker.click(pageId, selector);
+  type: BrowserAutomation['type'] = (pageId, selector, text) => this.worker.type(pageId, selector, text);
+  read: BrowserAutomation['read'] = (pageId, selector, mode) => this.worker.read(pageId, selector, mode);
+  screenshot: BrowserAutomation['screenshot'] = pageId => this.worker.screenshot(pageId);
+  back: BrowserAutomation['back'] = pageId => this.worker.back(pageId);
+  forward: BrowserAutomation['forward'] = pageId => this.worker.forward(pageId);
+  reload: BrowserAutomation['reload'] = pageId => this.worker.reload(pageId);
+  location: BrowserAutomation['location'] = pageId => this.worker.location(pageId);
+  newPage: BrowserAutomation['newPage'] = options => this.worker.newPage(options);
+  closePage: BrowserAutomation['closePage'] = pageId => this.worker.closePage(pageId);
+  resize: BrowserAutomation['resize'] = (pageId, viewport) => this.worker.resize(pageId, viewport);
+  startScreencast: BrowserAutomation['startScreencast'] = (pageId, viewport, listener) =>
+    this.worker.startScreencast(pageId, viewport, listener);
+  stopScreencast: BrowserAutomation['stopScreencast'] = (pageId, listener) =>
+    this.worker.stopScreencast(pageId, listener);
+  dispatchInput: BrowserAutomation['dispatchInput'] = (pageId, input) => this.worker.dispatchInput(pageId, input);
   async close(): Promise<void> {
     await this.stop();
   }

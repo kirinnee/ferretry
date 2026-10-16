@@ -177,6 +177,8 @@ const sessionCases: SchemaCase[] = [
   { name: 'session view', schema: session.SessionViewSchema, value: sessionView },
   { name: 'session list', schema: session.SessionListSchema, value: [sessionView] },
   { name: 'attach target', schema: session.SessionAttachTargetSchema, value: sessionAttachTarget },
+  { name: 'console input', schema: session.SessionConsoleInputRequestSchema, value: { data: 'ls\r' } },
+  { name: 'console input result', schema: session.SessionConsoleInputResultSchema, value: { written: 3 } },
   { name: 'name suggestions', schema: session.NameSuggestionsSchema, value: ['Ada'] },
   { name: 'event source', schema: session.FyEventSourceSchema, value: 'daemon' },
   { name: 'event', schema: session.FyEventSchema, value: fyEvent },
@@ -546,6 +548,29 @@ describe('session schemas', () => {
     ];
 
     // Act + Assert
+    assertRejects(cases);
+  });
+
+  it('should bound a Console write to between one character and the documented maximum', () => {
+    // Arrange — the longest accepted write, and the three shapes a client must split or not send.
+    const longest = 'x'.repeat(session.SESSION_CONSOLE_INPUT_MAX);
+    const cases: SchemaCase[] = [
+      { name: 'an empty write', schema: session.SessionConsoleInputRequestSchema, value: { data: '' } },
+      {
+        name: 'a write one past the maximum',
+        schema: session.SessionConsoleInputRequestSchema,
+        value: { data: `${longest}x` },
+      },
+      {
+        name: 'a write with a field the daemon does not read',
+        schema: session.SessionConsoleInputRequestSchema,
+        value: { data: 'ls', paneId: '%1' },
+      },
+      { name: 'a result that wrote nothing', schema: session.SessionConsoleInputResultSchema, value: { written: 0 } },
+    ];
+
+    // Act / Assert
+    should(session.SessionConsoleInputRequestSchema.parse({ data: longest }).data).have.length(4_096);
     assertRejects(cases);
   });
 

@@ -35,6 +35,7 @@ import {
   type PartialSupport,
   type ProfileScope,
   profileScope,
+  resolveDefaultRuntime,
   type ResolvedProfile,
   resolveProfile,
   type SettingsObject,
@@ -187,6 +188,8 @@ export function machineView(
     format: facts.format,
     setUp: runtimeCount > 0,
     agentPermissions: model.machine.agentPermissions,
+    defaultRuntime: resolveDefaultRuntime(model) ?? null,
+    agentControl: { ...model.machine.agentControl },
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];
       return {
@@ -551,10 +554,15 @@ function modelSetView(resolved: ResolvedProfile | undefined): FleetRuntimeModelS
 const FIXED_ENTRY_WORDS: Readonly<Partial<Record<FixedEntry['purpose'], { key: string; value: string }>>> = {
   trust: { key: 'trust prompt', value: 'off' },
   onboarding: { key: 'onboarding screens', value: 'off' },
+  tools: { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
+  instructions: { key: 'Ferretry tools instruction', value: 'on' },
 };
 
 /** The folder the read-only view is computed for: entries naming a folder are shown by purpose. */
 const VIEW_FOLDER = '/ferretry-launch-folder';
+
+/** The `fy` the read-only view shows the tools server running as; the wrapper names the real path. */
+const VIEW_FY_COMMAND = 'fy';
 
 const OVERRIDE_SENTENCE = (from: string): string => `From your ${from} · Overridden for agents by Ferretry`;
 
@@ -571,8 +579,14 @@ function fixedLayerView(
           agentPermissions: model.machine.agentPermissions,
           cwd: VIEW_FOLDER,
           acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode,
+          fyCommand: VIEW_FY_COMMAND,
         })
-      : fixedLayerFor({ harness, agentPermissions: model.machine.agentPermissions, cwd: VIEW_FOLDER });
+      : fixedLayerFor({
+          harness,
+          agentPermissions: model.machine.agentPermissions,
+          cwd: VIEW_FOLDER,
+          fyCommand: VIEW_FY_COMMAND,
+        });
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
   const overridden =

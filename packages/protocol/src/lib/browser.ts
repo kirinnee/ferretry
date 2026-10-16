@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { SurfaceNameSchema } from './agent-tools.ts';
+import { SurfaceOpenerSchema } from './surface.ts';
 
 export const BROWSER_MAX_INSTANCES = 3;
+/** The most pages one SESSION keeps open; opening another past it is refused, never hidden. */
+export const BROWSER_MAX_PAGES = 20;
+/** The most pages the machine's one agent browser holds across every session. */
+export const BROWSER_MAX_MACHINE_PAGES = 60;
 export const BROWSER_MIN_WIDTH = 320;
 export const BROWSER_MIN_HEIGHT = 240;
 export const BROWSER_MAX_WIDTH = 1_920;
@@ -98,6 +104,25 @@ export const BrowserPageSummarySchema = z.object({
   id: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH),
   url: z.url(),
   title: z.string(),
+  /** The page's human name — `app` in `%browser:app` — when it was opened with one. */
+  name: SurfaceNameSchema.optional(),
+  /** Who opened it by name, as the daemon attests it. Absent for a page nobody opened by name. */
+  openedBy: SurfaceOpenerSchema.optional(),
+  /**
+   * An INCOGNITO page: its own throwaway browser context — its own cookies and storage, nothing shared
+   * with the machine's agent profile or with any other page — discarded when it closes or its session
+   * ends. Absent means the page uses the shared agent profile.
+   */
+  incognito: z.literal(true).optional(),
+  /** The page that opened this one, when it is a popup. */
+  openerId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
+  /**
+   * The session the page belongs to, and that session's display name — what a reader groups pages by
+   * ("Hadi's browser": every page one agent opened, together). Each page has its own window; the
+   * grouping is the session, not the window.
+   */
+  ownerSessionId: z.string().min(1).max(128).optional(),
+  ownerName: z.string().min(1).max(128).optional(),
 });
 export type BrowserPageSummary = z.infer<typeof BrowserPageSummarySchema>;
 
@@ -197,12 +222,14 @@ export const BrowserActionSchema = z.discriminatedUnion('action', [
   z.strictObject({
     action: z.literal('read'),
     selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH).optional(),
+    /** `text` (the default) is the visible text; `a11y` is the accessibility tree as YAML. */
+    mode: z.enum(['text', 'a11y']).optional(),
   }),
   z.strictObject({ action: z.literal('screenshot') }),
   z.strictObject({ action: z.literal('back') }),
   z.strictObject({ action: z.literal('forward') }),
   z.strictObject({ action: z.literal('reload') }),
-  z.strictObject({ action: z.literal('new-page'), url: z.url().optional() }),
+  z.strictObject({ action: z.literal('new-page'), url: z.url().optional(), incognito: z.literal(true).optional() }),
   z.strictObject({ action: z.literal('activate-page'), pageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH) }),
   z.strictObject({ action: z.literal('close-page'), pageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH) }),
   z.strictObject({

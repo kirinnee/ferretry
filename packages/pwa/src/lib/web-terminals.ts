@@ -5,6 +5,9 @@ import {
   CreateTerminalRequestSchema,
   FY_REQUEST_ID_HEADER,
   RenameTerminalRequestSchema,
+  SESSION_CONSOLE_INPUT_MAX,
+  SessionConsoleInputRequestSchema,
+  SessionConsoleInputResultSchema,
   TerminalIdSchema,
   type TerminalListView,
   TerminalListViewSchema,
@@ -131,6 +134,51 @@ export const closeSessionTerminal = async (
   const closed = CloseTerminalResponseSchema.parse(body);
   if (closed.id !== terminalId) throw new DaemonResponseError(502, 'daemon closed another terminal');
   return closed;
+};
+
+/**
+ * Splits input into writes the daemon accepts, never between the two halves of a surrogate pair — a
+ * paste of emoji cut there would type two replacement characters into the agent's pane.
+ */
+export const consoleInputChunks = (data: string, max = SESSION_CONSOLE_INPUT_MAX): readonly string[] => {
+  const chunks: string[] = [];
+  let current = '';
+  for (const character of data) {
+    if (current.length + character.length > max) {
+      chunks.push(current);
+      current = '';
+    }
+    current += character;
+  }
+  if (current !== '') chunks.push(current);
+  return chunks;
+};
+
+/**
+ * Types into the session's OWN pane — the Console — on the daemon that owns it.
+ *
+ * Governed as a terminal is (`terminal.use`): a paired device needs the grant and its unlock, and a
+ * refusal comes back as the same grant error a terminal open would raise. A long paste is sent as
+ * ordered writes, each one awaited, so the pane receives it in the order it was typed.
+ */
+export const typeIntoSessionConsole = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  data: string,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<number> => {
+  let written = 0;
+  for (const chunk of consoleInputChunks(data)) {
+    const body = await terminalJson(
+      daemon,
+      scope,
+      `/v1/sessions/${encodeURIComponent(scope.sessionId)}/console/input`,
+      { method: 'POST', body: JSON.stringify(SessionConsoleInputRequestSchema.parse({ data: chunk })) },
+      fetcher,
+    );
+    written += SessionConsoleInputResultSchema.parse(body).written;
+  }
+  return written;
 };
 
 /* ---------- one terminal stream, whichever carrier reaches the daemon ------- */

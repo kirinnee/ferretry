@@ -71,11 +71,12 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .command('start')
     .description(`start a session on one of your agent runtimes (\`${bin} runtimes\`)`)
     .argument('[prompt...]', 'the task prompt; required for --mode auto')
-    .requiredOption(
+    .option(
       '-a, --agent <agent>',
       `the runtime to run the session on — an agent runtime (\`${bin} runtimes\`), such as ${FIRST_RUN_EXAMPLE}. ` +
         'A runtime that is not an agent is for using the tool yourself in a terminal and cannot run sessions, ' +
-        'in either --mode',
+        "in either --mode. Omit it to use this machine's own default runtime for new agents " +
+        `(\`${bin} machine set default-runtime\`); a machine with none refuses and names the setting.`,
     )
     .addOption(
       new Option('--mode <mode>', 'auto for an autonomous teammate, interactive for a human terminal')
@@ -115,7 +116,7 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .action(
       guard(async (parts: string[], options: CommanderOptions, command: Command) => {
         await deps.start.execute({
-          agent: String(options.agent),
+          ...(text(options, 'agent') === undefined ? {} : { agent: text(options, 'agent') }),
           mode: options.mode === 'interactive' ? 'interactive' : 'auto',
           ...(joined(parts) === undefined ? {} : { prompt: joined(parts) }),
           ...(text(options, 'promptFile') === undefined ? {} : { promptFile: text(options, 'promptFile') }),

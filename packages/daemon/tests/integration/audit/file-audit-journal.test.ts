@@ -477,7 +477,9 @@ describe('the security log on disk', () => {
       argv: secrets.commandLine,
     });
     const log = new AuditLog({
-      journal: new FileAuditJournal(state, 3_200),
+      // Live plus rotated must hold one record per audited route — rotation drops the oldest file, so a
+      // size that only just fit the table loses records the moment a route is audited.
+      journal: new FileAuditJournal(state, 4_000),
       clock: { now: () => AT },
       failures: { auditWriteFailed: () => undefined },
     });

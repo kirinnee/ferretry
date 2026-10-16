@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from 'node:path';
 import type { SurfaceOpener, TerminalListView, TerminalSize, TerminalView } from '@ferretry/protocol';
 import {
   DEFAULT_TERMINAL_SIZE,
@@ -17,7 +18,7 @@ import type {
 
 export class TerminalServiceError extends Error {
   constructor(
-    readonly code: 'not_found' | 'capacity' | 'bad_request',
+    readonly code: 'not_found' | 'capacity' | 'bad_request' | 'conflict',
     message: string,
   ) {
     super(message);
@@ -29,6 +30,12 @@ export interface TerminalServiceOptions {
   readonly maximumPerSession?: number;
   readonly maximumGlobal?: number;
   readonly idleTimeoutMs?: number;
+  /**
+   * Whether a folder exists, for a terminal opened somewhere other than the session's own folder.
+   * tmux silently starts a shell in the daemon's own directory when asked for one that does not
+   * exist, so the folder is checked here rather than trusted. Without it, such a request is refused.
+   */
+  readonly isDirectory?: (path: string) => Promise<boolean>;
 }
 
 function key(ownerId: string, terminalId: string): string {
@@ -38,9 +45,11 @@ function key(ownerId: string, terminalId: string): string {
 /** Stateful lifecycle adapter; terminal process and session authority are injected ports. */
 export class ManagedTerminalService {
   private readonly records = new Map<string, TerminalRecord>();
+  private creating: Promise<unknown> = Promise.resolve();
   private readonly maximumPerSession: number;
   private readonly maximumGlobal: number;
   private readonly idleTimeoutMs: number;
+  private readonly isDirectory: ((path: string) => Promise<boolean>) | undefined;
 
   constructor(
     private readonly runtime: TerminalRuntimePort,
@@ -52,6 +61,7 @@ export class ManagedTerminalService {
     this.maximumPerSession = options.maximumPerSession ?? 6;
     this.maximumGlobal = options.maximumGlobal ?? 24;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 60 * 60_000;
+    this.isDirectory = options.isDirectory;
   }
 
   private async session(reference: string): Promise<TerminalSession> {
@@ -79,6 +89,7 @@ export class ManagedTerminalService {
       // Spread rather than assigned: `openedBy: undefined` is a present key with
       // no value, and the wire's "unrecorded" is an ABSENT key.
       ...(record.openedBy === undefined ? {} : { openedBy: record.openedBy }),
+      ...(record.name === undefined ? {} : { name: record.name }),
       createdAt: new Date(record.createdAtMs).toISOString(),
       lastActivityAt: new Date(record.lastActivityAtMs).toISOString(),
       idleDeadline: new Date(idleDeadline(record.lastActivityAtMs, 0, this.idleTimeoutMs) ?? 0).toISOString(),
@@ -126,11 +137,29 @@ export class ManagedTerminalService {
        * attest nothing.
        */
       readonly openedBy?: SurfaceOpener;
+      /** Unique within the session; the protocol's `SurfaceNameSchema` already checked its shape. */
+      readonly name?: string;
+      /** Where the shell starts: absolute, or relative to the session's own folder. */
+      readonly folder?: string;
     } = {},
+  ): Promise<TerminalView> {
+    // ONE CREATE AT A TIME. The name and capacity checks below read the listing and then await the
+    // runtime, so two opens racing for one name would both pass and leave two `dev` terminals.
+    const turn = this.creating.then(async () => await this.createNow(sessionReference, input));
+    this.creating = turn.catch(() => undefined);
+    return await turn;
+  }
+
+  private async createNow(
+    sessionReference: string,
+    input: Parameters<ManagedTerminalService['create']>[1] & object,
   ): Promise<TerminalView> {
     const session = await this.session(sessionReference);
     await this.refresh();
     const owned = [...this.records.values()].filter(record => record.ownerId === session.id);
+    if (input.name !== undefined && owned.some(record => record.name === input.name))
+      throw new TerminalServiceError('conflict', `this session already has a terminal named ${input.name}`);
+    const cwd = await this.folder(session.cwd, input.folder);
     if (owned.length >= this.maximumPerSession)
       throw new TerminalServiceError('capacity', 'terminal capacity reached for this session');
     if (this.records.size >= this.maximumGlobal)
@@ -150,12 +179,22 @@ export class ManagedTerminalService {
       ownerId: session.id,
       id: this.ids.next(),
       title,
-      cwd: session.cwd,
+      cwd,
       size,
       ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
+      ...(input.name === undefined ? {} : { name: input.name }),
     });
     this.records.set(key(record.ownerId, record.id), record);
     return this.view(record);
+  }
+
+  /** The folder a new shell starts in, proved to exist. */
+  private async folder(sessionCwd: string, folder: string | undefined): Promise<string> {
+    if (folder === undefined) return sessionCwd;
+    const path = isAbsolute(folder) ? resolve(folder) : resolve(sessionCwd, folder);
+    if (this.isDirectory === undefined || !(await this.isDirectory(path)))
+      throw new TerminalServiceError('bad_request', `there is no folder ${path} to open a terminal in`);
+    return path;
   }
 
   async get(sessionReference: string, terminalId: string): Promise<TerminalView> {
@@ -187,6 +226,14 @@ export class ManagedTerminalService {
 
   async capture(sessionReference: string, terminalId: string): Promise<Uint8Array> {
     return await this.runtime.capture(await this.record(sessionReference, terminalId));
+  }
+
+  async text(sessionReference: string, terminalId: string, lines: number): Promise<string> {
+    return await this.runtime.text(await this.record(sessionReference, terminalId), lines);
+  }
+
+  async foreground(sessionReference: string, terminalId: string): Promise<string> {
+    return await this.runtime.foreground(await this.record(sessionReference, terminalId));
   }
 
   async close(sessionReference: string, terminalId: string): Promise<void> {

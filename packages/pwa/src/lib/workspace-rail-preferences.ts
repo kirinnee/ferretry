@@ -108,3 +108,10 @@ export class WorkspaceRailPreferenceStore {
     }
   }
 }
+
+/**
+ * THE PAGE'S ONE STORE. The sessions bar writes `left` and the session page's context rail writes
+ * `right`, and each write stores both — so two instances would each put back the other's stale width.
+ * Everything that resizes a rail shares this one.
+ */
+export const workspaceRailPreferences = new WorkspaceRailPreferenceStore();

@@ -23,6 +23,9 @@ const ROOT_OPTION = '@fy_terminal_root';
  * to no opener at all.
  */
 const OPENED_BY_OPTION = '@fy_terminal_opened_by';
+/** The terminal's human name (`dev`), on the pane for the same reason as its owner: it lives exactly
+ *  as long as the shell it names, and survives a daemon restart. */
+const NAME_OPTION = '@fy_terminal_name';
 const SEPARATOR = '\t';
 
 export class TerminalRuntimeError extends Error {
@@ -61,6 +64,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       `#{${CREATED_OPTION}}`,
       `#{${ROOT_OPTION}}`,
       `#{${OPENED_BY_OPTION}}`,
+      `#{${NAME_OPTION}}`,
       '#{session_activity}',
       '#{window_width}',
       '#{window_height}',
@@ -82,6 +86,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         created = '',
         root = '',
         openedBy = '',
+        name = '',
         activity = '',
         cols = '',
         rows = '',
@@ -115,6 +120,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         cols: Math.max(1, Math.trunc(number(cols, 100))),
         rows: Math.max(1, Math.trunc(number(rows, 30))),
         ...(opener === undefined ? {} : { openedBy: opener }),
+        ...(name === '' ? {} : { name }),
       };
       if (!tmuxSession.startsWith('fy-webterm-') || !isRecordId(id) || !ownerId || !root.startsWith('/')) continue;
       records.push(record);
@@ -175,6 +181,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       ...(input.openedBy === undefined
         ? []
         : [';', 'set-option', '-t', tmuxSession, OPENED_BY_OPTION, encodeTerminalOpener(input.openedBy)]),
+      ...(input.name === undefined ? [] : [';', 'set-option', '-t', tmuxSession, NAME_OPTION, input.name]),
       ';',
       'set-window-option',
       '-t',
@@ -196,6 +203,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       lastActivityAtMs: createdAtMs,
       ...input.size,
       ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
+      ...(input.name === undefined ? {} : { name: input.name }),
     };
   }
 
@@ -232,6 +240,37 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     if (capture.code !== 0 || cursor.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
     const [x = '0', y = '0'] = cursor.stdout.trim().split('|');
     return new TextEncoder().encode(terminalSnapshotFrame(capture.stdout, number(x, 0), number(y, 0)));
+  }
+
+  /**
+   * The pane's last `lines` lines as plain text — no colour codes, wrapped lines joined — which is what
+   * an agent reads. Trailing blank rows are the unused bottom of the screen, not output, so they go.
+   */
+  async text(record: TerminalRecord, lines: number): Promise<string> {
+    const result = await this.tmux.execute([
+      'capture-pane',
+      '-p',
+      '-J',
+      '-S',
+      `-${String(lines)}`,
+      '-t',
+      terminalPaneTarget(record),
+    ]);
+    if (result.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
+    return result.stdout.replace(/\s+$/u, '');
+  }
+
+  /** The name of the program in the pane's foreground — the shell itself when nothing is running. */
+  async foreground(record: TerminalRecord): Promise<string> {
+    const result = await this.tmux.execute([
+      'display-message',
+      '-p',
+      '-t',
+      terminalPaneTarget(record),
+      '#{pane_current_command}',
+    ]);
+    if (result.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
+    return result.stdout.trim();
   }
 
   async kill(record: TerminalRecord): Promise<void> {

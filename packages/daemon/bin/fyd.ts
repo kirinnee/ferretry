@@ -20,6 +20,7 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
 } from '@ferretry/fleet';
@@ -321,6 +322,7 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
+import { type AgentControlPolicy, AccountModelAgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -340,6 +342,7 @@ import {
 import {
   type AccountInventoryPort,
   AgentSendFailureNotifier,
+  AgentToolService,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -361,6 +364,7 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
+  CredentialAgentIdentities,
   advertisesForeignAddress,
   answerArguments,
   attachmentDirectory,
@@ -369,6 +373,7 @@ import {
   type BootRefusal,
   type BrowserLoginLifecycle,
   BrowserSessionService,
+  type BrowserSessionLauncher,
   type BrowserViewerHost,
   type BrowserWorkerProgram,
   BrowserViewerStream,
@@ -561,6 +566,7 @@ import {
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
+  SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
@@ -641,6 +647,8 @@ import {
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
+  SurfaceControl,
+  secretsMatch,
   transcriptKey,
   tryParseSessionId,
   UnknownPeerRefused,
@@ -985,6 +993,9 @@ export interface DaemonWorld {
    * the session resolver over real storage — exactly as production builds them.
    */
   readonly terminalRuntime: TerminalRuntimePort;
+  /** What starts a session's browser: a Chrome and the browser worker. A world field for the reason
+   *  `terminalRuntime` is one. */
+  readonly browserLauncher: BrowserSessionLauncher;
   /**
    * The OTHER carriers this daemon can be reached over: outbound sockets to rendezvous.
    *
@@ -1114,6 +1125,12 @@ export interface DaemonWorld {
      * resolution the boot milestone reported rather than a second one built from its own reading.
      */
     harnessDiscovery: HarnessDiscoveryPolicy,
+    /**
+     * What starts a session's browser, passed IN for the same reason the terminal runtime is: the real
+     * one puts a Chrome and a browser worker on the machine, so a test substitutes this and keeps the
+     * browser service, the agent tools and the routes exactly as production builds them.
+     */
+    browserLauncher: BrowserSessionLauncher,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -1610,6 +1627,13 @@ function createSessionControlSubsystem(
    */
   provenance: SessionProvenanceStamper,
   clock: ClockPort,
+  /**
+   * "Default runtime for new agents" (T): the runtime a start with no `agent` named uses, resolved
+   * fresh from this machine's own configuration — never cached, so a change applies to the very next
+   * start. `undefined` when nothing resolves, which {@link resolveStartAccount} then refuses in its
+   * own words.
+   */
+  defaultAgentName: () => Promise<string | undefined>,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1655,7 +1679,13 @@ function createSessionControlSubsystem(
           );
         return { role: request.boardAccess, capability: boardCapability };
       })();
-      const { account, executable } = await resolveStartAccount(accounts, request.agent, executables, CLIENT_NAME);
+      const { account, executable } = await resolveStartAccount(
+        accounts,
+        request.agent,
+        executables,
+        CLIENT_NAME,
+        defaultAgentName,
+      );
       // Canonicalized HERE rather than only inside the lifecycle, because the transcript path below
       // is derived from it. The lifecycle resolves it again over an already-canonical value, and a
       // directory the agent could not have started in is refused as an invalid request — which is
@@ -3763,6 +3793,67 @@ const terminalScheduler: TerminalStreamScheduler = {
  * `cwd`, and a session the index does not hold resolves to nothing rather than to the daemon's own
  * working directory.
  */
+/**
+ * The agent tools: terminals and browser pages driven by name, over the SAME terminal and browser
+ * subsystems the person's routes serve, so a shell an agent opens is the shell a person sees.
+ *
+ * The agent is identified by its session credential — hashed and matched against the live sessions'
+ * stored hashes through the same directory the task boards authenticate with. Control changes are
+ * published to the session's own journal, which `/v1/events` streams to every viewer.
+ *
+ * "What agents may control" is the machine settings' own port, read per call. Takeovers and hand-overs
+ * are replayed from the same journal, so they outlive a restart.
+ */
+function createAgentToolsSubsystem(input: {
+  readonly storage: DaemonStorage;
+  readonly terminals: TerminalSubsystem;
+  readonly browser: MountedSubsystems['browser'];
+  readonly audit: AuditLog;
+  readonly policy: AgentControlPolicy;
+}): MountedSubsystems['agentTools'] {
+  const clock = { now: () => Date.now() };
+  const control = new SurfaceControl(
+    {
+      publish: async (sessionId, type, data) => {
+        const id = tryParseSessionId(sessionId);
+        if (id !== undefined) await input.storage.append(id, type, data);
+      },
+      history: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        const events: { readonly type: string; readonly data: unknown }[] = [];
+        if (id === undefined || input.storage.findSession(id) === undefined) return events;
+        for (let after = 0; ; ) {
+          const page = await input.storage.replay(id, after, 10_000);
+          for (const event of page.events) if (event.type.startsWith('surface.')) events.push(event);
+          if (!page.hasMore || page.nextSequence === undefined) return events;
+          after = page.nextSequence;
+        }
+      },
+    },
+    clock,
+  );
+  return {
+    service: new AgentToolService({
+      terminals: input.terminals,
+      browser: input.browser,
+      control,
+      policy: input.policy,
+      audit: input.audit,
+      clock,
+      sleep: async milliseconds => await Bun.sleep(milliseconds),
+    }),
+    identities: new CredentialAgentIdentities(
+      new StorageTaskBoardSessionDirectory({
+        sessionIds: () => input.storage.listSessions().map(session => session.id),
+        readConfig: async id => await input.storage.readConfig(id as SessionId),
+        readState: async id => await input.storage.readState(id as SessionId),
+      }),
+      capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
+      secretsMatch,
+    ),
+  };
+}
+
 function createTerminalSubsystem(
   storage: DaemonStorage,
   runtime: TerminalRuntimePort,
@@ -3787,6 +3878,13 @@ function createTerminalSubsystem(
       maximumPerSession: TERMINAL_MAX_PER_SESSION,
       maximumGlobal: TERMINAL_MAX_GLOBAL,
       idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
+      isDirectory: async path => {
+        try {
+          return statSync(path).isDirectory();
+        } catch {
+          return false;
+        }
+      },
     },
   );
   /** Adapter refusals, restated in the protocol's vocabulary so the mount can answer them. */
@@ -3806,12 +3904,17 @@ function createTerminalSubsystem(
           title: input.title,
           cols: input.cols,
           rows: input.rows,
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.folder === undefined ? {} : { folder: input.folder }),
           ...(openedBy === undefined ? {} : { openedBy }),
         })
         .catch(translate),
     get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
     rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
     close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
+    write: async (sessionId, terminalId, bytes) => await service.write(sessionId, terminalId, bytes).catch(translate),
+    text: async (sessionId, terminalId, lines) => await service.text(sessionId, terminalId, lines).catch(translate),
+    foreground: async (sessionId, terminalId) => await service.foreground(sessionId, terminalId).catch(translate),
     /**
      * One viewer socket, over the SAME lifecycle service the routes use.
      *
@@ -5598,6 +5701,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    browserLauncher: new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(paths.home),
+      browserWorkerProgram(),
+      // Only the SOURCE worker needs a runtime: it runs through Node, whose WebSocket stack completes
+      // Chrome's CDP upgrade where Bun 1.3's node:http shim does not. The compiled worker carries its own
+      // fix (scripts/release/compile-executable.ts) and runs directly.
+      Bun.which('node') ?? process.execPath,
+      process.env,
+      browserTransport.connectWorker,
+    ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
@@ -5678,6 +5791,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       security,
       carriers,
       harnessDiscovery,
+      browserLauncher,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -6022,46 +6136,60 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The instruction a quarantined session shows a human names the CLI they actually type.
         clientName: CLIENT_NAME,
       });
+      // A stopped session's browser pages close, and its incognito contexts are discarded. Assigned once
+      // the browser service below exists; a stop before then has no pages to close.
+      let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
       const sessionControl = releasingAttachmentsOnStop(
-        createSessionControlSubsystem(
-          storage,
-          sessions,
-          createSessionLifecycle,
-          planner,
-          launcher,
-          accounts,
-          executables,
-          sessionIds,
-          nameClaims,
-          payloadDigests,
-          // The session's own private directory holds the files, and the extractor over them is the
-          // production one: `initialAttachments` is the only mounted route that carries document
-          // bytes, so this is where a DOCX becomes text the agent can read.
-          {
-            plan: (id, decoded) =>
-              planInitialAttachments(
-                decoded,
-                join(createSessionPaths(paths, id).directory, 'attachments'),
-                new NodeRawDeflate(),
-              ),
-            write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
-          },
-          // The board grant a `--board-access` start asks for, over the same world and the same
-          // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
-          childGrantRequester(boards),
-          transcriptProvenance,
-          new NodeWorkingDirectoryResolver(),
-          id => createSessionPaths(paths, id).directory,
-          sessionRuntime,
-          // The stamper the world already constructed, now actually called. Before this it was a field
-          // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
-          spawnProvenance,
-          clock,
+        releasingAttachmentsOnStop(
+          createSessionControlSubsystem(
+            storage,
+            sessions,
+            createSessionLifecycle,
+            planner,
+            launcher,
+            accounts,
+            executables,
+            sessionIds,
+            nameClaims,
+            payloadDigests,
+            // The session's own private directory holds the files, and the extractor over them is the
+            // production one: `initialAttachments` is the only mounted route that carries document
+            // bytes, so this is where a DOCX becomes text the agent can read.
+            {
+              plan: (id, decoded) =>
+                planInitialAttachments(
+                  decoded,
+                  join(createSessionPaths(paths, id).directory, 'attachments'),
+                  new NodeRawDeflate(),
+                ),
+              write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
+            },
+            // The board grant a `--board-access` start asks for, over the same world and the same
+            // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
+            childGrantRequester(boards),
+            transcriptProvenance,
+            new NodeWorkingDirectoryResolver(),
+            id => createSessionPaths(paths, id).directory,
+            sessionRuntime,
+            // The stamper the world already constructed, now actually called. Before this it was a field
+            // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
+            spawnProvenance,
+            clock,
+            async () => {
+              const model = await declaredAccountModel();
+              return model === undefined ? undefined : resolveDefaultRuntime(model);
+            },
+          ),
+          attachmentStore,
         ),
-        attachmentStore,
+        {
+          releaseSession: sessionId => {
+            void releaseBrowserSession(sessionId).catch(() => undefined);
+          },
+        },
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({
@@ -6257,6 +6385,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * (docs/design/account-model.md §4.3, §4.7). A package manager runs only inside an install
        * a person asked for; nothing here runs on a timer.
        */
+      // A host attach is authorized by the durable pane registration, never by the session name.
+      // The observer reads the same private tmux server the launch registered, and the service
+      // compares pane id, pid and process-start incarnation before revealing its socket path.
+      const sessionAttach = new SessionAttachService(
+        paths.home,
+        join(paths.home, 'tmux.sock'),
+        {
+          list: async daemonId =>
+            await new DurableTerminalPaneStore(storage, stateFiles, paths).registrations(daemonId),
+        },
+        new ExactTmuxPaneReaper(launchTmux),
+      );
       const fleetSetup = createFleetSetupSubsystem(
         fileFleetSetupDeps({
           catalog: fleetCatalogDeps,
@@ -6274,6 +6414,41 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
       );
       credentialList = async () => await fleetCredentials.list();
+      const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
+      // A session browser nobody watches or drives stops after this long, so a forgotten one does not
+      // hold the one shared profile away from every other session.
+      const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now(), {
+        timeoutMs: 15 * 60_000,
+        after: (milliseconds, action) => {
+          const timer = setTimeout(action, milliseconds);
+          return { cancel: () => clearTimeout(timer) };
+        },
+      });
+      const agentControl = new AccountModelAgentControlPolicy(declaredAccountModel);
+      closeAgentBrowsers = async () => await browserService.closeAll();
+      releaseBrowserSession = async sessionId => await browserService.releaseSession(sessionId);
+      const browserHost: MountedSubsystems['browser'] = {
+        ...browserService,
+        status: browserService.status.bind(browserService),
+        act: browserService.act.bind(browserService),
+        attachViewer: browserService.attachViewer.bind(browserService),
+        dispatchHumanInput: browserService.dispatchHumanInput.bind(browserService),
+        releaseSession: browserService.releaseSession.bind(browserService),
+        openPage: browserService.openPage.bind(browserService),
+        actOnPage: browserService.actOnPage.bind(browserService),
+        closePage: browserService.closePage.bind(browserService),
+        closeAll: browserService.closeAll.bind(browserService),
+        stream: async (sessionId, downstream) => {
+          let viewer: BrowserViewerStream | undefined;
+          return {
+            open: async () => {
+              viewer = await BrowserViewerStream.connect(browserService, sessionId, downstream, new SystemFrameClock());
+            },
+            fromClient: frame => viewer?.fromClient(frame),
+            close: () => viewer?.close(),
+          };
+        },
+      };
       return {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -6311,6 +6486,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         fleetCredentials,
         // The catalogue runs the setup service's import and clone as two of its reviewed changes.
         fleetCatalog: createFleetCatalogSubsystem({ ...fleetCatalogDeps, executors: fleetSetup.executors }),
+        // Unit M's rebase target: the same single reader every other in-process consumer of this
+        // document shares, so this never disagrees with what the catalogue or a start just read.
+        agentControl,
         fleetSetup,
         /**
          * How much of this machine the managed fleet may take.
@@ -6494,43 +6672,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         analytics: createAnalyticsSubsystem(analyticsIngestion),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,
-        terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
+        terminals: terminalSubsystem,
         browserLogin,
-        browser: (() => {
-          const service = new BrowserSessionService(
-            sessions,
-            new NodeSessionBrowserLauncher(
-              new BrowserProfileStore(paths.home),
-              browserWorkerProgram(),
-              // Only the SOURCE worker needs a runtime: it runs through Node, whose WebSocket stack
-              // completes Chrome's CDP upgrade where Bun 1.3's node:http shim does not. The compiled
-              // worker carries its own fix (scripts/release/compile-executable.ts) and runs directly.
-              Bun.which('node') ?? process.execPath,
-              process.env,
-              browserTransport.connectWorker,
-            ),
-            () => Date.now(),
-          );
-          closeAgentBrowsers = async () => await service.closeAll();
-          return {
-            ...service,
-            status: service.status.bind(service),
-            act: service.act.bind(service),
-            attachViewer: service.attachViewer.bind(service),
-            dispatchHumanInput: service.dispatchHumanInput.bind(service),
-            closeAll: service.closeAll.bind(service),
-            stream: async (sessionId, downstream) => {
-              let viewer: BrowserViewerStream | undefined;
-              return {
-                open: async () => {
-                  viewer = await BrowserViewerStream.connect(service, sessionId, downstream, new SystemFrameClock());
-                },
-                fromClient: frame => viewer?.fromClient(frame),
-                close: () => viewer?.close(),
-              };
-            },
-          };
-        })(),
+        browser: browserHost,
+        agentTools: createAgentToolsSubsystem({
+          storage,
+          terminals: terminalSubsystem,
+          browser: browserHost,
+          audit: auditLog,
+          policy: agentControl,
+        }),
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(
           paths,
@@ -6612,18 +6763,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
           secretRedactor,
         ),
-        // A host attach is authorized by the durable pane registration, never by the session name.
-        // The observer reads the same private tmux server the launch registered, and the service
-        // compares pane id, pid and process-start incarnation before revealing its socket path.
-        sessionAttach: new SessionAttachService(
-          paths.home,
-          join(paths.home, 'tmux.sock'),
-          {
-            list: async daemonId =>
-              await new DurableTerminalPaneStore(storage, stateFiles, paths).registrations(daemonId),
-          },
-          new ExactTmuxPaneReaper(launchTmux),
-        ),
+        sessionAttach,
+        // The Console types into the pane the attach proof names, on the same private tmux server.
+        sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
         // ONE feed over ONE opened storage: live listeners cannot see another daemon's appends, and
         // the fleet backfill refuses if any indexed session has lost the journal its marker owes.
         fleetEvents: new FleetEventStreamService(
@@ -6906,6 +7048,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.security,
     carriers,
     harnessDiscovery,
+    world.browserLauncher,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must

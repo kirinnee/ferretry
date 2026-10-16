@@ -130,12 +130,27 @@ export const FleetMachineAuthoritySchema = z.strictObject({
 });
 export type FleetMachineAuthority = z.infer<typeof FleetMachineAuthoritySchema>;
 
+/** "What agents may control" (T, session-spec.html Settings): terminals, browsers and files, each on/off. */
+export const FleetAgentControlSchema = z.strictObject({
+  terminals: z.boolean(),
+  browsers: z.boolean(),
+  files: z.boolean(),
+});
+export type FleetAgentControl = z.infer<typeof FleetAgentControlSchema>;
+
 export const FleetMachineViewSchema = z.strictObject({
   name: NonEmptyStringSchema,
   format: FleetCatalogFormatSchema,
   /** At least one runtime exists. A machine that is not set up opens the first run (M3). */
   setUp: z.boolean(),
   agentPermissions: z.enum(['auto', 'skip']),
+  /**
+   * "Default runtime for new agents" (T), RESOLVED: the machine's own setting, or the
+   * `claude-default` fallback when that is an agent runtime here, or `null` when neither resolves —
+   * there is nothing yet to pick, and a start with no runtime named would be refused too.
+   */
+  defaultRuntime: NonEmptyStringSchema.nullable(),
+  agentControl: FleetAgentControlSchema,
   tools: z.array(FleetMachineToolSchema).readonly(),
   runtimeCount: NonNegativeIntegerSchema,
   runningSessions: NonNegativeIntegerSchema,
@@ -530,7 +545,17 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
   }),
   z.strictObject({ kind: z.literal('credential.remove'), id: NonEmptyStringSchema }),
   z.strictObject({ kind: z.literal('credential.signout'), id: NonEmptyStringSchema }),
-  z.strictObject({ kind: z.literal('machine.settings'), agentPermissions: z.enum(['auto', 'skip']) }),
+  z.strictObject({
+    kind: z.literal('machine.settings'),
+    agentPermissions: z.enum(['auto', 'skip']),
+    /**
+     * A caller always sends all three machine settings together — never only the one it means to
+     * change — so one `machine.settings` change can never clobber a field it was not shown. `null`
+     * unsets the explicit "Default runtime" override and falls back to the machine's own resolution.
+     */
+    defaultRuntime: NonEmptyStringSchema.nullable(),
+    agentControl: FleetAgentControlSchema,
+  }),
   z.strictObject({
     kind: z.literal('setup.import'),
     /** The harnesses the person chose to import ("Skip Claude Code"). Default: every installed one. */

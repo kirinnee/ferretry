@@ -1203,7 +1203,12 @@ describe('deriveAccountChange: credential.remove', () => {
 describe('deriveAccountChange: machine.settings', () => {
   it('should apply to new sessions when none is running', () => {
     // Act
-    const edit = derive({ kind: 'machine.settings', agentPermissions: 'skip' });
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
 
     // Assert
     should(edit.summary).equal('Set agent permissions to Skip all permission checks');
@@ -1213,10 +1218,19 @@ describe('deriveAccountChange: machine.settings', () => {
 
   it('should say one running session keeps the old mode (E32)', () => {
     // Act
-    const edit = derive({ kind: 'machine.settings', agentPermissions: 'skip' }, modelOf(), {
-      ...FACTS,
-      runningSessions: 1,
-    });
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'skip',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+      },
+      modelOf(),
+      {
+        ...FACTS,
+        runningSessions: 1,
+      },
+    );
 
     // Assert
     should(edit.consequences).deepEqual([
@@ -1229,16 +1243,114 @@ describe('deriveAccountChange: machine.settings', () => {
     const model = modelOf({ machine: { agentPermissions: 'skip' } });
 
     // Act
-    const edit = derive({ kind: 'machine.settings', agentPermissions: 'auto' }, model, {
-      ...FACTS,
-      runningSessions: 3,
-    });
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+      },
+      model,
+      {
+        ...FACTS,
+        runningSessions: 3,
+      },
+    );
 
     // Assert
     should(edit.summary).equal('Set agent permissions to Auto mode');
     should(edit.consequences).deepEqual([
       'Applies to new sessions. 3 running sessions keep the old mode (Skip all permission checks) until restarted.',
     ]);
+  });
+
+  it('should say nothing moved when every field matches the current machine settings', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
+
+    // Assert
+    should(edit.summary).equal('Keep machine settings the same');
+    should(edit.consequences).deepEqual([]);
+  });
+
+  it('should set the default runtime to an agent runtime on this machine, and refuse one that is not', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'beta',
+      agentControl: { terminals: true, browsers: true, files: true },
+    });
+
+    // Assert
+    should(edit.summary).equal('Set the default runtime for new agents to beta');
+    should(edit.model.machine.defaultRuntime).equal('beta');
+    should(edit.consequences).deepEqual([]);
+
+    // Assert — "alpha" exists but is not an agent runtime (R3)
+    should(
+      refusalOf({
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: 'alpha',
+        agentControl: { terminals: true, browsers: true, files: true },
+      }),
+    ).match(/this change would leave the setup invalid:.*is not an agent runtime/);
+  });
+
+  it('should unset an explicit default runtime back to automatic', () => {
+    // Arrange
+    const model = modelOf({ machine: { defaultRuntime: 'beta' } });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+      },
+      model,
+    );
+
+    // Assert
+    should(edit.summary).equal('Set the default runtime for new agents back to automatic');
+    should(edit.model.machine.defaultRuntime).be.undefined();
+  });
+
+  it('should set what agents may control, naming only the switches that moved', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: false, browsers: true, files: false },
+    });
+
+    // Assert
+    should(edit.summary).equal('Set what agents may control (terminals off, files off)');
+    should(edit.model.machine.agentControl).deepEqual({ terminals: false, browsers: true, files: false });
+    should(edit.consequences).deepEqual(['Applies to an agent’s next action; nothing already running is interrupted.']);
+  });
+
+  it('should name every field a change moves, in one summary', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: 'beta',
+      agentControl: { terminals: false, browsers: true, files: true },
+    });
+
+    // Assert
+    should(edit.summary).equal(
+      'Set agent permissions to Skip all permission checks; the default runtime for new agents to beta; what agents may control (terminals off)',
+    );
   });
 });
 

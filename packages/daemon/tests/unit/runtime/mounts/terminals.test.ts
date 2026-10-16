@@ -359,6 +359,15 @@ describe('the terminal mount', () => {
             close: async () => {
               throw new Error('unreachable');
             },
+            write: async () => {
+              throw new Error('not exercised by the lifecycle routes');
+            },
+            text: async () => {
+              throw new Error('not exercised by the lifecycle routes');
+            },
+            foreground: async () => {
+              throw new Error('not exercised by the lifecycle routes');
+            },
             stream: async () => {
               throw new Error('unreachable');
             },
@@ -395,6 +404,15 @@ describe('the terminal mount', () => {
             },
             close: async () => {
               throw new Error('unreachable');
+            },
+            write: async () => {
+              throw new Error('not exercised by the lifecycle routes');
+            },
+            text: async () => {
+              throw new Error('not exercised by the lifecycle routes');
+            },
+            foreground: async () => {
+              throw new Error('not exercised by the lifecycle routes');
             },
             stream: async () => {
               throw new Error('unreachable');

@@ -51,6 +51,13 @@ export interface WorkerClientOptions {
   readonly frameIntervalMs?: number;
 }
 
+interface PageCast {
+  readonly listeners: Set<(frame: BrowserScreencastFrame) => void>;
+  readonly governor: BrowserFrameGovernor<BrowserScreencastFrame>;
+  token: string;
+  start?: Promise<void>;
+}
+
 interface Pending {
   resolve(value: unknown): void;
   reject(error: unknown): void;
@@ -113,10 +120,10 @@ export class BrowserWorkerClient implements BrowserAutomation {
   private readonly pending = new Map<number, Pending>();
   private readonly ready = deferred<void>();
   private readonly exit = deferred<number>();
-  private readonly frameListeners = new Set<(frame: BrowserScreencastFrame) => void>();
-  private readonly governor: BrowserFrameGovernor<BrowserScreencastFrame>;
-  private screencastStart?: Promise<void>;
-  private screencastToken = '';
+  /** One screencast per page, each with its own pacing, listeners and acknowledgements. */
+  private readonly casts = new Map<string, PageCast>();
+  private readonly clock: FrameClock;
+  private readonly frameIntervalMs: number | undefined;
   private screencastSessions = 0;
   private readyState: 'pending' | 'ready' | 'failed' = 'pending';
   private closed = false;
@@ -133,22 +140,8 @@ export class BrowserWorkerClient implements BrowserAutomation {
     this.assembler = new WorkerLineAssembler(options.maxProtocolLineChars);
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS;
-    // Frames reach viewers through the governor, so the pace the browser captures at follows the real
-    // end-to-end path: a frame is acknowledged only once it has actually been handed to every viewer.
-    this.governor = new BrowserFrameGovernor<BrowserScreencastFrame>(
-      options.clock ?? new SystemFrameClock(),
-      {
-        write: frame => {
-          this.deliverFrame(frame);
-          // Listeners are synchronous, so the sink is never congested; pacing is the whole job here.
-          return true;
-        },
-      },
-      {
-        ...(options.frameIntervalMs === undefined ? {} : { minIntervalMs: options.frameIntervalMs }),
-        onAcknowledgementRejected: session => this.recoverScreencast(session),
-      },
-    );
+    this.clock = options.clock ?? new SystemFrameClock();
+    this.frameIntervalMs = options.frameIntervalMs;
     void this.readOutput().catch(() => undefined);
     void this.child.exited.then(code => this.onExit(code));
   }
@@ -189,98 +182,113 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
-  navigate(url: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('navigate', { url });
+  navigate(pageId: string, url: string): Promise<BrowserPageActionSnapshot> {
+    return this.action('navigate', { pageId, url });
   }
 
-  click(selector: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('click', { selector });
+  click(pageId: string, selector: string): Promise<BrowserPageActionSnapshot> {
+    return this.action('click', { pageId, selector });
   }
 
-  type(selector: string, text: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('type', { selector, text });
+  type(pageId: string, selector: string, text: string): Promise<BrowserPageActionSnapshot> {
+    return this.action('type', { pageId, selector, text });
   }
 
-  async read(selector?: string): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
-    const raw = await this.request('read', selector === undefined ? {} : { selector });
+  async read(
+    pageId: string,
+    selector?: string,
+    mode?: 'text' | 'a11y',
+  ): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
+    const raw = await this.request('read', {
+      pageId,
+      ...(selector === undefined ? {} : { selector }),
+      ...(mode === undefined ? {} : { mode }),
+    });
     return { ...unwrap(normalizeWorkerActionSnapshot(raw)), text: boundedReadText(raw) };
   }
 
-  async screenshot(): Promise<BrowserPageActionSnapshot & { readonly screenshotBase64: string }> {
-    const raw = await this.request('screenshot', {});
+  async screenshot(pageId: string): Promise<BrowserPageActionSnapshot & { readonly screenshotBase64: string }> {
+    const raw = await this.request('screenshot', { pageId });
     return { ...unwrap(normalizeWorkerActionSnapshot(raw)), screenshotBase64: boundedScreenshot(raw) };
   }
 
-  back(): Promise<BrowserPageActionSnapshot> {
-    return this.action('back', {});
+  back(pageId: string): Promise<BrowserPageActionSnapshot> {
+    return this.action('back', { pageId });
   }
 
-  forward(): Promise<BrowserPageActionSnapshot> {
-    return this.action('forward', {});
+  forward(pageId: string): Promise<BrowserPageActionSnapshot> {
+    return this.action('forward', { pageId });
   }
 
-  reload(): Promise<BrowserPageActionSnapshot> {
-    return this.action('reload', {});
+  reload(pageId: string): Promise<BrowserPageActionSnapshot> {
+    return this.action('reload', { pageId });
   }
 
-  async location(): Promise<BrowserPageSnapshot> {
-    return unwrap(normalizeWorkerSnapshot(await this.request('location', {})));
+  async location(pageId?: string): Promise<BrowserPageSnapshot> {
+    return unwrap(normalizeWorkerSnapshot(await this.request('location', pageId === undefined ? {} : { pageId })));
   }
 
-  newPage(url?: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('newPage', url === undefined ? {} : { url });
-  }
-
-  activatePage(pageId: string): Promise<BrowserPageActionSnapshot> {
-    return this.action('activatePage', { pageId });
+  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActionSnapshot> {
+    return this.action('newPage', {
+      ...(options.url === undefined ? {} : { url: options.url }),
+      ...(options.incognito === true ? { incognito: true } : {}),
+    });
   }
 
   closePage(pageId: string): Promise<BrowserPageActionSnapshot> {
+    this.casts.get(pageId)?.governor.dispose();
+    this.casts.delete(pageId);
     return this.action('closePage', { pageId });
   }
 
-  resize(viewport: BrowserViewport): Promise<BrowserPageActionSnapshot> {
-    return this.action('resize', { width: viewport.width, height: viewport.height });
+  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActionSnapshot> {
+    return this.action('resize', { pageId, width: viewport.width, height: viewport.height });
   }
 
   /**
-   * Joins the screencast. Viewers that arrive while the start is still in flight await the SAME
-   * request: reporting success off the back of an attempt that has not landed yet hands the second
-   * viewer a permanently black viewport and no error to explain it.
+   * Joins ONE page's screencast. Viewers of the same page that arrive while its start is still in
+   * flight await the SAME request: reporting success off the back of an attempt that has not landed
+   * yet hands the second viewer a permanently black viewport and no error to explain it. Viewers of
+   * different pages each get their own stream and never see each other's frames.
    */
-  async startScreencast(viewport: BrowserViewport, listener: (frame: BrowserScreencastFrame) => void): Promise<void> {
-    this.frameListeners.add(listener);
-    if (this.screencastStart === undefined) {
-      this.governor.bind(this.newScreencastSession());
-      this.screencastStart = this.request('startScreencast', {
-        width: viewport.width,
-        height: viewport.height,
-      }).then(() => undefined);
+  async startScreencast(
+    pageId: string,
+    viewport: BrowserViewport,
+    listener: (frame: BrowserScreencastFrame) => void,
+  ): Promise<void> {
+    const cast = this.castOf(pageId);
+    cast.listeners.add(listener);
+    if (cast.start === undefined) {
+      cast.governor.bind(this.newToken(cast));
+      cast.start = this.request('startScreencast', { pageId, width: viewport.width, height: viewport.height }).then(
+        () => undefined,
+      );
     }
-    const start = this.screencastStart;
+    const start = cast.start;
     try {
       await start;
     } catch (error) {
-      this.frameListeners.delete(listener);
+      cast.listeners.delete(listener);
       // Every viewer waiting on this attempt fails together, and the next join starts a fresh one.
-      if (this.screencastStart === start) {
-        this.screencastStart = undefined;
-        this.governor.stop();
+      if (cast.start === start) {
+        cast.start = undefined;
+        cast.governor.stop();
       }
       throw error;
     }
   }
 
-  async stopScreencast(): Promise<void> {
-    if (this.frameListeners.size === 0) return;
-    this.frameListeners.clear();
-    this.screencastStart = undefined;
-    this.governor.stop();
-    await this.request('stopScreencast', {});
+  /** Leaves one page's screencast; the page stops streaming when its last viewer leaves. */
+  async stopScreencast(pageId: string, listener: (frame: BrowserScreencastFrame) => void): Promise<void> {
+    const cast = this.casts.get(pageId);
+    if (cast === undefined || !cast.listeners.delete(listener) || cast.listeners.size > 0) return;
+    cast.governor.dispose();
+    this.casts.delete(pageId);
+    await this.request('stopScreencast', { pageId });
   }
 
-  async dispatchInput(input: BrowserInputEvent): Promise<void> {
-    await this.request('dispatchInput', { input });
+  async dispatchInput(pageId: string, input: BrowserInputEvent): Promise<void> {
+    await this.request('dispatchInput', { pageId, input });
   }
 
   /**
@@ -296,8 +304,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
     const deadline = this.shutdownTimeoutMs;
     await withTimeout(this.request('close', {}), deadline, () => shutdownExpired()).catch(() => undefined);
     this.closed = true;
-    this.frameListeners.clear();
-    this.governor.dispose();
+    this.disposeCasts();
     this.child.stdin.end();
     await this.terminate(deadline);
   }
@@ -391,11 +398,14 @@ export class BrowserWorkerClient implements BrowserAutomation {
         this.readyState = 'failed';
         this.ready.reject(new BrowserTransportError('launch_failed', `browser worker failed: ${event.message}`, 503));
         return;
-      case 'frame':
-        // Frames outside a bound screencast are discarded by the governor rather than published: a
-        // frame nobody asked for still costs every viewer a repaint.
-        this.governor.capture(this.screencastToken, event.frame, () => this.acknowledgeFrame(event.ackId));
+      case 'frame': {
+        // A frame is routed to its OWN page's stream, and one for a page nobody streams is discarded:
+        // a frame nobody asked for still costs every viewer a repaint.
+        const cast = this.casts.get(event.frame.pageId);
+        if (cast === undefined) return;
+        cast.governor.capture(cast.token, event.frame, () => this.acknowledgeFrame(event.ackId));
         return;
+      }
       case 'result':
         this.pending.get(event.id)?.resolve(event.result);
         this.pending.delete(event.id);
@@ -418,31 +428,58 @@ export class BrowserWorkerClient implements BrowserAutomation {
     await this.request('ackFrame', { ackId });
   }
 
-  private newScreencastSession(): string {
+  private newToken(cast: PageCast): string {
     this.screencastSessions += 1;
-    this.screencastToken = `screencast-${this.screencastSessions}`;
-    return this.screencastToken;
+    cast.token = `screencast-${String(this.screencastSessions)}`;
+    return cast.token;
   }
 
   /**
-   * An acknowledgement the worker refused means this capture window is unusable. Rebinding discards
-   * the stale window so later frames flow, instead of wedging behind acknowledgements nobody will
-   * ever take.
+   * One page's stream. Frames reach its viewers through its own governor, so the pace the browser
+   * captures that page at follows the real end-to-end path: a frame is acknowledged only once it has
+   * actually been handed to every viewer of that page.
    */
-  private recoverScreencast(session: string): void {
-    if (session !== this.screencastToken || this.closed) return;
-    this.governor.bind(this.newScreencastSession());
+  private castOf(pageId: string): PageCast {
+    const existing = this.casts.get(pageId);
+    if (existing !== undefined) return existing;
+    const listeners = new Set<(frame: BrowserScreencastFrame) => void>();
+    const cast: PageCast = {
+      listeners,
+      token: '',
+      governor: new BrowserFrameGovernor<BrowserScreencastFrame>(
+        this.clock,
+        {
+          write: frame => {
+            for (const listener of [...listeners]) {
+              try {
+                listener(frame);
+              } catch {
+                // A failing viewer must never stop the reader: agent actions share this worker and
+                // have to keep resolving.
+              }
+            }
+            // Listeners are synchronous, so the sink is never congested; pacing is the whole job here.
+            return true;
+          },
+        },
+        {
+          ...(this.frameIntervalMs === undefined ? {} : { minIntervalMs: this.frameIntervalMs }),
+          // An acknowledgement the worker refused means this capture window is unusable. Rebinding
+          // discards the stale window so later frames flow, instead of wedging behind
+          // acknowledgements nobody will ever take.
+          onAcknowledgementRejected: token => {
+            if (token === cast.token && !this.closed) cast.governor.bind(this.newToken(cast));
+          },
+        },
+      ),
+    };
+    this.casts.set(pageId, cast);
+    return cast;
   }
 
-  private deliverFrame(frame: BrowserScreencastFrame): void {
-    for (const listener of [...this.frameListeners]) {
-      try {
-        listener(frame);
-      } catch {
-        // A failing viewer must never stop the reader: agent actions share this worker and have to
-        // keep resolving.
-      }
-    }
+  private disposeCasts(): void {
+    for (const cast of this.casts.values()) cast.governor.dispose();
+    this.casts.clear();
   }
 
   /**
@@ -459,7 +496,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
     );
     this.assembler.reset();
     this.closed = true;
-    this.frameListeners.clear();
+    this.disposeCasts();
     if (launching) {
       this.readyState = 'failed';
       this.ready.reject(error);

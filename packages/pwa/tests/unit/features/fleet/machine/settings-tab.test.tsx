@@ -216,6 +216,122 @@ describe('MachineSettingsTab', () => {
     });
   });
 
+  describe('Default runtime for new agents (T)', () => {
+    it('says there is nothing to pick yet while the machine has no agent runtime', async () => {
+      await withTab({ answers: { '/v1/fleet/runtimes': runtimes([]) } }, async ({ q }) => {
+        await settle();
+        expect(q('[data-default-runtime-empty]')?.textContent).toContain('has no agent runtime yet');
+        expect(q('[data-setup-choices="default-runtime"]')).toBeNull();
+      });
+    });
+
+    it('offers a picker of agent runtimes, the current one checked, and Save restates agent permissions and agent control untouched', async () => {
+      await withTab(
+        {
+          answers: {
+            '/v1/fleet/runtimes': runtimes([runtimeView('claude-default'), runtimeView('claude-review')]),
+            '/v1/fleet/proposals': STAGED,
+            [APPLY_PATH]: OUTCOME,
+          },
+        },
+        async ({ q, calls, retried }) => {
+          await settle();
+          const section = must(q('[data-setup-section="default-runtime"]'), 'default runtime section');
+          expect(section.querySelector('[data-setup-choice="claude-default"] input')).toHaveProperty('checked', true);
+          expect(section.querySelector('[data-setup-choice="claude-review"] input')).toHaveProperty('checked', false);
+          expect(q('[data-default-runtime-undo]')).toBeNull();
+
+          await click(q('[data-setup-choice="claude-review"] input'), 'claude-review radio');
+          expect(q('[data-default-runtime-undo]')?.textContent).toBe('Keep claude-default');
+          await click(q('[data-change-submit]'), 'save default runtime');
+
+          const staged = must(
+            calls.find(call => call.path === '/v1/fleet/proposals'),
+            'the staged change call',
+          );
+          expect(staged.body).toEqual({
+            change: {
+              kind: 'machine.settings',
+              agentPermissions: 'auto',
+              defaultRuntime: 'claude-review',
+              agentControl: { terminals: true, browsers: true, files: true },
+            },
+          });
+          expect(retried.count).toBe(1);
+        },
+      );
+    });
+
+    it('shows what a machine with no resolvable default looks like, and Keep returns to it', async () => {
+      await withTab(
+        {
+          machine: machineView({ defaultRuntime: null }),
+          answers: { '/v1/fleet/runtimes': runtimes([runtimeView('claude-default')]) },
+        },
+        async ({ q }) => {
+          await settle();
+          expect(q('[data-setup-choice="claude-default"] input')).toHaveProperty('checked', false);
+          expect(q('[data-change-submit]')).toBeNull();
+          await click(q('[data-setup-choice="claude-default"] input'), 'claude-default radio');
+          expect(q('[data-default-runtime-undo]')?.textContent).toBe('Keep automatic');
+          await click(q('[data-default-runtime-undo]'), 'keep automatic');
+          expect(q('[data-setup-choice="claude-default"] input')).toHaveProperty('checked', false);
+          expect(q('[data-change-submit]')).toBeNull();
+        },
+      );
+    });
+  });
+
+  describe('What agents may control (T)', () => {
+    it('shows all three switched on by default, and Save sends only the one that moved', async () => {
+      await withTab(
+        {
+          answers: {
+            '/v1/fleet/proposals': STAGED,
+            [APPLY_PATH]: OUTCOME,
+          },
+        },
+        async ({ q, calls, retried }) => {
+          const section = must(q('[data-setup-section="agent-control"]'), 'agent control section');
+          expect(section.querySelector('[data-setup-choice="terminals"] input')).toHaveProperty('checked', true);
+          expect(section.querySelector('[data-setup-choice="browsers"] input')).toHaveProperty('checked', true);
+          expect(section.querySelector('[data-setup-choice="files"] input')).toHaveProperty('checked', true);
+          expect(q('[data-change-submit]')).toBeNull();
+
+          await click(q('[data-setup-choice="terminals"] input'), 'terminals checkbox');
+          expect(q('[data-change-submit]')?.textContent).toBe('Save what agents may control');
+          await click(q('[data-change-submit]'), 'save agent control');
+
+          const staged = must(
+            calls.find(call => call.path === '/v1/fleet/proposals'),
+            'the staged change call',
+          );
+          expect(staged.body).toEqual({
+            change: {
+              kind: 'machine.settings',
+              agentPermissions: 'auto',
+              defaultRuntime: 'claude-default',
+              agentControl: { terminals: false, browsers: true, files: true },
+            },
+          });
+          expect(retried.count).toBe(1);
+        },
+      );
+    });
+
+    it('Undo puts every switch back to how it was', async () => {
+      await withTab({}, async ({ q }) => {
+        await click(q('[data-setup-choice="terminals"] input'), 'terminals checkbox');
+        await click(q('[data-setup-choice="files"] input'), 'files checkbox');
+        expect(q('[data-change-submit]')).not.toBeNull();
+        await click(q('[data-agent-control-undo]'), 'undo');
+        expect(q('[data-setup-choice="terminals"] input')).toHaveProperty('checked', true);
+        expect(q('[data-setup-choice="files"] input')).toHaveProperty('checked', true);
+        expect(q('[data-change-submit]')).toBeNull();
+      });
+    });
+  });
+
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');

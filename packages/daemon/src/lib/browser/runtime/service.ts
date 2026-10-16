@@ -1,14 +1,18 @@
 import {
-  BROWSER_MAX_INSTANCES,
+  BROWSER_MAX_MACHINE_PAGES,
+  BROWSER_MAX_PAGES,
   type BrowserAction,
   type BrowserActionResult,
   type BrowserInputEvent,
   type BrowserPageActionSnapshot,
   type BrowserPageSnapshot,
+  type BrowserPageSummary,
   type BrowserScreencastFrame,
   type BrowserStatus,
   type BrowserViewport,
+  type SurfaceOpener,
 } from '@ferretry/protocol';
+import { agentSpokenName } from '../../names/session-names.ts';
 import type { BrowserAutomation } from '../transport/automation-contracts.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 
@@ -16,7 +20,7 @@ export const DEFAULT_BROWSER_VIEWPORT: BrowserViewport = { width: 1280, height: 
 
 export class BrowserSessionError extends Error {
   constructor(
-    readonly code: 'not_found' | 'capacity' | 'not_running' | 'launch_failed' | 'upstream_failed',
+    readonly code: 'not_found' | 'capacity' | 'conflict' | 'not_running' | 'launch_failed' | 'upstream_failed',
     message: string,
   ) {
     super(message);
@@ -24,75 +28,224 @@ export class BrowserSessionError extends Error {
   }
 }
 
+/** Starts the machine's one agent browser. */
 export interface BrowserSessionLauncher {
-  launch(sessionId: string, viewport: BrowserViewport): Promise<BrowserAutomation>;
+  launch(viewport: BrowserViewport): Promise<BrowserAutomation>;
 }
 
+/** A timer the composition root owns. */
+export interface BrowserIdleTimer {
+  cancel(): void;
+}
+
+/**
+ * When the agent browser stops on its own: after this long with nobody watching any page and nobody
+ * acting on one. A forgotten browser would otherwise hold the agent profile for ever.
+ */
+export interface BrowserIdlePolicy {
+  readonly timeoutMs: number;
+  after(milliseconds: number, action: () => void): BrowserIdleTimer;
+}
+
+/** Refuses an agent's act from inside its page's own queue — a takeover that landed while it waited. */
+export type BrowserActGuard = () => Promise<void>;
+
+/** The sessions the browser serves: whether one exists, and the display name a page is grouped under. */
 export interface BrowserSessionDirectory {
-  get(sessionId: string): Promise<unknown | undefined>;
+  get(
+    sessionId: string,
+  ): Promise<{ readonly config?: { readonly name?: string | null; readonly teammate?: string } } | undefined>;
+}
+
+/** What can be done to ONE named page: the agent tools' browser verbs. */
+export type BrowserPageAction = Extract<
+  BrowserAction,
+  { readonly action: 'navigate' | 'click' | 'type' | 'read' | 'screenshot' }
+>;
+
+/** How a named page is opened. */
+export interface BrowserOpenOptions {
+  readonly url?: string;
+  /** Who opened it, as the daemon attests it. */
+  readonly openedBy?: SurfaceOpener;
+  /** A throwaway context with its own cookies and storage, discarded when the page closes. */
+  readonly incognito?: boolean;
 }
 
 export interface BrowserSubsystem extends BrowserViewerHost {
+  /** This session's view of the machine's browser: its own pages, and the one its person is viewing. */
   status(sessionId: string): Promise<BrowserStatus>;
+  /** A person's toolbar: everything acts on the page this session's person is viewing. */
   act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult>;
+  /**
+   * Opens a page with a human NAME in its own window, starting the browser when it is not running. A
+   * name already in use in this session is refused, and so is a page past the session's or the
+   * machine's cap — refused, never hidden.
+   */
+  openPage(sessionId: string, name: string, options?: BrowserOpenOptions): Promise<BrowserPageSummary>;
+  /**
+   * Acts on this session's page with this name (or id) — and on nothing else: no tab is activated, and
+   * a person viewing another page is never moved. `guard` runs inside the page's own queue,
+   * immediately before anything happens, and may refuse.
+   */
+  actOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserPageAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserActionResult>;
+  /** Closes this session's page with this name (or id). An incognito page's whole context goes with it. */
+  closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void>;
+  /** A session ended: every page it owns closes, and every incognito context it held is discarded. */
+  releaseSession(sessionId: string): Promise<void>;
   closeAll(): Promise<void>;
 }
 
 interface Viewer {
+  readonly sessionId: string;
+  pageId: string;
   readonly frame: (frame: BrowserScreencastFrame) => void;
   readonly terminal: (signal: ViewerTerminalSignal) => void;
 }
 
+/** The machine's agent browser while it runs. Pages are in memory: they do not outlive it. */
 interface Running {
-  readonly sessionId: string;
   readonly driver: BrowserAutomation;
-  viewport: BrowserViewport;
   readonly startedAt: string;
-  readonly viewers: Set<Viewer>;
+  /** The last page list the browser reported, every session's pages together. */
   snapshot: BrowserPageSnapshot;
   closed: boolean;
+  readonly viewers: Set<Viewer>;
+  /** Page id → the session it belongs to. A popup belongs to its opener's session. */
+  readonly owners: Map<string, string>;
+  /** Page id → human name. */
+  readonly names: Map<string, string>;
+  /** Page id → who opened it by name. */
+  readonly openers: Map<string, SurfaceOpener>;
+  /** Session id → the page that session's person is viewing — where their input and view go. */
+  readonly viewed: Map<string, string>;
+  /** Page id → viewport. */
+  readonly viewports: Map<string, BrowserViewport>;
+  idle?: BrowserIdleTimer;
 }
 
 /**
- * The per-session browser owner. It is deliberately the one implementation of BrowserViewerHost:
- * HTTP actions and a viewer socket therefore address the same worker, tabs and profile-backed page.
+ * THE MACHINE'S ONE AGENT BROWSER, SHARED BY EVERY SESSION.
+ *
+ * One Chrome, over one dedicated agent profile (never a person's own Chrome profile): every agent on
+ * the machine shares its cookies and sign-ins. Each page belongs to the session that opened it, opens
+ * in its own window, and is visible to — and actable by — that session alone; an incognito page has its
+ * own throwaway cookies and storage besides.
+ *
+ * THERE IS NO ACTIVE TAB. An agent's act names its page and moves nothing; a person's toolbar and
+ * input go to the page THEIR session is viewing; a viewer streams that one page. So a person typing a
+ * password into one tab and an agent driving another never cross, and neither waits for the other:
+ * acts are serialized per PAGE, not per session or per browser.
  */
 export class BrowserSessionService implements BrowserSubsystem {
-  private readonly running = new Map<string, Running>();
+  private run: Running | undefined;
+  private starting: Promise<Running> | undefined;
   private readonly serial = new Map<string, Promise<void>>();
+  /** Session id → the agent's spoken name (its first name, else its task title), as last read. */
+  private readonly sessionNames = new Map<string, string>();
 
   constructor(
     private readonly sessions: BrowserSessionDirectory,
     private readonly launcher: BrowserSessionLauncher,
     private readonly now: () => number,
+    private readonly idle?: BrowserIdlePolicy,
   ) {}
 
   async status(sessionId: string): Promise<BrowserStatus> {
     await this.requireSession(sessionId);
-    const run = this.running.get(sessionId);
-    return run === undefined ? this.stopped(sessionId) : this.project(run);
+    const run = this.run;
+    if (run === undefined) return this.stopped(sessionId);
+    const viewed = this.viewedPage(run, sessionId);
+    if (viewed !== undefined) run.snapshot = pageOf(await run.driver.location(viewed));
+    return this.project(run, sessionId);
   }
 
   async act(sessionId: string, action: BrowserAction): Promise<BrowserActionResult> {
     await this.requireSession(sessionId);
-    return await this.exclusive(sessionId, async () => {
-      if (action.action === 'start' || action.action === 'open') {
-        const run = await this.ensure(sessionId);
-        const result =
-          action.action === 'open' && action.url !== undefined ? await run.driver.navigate(action.url) : undefined;
-        if (result) run.snapshot = pageOf(result);
-        return result === undefined ? { status: this.project(run) } : { status: this.project(run), result };
+    if (action.action === 'stop') {
+      await this.releaseSession(sessionId);
+      return { status: await this.status(sessionId) };
+    }
+    if (action.action === 'start' || action.action === 'open' || action.action === 'new-page') {
+      const run = await this.ensure();
+      const viewed = this.viewedPage(run, sessionId);
+      if (action.action === 'new-page' || viewed === undefined) {
+        const opened = await this.openIn(run, sessionId, {
+          ...(action.action !== 'start' && action.url !== undefined ? { url: action.url } : {}),
+          ...(action.action === 'new-page' && action.incognito === true ? { incognito: true } : {}),
+        });
+        await this.view(run, sessionId, opened.actedPageId);
+        return { status: this.project(run, sessionId), result: opened };
       }
-      if (action.action === 'stop') {
-        await this.stop(sessionId);
-        return { status: this.stopped(sessionId) };
+      if (action.action === 'start' || action.url === undefined) return { status: this.project(run, sessionId) };
+      const url = action.url;
+      return await this.onPage(run, viewed, async () => await run.driver.navigate(viewed, url), sessionId);
+    }
+    const run = this.requireRunning();
+    if (action.action === 'activate-page' || action.action === 'close-page') {
+      const page = this.requirePage(run, sessionId, action.pageId);
+      if (action.action === 'activate-page') {
+        await this.view(run, sessionId, page.id);
+        return { status: await this.status(sessionId), result: { ...run.snapshot, actedPageId: page.id } };
       }
-      const run = this.running.get(sessionId);
-      if (!run) throw new BrowserSessionError('not_running', 'the session browser is not running');
-      const result = await this.perform(run, action);
+      await this.closeIn(run, sessionId, page.id);
+      return { status: await this.status(sessionId) };
+    }
+    const viewed = this.viewedPage(run, sessionId);
+    if (viewed === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
+    return await this.onPage(run, viewed, async () => await this.perform(run, viewed, action), sessionId);
+  }
+
+  async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
+    await this.requireSession(sessionId);
+    const run = await this.ensure();
+    if (this.page(run, sessionId, name) !== undefined)
+      throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
+    const opened = await this.openIn(run, sessionId, options);
+    run.names.set(opened.actedPageId, name);
+    if (options.openedBy !== undefined) run.openers.set(opened.actedPageId, options.openedBy);
+    return this.named(run, opened.actedPageId);
+  }
+
+  async actOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserPageAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserActionResult> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    return await this.exclusive(page.id, async () => {
+      await guard?.();
+      const result = await this.perform(run, page.id, action);
       run.snapshot = pageOf(result);
-      return { status: this.project(run), result };
+      this.touch(run);
+      return { status: this.project(run, sessionId), result };
     });
+  }
+
+  async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    await this.exclusive(page.id, async () => {
+      await guard?.();
+      await this.closeIn(run, sessionId, page.id);
+    });
+  }
+
+  async releaseSession(sessionId: string): Promise<void> {
+    const run = this.run;
+    if (run === undefined) return;
+    for (const page of this.owned(run, sessionId))
+      await this.exclusive(page.id, async () => await this.closeIn(run, sessionId, page.id)).catch(() => undefined);
+    run.viewed.delete(sessionId);
   }
 
   async attachViewer(
@@ -101,68 +254,69 @@ export class BrowserSessionService implements BrowserSubsystem {
     terminal: (signal: ViewerTerminalSignal) => void,
   ): Promise<ViewerAttachment> {
     await this.requireSession(sessionId);
-    return await this.exclusive(sessionId, async () => {
-      const run = this.running.get(sessionId);
-      if (!run) throw new BrowserSessionError('not_running', 'the session browser is not running');
-      const viewer: Viewer = { frame, terminal };
-      run.viewers.add(viewer);
-      try {
-        await run.driver.startScreencast(run.viewport, received => {
-          for (const listener of run.viewers) listener.frame(received);
-        });
-      } catch (error) {
+    const run = this.requireRunning();
+    const pageId = this.viewedPage(run, sessionId);
+    if (pageId === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
+    const viewer: Viewer = { sessionId, pageId, frame, terminal };
+    run.viewers.add(viewer);
+    try {
+      await this.cast(run, viewer);
+    } catch (error) {
+      run.viewers.delete(viewer);
+      throw error;
+    }
+    let detached = false;
+    return {
+      detach: () => {
+        if (detached) return;
+        detached = true;
         run.viewers.delete(viewer);
-        throw error;
-      }
-      let detached = false;
-      return {
-        detach: () => {
-          if (detached) return;
-          detached = true;
-          run.viewers.delete(viewer);
-          if (run.viewers.size === 0) void run.driver.stopScreencast().catch(() => undefined);
-        },
-      };
-    });
+        void run.driver.stopScreencast(viewer.pageId, viewer.frame).catch(() => undefined);
+        this.touch(run);
+      },
+    };
   }
 
+  /** A person's input goes to the page THEIR session is viewing, and nowhere else. */
   async dispatchHumanInput(sessionId: string, input: BrowserInputEvent): Promise<void> {
-    const run = this.running.get(sessionId);
-    if (!run) throw new BrowserSessionError('not_running', 'the session browser is not running');
-    await run.driver.dispatchInput(input);
+    const run = this.requireRunning();
+    const pageId = this.viewedPage(run, sessionId);
+    if (pageId === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
+    await run.driver.dispatchInput(pageId, input);
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all(
-      [...this.running.keys()].map(
-        async sessionId => await this.exclusive(sessionId, async () => await this.stop(sessionId)),
-      ),
-    );
+    await this.stop();
   }
 
-  private async ensure(sessionId: string): Promise<Running> {
-    const existing = this.running.get(sessionId);
-    if (existing) return existing;
-    if (this.running.size >= BROWSER_MAX_INSTANCES)
-      throw new BrowserSessionError(
-        'capacity',
-        `this daemon already has ${BROWSER_MAX_INSTANCES} session browsers running`,
-      );
+  /** The machine's browser, started on first need; concurrent first needs share one launch. */
+  private async ensure(): Promise<Running> {
+    if (this.run !== undefined) return this.run;
+    this.starting ??= this.launch().finally(() => {
+      this.starting = undefined;
+    });
+    return await this.starting;
+  }
+
+  private async launch(): Promise<Running> {
     let driver: BrowserAutomation;
     try {
-      driver = await this.launcher.launch(sessionId, DEFAULT_BROWSER_VIEWPORT);
-      const snapshot = await driver.location();
+      driver = await this.launcher.launch(DEFAULT_BROWSER_VIEWPORT);
       const run: Running = {
-        sessionId,
         driver,
-        viewport: DEFAULT_BROWSER_VIEWPORT,
         startedAt: new Date(this.now()).toISOString(),
-        viewers: new Set(),
-        snapshot,
+        snapshot: pageOf(await driver.location()),
         closed: false,
+        viewers: new Set(),
+        owners: new Map(),
+        names: new Map(),
+        openers: new Map(),
+        viewed: new Map(),
+        viewports: new Map(),
       };
-      this.running.set(sessionId, run);
+      this.run = run;
       void driver.unexpectedExit.then(() => this.ended(run));
+      this.touch(run);
       return run;
     } catch (error) {
       throw error instanceof BrowserSessionError
@@ -171,73 +325,232 @@ export class BrowserSessionService implements BrowserSubsystem {
     }
   }
 
+  /** A new page for this session, in its own window, inside both caps. */
+  private async openIn(
+    run: Running,
+    sessionId: string,
+    options: BrowserOpenOptions,
+  ): Promise<BrowserPageActionSnapshot> {
+    return await this.exclusive('', async () => {
+      // Read the pages fresh: a popup a click opened since the last act counts toward both caps.
+      run.snapshot = pageOf(await run.driver.location());
+      if (this.owned(run, sessionId).length >= BROWSER_MAX_PAGES)
+        throw new BrowserSessionError(
+          'capacity',
+          `this session already has ${String(BROWSER_MAX_PAGES)} browser pages open; close one before opening another`,
+        );
+      // Every page that belongs to a session counts — the popups an agent's clicks opened included.
+      if (this.sessionPages(run) >= BROWSER_MAX_MACHINE_PAGES)
+        throw new BrowserSessionError(
+          'capacity',
+          `this machine's browser already has ${String(BROWSER_MAX_MACHINE_PAGES)} pages open; close one before opening another`,
+        );
+      const opened = await run.driver.newPage({
+        ...(options.url === undefined ? {} : { url: options.url }),
+        ...(options.incognito === true ? { incognito: true } : {}),
+      });
+      run.owners.set(opened.actedPageId, sessionId);
+      run.snapshot = pageOf(opened);
+      if (!run.viewed.has(sessionId)) run.viewed.set(sessionId, opened.actedPageId);
+      this.touch(run);
+      return opened;
+    });
+  }
+
+  private async closeIn(run: Running, sessionId: string, pageId: string): Promise<void> {
+    const result = await run.driver.closePage(pageId);
+    run.snapshot = pageOf(result);
+    run.owners.delete(pageId);
+    run.names.delete(pageId);
+    run.openers.delete(pageId);
+    run.viewports.delete(pageId);
+    for (const viewer of [...run.viewers])
+      if (viewer.pageId === pageId) {
+        run.viewers.delete(viewer);
+        viewer.terminal({ code: 1000, reason: 'the page closed' });
+      }
+    if (run.viewed.get(sessionId) === pageId) {
+      const next = this.owned(run, sessionId).at(-1);
+      if (next === undefined) run.viewed.delete(sessionId);
+      else run.viewed.set(sessionId, next.id);
+    }
+    this.touch(run);
+  }
+
+  /** Points this session's person at another of its pages, and moves its live viewers there. */
+  private async view(run: Running, sessionId: string, pageId: string): Promise<void> {
+    run.viewed.set(sessionId, pageId);
+    for (const viewer of run.viewers)
+      if (viewer.sessionId === sessionId && viewer.pageId !== pageId) {
+        await run.driver.stopScreencast(viewer.pageId, viewer.frame).catch(() => undefined);
+        viewer.pageId = pageId;
+        await this.cast(run, viewer);
+      }
+  }
+
+  private async cast(run: Running, viewer: Viewer): Promise<void> {
+    await run.driver.startScreencast(
+      viewer.pageId,
+      run.viewports.get(viewer.pageId) ?? DEFAULT_BROWSER_VIEWPORT,
+      viewer.frame,
+    );
+  }
+
+  private async onPage(
+    run: Running,
+    pageId: string,
+    work: () => Promise<BrowserPageActionSnapshot>,
+    sessionId: string,
+  ): Promise<BrowserActionResult> {
+    return await this.exclusive(pageId, async () => {
+      const result = await work();
+      run.snapshot = pageOf(result);
+      this.touch(run);
+      return { status: this.project(run, sessionId), result };
+    });
+  }
+
   private async perform(
     run: Running,
-    action: Exclude<BrowserAction, { action: 'start' | 'open' | 'stop' }>,
+    pageId: string,
+    action: Exclude<BrowserAction, { action: 'start' | 'open' | 'stop' | 'new-page' | 'activate-page' | 'close-page' }>,
   ): Promise<BrowserPageActionSnapshot> {
     switch (action.action) {
       case 'navigate':
-        return await run.driver.navigate(action.url);
+        return await run.driver.navigate(pageId, action.url);
       case 'click':
-        return await run.driver.click(action.selector);
+        return await run.driver.click(pageId, action.selector);
       case 'type':
-        return await run.driver.type(action.selector, action.text);
+        return await run.driver.type(pageId, action.selector, action.text);
       case 'read':
-        return await run.driver.read(action.selector);
+        return await run.driver.read(pageId, action.selector, action.mode);
       case 'screenshot':
-        return await run.driver.screenshot();
+        return await run.driver.screenshot(pageId);
       case 'back':
-        return await run.driver.back();
+        return await run.driver.back(pageId);
       case 'forward':
-        return await run.driver.forward();
+        return await run.driver.forward(pageId);
       case 'reload':
-        return await run.driver.reload();
-      case 'new-page':
-        return await run.driver.newPage(action.url);
-      case 'activate-page':
-        return await run.driver.activatePage(action.pageId);
-      case 'close-page':
-        return await run.driver.closePage(action.pageId);
+        return await run.driver.reload(pageId);
       case 'resize':
-        run.viewport = { width: action.width, height: action.height };
-        return await run.driver.resize(run.viewport);
+        run.viewports.set(pageId, { width: action.width, height: action.height });
+        return await run.driver.resize(pageId, { width: action.width, height: action.height });
       case 'human-activity': {
-        const snapshot = await run.driver.location();
-        return { ...snapshot, actedPageId: snapshot.activePageId };
+        const snapshot = await run.driver.location(pageId);
+        return { ...snapshot, actedPageId: pageId };
       }
     }
   }
 
-  private async stop(sessionId: string): Promise<void> {
-    const run = this.running.get(sessionId);
-    if (!run) return;
-    this.running.delete(sessionId);
+  private async stop(): Promise<void> {
+    const run = this.run;
+    if (run === undefined) return;
+    this.run = undefined;
     run.closed = true;
+    run.idle?.cancel();
     for (const viewer of run.viewers) viewer.terminal({ code: 1000, reason: 'browser stopped' });
     run.viewers.clear();
     await run.driver.close().catch(() => undefined);
   }
 
   private ended(run: Running): void {
-    if (run.closed || this.running.get(run.sessionId) !== run) return;
-    this.running.delete(run.sessionId);
+    if (run.closed || this.run !== run) return;
+    this.run = undefined;
     run.closed = true;
+    run.idle?.cancel();
     for (const viewer of run.viewers) viewer.terminal({ code: 1011, reason: 'browser worker exited' });
     run.viewers.clear();
   }
 
-  private project(run: Running): BrowserStatus {
+  /** The session a page belongs to: its own record, or its opener's (a popup is its opener's). */
+  private ownerOf(run: Running, page: BrowserPageSummary, depth = 0): string | undefined {
+    const own = run.owners.get(page.id);
+    if (own !== undefined || page.openerId === undefined || depth > 8) return own;
+    const opener = run.snapshot.pages.find(candidate => candidate.id === page.openerId);
+    return opener === undefined ? undefined : this.ownerOf(run, opener, depth + 1);
+  }
+
+  /** Pages that belong to some session (popups included) — what the machine cap counts. */
+  private sessionPages(run: Running): number {
+    return run.snapshot.pages.filter(page => this.ownerOf(run, page) !== undefined).length;
+  }
+
+  /** This session's pages, among the pages the browser reported last. */
+  private owned(run: Running, sessionId: string): BrowserPageSummary[] {
+    return run.snapshot.pages.filter(page => this.ownerOf(run, page) === sessionId);
+  }
+
+  /** This session's page with this name or id — never another session's. */
+  private page(run: Running, sessionId: string, key: string): BrowserPageSummary | undefined {
+    return this.owned(run, sessionId).find(page => page.id === key || run.names.get(page.id) === key);
+  }
+
+  private requirePage(run: Running, sessionId: string, key: string): BrowserPageSummary {
+    const page = this.page(run, sessionId, key);
+    if (page === undefined) throw new BrowserSessionError('not_found', `there is no browser page named ${key}`);
+    return page;
+  }
+
+  private requireRunning(): Running {
+    const run = this.run;
+    if (run === undefined) throw new BrowserSessionError('not_running', 'the browser is not running');
+    return run;
+  }
+
+  /** The page this session's person is viewing, if it still exists. */
+  private viewedPage(run: Running, sessionId: string): string | undefined {
+    const viewed = run.viewed.get(sessionId);
+    if (viewed !== undefined && this.owned(run, sessionId).some(page => page.id === viewed)) return viewed;
+    const fallback = this.owned(run, sessionId).at(-1)?.id;
+    if (fallback === undefined) run.viewed.delete(sessionId);
+    else run.viewed.set(sessionId, fallback);
+    return fallback;
+  }
+
+  /** One page as the wire shows it, carrying its name and opener when it has them. */
+  private named(run: Running, pageId: string): BrowserPageSummary {
+    const page = run.snapshot.pages.find(candidate => candidate.id === pageId) as BrowserPageSummary;
+    const name = run.names.get(page.id);
+    const openedBy = run.openers.get(page.id);
+    const owner = this.ownerOf(run, page);
+    const ownerName = owner === undefined ? undefined : this.sessionNames.get(owner);
     return {
-      ...run.snapshot,
-      state: 'running',
-      sessionId: run.sessionId,
-      viewport: run.viewport,
-      viewers: run.viewers.size,
-      persistentProfile: true,
-      profileKind: 'shared',
-      idleTimeoutSeconds: 0,
+      ...page,
+      ...(name === undefined ? {} : { name }),
+      ...(openedBy === undefined ? {} : { openedBy }),
+      ...(owner === undefined ? {} : { ownerSessionId: owner }),
+      ...(ownerName === undefined ? {} : { ownerName }),
+    };
+  }
+
+  private project(run: Running, sessionId: string): BrowserStatus & { readonly state: 'running' } {
+    const pages = this.owned(run, sessionId).map(page => this.named(run, page.id));
+    const base = {
+      state: 'running' as const,
+      sessionId,
+      viewport: DEFAULT_BROWSER_VIEWPORT,
+      viewers: [...run.viewers].filter(viewer => viewer.sessionId === sessionId).length,
+      persistentProfile: true as const,
+      profileKind: 'shared' as const,
+      idleTimeoutSeconds: Math.round((this.idle?.timeoutMs ?? 0) / 1_000),
       startedAt: run.startedAt,
-      capacity: { running: this.running.size, maximum: BROWSER_MAX_INSTANCES },
+      capacity: { running: this.sessionPages(run), maximum: BROWSER_MAX_MACHINE_PAGES },
+    };
+    const viewed = this.viewedPage(run, sessionId);
+    const active = pages.find(page => page.id === viewed);
+    if (active === undefined) return { ...base, pages: [] };
+    const described = run.snapshot.activePageId === active.id;
+    return {
+      ...base,
+      viewport: run.viewports.get(active.id) ?? DEFAULT_BROWSER_VIEWPORT,
+      url: active.url,
+      title: active.title,
+      pages: pages as [BrowserPageSummary, ...BrowserPageSummary[]],
+      activePageId: active.id,
+      pageState: described ? run.snapshot.pageState : 'ready',
+      ...(described && run.snapshot.pageError !== undefined ? { pageError: run.snapshot.pageError } : {}),
+      canGoBack: described && run.snapshot.canGoBack,
+      canGoForward: described && run.snapshot.canGoForward,
     };
   }
 
@@ -249,25 +562,50 @@ export class BrowserSessionService implements BrowserSubsystem {
       viewers: 0,
       persistentProfile: true,
       profileKind: 'shared',
-      idleTimeoutSeconds: 0,
+      idleTimeoutSeconds: Math.round((this.idle?.timeoutMs ?? 0) / 1_000),
       pages: [],
-      capacity: { running: this.running.size, maximum: BROWSER_MAX_INSTANCES },
+      capacity: { running: 0, maximum: BROWSER_MAX_MACHINE_PAGES },
     };
   }
 
-  private async requireSession(sessionId: string): Promise<void> {
-    if ((await this.sessions.get(sessionId)) === undefined)
-      throw new BrowserSessionError('not_found', 'the session does not exist');
+  /**
+   * Restarts the browser's idle clock. When it runs out with nobody watching any page, the browser
+   * stops; with a viewer attached, the clock simply starts again.
+   */
+  private touch(run: Running): void {
+    if (this.idle === undefined) return;
+    const idle = this.idle;
+    run.idle?.cancel();
+    run.idle = idle.after(idle.timeoutMs, () => {
+      if (this.run !== run) return;
+      if (run.viewers.size > 0) this.touch(run);
+      else void this.stop();
+    });
   }
 
-  private async exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.serial.get(sessionId) ?? Promise.resolve();
+  private async requireSession(sessionId: string): Promise<void> {
+    const session = await this.sessions.get(sessionId);
+    if (session === undefined) throw new BrowserSessionError('not_found', 'the session does not exist');
+    const name = session.config?.name;
+    if (typeof name === 'string' && name !== '')
+      this.sessionNames.set(
+        sessionId,
+        agentSpokenName({
+          name,
+          ...(session.config?.teammate === undefined ? {} : { teammate: session.config.teammate }),
+        }),
+      );
+  }
+
+  /** Work on one page runs in order; work on different pages runs side by side. `''` is the browser. */
+  private async exclusive<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.serial.get(key) ?? Promise.resolve();
     let release!: () => void;
     const next = new Promise<void>(resolve => {
       release = resolve;
     });
     this.serial.set(
-      sessionId,
+      key,
       previous.then(() => next),
     );
     await previous;
@@ -275,7 +613,7 @@ export class BrowserSessionService implements BrowserSubsystem {
       return await work();
     } finally {
       release();
-      if (this.serial.get(sessionId) === next) this.serial.delete(sessionId);
+      if (this.serial.get(key) === next) this.serial.delete(key);
     }
   }
 }

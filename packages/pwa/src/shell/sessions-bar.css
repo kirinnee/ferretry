@@ -16,9 +16,10 @@
   font-family: var(--font-ui);
 }
 .fy-sbar--column {
+  /* The reader's own width, set inline from the remembered rail store; this is the default. Its edge is
+     the resize handle beside it, which draws its own line — a border here would draw a second one. */
   width: 264px;
   flex-shrink: 0;
-  border-right: var(--divider-width) solid var(--border);
 }
 .fy-sbar--rail {
   width: 52px;

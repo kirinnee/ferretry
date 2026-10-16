@@ -1,5 +1,6 @@
 import {
   cloneRunnables,
+  type FleetAgentControl,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
   type FleetMachineView,
@@ -20,6 +21,10 @@ import {
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
 import { HARNESS_LABEL, indent } from '../fleet/account-render.ts';
 
+/** "What agents may control", in the order `machine set agent-control` names it. */
+const AGENT_CONTROL_WORDS = (control: FleetAgentControl): string =>
+  (['terminals', 'browsers', 'files'] as const).map(kind => `${kind} ${control[kind] ? 'on' : 'off'}`).join(', ');
+
 /** The machine's facts: its tools, its Agent permissions, and whether it is set up yet. */
 export function renderMachine(machine: FleetMachineView, binaryName: string): string {
   const format = machine.format === 'none' ? 'not set up yet' : 'the account model';
@@ -28,6 +33,8 @@ export function renderMachine(machine: FleetMachineView, binaryName: string): st
     ...indent([
       `Setup: ${format}${machine.setUp ? `, ${machine.runtimeCount} runtime(s)` : ''}`,
       `Agent permissions: ${machine.agentPermissions === 'auto' ? 'auto (the tool decides what needs asking)' : 'skip (agents are never asked)'}`,
+      `Default runtime for new agents: ${machine.defaultRuntime ?? 'none set, and no claude-default runtime exists yet'}`,
+      `What agents may control: ${AGENT_CONTROL_WORDS(machine.agentControl)}`,
       `Sessions running: ${machine.runningSessions}`,
       'Tools:',
       ...machine.tools.map(
@@ -107,6 +114,51 @@ export function parseCloneBundle(text: string, path: string): FleetCloneBundle {
   return parsed.data;
 }
 
+/** The three machine settings as one change always carries them, built from the ONE field a person named. */
+function machineSettingsEdit(
+  setting: string,
+  value: readonly string[],
+  current: FleetMachineView,
+  binaryName: string,
+): {
+  agentPermissions: FleetMachineView['agentPermissions'];
+  defaultRuntime: string | null;
+  agentControl: FleetAgentControl;
+} {
+  const base = {
+    agentPermissions: current.agentPermissions,
+    defaultRuntime: current.defaultRuntime,
+    agentControl: { ...current.agentControl },
+  };
+  if (setting === 'agent-permissions') {
+    const [next] = value;
+    if (next !== 'auto' && next !== 'skip') throw new AccountCommandError('Agent permissions are auto or skip.');
+    return { ...base, agentPermissions: next };
+  }
+  if (setting === 'default-runtime') {
+    const [next] = value;
+    if (next === undefined || next === '') {
+      throw new AccountCommandError(
+        `Name a runtime, or "automatic" for the machine's own fallback. Try: ${binaryName} machine set default-runtime claude-default`,
+      );
+    }
+    return { ...base, defaultRuntime: next === 'automatic' ? null : next };
+  }
+  if (setting === 'agent-control') {
+    const [kind, state] = value;
+    if (kind !== 'terminals' && kind !== 'browsers' && kind !== 'files') {
+      throw new AccountCommandError(
+        `"${kind}" is not one of terminals, browsers, files. Try: ${binaryName} machine set agent-control terminals on`,
+      );
+    }
+    if (state !== 'on' && state !== 'off') throw new AccountCommandError('Say on or off.');
+    return { ...base, agentControl: { ...base.agentControl, [kind]: state === 'on' } };
+  }
+  throw new AccountCommandError(
+    `"${setting}" is not a machine setting. Try: ${binaryName} machine set agent-permissions auto`,
+  );
+}
+
 /** Mounts `machine …` (docs/design/account-model.md §6.2). */
 export function registerMachineCommands(program: Command, deps: AccountCommandDeps): void {
   const bin = deps.binaryName;
@@ -120,24 +172,19 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
   writeOptions(
     machine
       .command('set')
-      .description('change a machine setting: agent-permissions auto|skip')
-      .argument('<setting>', 'agent-permissions')
-      .argument('<value>', 'auto or skip'),
-  ).action(async (setting: string, value: string, _options: unknown, command: Command) => {
+      .description(
+        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files on|off',
+      )
+      .argument('<setting>', 'agent-permissions, default-runtime, or agent-control')
+      .argument('<value...>', 'the new value — two words for agent-control'),
+  ).action(async (setting: string, value: string[], _options: unknown, command: Command) => {
     const options = mergedOptions(command);
-    if (setting !== 'agent-permissions') {
-      throw new AccountCommandError(
-        `"${setting}" is not a machine setting. Try: ${bin} machine set agent-permissions auto`,
-      );
-    }
-    if (value !== 'auto' && value !== 'skip') {
-      throw new AccountCommandError('Agent permissions are auto or skip.');
-    }
-    await runChange(deps, {
-      change: { kind: 'machine.settings', agentPermissions: value },
-      destructive: true,
-      options: writeFlags(options),
-    });
+    // A caller always sends every machine setting together (the wire contract never lets one field
+    // be changed without restating the other two), so a single-setting command reads the current
+    // view first and changes only the one field it names.
+    const current = await deps.gateway.machine();
+    const change = { kind: 'machine.settings' as const, ...machineSettingsEdit(setting, value, current, bin) };
+    await runChange(deps, { change, destructive: true, options: writeFlags(options) });
   });
 
   machine

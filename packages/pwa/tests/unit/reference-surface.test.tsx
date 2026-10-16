@@ -277,6 +277,39 @@ describe('sessionReferenceSurface', () => {
     should(readSidePaneTabsState(scope).active).equal(sidePaneInstanceTabId('terminal', '0a1b2c3d4e5f'));
   });
 
+  test('should open a terminal a reference names by its name as that terminal’s own tab', () => {
+    // Arrange — `%terminal:dev`, the handle a person and an agent share, over a listing that holds it.
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      terminals: {
+        sessionId: scope.sessionId,
+        terminals: [
+          {
+            id: '0a1b2c3d4e5f',
+            name: 'dev',
+            sessionId: scope.sessionId,
+            title: 'Terminal 1',
+            state: 'running',
+            cols: 80,
+            rows: 24,
+            viewers: 1,
+            createdAt: '2026-08-01T10:00:00.000Z',
+            lastActivityAt: '2026-08-01T10:05:00.000Z',
+          },
+        ],
+        limits: { perSession: 6, global: 24, runningGlobal: 1, idleTimeoutSeconds: 900, scrollbackLines: 5_000 },
+      },
+    });
+
+    // Act
+    surface.onSurfaceOpen?.({ kind: 'surface', surface: 'terminal', key: 'dev', daemonId, sessionId: scope.sessionId });
+
+    // Assert
+    should(readSidePaneTabsState(scope).active).equal(sidePaneInstanceTabId('terminal', '0a1b2c3d4e5f'));
+  });
+
   test('should carry navigation through only when the host offered it', () => {
     // Arrange
     const visited: string[] = [];

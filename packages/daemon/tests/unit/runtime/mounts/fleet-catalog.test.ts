@@ -19,6 +19,7 @@ import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
+  FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   FleetCatalogService,
   type FleetCatalogServiceDeps,
@@ -38,6 +39,8 @@ const MACHINE: FleetMachineView = {
   format: 'version-2',
   setUp: true,
   agentPermissions: 'auto',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true },
   tools: [],
   runtimeCount: 1,
   runningSessions: 0,
@@ -47,7 +50,12 @@ const MACHINE: FleetMachineView = {
 const VIEW: FleetAccountChangeView = {
   id: ID,
   revision: 'absent',
-  change: { kind: 'machine.settings', agentPermissions: 'skip' },
+  change: {
+    kind: 'machine.settings',
+    agentPermissions: 'skip',
+    defaultRuntime: null,
+    agentControl: { terminals: true, browsers: true, files: true },
+  },
   summary: 'Set agent permissions to Skip all permission checks',
   consequences: ['Applies to new sessions.'],
   expiresAt: '2026-10-13T08:15:00.000Z',
@@ -143,6 +151,18 @@ describe('the fleet catalogue mount', () => {
     should(jsonBody(responses[0] as never)).deepEqual(MACHINE);
   });
 
+  it('should let nothing write machine settings — agent permissions, the default runtime, or what agents may control — below operator (T, S)', () => {
+    // Assert — proposing and applying are the ONLY routes that change `machine.*`, and both demand
+    // the operator class: an admin token or a paired device, never the warden and never a lesser
+    // class an agent's own session credential could ever hold. An agent therefore has no route that
+    // could flip its own control switches, whatever credential a future agent tool-call path mints.
+    const writes = fleetCatalogRoutes(stub().subsystem).filter(
+      route => route.path === '/v1/fleet/proposals' || route.path === '/v1/fleet/proposals/:proposalId/apply',
+    );
+    should(writes).have.length(2);
+    should(writes.map(route => route.minimum)).deepEqual(['operator', 'operator']);
+  });
+
   it('should hand the machine read the caller governance, so its authority is this caller', async () => {
     // Arrange
     const { subsystem, calls } = stub();
@@ -197,7 +217,12 @@ describe('the fleet catalogue mount', () => {
   it('should stage the one change the body names and read it back by id', async () => {
     // Arrange
     const { subsystem, calls } = stub();
-    const change = { kind: 'machine.settings', agentPermissions: 'skip' };
+    const change = {
+      kind: 'machine.settings',
+      agentPermissions: 'skip',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
 
     // Act
     const staged = await dispatcher(subsystem).dispatch(post('/v1/fleet/proposals', JSON.stringify({ change })));
@@ -227,6 +252,45 @@ describe('the fleet catalogue mount', () => {
     should(jsonBody(applied)).deepEqual({ outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' });
     should(calls.applied.map(call => call.id)).deepEqual([ID, ID]);
     should(calls.applied[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should answer turning an agent control back on with the pairing-style step-up demand (owner decision, T)', async () => {
+    // Arrange
+    const { subsystem } = stub({
+      apply: async () => {
+        throw new FleetCatalogFreshStepUpRequired();
+      },
+    });
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
+
+    // Assert — the SAME wire shape minting a pairing code and widening a device refuse with, so the
+    // PWA's existing transparent step-up retry handles this with no code of its own.
+    should(response.status).equal(403);
+    should(jsonBody(response)).deepEqual({
+      error: 'turning an agent control back on from a remote device needs a passkey confirmation for it',
+      code: 'grant_step_up_required',
+      demand: { capability: 'fleet', axis: 'configure', act: 'enable-agent-control' },
+    });
+  });
+
+  it('should pass this request’s presentation and a spend callback into apply', async () => {
+    // Arrange
+    let seen: { presentation: unknown; spend: () => void } | undefined;
+    const { subsystem } = stub({
+      apply: async (_id, _governance, freshStepUp) => {
+        seen = freshStepUp as never;
+        return { outcome: 'executed', executor: 'setup', summary: 'Imported 1 runtime' };
+      },
+    });
+
+    // Act
+    await dispatcher(subsystem).dispatch(post(`/v1/fleet/proposals/${ID}/apply`));
+
+    // Assert — a handler with no proven device still gets a callable, harmless spend.
+    should(seen).not.be.undefined();
+    should(() => seen?.spend()).not.throw();
   });
 
   it('should refuse an apply body that names a field, before the service runs', async () => {

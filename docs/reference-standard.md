@@ -49,8 +49,8 @@ rule exists so a model cannot fabricate a destination by writing one.
 | `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits                     |
 | `!AN`              | An Attention item   | `!A3`                         | Always `A` + a positive number                              |
 | `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
-| `%terminal:<key>`  | A live terminal     | `%terminal:0a1b2c3d4e5f`      | The daemon's own terminal id; session-scoped                |
-| `%browser:<key>`   | A live browser page | `%browser:page-1`             | The worker's own page key; session-scoped                   |
+| `%terminal:<key>`  | A live terminal     | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped     |
+| `%browser:<key>`   | A live browser page | `%browser:app`                | The page's name, or the worker's page id; session-scoped    |
 
 Both skill sigils are accepted because the harnesses differ: Claude invokes a skill as `/name` and
 Codex as `$name`. Whichever you type is what the reader keeps seeing — a reference is never rewritten
@@ -61,6 +61,15 @@ rather than fleet-scoped: the twelve hex characters that name a shell in one ses
 all in another, so a proved surface carries both the daemon and the session it was proved against.
 A surface reference is never an index — "the second terminal" shifts when a neighbour closes, and a
 shifted reference is how an agent types into the wrong shell.
+
+**A surface's NAME is the shared handle.** A terminal or page opened with a name — by a person, or by
+an agent through the Ferretry tools (`terminal.open`, `browser.open`) — is written `%terminal:dev`
+and `%browser:app`, and the agent's tools take exactly that name, so a reference in a message is a
+handle the agent can use as-is. A name is a lowercase letter then up to 31 lowercase letters, digits or
+dashes, unique within its session, and it may never be twelve hex characters: the id form
+(`%terminal:0a1b2c3d4e5f`) keeps working for surfaces opened without a name and for every reference
+written before names existed, and a name that could also be an id would make one key mean two shells.
+The key grammar below is unchanged — a name is already a valid key.
 
 ### What is NOT a reference
 

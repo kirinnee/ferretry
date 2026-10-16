@@ -44,6 +44,25 @@ describe('browser worker snapshots', () => {
     should(BrowserPageSnapshotSchema.safeParse(normalized.value).success).be.true();
   });
 
+  it('should keep a page’s incognito mark and its opener, and nothing that only resembles them', () => {
+    // Arrange
+    const reply = snapshotReply({
+      pages: [
+        { ...page('p0'), incognito: true, openerId: 'p1' },
+        { ...page('p1'), incognito: 'yes', openerId: '' },
+      ],
+    });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok && normalized.value.pages).deepEqual([
+      { id: 'p0', url: 'https://example.test/p0', title: 'title p0', incognito: true, openerId: 'p1' },
+      { id: 'p1', url: 'https://example.test/p1', title: 'title p1' },
+    ]);
+  });
+
   it('should substitute a blank URL for a tab the worker described without one', () => {
     // Arrange: kteam emitted an empty string here, which the wire schema rejects outright.
     const reply = snapshotReply({ pages: [{ id: 'p1', title: 'new tab' }] });

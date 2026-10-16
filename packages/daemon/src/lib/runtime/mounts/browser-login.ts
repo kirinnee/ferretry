@@ -100,7 +100,14 @@ async function act(window: BrowserLoginLifecycle, context: RouteContext): Promis
 function browserFailure(error: unknown): never {
   if (!(error instanceof BrowserSessionError)) throw error;
   const status = (
-    { not_found: 404, capacity: 409, not_running: 409, launch_failed: 503, upstream_failed: 502 } as const
+    {
+      not_found: 404,
+      capacity: 409,
+      conflict: 409,
+      not_running: 409,
+      launch_failed: 503,
+      upstream_failed: 502,
+    } as const
   )[error.code];
   throw new ApiError(status, error.message, error.code);
 }
