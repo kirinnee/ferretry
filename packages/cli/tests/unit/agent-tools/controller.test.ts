@@ -14,17 +14,15 @@ function harness(answers: unknown[] = [], environment = { capability: 'cap-1' })
   const written: [string, string][] = [];
   const sent: string[] = [];
   let exitCode = 0;
-  const client = new AgentToolsClient(
-    {
-      request: async (path, schema, init) => {
-        sent.push(`${init?.method ?? 'GET'} ${path} ${String(init?.body ?? '')}`);
-        const answer = answers.shift();
-        if (answer instanceof Error) throw answer;
-        return schema.parse(answer ?? { summary: 'ok' });
-      },
+  const port = {
+    request: async <T>(path: string, schema: { parse(value: unknown): T }, init?: RequestInit): Promise<T> => {
+      sent.push(`${init?.method ?? 'GET'} ${path} ${String(init?.body ?? '')}`);
+      const answer = answers.shift();
+      if (answer instanceof Error) throw answer;
+      return schema.parse(answer ?? { summary: 'ok' });
     },
-    environment,
-  );
+  };
+  const client = new AgentToolsClient({ agent: port, person: port }, environment);
   const controller = new AgentToolsController(
     client,
     {
@@ -92,7 +90,7 @@ describe('AgentToolsController', () => {
 
   it('should take over and show control state only on a session that was named', async () => {
     // Arrange
-    const view: SurfaceControlView = { sessionId: 's1', driving: [], takeovers: [] };
+    const view: SurfaceControlView = { sessionId: 's1', driving: [], takeovers: [], handed: [] };
     const world = harness([view, view]);
 
     // Act
@@ -104,7 +102,7 @@ describe('AgentToolsController', () => {
       key: 'dev',
       session: 's1',
     });
-    const shown = await world.run({ kind: 'view', session: 's1' });
+    const shown = await world.run({ kind: 'view', surface: 'browser', session: 's1' });
 
     // Assert
     should([unnamed, named, shown]).deepEqual([1, 0, 0]);
@@ -160,6 +158,10 @@ describe('rendering', () => {
           { surface: 'browser', id: 'page-2', name: 'app', by: { by: 'human', deviceId: 'phone' }, since: 'd' },
           { surface: 'terminal', id: 'a1b2c3d4e5f6', by: { by: 'local' }, since: 'e' },
         ],
+        handed: [
+          { surface: 'terminal', id: 'b1b2c3d4e5f6', name: 'mine', by: { by: 'local' }, at: 'f' },
+          { surface: 'browser', id: 'page-3', by: { by: 'human', deviceId: 'phone' }, at: 'g' },
+        ],
       } as unknown as SurfaceControlView),
     ).equal(
       [
@@ -167,9 +169,11 @@ describe('rendering', () => {
         '%browser:page-1  driven by s1 until c',
         '%browser:app  taken over by device phone since d',
         '%terminal:a1b2c3d4e5f6  taken over by this computer since e',
+        '%terminal:mine  handed to the agent by this computer',
+        '%browser:page-3  handed to the agent by device phone',
       ].join('\n'),
     );
-    should(renderControlView({ sessionId: 's1', driving: [], takeovers: [] })).equal(
+    should(renderControlView({ sessionId: 's1', driving: [], takeovers: [], handed: [] })).equal(
       'no agent is driving anything in s1, and nothing is taken over',
     );
   });

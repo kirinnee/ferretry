@@ -445,6 +445,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     closePage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    releaseSession: async () => undefined,
     closeAll: async () => undefined,
     stream: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
   },
@@ -518,10 +519,10 @@ describe('the mounted daemon surface', () => {
       return counts;
     }, {});
 
-    // `admin-token` is declared by exactly TWO routes: the owner's re-opened passkey window (review L3),
-    // so a paired device is refused at the boundary before the service's own at-the-machine check; and
-    // the agent tools route, which only an agent on this machine holding the host token may reach. The
-    // fleet's old approval-code route used it once too, and is gone.
+    // `admin-token` is declared by exactly ONE route: the owner's re-opened passkey window (review L3),
+    // so a paired device is refused at the boundary before the service's own at-the-machine check. The
+    // fleet's old approval-code route used it once too, and is gone. The agent tools route is `none` and
+    // privileged: it carries no host authority, only the session credential it checks itself.
     // Written as a LABELLED sum, one term per line, and that is the anti-merge device rather than
     // style: a bare `129 + 5 + 1 + 1` invited two changes to each append `+ 1` and produce the same
     // total, which git merges without a conflict — exactly how a route goes missing with this test
@@ -539,9 +540,9 @@ describe('the mounted daemon surface', () => {
       1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
-      5; // a person's agent tools: terminal and browser tool calls, their takeover/hand back, and the control read
+      6; // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes, 'admin-token': 2 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['POST /v1/agent/tools', 'GET /v1/sessions/:sessionId/attach']);
@@ -717,9 +718,10 @@ describe('the mounted daemon surface', () => {
       'POST /v1/agent/tools',
       'POST /v1/sessions/:sessionId/surfaces/terminals/tools',
       'POST /v1/sessions/:sessionId/surfaces/terminals/control',
+      'GET /v1/sessions/:sessionId/surfaces/terminals/control',
       'POST /v1/sessions/:sessionId/surfaces/browser/tools',
       'POST /v1/sessions/:sessionId/surfaces/browser/control',
-      'GET /v1/sessions/:sessionId/surfaces/control',
+      'GET /v1/sessions/:sessionId/surfaces/browser/control',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',

@@ -19,7 +19,7 @@ export type AgentToolCaller =
       readonly kind: 'person';
       readonly sessionId: string;
       readonly actor: AuditActor;
-      /** Who the terminal a person opens is recorded as opened by; absent when nothing can be attested. */
+      /** Who the terminal or page a person opens is recorded as opened by; absent when nothing can be attested. */
       readonly openedBy?: SurfaceOpener;
     };
 
@@ -34,20 +34,20 @@ export interface AgentIdentityResolver {
   resolve(capability: string): Promise<AgentIdentity | undefined>;
 }
 
-/** What an agent may control, as the machine's settings say (`What agents may control`). */
-export type AgentControlKind = 'terminal' | 'browser' | 'files';
-
-/**
- * The machine's "What agents may control" switches, read per call so a change applies to the next
- * action without a restart. Owned by the machine-settings store; this domain only asks.
- */
-export interface AgentControlPolicy {
-  allows(kind: AgentControlKind): Promise<boolean>;
+/** One control event, as the session's journal hands it back. */
+export interface RecordedSurfaceEvent {
+  readonly type: string;
+  readonly data: unknown;
 }
 
-/** Where control changes are published: the session's own journal, which `/v1/events` streams. */
+/**
+ * Where control changes are published — the session's own journal, which `/v1/events` streams — and
+ * read back from, so a takeover or a hand-over outlives a daemon restart.
+ */
 export interface SurfaceEventSink {
   publish(sessionId: string, type: string, data: unknown): Promise<void>;
+  /** This session's earlier `surface.*` events, oldest first. */
+  history(sessionId: string): Promise<readonly RecordedSurfaceEvent[]>;
 }
 
 export interface AgentToolClock {
@@ -59,4 +59,8 @@ export interface ResolvedSurface {
   readonly surface: SurfaceKind;
   readonly id: string;
   readonly name?: string;
+  /** Who opened it, when the daemon can attest that. */
+  readonly openedBy?: SurfaceOpener;
+  /** A browser page in its own throwaway context. */
+  readonly incognito?: true;
 }

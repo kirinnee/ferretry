@@ -91,7 +91,7 @@ describe('fy terminal', () => {
       { kind: 'call', call: { tool: 'terminal.list' }, session: 'child' },
       { kind: 'control', surface: 'terminal', action: 'takeover', key: 'dev', session: 's1' },
       { kind: 'control', surface: 'terminal', action: 'handback', key: 'dev' },
-      { kind: 'view', session: 's1' },
+      { kind: 'view', surface: 'terminal', session: 's1' },
     ]);
   });
 });
@@ -104,7 +104,7 @@ describe('fy browser page', () => {
     // Act
     await run('browser', 'page', 'list');
     await run('browser', 'page', 'open', 'app', 'http://localhost:5173/');
-    await run('browser', 'page', 'open', 'docs');
+    await run('browser', 'page', 'open', 'docs', '--incognito');
     await run('browser', 'page', 'navigate', 'app', 'https://example.test/');
     await run('browser', 'page', 'click', 'app', 'button[type=submit]');
     await run('browser', 'page', 'type', 'app', '#q', 'hello', 'world');
@@ -117,7 +117,7 @@ describe('fy browser page', () => {
     should(calls).deepEqual([
       { kind: 'call', call: { tool: 'browser.list' } },
       { kind: 'call', call: { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/' } },
-      { kind: 'call', call: { tool: 'browser.open', name: 'docs' } },
+      { kind: 'call', call: { tool: 'browser.open', name: 'docs', incognito: true } },
       { kind: 'call', call: { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' } },
       { kind: 'call', call: { tool: 'browser.click', name: 'app', selector: 'button[type=submit]' } },
       { kind: 'call', call: { tool: 'browser.type', name: 'app', selector: '#q', text: 'hello world' } },
@@ -136,12 +136,16 @@ describe('fy browser page', () => {
     await run('browser', '--session', 'outer', 'page', 'list');
     await run('browser', 'page', '--session', 'middle', 'takeover', 'app');
     await run('browser', 'page', 'handback', 'app', '--session', 'inner');
+    await run('browser', 'page', 'handover', 'app', '--session', 'inner');
+    await run('browser', 'page', 'control', '--session', 'inner');
 
     // Assert
     should(calls).deepEqual([
       { kind: 'call', call: { tool: 'browser.list' }, session: 'outer' },
       { kind: 'control', surface: 'browser', action: 'takeover', key: 'app', session: 'middle' },
       { kind: 'control', surface: 'browser', action: 'handback', key: 'app', session: 'inner' },
+      { kind: 'control', surface: 'browser', action: 'handover', key: 'app', session: 'inner' },
+      { kind: 'view', surface: 'browser', session: 'inner' },
     ]);
   });
 

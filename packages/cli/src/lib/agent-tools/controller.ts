@@ -22,11 +22,11 @@ export type AgentToolsCommand =
   | {
       readonly kind: 'control';
       readonly surface: SurfaceKind;
-      readonly action: 'takeover' | 'handback';
+      readonly action: 'takeover' | 'handback' | 'handover';
       readonly key: string;
       readonly session?: string;
     }
-  | { readonly kind: 'view'; readonly session?: string };
+  | { readonly kind: 'view'; readonly surface: SurfaceKind; readonly session?: string };
 
 export interface IAgentToolsRunner {
   run(command: AgentToolsCommand): Promise<number>;
@@ -58,6 +58,10 @@ export function renderControlView(view: SurfaceControlView): string {
   for (const takeover of view.takeovers)
     lines.push(
       `${reference(takeover.surface, takeover.id, takeover.name)}  taken over by ${takeover.by.by === 'human' ? `device ${takeover.by.deviceId}` : 'this computer'} since ${takeover.since}`,
+    );
+  for (const handed of view.handed)
+    lines.push(
+      `${reference(handed.surface, handed.id, handed.name)}  handed to the agent by ${handed.by.by === 'human' ? `device ${handed.by.deviceId}` : 'this computer'}`,
     );
   return lines.length === 0
     ? `no agent is driving anything in ${view.sessionId}, and nothing is taken over`
@@ -114,7 +118,10 @@ export class AgentToolsController implements IAgentToolsRunner {
         return { text: renderControlView(view), matched: true };
       }
       case 'view':
-        return { text: renderControlView(await this.client.view(personal(command.session))), matched: true };
+        return {
+          text: renderControlView(await this.client.view(command.surface, personal(command.session))),
+          matched: true,
+        };
     }
   }
 }

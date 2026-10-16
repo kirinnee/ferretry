@@ -45,6 +45,7 @@ function key(ownerId: string, terminalId: string): string {
 /** Stateful lifecycle adapter; terminal process and session authority are injected ports. */
 export class ManagedTerminalService {
   private readonly records = new Map<string, TerminalRecord>();
+  private creating: Promise<unknown> = Promise.resolve();
   private readonly maximumPerSession: number;
   private readonly maximumGlobal: number;
   private readonly idleTimeoutMs: number;
@@ -141,6 +142,17 @@ export class ManagedTerminalService {
       /** Where the shell starts: absolute, or relative to the session's own folder. */
       readonly folder?: string;
     } = {},
+  ): Promise<TerminalView> {
+    // ONE CREATE AT A TIME. The name and capacity checks below read the listing and then await the
+    // runtime, so two opens racing for one name would both pass and leave two `dev` terminals.
+    const turn = this.creating.then(async () => await this.createNow(sessionReference, input));
+    this.creating = turn.catch(() => undefined);
+    return await turn;
+  }
+
+  private async createNow(
+    sessionReference: string,
+    input: Parameters<ManagedTerminalService['create']>[1] & object,
   ): Promise<TerminalView> {
     const session = await this.session(sessionReference);
     await this.refresh();

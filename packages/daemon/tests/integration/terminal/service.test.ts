@@ -267,3 +267,37 @@ describe('ManagedTerminalService names, folders and agent reads', () => {
     should(runtime.calls).containDeep(['text:120', 'foreground']);
   });
 });
+
+describe('ManagedTerminalService — one create at a time', () => {
+  it('should give two racing opens of one name one terminal and one refusal, never two terminals', async () => {
+    // Arrange — a runtime whose create yields before it lands, as tmux does.
+    const runtime = new FakeRuntime();
+    const create = runtime.create.bind(runtime);
+    runtime.create = async input => {
+      await Bun.sleep(10);
+      return await create(input);
+    };
+    let minted = 0;
+    const next = (): string => {
+      minted += 1;
+      return `abcdef01234${String(minted)}`;
+    };
+    const service = new ManagedTerminalService(
+      runtime,
+      sessions,
+      { now: () => 2_000 },
+      { next },
+      { maximumPerSession: 4 },
+    );
+
+    // Act
+    const outcomes = await Promise.allSettled([
+      service.create('session-a', { name: 'dev' }),
+      service.create('session-a', { name: 'dev' }),
+    ]);
+
+    // Assert
+    should(outcomes.map(outcome => outcome.status).toSorted()).deepEqual(['fulfilled', 'rejected']);
+    should([...runtime.records.values()].filter(record => record.name === 'dev')).have.length(1);
+  });
+});

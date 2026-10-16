@@ -11,9 +11,11 @@ import {
   type SurfaceController,
   type SurfaceControlView,
   type SurfaceKind,
+  type SurfaceOpener,
 } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
 import { BrowserSessionError, type BrowserPageAction, type BrowserSubsystem } from '../browser/runtime/index.ts';
+import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import type { SurfaceControl } from './control.ts';
 import {
@@ -25,7 +27,7 @@ import {
   surfaceReference,
   terminalInput,
 } from './policy.ts';
-import type { AgentControlPolicy, AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
+import type { AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
 
 /**
  * Why a tool call was not carried out, in words an agent can act on.
@@ -81,6 +83,10 @@ const kindOf = (call: AgentToolCall): SurfaceKind => (call.tool.startsWith('term
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
+/** Whether this agent opened the surface itself — the attestation the daemon recorded, never a claim. */
+const openedByAgent = (openedBy: SurfaceOpener | undefined, sessionId: string): boolean =>
+  openedBy?.by === 'agent' && openedBy.sessionId === sessionId;
+
 /**
  * The agent tools: terminals and browser pages, driven by name.
  *
@@ -90,9 +96,13 @@ const plural = (count: number, word: string): string => `${String(count)} ${word
  * 1. an agent is asked the machine's "What agents may control" switch for this kind first;
  * 2. the surface is looked up inside the caller's own session only — a name from another session
  *    is simply not there;
- * 3. an agent is refused a surface a person has taken over;
- * 4. the act is carried out, and an agent's act puts up the driving marker;
- * 5. one audit record names the tool, the surface and the outcome — with lengths, never the text.
+ * 3. an agent acts only on a surface IT opened, or one a person handed to it — a person's own shell
+ *    or page is theirs unless they say otherwise;
+ * 4. an agent is refused a surface a person has taken over — that one tab or terminal only; it keeps
+ *    working everywhere else. For a page the check is repeated inside that page's own queue, so a
+ *    takeover that lands while an act waits its turn still wins;
+ * 5. the act is carried out, and an agent's act puts up the driving marker;
+ * 6. one audit record names the tool, the surface and the outcome — with lengths, never the text.
  */
 export class AgentToolService {
   constructor(private readonly ports: AgentToolPorts) {}
@@ -113,12 +123,25 @@ export class AgentToolService {
     }
   }
 
-  /** Every live driving marker and standing takeover in one session. */
-  controlView(sessionId: string): SurfaceControlView {
-    return this.ports.control.view(sessionId);
+  /**
+   * Records a call that was refused before it could name a session — a missing or unknown credential,
+   * or a body that is not a call — so credential guessing and stale credentials leave a trace.
+   */
+  async refusedCaller(reason: string): Promise<void> {
+    await this.ports.audit.record({
+      event: 'agent.tool',
+      actor: { kind: 'host' },
+      outcome: 'refused',
+      detail: { by: 'agent', reason },
+    });
   }
 
-  /** A person takes a surface over from the agent, or hands it back. */
+  /** Every live driving marker, standing takeover and hand-over of one kind in one session. */
+  async controlView(sessionId: string, surface: SurfaceKind): Promise<SurfaceControlView> {
+    return await this.ports.control.view(sessionId, surface);
+  }
+
+  /** A person takes a surface over from the agent, hands it back, or hands it to the agent. */
   async control(
     sessionId: string,
     kind: SurfaceKind,
@@ -131,9 +154,10 @@ export class AgentToolService {
     try {
       surface = await this.resolve(sessionId, kind, request.key);
       if (request.action === 'takeover') await this.ports.control.takeover(sessionId, surface, by);
-      else await this.ports.control.handback(sessionId, surface);
+      else if (request.action === 'handback') await this.ports.control.handback(sessionId, surface);
+      else await this.ports.control.hand(sessionId, surface, by);
       outcome = 'succeeded';
-      return this.ports.control.view(sessionId);
+      return await this.ports.control.view(sessionId, kind);
     } catch (error) {
       throw translate(error) ?? error;
     } finally {
@@ -158,9 +182,9 @@ export class AgentToolService {
     const { sessionId } = caller;
     switch (call.tool) {
       case 'terminal.list':
-        return await this.listTerminals(sessionId);
+        return await this.listTerminals(caller);
       case 'browser.list':
-        return await this.listPages(sessionId);
+        return await this.listPages(caller);
       case 'terminal.open': {
         const opened = await this.ports.terminals.create(
           sessionId,
@@ -176,31 +200,44 @@ export class AgentToolService {
         };
       }
       case 'browser.open': {
-        const page = await this.ports.browser.openPage(sessionId, call.name, call.url);
-        facts.surface = { surface: 'browser', id: page.id, name: call.name };
+        const opener: SurfaceOpener | undefined =
+          caller.kind === 'agent' ? { by: 'agent', sessionId } : caller.openedBy;
+        const page = await this.ports.browser.openPage(sessionId, call.name, {
+          ...(call.url === undefined ? {} : { url: call.url }),
+          ...(opener === undefined ? {} : { openedBy: opener }),
+          ...(call.incognito === true ? { incognito: true } : {}),
+        });
+        facts.surface = {
+          surface: 'browser',
+          id: page.id,
+          name: call.name,
+          ...(page.incognito ? { incognito: true } : {}),
+        };
         await this.drove(caller, call, facts.surface);
-        return { summary: `Opened ${surfaceReference('browser', call.name)} at ${page.url}.` };
+        const kind = call.incognito === true ? 'an incognito page, ' : '';
+        return { summary: `Opened ${kind}${surfaceReference('browser', call.name)} at ${page.url}.` };
       }
       default: {
         const surface = await this.resolve(sessionId, kindOf(call), call.name);
         facts.surface = surface;
-        if (caller.kind === 'agent') this.assertFree(sessionId, surface);
-        const result = await this.act(sessionId, call, surface);
+        if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
+        const result = await this.act(caller, call, surface);
         await this.drove(caller, call, surface);
         return result;
       }
     }
   }
 
-  /** The act itself, on a surface already resolved inside the caller's session. */
+  /** The act itself, on a surface already resolved inside the caller's session and cleared for it. */
   private async act(
-    sessionId: string,
+    caller: AgentToolCaller,
     call: Exclude<
       AgentToolCall,
       { readonly tool: 'terminal.list' | 'browser.list' | 'terminal.open' | 'browser.open' }
     >,
     surface: ResolvedSurface,
   ): Promise<AgentToolResult> {
+    const { sessionId } = caller;
     const reference = surfaceReference(surface.surface, surface.name ?? surface.id);
     switch (call.tool) {
       case 'terminal.send': {
@@ -217,22 +254,22 @@ export class AgentToolService {
         return { summary: `The last ${plural(lines, 'line')} of ${reference}.`, output };
       }
       case 'terminal.wait':
-        return await this.wait(sessionId, call, surface, reference);
+        return await this.wait(caller, call, surface, reference);
       case 'terminal.close':
         await this.ports.terminals.close(sessionId, surface.id);
         this.ports.control.forget(sessionId, surface);
         return { summary: `Closed ${reference}.` };
       case 'browser.close':
-        await this.ports.browser.closePage(sessionId, surface.id);
+        await this.ports.browser.closePage(sessionId, surface.id, this.browserGuard(caller, surface));
         this.ports.control.forget(sessionId, surface);
         return { summary: `Closed ${reference}.` };
       default:
-        return await this.browse(sessionId, call, surface, reference);
+        return await this.browse(caller, call, surface, reference);
     }
   }
 
   private async browse(
-    sessionId: string,
+    caller: AgentToolCaller,
     call: Extract<
       AgentToolCall,
       { readonly tool: 'browser.navigate' | 'browser.click' | 'browser.type' | 'browser.read' | 'browser.screenshot' }
@@ -254,7 +291,12 @@ export class AgentToolService {
                   ...(call.mode === undefined ? {} : { mode: call.mode }),
                 }
               : { action: 'screenshot' };
-    const answer: BrowserActionResult = await this.ports.browser.actOnPage(sessionId, surface.id, action);
+    const answer: BrowserActionResult = await this.ports.browser.actOnPage(
+      caller.sessionId,
+      surface.id,
+      action,
+      this.browserGuard(caller, surface),
+    );
     const page: { readonly url?: string; readonly text?: unknown; readonly screenshotBase64?: unknown } =
       'result' in answer ? answer.result : {};
     const at = page.url === undefined ? '' : ` (now at ${page.url})`;
@@ -265,23 +307,34 @@ export class AgentToolService {
   }
 
   /**
+   * The check the browser runs INSIDE the page's own queue, right before an agent's act: a takeover
+   * that landed while the act was waiting its turn still refuses it.
+   */
+  private browserGuard(caller: AgentToolCaller, surface: ResolvedSurface): (() => Promise<void>) | undefined {
+    return caller.kind === 'agent' ? async () => await this.assertFree(caller.sessionId, surface) : undefined;
+  }
+
+  /**
    * Waits, inside one bounded request, for text to appear or for the running command to end.
    *
    * THE FIRST LOOK IS ONE POLL INTERVAL LATER, not immediately: a wait for `exit` sent straight after
    * a command would otherwise look before the shell has even started it, find the shell in the
-   * foreground, and report a command that never ran as finished.
+   * foreground, and report a command that never ran as finished. An agent's wait also stops the moment
+   * a person takes the terminal over.
    */
   private async wait(
-    sessionId: string,
+    caller: AgentToolCaller,
     call: Extract<AgentToolCall, { readonly tool: 'terminal.wait' }>,
     surface: ResolvedSurface,
     reference: string,
   ): Promise<AgentToolResult> {
+    const { sessionId } = caller;
     const deadline = this.ports.clock.now() + (call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
     const tail = async (): Promise<string> =>
       clipOutput(await this.ports.terminals.text(sessionId, surface.id, WAIT_TAIL_LINES));
     for (;;) {
       await this.ports.sleep(AGENT_TOOL_POLL_MS);
+      if (caller.kind === 'agent') await this.assertFree(sessionId, surface);
       const matched =
         call.text === undefined
           ? await this.ended(sessionId, surface)
@@ -306,30 +359,68 @@ export class AgentToolService {
     }
   }
 
-  private async listTerminals(sessionId: string): Promise<AgentToolResult> {
-    const listing = await this.ports.terminals.list(sessionId);
-    const surfaces: AgentSurface[] = listing.terminals.map(terminal => ({
-      id: terminal.id,
-      ...(terminal.name === undefined ? {} : { name: terminal.name }),
-      title: terminal.title,
-    }));
+  private async listTerminals(caller: AgentToolCaller): Promise<AgentToolResult> {
+    const listing = await this.ports.terminals.list(caller.sessionId);
+    const surfaces = await Promise.all(
+      listing.terminals.map(async terminal =>
+        this.listed(caller, {
+          surface: 'terminal',
+          id: terminal.id,
+          title: terminal.title,
+          ...(terminal.name === undefined ? {} : { name: terminal.name }),
+          ...(terminal.openedBy === undefined ? {} : { openedBy: terminal.openedBy }),
+        }),
+      ),
+    );
     return { summary: listed('terminal', surfaces), surfaces };
   }
 
-  private async listPages(sessionId: string): Promise<AgentToolResult> {
-    const status = await this.ports.browser.status(sessionId);
-    const surfaces: AgentSurface[] = status.pages.map(page => ({
-      id: page.id,
-      ...(page.name === undefined ? {} : { name: page.name }),
-      title: page.title,
-      url: page.url,
-    }));
+  private async listPages(caller: AgentToolCaller): Promise<AgentToolResult> {
+    const status = await this.ports.browser.status(caller.sessionId);
+    const surfaces = await Promise.all(
+      status.pages.map(async page =>
+        this.listed(caller, {
+          surface: 'browser',
+          id: page.id,
+          title: page.title,
+          url: page.url,
+          ...(page.name === undefined ? {} : { name: page.name }),
+          ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
+          ...(page.incognito === true ? { incognito: true } : {}),
+        }),
+      ),
+    );
     return { summary: listed('browser', surfaces), surfaces };
+  }
+
+  /** One row of a listing. An agent is told, per row, whether it may act there. */
+  private async listed(
+    caller: AgentToolCaller,
+    row: ResolvedSurface & { readonly title: string; readonly url?: string },
+  ): Promise<AgentSurface> {
+    const base: AgentSurface = {
+      id: row.id,
+      ...(row.name === undefined ? {} : { name: row.name }),
+      title: row.title,
+      ...(row.incognito === true ? { incognito: true } : {}),
+      ...(row.url === undefined ? {} : { url: row.url }),
+    };
+    if (caller.kind !== 'agent') return base;
+    const available = await this.assertAgentMay(caller.sessionId, row).then(
+      () => true,
+      () => false,
+    );
+    return { ...base, available };
   }
 
   /** The surface a name or id addresses, looked up in this session's own listing and nowhere else. */
   private async resolve(sessionId: string, surface: SurfaceKind, key: string): Promise<ResolvedSurface> {
-    const candidates: readonly { readonly id: string; readonly name?: string }[] =
+    const candidates: readonly {
+      readonly id: string;
+      readonly name?: string;
+      readonly openedBy?: SurfaceOpener;
+      readonly incognito?: true;
+    }[] =
       surface === 'terminal'
         ? (await this.ports.terminals.list(sessionId)).terminals
         : (await this.ports.browser.status(sessionId)).pages;
@@ -341,11 +432,29 @@ export class AgentToolService {
         `There is no ${surfaceReference(surface, key)} in this session. List them with ${surface}.list, or open one with ${open}.`,
       );
     }
-    return { surface, id: found.id, ...(found.name === undefined ? {} : { name: found.name }) };
+    return {
+      surface,
+      id: found.id,
+      ...(found.name === undefined ? {} : { name: found.name }),
+      ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
+      ...(found.incognito === true ? { incognito: true } : {}),
+    };
   }
 
-  private assertFree(sessionId: string, surface: ResolvedSurface): void {
-    if (this.ports.control.takeoverOf(sessionId, surface) === undefined) return;
+  /** Whether an agent may act on this surface now: it is the agent's, and nobody is holding it. */
+  private async assertAgentMay(sessionId: string, surface: ResolvedSurface): Promise<void> {
+    if (!openedByAgent(surface.openedBy, sessionId) && !(await this.ports.control.isHanded(sessionId, surface)))
+      throw new AgentToolError(
+        'forbidden',
+        `${surfaceReference(surface.surface, surface.name ?? surface.id)} is a person's, not yours: you may use it only if they hand it to you. Ask them, or open your own.`,
+      );
+    await this.assertFree(sessionId, surface);
+  }
+
+  /** Whether a person holds THIS surface. Holding one tab or terminal holds nothing else. */
+  private async assertFree(sessionId: string, surface: ResolvedSurface): Promise<void> {
+    const takeover = await this.ports.control.takeoverOf(sessionId, surface);
+    if (takeover === undefined) return;
     throw new AgentToolError(
       'taken_over',
       `A person has taken over ${surfaceReference(surface.surface, surface.name ?? surface.id)}; wait or ask them.`,
@@ -403,7 +512,10 @@ function callFacts(call: AgentToolCall): AuditDetail {
         timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS,
       };
     case 'browser.open':
-      return call.url === undefined ? {} : { host: auditHost(call.url) };
+      return {
+        ...(call.url === undefined ? {} : { host: auditHost(call.url) }),
+        ...(call.incognito === true ? { incognito: true } : {}),
+      };
     case 'browser.navigate':
       return { host: auditHost(call.url) };
     case 'browser.click':
@@ -420,7 +532,11 @@ function callFacts(call: AgentToolCall): AuditDetail {
 function listed(surface: SurfaceKind, surfaces: readonly AgentSurface[]): string {
   const word = surface === 'terminal' ? 'terminal' : 'browser page';
   if (surfaces.length === 0) return `No ${word}s are open in this session.`;
-  const names = surfaces.map(entry => surfaceReference(surface, entry.name ?? entry.id)).join(', ');
+  const names = surfaces
+    .map(
+      entry => `${surfaceReference(surface, entry.name ?? entry.id)}${entry.available === false ? ' (not yours)' : ''}`,
+    )
+    .join(', ');
   return `${plural(surfaces.length, word)}: ${names}.`;
 }
 

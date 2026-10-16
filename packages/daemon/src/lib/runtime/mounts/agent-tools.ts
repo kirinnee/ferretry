@@ -1,6 +1,6 @@
 import {
-  AgentToolCallSchema,
   type AgentToolCall,
+  AgentToolCallSchema,
   type SurfaceController,
   SurfaceControlRequestSchema,
   type SurfaceKind,
@@ -19,33 +19,30 @@ import { decideTerminalOpener } from '../../terminal/ownership.ts';
 /**
  * THE AGENT TOOLS, OVER HTTP — terminals and browser pages driven by name.
  *
- * ## THE AGENT'S ROUTE NAMES NO SESSION
+ * ## THE AGENT'S ROUTE CARRIES NO HOST AUTHORITY AND NAMES NO SESSION
  *
- * `POST /v1/agent/tools` derives its session from the session credential the caller presents, which
- * the daemon minted into that session's own environment at launch and keeps only a hash of. There is
- * no session id in its path, its body (the call schema is strict, so a `sessionId` field is refused)
- * or any header it reads, so the one way to act as a session here is to hold that session's secret —
- * and what it then reaches is that session's surfaces, on this machine, and nothing else.
+ * `POST /v1/agent/tools` is authenticated by the session credential alone — the one the daemon minted
+ * into that session's own environment and keeps only a hash of — and NOT by the host's admin token,
+ * which it neither needs nor reads. So the tools server an agent runs holds exactly its session's
+ * authority and nothing more. It is served only over a privileged loopback carrier (`privilegedOnly`):
+ * a paired device, or anything arriving through the relay, is refused before the handler runs.
  *
- * It is served to the host's OWN admin token arriving over loopback (`admin-token`, `privilegedOnly`),
- * and to nothing else: a paired device, a warden, or anything reaching the daemon through the relay
- * is refused before the handler runs.
+ * There is no session id in its path, its body (the call schema is strict, so a `sessionId` field is
+ * refused) or any header it reads, so the only way to act as a session here is to hold that session's
+ * secret. A refused credential or body is audited too, so guessing leaves a trace.
  *
  * ## A PERSON'S ROUTES NAME THE SESSION, AND REFUSE AN AGENT
  *
- * `…/surfaces/terminals/tools` and `…/surfaces/browser/tools` are what `fy terminal` and `fy browser` use from a
- * person's shell, governed by the `terminal` and `browser` grants like every other surface route. An
- * agent that identifies itself (`peer:` or `warden:`) is refused there and told to use its own route,
- * so the honest path for an agent is always the one that checks takeover and the machine's switches.
+ * Everything under `/v1/sessions/:sessionId/surfaces` is a person's — the CLI and the app — governed by
+ * the `terminal` and `browser` grants like every other surface route. An agent that identifies itself
+ * (`peer:` or `warden:`) is refused there and pointed at its own route, which is the one that holds it
+ * to its own surfaces, the machine's switches and a person's takeover.
  *
  * ## WHAT THIS DOES NOT STOP — DECLARED
  *
- * An agent runs as the same user as this daemon and can read the admin token from the state home,
- * as every in-pane `fy` command does. Such an agent can call a person's route without identifying
- * itself, and so act on a surface past a takeover. That is the shared-token boundary every peer route
- * already states (`isHumanAdminActor`): an operational boundary for honest clients, not a sandbox.
- * The agent route is what holds an agent to its own session; the shell an agent is given is not a
- * containment.
+ * An agent runs as the same user as this daemon and can read the admin token from the state home.
+ * Such an agent can call a person's route without identifying itself. That is the shared-token
+ * boundary every peer route already states (`isHumanAdminActor`): for honest clients, not a sandbox.
  */
 
 /**
@@ -79,18 +76,26 @@ function sessionOf(context: RouteContext): string {
   return id;
 }
 
-/** The agent behind a request, from its session credential and from nothing else. */
-async function agentOf(identities: AgentIdentityResolver, context: RouteContext): Promise<AgentToolCaller> {
+/** The agent behind a request, from its session credential and from nothing else. Refusals are audited. */
+async function agentOf(
+  service: AgentToolService,
+  identities: AgentIdentityResolver,
+  context: RouteContext,
+): Promise<AgentToolCaller> {
   const capability = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
-  if (capability === '')
+  if (capability === '') {
+    await service.refusedCaller('no session credential');
     throw new ApiError(
       401,
       'agent tools need the session credential Ferretry gives each agent session (FY_SESSION_BOARD_CAPABILITY); run this from inside an agent session',
       'missing_capability',
     );
+  }
   const identity = await identities.resolve(capability);
-  if (identity === undefined)
+  if (identity === undefined) {
+    await service.refusedCaller('unknown session credential');
     throw new ApiError(403, 'the session credential names no running session on this machine', 'forbidden');
+  }
   return {
     kind: 'agent',
     sessionId: identity.sessionId,
@@ -120,7 +125,7 @@ function personOf(context: RouteContext): AgentToolCaller & { readonly kind: 'pe
   };
 }
 
-/** Who a person taking a surface over is, as the takeover records it. */
+/** Who a person taking a surface over or handing it on is, as the record says. */
 function controllerOf(context: RouteContext): SurfaceController {
   const credential = context.credential;
   return credential?.tokenClass === 'device' ? { by: 'human', deviceId: credential.deviceId } : { by: 'local' };
@@ -133,8 +138,11 @@ async function agentCall(
   identities: AgentIdentityResolver,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  const caller = await agentOf(identities, context);
-  const call = await parseBody(context.request, AgentToolCallSchema);
+  const caller = await agentOf(service, identities, context);
+  const call = await parseBody(context.request, AgentToolCallSchema).catch(async (error: unknown) => {
+    await service.refusedCaller('not a tool call');
+    throw error;
+  });
   return jsonResponse(await service.call(caller, call).catch(answered));
 }
 
@@ -156,14 +164,15 @@ async function control(service: AgentToolService, kind: SurfaceKind, context: Ro
 
 /**
  * Every route but the agent's lives under `/v1/sessions/:sessionId/surfaces`, a segment no other
- * subsystem uses, so none of them can shadow or be shadowed by `…/terminals/:terminalId`.
+ * subsystem uses, so none of them can shadow or be shadowed by `…/terminals/:terminalId`. Each person's
+ * route is one kind's, so each is governed by that kind's grant — the control reads included.
  */
 export function agentToolRoutes(service: AgentToolService, identities: AgentIdentityResolver): readonly ApiRoute[] {
   return [
     {
       method: 'POST',
       path: '/v1/agent/tools',
-      minimum: 'admin-token',
+      minimum: 'none',
       privilegedOnly: true,
       noStore: true,
       handle: async context => await agentCall(service, identities, context),
@@ -185,6 +194,14 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       handle: async context => await control(service, 'terminal', context),
     },
     {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/surfaces/terminals/control',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => jsonResponse(await service.controlView(sessionOf(context), 'terminal')),
+    },
+    {
       method: 'POST',
       path: '/v1/sessions/:sessionId/surfaces/browser/tools',
       minimum: 'operator',
@@ -202,10 +219,11 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
     },
     {
       method: 'GET',
-      path: '/v1/sessions/:sessionId/surfaces/control',
+      path: '/v1/sessions/:sessionId/surfaces/browser/control',
       minimum: 'operator',
+      capability: { capability: 'browser', axis: 'use' },
       noStore: true,
-      handle: async context => jsonResponse(service.controlView(sessionOf(context))),
+      handle: async context => jsonResponse(await service.controlView(sessionOf(context), 'browser')),
     },
   ];
 }

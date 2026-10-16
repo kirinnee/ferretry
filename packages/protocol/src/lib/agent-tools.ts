@@ -164,7 +164,13 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     .refine(call => (call.text === undefined) !== (call.exit === undefined), 'wait for text or for exit, not both'),
   z.strictObject({ tool: z.literal('terminal.close'), name: SurfaceKeySchema }),
   z.strictObject({ tool: z.literal('browser.list') }),
-  z.strictObject({ tool: z.literal('browser.open'), name: SurfaceNameSchema, url: AgentUrlSchema.optional() }),
+  z.strictObject({
+    tool: z.literal('browser.open'),
+    name: SurfaceNameSchema,
+    url: AgentUrlSchema.optional(),
+    /** A throwaway page with its own cookies and storage, shared with nothing; gone when it closes. */
+    incognito: z.literal(true).optional(),
+  }),
   z.strictObject({ tool: z.literal('browser.navigate'), name: SurfaceKeySchema, url: AgentUrlSchema }),
   z.strictObject({ tool: z.literal('browser.click'), name: SurfaceKeySchema, selector: SelectorSchema }),
   z.strictObject({
@@ -209,10 +215,18 @@ export const AgentSurfaceSchema = z.strictObject({
   id: z.string().min(1).max(128),
   name: SurfaceNameSchema.optional(),
   title: z.string().max(512),
+  /** A throwaway browser page with its own cookies, shared with nothing. */
+  incognito: z.literal(true).optional(),
   url: z
     .string()
     .max(AGENT_TOOL_MAX_URL_CHARS * 4)
     .optional(),
+  /**
+   * For an agent's listing only: whether this agent may act on it. An agent acts on what it opened,
+   * and on what a person explicitly handed to it — never on a person's own shell or page by default,
+   * nor on anything a person has taken over.
+   */
+  available: z.boolean().optional(),
 });
 export type AgentSurface = z.infer<typeof AgentSurfaceSchema>;
 
@@ -243,6 +257,8 @@ export const SurfaceDrivingSchema = z.strictObject({
   name: SurfaceNameSchema.optional(),
   agentSessionId: z.string().min(1).max(128),
   agentName: z.string().min(1).max(128).optional(),
+  /** The page is incognito: its own throwaway cookies and storage. */
+  incognito: z.literal(true).optional(),
   since: InstantSchema,
   until: InstantSchema,
 });
@@ -265,11 +281,25 @@ export const SurfaceTakeoverSchema = z.strictObject({
 });
 export type SurfaceTakeover = z.infer<typeof SurfaceTakeoverSchema>;
 
-/** `GET /v1/sessions/:sessionId/surfaces/control` and the answer to every control change. */
+/** A surface a person opened and then handed to the agent, so the agent may act on it. */
+export const SurfaceHandedSchema = z.strictObject({
+  surface: SurfaceKindSchema,
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  by: SurfaceControllerSchema,
+  at: InstantSchema,
+});
+export type SurfaceHanded = z.infer<typeof SurfaceHandedSchema>;
+
+/**
+ * `GET /v1/sessions/:sessionId/surfaces/terminals/control` and `…/surfaces/browser/control` — one kind
+ * each, so each is governed by that kind's grant — and the answer to every control change.
+ */
 export const SurfaceControlViewSchema = z.strictObject({
   sessionId: z.string().min(1),
   driving: z.array(SurfaceDrivingSchema),
   takeovers: z.array(SurfaceTakeoverSchema),
+  handed: z.array(SurfaceHandedSchema),
 });
 export type SurfaceControlView = z.infer<typeof SurfaceControlViewSchema>;
 
@@ -278,7 +308,12 @@ export type SurfaceControlView = z.infer<typeof SurfaceControlViewSchema>;
  * over from the agent, or hands it back. The answer is the session's {@link SurfaceControlViewSchema}.
  */
 export const SurfaceControlRequestSchema = z.strictObject({
-  action: z.enum(['takeover', 'handback']),
+  /**
+   * `takeover` holds a surface (for a browser: the WHOLE browser — every page shares one active tab and
+   * one input stream); `handback` ends a takeover; `handover` gives the agent a surface a person opened,
+   * which it may otherwise not touch.
+   */
+  action: z.enum(['takeover', 'handback', 'handover']),
   /** The surface's name or id. */
   key: SurfaceKeySchema,
 });
@@ -287,12 +322,14 @@ export type SurfaceControlRequest = z.infer<typeof SurfaceControlRequestSchema>;
 /**
  * The session-journal events control changes are published as, on the existing `/v1/events` feed.
  * `surface.driving` carries {@link SurfaceDrivingSchema}; `surface.takeover` carries
- * {@link SurfaceTakeoverSchema}; `surface.handback` carries {@link SurfaceHandbackSchema}.
+ * {@link SurfaceTakeoverSchema}; `surface.handback` carries {@link SurfaceHandbackSchema}; `surface.handed`
+ * carries {@link SurfaceHandedSchema}. The daemon replays them on start, so a takeover outlives a restart.
  */
 export const SURFACE_EVENT_TYPES = {
   driving: 'surface.driving',
   takeover: 'surface.takeover',
   handback: 'surface.handback',
+  handed: 'surface.handed',
 } as const;
 
 export const SurfaceHandbackSchema = z.strictObject({

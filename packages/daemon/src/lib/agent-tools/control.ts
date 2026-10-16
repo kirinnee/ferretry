@@ -3,29 +3,32 @@ import {
   type SurfaceController,
   type SurfaceControlView,
   type SurfaceDriving,
-  type SurfaceHandback,
+  type SurfaceHanded,
+  SurfaceHandedSchema,
+  SurfaceHandbackSchema,
   type SurfaceKind,
   type SurfaceTakeover,
+  SurfaceTakeoverSchema,
 } from '@ferretry/protocol';
 import type { AgentToolClock, ResolvedSurface, SurfaceEventSink } from './types.ts';
 
 /**
- * WHO IS DRIVING EACH SURFACE, AND WHO HAS TAKEN ONE OVER.
+ * WHO IS DRIVING EACH SURFACE, WHO HAS TAKEN ONE OVER, AND WHAT WAS HANDED TO THE AGENT.
  *
  * DRIVING is the "AGENT · Hadi is typing here" marker. It is published as a `surface.driving` event
  * carrying `until`, the instant it lapses unless the agent acts again, so a reader shows it while
- * `now < until` and needs no second event to clear it. An agent acting on a surface every second
- * would otherwise write an event a second; instead one is written only when the marker would lapse
- * within half its window, which bounds the journal to about one event per surface per
+ * `now < until` and needs no second event to clear it. One is written only when the standing marker
+ * would lapse within half its window, which bounds the journal to about one event per surface per
  * {@link DRIVING_WINDOW_MS}/2 however busy the agent is.
  *
- * A TAKEOVER is a person holding a surface. While it stands, every agent tool call on that surface is
- * refused — the check is in the daemon, on the tool path, so an agent cannot talk its way past it —
- * until the person hands it back. Takeovers are held in memory: a daemon restart drops every
- * terminal viewer and browser viewer as well, and a person who still wants control takes it again.
+ * A TAKEOVER is a person holding a surface; a HAND-OVER is a person giving the agent a surface they
+ * opened. Both are journaled (`surface.takeover`, `surface.handback`, `surface.handed`) and REPLAYED
+ * from the session's journal the first time a session is asked about after a start, so a person who
+ * took a shell over is still holding it after the daemon restarts. A driving marker is not replayed:
+ * it lapses within seconds anyway.
  *
- * Both are keyed by the surface's ID, not its name: a name can be reused by the next terminal opened
- * after this one closes, and a takeover of the old shell must not follow its name to the new one.
+ * Everything is keyed by the surface's ID, not its name: a name can be reused by the next terminal
+ * opened after this one closes, and a takeover of the old shell must not follow its name to the new one.
  */
 
 /** How long one action keeps the driving marker up. */
@@ -41,6 +44,8 @@ interface Held<T> {
 export class SurfaceControl {
   readonly #driving = new Map<string, Held<SurfaceDriving>>();
   readonly #takeovers = new Map<string, Held<SurfaceTakeover>>();
+  readonly #handed = new Map<string, Held<SurfaceHanded>>();
+  readonly #loaded = new Map<string, Promise<void>>();
 
   constructor(
     private readonly events: SurfaceEventSink,
@@ -48,8 +53,15 @@ export class SurfaceControl {
   ) {}
 
   /** The takeover standing on this surface, if a person holds it. */
-  takeoverOf(sessionId: string, surface: ResolvedSurface): SurfaceTakeover | undefined {
+  async takeoverOf(sessionId: string, surface: ResolvedSurface): Promise<SurfaceTakeover | undefined> {
+    await this.#load(sessionId);
     return this.#takeovers.get(keyOf(sessionId, surface.surface, surface.id))?.value;
+  }
+
+  /** Whether a person handed this surface to the agent. */
+  async isHanded(sessionId: string, surface: ResolvedSurface): Promise<boolean> {
+    await this.#load(sessionId);
+    return this.#handed.has(keyOf(sessionId, surface.surface, surface.id));
   }
 
   /**
@@ -68,6 +80,7 @@ export class SurfaceControl {
       ...(surface.name === undefined ? {} : { name: surface.name }),
       agentSessionId: sessionId,
       ...(agent.name === undefined ? {} : { agentName: agent.name }),
+      ...(surface.incognito === true ? { incognito: true } : {}),
       since: current?.since ?? new Date(now).toISOString(),
       until: new Date(now + DRIVING_WINDOW_MS).toISOString(),
     };
@@ -77,6 +90,7 @@ export class SurfaceControl {
 
   /** A person takes a surface: the agent's marker goes, and its tool calls on it are refused. */
   async takeover(sessionId: string, surface: ResolvedSurface, by: SurfaceController): Promise<SurfaceTakeover> {
+    await this.#load(sessionId);
     const key = keyOf(sessionId, surface.surface, surface.id);
     const standing = this.#takeovers.get(key)?.value;
     if (standing !== undefined) return standing;
@@ -95,15 +109,30 @@ export class SurfaceControl {
 
   /** The person hands the surface back. Handing back one nobody holds changes nothing. */
   async handback(sessionId: string, surface: ResolvedSurface): Promise<void> {
-    const key = keyOf(sessionId, surface.surface, surface.id);
-    if (!this.#takeovers.delete(key)) return;
-    const handback: SurfaceHandback = {
+    await this.#load(sessionId);
+    if (!this.#takeovers.delete(keyOf(sessionId, surface.surface, surface.id))) return;
+    await this.events.publish(sessionId, SURFACE_EVENT_TYPES.handback, {
       surface: surface.surface,
       id: surface.id,
       ...(surface.name === undefined ? {} : { name: surface.name }),
       at: new Date(this.clock.now()).toISOString(),
+    });
+  }
+
+  /** A person gives the agent a surface they opened. Handing one twice changes nothing. */
+  async hand(sessionId: string, surface: ResolvedSurface, by: SurfaceController): Promise<void> {
+    await this.#load(sessionId);
+    const key = keyOf(sessionId, surface.surface, surface.id);
+    if (this.#handed.has(key)) return;
+    const handed: SurfaceHanded = {
+      surface: surface.surface,
+      id: surface.id,
+      ...(surface.name === undefined ? {} : { name: surface.name }),
+      by,
+      at: new Date(this.clock.now()).toISOString(),
     };
-    await this.events.publish(sessionId, SURFACE_EVENT_TYPES.handback, handback);
+    this.#handed.set(key, { sessionId, value: handed });
+    await this.events.publish(sessionId, SURFACE_EVENT_TYPES.handed, handed);
   }
 
   /** A surface that closed: nothing about it stands any more. */
@@ -111,14 +140,58 @@ export class SurfaceControl {
     const key = keyOf(sessionId, surface.surface, surface.id);
     this.#driving.delete(key);
     this.#takeovers.delete(key);
+    this.#handed.delete(key);
   }
 
-  /** Every live marker and standing takeover in one session. */
-  view(sessionId: string): SurfaceControlView {
+  /** Every live marker, standing takeover and hand-over of one kind in one session. */
+  async view(sessionId: string, surface: SurfaceKind): Promise<SurfaceControlView> {
+    await this.#load(sessionId);
     this.#prune(this.clock.now());
-    const of = <T>(held: Map<string, Held<T>>): T[] =>
-      [...held.values()].filter(entry => entry.sessionId === sessionId).map(entry => entry.value);
-    return { sessionId, driving: of(this.#driving), takeovers: of(this.#takeovers) };
+    const of = <T extends { readonly surface: SurfaceKind }>(held: Map<string, Held<T>>): T[] =>
+      [...held.values()]
+        .filter(entry => entry.sessionId === sessionId && entry.value.surface === surface)
+        .map(entry => entry.value);
+    return {
+      sessionId,
+      driving: of(this.#driving),
+      takeovers: of(this.#takeovers),
+      handed: of(this.#handed),
+    };
+  }
+
+  /** Rebuilds a session's takeovers and hand-overs from its journal, once per daemon run. */
+  async #load(sessionId: string): Promise<void> {
+    let loading = this.#loaded.get(sessionId);
+    if (loading === undefined) {
+      // A journal that could not be read is asked again next time, rather than remembered as empty:
+      // an empty history would read every standing takeover as released.
+      loading = this.#replay(sessionId).catch((error: unknown) => {
+        this.#loaded.delete(sessionId);
+        throw error;
+      });
+      this.#loaded.set(sessionId, loading);
+    }
+    await loading;
+  }
+
+  async #replay(sessionId: string): Promise<void> {
+    for (const event of await this.events.history(sessionId)) {
+      if (event.type === SURFACE_EVENT_TYPES.takeover) {
+        const takeover = SurfaceTakeoverSchema.safeParse(event.data);
+        if (takeover.success)
+          this.#takeovers.set(keyOf(sessionId, takeover.data.surface, takeover.data.id), {
+            sessionId,
+            value: takeover.data,
+          });
+      } else if (event.type === SURFACE_EVENT_TYPES.handback) {
+        const handback = SurfaceHandbackSchema.safeParse(event.data);
+        if (handback.success) this.#takeovers.delete(keyOf(sessionId, handback.data.surface, handback.data.id));
+      } else if (event.type === SURFACE_EVENT_TYPES.handed) {
+        const handed = SurfaceHandedSchema.safeParse(event.data);
+        if (handed.success)
+          this.#handed.set(keyOf(sessionId, handed.data.surface, handed.data.id), { sessionId, value: handed.data });
+      }
+    }
   }
 
   /** Drops lapsed markers, so a session that stopped acting leaves nothing behind in memory. */

@@ -21,6 +21,9 @@ function gateway(answers: unknown[] = []) {
   };
 }
 
+/** One recording gateway standing in for both ways to the daemon. */
+const both = <T>(port: T) => ({ agent: port, person: port });
+
 const headers = (sent: Sent | undefined): Record<string, string> =>
   Object.fromEntries(new Headers(sent?.init?.headers).entries());
 
@@ -28,7 +31,7 @@ describe('AgentToolsClient', () => {
   it('should act as the agent session it runs inside, presenting that session’s credential', async () => {
     // Arrange
     const port = gateway();
-    const client = new AgentToolsClient(port, { capability: 'cap-1', ownSessionId: 's1' });
+    const client = new AgentToolsClient(both(port), { capability: 'cap-1', ownSessionId: 's1' });
 
     // Act
     await client.call({ tool: 'terminal.send', name: 'dev', text: 'ls' });
@@ -40,7 +43,7 @@ describe('AgentToolsClient', () => {
   });
 
   it('should refuse to act as an agent with no credential, naming the way out', async () => {
-    const client = new AgentToolsClient(gateway(), { capability: '  ' });
+    const client = new AgentToolsClient(both(gateway()), { capability: '  ' });
     const error = await client.call({ tool: 'terminal.list' }).catch((failure: unknown) => failure);
     should(error).be.instanceOf(AgentToolsCommandError);
     should((error as Error).message).containEql('pass --session <id>');
@@ -49,8 +52,8 @@ describe('AgentToolsClient', () => {
   it('should act as a person on a named session, identifying itself and the pane it runs in', async () => {
     // Arrange
     const port = gateway();
-    const inPane = new AgentToolsClient(port, { ownSessionId: 's2' });
-    const outside = new AgentToolsClient(port, {});
+    const inPane = new AgentToolsClient(both(port), { ownSessionId: 's2' });
+    const outside = new AgentToolsClient(both(port), {});
 
     // Act
     await inPane.call({ tool: 'terminal.list' }, 'a/b');
@@ -75,7 +78,7 @@ describe('AgentToolsClient', () => {
       { summary: 'still', matched: false },
       { summary: 'done', matched: true },
     ]);
-    const client = new AgentToolsClient(port, { capability: 'cap-1' });
+    const client = new AgentToolsClient(both(port), { capability: 'cap-1' });
 
     // Act
     const result = await client.wait({ name: 'dev', exit: true, totalMs: 60_000 });
@@ -94,7 +97,7 @@ describe('AgentToolsClient', () => {
       { summary: 'still', matched: false },
       { summary: 'still', matched: false },
     ]);
-    const client = new AgentToolsClient(port, {});
+    const client = new AgentToolsClient(both(port), {});
 
     // Act
     const result = await client.wait({ name: 'dev', text: 'ready', totalMs: 25_050 }, 's1');
@@ -110,21 +113,40 @@ describe('AgentToolsClient', () => {
 
   it('should take over, hand back and read control state on a person’s routes', async () => {
     // Arrange
-    const view = { sessionId: 's1', driving: [], takeovers: [] };
-    const port = gateway([view, view, view]);
-    const client = new AgentToolsClient(port, {});
+    const view = { sessionId: 's1', driving: [], takeovers: [], handed: [] };
+    const port = gateway([view, view, view, view]);
+    const client = new AgentToolsClient(both(port), {});
 
     // Act
     await client.control('terminal', 'takeover', 'dev', 's1');
     await client.control('browser', 'handback', 'app', 's1');
-    await client.view('s1');
+    await client.view('terminal', 's1');
+    await client.view('browser', 's1');
 
     // Assert
     should(port.sent.map(sent => [sent.init?.method, sent.path])).deepEqual([
       ['POST', '/v1/sessions/s1/surfaces/terminals/control'],
       ['POST', '/v1/sessions/s1/surfaces/browser/control'],
-      ['GET', '/v1/sessions/s1/surfaces/control'],
+      ['GET', '/v1/sessions/s1/surfaces/terminals/control'],
+      ['GET', '/v1/sessions/s1/surfaces/browser/control'],
     ]);
     should(JSON.parse(String(port.sent[1]?.init?.body))).deepEqual({ action: 'handback', key: 'app' });
+  });
+});
+
+describe('AgentToolsClient — two authorities', () => {
+  it('should send an agent call only through the agent gateway, and a person call only through the person one', async () => {
+    // Arrange
+    const agent = gateway();
+    const person = gateway();
+    const client = new AgentToolsClient({ agent, person }, { capability: 'cap-1' });
+
+    // Act
+    await client.call({ tool: 'terminal.list' });
+    await client.call({ tool: 'terminal.list' }, 's1');
+
+    // Assert
+    should(agent.sent.map(sent => sent.path)).deepEqual(['/v1/agent/tools']);
+    should(person.sent.map(sent => sent.path)).deepEqual(['/v1/sessions/s1/surfaces/terminals/tools']);
   });
 });

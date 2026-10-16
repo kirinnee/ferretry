@@ -29,13 +29,12 @@ function served() {
 
 const json = (body: unknown) => (body === undefined ? '' : JSON.stringify(body));
 
-/** An agent in its own pane: the host's token, over loopback, with its session credential. */
+/** An agent's tools server: its session credential, over loopback, and NO host token. */
 const agentCall = (body: unknown, capability = 'cap-s1', extra: Readonly<Record<string, string>> = {}) =>
   request({
     method: 'POST',
     path: '/v1/agent/tools',
     headers: {
-      ...human,
       'content-type': 'application/json',
       ...(capability === '' ? {} : { [AGENT_SESSION_CAPABILITY_HEADER]: capability }),
       ...extra,
@@ -92,49 +91,53 @@ describe('the agent tools route', () => {
     should(world.terminals.typed.size).equal(0);
   });
 
-  it('should refuse a caller with no credential, or one that names no session', async () => {
-    const { dispatch } = served();
+  it('should refuse a caller with no credential, or one that names no session — and audit both', async () => {
+    // Arrange
+    const { world, dispatch } = served();
+
+    // Act
     const missing = await dispatch.dispatch(agentCall({ tool: 'terminal.list' }, ''));
     const unknown = await dispatch.dispatch(agentCall({ tool: 'terminal.list' }, 'cap-nobody'));
+    const hostTokenAlone = await dispatch.dispatch(agentCall({ tool: 'terminal.list' }, '', human));
+    const notACall = await dispatch.dispatch(agentCall({ tool: 'shell.exec' }));
+
+    // Assert — the host's own token buys nothing here: only a session credential does.
     should(missing.status).equal(401);
     should(jsonBody(missing)).match({ code: 'missing_capability', error: /FY_SESSION_BOARD_CAPABILITY/u });
     should(unknown.status).equal(403);
+    should(hostTokenAlone.status).equal(401);
+    should(notACall.status).equal(400);
+    should(world.audit.entries.map(entry => [entry.outcome, entry.detail])).deepEqual([
+      ['refused', { by: 'agent', reason: 'no session credential' }],
+      ['refused', { by: 'agent', reason: 'unknown session credential' }],
+      ['refused', { by: 'agent', reason: 'no session credential' }],
+      ['refused', { by: 'agent', reason: 'not a tool call' }],
+    ]);
   });
 
-  it('should be served only to the host’s own token arriving over loopback', async () => {
+  it('should need no host token at all, and be served only over a privileged loopback carrier', async () => {
     // Arrange
     const { dispatch } = served();
     const body = json({ tool: 'terminal.list' });
     const headers = { 'content-type': 'application/json', [AGENT_SESSION_CAPABILITY_HEADER]: 'cap-s1' };
 
     // Act
-    const remote = await dispatch.dispatch(
-      request({ method: 'POST', path: '/v1/agent/tools', headers: { ...human, ...headers }, body }),
-    );
-    const device = await dispatch.dispatch(
+    const tokenless = await dispatch.dispatch(agentCall({ tool: 'terminal.list' }));
+    const remote = await dispatch.dispatch(request({ method: 'POST', path: '/v1/agent/tools', headers, body }));
+    const relayedDevice = await dispatch.dispatch(
       request({
         method: 'POST',
         path: '/v1/agent/tools',
         headers,
         body,
         loopback: true,
-        privilegedLoopback: true,
         device: { deviceId: 'device-1', appSession: 'app-one' },
-      }),
-    );
-    const warden = await dispatch.dispatch(
-      request({
-        method: 'POST',
-        path: '/v1/agent/tools',
-        headers: { ...headers, authorization: `Bearer ${CREDENTIALS.warden}` },
-        body,
-        loopback: true,
-        privilegedLoopback: true,
       }),
     );
 
     // Assert
-    should([remote.status, device.status, warden.status]).deepEqual([403, 403, 403]);
+    should(tokenless.status).equal(200);
+    should([remote.status, relayedDevice.status]).deepEqual([403, 403]);
   });
 
   it('should answer a takeover refusal as a conflict, in the words the agent is shown', async () => {
@@ -200,7 +203,7 @@ describe('a person’s tool routes', () => {
     ]);
   });
 
-  it('should refuse an agent that names a session, sending it to its own route', async () => {
+  it('should refuse an agent that names a session — taking over or handing on included — sending it to its own route', async () => {
     // Arrange
     const { world, dispatch } = served();
 
@@ -248,7 +251,10 @@ describe('take over and hand back', () => {
       deviceCall('/v1/sessions/s1/surfaces/browser/control', { action: 'takeover', key: 'app' }),
     );
     const listed = await dispatch.dispatch(
-      request({ method: 'GET', path: '/v1/sessions/s1/surfaces/control', headers: human }),
+      request({ method: 'GET', path: '/v1/sessions/s1/surfaces/browser/control', headers: human }),
+    );
+    const terminals = await dispatch.dispatch(
+      request({ method: 'GET', path: '/v1/sessions/s1/surfaces/terminals/control', headers: human }),
     );
     const handedBack = await dispatch.dispatch(
       personCall('/v1/sessions/s1/surfaces/browser/control', { action: 'handback', key: '%browser:app' }),
@@ -259,7 +265,29 @@ describe('take over and hand back', () => {
       { surface: 'browser', name: 'app', by: { by: 'human', deviceId: 'device-1' } },
     ]);
     should(SurfaceControlViewSchema.parse(jsonBody(listed)).takeovers).have.length(1);
+    // Each kind's read shows only that kind, so each is governed by that kind's grant.
+    should(SurfaceControlViewSchema.parse(jsonBody(terminals)).takeovers).deepEqual([]);
     should(SurfaceControlViewSchema.parse(jsonBody(handedBack))).match({ sessionId: 's1', takeovers: [] });
+  });
+
+  it('should hand a person’s terminal to the agent, which may then use it', async () => {
+    // Arrange
+    const { dispatch } = served();
+    await dispatch.dispatch(
+      personCall('/v1/sessions/s1/surfaces/terminals/tools', { tool: 'terminal.open', name: 'mine' }),
+    );
+    const before = await dispatch.dispatch(agentCall({ tool: 'terminal.read', name: 'mine' }));
+
+    // Act
+    const handed = await dispatch.dispatch(
+      personCall('/v1/sessions/s1/surfaces/terminals/control', { action: 'handover', key: 'mine' }),
+    );
+    const after = await dispatch.dispatch(agentCall({ tool: 'terminal.read', name: 'mine' }));
+
+    // Assert
+    should(before.status).equal(403);
+    should(SurfaceControlViewSchema.parse(jsonBody(handed)).handed).match([{ name: 'mine', by: { by: 'local' } }]);
+    should(after.status).equal(200);
   });
 
   it('should answer a takeover of a surface that is not there as not found', async () => {

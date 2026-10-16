@@ -1,5 +1,6 @@
 import { AGENT_TOOL_MAX_OUTPUT_CHARS, type SurfaceKind, type TerminalKey } from '@ferretry/protocol';
-import type { AgentControlKind, AgentControlPolicy, AgentIdentity, AgentIdentityResolver } from './types.ts';
+import type { AgentControlKind } from '../fleet/agent-control.ts';
+import type { AgentIdentity, AgentIdentityResolver } from './types.ts';
 
 /**
  * The pure decisions of the agent-tools domain: the bytes a named key is, which foreground programs
@@ -81,9 +82,6 @@ export function controlRefusal(kind: AgentControlKind): string {
   const setting = CONTROL_SETTING[kind];
   return `This machine does not let agents control ${setting.toLowerCase()}: "What agents may control › ${setting}" is off in this machine's settings. Ask the person to turn it on if you need it.`;
 }
-
-/** Every kind allowed — the default until the machine-settings store supplies the real switches. */
-export const ALLOW_ALL_AGENT_CONTROL: AgentControlPolicy = { allows: async () => true };
 
 /** A session as the identity resolver needs it — the task-board directory's projection satisfies it. */
 export interface CredentialedSession {

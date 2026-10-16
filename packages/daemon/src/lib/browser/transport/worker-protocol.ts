@@ -11,7 +11,8 @@ import {
 
 /** A page with no URL of its own is a blank tab; the wire schema has no room for an empty string. */
 export const BLANK_PAGE_URL = 'about:blank';
-export const MAX_WORKER_PAGES = 40;
+/** Above the machine's own page cap, so a listing is never what hides a page. */
+export const MAX_WORKER_PAGES = 200;
 export const MAX_WORKER_URL_CHARS = 4_096;
 export const MAX_WORKER_TITLE_CHARS = 500;
 export const MAX_WORKER_ERROR_CHARS = 200;
@@ -107,6 +108,9 @@ export function normalizeWorkerSnapshot(value: unknown): WorkerSnapshotResult<Br
         // blank tab could fail the whole status response.
         url: bounded(page['url'], MAX_WORKER_URL_CHARS, BLANK_PAGE_URL) || BLANK_PAGE_URL,
         title: bounded(page['title'], MAX_WORKER_TITLE_CHARS),
+        // Only the exact values mean anything: an incognito page is `true`, and an opener is an id.
+        ...(page['incognito'] === true ? { incognito: true as const } : {}),
+        ...(pageIdentity(page['openerId']) === undefined ? {} : { openerId: pageIdentity(page['openerId']) }),
       });
     }
     return pages;

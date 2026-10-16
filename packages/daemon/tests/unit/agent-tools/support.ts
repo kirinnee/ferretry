@@ -1,15 +1,17 @@
 import type { BrowserActionResult, BrowserPageSnapshot, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
+import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
 import {
-  type AgentControlKind,
-  type AgentControlPolicy,
   type AgentIdentity,
   type AgentIdentityResolver,
   AgentToolService,
   type AuditEntry,
   type AuditSink,
+  type BrowserActGuard,
+  type BrowserOpenOptions,
   type BrowserPageAction,
   BrowserSessionError,
   type BrowserSubsystem,
+  type RecordedSurfaceEvent,
   SurfaceControl,
   type SurfaceEventSink,
 } from '../../../src/lib/index.ts';
@@ -23,13 +25,25 @@ class RecordingAudit implements AuditSink {
   }
 }
 
-/** Every journal event published, in order. */
+/** Every journal event published, in order — and what a restarted daemon would read back. */
 export class RecordingEvents implements SurfaceEventSink {
   readonly published: { readonly sessionId: string; readonly type: string; readonly data: unknown }[] = [];
+  /** Events a previous daemon run left in each session's journal. */
+  readonly earlier = new Map<string, RecordedSurfaceEvent[]>();
   failing = false;
+  unreadable = 0;
+  reads = 0;
   async publish(sessionId: string, type: string, data: unknown): Promise<void> {
     if (this.failing) throw new Error('the journal is full');
     this.published.push({ sessionId, type, data });
+  }
+  async history(sessionId: string): Promise<readonly RecordedSurfaceEvent[]> {
+    this.reads += 1;
+    if (this.unreadable > 0) {
+      this.unreadable -= 1;
+      throw new Error('the journal could not be read');
+    }
+    return this.earlier.get(sessionId) ?? [];
   }
 }
 
@@ -57,12 +71,16 @@ const CAPABILITIES: Readonly<Record<string, AgentIdentity>> = {
 
 const identities: AgentIdentityResolver = { resolve: async capability => CAPABILITIES[capability] };
 
+type FakePage = BrowserPageSummary & { readonly sessionId: string };
+
 /**
- * A per-session browser holding named pages, with the same refusals the real service raises. It
- * records every act, and can be told to fail the next call with any error.
+ * A per-session browser holding named pages and ONE active tab, with the same refusals the real
+ * service raises. It records every act (by the page that was active when it ran), runs a guard where
+ * the real one does, and can be told to fail the next call with any error.
  */
 class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' | 'actOnPage' | 'closePage'> {
-  readonly pages = new Map<string, (BrowserPageSummary & { readonly sessionId: string })[]>();
+  readonly pages = new Map<string, FakePage[]>();
+  readonly active = new Map<string, string>();
   readonly acts: string[] = [];
   failure: unknown;
   private minted = 0;
@@ -85,22 +103,39 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
     return { ...base, ...this.snapshot(sessionId), state: 'running' };
   }
 
-  async openPage(sessionId: string, name: string, url?: string): Promise<BrowserPageSummary> {
+  async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
+    const { url, openedBy } = options;
     this.fail();
     this.session(sessionId);
     const pages = this.pages.get(sessionId) ?? [];
     if (pages.some(page => page.name === name))
       throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
     this.minted += 1;
-    const page = { id: `page-${String(this.minted)}`, url: url ?? 'about:blank', title: '', name, sessionId };
+    const page: FakePage = {
+      id: `page-${String(this.minted)}`,
+      url: url ?? 'about:blank',
+      title: '',
+      name,
+      ...(openedBy === undefined ? {} : { openedBy }),
+      ...(options.incognito === true ? { incognito: true as const } : {}),
+      sessionId,
+    };
     this.pages.set(sessionId, [...pages, page]);
+    this.active.set(sessionId, page.id);
     const { sessionId: _owner, ...summary } = page;
     return summary;
   }
 
-  async actOnPage(sessionId: string, key: string, action: BrowserPageAction): Promise<BrowserActionResult> {
+  async actOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserPageAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserActionResult> {
     this.fail();
+    await guard?.();
     const page = this.page(sessionId, key);
+    this.active.set(sessionId, page.id);
     this.acts.push(`${sessionId}:${page.id}:${action.action}`);
     const status = (await this.status(sessionId)) as Extract<BrowserStatus, { readonly state: 'running' }>;
     const snapshot = { ...this.snapshot(sessionId), actedPageId: page.id };
@@ -110,8 +145,9 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
     return { status, result: snapshot };
   }
 
-  async closePage(sessionId: string, key: string): Promise<void> {
+  async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
     this.fail();
+    await guard?.();
     const page = this.page(sessionId, key);
     this.pages.set(
       sessionId,
@@ -124,7 +160,7 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
       ...page,
       url: page.url === 'about:blank' ? 'https://blank.test/' : page.url,
     }));
-    const active = pages[pages.length - 1] as BrowserPageSummary;
+    const active = pages.find(page => page.id === this.active.get(sessionId)) ?? (pages[0] as BrowserPageSummary);
     return {
       url: active.url,
       title: active.title,
@@ -163,6 +199,7 @@ export function agentToolWorld() {
   const policy = new Switches();
   const slept: number[] = [];
   const control = new SurfaceControl(events, clock);
+  const onSleep: (() => void | Promise<void>)[] = [];
   const service = new AgentToolService({
     terminals,
     browser,
@@ -173,9 +210,10 @@ export function agentToolWorld() {
     sleep: async milliseconds => {
       slept.push(milliseconds);
       clock.ms += milliseconds;
+      await onSleep.shift()?.();
     },
   });
-  return { terminals, browser, audit, events, clock, policy, slept, control, service, identities };
+  return { terminals, browser, audit, events, clock, policy, slept, onSleep, control, service, identities };
 }
 
 export const agent = { kind: 'agent', sessionId: 's1', name: 'Hadi' } as const;

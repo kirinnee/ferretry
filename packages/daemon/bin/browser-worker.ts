@@ -1,40 +1,56 @@
 #!/usr/bin/env bun
 /**
- * Cross-platform partner-browser worker. The parent leases and launches Chrome
- * with a disposable profile; this process attaches only to that loopback CDP
- * endpoint, so a human and an agent retain the same cookies and tabs.
+ * The machine's agent-browser worker. The parent leases and launches ONE headless Chrome over the
+ * machine's dedicated agent profile; this process attaches only to that loopback CDP endpoint.
+ *
+ * THERE IS NO ACTIVE TAB. Every request that touches a page names it (`pageId`), every input — a
+ * person's or an agent's — is dispatched to that page's own CDP session, and every screencast is
+ * pinned to one page. So a person typing into one tab and an agent driving another never cross: the
+ * person's keystrokes cannot land in the agent's page, and the agent's work never moves the person's
+ * view. Requests on DIFFERENT pages run concurrently; requests on one page run in order; input is
+ * never queued behind a slow page load.
+ *
+ * Each page opens in its OWN WINDOW, in the background, because Chrome only renders — and only
+ * screencasts — a tab that is visible in its window: two tabs sharing a window could not both stream.
+ * An INCOGNITO page gets its own browser context (its own cookies and storage, shared with nothing),
+ * closed with the page.
  */
 import { createInterface } from 'node:readline';
 import type { BrowserInputEvent } from '@ferretry/protocol';
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright-core';
 
 const endpoint = process.argv[2];
-const MAX_PAGES = 40;
+const MAX_PAGES = 200;
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 const MAX_ERROR_CHARS = 200;
 const MAX_TEXT_CHARS = 200_000;
 const MAX_SCREENSHOT_CHARS = 24 * 1024 * 1024;
 const MAX_URL_CHARS = 4_096;
 const MAX_TITLE_CHARS = 500;
+const TARGET_WAIT_MS = 10_000;
 
 type Request = { readonly id: number; readonly method: string; readonly params: Readonly<Record<string, unknown>> };
 type PageState = { readonly state: 'ready' | 'loading' | 'error'; readonly error?: string };
 type HeldFrame = { readonly session: CDPSession; readonly cdpSessionId: number };
+type Viewport = { width: number; height: number };
 
 let browser: Browser | undefined;
 let context: BrowserContext | undefined;
-let activePage: Page | undefined;
-let viewport: { width: number; height: number } = DEFAULT_VIEWPORT;
-let screencastPage: Page | undefined;
-let screencastSession: CDPSession | undefined;
-let screencastEnabled = false;
-let serial = Promise.resolve();
+let browserSession: CDPSession | undefined;
 let pageSerial = 0;
 let frameSerial = 0;
-let knownPages: readonly Page[] = [];
 const pageIds = new WeakMap<Page, string>();
 const pageStates = new WeakMap<Page, PageState>();
+const openers = new WeakMap<Page, string>();
+const sessions = new WeakMap<Page, Promise<CDPSession>>();
+const targets = new WeakMap<Page, Promise<string>>();
+/** The context of each incognito page, closed with it. */
+const incognito = new WeakMap<Page, BrowserContext>();
+const queues = new Map<string, Promise<unknown>>();
+const viewports = new Map<string, Viewport>();
+const screencasts = new Map<string, CDPSession>();
 const heldFrames = new Map<number, HeldFrame>();
+let global: Promise<unknown> = Promise.resolve();
 
 function send(record: unknown): void {
   process.stdout.write(`${JSON.stringify(record)}\n`);
@@ -45,12 +61,21 @@ function safeError(error: unknown): string {
   return message.split(/\r?\n|\r/, 1)[0]?.slice(0, MAX_ERROR_CHARS) || 'unknown error';
 }
 
-function schedule<T>(work: () => Promise<T>): Promise<T> {
-  const result = serial.then(work);
-  serial = result.then(
+/** Runs work in order behind everything else queued under the same key. */
+function queued<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = key === '' ? global : (queues.get(key) ?? Promise.resolve());
+  const result = previous.then(work, work);
+  const settled = result.then(
     () => undefined,
     () => undefined,
   );
+  if (key === '') global = settled;
+  else {
+    queues.set(key, settled);
+    void settled.then(() => {
+      if (queues.get(key) === settled) queues.delete(key);
+    });
+  }
   return result;
 }
 
@@ -76,6 +101,12 @@ function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   pageId(page);
   setPageState(page, 'ready');
+  void page
+    .opener()
+    .then(opener => {
+      if (opener) openers.set(page, pageId(opener));
+    })
+    .catch(() => undefined);
   page.on('request', request => {
     try {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) setPageState(page, 'loading');
@@ -83,15 +114,11 @@ function registerPage(page: Page): void {
   });
   page.on('domcontentloaded', () => {
     if (pageStates.get(page)?.state !== 'error') setPageState(page, 'ready');
-    rebindWhenActive(page);
   });
   page.on('load', () => {
     if (pageStates.get(page)?.state !== 'error') setPageState(page, 'ready');
   });
-  page.on('crash', () => {
-    setPageState(page, 'error', 'the page crashed');
-    rebindWhenActive(page);
-  });
+  page.on('crash', () => setPageState(page, 'error', 'the page crashed'));
   page.on('requestfailed', request => {
     try {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
@@ -99,46 +126,22 @@ function registerPage(page: Page): void {
       }
     } catch {}
   });
-  page.on('close', () => void schedule(async () => await recoverAfterClose(page)));
+  page.on('close', () => {
+    const id = pageId(page);
+    viewports.delete(id);
+    const cast = screencasts.get(id);
+    screencasts.delete(id);
+    if (cast) void cast.detach().catch(() => undefined);
+    const own = incognito.get(page);
+    if (own) void own.close().catch(() => undefined);
+  });
 }
 
+/** Every open page, in every context — the shared profile's and each incognito one. */
 function livePages(): readonly Page[] {
-  const pages = requireContext()
-    .pages()
-    .filter(page => !page.isClosed());
+  const pages = (browser?.contexts() ?? []).flatMap(each => each.pages()).filter(page => !page.isClosed());
   for (const page of pages) registerPage(page);
-  knownPages = pages;
   return pages;
-}
-
-async function selectPage(page: Page): Promise<void> {
-  registerPage(page);
-  activePage = page;
-  if (screencastEnabled) await refreshScreencast(true);
-}
-
-async function active(): Promise<Page> {
-  if (activePage && !activePage.isClosed()) return activePage;
-  const index = activePage ? knownPages.indexOf(activePage) : 0;
-  const pages = livePages();
-  const replacement = pages[Math.max(0, index)] ?? pages.at(-1) ?? (await requireContext().newPage());
-  await selectPage(replacement);
-  return replacement;
-}
-
-async function recoverAfterClose(closed: Page): Promise<void> {
-  if (activePage !== closed && activePage && !activePage.isClosed()) {
-    livePages();
-    return;
-  }
-  activePage = undefined;
-  await active();
-}
-
-function rebindWhenActive(page: Page): void {
-  void schedule(async () => {
-    if (screencastEnabled && screencastPage === page && !page.isClosed()) await refreshScreencast(true);
-  }).catch(() => undefined);
 }
 
 function text(value: unknown, name: string): string {
@@ -152,7 +155,8 @@ function dimension(value: unknown, name: string): number {
 }
 
 function targetPage(id: unknown): Page {
-  const page = livePages().find(candidate => pageIds.get(candidate) === text(id, 'pageId'));
+  const wanted = text(id, 'pageId');
+  const page = livePages().find(candidate => pageIds.get(candidate) === wanted);
   if (!page) throw new Error('that page is no longer open');
   return page;
 }
@@ -173,42 +177,65 @@ async function safeTitle(page: Page): Promise<string> {
   }
 }
 
-async function usingSession<T>(page: Page, work: (session: CDPSession) => Promise<T>): Promise<T> {
-  if (page === screencastPage && screencastSession) return await work(screencastSession);
-  const session = await requireContext().newCDPSession(page);
-  try {
-    return await work(session);
-  } finally {
-    await session.detach().catch(() => undefined);
+/** The page's own long-lived CDP session: every input, screencast and history read goes through it. */
+async function pageSession(page: Page): Promise<CDPSession> {
+  let session = sessions.get(page);
+  if (session === undefined) {
+    session = page.context().newCDPSession(page);
+    sessions.set(page, session);
   }
+  return await session;
 }
 
-async function snapshot(extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
-  const page = await active();
-  const all = livePages();
-  let shown = all.slice(0, MAX_PAGES);
-  if (!shown.includes(page)) shown = [...shown.slice(0, MAX_PAGES - 1), page];
+async function targetId(page: Page): Promise<string> {
+  let id = targets.get(page);
+  if (id === undefined) {
+    id = pageSession(page).then(async session => {
+      const info = (await session.send('Target.getTargetInfo')) as { targetInfo?: { targetId?: string } };
+      return info.targetInfo?.targetId ?? '';
+    });
+    targets.set(page, id);
+  }
+  return await id;
+}
+
+/** A page that always exists, so a listing is never empty: Chrome's own first tab, or a new one. */
+async function anyPage(): Promise<Page> {
+  return livePages()[0] ?? (await requireContext().newPage());
+}
+
+async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
+  const all = livePages().slice(0, MAX_PAGES);
+  const shown = all.includes(focus) || focus.isClosed() ? all : [...all.slice(0, MAX_PAGES - 1), focus];
   let canGoBack = false;
   let canGoForward = false;
-  try {
-    await usingSession(page, async session => {
-      const history = (await session.send('Page.getNavigationHistory')) as {
+  if (!focus.isClosed()) {
+    try {
+      const history = (await (await pageSession(focus)).send('Page.getNavigationHistory')) as {
         currentIndex?: number;
         entries?: unknown[];
       };
       canGoBack = (history.currentIndex ?? 0) > 0;
       canGoForward = (history.currentIndex ?? 0) < (history.entries?.length ?? 0) - 1;
-    });
-  } catch {
-    // A status can still be honest about tabs when CDP history is briefly unavailable.
+    } catch {
+      // A status can still be honest about tabs when CDP history is briefly unavailable.
+    }
   }
-  const state = pageStates.get(page) ?? { state: 'ready' as const };
+  const listed = shown.length === 0 ? [await anyPage()] : shown;
+  const active = focus.isClosed() ? (listed[0] as Page) : focus;
+  const state = pageStates.get(active) ?? { state: 'ready' as const };
   return {
-    url: safeUrl(page),
-    title: await safeTitle(page),
-    activePageId: pageId(page),
+    url: safeUrl(active),
+    title: await safeTitle(active),
+    activePageId: pageId(active),
     pages: await Promise.all(
-      shown.map(async item => ({ id: pageId(item), url: safeUrl(item), title: await safeTitle(item) })),
+      listed.map(async item => ({
+        id: pageId(item),
+        url: safeUrl(item),
+        title: await safeTitle(item),
+        ...(incognito.has(item) ? { incognito: true } : {}),
+        ...(openers.has(item) ? { openerId: openers.get(item) } : {}),
+      })),
     ),
     pageState: state.state,
     ...(state.state === 'error' ? { pageError: state.error ?? 'unknown error' } : {}),
@@ -218,51 +245,57 @@ async function snapshot(extra: Readonly<Record<string, unknown>> = {}): Promise<
   };
 }
 
-async function action(page: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
-  return { ...(await snapshot(extra)), actedPageId: pageId(page) };
+async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
+  return { ...(await snapshot(page, extra)), actedPageId: pageId(page) };
 }
 
-async function stopScreencast(): Promise<void> {
-  const session = screencastSession;
-  screencastSession = undefined;
-  screencastPage = undefined;
-  heldFrames.clear();
-  if (!session) return;
-  await session.send('Page.stopScreencast').catch(() => undefined);
-  await session.detach().catch(() => undefined);
+/** Opens a page in its own background window — in the shared profile, or in a new incognito context. */
+async function openPage(private_: boolean): Promise<Page> {
+  if (private_) {
+    if (!browser) throw new Error('the browser is not connected');
+    const own = await browser.newContext({ viewport: null });
+    const page = await own.newPage();
+    incognito.set(page, own);
+    registerPage(page);
+    return page;
+  }
+  if (!browserSession) throw new Error('the browser is not connected');
+  const created = (await browserSession.send('Target.createTarget', {
+    url: 'about:blank',
+    newWindow: true,
+    background: true,
+  })) as { targetId?: string };
+  const deadline = Date.now() + TARGET_WAIT_MS;
+  for (;;) {
+    for (const page of requireContext().pages())
+      if (!page.isClosed() && (await targetId(page)) === created.targetId) {
+        registerPage(page);
+        return page;
+      }
+    if (Date.now() > deadline) throw new Error('Chrome opened a window that never appeared');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
 }
 
-function frame(
-  event: { data?: unknown; sessionId?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } },
-  session: CDPSession,
-  page: Page,
-): void {
-  if (session !== screencastSession || typeof event.data !== 'string' || typeof event.sessionId !== 'number') return;
-  frameSerial += 1;
-  heldFrames.set(frameSerial, { session, cdpSessionId: event.sessionId });
-  const width = typeof event.metadata?.deviceWidth === 'number' ? event.metadata.deviceWidth : viewport.width;
-  const height = typeof event.metadata?.deviceHeight === 'number' ? event.metadata.deviceHeight : viewport.height;
-  send({
-    type: 'screencast-frame',
-    dataBase64: event.data,
-    width: Math.max(1, Math.round(width)),
-    height: Math.max(1, Math.round(height)),
-    pageId: pageId(page),
-    ackId: frameSerial,
+async function applyViewport(page: Page, viewport: Viewport): Promise<void> {
+  viewports.set(pageId(page), viewport);
+  await (
+    await pageSession(page)
+  ).send('Emulation.setDeviceMetricsOverride', {
+    ...viewport,
+    deviceScaleFactor: 1,
+    mobile: false,
   });
 }
 
-async function refreshScreencast(force = false): Promise<void> {
-  if (!screencastEnabled) return;
-  const page = await active();
-  if (!force && page === screencastPage && screencastSession) return;
-  await stopScreencast();
-  const session = await requireContext().newCDPSession(page);
-  screencastPage = page;
-  screencastSession = session;
+async function startScreencast(page: Page, viewport: Viewport): Promise<void> {
+  const id = pageId(page);
+  await stopScreencast(id);
+  const session = await pageSession(page);
+  screencasts.set(id, session);
   session.on('Page.screencastFrame', event => frame(event, session, page));
   await session.send('Page.enable');
-  await session.send('Emulation.setDeviceMetricsOverride', { ...viewport, deviceScaleFactor: 1, mobile: false });
+  await applyViewport(page, viewport);
   await session.send('Page.startScreencast', {
     format: 'jpeg',
     quality: 50,
@@ -272,13 +305,43 @@ async function refreshScreencast(force = false): Promise<void> {
   });
 }
 
-async function input(value: unknown): Promise<void> {
+async function stopScreencast(id: string): Promise<void> {
+  const session = screencasts.get(id);
+  screencasts.delete(id);
+  for (const [ackId, held] of heldFrames) if (held.session === session) heldFrames.delete(ackId);
+  if (!session) return;
+  await session.send('Page.stopScreencast').catch(() => undefined);
+}
+
+function frame(
+  event: { data?: unknown; sessionId?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } },
+  session: CDPSession,
+  page: Page,
+): void {
+  const id = pageId(page);
+  if (screencasts.get(id) !== session || typeof event.data !== 'string' || typeof event.sessionId !== 'number') return;
+  frameSerial += 1;
+  heldFrames.set(frameSerial, { session, cdpSessionId: event.sessionId });
+  const viewport = viewports.get(id) ?? DEFAULT_VIEWPORT;
+  const width = typeof event.metadata?.deviceWidth === 'number' ? event.metadata.deviceWidth : viewport.width;
+  const height = typeof event.metadata?.deviceHeight === 'number' ? event.metadata.deviceHeight : viewport.height;
+  send({
+    type: 'screencast-frame',
+    dataBase64: event.data,
+    width: Math.max(1, Math.round(width)),
+    height: Math.max(1, Math.round(height)),
+    pageId: id,
+    ackId: frameSerial,
+  });
+}
+
+/** One input event, to exactly the page it names — never to "whatever is active". */
+async function input(page: Page, value: unknown): Promise<void> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('browser input is required');
-  await refreshScreencast();
-  if (!screencastSession) throw new Error('browser input requires an active viewer');
+  const session = await pageSession(page);
   const event = value as BrowserInputEvent;
   if (event.kind === 'mouse')
-    await screencastSession.send('Input.dispatchMouseEvent', {
+    await session.send('Input.dispatchMouseEvent', {
       type: event.type,
       x: event.x,
       y: event.y,
@@ -291,7 +354,7 @@ async function input(value: unknown): Promise<void> {
       pointerType: 'mouse',
     });
   else if (event.kind === 'key')
-    await screencastSession.send('Input.dispatchKeyEvent', {
+    await session.send('Input.dispatchKeyEvent', {
       type: event.type,
       key: event.key,
       code: event.code,
@@ -304,15 +367,21 @@ async function input(value: unknown): Promise<void> {
       isKeypad: event.isKeypad ?? false,
     });
   else if (event.kind === 'insertText' && typeof event.text === 'string')
-    await screencastSession.send('Input.insertText', { text: event.text });
+    await session.send('Input.insertText', { text: event.text });
   else throw new Error('unsupported browser input');
+}
+
+/** Requests that touch one page run in that page's own queue; the rest in the global one. */
+function keyOf(request: Request): string {
+  const id = request.params.pageId;
+  return typeof id === 'string' && request.method !== 'dispatchInput' && request.method !== 'ackFrame' ? id : '';
 }
 
 async function run(request: Request): Promise<Record<string, unknown>> {
   const params = request.params;
   switch (request.method) {
     case 'navigate': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       setPageState(page, 'loading');
       try {
         await page.goto(text(params.url, 'url'), { waitUntil: 'domcontentloaded', timeout: 45_000 });
@@ -321,25 +390,23 @@ async function run(request: Request): Promise<Record<string, unknown>> {
         setPageState(page, 'error', error);
         throw error;
       }
-      await refreshScreencast();
-      return await action(page);
+      return await acted(page);
     }
     case 'click': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       await page.locator(text(params.selector, 'selector')).first().click({ timeout: 30_000 });
-      await refreshScreencast();
-      return await action(page);
+      return await acted(page);
     }
     case 'type': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       await page
         .locator(text(params.selector, 'selector'))
         .first()
-        .fill(text(params.text, 'text'), { timeout: 30_000 });
-      return await action(page);
+        .fill(typeof params.text === 'string' ? params.text : '', { timeout: 30_000 });
+      return await acted(page);
     }
     case 'read': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       const selector = typeof params.selector === 'string' && params.selector ? params.selector : 'body';
       const target = page.locator(selector).first();
       // The accessibility tree names what can be clicked and typed into, which is what an agent needs
@@ -348,76 +415,63 @@ async function run(request: Request): Promise<Record<string, unknown>> {
         params.mode === 'a11y'
           ? await target.ariaSnapshot({ timeout: 30_000 })
           : await target.innerText({ timeout: 30_000 });
-      return await action(page, { text: read.slice(0, MAX_TEXT_CHARS) });
+      return await acted(page, { text: read.slice(0, MAX_TEXT_CHARS) });
     }
     case 'screenshot': {
-      const page = await active();
-      return await action(page, {
+      const page = targetPage(params.pageId);
+      return await acted(page, {
         screenshotBase64: (await page.screenshot({ type: 'png', fullPage: false }))
           .toString('base64')
           .slice(0, MAX_SCREENSHOT_CHARS),
       });
     }
     case 'back': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       await page.goBack({ waitUntil: 'commit', timeout: 30_000 });
-      await refreshScreencast();
-      return await action(page);
+      return await acted(page);
     }
     case 'forward': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       await page.goForward({ waitUntil: 'commit', timeout: 30_000 });
-      await refreshScreencast();
-      return await action(page);
+      return await acted(page);
     }
     case 'reload': {
-      const page = await active();
+      const page = targetPage(params.pageId);
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await refreshScreencast();
-      return await action(page);
+      return await acted(page);
     }
     case 'location':
-      return await snapshot();
+      return await snapshot(typeof params.pageId === 'string' ? targetPage(params.pageId) : await anyPage());
     case 'newPage': {
-      const page = await requireContext().newPage();
-      await selectPage(page);
+      const page = await openPage(params.incognito === true);
+      await applyViewport(page, DEFAULT_VIEWPORT);
       if (typeof params.url === 'string' && params.url)
         await page.goto(params.url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-      return await action(page);
-    }
-    case 'activatePage': {
-      const page = targetPage(params.pageId);
-      await selectPage(page);
-      return await action(page);
+      return await acted(page);
     }
     case 'closePage': {
       const page = targetPage(params.pageId);
+      await stopScreencast(pageId(page));
       await page.close({ runBeforeUnload: false });
-      return await action(page);
+      const own = incognito.get(page);
+      if (own) await own.close().catch(() => undefined);
+      return await acted(page);
     }
     case 'resize': {
-      const page = await active();
-      viewport = { width: dimension(params.width, 'width'), height: dimension(params.height, 'height') };
-      await usingSession(
-        page,
-        async session =>
-          await session.send('Emulation.setDeviceMetricsOverride', {
-            ...viewport,
-            deviceScaleFactor: 1,
-            mobile: false,
-          }),
-      );
-      await refreshScreencast(true);
-      return await action(page);
+      const page = targetPage(params.pageId);
+      const viewport = { width: dimension(params.width, 'width'), height: dimension(params.height, 'height') };
+      if (screencasts.has(pageId(page))) await startScreencast(page, viewport);
+      else await applyViewport(page, viewport);
+      return await acted(page);
     }
     case 'startScreencast':
-      viewport = { width: dimension(params.width, 'width'), height: dimension(params.height, 'height') };
-      screencastEnabled = true;
-      await refreshScreencast(true);
+      await startScreencast(targetPage(params.pageId), {
+        width: dimension(params.width, 'width'),
+        height: dimension(params.height, 'height'),
+      });
       return {};
     case 'stopScreencast':
-      screencastEnabled = false;
-      await stopScreencast();
+      await stopScreencast(text(params.pageId, 'pageId'));
       return {};
     case 'ackFrame': {
       if (typeof params.ackId !== 'number') throw new Error('ackId is required');
@@ -428,11 +482,10 @@ async function run(request: Request): Promise<Record<string, unknown>> {
       return {};
     }
     case 'dispatchInput':
-      await input(params.input);
+      await input(targetPage(params.pageId), params.input);
       return {};
     case 'close':
-      screencastEnabled = false;
-      await stopScreencast();
+      for (const id of [...screencasts.keys()]) await stopScreencast(id);
       await browser?.close().catch(() => undefined);
       return {};
     default:
@@ -456,6 +509,16 @@ function parse(line: string): Request {
   };
 }
 
+async function answer(request: Request): Promise<void> {
+  try {
+    const result = await run(request);
+    send({ id: request.id, ok: true, result });
+    if (request.method === 'close') process.exit(0);
+  } catch (error) {
+    send({ id: request.id, ok: false, error: safeError(error) });
+  }
+}
+
 export async function startBrowserWorker(): Promise<void> {
   if (!endpoint) {
     send({ type: 'fatal', error: 'a CDP endpoint is required' });
@@ -466,12 +529,9 @@ export async function startBrowserWorker(): Promise<void> {
     browser = await chromium.connectOverCDP(endpoint, { timeout: 10_000 });
     context = browser.contexts()[0];
     if (!context) throw new Error('Chrome exposed no persistent browser context');
-    context.on('page', page => {
-      registerPage(page);
-      void schedule(async () => await selectPage(page)).catch(() => undefined);
-    });
-    activePage = livePages().at(-1) ?? (await context.newPage());
-    registerPage(activePage);
+    browserSession = await browser.newBrowserCDPSession();
+    context.on('page', page => registerPage(page));
+    livePages();
     send({ type: 'ready' });
   } catch (error) {
     send({ type: 'fatal', error: safeError(error) });
@@ -479,24 +539,22 @@ export async function startBrowserWorker(): Promise<void> {
     return;
   }
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  lines.on(
-    'line',
-    line =>
-      void schedule(async () => {
-        let request: Request | undefined;
-        try {
-          request = parse(line);
-          const result = await run(request);
-          send({ id: request.id, ok: true, result });
-          if (request.method === 'close') process.exit(0);
-        } catch (error) {
-          send({ id: request?.id, ok: false, error: safeError(error) });
-        }
-      }),
-  );
+  lines.on('line', line => {
+    let request: Request;
+    try {
+      request = parse(line);
+    } catch (error) {
+      send({ id: undefined, ok: false, error: safeError(error) });
+      return;
+    }
+    // Input and frame acknowledgements never wait: a person typing must not queue behind a page load.
+    if (request.method === 'dispatchInput' || request.method === 'ackFrame') void answer(request);
+    else void queued(keyOf(request), async () => await answer(request));
+  });
   process.stdin.on('end', () => {
-    screencastEnabled = false;
-    void stopScreencast().finally(() => void browser?.close().finally(() => process.exit(0)));
+    void Promise.all([...screencasts.keys()].map(id => stopScreencast(id))).finally(
+      () => void browser?.close().finally(() => process.exit(0)),
+    );
   });
 }
 

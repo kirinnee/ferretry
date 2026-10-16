@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  ALLOW_ALL_AGENT_CONTROL,
   auditHost,
   clipOutput,
   controlRefusal,
@@ -40,12 +39,6 @@ describe('agent-tools policy', () => {
     should(controlRefusal('files')).equal(
       'This machine does not let agents control files: "What agents may control › Files" is off in this machine\'s settings. Ask the person to turn it on if you need it.',
     );
-  });
-
-  it('should allow every kind until the machine settings say otherwise', async () => {
-    should(
-      await Promise.all(['terminal', 'browser', 'files'].map(kind => ALLOW_ALL_AGENT_CONTROL.allows(kind as 'files'))),
-    ).deepEqual([true, true, true]);
   });
 });
 

@@ -18,57 +18,104 @@ the page and end with it. The reference grammar is unchanged — see
 
 `terminal.list` · `terminal.open(name, folder?, command?)` · `terminal.send(name, text?, keys?)` ·
 `terminal.read(name, lines?)` · `terminal.wait(name, text | exit, timeoutMs?)` · `terminal.close(name)` ·
-`browser.list` · `browser.open(name, url?)` · `browser.navigate(name, url)` ·
+`browser.list` · `browser.open(name, url?, incognito?)` · `browser.navigate(name, url)` ·
 `browser.click(name, selector)` · `browser.type(name, selector, text)` ·
 `browser.read(name, mode: text | a11y, selector?)` · `browser.screenshot(name)` · `browser.close(name)`.
 
 The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.ts`); the answer is
-`AgentToolResultSchema`. The same actions are `fy terminal …` and `fy browser page …`.
+`AgentToolResultSchema`. The same actions are `fy terminal …` and `fy browser page …`
+(`fy browser page open <name> [url] --incognito`).
 
 ## Routes
 
-| Route                                                     | Who                       | Session from               |
-| --------------------------------------------------------- | ------------------------- | -------------------------- |
-| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential     |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant |
-| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant  |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: take over/back  | the path; `terminal` grant |
-| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: take over/back  | the path; `browser` grant  |
-| `GET /v1/sessions/:sessionId/surfaces/control`            | a person: who drives what | the path                   |
+| Route                                                     | Who                       | Session from                |
+| --------------------------------------------------------- | ------------------------- | --------------------------- |
+| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY |
+| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant  |
+| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant   |
+| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant  |
+| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant   |
+| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant  |
+| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant   |
+
+A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and answers
+`SurfaceControlView { sessionId, driving[], takeovers[], handed[] }` for that kind.
 
 Control changes are published on the session's journal, so `/v1/events` streams them:
-`surface.driving` (`SurfaceDrivingSchema`, carrying `until` — show the marker while `now < until`),
-`surface.takeover` (`SurfaceTakeoverSchema`) and `surface.handback` (`SurfaceHandbackSchema`).
+`surface.driving` (`SurfaceDrivingSchema`, carrying `until` — show the marker while `now < until`, and
+`incognito` for an incognito page), `surface.takeover`, `surface.handback` and `surface.handed`. The
+daemon replays its journal on start, so a takeover or a hand-over outlives a restart.
+
+## The browser: one shared agent profile per machine
+
+- **One Chrome per machine**, headless on every platform, over Ferretry's own dedicated agent profile —
+  never a person's own Chrome profile. **Every agent on the machine shares that profile's cookies and
+  sign-ins.** An agent signed in to a site is signed in for every agent; a person who signs the profile
+  in (the sign-in window) signs every agent in. That is the trade-off for "agents can just use the
+  sites you use": treat anything the profile is signed in to as reachable by every agent here.
+- **Incognito pages** (`browser.open(…, incognito: true)`) are the exception: each is its own
+  throwaway browser context — its own cookies and storage, nothing shared with the profile or with
+  any other page — discarded when the page closes or its session ends. Pages and events carry
+  `incognito: true`.
+- **Every page belongs to the session that opened it**, opens in its own window, and is listed to and
+  actable by that session alone; a popup belongs to its opener's session. Chrome renders and streams
+  a tab only while it is visible in its window, which is why each page gets its own window — and a
+  headless window is never shown, so the daemon's per-session ownership, not the window, is what keeps
+  agents' tabs apart.
+- **There is no active tab.** Every act, every input and every screencast names its page (each page's
+  own CDP session). A person's input and live view go to the page their session is viewing; an
+  agent's act moves nothing. Acts are serialized per page, not per browser, and input never queues
+  behind a page load — a person and an agent work at the same time without blocking each other.
+- Caps: 20 pages per session, 60 per machine — refused past them, never hidden. The browser stops
+  after 15 minutes with nobody watching and nobody acting.
+- The CDP port listens on loopback and accepts no cross-origin WebSocket (`--remote-allow-origins` is
+  gone; the worker sends no `Origin`).
 
 ## What is enforced, and where
 
 1. **An agent reaches only its own session.** `POST /v1/agent/tools` names no session anywhere: the
-   daemon hashes the credential presented on `x-fy-session-capability` and finds the one live session
+   daemon hashes the credential presented on `x-fy-session-capability` and finds the one LIVE session
    whose stored hash matches (constant-time). The call schema is strict, so a body `sessionId` is
-   refused; the `x-ferretry-session-id` header is not read. A surface is looked up in that session's
-   own listing only.
-2. **Only on this machine.** The agent route is served to the host's own admin token arriving over
-   loopback (`admin-token`, `privilegedOnly`) — never a paired device, a warden, or the relay.
-3. **A person's route refuses an agent that says it is one** (`peer:` / `warden:` actors) and points it
-   at its own route, which is the one that checks takeover and the machine's switches.
-4. **What agents may control.** Every agent call first asks `AgentControlPolicy.allows(kind)` — the
-   machine's "What agents may control" switches, read per call. A refusal names the setting.
-5. **Take over / hand back.** While a person holds a surface, every agent tool call on it is refused
-   with "A person has taken over %terminal:dev; wait or ask them." Held in memory, keyed by surface id.
-6. **Audit.** Every call writes one `agent.tool` record: tool, surface name, outcome, and lengths —
-   never the typed text, a URL's path or query (host only), or a selector longer than 120 characters.
-   Takeovers write `surface.control`. Identical successes fold per minute like all activity.
-7. **Bounds.** Text 16 KiB, 64 keys, 2000 lines read, 64 KiB returned, a 25 s wait per request (a
-   client loops up to 120 s), URLs `http`/`https` only and 2 KiB, selectors 1 KiB.
+   refused; `x-ferretry-session-id` is not read. Surfaces are looked up in that session's listing only.
+2. **No host authority.** The agent route is `none` + `privilegedOnly`: it is served only over a
+   privileged loopback carrier (never a paired device or the relay), and the session credential is the
+   whole of its authority — it neither needs nor reads the admin token. `fy mcp serve` and an agent's
+   `fy terminal`/`fy browser page` send no bearer token at all.
+3. **An agent acts only on what it opened, or what a person handed to it.** A person's own terminal or
+   page in the agent's session is refused ("… is a person's, not yours") until they hand it over
+   (`handover`). The listing tells the agent which rows it may use (`available`).
+4. **A person's route refuses an agent that says it is one** (`peer:` / `warden:` actors).
+5. **What agents may control.** Every agent call first asks the machine's `AgentControlPolicy` (unit S's
+   store, read per call). The same switches also wrap every ordinary terminal, browser and filesystem
+   route — HTTP and sockets — for an agent caller, so `files` is enforced on the session filesystem
+   routes. A person is never asked.
+6. **Take over / hand back, per tab and per terminal.** While a person holds a surface, every agent tool
+   call on THAT surface is refused ("A person has taken over %terminal:dev; wait or ask them."); the
+   agent keeps working everywhere else. The check is repeated inside the page's own queue, so a takeover
+   landing while an act waits its turn still wins; an agent's `terminal.wait` stops the moment the
+   terminal is taken over. An act already running when the takeover lands finishes (a page load is
+   bounded at 45 s); several people typing into one terminal at once is fine.
+7. **Audit.** Every call writes one `agent.tool` record: tool, surface name, outcome, lengths and
+   `incognito` — never typed text, a URL's path or query (host only), or a selector over 120 characters.
+   A refused credential or a body that is not a call is recorded too (`reason`). Takeovers and
+   hand-overs write `surface.control`. Identical successes fold per minute like all activity.
+8. **Bounds.** Text 16 KiB, 64 keys, 2000 lines read, 64 KiB returned, a 25 s wait per request (a client
+   loops up to 120 s), URLs `http`/`https` only and 2 KiB, selectors 1 KiB; terminal creation is
+   serialized, so two opens racing for one name leave one terminal.
 
 ## Declared gaps
 
-- **The shared admin token.** An agent runs as the same user as the daemon and can read the admin
-  token, as every in-pane `fy` command does. Such an agent can call a person's route without
-  identifying itself and act past a takeover. This is the boundary `isHumanAdminActor` already
-  states — for honest clients, not a sandbox — and the shell an agent is given is not a containment.
-- **Same-user processes** can read each other's environment, so one agent that sets out to can read
-  another session's credential. The credential holds an honest agent to its own session; it does not
-  isolate agents from each other at the OS level.
-- **A terminal's folder** is where the shell starts, not a boundary: the shell can `cd` anywhere the
-  user can.
+- **The shared admin token.** An agent runs as the same user as the daemon and can read the admin token
+  from the state home. Such an agent can call a person's route without identifying itself and act past a
+  takeover, on a person's own surface, or past a switch. This is the boundary `isHumanAdminActor`
+  already states — for honest clients, not a sandbox.
+- **Same-user processes** can read each other's environment, including another session's credential.
+- **The shared profile** is shared by design: see above.
+- **Chrome's sandbox on Linux.** The agent browser still runs with `--no-sandbox` on Linux. Measured on
+  this project's Ubuntu host (`kernel.apparmor_restrict_unprivileged_userns=1`, a Nix-packaged Chrome
+  whose `chrome-sandbox` helper is not setuid): without the flag Chrome does not start. A
+  distro-packaged Chrome with a setuid `chrome-sandbox`, or a kernel that allows unprivileged user
+  namespaces, can run sandboxed — dropping the flag where the host supports it is a follow-up, not a
+  removal this change can make unconditionally. Until then a renderer exploit on a page an agent is
+  steered to runs as the daemon's user.
+- **A terminal's folder** is where the shell starts, not a boundary.

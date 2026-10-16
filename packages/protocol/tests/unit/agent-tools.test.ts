@@ -23,7 +23,12 @@ const takeover = {
   since: INSTANT,
 } as const;
 
-const view = { sessionId: 's1', driving: [driving], takeovers: [takeover] } satisfies SurfaceControlView;
+const view = {
+  sessionId: 's1',
+  driving: [driving],
+  takeovers: [takeover],
+  handed: [{ surface: 'terminal', id: 'a1b2c3d4e5f6', by: { by: 'local' }, at: INSTANT }],
+} satisfies SurfaceControlView;
 
 const cases: SchemaCase[] = [
   { name: 'name', schema: tools.SurfaceNameSchema, value: 'dev-server' },
@@ -42,10 +47,11 @@ const cases: SchemaCase[] = [
   { name: 'controller', schema: tools.SurfaceControllerSchema, value: { by: 'local' } },
   { name: 'takeover', schema: tools.SurfaceTakeoverSchema, value: takeover },
   { name: 'control view', schema: tools.SurfaceControlViewSchema, value: view },
+  { name: 'handed', schema: tools.SurfaceHandedSchema, value: view.handed[0] },
   {
     name: 'control request',
     schema: tools.SurfaceControlRequestSchema,
-    value: { action: 'takeover', key: '%terminal:dev' },
+    value: { action: 'handover', key: '%terminal:dev' },
   },
   {
     name: 'handback',
@@ -71,7 +77,7 @@ describe('agent tool schemas', () => {
       { tool: 'terminal.wait', name: 'dev', exit: true },
       { tool: 'terminal.close', name: 'dev' },
       { tool: 'browser.list' },
-      { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/' },
+      { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true },
       { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' },
       { tool: 'browser.click', name: 'app', selector: 'button' },
       { tool: 'browser.type', name: 'app', selector: '#email', text: '' },

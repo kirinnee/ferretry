@@ -117,7 +117,7 @@ describe('browser worker client — lifecycle', () => {
     const client = await connect();
 
     // Act
-    const failure = await rejection(client.navigate('crashes'));
+    const failure = await rejection(client.navigate('p1', 'crashes'));
 
     // Assert: the fixture exits mid-request, so the pending call fails and the exit is observable.
     should(failure.code).be.oneOf(['upstream_failed', 'not_running']);
@@ -180,17 +180,16 @@ describe('browser worker client — requests', () => {
 
     // Act
     const calls = [
-      await client.navigate('https://example.test/next'),
-      await client.click('#submit'),
-      await client.type('#field', 'hello'),
-      await client.back(),
-      await client.forward(),
-      await client.reload(),
-      await client.newPage('https://example.test/tab'),
-      await client.newPage(),
-      await client.activatePage('p2'),
+      await client.navigate('p1', 'https://example.test/next'),
+      await client.click('p1', '#submit'),
+      await client.type('p1', '#field', 'hello'),
+      await client.back('p1'),
+      await client.forward('p1'),
+      await client.reload('p1'),
+      await client.newPage({ url: 'https://example.test/tab', incognito: true }),
+      await client.newPage({}),
       await client.closePage('p3'),
-      await client.resize(VIEWPORT),
+      await client.resize('p1', VIEWPORT),
     ];
 
     // Assert
@@ -203,15 +202,17 @@ describe('browser worker client — requests', () => {
       'reload',
       'newPage',
       'newPage',
-      'activatePage',
       'closePage',
       'resize',
     ]);
-    should(reportedParams(calls[0]?.url ?? '')).deepEqual({ url: 'https://example.test/next' });
-    should(reportedParams(calls[2]?.url ?? '')).deepEqual({ selector: '#field', text: 'hello' });
+    // Every page act names its page: there is no "active tab" for a request to fall back on.
+    should(reportedParams(calls[0]?.url ?? '')).deepEqual({ pageId: 'p1', url: 'https://example.test/next' });
+    should(reportedParams(calls[2]?.url ?? '')).deepEqual({ pageId: 'p1', selector: '#field', text: 'hello' });
+    should(reportedParams(calls[3]?.url ?? '')).deepEqual({ pageId: 'p1' });
+    should(reportedParams(calls[6]?.url ?? '')).deepEqual({ url: 'https://example.test/tab', incognito: true });
     should(reportedParams(calls[7]?.url ?? '')).deepEqual({});
-    should(reportedParams(calls[9]?.url ?? '')).deepEqual({ pageId: 'p3' });
-    should(reportedParams(calls[10]?.url ?? '')).deepEqual({ width: 800, height: 600 });
+    should(reportedParams(calls[8]?.url ?? '')).deepEqual({ pageId: 'p3' });
+    should(reportedParams(calls[9]?.url ?? '')).deepEqual({ pageId: 'p1', width: 800, height: 600 });
     should(calls.every(call => call.actedPageId === 'p1')).be.true();
   });
 
@@ -220,17 +221,17 @@ describe('browser worker client — requests', () => {
     const client = await connect();
 
     // Act
-    const read = await client.read('#article');
-    const readWithoutSelector = await client.read();
-    const tree = await client.read('main', 'a11y');
-    const shot = await client.screenshot();
+    const read = await client.read('p1', '#article');
+    const readWithoutSelector = await client.read('p1');
+    const tree = await client.read('p1', 'main', 'a11y');
+    const shot = await client.screenshot('p1');
 
     // Assert
     should(read.text).equal('page text');
-    should(reportedParams(read.url)).deepEqual({ selector: '#article' });
-    should(reportedParams(readWithoutSelector.url)).deepEqual({});
+    should(reportedParams(read.url)).deepEqual({ pageId: 'p1', selector: '#article' });
+    should(reportedParams(readWithoutSelector.url)).deepEqual({ pageId: 'p1' });
     // The accessibility tree is asked for by mode, on the same request.
-    should(reportedParams(tree.url)).deepEqual({ selector: 'main', mode: 'a11y' });
+    should(reportedParams(tree.url)).deepEqual({ pageId: 'p1', selector: 'main', mode: 'a11y' });
     should(shot.screenshotBase64).equal('AAAA');
   });
 
@@ -248,7 +249,7 @@ describe('browser worker client — requests', () => {
     });
 
     // Act
-    const granted = reportedParams((await client.navigate('environment')).url) as Record<string, string>;
+    const granted = reportedParams((await client.navigate('p1', 'environment')).url) as Record<string, string>;
 
     // Assert: nothing outside the allowlist reaches the browser, and loopback never goes via a proxy.
     should(granted.PATH).equal('set');
@@ -265,7 +266,7 @@ describe('browser worker client — requests', () => {
     const client = await connect();
 
     // Act
-    await client.dispatchInput({ kind: 'insertText', text: 'typed' });
+    await client.dispatchInput('p1', { kind: 'insertText', text: 'typed' });
 
     // Assert: a dispatch that resolves is the whole contract; the worker echoes nothing back.
     should(await client.location()).have.property('activePageId', 'p1');
@@ -276,7 +277,7 @@ describe('browser worker client — requests', () => {
     const client = await connect();
 
     // Act
-    const failure = await rejection(client.click('refuses'));
+    const failure = await rejection(client.click('p1', 'refuses'));
 
     // Assert
     should(failure.code).equal('upstream_failed');
@@ -289,8 +290,8 @@ describe('browser worker client — requests', () => {
     const client = await connect();
 
     // Act
-    const badSnapshot = await rejection(client.navigate('bad-snapshot'));
-    const noActedPage = await rejection(client.navigate('no-acted-page'));
+    const badSnapshot = await rejection(client.navigate('p1', 'bad-snapshot'));
+    const noActedPage = await rejection(client.navigate('p1', 'no-acted-page'));
     const badLocation = await rejection((await connect({ endpoint: 'bad-location' })).location());
 
     // Assert
@@ -304,7 +305,7 @@ describe('browser worker client — requests', () => {
     const client = await connect({ requestTimeoutMs: 150 });
 
     // Act
-    const failure = await rejection(client.navigate('never-replies'));
+    const failure = await rejection(client.navigate('p1', 'never-replies'));
 
     // Assert
     should(failure.code).equal('upstream_failed');
@@ -317,7 +318,7 @@ describe('browser worker client — requests', () => {
     const client = await connect({ maxProtocolLineChars: 64 });
 
     // Act
-    const failure = await rejection(client.navigate('overflows'));
+    const failure = await rejection(client.navigate('p1', 'overflows'));
 
     // Assert
     should(failure.message).equal('browser worker emitted an oversized protocol record');
@@ -334,10 +335,10 @@ describe('browser worker client — screencast', () => {
     const second: BrowserScreencastFrame[] = [];
 
     // Act
-    await client.startScreencast(VIEWPORT, frame => void first.push(frame));
+    await client.startScreencast('p1', VIEWPORT, frame => void first.push(frame));
     // A second viewer joins an already-running screencast, so the worker is not asked twice.
-    await client.startScreencast(VIEWPORT, frame => void second.push(frame));
-    await client.navigate('emit-frames');
+    await client.startScreencast('p1', VIEWPORT, frame => void second.push(frame));
+    await client.navigate('p1', 'emit-frames');
 
     // Assert: the identity-free frame the worker emitted never reaches a viewer.
     should(first.map(frame => frame.dataBase64)).deepEqual(['AAAA', 'BBBB']);
@@ -350,11 +351,11 @@ describe('browser worker client — screencast', () => {
     const seen: string[] = [];
 
     // Act
-    await client.startScreencast(VIEWPORT, frame => {
+    await client.startScreencast('p1', VIEWPORT, frame => {
       seen.push(frame.dataBase64);
       throw new Error('viewer exploded');
     });
-    const snapshot = await client.navigate('emit-frames');
+    const snapshot = await client.navigate('p1', 'emit-frames');
 
     // Assert
     should(seen).have.length(2);
@@ -366,12 +367,13 @@ describe('browser worker client — screencast', () => {
     const client = await connect({ endpoint: 'no-screencast', requestTimeoutMs: 150 });
 
     // Act
-    const failure = await rejection(client.startScreencast(VIEWPORT, () => undefined));
+    const listener = (): void => undefined;
+    const failure = await rejection(client.startScreencast('p1', VIEWPORT, listener));
 
     // Assert
     should(failure.code).equal('upstream_failed');
     // The listener was forgotten, so a screencast that never started needs no stop request.
-    await client.stopScreencast();
+    await client.stopScreencast('p1', listener);
     should((await client.location()).activePageId).equal('p1');
   });
 
@@ -381,8 +383,8 @@ describe('browser worker client — screencast', () => {
     const frames: BrowserScreencastFrame[] = [];
 
     // Act
-    const first = rejection(client.startScreencast(VIEWPORT, () => undefined));
-    const second = rejection(client.startScreencast(VIEWPORT, frame => void frames.push(frame)));
+    const first = rejection(client.startScreencast('p1', VIEWPORT, () => undefined));
+    const second = rejection(client.startScreencast('p1', VIEWPORT, frame => void frames.push(frame)));
 
     // Assert: reporting success to B would hand it a permanently black viewport and no error.
     should((await first).code).equal('upstream_failed');
@@ -395,10 +397,10 @@ describe('browser worker client — screencast', () => {
     const client = await connect({ requestTimeoutMs: 150, endpoint: 'ready' });
 
     // Act: the first attempt is refused by the worker, the second is a genuine start.
-    const refused = await rejection(client.startScreencast({ width: 0, height: 0 }, () => undefined));
+    const refused = await rejection(client.startScreencast('p1', { width: 0, height: 0 }, () => undefined));
     const frames: BrowserScreencastFrame[] = [];
-    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
-    await client.navigate('emit-frames');
+    await client.startScreencast('p1', VIEWPORT, frame => void frames.push(frame));
+    await client.navigate('p1', 'emit-frames');
 
     // Assert
     should(refused.code).equal('upstream_failed');
@@ -424,10 +426,10 @@ describe('browser worker client — screencast', () => {
     };
     const client = await connect({ clock, frameIntervalMs: 1_000 });
     const frames: BrowserScreencastFrame[] = [];
-    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
+    await client.startScreencast('p1', VIEWPORT, frame => void frames.push(frame));
 
     // Act: the worker emits two frames well inside one interval.
-    await client.navigate('emit-frames');
+    await client.navigate('p1', 'emit-frames');
 
     // Assert: the first is painted, the second is held as the newest rather than queued.
     should(frames.map(frame => frame.dataBase64)).deepEqual(['AAAA']);
@@ -443,11 +445,11 @@ describe('browser worker client — screencast', () => {
   it('should acknowledge each delivered frame so the browser may capture the next one', async () => {
     // Arrange
     const client = await connect();
-    await client.startScreencast(VIEWPORT, () => undefined);
+    await client.startScreencast('p1', VIEWPORT, () => undefined);
 
     // Act
-    await client.navigate('emit-frames');
-    const acks = reportedParams((await client.navigate('acknowledged')).url) as { acks: number[] };
+    await client.navigate('p1', 'emit-frames');
+    const acks = reportedParams((await client.navigate('p1', 'acknowledged')).url) as { acks: number[] };
 
     // Assert: only the frames that actually reached a viewer are acknowledged.
     should(acks.acks).have.length(2);
@@ -457,11 +459,11 @@ describe('browser worker client — screencast', () => {
     // Arrange
     const client = await connect({ endpoint: 'refuses-acks' });
     const frames: BrowserScreencastFrame[] = [];
-    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
+    await client.startScreencast('p1', VIEWPORT, frame => void frames.push(frame));
 
     // Act: a refused acknowledgement must not wedge the stream behind a dead window.
-    await client.navigate('emit-frames');
-    await client.navigate('emit-frames');
+    await client.navigate('p1', 'emit-frames');
+    await client.navigate('p1', 'emit-frames');
 
     // Assert
     should(frames.length).be.aboveOrEqual(2);
@@ -471,15 +473,50 @@ describe('browser worker client — screencast', () => {
     // Arrange
     const client = await connect();
     const frames: BrowserScreencastFrame[] = [];
-    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
-    await client.navigate('emit-frames');
+    const listener = (frame: BrowserScreencastFrame): void => void frames.push(frame);
+    await client.startScreencast('p1', VIEWPORT, listener);
+    await client.navigate('p1', 'emit-frames');
 
     // Act
-    await client.stopScreencast();
-    await client.stopScreencast();
+    await client.stopScreencast('p1', listener);
+    await client.stopScreencast('p1', listener);
+    await client.stopScreencast('p9', listener);
 
     // Assert
     should(frames).have.length(2);
     should((await client.location()).activePageId).equal('p1');
+  });
+});
+
+describe('browser worker client — one stream per page', () => {
+  it('should route each page’s frames to that page’s viewers only, and keep a page streaming until its last viewer leaves', async () => {
+    // Arrange — the fake worker streams the page named by the emitting request.
+    const client = await connect();
+    const first: BrowserScreencastFrame[] = [];
+    const second: BrowserScreencastFrame[] = [];
+    const other: BrowserScreencastFrame[] = [];
+    const onFirst = (frame: BrowserScreencastFrame): void => void first.push(frame);
+    await client.startScreencast('p1', VIEWPORT, onFirst);
+    await client.startScreencast('p1', VIEWPORT, frame => void second.push(frame));
+    await client.startScreencast('p2', VIEWPORT, frame => void other.push(frame));
+
+    // Act
+    await client.navigate('p1', 'emit-frames');
+    await client.stopScreencast('p1', onFirst);
+    await client.navigate('p1', 'emit-frames');
+
+    // Assert — p2's viewer saw none of p1's frames; p1 kept streaming for its remaining viewer.
+    should(first.map(frame => frame.pageId)).deepEqual(['p1', 'p1']);
+    should(second.length).be.above(first.length);
+    should(other).deepEqual([]);
+  });
+
+  it('should drop a page’s stream when the page closes', async () => {
+    const client = await connect();
+    const frames: BrowserScreencastFrame[] = [];
+    await client.startScreencast('p1', VIEWPORT, frame => void frames.push(frame));
+    await client.closePage('p1');
+    await client.navigate('p1', 'emit-frames');
+    should(frames).deepEqual([]);
   });
 });

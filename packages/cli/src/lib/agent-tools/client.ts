@@ -21,6 +21,15 @@ const AGENT_SESSION_CAPABILITY_HEADER = 'x-fy-session-capability';
 /** The one daemon call these tools make. `IFyApiClient` satisfies it structurally. */
 export type IAgentToolsGateway = Pick<IFyApiClient, 'request'>;
 
+/**
+ * Two ways to the daemon, because an agent and a person are two different authorities: the agent's
+ * carries only its session credential (no host token), the person's is the ordinary CLI client.
+ */
+export interface AgentToolsGateways {
+  readonly agent: IAgentToolsGateway;
+  readonly person: IAgentToolsGateway;
+}
+
 /** What the environment tells the tools about who is calling. Read by the composition root. */
 export interface AgentToolsEnvironment {
   /** `FY_SESSION_BOARD_CAPABILITY`: the calling agent session's own credential, when there is one. */
@@ -67,30 +76,33 @@ const kindOf = (call: AgentToolCall): SurfaceKind => (call.tool.startsWith('term
  */
 export class AgentToolsClient {
   constructor(
-    private readonly gateway: IAgentToolsGateway,
+    private readonly gateways: AgentToolsGateways,
     private readonly environment: AgentToolsEnvironment,
   ) {}
 
   /** One tool call. `session` names the session a person acts on; absent, the caller is the agent. */
   async call(call: AgentToolCall, session?: string): Promise<AgentToolResult> {
     const body = JSON.stringify(call);
-    if (session === undefined) {
-      const init: RequestInit = { method: 'POST', body, headers: this.agentHeaders() };
-      return await this.gateway.request('/v1/agent/tools', AgentToolResultSchema, init, TOOL_REQUEST_TIMEOUT_MS);
-    }
+    // Each dial writes its verb out in full, so the route-agreement gate can prove it.
+    if (session === undefined)
+      return await this.gateways.agent.request(
+        '/v1/agent/tools',
+        AgentToolResultSchema,
+        { method: 'POST', body, headers: this.agentHeaders() },
+        TOOL_REQUEST_TIMEOUT_MS,
+      );
     const id = encodeURIComponent(session);
-    const init: RequestInit = { method: 'POST', body, headers: this.personHeaders() };
     return kindOf(call) === 'browser'
-      ? await this.gateway.request(
+      ? await this.gateways.person.request(
           `/v1/sessions/${id}/surfaces/browser/tools`,
           AgentToolResultSchema,
-          init,
+          { method: 'POST', body, headers: this.personHeaders() },
           TOOL_REQUEST_TIMEOUT_MS,
         )
-      : await this.gateway.request(
+      : await this.gateways.person.request(
           `/v1/sessions/${id}/surfaces/terminals/tools`,
           AgentToolResultSchema,
-          init,
+          { method: 'POST', body, headers: this.personHeaders() },
           TOOL_REQUEST_TIMEOUT_MS,
         );
   }
@@ -120,24 +132,37 @@ export class AgentToolsClient {
   /** A person takes a surface over from the agent, or hands it back. */
   async control(
     surface: SurfaceKind,
-    action: 'takeover' | 'handback',
+    action: 'takeover' | 'handback' | 'handover',
     key: string,
     session: string,
   ): Promise<SurfaceControlView> {
     const id = encodeURIComponent(session);
-    const init: RequestInit = { method: 'POST', body: JSON.stringify({ action, key }), headers: this.personHeaders() };
+    const body = JSON.stringify({ action, key });
     return surface === 'terminal'
-      ? await this.gateway.request(`/v1/sessions/${id}/surfaces/terminals/control`, SurfaceControlViewSchema, init)
-      : await this.gateway.request(`/v1/sessions/${id}/surfaces/browser/control`, SurfaceControlViewSchema, init);
+      ? await this.gateways.person.request(`/v1/sessions/${id}/surfaces/terminals/control`, SurfaceControlViewSchema, {
+          method: 'POST',
+          body,
+          headers: this.personHeaders(),
+        })
+      : await this.gateways.person.request(`/v1/sessions/${id}/surfaces/browser/control`, SurfaceControlViewSchema, {
+          method: 'POST',
+          body,
+          headers: this.personHeaders(),
+        });
   }
 
-  /** Who is driving which surface in a session, and what a person has taken over. */
-  async view(session: string): Promise<SurfaceControlView> {
-    return await this.gateway.request(
-      `/v1/sessions/${encodeURIComponent(session)}/surfaces/control`,
-      SurfaceControlViewSchema,
-      { method: 'GET', headers: this.personHeaders() },
-    );
+  /** Who is driving which surfaces of one kind in a session, what is taken over, and what was handed on. */
+  async view(surface: SurfaceKind, session: string): Promise<SurfaceControlView> {
+    const id = encodeURIComponent(session);
+    return surface === 'terminal'
+      ? await this.gateways.person.request(`/v1/sessions/${id}/surfaces/terminals/control`, SurfaceControlViewSchema, {
+          method: 'GET',
+          headers: this.personHeaders(),
+        })
+      : await this.gateways.person.request(`/v1/sessions/${id}/surfaces/browser/control`, SurfaceControlViewSchema, {
+          method: 'GET',
+          headers: this.personHeaders(),
+        });
   }
 
   private agentHeaders(): Record<string, string> {

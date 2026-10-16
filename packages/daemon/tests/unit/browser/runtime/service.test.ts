@@ -1,370 +1,540 @@
 import { describe, it } from 'bun:test';
+import type {
+  BrowserInputEvent,
+  BrowserPageActionSnapshot,
+  BrowserPageSnapshot,
+  BrowserPageSummary,
+  BrowserScreencastFrame,
+} from '@ferretry/protocol';
 import should from 'should';
-import { BrowserActionResultSchema, BrowserStatusSchema } from '@ferretry/protocol';
+import {
+  type BrowserIdlePolicy,
+  BrowserSessionError,
+  BrowserSessionService,
+} from '../../../../src/lib/browser/runtime/service.ts';
 import type { BrowserAutomation } from '../../../../src/lib/browser/transport/automation-contracts.ts';
-import { BrowserSessionError, BrowserSessionService } from '../../../../src/lib/browser/runtime/service.ts';
 
-const snapshot = (url = 'about:blank') => ({
-  url,
-  title: url,
-  activePageId: 'p1',
-  pages: [{ id: 'p1', url, title: url }],
-  pageState: 'ready' as const,
-  canGoBack: false,
-  canGoForward: false,
-});
-const acted = (url = 'https://example.test') => ({ ...snapshot(url), actedPageId: 'p1' });
+type Page = BrowserPageSummary & { pageState?: 'ready' | 'error' };
 
-function deferred() {
-  let resolve!: (value: number) => void;
-  const promise = new Promise<number>(done => {
-    resolve = done;
+/**
+ * The machine's agent browser, faked with REAL tabs and no active one: every act names its page,
+ * every screencast streams one page, every input lands on the page it names. What a test reads back
+ * is what each page received — so cross-talk between a person's tab and an agent's would show.
+ */
+class Tabs {
+  readonly calls: string[] = [];
+  readonly inputs: { readonly pageId: string; readonly input: BrowserInputEvent }[] = [];
+  readonly casts = new Map<string, Set<(frame: BrowserScreencastFrame) => void>>();
+  pages: Page[] = [{ id: 'p0', url: 'about:blank', title: '' }];
+  castFailure: Error | undefined;
+  private minted = 0;
+  private exited!: (code: number) => void;
+  readonly exit = new Promise<number>(resolve => {
+    this.exited = resolve;
   });
-  return { promise, resolve };
-}
 
-class Driver {
-  readonly exit = deferred();
-  calls: string[] = [];
-  frame?: (value: { dataBase64: string; width: number; height: number; pageId: string; ackId: number }) => void;
+  die(): void {
+    this.exited(1);
+  }
+
+  /** Streams one frame from a page to whoever watches that page. */
+  emit(pageId: string): void {
+    for (const listener of this.casts.get(pageId) ?? []) listener({ dataBase64: 'AAAA', width: 1, height: 1, pageId });
+  }
+
+  private state(pageId?: string): BrowserPageSnapshot {
+    const page = this.pages.find(candidate => candidate.id === pageId) ?? (this.pages[0] as Page);
+    return {
+      url: page.url,
+      title: page.title,
+      pages: this.pages.map(({ pageState: _state, ...summary }) => summary),
+      activePageId: page.id,
+      pageState: page.pageState ?? 'ready',
+      ...(page.pageState === 'error' ? { pageError: 'it broke' } : {}),
+      canGoBack: page.pageState !== 'error',
+      canGoForward: false,
+    };
+  }
+
+  private acted(method: string, pageId: string): BrowserPageActionSnapshot {
+    this.calls.push(`${method}:${pageId}`);
+    return { ...this.state(pageId), actedPageId: pageId };
+  }
+
   readonly automation: BrowserAutomation = {
-    unexpectedExit: this.exit.promise,
-    navigate: async url => this.call(`navigate:${url}`),
-    click: async selector => this.call(`click:${selector}`),
-    type: async (selector, text) => this.call(`type:${selector}:${text}`),
-    read: async selector => ({ ...(await this.call(`read:${selector ?? ''}`)), text: 'read' }),
-    screenshot: async () => ({ ...(await this.call('screenshot')), screenshotBase64: 'image' }),
-    back: async () => this.call('back'),
-    forward: async () => this.call('forward'),
-    reload: async () => this.call('reload'),
-    location: async () => snapshot(),
-    newPage: async url => this.call(`new:${url ?? ''}`),
-    activatePage: async id => this.call(`activate:${id}`),
-    closePage: async id => this.call(`close:${id}`),
-    resize: async view => this.call(`resize:${view.width}x${view.height}`),
-    startScreencast: async (_view, listener) => {
-      this.calls.push('start-cast');
-      this.frame = listener;
+    unexpectedExit: this.exit,
+    navigate: async (pageId, url) => {
+      this.pages = this.pages.map(page => (page.id === pageId ? { ...page, url } : page));
+      return this.acted('navigate', pageId);
     },
-    stopScreencast: async () => {
-      this.calls.push('stop-cast');
+    click: async pageId => this.acted('click', pageId),
+    type: async pageId => this.acted('type', pageId),
+    read: async (pageId, _selector, mode) => ({ ...this.acted(`read-${mode ?? 'text'}`, pageId), text: 'hello' }),
+    screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
+    back: async pageId => this.acted('back', pageId),
+    forward: async pageId => this.acted('forward', pageId),
+    reload: async pageId => this.acted('reload', pageId),
+    location: async pageId => this.state(pageId),
+    newPage: async options => {
+      this.minted += 1;
+      const id = `p${String(this.minted)}`;
+      this.pages.push({
+        id,
+        url: options.url ?? 'about:blank',
+        title: '',
+        ...(options.incognito === true ? { incognito: true } : {}),
+      });
+      return this.acted(`new${options.incognito === true ? '-incognito' : ''}`, id);
     },
-    dispatchInput: async () => {
-      this.calls.push('input');
+    closePage: async pageId => {
+      this.pages = this.pages.filter(page => page.id !== pageId);
+      this.casts.delete(pageId);
+      return { ...this.state(), actedPageId: pageId };
+    },
+    resize: async (pageId, viewport) => this.acted(`resize-${String(viewport.width)}`, pageId),
+    startScreencast: async (pageId, _viewport, listener) => {
+      if (this.castFailure !== undefined) throw this.castFailure;
+      const set = this.casts.get(pageId) ?? new Set();
+      set.add(listener);
+      this.casts.set(pageId, set);
+    },
+    stopScreencast: async (pageId, listener) => {
+      this.casts.get(pageId)?.delete(listener);
+    },
+    dispatchInput: async (pageId, input) => {
+      this.inputs.push({ pageId, input });
     },
     close: async () => {
       this.calls.push('close');
     },
   };
-  private async call(value: string) {
-    this.calls.push(value);
-    return acted(value);
-  }
 }
 
-describe('session browser runtime', () => {
-  it('should launch, project and dispatch every browser action through one session driver', async () => {
-    const driver = new Driver();
-    const service = new BrowserSessionService(
-      { get: async id => (id === 's1' ? {} : undefined) },
-      { launch: async () => driver.automation },
-      () => 0,
+const known = new Set(['s1', 's2']);
+
+function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy) {
+  let launches = 0;
+  const service = new BrowserSessionService(
+    { get: async id => (known.has(id) ? {} : undefined) },
+    {
+      launch: async () => {
+        launches += 1;
+        return tabs.automation;
+      },
+    },
+    () => Date.parse('2026-10-16T10:00:00.000Z'),
+    idle,
+  );
+  return { tabs, service, launches: () => launches };
+}
+
+const failure = async (work: Promise<unknown>): Promise<BrowserSessionError> =>
+  (await work.then(
+    () => undefined,
+    (error: unknown) => error,
+  )) as BrowserSessionError;
+
+describe('the machine agent browser — one Chrome, pages by session', () => {
+  it('should start one browser for every session, and show each session only its own pages', async () => {
+    // Arrange
+    const { service, launches } = harness();
+
+    // Act — two sessions open pages at once: one launch serves both.
+    const [app, docs] = await Promise.all([
+      service.openPage('s1', 'app', { url: 'https://app.test/', openedBy: { by: 'agent', sessionId: 's1' } }),
+      service.openPage('s2', 'docs', { incognito: true }),
+    ]);
+    const mine = await service.status('s1');
+    const theirs = await service.status('s2');
+
+    // Assert
+    should(launches()).equal(1);
+    should(app).match({ name: 'app', openedBy: { by: 'agent', sessionId: 's1' }, url: 'https://app.test/' });
+    should(docs).match({ name: 'docs', incognito: true });
+    should(mine.pages.map(page => page.name)).deepEqual(['app']);
+    should(theirs.pages.map(page => page.name)).deepEqual(['docs']);
+    should(mine).match({ state: 'running', activePageId: app.id, url: 'https://app.test/', canGoBack: true });
+    // Chrome's own first tab belongs to nobody, so it is in nobody's listing.
+    should(mine.pages.some(page => page.id === 'p0')).be.false();
+  });
+
+  it('should act on the named page and nothing else, and never on another session’s page', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    const other = await service.openPage('s2', 'app');
+
+    // Act
+    for (const action of [
+      { action: 'navigate', url: 'https://x.test/' },
+      { action: 'click', selector: 'a' },
+      { action: 'type', selector: '#q', text: 'x' },
+      { action: 'read', mode: 'a11y' },
+      { action: 'screenshot' },
+    ] as const)
+      await service.actOnPage('s1', 'app', action);
+    const foreign = await failure(service.actOnPage('s1', other.id, { action: 'click', selector: 'a' }));
+
+    // Assert — every act went to s1's page; s2's page of the same name was never touched.
+    should(tabs.calls.filter(call => !call.startsWith('new'))).deepEqual([
+      `navigate:${app.id}`,
+      `click:${app.id}`,
+      `type:${app.id}`,
+      `read-a11y:${app.id}`,
+      `screenshot:${app.id}`,
+    ]);
+    should(foreign).match({ code: 'not_found' });
+  });
+
+  it('should let a guard refuse an act from inside the page’s own queue', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const refused = await failure(
+      service.actOnPage('s1', 'app', { action: 'click', selector: 'a' }, async () => {
+        throw new BrowserSessionError('conflict', 'a person holds it');
+      }),
     );
-    should((await service.status('s1')).state).equal('stopped');
+    should(refused.message).equal('a person holds it');
+    should(tabs.calls.filter(call => call.startsWith('click'))).deepEqual([]);
+  });
+
+  it('should refuse a name in use, and a page past the session’s or the machine’s cap — never hide it', async () => {
+    // Arrange
+    const { service } = harness();
+    await service.openPage('s1', 'app');
+
+    // Act
+    const taken = await failure(service.openPage('s1', 'app'));
+    for (let page = 1; page < 20; page += 1) await service.openPage('s1', `p-${String(page)}`);
+    const sessionFull = await failure(service.openPage('s1', 'one-more'));
+    for (let page = 0; page < 20; page += 1) await service.openPage('s2', `a-${String(page)}`);
+    known.add('s3');
+    for (let page = 0; page < 20; page += 1) await service.openPage('s3', `b-${String(page)}`);
+    known.add('s4');
+    const machineFull = await failure(service.openPage('s4', 'first'));
+
+    // Assert
+    should(taken.code).equal('conflict');
+    should(sessionFull).match({ code: 'capacity', message: /this session already has 20 browser pages open/u });
+    should(machineFull).match({ code: 'capacity', message: /this machine's browser already has 60 pages open/u });
+    should((await service.status('s1')).pages).have.length(20);
+  });
+
+  it('should count a popup as its opener’s session’s page', async () => {
+    // Arrange — a click in s1's page opened a popup (the browser reports its opener).
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    tabs.pages.push({ id: 'popup', url: 'https://pop.test/', title: '', openerId: app.id });
+    tabs.pages.push({ id: 'stray', url: 'https://x.test/', title: '', openerId: 'gone' });
+
+    // Act
+    const pages = (await service.status('s1')).pages.map(page => page.id);
+    const viaPopup = await service.actOnPage('s1', 'popup', { action: 'screenshot' });
+
+    // Assert
+    should(pages).deepEqual([app.id, 'popup']);
+    should(viaPopup.status).match({ sessionId: 's1' });
+    should((await service.status('s2')).pages).deepEqual([]);
+  });
+
+  it('should close a page by name, and close every page of a session that ended', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    await service.openPage('s1', 'secret', { incognito: true });
+    await service.openPage('s2', 'docs');
+
+    // Act
+    await service.closePage('s1', 'app');
+    const afterClose = await service.status('s1');
+    await service.releaseSession('s1');
+    await service.releaseSession('s9');
+
+    // Assert — the incognito page closed with the session; s2 kept its page.
+    should(afterClose.pages.map(page => page.name)).deepEqual(['secret']);
+    should((await service.status('s1')).pages).deepEqual([]);
+    should((await service.status('s2')).pages.map(page => page.name)).deepEqual(['docs']);
+    should(tabs.pages.some(page => page.incognito === true)).be.false();
+  });
+
+  it('should release nothing, and report stopped, when the browser is not running', async () => {
+    const { service } = harness();
+    await service.releaseSession('s1');
+    should(await service.status('s1')).match({ state: 'stopped', pages: [], idleTimeoutSeconds: 0 });
+    should(await failure(service.actOnPage('s1', 'app', { action: 'screenshot' }))).match({ code: 'not_running' });
+    should(await failure(service.closePage('s1', 'app'))).match({ code: 'not_running' });
+    should(await failure(service.status('s9'))).match({ code: 'not_found' });
+  });
+});
+
+describe('the machine agent browser — a person and an agent at once', () => {
+  it('should stream only the page a person is viewing, and land their input there while the agent works elsewhere', async () => {
+    // Arrange — the agent's page and the person's page, both in session s1.
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page', url: 'https://bank.test/' });
+    const persons = activeOf(await service.status('s1'));
+    const agents = await service.openPage('s1', 'app', { openedBy: { by: 'agent', sessionId: 's1' } });
+    const frames: BrowserScreencastFrame[] = [];
+    const attachment = await service.attachViewer(
+      's1',
+      frame => frames.push(frame),
+      () => undefined,
+    );
+
+    // Act — the agent drives its page while the person types into theirs.
+    await service.actOnPage('s1', 'app', { action: 'type', selector: '#q', text: 'agent' });
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'hunter2' });
+    tabs.emit(agents.id);
+    tabs.emit(persons);
+
+    // Assert — no cross-talk either way, and the agent's act moved nothing.
+    should(tabs.inputs).deepEqual([{ pageId: persons, input: { kind: 'insertText', text: 'hunter2' } }]);
+    should(tabs.calls).containEql(`type:${agents.id}`);
+    should(frames.map(frame => frame.pageId)).deepEqual([persons]);
+    should(activeOf(await service.status('s1'))).equal(persons);
+    attachment.detach();
+    attachment.detach();
+  });
+
+  it('should move a person’s view and live stream when they switch tabs, and keep sessions’ viewers apart', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'start' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    await service.openPage('s2', 'theirs');
+    const mine: string[] = [];
+    const theirs: string[] = [];
+    await service.attachViewer(
+      's1',
+      frame => mine.push(frame.pageId),
+      () => undefined,
+    );
+    await service.attachViewer(
+      's2',
+      frame => theirs.push(frame.pageId),
+      () => undefined,
+    );
+
+    // Act
+    await service.act('s1', { action: 'activate-page', pageId: first });
+    tabs.emit(first);
+    tabs.emit(second);
+
+    // Assert
+    should(second).not.equal(first);
+    should(mine).deepEqual([first]);
+    should(theirs).deepEqual([]);
+    should((await service.status('s1')).viewers).equal(1);
+  });
+
+  it('should drive the person’s toolbar on the page they view', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const started = await service.act('s1', { action: 'open', url: 'https://one.test/' });
+    const viewed = activeOf(await service.status('s1'));
+
+    // Act
+    await service.act('s1', { action: 'open', url: 'https://two.test/' });
+    await service.act('s1', { action: 'open' });
     await service.act('s1', { action: 'start' });
     for (const action of [
-      { action: 'open', url: 'https://open.test' },
-      { action: 'navigate', url: 'https://navigate.test' },
-      { action: 'click', selector: '#go' },
-      { action: 'type', selector: '#q', text: 'x' },
+      { action: 'navigate', url: 'https://three.test/' },
+      { action: 'click', selector: 'a' },
+      { action: 'type', selector: 'a', text: 'b' },
       { action: 'read' },
       { action: 'screenshot' },
       { action: 'back' },
       { action: 'forward' },
       { action: 'reload' },
-      { action: 'new-page' },
-      { action: 'activate-page', pageId: 'p1' },
-      { action: 'close-page', pageId: 'p1' },
-      { action: 'resize', width: 10, height: 20 },
+      { action: 'resize', width: 400, height: 300 },
       { action: 'human-activity', kind: 'pointer' },
     ] as const)
       await service.act('s1', action);
-    const frames: unknown[] = [];
-    const ends: unknown[] = [];
-    const attachment = await service.attachViewer(
+    const status = await service.status('s1');
+
+    // Assert
+    should(started).match({ status: { url: 'https://one.test/' } });
+    should(tabs.calls.slice(1)).deepEqual([
+      `navigate:${viewed}`,
+      `navigate:${viewed}`,
+      `click:${viewed}`,
+      `type:${viewed}`,
+      `read-text:${viewed}`,
+      `screenshot:${viewed}`,
+      `back:${viewed}`,
+      `forward:${viewed}`,
+      `reload:${viewed}`,
+      `resize-400:${viewed}`,
+    ]);
+    should(status.viewport).deepEqual({ width: 400, height: 300 });
+  });
+
+  it('should close a viewed page, end its stream, and fall back to the session’s next page', async () => {
+    // Arrange
+    const { service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const ended: string[] = [];
+    await service.attachViewer(
       's1',
-      frame => frames.push(frame),
-      end => ends.push(end),
+      () => undefined,
+      signal => ended.push(signal.reason),
     );
-    driver.frame?.({ dataBase64: 'a', width: 1, height: 1, pageId: 'p1', ackId: 1 });
-    await service.dispatchHumanInput('s1', { kind: 'mouse', type: 'mouseMoved', x: 1, y: 1 });
+
+    // Act
+    await service.act('s1', { action: 'close-page', pageId: second });
+    const after = await service.status('s1');
     await service.act('s1', { action: 'stop' });
-    attachment.detach();
-    attachment.detach();
-    should(frames).have.length(1);
-    should(ends).deepEqual([{ code: 1000, reason: 'browser stopped' }]);
-    should(driver.calls).containEql('stop-cast');
-    should(driver.calls).containEql('close');
+
+    // Assert
+    should(ended).deepEqual(['the page closed']);
+    should(activeOf(after)).equal(first);
+    should((await service.status('s1')).pages).deepEqual([]);
+    should(await failure(service.act('s1', { action: 'click', selector: 'a' }))).match({ code: 'not_running' });
+    should(await failure(service.dispatchHumanInput('s1', { kind: 'insertText', text: 'x' }))).match({
+      code: 'not_running',
+    });
+    should(
+      await failure(
+        service.attachViewer(
+          's1',
+          () => undefined,
+          () => undefined,
+        ),
+      ),
+    ).match({ code: 'not_running' });
   });
 
-  it('should report a status the strict wire schema accepts after every kind of action', async () => {
-    // Arrange — a real compiled daemon failed `fy browser open` here: the action's own fields
-    // (`actedPageId`, the text read, the screenshot taken) leaked into every later status.
-    const driver = new Driver();
-    const automation: BrowserAutomation = {
-      ...driver.automation,
-      navigate: async url => acted(url),
-      read: async () => ({ ...acted(), text: 'page text' }),
-      screenshot: async () => ({ ...acted(), screenshotBase64: 'aW1hZ2U=' }),
-    };
-    const service = new BrowserSessionService({ get: async () => ({}) }, { launch: async () => automation }, () => 0);
-
-    for (const action of [
-      { action: 'open', url: 'https://open.test' },
-      { action: 'read' },
-      { action: 'screenshot' },
-    ] as const) {
-      // Act
-      const result = await service.act('s1', action);
-
-      // Assert
-      should(BrowserActionResultSchema.safeParse(result).error?.issues).be.undefined();
-      should(BrowserStatusSchema.safeParse(await service.status('s1')).success).be.true();
-      should(result.status).not.have.property('actedPageId');
-      should(result.status).not.have.property('text');
-      should(result.status).not.have.property('screenshotBase64');
-    }
+  it('should describe a page it last saw in error, and only the page it last described', async () => {
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const viewed = activeOf(await service.status('s1'));
+    tabs.pages = tabs.pages.map(page => (page.id === viewed ? { ...page, pageState: 'error' } : page));
+    should(await service.status('s1')).match({ pageState: 'error', pageError: 'it broke', canGoBack: false });
   });
 
-  it('should name absent, failed, over-capacity and exited browsers honestly', async () => {
-    const drivers = [new Driver(), new Driver(), new Driver(), new Driver()];
-    let next = 0;
-    const service = new BrowserSessionService(
-      { get: async id => (id === 'missing' ? undefined : {}) },
-      { launch: async () => drivers[next++]!.automation },
-      () => 0,
+  it('should refuse a viewer whose stream would not start, keeping nothing behind', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    tabs.castFailure = new Error('no frames');
+    await should(
+      service.attachViewer(
+        's1',
+        () => undefined,
+        () => undefined,
+      ),
+    ).be.rejectedWith('no frames');
+    should((await service.status('s1')).viewers).equal(0);
+  });
+});
+
+describe('the machine agent browser — its life', () => {
+  it('should tell every viewer when the browser stops, or when its worker dies', async () => {
+    // Arrange
+    const stopped = harness();
+    await stopped.service.openPage('s1', 'app');
+    const stops: number[] = [];
+    await stopped.service.attachViewer(
+      's1',
+      () => undefined,
+      signal => stops.push(signal.code),
     );
-    try {
-      await service.status('missing');
-    } catch (error) {
-      should(error).be.instanceOf(BrowserSessionError);
-      should((error as BrowserSessionError).code).equal('not_found');
-    }
-    await Promise.all(['a', 'b', 'c'].map(id => service.act(id, { action: 'start' })));
-    try {
-      await service.act('d', { action: 'start' });
-    } catch (error) {
-      should((error as BrowserSessionError).code).equal('capacity');
-    }
-    drivers[0]!.exit.resolve(1);
+    const died = harness();
+    await died.service.openPage('s1', 'app');
+    const deaths: number[] = [];
+    await died.service.attachViewer(
+      's1',
+      () => undefined,
+      signal => deaths.push(signal.code),
+    );
+
+    // Act
+    await stopped.service.closeAll();
+    await stopped.service.closeAll();
+    died.tabs.die();
     await Bun.sleep(0);
-    should((await service.status('a')).state).equal('stopped');
-    try {
-      await service.act('a', { action: 'click', selector: '#x' });
-    } catch (error) {
-      should((error as BrowserSessionError).code).equal('not_running');
-    }
-    await service.closeAll();
+
+    // Assert
+    should(stops).deepEqual([1000]);
+    should(stopped.tabs.calls).containEql('close');
+    should(deaths).deepEqual([1011]);
+    should(await died.service.status('s1')).match({ state: 'stopped' });
   });
 
-  it('should turn launcher and screencast failures into observable launch errors without retaining a viewer', async () => {
-    const service = new BrowserSessionService(
+  it('should name a launch failure, passing the browser’s own refusal through', async () => {
+    const plain = new BrowserSessionService(
       { get: async () => ({}) },
       {
         launch: async () => {
-          throw new Error('no chrome');
+          throw new Error('Chrome is not installed');
         },
       },
       () => 0,
     );
-    try {
-      await service.act('s', { action: 'start' });
-    } catch (error) {
-      should((error as BrowserSessionError).code).equal('launch_failed');
-    }
-  });
-});
-
-/**
- * A driver that keeps real tabs: a page list, an active page, and a URL per page — enough for names
- * to be checked against what the browser actually holds rather than against what a call claimed.
- */
-class Tabs {
-  calls: string[] = [];
-  pages = [{ id: 'p1', url: 'about:blank', title: '' }];
-  active = 'p1';
-  private minted = 1;
-  private state(acted = this.active) {
-    const current = this.pages.find(page => page.id === this.active) ?? this.pages[0];
-    if (current === undefined) throw new Error('the fixture holds no page');
-    return {
-      url: current.url,
-      title: current.title,
-      activePageId: current.id,
-      pages: this.pages.map(page => ({ ...page })),
-      pageState: 'ready' as const,
-      canGoBack: false,
-      canGoForward: false,
-      actedPageId: acted,
-    };
-  }
-  private on(page: string, url: string) {
-    this.pages = this.pages.map(candidate => (candidate.id === page ? { ...candidate, url } : candidate));
-  }
-  readonly automation: BrowserAutomation = {
-    unexpectedExit: new Promise<number>(() => undefined),
-    navigate: async url => {
-      this.calls.push(`navigate:${this.active}:${url}`);
-      this.on(this.active, url);
-      return this.state();
-    },
-    click: async selector => {
-      this.calls.push(`click:${this.active}:${selector}`);
-      return this.state();
-    },
-    type: async (selector, text) => {
-      this.calls.push(`type:${this.active}:${selector}:${text}`);
-      return this.state();
-    },
-    read: async (selector, mode) => {
-      this.calls.push(`read:${this.active}:${selector ?? ''}:${mode ?? ''}`);
-      return { ...this.state(), text: mode === 'a11y' ? '- link "Docs"' : 'Docs' };
-    },
-    screenshot: async () => ({ ...this.state(), screenshotBase64: 'image' }),
-    back: async () => this.state(),
-    forward: async () => this.state(),
-    reload: async () => this.state(),
-    location: async () => this.state(),
-    newPage: async url => {
-      this.minted += 1;
-      const id = `p${String(this.minted)}`;
-      this.pages.push({ id, url: url ?? 'about:blank', title: '' });
-      this.active = id;
-      this.calls.push(`new:${id}:${url ?? ''}`);
-      return this.state(id);
-    },
-    activatePage: async id => {
-      this.active = id;
-      this.calls.push(`activate:${id}`);
-      return this.state(id);
-    },
-    closePage: async id => {
-      this.pages = this.pages.filter(page => page.id !== id);
-      if (this.active === id) this.active = this.pages[0]?.id ?? id;
-      this.calls.push(`close:${id}`);
-      return this.state(id);
-    },
-    resize: async () => this.state(),
-    startScreencast: async () => undefined,
-    stopScreencast: async () => undefined,
-    dispatchInput: async () => undefined,
-    close: async () => undefined,
-  };
-}
-
-describe('named browser pages', () => {
-  const service = (tabs: Tabs) =>
-    new BrowserSessionService(
-      { get: async id => (id === 's1' ? {} : undefined) },
-      { launch: async () => tabs.automation },
+    const own = new BrowserSessionService(
+      { get: async () => ({}) },
+      {
+        launch: async () => {
+          throw new BrowserSessionError('capacity', 'busy');
+        },
+      },
       () => 0,
     );
-
-  it('should name the blank tab a fresh browser opened with, and open a new tab for every later name', async () => {
-    // Arrange
-    const tabs = new Tabs();
-    const browser = service(tabs);
-
-    // Act
-    const app = await browser.openPage('s1', 'app', 'https://app.test/');
-    const docs = await browser.openPage('s1', 'docs');
-    const status = await browser.status('s1');
-
-    // Assert
-    should(app).deepEqual({ id: 'p1', url: 'https://app.test/', title: '', name: 'app' });
-    should(docs).deepEqual({ id: 'p2', url: 'about:blank', title: '', name: 'docs' });
-    should(status.pages.map(page => [page.id, page.name])).deepEqual([
-      ['p1', 'app'],
-      ['p2', 'docs'],
-    ]);
-    should(tabs.calls).deepEqual(['navigate:p1:https://app.test/', 'new:p2:']);
-  });
-
-  it('should name a fresh browser’s blank tab without navigating when no URL is given', async () => {
-    const tabs = new Tabs();
-    should(await service(tabs).openPage('s1', 'app')).deepEqual({
-      id: 'p1',
-      url: 'about:blank',
-      title: '',
-      name: 'app',
+    const odd = new BrowserSessionService(
+      { get: async () => ({}) },
+      {
+        launch: async () => {
+          throw 'a string';
+        },
+      },
+      () => 0,
+    );
+    should(await failure(plain.openPage('s1', 'app'))).match({
+      code: 'launch_failed',
+      message: 'Chrome is not installed',
     });
-    should(tabs.calls).deepEqual([]);
+    should(await failure(own.openPage('s1', 'app'))).match({ code: 'capacity' });
+    should(await failure(odd.openPage('s1', 'app'))).match({ code: 'launch_failed', message: 'browser launch failed' });
   });
 
-  it('should refuse a name already in use in the session', async () => {
-    const browser = service(new Tabs());
-    await browser.openPage('s1', 'app');
-    const error = await browser.openPage('s1', 'app').catch((failure: unknown) => failure);
-    should(error).be.instanceOf(BrowserSessionError).and.have.property('code', 'conflict');
-  });
+  it('should stop the browser after it sat idle with nobody watching, and wait while somebody is', async () => {
+    // Arrange — a timer the test fires by hand.
+    const timers: (() => void)[] = [];
+    const idle: BrowserIdlePolicy = {
+      timeoutMs: 600_000,
+      after: (_milliseconds, action) => {
+        timers.push(action);
+        return { cancel: () => undefined };
+      },
+    };
+    const { tabs, service } = harness(new Tabs(), idle);
+    await service.openPage('s1', 'app');
+    const attachment = await service.attachViewer(
+      's1',
+      () => undefined,
+      () => undefined,
+    );
 
-  it('should act on the page a name addresses, making it the active tab first', async () => {
-    // Arrange
-    const tabs = new Tabs();
-    const browser = service(tabs);
-    await browser.openPage('s1', 'app', 'https://app.test/');
-    await browser.openPage('s1', 'docs', 'https://docs.test/');
-    tabs.calls = [];
-
-    // Act
-    await browser.actOnPage('s1', 'app', { action: 'click', selector: '#login' });
-    await browser.actOnPage('s1', 'app', { action: 'type', selector: '#user', text: 'kirin' });
-    const read = await browser.actOnPage('s1', 'p2', { action: 'read', mode: 'a11y', selector: 'nav' });
+    // Act — the clock runs out with a viewer: nothing stops. Then without one: the browser stops.
+    (timers.at(-1) as () => void)();
+    const watched = await service.status('s1');
+    attachment.detach();
+    (timers.at(-1) as () => void)();
+    await Bun.sleep(0);
+    timers[0]?.();
 
     // Assert
-    should(tabs.calls).deepEqual([
-      'activate:p1',
-      'click:p1:#login',
-      'type:p1:#user:kirin',
-      'activate:p2',
-      'read:p2:nav:a11y',
-    ]);
-    should(read).match({ result: { text: '- link "Docs"' }, status: { activePageId: 'p2' } });
-  });
-
-  it('should close a named page and forget its name, so the name can be used again', async () => {
-    // Arrange
-    const tabs = new Tabs();
-    const browser = service(tabs);
-    await browser.openPage('s1', 'app');
-    await browser.openPage('s1', 'docs');
-
-    // Act
-    await browser.closePage('s1', 'docs');
-    const again = await browser.openPage('s1', 'docs');
-
-    // Assert
-    should(again.id).equal('p3');
-    should((await browser.status('s1')).pages.map(page => page.name)).deepEqual(['app', 'docs']);
-  });
-
-  it('should refuse a page that is not there, and any page while the browser is not running', async () => {
-    // Arrange
-    const browser = service(new Tabs());
-
-    // Act
-    const stopped = await browser.actOnPage('s1', 'app', { action: 'screenshot' }).catch((failure: unknown) => failure);
-    const closing = await browser.closePage('s1', 'app').catch((failure: unknown) => failure);
-    await browser.openPage('s1', 'app');
-    const missing = await browser
-      .actOnPage('s1', 'docs', { action: 'screenshot' })
-      .catch((failure: unknown) => failure);
-    const unknownSession = await browser.openPage('s9', 'app').catch((failure: unknown) => failure);
-
-    // Assert
-    should(stopped).have.property('code', 'not_running');
-    should(closing).have.property('code', 'not_running');
-    should(missing).match({ code: 'not_found', message: 'there is no browser page named docs' });
-    should(unknownSession).have.property('code', 'not_found');
+    should(watched).match({ state: 'running', idleTimeoutSeconds: 600 });
+    should(tabs.calls).containEql('close');
+    should(await service.status('s1')).match({ state: 'stopped', idleTimeoutSeconds: 600 });
   });
 });
+
+/** The page a running status says its person is viewing. */
+function activeOf(status: unknown): string {
+  return (status as { readonly activePageId: string }).activePageId;
+}

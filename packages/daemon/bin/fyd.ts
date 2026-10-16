@@ -321,7 +321,7 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
-import { AccountModelAgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
+import { type AgentControlPolicy, AccountModelAgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -341,7 +341,6 @@ import {
 import {
   type AccountInventoryPort,
   AgentToolService,
-  ALLOW_ALL_AGENT_CONTROL,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -636,9 +635,9 @@ import {
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
-  TEST_TIMINGS_VARIABLE,
   SurfaceControl,
   secretsMatch,
+  transcriptKey,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -3704,14 +3703,15 @@ const terminalScheduler: TerminalStreamScheduler = {
  * stored hashes through the same directory the task boards authenticate with. Control changes are
  * published to the session's own journal, which `/v1/events` streams to every viewer.
  *
- * "What agents may control" is the machine settings' switch; until that store is composed here every
- * kind is allowed, which is the shipped behaviour of a machine nobody has configured.
+ * "What agents may control" is the machine settings' own port, read per call. Takeovers and hand-overs
+ * are replayed from the same journal, so they outlive a restart.
  */
 function createAgentToolsSubsystem(input: {
   readonly storage: DaemonStorage;
   readonly terminals: TerminalSubsystem;
   readonly browser: MountedSubsystems['browser'];
   readonly audit: AuditLog;
+  readonly policy: AgentControlPolicy;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -3719,6 +3719,17 @@ function createAgentToolsSubsystem(input: {
       publish: async (sessionId, type, data) => {
         const id = tryParseSessionId(sessionId);
         if (id !== undefined) await input.storage.append(id, type, data);
+      },
+      history: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        const events: { readonly type: string; readonly data: unknown }[] = [];
+        if (id === undefined || input.storage.findSession(id) === undefined) return events;
+        for (let after = 0; ; ) {
+          const page = await input.storage.replay(id, after, 10_000);
+          for (const event of page.events) if (event.type.startsWith('surface.')) events.push(event);
+          if (!page.hasMore || page.nextSequence === undefined) return events;
+          after = page.nextSequence;
+        }
       },
     },
     clock,
@@ -3728,7 +3739,7 @@ function createAgentToolsSubsystem(input: {
       terminals: input.terminals,
       browser: input.browser,
       control,
-      policy: ALLOW_ALL_AGENT_CONTROL,
+      policy: input.policy,
       audit: input.audit,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
@@ -6001,47 +6012,57 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // The instruction a quarantined session shows a human names the CLI they actually type.
         clientName: CLIENT_NAME,
       });
+      // A stopped session's browser pages close, and its incognito contexts are discarded. Assigned once
+      // the browser service below exists; a stop before then has no pages to close.
+      let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
       const sessionControl = releasingAttachmentsOnStop(
-        createSessionControlSubsystem(
-          storage,
-          sessions,
-          createSessionLifecycle,
-          planner,
-          launcher,
-          accounts,
-          executables,
-          sessionIds,
-          createCallsignClaims(storage, stateFiles, paths, callsignClaims),
-          payloadDigests,
-          // The session's own private directory holds the files, and the extractor over them is the
-          // production one: `initialAttachments` is the only mounted route that carries document
-          // bytes, so this is where a DOCX becomes text the agent can read.
-          {
-            plan: (id, decoded) =>
-              planInitialAttachments(
-                decoded,
-                join(createSessionPaths(paths, id).directory, 'attachments'),
-                new NodeRawDeflate(),
-              ),
-            write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
-          },
-          // The board grant a `--board-access` start asks for, over the same world and the same
-          // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
-          childGrantRequester(boards),
-          transcriptProvenance,
-          new NodeWorkingDirectoryResolver(),
-          id => createSessionPaths(paths, id).directory,
-          sessionRuntime,
-          // The stamper the world already constructed, now actually called. Before this it was a field
-          // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
-          spawnProvenance,
-          clock,
-          async () => {
-            const model = await declaredAccountModel();
-            return model === undefined ? undefined : resolveDefaultRuntime(model);
-          },
+        releasingAttachmentsOnStop(
+          createSessionControlSubsystem(
+            storage,
+            sessions,
+            createSessionLifecycle,
+            planner,
+            launcher,
+            accounts,
+            executables,
+            sessionIds,
+            createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+            payloadDigests,
+            // The session's own private directory holds the files, and the extractor over them is the
+            // production one: `initialAttachments` is the only mounted route that carries document
+            // bytes, so this is where a DOCX becomes text the agent can read.
+            {
+              plan: (id, decoded) =>
+                planInitialAttachments(
+                  decoded,
+                  join(createSessionPaths(paths, id).directory, 'attachments'),
+                  new NodeRawDeflate(),
+                ),
+              write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
+            },
+            // The board grant a `--board-access` start asks for, over the same world and the same
+            // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
+            childGrantRequester(boards),
+            transcriptProvenance,
+            new NodeWorkingDirectoryResolver(),
+            id => createSessionPaths(paths, id).directory,
+            sessionRuntime,
+            // The stamper the world already constructed, now actually called. Before this it was a field
+            // nothing dereferenced: a shield the fork wrote and no ordinary start ever did.
+            spawnProvenance,
+            clock,
+            async () => {
+              const model = await declaredAccountModel();
+              return model === undefined ? undefined : resolveDefaultRuntime(model);
+            },
+          ),
+          attachmentStore,
         ),
-        attachmentStore,
+        {
+          releaseSession: sessionId => {
+            void releaseBrowserSession(sessionId).catch(() => undefined);
+          },
+        },
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({
@@ -6255,14 +6276,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       credentialList = async () => await fleetCredentials.list();
       const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
-      const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now());
+      // A session browser nobody watches or drives stops after this long, so a forgotten one does not
+      // hold the one shared profile away from every other session.
+      const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now(), {
+        timeoutMs: 15 * 60_000,
+        after: (milliseconds, action) => {
+          const timer = setTimeout(action, milliseconds);
+          return { cancel: () => clearTimeout(timer) };
+        },
+      });
+      const agentControl = new AccountModelAgentControlPolicy(declaredAccountModel);
       closeAgentBrowsers = async () => await browserService.closeAll();
+      releaseBrowserSession = async sessionId => await browserService.releaseSession(sessionId);
       const browserHost: MountedSubsystems['browser'] = {
         ...browserService,
         status: browserService.status.bind(browserService),
         act: browserService.act.bind(browserService),
         attachViewer: browserService.attachViewer.bind(browserService),
         dispatchHumanInput: browserService.dispatchHumanInput.bind(browserService),
+        releaseSession: browserService.releaseSession.bind(browserService),
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
@@ -6317,7 +6349,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         fleetCatalog: createFleetCatalogSubsystem({ ...fleetCatalogDeps, executors: fleetSetup.executors }),
         // Unit M's rebase target: the same single reader every other in-process consumer of this
         // document shares, so this never disagrees with what the catalogue or a start just read.
-        agentControl: new AccountModelAgentControlPolicy(declaredAccountModel),
+        agentControl,
         fleetSetup,
         /**
          * How much of this machine the managed fleet may take.
@@ -6498,6 +6530,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           terminals: terminalSubsystem,
           browser: browserHost,
           audit: auditLog,
+          policy: agentControl,
         }),
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(

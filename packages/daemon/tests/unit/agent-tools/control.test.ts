@@ -52,15 +52,15 @@ describe('SurfaceControl — the driving marker', () => {
     await control.drove('s2', dev, {});
 
     // Act
-    const both = control.view('s1');
+    const both = await control.view('s1', 'browser');
     clock.ms += DRIVING_WINDOW_MS;
-    const lapsed = control.view('s1');
+    const lapsed = await control.view('s1', 'browser');
     await control.drove('s1', page, {});
 
     // Assert
     should(both.driving.map(driving => driving.id)).deepEqual(['page-1']);
     should(lapsed.driving).deepEqual([]);
-    should(control.view('s1').driving).deepEqual([
+    should((await control.view('s1', 'browser')).driving).deepEqual([
       {
         surface: 'browser',
         id: 'page-1',
@@ -84,14 +84,14 @@ describe('SurfaceControl — takeover', () => {
     const taken = await control.takeover('s1', dev, { by: 'local' });
     clock.ms += 5_000;
     const again = await control.takeover('s1', dev, { by: 'human', deviceId: 'phone-1' });
-    const held = control.takeoverOf('s1', dev);
+    const held = await control.takeoverOf('s1', dev);
     await control.handback('s1', dev);
     await control.handback('s1', dev);
 
     // Assert
     should(again).equal(taken);
     should(held).equal(taken);
-    should(control.takeoverOf('s1', dev)).be.undefined();
+    should(await control.takeoverOf('s1', dev)).be.undefined();
     should(events.published.map(event => event.type)).deepEqual([
       'surface.driving',
       'surface.takeover',
@@ -113,8 +113,8 @@ describe('SurfaceControl — takeover', () => {
     await control.drove('s1', dev, {});
 
     // Act
-    const reusedName = control.takeoverOf('s1', { surface: 'browser', id: 'page-2' });
-    const otherSession = control.takeoverOf('s2', page);
+    const reusedName = await control.takeoverOf('s1', { surface: 'browser', id: 'page-2' });
+    const otherSession = await control.takeoverOf('s2', page);
     control.forget('s1', page);
     control.forget('s1', dev);
     await control.handback('s1', page);
@@ -122,7 +122,8 @@ describe('SurfaceControl — takeover', () => {
     // Assert
     should(reusedName).be.undefined();
     should(otherSession).be.undefined();
-    should(control.view('s1')).deepEqual({ sessionId: 's1', driving: [], takeovers: [] });
+    should(await control.view('s1', 'browser')).deepEqual({ sessionId: 's1', driving: [], takeovers: [], handed: [] });
+    should(await control.view('s1', 'terminal')).deepEqual({ sessionId: 's1', driving: [], takeovers: [], handed: [] });
     should(events.published.map(event => event.type)).deepEqual(['surface.takeover', 'surface.driving']);
     should(events.published[0]?.data).deepEqual({
       surface: 'browser',

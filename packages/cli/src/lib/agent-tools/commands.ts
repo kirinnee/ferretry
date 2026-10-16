@@ -130,12 +130,6 @@ export function registerTerminalCommands(program: Command, runner: IAgentToolsRu
     });
 
   registerControlVerbs('terminal', verb, run, sessionOf);
-
-  verb('control', 'show which terminals and pages an agent is driving, and which are taken over').action(
-    async (options: SessionOption) => {
-      await run({ kind: 'view', ...sessionOf(options) });
-    },
-  );
 }
 
 /**
@@ -158,8 +152,17 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
   verb('open', 'open a named page, starting the browser if it is not running')
     .argument('<name>', 'its name: a lowercase letter, then letters, digits or dashes')
     .argument('[url]', 'an http or https URL to load')
-    .action(async (name: string, url: string | undefined, options: SessionOption) => {
-      await call({ tool: 'browser.open', name, ...(url === undefined ? {} : { url }) }, options);
+    .option('--incognito', 'a throwaway page with its own cookies, shared with nothing; gone when closed')
+    .action(async (name: string, url: string | undefined, options: SessionOption & { incognito?: boolean }) => {
+      await call(
+        {
+          tool: 'browser.open',
+          name,
+          ...(url === undefined ? {} : { url }),
+          ...(options.incognito === true ? { incognito: true } : {}),
+        },
+        options,
+      );
     });
 
   verb('navigate', 'load a URL in a page')
@@ -228,9 +231,19 @@ function registerControlVerbs(
     .action(async (name: string, options: SessionOption) => {
       await run({ kind: 'control', surface, action: 'takeover', key: name, ...sessionOf(options) });
     });
-  verb('handback', `hand a ${noun} back to the agent`)
+  verb('handback', `hand a ${noun} you took over back to the agent`)
     .argument('<name>', `the ${noun}’s name or id`)
     .action(async (name: string, options: SessionOption) => {
       await run({ kind: 'control', surface, action: 'handback', key: name, ...sessionOf(options) });
     });
+  verb('handover', `let the agent use a ${noun} you opened (it may not otherwise)`)
+    .argument('<name>', `the ${noun}’s name or id`)
+    .action(async (name: string, options: SessionOption) => {
+      await run({ kind: 'control', surface, action: 'handover', key: name, ...sessionOf(options) });
+    });
+  verb('control', `show which ${noun}s an agent is driving, taken over, or handed to it`).action(
+    async (options: SessionOption) => {
+      await run({ kind: 'view', surface, ...sessionOf(options) });
+    },
+  );
 }

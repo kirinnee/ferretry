@@ -34,7 +34,7 @@ describe('AgentToolService — terminals', () => {
 
     // Assert
     should(opened.summary).equal('Opened %terminal:dev and started the command.');
-    should(listed.surfaces).deepEqual([{ id: '000000000001', name: 'dev', title: 'Terminal 1' }]);
+    should(listed.surfaces).deepEqual([{ id: '000000000001', name: 'dev', title: 'Terminal 1', available: true }]);
     should(listed.summary).equal('1 terminal: %terminal:dev.');
     const terminal = await world.terminals.get('s1', '000000000001');
     should(terminal.openedBy).deepEqual({ by: 'agent', sessionId: 's1' });
@@ -84,9 +84,9 @@ describe('AgentToolService — terminals', () => {
   });
 
   it('should list an unnamed terminal by its id, and act on it by that id', async () => {
-    // Arrange
+    // Arrange — the agent's own, opened without a name through the ordinary route.
     const world = agentToolWorld();
-    await world.terminals.create('s1', {});
+    await world.terminals.create('s1', {}, { by: 'agent', sessionId: 's1' });
 
     // Act
     const listed = await world.service.call(agent, { tool: 'terminal.list' });
@@ -301,14 +301,14 @@ describe('AgentToolService — take over and hand back', () => {
     should(personSent.summary).equal('Sent 3 characters to %terminal:dev.');
     should(allowed.summary).equal('Sent 2 characters to %terminal:dev.');
     should(world.terminals.typed.get('000000000001')).equal('pwdls');
-    should(world.service.controlView('s1').takeovers).deepEqual([]);
+    should((await world.service.controlView('s1', 'terminal')).takeovers).deepEqual([]);
   });
 
   it('should take over a browser page by name, and say which surface in a refusal of an unnamed one', async () => {
     // Arrange
     const world = agentToolWorld();
     await world.service.call(agent, { tool: 'browser.open', name: 'app' });
-    await world.terminals.create('s1', {});
+    await world.terminals.create('s1', {}, { by: 'agent', sessionId: 's1' });
 
     // Act
     await world.service.control('s1', 'browser', { action: 'takeover', key: 'app' }, { by: 'local' }, person);
@@ -401,7 +401,7 @@ describe('AgentToolService — the driving marker', () => {
     should((await world.service.call(otherAgent, { tool: 'terminal.open', name: 'dev' })).summary).equal(
       'Opened %terminal:dev.',
     );
-    should(world.service.controlView('s2').driving).have.length(1);
+    should((await world.service.controlView('s2', 'terminal')).driving).have.length(1);
   });
 });
 
@@ -442,7 +442,9 @@ describe('AgentToolService — browser pages', () => {
     should(text).deepEqual({ summary: 'Read %browser:app (now at http://localhost:5173/).', output: 'Welcome back' });
     should(tree.output).equal('- button "Sign in"');
     should(shot).match({ summary: /^A screenshot of %browser:app/u, screenshotBase64: 'iVBORw0KGgo=' });
-    should(listed.surfaces).deepEqual([{ id: 'page-1', name: 'app', title: '', url: 'http://localhost:5173/' }]);
+    should(listed.surfaces).deepEqual([
+      { id: 'page-1', name: 'app', title: '', url: 'http://localhost:5173/', available: true },
+    ]);
     should(listed.summary).equal('1 browser page: %browser:app.');
     should(closed.summary).equal('Closed %browser:app.');
     should(world.browser.acts).deepEqual([
@@ -591,5 +593,209 @@ describe('AgentToolService — the audit record', () => {
     // Assert
     should(error).equal(defect);
     should(world.audit.entries).match([{ outcome: 'failed', detail: { tool: 'terminal.list' } }]);
+  });
+});
+
+describe('AgentToolService — a takeover holds one tab, and only that tab', () => {
+  it('should refuse the agent the tab a person holds, and let it keep working on every other', async () => {
+    // Arrange — two pages; the person takes `login` to type a password.
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    await world.service.call(agent, { tool: 'browser.open', name: 'login' });
+
+    // Act
+    await world.service.control('s1', 'browser', { action: 'takeover', key: 'login' }, { by: 'local' }, person);
+    world.browser.acts.length = 0;
+    const onHeld = await Promise.all(
+      [
+        { tool: 'browser.read', name: 'login' },
+        { tool: 'browser.type', name: 'login', selector: '#password', text: 'x' },
+        { tool: 'browser.close', name: 'login' },
+      ].map(async call => (await refusal(world.service.call(agent, call as never))).code),
+    );
+    const elsewhere = await world.service.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' });
+    const opened = await world.service.call(agent, { tool: 'browser.open', name: 'more' });
+
+    // Assert
+    should(onHeld).deepEqual(['taken_over', 'taken_over', 'taken_over']);
+    should(elsewhere.summary).startWith('Done on %browser:app');
+    should(opened.summary).startWith('Opened %browser:more');
+    should(world.browser.acts).deepEqual(['s1:page-1:click']);
+  });
+
+  it('should open an incognito page, mark it, and record that it was incognito — never its contents', async () => {
+    // Arrange
+    const world = agentToolWorld();
+
+    // Act
+    const opened = await world.service.call(agent, {
+      tool: 'browser.open',
+      name: 'private',
+      url: 'https://bank.test/?session=secret',
+      incognito: true,
+    });
+    const listed = await world.service.call(agent, { tool: 'browser.list' });
+    await world.service.call(agent, { tool: 'browser.type', name: 'private', selector: '#pin', text: '1234' });
+
+    // Assert
+    should(opened.summary).equal('Opened an incognito page, %browser:private at https://bank.test/?session=secret.');
+    should(listed.surfaces?.[0]).match({ name: 'private', incognito: true, available: true });
+    should(world.events.published[0]?.data).match({ name: 'private', incognito: true });
+    should(world.audit.entries[0]?.detail).deepEqual({
+      tool: 'browser.open',
+      by: 'agent',
+      surface: '%browser:private',
+      host: 'bank.test',
+      incognito: true,
+    });
+    should(JSON.stringify(world.audit.entries)).not.containEql('1234');
+  });
+
+  it('should refuse an act already queued when the takeover lands, from inside the browser’s queue', async () => {
+    // Arrange — the guard runs where the real service runs it; a takeover between the agent's checks
+    // and its turn in the queue still wins.
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    const original = world.browser.actOnPage.bind(world.browser);
+    world.browser.actOnPage = async (sessionId, key, action, guard) => {
+      await world.control.takeover('s1', { surface: 'browser', id: 'page-1' }, { by: 'local' });
+      return await original(sessionId, key, action, guard);
+    };
+
+    // Act
+    const raced = await refusal(world.service.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' }));
+
+    // Assert
+    should(raced.code).equal('taken_over');
+    should(world.browser.acts).deepEqual([]);
+  });
+
+  it('should stop an agent’s wait the moment a person takes the terminal over', async () => {
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    world.terminals.foregrounds.set('000000000001', ['sleep']);
+    world.onSleep.push(async () => {
+      await world.service.control('s1', 'terminal', { action: 'takeover', key: 'dev' }, { by: 'local' }, person);
+    });
+    const stopped = await refusal(world.service.call(agent, { tool: 'terminal.wait', name: 'dev', exit: true }));
+    should(stopped.code).equal('taken_over');
+    should(world.slept).have.length(1);
+  });
+});
+
+describe('AgentToolService — an agent acts only on what it opened, or was handed', () => {
+  it('should refuse the agent a terminal and a page a person opened, and say how to get one', async () => {
+    // Arrange — the person's own shell, in the agent's session (say, for sudo), and their own page.
+    const world = agentToolWorld();
+    await world.service.call(person, { tool: 'terminal.open', name: 'mine' });
+    await world.terminals.create('s1', {});
+    await world.service.call(person, { tool: 'browser.open', name: 'bank' });
+
+    // Act
+    const read = await refusal(world.service.call(agent, { tool: 'terminal.read', name: 'mine' }));
+    const typed = await refusal(world.service.call(agent, { tool: 'terminal.send', name: 'mine', text: 'id' }));
+    const unrecorded = await refusal(world.service.call(agent, { tool: 'terminal.read', name: '000000000002' }));
+    const page = await refusal(world.service.call(agent, { tool: 'browser.screenshot', name: 'bank' }));
+    const terminals = await world.service.call(agent, { tool: 'terminal.list' });
+    const pages = await world.service.call(person, { tool: 'browser.list' });
+
+    // Assert
+    should(read).match({
+      code: 'forbidden',
+      message:
+        "%terminal:mine is a person's, not yours: you may use it only if they hand it to you. Ask them, or open your own.",
+    });
+    should([typed.code, unrecorded.code, page.code]).deepEqual(['forbidden', 'forbidden', 'forbidden']);
+    should(world.terminals.typed.size).equal(0);
+    should(world.browser.acts).deepEqual([]);
+    should(terminals.summary).equal('2 terminals: %terminal:mine (not yours), %terminal:000000000002 (not yours).');
+    should(terminals.surfaces?.map(surface => surface.available)).deepEqual([false, false]);
+    // A person's own listing carries no availability: it is all theirs.
+    should(pages.surfaces?.[0]).not.have.property('available');
+  });
+
+  it('should let the agent use a surface a person handed to it, once, recorded and journaled', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(person, { tool: 'terminal.open', name: 'mine' });
+    await world.service.call(person, { tool: 'browser.open', name: 'bank' });
+
+    // Act
+    const view = await world.service.control(
+      's1',
+      'terminal',
+      { action: 'handover', key: 'mine' },
+      { by: 'local' },
+      person,
+    );
+    await world.service.control('s1', 'terminal', { action: 'handover', key: 'mine' }, { by: 'local' }, person);
+    await world.service.control('s1', 'browser', { action: 'handover', key: 'bank' }, { by: 'local' }, person);
+    const sent = await world.service.call(agent, { tool: 'terminal.send', name: 'mine', text: 'ls' });
+    const shot = await world.service.call(agent, { tool: 'browser.screenshot', name: 'bank' });
+    const listed = await world.service.call(agent, { tool: 'terminal.list' });
+
+    // Assert
+    should(view.handed).deepEqual([
+      { surface: 'terminal', id: '000000000001', name: 'mine', by: { by: 'local' }, at: '2026-10-16T10:00:00.000Z' },
+    ]);
+    should(sent.summary).equal('Sent 2 characters to %terminal:mine.');
+    should(shot.screenshotBase64).equal('iVBORw0KGgo=');
+    should(listed.surfaces?.[0]?.available).be.true();
+    should(world.events.published.filter(event => event.type === 'surface.handed')).have.length(2);
+    should(world.audit.entries.filter(entry => entry.detail?.action === 'handover')).have.length(3);
+  });
+});
+
+describe('AgentToolService — takeovers and hand-overs outlive a restart', () => {
+  it('should rebuild them from the session journal the first time the session is asked about', async () => {
+    // Arrange — a previous daemon run took `dev` over, took and handed back `old`, and handed `mine` on.
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    await world.service.call(person, { tool: 'terminal.open', name: 'mine' });
+    const fresh = agentToolWorld();
+    fresh.terminals.create = world.terminals.create.bind(world.terminals);
+    fresh.terminals.list = world.terminals.list.bind(world.terminals);
+    fresh.terminals.write = world.terminals.write.bind(world.terminals);
+    fresh.events.earlier.set('s1', [
+      { type: 'surface.takeover', data: { surface: 'terminal', id: '000000000001', by: { by: 'local' }, since: 'x' } },
+      {
+        type: 'surface.takeover',
+        data: {
+          surface: 'terminal',
+          id: '000000000001',
+          name: 'dev',
+          by: { by: 'local' },
+          since: '2026-10-16T09:00:00.000Z',
+        },
+      },
+      {
+        type: 'surface.takeover',
+        data: { surface: 'terminal', id: 'abc', by: { by: 'local' }, since: '2026-10-16T09:00:00.000Z' },
+      },
+      { type: 'surface.handback', data: { surface: 'terminal', id: 'abc', at: '2026-10-16T09:01:00.000Z' } },
+      { type: 'surface.handback', data: { id: 'abc' } },
+      {
+        type: 'surface.handed',
+        data: { surface: 'terminal', id: '000000000002', by: { by: 'local' }, at: '2026-10-16T09:02:00.000Z' },
+      },
+      { type: 'surface.handed', data: 'nonsense' },
+      { type: 'surface.driving', data: {} },
+    ]);
+    fresh.events.unreadable = 1;
+
+    // Act — the first read of the journal fails and is retried, never remembered as empty.
+    const unreadable = await fresh.service
+      .call(agent, { tool: 'terminal.send', name: 'dev', text: 'ls' })
+      .catch((error: unknown) => error);
+    const held = await refusal(fresh.service.call(agent, { tool: 'terminal.send', name: 'dev', text: 'ls' }));
+    const handed = await fresh.service.call(agent, { tool: 'terminal.send', name: 'mine', text: 'ls' });
+    const view = await fresh.service.controlView('s1', 'terminal');
+
+    // Assert
+    should((unreadable as Error).message).equal('the journal could not be read');
+    should(held.code).equal('taken_over');
+    should(handed.summary).equal('Sent 2 characters to %terminal:mine.');
+    should(view.takeovers.map(takeover => takeover.id)).deepEqual(['000000000001']);
+    should(fresh.events.reads).equal(2);
   });
 });
