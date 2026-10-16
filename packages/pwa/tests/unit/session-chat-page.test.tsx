@@ -281,6 +281,28 @@ describe('SessionChatPage', () => {
     run(() => page.unmount());
   });
 
+  test('a send returns the transcript to the tail and still refreshes the page', () => {
+    let refreshed = 0;
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[{ id: 'one', kind: 'assistant', label: 'Assistant', text: 'The daemon answered.' }]}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    expect(page.root.findByType(Transcript).props.pinSignal).toBe(0);
+    run(() => page.root.findByType(Composer).props.onSent());
+    expect(page.root.findByType(Transcript).props.pinSignal).toBe(1);
+    expect(refreshed).toBe(1);
+    run(() => page.unmount());
+  });
+
   test('mounts runtime controls only when the paired client can invoke the runtime route', () => {
     const next = sessionView('shared');
     const runtimeClient: SessionChatClient = {
