@@ -1323,19 +1323,24 @@ export class RelayLink {
    * over-budget or backed-up frame is DROPPED and nothing is lost but latency. An event is text and a
    * unique journal record, so it may be neither dropped nor split, and the stream closes instead —
    * `1009` when the single frame is too large for a record, `1013` when the viewer has fallen behind.
+   *
+   * A DROPPED FRAME ANSWERS `0`, the transport convention every producer here reads: `0` is "not
+   * taken", a negative number is "the peer is gone". Answering the frame's size instead told a
+   * producer the viewer had it, so one that skips a redraw the viewer already holds would never resend
+   * a picture that was in fact thrown away.
    */
   #sendStream(session: LinkSession, frame: string | Uint8Array): number | undefined {
     if (session.phase !== 'streaming') return -1;
     const droppable = typeof frame !== 'string';
     const size = droppable ? frame.byteLength : frame.length;
     if (this.#buffered(session) > RELAY_STREAM_MAX_BUFFERED_BYTES) {
-      if (droppable) return size;
+      if (droppable) return 0;
       this.#closeStream(session, RELAY_STREAM_CLOSES.slowReader.code, RELAY_STREAM_CLOSES.slowReader.reason);
       return -1;
     }
     const message = tunnelDataMessage(frame);
     if (message === null) {
-      if (droppable) return size;
+      if (droppable) return 0;
       this.#closeStream(session, RELAY_STREAM_CLOSES.oversize.code, RELAY_STREAM_CLOSES.oversize.reason);
       return -1;
     }
