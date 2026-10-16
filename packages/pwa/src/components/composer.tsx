@@ -29,7 +29,6 @@ import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx
 import {
   type ComposerAttentionItem,
   type ComposerSkillsCatalog,
-  type ComposerTaskSummary,
   createComposerAutocompleteProviders,
 } from './composer-autocomplete-providers.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
@@ -61,8 +60,6 @@ export interface ComposerProps {
   readonly dictationRecognition?: BrowserRecognitionProvider;
   /** One already-read daemon fleet slice, shared with transcript references. */
   readonly autocompleteSessions?: readonly SessionView[];
-  /** The session's already-read task summaries, shared with reference proof. */
-  readonly autocompleteTasks?: readonly ComposerTaskSummary[];
   /** The session's unresolved Attention items, shared with reference proof. */
   readonly autocompleteAttention?: readonly ComposerAttentionItem[];
   /** The session's already-read skills catalog, shared with reference proof. */
@@ -267,7 +264,6 @@ const hasFiles = (transfer: Pick<DataTransfer, 'types'> | null): boolean =>
 /** Stable empties, so an unsettled family is a getter that answers rather than a
  *  getter that is missing — and never a new array identity per render. */
 const EMPTY_SESSIONS: readonly SessionView[] = [];
-const EMPTY_TASKS: readonly ComposerTaskSummary[] = [];
 const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
 
 /** The composer's own name for a Vim mode, in words rather than in colour. */
@@ -311,7 +307,6 @@ export function Composer({
   dictationSettings,
   dictationRecognition,
   autocompleteSessions,
-  autocompleteTasks,
   autocompleteAttention,
   autocompleteSkills,
   autocompleteReady,
@@ -366,20 +361,17 @@ export function Composer({
   // supplies none is a standalone composer and keeps the daemon-backed defaults.
   const hosted =
     autocompleteSessions !== undefined ||
-    autocompleteTasks !== undefined ||
     autocompleteAttention !== undefined ||
     autocompleteSkills !== undefined ||
     autocompleteReady !== undefined;
   const hostRef = useRef({
     sessions: autocompleteSessions,
-    tasks: autocompleteTasks,
     attention: autocompleteAttention,
     skills: autocompleteSkills,
     ready: autocompleteReady,
   });
   hostRef.current = {
     sessions: autocompleteSessions,
-    tasks: autocompleteTasks,
     attention: autocompleteAttention,
     skills: autocompleteSkills,
     ready: autocompleteReady,
@@ -410,10 +402,8 @@ export function Composer({
         ...(hosted
           ? {
               getSessions: () => hostRef.current.sessions ?? EMPTY_SESSIONS,
-              getTasks: () => hostRef.current.tasks ?? EMPTY_TASKS,
               getAttentionItems: () => hostRef.current.attention ?? EMPTY_ATTENTION,
               getSkills: () => hostRef.current.skills,
-              waitForTasks: hostWarmup,
               waitForAttentionItems: hostWarmup,
               waitForSkills: hostWarmup,
             }
