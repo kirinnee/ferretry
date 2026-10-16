@@ -95,7 +95,6 @@ import { SessionTaskKanban, SessionTaskList } from '../src/components/session-ta
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
-import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
@@ -183,6 +182,7 @@ import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
 import { type WardenClientFactory, WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
+import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
 import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import { useLayoutMode } from '../src/hooks/use-layout-mode.ts';
@@ -267,6 +267,7 @@ import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
+import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -7621,6 +7622,7 @@ if (host) {
   const machineSetupHarness = new URLSearchParams(window.location.search).get('machine-setup');
   const appChromeHarness = new URLSearchParams(window.location.search).get('app-chrome');
   const mcpFrame = mcpSignInFrame(window.location.search);
+  const pairFromMenu = isPairFromMenuPage(window.location.search);
   createRoot(host).render(
     // The harness answers its daemon inside the page, on the plain network, so every surface is handed
     // a client over it; the app itself only ever has the store's session-routed pool.
@@ -7628,6 +7630,8 @@ if (host) {
       <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
         {mcpFrame !== undefined ? (
           <McpSignInFrameHarness frame={mcpFrame} />
+        ) : pairFromMenu ? (
+          <PairFromMenuHarness />
         ) : appChromeHarness !== null ? (
           <AppChromeHarness active={appChromeHarness} />
         ) : machineSetupHarness !== null ? (
