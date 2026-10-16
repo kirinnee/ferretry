@@ -42,6 +42,7 @@ import {
   codexProviderModelArgs,
   parseCloudCredential,
 } from './environment.ts';
+import { credentialHalf } from './halves.ts';
 import type { Credential } from './schema.ts';
 
 /** The directory, under the fleet root, that holds every `store: ferretry` credential. */
@@ -166,13 +167,17 @@ export function claudeStorageDirectory(secureStorage: string, userHome: string):
   return (secureStorage.length > 0 ? secureStorage : join(userHome, '.claude')).normalize('NFC');
 }
 
-/** Where a credential is kept, and what every runtime on it is given to reach it. */
+/**
+ * Where a credential is kept, and what every runtime on it is given to reach it. `harness` picks the
+ * half of an environment login that drives both CLIs (`./halves.ts`); left out, it is the login's own.
+ */
 export function resolveCredentialStore(
   id: string,
   credential: Credential,
   paths: CredentialStorePaths,
+  harness: HarnessKind = credential.harness,
 ): CredentialStoreResolution {
-  if (credential.store === 'environment') return environmentResolution(credential, paths.userHome);
+  if (credential.store === 'environment') return environmentResolution(credential, harness, paths.userHome);
   const owned = credential.store === 'ferretry' ? ferretryCredentialDirectory(paths.fleetRoot, id) : undefined;
   if (credential.harness === 'claude') {
     const secureStorage = owned ?? HOST_CLAUDE_SECURE_STORAGE;
@@ -231,23 +236,30 @@ export function codexCredentialLink(
   return { path: join(runtimeHome, CODEX_CREDENTIAL_FILE), target: resolution.canonicalFile };
 }
 
-/** An environment credential, resolved: its variables, its cloud reference's variable, its Codex flags. */
-function environmentResolution(credential: Credential, userHome: string): EnvironmentStoreResolution {
-  const own = credential.env ?? {};
+/**
+ * An environment credential, resolved for one CLI: that half's variables, its cloud reference's
+ * variable, its Codex flags. A CLI the login does not drive gets no variables — the runtime that asked
+ * was refused by the schema, so only a hand-built model reaches that.
+ */
+function environmentResolution(
+  credential: Credential,
+  harness: HarnessKind,
+  userHome: string,
+): EnvironmentStoreResolution {
+  const half = credentialHalf(credential, harness);
+  const own = half?.env ?? {};
+  const codexProvider = half?.codexProvider;
   const reference =
     credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
   const env = { ...own, ...(reference === undefined ? {} : cloudCredentialEnvironment(reference, userHome)) };
-  const provider =
-    credential.codexProvider === undefined ? undefined : codexProviderArgs(credential.codexProvider, own);
+  const provider = codexProvider === undefined ? undefined : codexProviderArgs(codexProvider, own);
   return {
-    harness: credential.harness,
+    harness,
     store: 'environment',
     env,
     ...(provider !== undefined && 'args' in provider ? { args: provider.args } : {}),
     ...(provider !== undefined && 'problem' in provider ? { problem: provider.problem } : {}),
-    ...(credential.codexProvider?.model === undefined
-      ? {}
-      : { modelArgs: codexProviderModelArgs(credential.codexProvider.model) }),
+    ...(codexProvider?.model === undefined ? {} : { modelArgs: codexProviderModelArgs(codexProvider.model) }),
   };
 }
 

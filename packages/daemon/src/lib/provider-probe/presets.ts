@@ -5,7 +5,14 @@
  * A preset is never a secret and names none by value — only the NAME a secret is suggested to be kept
  * under — so the whole catalogue may travel to any caller with `fleet.use`.
  */
-import { builtInPresets, type PresetTest, type ProviderPreset, presetCatalog } from '@ferretry/fleet';
+import {
+  builtInPresets,
+  type HarnessKind,
+  type PresetTest,
+  type ProviderPreset,
+  presetCatalog,
+  presetHarnesses,
+} from '@ferretry/fleet';
 import type {
   FleetCredentialAct,
   FleetCredentialTestAct,
@@ -30,9 +37,44 @@ export function presetTestAct(test: PresetTest): FleetCredentialTestAct {
   }
 }
 
+/** Whether a preset declares no detection clue: it is never offered as a detection. */
+const isEmptyDetect = (preset: ProviderPreset): boolean =>
+  preset.detect.hosts.length + preset.detect.variables.length + preset.detect.keyPrefixes.length === 0;
+
 /** Whether a preset may add a login here. */
 const offered = (preset: ProviderPreset): FleetCredentialAct =>
   preset.unavailable === undefined ? { available: true } : { available: false, reason: preset.unavailable };
+
+/** The halves that set a variable, said only for a preset a login from which drives both CLIs. */
+function variableHalves(preset: ProviderPreset, name: string): { harnesses?: HarnessKind[] } {
+  const usable = presetHarnesses(preset);
+  if (usable.length < 2) return {};
+  return { harnesses: usable.filter(harness => preset.halves[harness]?.env[name] !== undefined) };
+}
+
+const HALF_ORDER: readonly HarnessKind[] = ['claude', 'codex'];
+
+/**
+ * Each half and whether it is offered: a half is offered when the preset is and the half itself says no
+ * reason it cannot be.
+ */
+function halvesView(preset: ProviderPreset): NonNullable<FleetProviderPresetView['halves']> {
+  const usable = presetHarnesses(preset);
+  return HALF_ORDER.flatMap(harness => {
+    const half = preset.halves[harness];
+    if (half === undefined) return [];
+    return [
+      {
+        harness,
+        offered: usable.includes(harness)
+          ? { available: true as const }
+          : { available: false as const, reason: half.unavailable ?? (preset.unavailable as string) },
+        ...(half.docs === undefined ? {} : { docs: half.docs }),
+        models: [...half.models],
+      },
+    ];
+  });
+}
 
 /** One preset as the wire carries it. */
 export function presetView(preset: ProviderPreset): FleetProviderPresetView {
@@ -51,6 +93,7 @@ export function presetView(preset: ProviderPreset): FleetProviderPresetView {
       required: variable.required,
       allowEmpty: variable.allowEmpty,
       ...(variable.description === undefined ? {} : { description: variable.description }),
+      ...variableHalves(preset, name),
     })),
     ...(preset.cloudCredential === undefined
       ? {}
@@ -61,6 +104,8 @@ export function presetView(preset: ProviderPreset): FleetProviderPresetView {
     unverified: [...preset.unverified],
     verified: preset.verified,
     offered: offered(preset),
+    halves: halvesView(preset),
+    ...(isEmptyDetect(preset) ? {} : { detect: { ...preset.detect } }),
   };
 }
 

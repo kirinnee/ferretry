@@ -229,6 +229,51 @@ describe('planProviderProbe', () => {
   });
 });
 
+describe('planProviderProbe of a login that drives both CLIs, or one half of such a preset', () => {
+  it('should find the one key in whichever half carries it', () => {
+    // Act
+    const dual = authorized(
+      planProviderProbe(
+        preset('deepseek'),
+        login({
+          harness: 'codex',
+          claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:DEEPSEEK_API_KEY}' } },
+          codex: { env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' }, codexProvider: { id: 'ollama' } },
+        }),
+      ),
+    );
+    const codexOnly = authorized(
+      planProviderProbe(
+        preset('deepseek'),
+        login({
+          harness: 'codex',
+          env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' },
+          codexProvider: { id: 'ollama' },
+        }),
+      ),
+    );
+
+    // Assert
+    should([dual.secretName, dual.request.url]).deepEqual(['DEEPSEEK_API_KEY', 'https://api.deepseek.com/models']);
+    should([codexOnly.secretName, codexOnly.request.url]).deepEqual([
+      'DEEPSEEK_API_KEY',
+      'https://api.deepseek.com/models',
+    ]);
+  });
+
+  it('should not take a different secret for the key', () => {
+    should(
+      planProviderProbe(
+        preset('deepseek'),
+        login({ harness: 'codex', env: { DEEPSEEK_API_KEY: '${secret:OTHER}' }, codexProvider: { id: 'ollama' } }),
+      ),
+    ).deepEqual({
+      code: 'not_testable',
+      reason: 'This login has no ANTHROPIC_AUTH_TOKEN, so there is no key to Test.',
+    });
+  });
+});
+
 describe('loginHosts', () => {
   it('should list the hosts of the URL-valued plain values only', () => {
     should([

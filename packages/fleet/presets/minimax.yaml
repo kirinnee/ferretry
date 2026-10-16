@@ -1,23 +1,35 @@
-# Claude Code on MiniMax's Token Plan, through its Anthropic-compatible endpoint.
+# MiniMax's Token Plan for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: MiniMax (Token Plan)
-harness: claude
-summary: Claude Code on MiniMax models with a Token Plan subscription key (a pay-as-you-go key is a different key).
+summary: Claude Code and Codex on MiniMax models with one Token Plan subscription key (a pay-as-you-go key is a different key). Codex 0.146.0 or newer is recommended.
 docs: https://platform.minimax.io/docs/api-reference/text-anthropic-api.md
 verified: '2026-10-16'
 unverified:
   - MiniMax publishes no mapping of its models onto Claude Code's opus, sonnet and haiku; the ones filled in are a suggestion.
-env:
-  ANTHROPIC_BASE_URL:
-    value: https://api.minimax.io/anthropic
-  ANTHROPIC_API_KEY:
-    secretName: MINIMAX_API_KEY
-    description: the Token Plan key, sent as x-api-key as MiniMax documents
-  ANTHROPIC_MODEL:
-    value: MiniMax-M3
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: MiniMax-M3.1-Flash-Preview
-    required: false
-models: [MiniMax-M3, MiniMax-M3.1-Flash-Preview, MiniMax-M2.7]
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://api.minimax.io/anthropic
+    ANTHROPIC_API_KEY:
+      secretName: MINIMAX_API_KEY
+      description: the Token Plan key, sent as x-api-key as MiniMax documents
+    ANTHROPIC_MODEL:
+      value: MiniMax-M3
+    ANTHROPIC_DEFAULT_HAIKU_MODEL:
+      value: MiniMax-M3.1-Flash-Preview
+      required: false
+  models: [MiniMax-M3, MiniMax-M3.1-Flash-Preview, MiniMax-M2.7]
+codex:
+  docs: https://platform.minimax.io/docs/token-plan/codex.md
+  env:
+    MINIMAX_API_KEY:
+      secretName: MINIMAX_API_KEY
+  codexProvider:
+    id: minimax
+    name: MiniMax
+    baseUrl: https://api.minimax.io/v1
+    keyVariable: MINIMAX_API_KEY
+    model: MiniMax-M3.1-Flash-Preview
+  models: [MiniMax-M3.1-Flash-Preview, MiniMax-M3]
 test:
   kind: request
   url: https://www.minimax.io/v1/token_plan/remains
@@ -27,3 +39,6 @@ quota:
   source: minimax-token-plan
   note: The Token Plan's 5-hour and weekly windows. MiniMax reports what REMAINS, and Ferretry turns it into what is used.
 pricing: minimax
+detect:
+  hosts: [api.minimax.io, api.minimaxi.com]
+  variables: [MINIMAX_*]

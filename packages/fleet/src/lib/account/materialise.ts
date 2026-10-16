@@ -64,6 +64,7 @@ import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.t
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
 import { HARNESS_DISPLAY_NAMES, type ResolvedProfile, resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
+import { runtimeHarness } from './scope.ts';
 
 const DIRECTORY_MODE = 0o700;
 const EXECUTABLE_MODE = 0o755;
@@ -252,7 +253,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // The schema refused both; only a hand-built model could get here.
     if (runtime === undefined || credential === undefined) continue;
     const entry = ids.runtimes[name] as RuntimeIds['runtimes'][string];
-    const harness = credential.harness;
+    const harness = runtimeHarness(model, runtime) as HarnessKind;
     const home =
       entry.home === undefined
         ? joinPath(layout.homesDirectory, entry.id)
@@ -266,7 +267,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const wrapper = joinPath(layout.binDirectory, name);
     const reasons: string[] = [];
 
-    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths);
+    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness);
     if ('unavailable' in store)
       reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
     if (store.store === 'environment' && store.problem !== undefined) {
