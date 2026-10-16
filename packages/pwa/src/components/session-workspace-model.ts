@@ -1,6 +1,7 @@
 import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
 
 import type { TranscriptEntry } from '../lib/session-screens.ts';
+import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
 import { fieldHash } from './session-chat-model.ts';
 
@@ -39,13 +40,21 @@ const recordKind = (record: LogRecord): TranscriptEntry['kind'] => {
   return 'notice';
 };
 
+/** A tool call or its result — grouped into a run, never shown or hidden on its own. */
+const isToolRecord = (record: LogRecord): boolean => record.kind === 'tool-call' || record.kind === 'tool-result';
+
 /**
- * WHICH MACHINE RECORDS ARE BOOKKEEPING. Reasoning, token usage, turn markers, settings echoes and
- * attachment stubs are evidence a reader occasionally wants and never reads first, so they are kept
- * — behind "Show details" — rather than dropped. An `error` is never bookkeeping: a failure that hid
- * behind a toggle would be a bug, not tidiness.
+ * WHICH MACHINE RECORDS THE CONVERSATION LEAVES OUT. Reasoning, token usage, turn markers, settings
+ * echoes and attachment stubs are bookkeeping, and the transcript shows none of them — there is no
+ * "Show details" fold any more. An `error` is never bookkeeping: a failure that vanished would be a
+ * bug, not tidiness.
+ *
+ * Dropping them HERE, before tool runs are grouped, is what keeps a run whole. Claude writes a usage
+ * record after every assistant record, so a call and its result were always separated by one; a run
+ * split there read as `2 tools · Bash, Edit` followed by `2 tools · result ×2`.
  */
-const isDetailRecord = (record: LogRecord): boolean => record.kind !== 'error' && recordKind(record) === 'notice';
+const isHiddenRecord = (record: LogRecord): boolean =>
+  !isToolRecord(record) && record.kind !== 'error' && recordKind(record) === 'notice';
 
 const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
   const text = record.lines.join('\n');
@@ -55,7 +64,6 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
     kind: recordKind(record),
     text: text || title(record.kind),
     label: recordLabel(record),
-    ...(isDetailRecord(record) ? { detail: true } : {}),
     ...(record.kind === 'error' ? { alert: true } : {}),
   };
 };
@@ -78,9 +86,33 @@ const toolUse = (text: string): ToolUseData => {
 const toolResult = (text: string): ToolResultData =>
   text.startsWith('error ') ? { text: text.slice('error '.length), isError: true } : { text };
 
+const DAY_MS = 86_400_000;
+
+/**
+ * The instant a record's `HH:MM:SS` clock names, or nothing.
+ *
+ * The daemon prints only the UTC wall clock, so the date is inferred: the most recent such instant
+ * not after `now`. That is exact for anything under a day old — which is every tool still running —
+ * and a record with no clock gets no instant rather than a made-up one, because a wrong elapsed time
+ * is worse than none.
+ */
+const recordInstant = (clock: string | undefined, now: number): string | undefined => {
+  if (clock === undefined) return undefined;
+  const [hours, minutes, seconds] = clock.split(':').map(Number) as [number, number, number];
+  const today = new Date(now);
+  const at = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), hours, minutes, seconds);
+  return new Date(at > now ? at - DAY_MS : at).toISOString();
+};
+
 interface ToolRun {
   readonly index: number;
-  readonly calls: { key: string; use: ToolUseData; result?: ToolResultData; orphanResult?: boolean }[];
+  readonly calls: {
+    key: string;
+    use: ToolUseData;
+    result?: ToolResultData;
+    ts?: string;
+    orphanResult?: boolean;
+  }[];
 }
 
 /**
@@ -97,16 +129,30 @@ const toolEntry = (run: ToolRun): TranscriptEntry => ({
   tools: run.calls,
 });
 
-const projectRecords = (records: readonly LogRecord[]): readonly TranscriptEntry[] => {
+/** A slash command as one compact row: `/model opus[1m] → Set model to …`. */
+const commandEntry = (id: string, command: SlashCommand): TranscriptEntry => ({
+  id,
+  kind: 'command',
+  text: [command.name, command.args, command.output].filter(Boolean).join(' '),
+  command,
+});
+
+const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
+  const flush = (): void => {
+    if (run !== null) entries.push(toolEntry(run));
+    run = null;
+  };
   records.forEach((record, index) => {
+    if (isHiddenRecord(record)) return;
     const text = record.lines.join('\n');
-    if (record.kind === 'tool-call' || record.kind === 'tool-result') {
+    if (isToolRecord(record)) {
       run ??= { index, calls: [] };
       const key = `log:${index}:${fieldHash(`${record.kind}|${text}`)}`;
       if (record.kind === 'tool-call') {
-        run.calls.push({ key, use: toolUse(text) });
+        const ts = recordInstant(record.clock, now);
+        run.calls.push({ key, use: toolUse(text), ...(ts === undefined ? {} : { ts }) });
         return;
       }
       const waiting = run.calls.find(call => call.result === undefined && call.orphanResult !== true);
@@ -115,11 +161,30 @@ const projectRecords = (records: readonly LogRecord[]): readonly TranscriptEntry
       else waiting.result = toolResult(text);
       return;
     }
-    if (run !== null) entries.push(toolEntry(run));
-    run = null;
+    const command = recordKind(record) === 'user' ? parseSlashCommandText(text) : null;
+    // The caveat is an instruction to the model, never something anybody said, so it is dropped
+    // outright — and, like bookkeeping, it does not end a tool run.
+    if (command?.kind === 'caveat') return;
+    flush();
+    const id = `log:${index}:${fieldHash(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`)}`;
+    if (command?.kind === 'command') {
+      entries.push(commandEntry(id, command.command));
+      return;
+    }
+    if (command?.kind === 'output') {
+      // Claude writes a command's output as its own record straight after the command. It joins
+      // that row; output whose command fell outside the loaded window still gets a row of its own.
+      const last = entries.at(-1);
+      if (last?.command !== undefined && last.command.output === undefined && last.command.tone === 'ok') {
+        entries[entries.length - 1] = commandEntry(last.id, withCommandOutput(last.command, command));
+        return;
+      }
+      entries.push(commandEntry(id, withCommandOutput({ name: '', tone: 'ok' }, command)));
+      return;
+    }
     entries.push(entryFor(record, index));
   });
-  if (run !== null) entries.push(toolEntry(run));
+  flush();
   return entries;
 };
 
@@ -130,11 +195,13 @@ const projectRecords = (records: readonly LogRecord[]): readonly TranscriptEntry
  * compatibility contract this first workspace slice consumes. The daemon's
  * paged event route is mounted, but structured history/live-event projection
  * remains an explicit integration gap.
+ *
+ * Text before the first record header is not a record at all; like every other piece of daemon
+ * bookkeeping it is left out of the conversation. `now` dates the records' wall clocks.
  */
-export const transcriptEntriesFromLog = (text: string): readonly TranscriptEntry[] => {
+export const transcriptEntriesFromLog = (text: string, now: number = Date.now()): readonly TranscriptEntry[] => {
   if (text.trim() === '') return [];
   const records: LogRecord[] = [];
-  const preamble: string[] = [];
   let current: { clock?: string; role: LogRecord['role']; kind: string; lines: string[] } | null = null;
 
   const flush = (): void => {
@@ -155,24 +222,11 @@ export const transcriptEntriesFromLog = (text: string): readonly TranscriptEntry
       };
     } else if (current !== null) {
       current.lines.push(line.startsWith('    ') ? line.slice(4) : line);
-    } else if (line !== '') {
-      preamble.push(line);
     }
   }
   flush();
 
-  const entries = projectRecords(records);
-  if (preamble.length === 0) return entries;
-  const raw = preamble.join('\n');
-  return [
-    {
-      id: `log:preamble:${fieldHash(raw)}`,
-      kind: 'notice',
-      text: raw,
-      label: 'Transcript',
-    },
-    ...entries,
-  ];
+  return projectRecords(records, now);
 };
 
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {

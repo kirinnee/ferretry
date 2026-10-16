@@ -6,7 +6,7 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { LiveMarkdownEditor } from '../../src/components/live-markdown-editor.tsx';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
-import { foldsIntoDetails, type TranscriptEntry } from '../../src/lib/session-screens.ts';
+import { hiddenFromTranscript, type TranscriptEntry } from '../../src/lib/session-screens.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
@@ -306,22 +306,21 @@ describe('transcript labels and folding', () => {
     expect(withAgentName({ id: 'u', kind: 'user', text: 'x' }, 'Hadi').label).toBeUndefined();
   });
 
-  test('folds every notice but an alert', () => {
-    expect(foldsIntoDetails({ id: 'n', kind: 'notice', text: 'Browser automation stays unavailable' })).toBe(true);
-    expect(foldsIntoDetails({ id: 'e', kind: 'notice', text: 'E1: broke', alert: true })).toBe(false);
-    expect(foldsIntoDetails({ id: 'a', kind: 'assistant', text: 'x' })).toBe(false);
+  test('hides every notice but an alert', () => {
+    expect(hiddenFromTranscript({ id: 'n', kind: 'notice', text: 'Browser automation stays unavailable' })).toBe(true);
+    expect(hiddenFromTranscript({ id: 'e', kind: 'notice', text: 'E1: broke', alert: true })).toBe(false);
+    expect(hiddenFromTranscript({ id: 'a', kind: 'assistant', text: 'x' })).toBe(false);
   });
 
-  test('Show details opens every fold by default, and a toggle still closes one', () => {
+  test('renders the agent name and no "Show details" toggle at all', () => {
     const entries: readonly TranscriptEntry[] = [
       { id: 'a', kind: 'assistant', text: 'hello', label: 'Assistant' },
       { id: 'n', kind: 'notice', text: 'note' },
     ];
-    const view = render(<Transcript agentName="Hadi" daemonId="d" detailsShown entries={entries} sessionId="s" />);
-    const toggle = () => view.root.findByProps({ className: 'fy-transcript-details-toggle' });
-    expect(toggle().props['aria-expanded']).toBe(true);
-    expect(JSON.stringify(view.toJSON())).toContain('Hadi');
-    run(() => toggle().props.onClick());
-    expect(toggle().props['aria-expanded']).toBe(false);
+    const view = render(<Transcript agentName="Hadi" daemonId="d" entries={entries} sessionId="s" />);
+    const json = JSON.stringify(view.toJSON());
+    expect(json).toContain('Hadi');
+    expect(json).not.toContain('note');
+    expect(json).not.toContain('Show details');
   });
 });

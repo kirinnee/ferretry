@@ -103,8 +103,6 @@ export interface DeviceControls {
   readonly composerEnterKey: ComposerEnterKeyPreference | null;
   /** Return on a phone or other touch-first device. null = the default, return starts a new line. */
   readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
-  /** Whether the transcript opens its folded bookkeeping (reasoning, usage, notices) by default. */
-  readonly showDetails: boolean;
   /** Reduced motion: follow the operating system, or always reduce it on this device. */
   readonly motion: MotionPreference;
   readonly sidebarCollapsed: boolean;
@@ -148,7 +146,6 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   chatWidth: 'readable',
   composerEnterKey: null,
   composerPhoneEnterKey: null,
-  showDetails: false,
   motion: 'system',
   sidebarCollapsed: false,
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
@@ -252,7 +249,6 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.composerPhoneEnterKey === 'send' || fields.composerPhoneEnterKey === 'newline'
         ? fields.composerPhoneEnterKey
         : null,
-    showDetails: readFlag(fields.showDetails, DEFAULT_DEVICE_CONTROLS.showDetails),
     motion: fields.motion === 'reduced' ? 'reduced' : 'system',
   };
 };

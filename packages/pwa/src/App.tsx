@@ -1090,7 +1090,6 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
-          showDetails={controls.showDetails}
           composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
