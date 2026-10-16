@@ -12,7 +12,7 @@ import {
   type UsageFeedDocument,
   usageRoutes,
 } from '../../../src/lib/api/index.ts';
-import type { UsageFeedPort } from '../../../src/lib/usage/index.ts';
+import { type UsageFeedPort, WatchedUsageFeed } from '../../../src/lib/usage/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { fixedClock, jsonBody, request } from './support.ts';
 
@@ -301,5 +301,33 @@ describe('the assembled daemon surface', () => {
     // Assert
     should(response.status).equal(200);
     should(response.body).containEql('ferretry_accounts_total 0');
+  });
+});
+
+describe('usage routes — who is a watcher (docs/provider-quotas.md)', () => {
+  it('should let only /v1/usage ask for provider quotas; the scraped /usage and /metrics read the cache', async () => {
+    // Arrange
+    let watches = 0;
+    const feed = new WatchedUsageFeed(new StubFeed([{ agent: 'glm', ok: true }], NOW), () => ({
+      watch: async () => {
+        watches += 1;
+      },
+      peekAgent: () => undefined,
+    }));
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([...usageRoutes(feed, fixedClock(NOW))]),
+      { admin: 'admin-secret' },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+
+    // Act
+    await dispatcher.dispatch(request({ path: '/usage' }));
+    await dispatcher.dispatch(request({ path: '/metrics' }));
+    const scraped = watches;
+    await dispatcher.dispatch(request({ path: '/v1/usage', headers: { authorization: 'Bearer admin-secret' } }));
+
+    // Assert
+    should(scraped).equal(0);
+    should(watches).equal(1);
   });
 });

@@ -179,3 +179,25 @@ describe('DaemonUsageIndex', () => {
     } satisfies ResolvedQuota);
   });
 });
+
+describe('DaemonUsageIndex — credit-billed logins (docs/provider-quotas.md)', () => {
+  it('carries the money a feed row reports, and counts it as a readout', () => {
+    const index = new DaemonUsageIndex();
+    index.apply(
+      daemonA.daemonId,
+      feed([
+        { agent: 'deepseek', balance: { amount: 12.5, currency: 'USD' } },
+        { agent: 'anthropic', spendUsd: 3.25 },
+      ]),
+    );
+
+    const credit = index.quotaFor(daemonA.daemonId, session('deepseek'));
+    const spend = index.quotaFor(daemonA.daemonId, session('anthropic'));
+
+    should(credit?.balance).eql({ amount: 12.5, currency: 'USD' });
+    should(credit).not.have.property('spendUsd');
+    should(spend?.spendUsd).equal(3.25);
+    should(hasReadout(credit)).be.true();
+    should(hasReadout(spend)).be.true();
+  });
+});

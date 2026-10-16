@@ -19,11 +19,37 @@
  * colour once a window is actually running out.
  */
 
-import type { SessionState } from '@ferretry/protocol';
+import type { ProviderQuotaBalance, SessionState } from '@ferretry/protocol';
 import { cn } from '../lib/class-names.ts';
 
-/** The daemon's per-wrapper quota record, as it rides on session state. */
-export type Quota = NonNullable<SessionState['quota']>;
+/**
+ * The daemon's per-wrapper quota record, as it rides on session state — plus, for an environment
+ * login whose provider bills by credit rather than by window, the money left or this month's
+ * transcript cost (docs/provider-quotas.md).
+ */
+export type Quota = NonNullable<SessionState['quota']> & {
+  readonly balance?: ProviderQuotaBalance;
+  readonly spendUsd?: number;
+};
+
+/** Money as a person reads it: "$12.34", "¥80.00". An unknown currency code is written out. */
+export function formatQuotaMoney(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('en', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
+}
+
+/**
+ * The money line for a credit-billed login with no window: "$12.34 left", else "$3.20 this month".
+ * `null` when neither is known — and then the caller says "unknown", never "$0".
+ */
+export function quotaMoneyText(quota: Pick<Quota, 'balance' | 'spendUsd'> | null | undefined): string | null {
+  if (quota?.balance !== undefined) return `${formatQuotaMoney(quota.balance.amount, quota.balance.currency)} left`;
+  if (quota?.spendUsd !== undefined) return `${formatQuotaMoney(quota.spendUsd, 'USD')} this month`;
+  return null;
+}
 
 /** Humanised time until a window rolls over: "47m", "3h 10m", "2d". */
 export function quotaResetsIn(at: number | undefined, now: number): string | null {
@@ -89,8 +115,17 @@ export function QuotaReadout({ quota, className = '', showUnknown = false, now =
   const five = quota.fiveHourPercent;
   const week = quota.weeklyPercent;
   // At-limit with no percentages is still the most important thing to say, so
-  // it is not folded into the unknown case.
+  // it is not folded into the unknown case. A credit-billed login with no window
+  // says its money instead.
+  const money = quotaMoneyText(quota);
   if (five == null && week == null && quota.atLimit !== true) {
+    if (money !== null) {
+      return (
+        <span className={cn('mono shrink-0 text-muted', className)} title={`account usage: ${money}`}>
+          {money}
+        </span>
+      );
+    }
     return showUnknown ? <Unknown className={className} /> : null;
   }
 

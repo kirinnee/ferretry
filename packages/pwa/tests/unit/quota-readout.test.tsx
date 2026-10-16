@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { type Quota, QuotaReadout, quotaResetsIn } from '../../src/shell/quota-readout.tsx';
+import {
+  formatQuotaMoney,
+  type Quota,
+  QuotaReadout,
+  quotaMoneyText,
+  quotaResetsIn,
+} from '../../src/shell/quota-readout.tsx';
 import { render } from '../support/react.ts';
 
 const NOW = 1_700_000_000_000;
@@ -126,5 +132,25 @@ describe('QuotaReadout', () => {
       render(<QuotaReadout quota={null} showUnknown className="ml-2" now={NOW} />).root.findByType('span').props
         .className,
     ).toBe('mono shrink-0 text-faint ml-2');
+  });
+});
+
+describe('QuotaReadout — credit-billed logins (docs/provider-quotas.md)', () => {
+  it('says the money left, or this month’s cost, when there is no window — never 0%', () => {
+    const balance = render(
+      <QuotaReadout quota={{ balance: { amount: 12.345, currency: 'USD' } } as Quota} now={NOW} />,
+    ).root.findByType('span');
+    expect(balance.props.children).toBe('$12.35 left');
+    expect(balance.props.title).toBe('account usage: $12.35 left');
+
+    const spend = render(<QuotaReadout quota={{ spendUsd: 3.2 } as Quota} now={NOW} />).root.findByType('span');
+    expect(spend.props.children).toBe('$3.20 this month');
+  });
+
+  it('writes out a currency it cannot format', () => {
+    expect(formatQuotaMoney(4, 'ZZZZ')).toBe('4.00 ZZZZ');
+    expect(formatQuotaMoney(80, 'CNY')).toBe('CN¥80.00');
+    expect(quotaMoneyText(null)).toBeNull();
+    expect(quotaMoneyText({})).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
 import { HarnessSchema } from './session-base.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
+import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 
 export type { Harness } from './session-base.ts';
 export { HarnessSchema } from './session-base.ts';
@@ -404,6 +405,10 @@ export const AccountUsageSchema = z.object({
   weeklyPercent: z.number().finite().min(0).max(100).nullable().optional(),
   fiveHourResetAt: NonNegativeFiniteSchema.nullable().optional(),
   weeklyResetAt: NonNegativeFiniteSchema.nullable().optional(),
+  /** An environment login's prepaid credit, when its provider reports one (`lib/usage/provider-quota`). */
+  balance: ProviderQuotaBalanceSchema.optional(),
+  /** Equivalent cost this month from this daemon's transcripts, when no provider endpoint answers. */
+  spendUsd: NonNegativeFiniteSchema.optional(),
 });
 export type AccountUsage = z.infer<typeof AccountUsageSchema>;
 
