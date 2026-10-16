@@ -175,6 +175,18 @@ describe('registerCredentialCommands', () => {
     should(world.out.exitCode).equal(1);
   });
 
+  it('should start a sign-in over only when forced', async () => {
+    // Arrange
+    const world = fakeWorld();
+
+    // Act
+    await runCommand(registerCredentialCommands, world, ['credential', 'signin', 'codex-you']);
+    await runCommand(registerCredentialCommands, world, ['credential', 'signin', 'codex-you', '--force']);
+
+    // Assert
+    should(world.gateway.called('startSignIn').map(call => call.args)).eql([['codex-you'], ['codex-you', 'restart']]);
+  });
+
   it('should sign out and remove only after a yes', async () => {
     const world = fakeWorld({ answers: ['y', 'n'] });
     await runCommand(registerCredentialCommands, world, ['credential', 'signout', 'claude-you']);

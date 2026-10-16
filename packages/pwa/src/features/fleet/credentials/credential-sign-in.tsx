@@ -7,6 +7,11 @@
  * no token while it happens — the harness writes its own login into the one store every runtime on it
  * reads, so one sign-in fixes all of them.
  *
+ * A login has one sign-in at a time. Starting one that is already running — a page that reloaded, a
+ * phone that slept, the same login opened from setup and then from Credentials — picks it up and shows
+ * it again; "Start over" ends it and starts a fresh one. A start after a sign-in failed is a start-over
+ * too, so a leftover Codex sign-in holding the machine's callback port is cleared on the way.
+ *
  * Before a sign-in starts, this is the ordinary change panel ("Sign in to Claude Code"). Once one is running, it is the harness's panel. The
  * live flow is re-read every two seconds only while it waits for the person, because they are acting
  * somewhere this browser cannot see; it stops the moment the flow ends.
@@ -24,6 +29,7 @@ import {
   type CredentialLoginFlow,
   cancelCredentialSignIn,
   readCredentialSignIn,
+  restartCredentialSignIn,
   startCredentialSignIn,
   submitCredentialSignInCode,
   switchCredentialSignInToLink,
@@ -79,6 +85,8 @@ export function CredentialSignIn({
   const [refusal, setRefusal] = useState<string | null>(null);
   /** Codex's sign-in method for the next start. Follows a flow that moved to a link by itself. */
   const [method, setMethod] = useState<HarnessLoginCodexMethod>('device-code');
+  /** The next start follows a sign-in that ended badly, so it starts over rather than picking one up. */
+  const [restartNext, setRestartNext] = useState(false);
   const reported = useRef<string | null>(null);
 
   const finished = useCallback(
@@ -104,22 +112,34 @@ export function CredentialSignIn({
     return () => clearTimeout(timer);
   }, [connection, createClient, finished, flow, pollMs]);
 
-  const start = async (): Promise<void> => {
+  /**
+   * Start this login's sign-in. `over` ends whatever sign-in is running for it first (`running` names
+   * it, when this screen knows it); otherwise one already running is picked up.
+   */
+  const start = async (over: boolean, running?: string): Promise<void> => {
     setRefusal(null);
     setBusy(true);
     try {
       const client = await createClient(connection);
+      const request = {
+        credentialId: credential.id,
+        ...(credential.harness === 'codex' && method === 'link' ? { method } : {}),
+      };
       finished(
-        await startCredentialSignIn(client, {
-          credentialId: credential.id,
-          ...(credential.harness === 'codex' && method === 'link' ? { method } : {}),
-        }),
+        over ? await restartCredentialSignIn(client, request, running) : await startCredentialSignIn(client, request),
       );
+      setRestartNext(false);
     } catch (error) {
       setRefusal(changeRefusalSentence(error));
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Back to the start panel after an ending, so the next start starts over. */
+  const again = (): void => {
+    setRestartNext(true);
+    setFlow(null);
   };
 
   const submit = async (code: string): Promise<void> => {
@@ -193,7 +213,7 @@ export function CredentialSignIn({
           busyLabel="Starting sign-in…"
           refusal={refusal ?? changes.refusal}
           submitLabel={linkStart ? `Sign in to ${name} with a link` : `Sign in to ${name}`}
-          onSubmit={() => void start()}
+          onSubmit={() => void start(restartNext)}
         />
         {credential.harness === 'codex' ? (
           <div data-credential-sign-in-method={method}>
@@ -202,8 +222,7 @@ export function CredentialSignIn({
             </p>
             <Button
               type="button"
-              variant="ghost"
-              className="mt-1"
+              className="mt-2"
               disabled={busy}
               onClick={() => setMethod(linkStart ? 'device-code' : 'link')}
             >
@@ -225,8 +244,9 @@ export function CredentialSignIn({
     busy,
     refusal,
     wording,
-    onStart: () => setFlow(null),
+    onStart: again,
     onCancel: () => void cancel(),
+    ...(waiting(flow) ? { onStartOver: () => void start(true, flow.flowId) } : {}),
   };
   return (
     <div data-credential-sign-in={flow.state}>
@@ -240,7 +260,7 @@ export function CredentialSignIn({
           onUseLink={() => void switchToLink()}
           onStartLink={() => {
             setMethod('link');
-            setFlow(null);
+            again();
           }}
           onSubmitAddress={address => void submit(address)}
         />

@@ -127,9 +127,10 @@ const WALKS_SETTINGS = !(
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, and two are the Security settings block's loosening sentence and out-of-bounds sentence.
  *
- * MACHINES, forty-five per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * MACHINES, forty-eight per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, ten Runtimes and
- * Credentials pages, three Codex sign-in screens (device code, link, finishing), two Add a login steps,
+ * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
+ * its callback port held by another program, finishing), the old pairing a reset left, two Add a login steps,
  * twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps, a component with
  * every badge, two edit forms), and seven other-machine states (offline; the first run that opens by
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
@@ -156,17 +157,17 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 130;
+const SETTINGS_SIDEWAYS_CHECKS = 136;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — forty-five frames (the section itself is measured once
+ * Machines frame, at each viewport — forty-eight frames (the section itself is measured once
  * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
- * machine: 45 + 44. Same tripwire as the number above, for the same reason — a check
+ * machine: 48 + 47. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 89;
+const MACHINES_GEOMETRY_CHECKS = 95;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -1903,7 +1904,7 @@ try {
           // card — Daemons is no longer a section of its own, so this list is where a machine is chosen.
           await settingsBack();
           const listedMachines = await settingsNavigation().locator('[data-settings-machine]').count();
-          if (listedMachines !== 3) fail(`settings many-daemon fixture listed ${listedMachines} machines instead of 3`);
+          if (listedMachines !== 4) fail(`settings many-daemon fixture listed ${listedMachines} machines instead of 4`);
 
           /**
            * One of the machine's connection and security panels — what the Daemons section used to hold —
@@ -2246,6 +2247,17 @@ try {
           await credentialsPanel.locator('[data-credential-sign-in="awaiting-code"]').waitFor({ state: 'visible' });
           await accountShot('credential-sign-in', 'login sign-in link');
           await credentialsPanel.locator('[data-page-back]').click();
+          // A SIGN-IN ALREADY RUNNING is picked up, never an error naming a flow: the second start lands
+          // on the same link, says so, and offers Start over.
+          await credentialsPanel.locator('[data-credential-row="claude-team"]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+          await credentialsPanel.locator('[data-sign-in-resumed]').waitFor({ state: 'visible' });
+          const resumedText = await credentialsPanel.locator('[data-credential-sign-in]').innerText();
+          if (/flow|fy_daemon_/u.test(resumedText)) fail('the picked-up sign-in shows an internal id');
+          await accountShot('credential-sign-in-resumed', 'login sign-in picked up');
+          await credentialsPanel.locator('[data-sign-in-start-over]').click();
+          await credentialsPanel.locator('[data-sign-in-resumed]').waitFor({ state: 'detached' });
+          await credentialsPanel.locator('[data-page-back]').click();
           // CODEX'S TWO SIGN-INS (S2): the device code with its "didn't work?" way out, the link sign-in
           // that asks for the address a phone's browser could not load, and the wait after it is pasted.
           // Each frame starts at the Codex panel, because on a phone its steps sit below the fold.
@@ -2261,6 +2273,15 @@ try {
           await credentialsPanel.locator('[data-codex-login-use-link] button').click();
           await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"]').waitFor({ state: 'visible' });
           await accountShot('codex-link', 'Codex link sign-in', codexPanelToTop);
+          // START OVER with the callback port held by somebody else's program: named, and left alone.
+          await credentialsPanel.locator('[data-sign-in-start-over]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="failed"]').waitFor({ state: 'visible' });
+          await accountShot('codex-port-held', 'Codex callback port held', codexPanelToTop);
+          await credentialsPanel
+            .locator('[data-credential-sign-in="failed"] button:has-text("Start a new sign-in")')
+            .click();
+          await credentialsPanel.locator('[data-credential-sign-in="start"] [data-change-submit]').click();
+          await credentialsPanel.locator('[data-credential-sign-in="awaiting-callback"]').waitFor({ state: 'visible' });
           await credentialsPanel
             .locator('textarea[name="codex-login-address"]')
             .fill('http://localhost:1455/auth/callback?code=harness-preview&state=harness-preview');
@@ -2288,6 +2309,17 @@ try {
           const stopAddLogin = credentialsPanel.locator('[data-stepper-stop]');
           if ((await stopAddLogin.count()) > 0) await stopAddLogin.click();
           await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
+
+          // THE PAIRING A RESET LEFT BEHIND: same name, same address. It is called the old pairing and
+          // offers Remove; the live one keeps its plain name. No fingerprint is shown on either.
+          const oldPairing = await openMachine('harness-daemon-before-reset');
+          await oldPairing.locator('[data-machine-replaced]').waitFor({ state: 'visible' });
+          const oldHeading = await oldPairing.locator('#settings-machine-heading').innerText();
+          if (oldHeading !== 'Studio workstation (old pairing)') fail(`the old pairing reads "${oldHeading}"`);
+          await accountShot('old-pairing', 'old pairing');
+          await openMachine('harness-daemon');
+          const liveHeading = await machinesSurface.locator('#settings-machine-heading').innerText();
+          if (liveHeading !== 'Studio workstation') fail(`the live pairing reads "${liveHeading}"`);
 
           await machinesSurface.locator('[data-machine-tab="profiles"]').click();
           const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');

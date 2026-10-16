@@ -45,6 +45,38 @@ describe('runSignIn', () => {
     should(world.slept.every(ms => ms === SIGN_IN_POLL_MS)).be.true();
   });
 
+  it('should say it picked up a sign-in already running, and how to start over instead', async () => {
+    // Arrange — a sign-in the browser started; this terminal lands on the same one.
+    const world = fakeWorld({
+      answers: ['the-code'],
+      gateway: {
+        startSignIn: () => awaitingCode({ resumed: true }),
+        submitSignInCode: () => ({ outcome: 'accepted', flow: complete() }),
+      },
+    });
+
+    // Act
+    const signedIn = await runSignIn(world.deps, 'claude-you');
+
+    // Assert
+    should(signedIn).be.true();
+    should(world.out.text('report')).startWith(
+      'A sign-in for claude-you was already running, so this picks it up. To start over instead: fz credential signin claude-you --force',
+    );
+  });
+
+  it('should ask the daemon to start over when forced', async () => {
+    // Arrange
+    const world = fakeWorld({ gateway: { startSignIn: () => complete() } });
+
+    // Act
+    await runSignIn(world.deps, 'codex-you', { force: true });
+
+    // Assert
+    should(world.gateway.called('startSignIn')[0]?.args).eql(['codex-you', 'restart']);
+    should(world.out.text('report')).equal('');
+  });
+
   it('should ask again when the code was not accepted', async () => {
     const world = fakeWorld({
       answers: ['bad', 'good'],

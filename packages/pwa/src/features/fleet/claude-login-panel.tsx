@@ -40,6 +40,7 @@ import { type FormEvent, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from './harness-login-model.ts';
 
 export interface ClaudeLoginPanelProps {
@@ -55,6 +56,8 @@ export interface ClaudeLoginPanelProps {
   readonly onStart: () => void;
   readonly onSubmitCode: (code: string) => void;
   readonly onCancel: () => void;
+  /** End this sign-in and start a fresh one. Offered while one is running; absent where nothing can. */
+  readonly onStartOver?: () => void;
   readonly copy?: ClipboardWriter;
   /** What one sign-in covers, and what to say once it is done. */
   readonly wording: LoginPanelWording;
@@ -94,6 +97,7 @@ export function ClaudeLoginPanel({
   onStart,
   onSubmitCode,
   onCancel,
+  onStartOver,
   copy = browserClipboardWriter(),
   wording,
   className,
@@ -148,6 +152,8 @@ export function ClaudeLoginPanel({
           </p>
         )}
 
+        <ResumedNote flow={flow} />
+
         {state === 'idle' || state === 'starting' ? (
           <div className="space-y-3">
             <p className="m-0 text-ui leading-base text-muted">
@@ -158,6 +164,7 @@ export function ClaudeLoginPanel({
               <Link2 size={16} aria-hidden="true" />
               {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Claude Code'}
             </Button>
+            {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
           </div>
         ) : null}
 
@@ -207,6 +214,7 @@ export function ClaudeLoginPanel({
                   <ShieldCheck size={16} aria-hidden="true" />
                   {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
                 </Button>
+                <StartOverButton onStartOver={onStartOver} busy={busy} />
                 <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
                   Cancel
                 </Button>

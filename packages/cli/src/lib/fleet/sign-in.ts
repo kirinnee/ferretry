@@ -25,11 +25,19 @@ type Attempt =
  * When a device code fails for any other reason, this offers that link sign-in. Either way the login
  * lands in the credential's own store, and the daemon checks it did.
  *
+ * A credential has at most one sign-in running. Without `force` this PICKS UP the one already running —
+ * started in the browser, or by a terminal that went away — and says so; with it, that one is ended,
+ * any leftover Codex sign-in on the callback port is cleared, and a fresh one starts.
+ *
  * Returns whether it ended signed in. A failure sets a non-zero exit with the reason and the way back.
  */
-export async function runSignIn(deps: AccountCommandDeps, credentialId: string): Promise<boolean> {
+export async function runSignIn(
+  deps: AccountCommandDeps,
+  credentialId: string,
+  options: { readonly force?: boolean } = {},
+): Promise<boolean> {
   await requireMayApply(deps);
-  let attempt = await attemptSignIn(deps, credentialId);
+  let attempt = await attemptSignIn(deps, credentialId, undefined, options.force === true);
   if (attempt.kind === 'failed' && attempt.device && deps.interactive) {
     deps.out.warn(`The device code did not work: ${attempt.flow.reason}`);
     const answer = (await deps.prompt.ask('Sign in with a link instead? [y/N]')).trim().toLowerCase();
@@ -52,8 +60,14 @@ async function attemptSignIn(
   deps: AccountCommandDeps,
   credentialId: string,
   method?: HarnessLoginCodexMethod,
+  restart = false,
 ): Promise<Attempt> {
-  let flow = await deps.gateway.startSignIn(credentialId, method);
+  let flow = await deps.gateway.startSignIn(credentialId, method, restart);
+  if (flow.resumed === true) {
+    deps.out.report(
+      `A sign-in for ${credentialId} was already running, so this picks it up. To start over instead: ${deps.binaryName} credential signin ${credentialId} --force`,
+    );
+  }
   let shownApproval = false;
   let shownUrl: string | undefined;
   let shownFinishing = false;

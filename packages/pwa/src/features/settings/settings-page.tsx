@@ -622,6 +622,7 @@ export function SettingsPage({
                     createClient={createMachineClient}
                     {...(machineTabs ? { tabs: machineTabs } : {})}
                     {...(daemonPanels === undefined ? {} : { daemonPanels })}
+                    {...(onRemoveDaemon === undefined ? {} : { onRemove: onRemoveDaemon })}
                   />
                 )
               ) : null}

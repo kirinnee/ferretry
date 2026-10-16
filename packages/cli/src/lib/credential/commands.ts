@@ -99,8 +99,12 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
     .command('signin')
     .description('sign a login in, or in again')
     .argument('<id>', 'the login')
-    .action(async (id: string) => {
-      await runSignIn(deps, id);
+    .option(
+      '--force',
+      'start over: end the sign-in already running for it, and clear a leftover Codex sign-in from its port',
+    )
+    .action(async (id: string, options: { force?: boolean }) => {
+      await runSignIn(deps, id, { force: options.force === true });
     });
 
   writeOptions(

@@ -84,6 +84,7 @@ export * from '../features/fleet/runtimes/index.ts';
 export * from '../features/fleet/setup/index.ts';
 export * from '../features/fleet/setup-api.ts';
 export * from '../features/fleet/shell/index.ts';
+export * from '../features/fleet/sign-in-restart.tsx';
 export * from '../features/learning/learning-header.tsx';
 export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
 export {

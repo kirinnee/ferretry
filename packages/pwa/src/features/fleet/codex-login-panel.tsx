@@ -36,6 +36,7 @@ import { type FormEvent, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../onboarding/copy-button.tsx';
+import { ResumedNote, StartOverButton } from './sign-in-restart.tsx';
 import type { LoginPanelWording } from './harness-login-model.ts';
 
 export interface CodexLoginPanelProps {
@@ -47,6 +48,8 @@ export interface CodexLoginPanelProps {
   readonly refusal: string | null;
   readonly onStart: () => void;
   readonly onCancel: () => void;
+  /** End this sign-in and start a fresh one. Offered while one is running; absent where nothing can. */
+  readonly onStartOver?: () => void;
   /** Move a device code that did not work to the link sign-in, in the same flow. */
   readonly onUseLink: () => void;
   /** Start a fresh sign-in with a link, after a device code failed. */
@@ -101,6 +104,7 @@ export function CodexLoginPanel({
   refusal,
   onStart,
   onCancel,
+  onStartOver,
   onUseLink,
   onStartLink,
   onSubmitAddress,
@@ -160,6 +164,8 @@ export function CodexLoginPanel({
           </p>
         )}
 
+        <ResumedNote flow={flow} />
+
         {state === 'idle' || state === 'starting' ? (
           <div className="space-y-3">
             <p className="m-0 text-ui leading-base text-muted">
@@ -171,6 +177,7 @@ export function CodexLoginPanel({
               <Link2 size={16} aria-hidden="true" />
               {state === 'starting' ? 'Starting sign-in…' : 'Sign in to Codex'}
             </Button>
+            {state === 'starting' ? <StartOverButton onStartOver={onStartOver} busy={busy} /> : null}
           </div>
         ) : null}
 
@@ -205,13 +212,14 @@ export function CodexLoginPanel({
               <p className="m-0 text-ui leading-base text-muted" role="status">
                 Waiting for the provider. Codex finishes on its own — there is nothing to paste back.
               </p>
+              <StartOverButton onStartOver={onStartOver} busy={busy} />
               <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
                 Cancel
               </Button>
             </div>
             <div className="border-t border-border pt-3" data-codex-login-use-link="">
               <p className="m-0 text-meta leading-base text-muted">Device code didn’t work?</p>
-              <Button type="button" variant="ghost" className="mt-1" onClick={onUseLink} disabled={busy}>
+              <Button type="button" className="mt-2" onClick={onUseLink} disabled={busy}>
                 Sign in with a link instead
               </Button>
             </div>
@@ -269,6 +277,7 @@ export function CodexLoginPanel({
                   <ShieldCheck size={16} aria-hidden="true" />
                   {busy ? 'Sending…' : (wording.finishLabel ?? 'Finish sign-in')}
                 </Button>
+                <StartOverButton onStartOver={onStartOver} busy={busy} />
                 <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
                   Cancel
                 </Button>
@@ -286,6 +295,7 @@ export function CodexLoginPanel({
             <p className="m-0 text-ui leading-base text-muted" role="status">
               Codex is finishing the sign-in…
             </p>
+            <StartOverButton onStartOver={onStartOver} busy={busy} />
             <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
               Cancel
             </Button>
@@ -322,7 +332,7 @@ export function CodexLoginPanel({
                 {ending?.action ?? 'Start a new sign-in'}
               </Button>
               {linked ? null : (
-                <Button type="button" variant="ghost" onClick={onStartLink} disabled={busy}>
+                <Button type="button" onClick={onStartLink} disabled={busy}>
                   Sign in with a link instead
                 </Button>
               )}

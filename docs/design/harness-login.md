@@ -562,7 +562,23 @@ UI in front of a phone.
   the **push** did not.
 - **No cross-process lock over credential writes.** Pre-existing (§3.3 rule 5) and now genuinely reachable
   from two places: `fy fleet login` on the host, and a flow here. The daemon-side service is single-flight
-  **within itself** and its refusal says which flow holds an identity; it makes no claim about the host.
+  **within itself**; it makes no claim about the host.
+- **A second start PICKS UP the running flow; it is never refused.** The first build refused it with
+  `fleet_login_in_progress` and the flow's internal id, and a page that reloaded mid sign-in — or a
+  phone that slept, or the same credential opened from another screen — became a dead end: an error
+  naming a flow nobody could reach. Now `start` answers with the running flow marked `resumed`, and
+  every entry (first-run setup, Credentials, `fy credential signin`) lands back on its link, code or
+  paste box. `restart: true` ("Start over", `fy credential signin --force`) ends that flow, waits for
+  its child to exit so a Codex link frees the callback port, and starts afresh.
+- **Starting a Codex sign-in over clears a LEFTOVER on the callback port, and nothing else.** A daemon
+  killed before it could end its sign-ins leaves a `codex login` holding 1455. Start over reads who
+  listens on the callback ports (`lsof`, else `ss`; then `ps`) and stops a holder only when it is
+  PROVEN to be a Codex login run by the daemon's own OS user. Anything else — a proxy the owner runs on
+  that port — is named with its program and pid and left alone; a link sign-in that would find every
+  callback port taken ends saying so rather than launching Codex to fail on it.
+- **A flow nobody follows ends before its window.** One that only a person bringing a value back can
+  finish (Claude's code, a Codex link's address) ends after five minutes unread. A Codex device code is
+  exempt: it completes at the provider with nobody reading, and ending it would throw an approval away.
 - **Nothing here helps an API-key account** (§1.2). Unchanged — and the build makes the ABSENCE legible
   rather than silent: such an account gets no control and a sentence naming the file or the variable its
   credential comes from. Rotating a key is still `docs/secrets.md`.

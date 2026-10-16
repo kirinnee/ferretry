@@ -43,7 +43,11 @@ export interface IAccountGateway {
   installTools(harnesses: readonly AccountHarness[]): Promise<FleetToolInstallResult>;
   exportBundle(): Promise<FleetCloneBundle>;
   /** `method` is Codex's choice of sign-in; absent means its default, a device code. */
-  startSignIn(credentialId: string, method?: HarnessLoginCodexMethod): Promise<HarnessLoginFlow>;
+  /**
+   * Start a credential's sign-in, or pick up the one already running for it (`resumed`). `restart`
+   * ends that one — and clears a leftover Codex sign-in from the callback port — then starts afresh.
+   */
+  startSignIn(credentialId: string, method?: HarnessLoginCodexMethod, restart?: boolean): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string): Promise<HarnessLoginFlow>;
   submitSignInCode(flowId: string, code: string): Promise<HarnessLoginSubmission>;
   cancelSignIn(flowId: string): Promise<HarnessLoginFlow>;

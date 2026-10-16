@@ -21,7 +21,7 @@ import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../../lib/daemon-connection.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { UnderlineTabs } from '../../../shell/underline-tabs.tsx';
-import { distinctDaemonName } from '../../settings/daemon-settings.tsx';
+import { daemonDisplayName, distinctDaemonName, replacedPairing } from '../../settings/daemon-settings.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from './account-status.tsx';
 import { reachLabel, reachWord, type ShownReach, shownReachSummary } from './machine-reach.ts';
@@ -112,6 +112,8 @@ export interface MachinesSurfaceProps {
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
   readonly daemonPanels?: DaemonPanelsRenderer;
+  /** Forget a pairing in this browser — offered here for one a newer pairing replaced. */
+  readonly onRemove?: (daemonId: DaemonId) => void;
 }
 
 export function MachinesSurface({
@@ -126,6 +128,7 @@ export function MachinesSurface({
   createClient,
   tabs = {},
   daemonPanels,
+  onRemove,
 }: MachinesSurfaceProps) {
   const record = connections.find(candidate => candidate.daemonId === daemonId);
 
@@ -156,6 +159,22 @@ export function MachinesSurface({
           <span className="min-w-0 truncate">{shownReachSummary(reach)}</span>
         </span>
       </header>
+
+      {/* An old pairing a newer one replaced: nothing answers it, so the one useful thing is to remove it. */}
+      {onRemove !== undefined && replacedPairing(record, connections) ? (
+        <div className="kt-panel flex flex-wrap items-center justify-between gap-3 p-panel" data-machine-replaced="">
+          <div className="min-w-0">
+            <p className="m-0 text-row font-semibold text-fg">This is an old pairing</p>
+            <p className="mb-0 mt-1 text-cell leading-base text-muted">
+              {daemonDisplayName(record)} was paired again at the same address, most likely after it was reset. This
+              browser uses the newer pairing, and nothing answers this one any more.
+            </p>
+          </div>
+          <Button type="button" variant="danger" data-machine-replaced-remove="" onClick={() => onRemove(daemonId)}>
+            Remove old pairing
+          </Button>
+        </div>
+      ) : null}
 
       {/* A machine whose setup was left for later — or never started — says so above everything else, with
           the one button that resumes it. Setup itself is a full screen of its own, never a tab here. */}
