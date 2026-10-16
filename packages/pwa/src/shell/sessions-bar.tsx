@@ -19,10 +19,12 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, Search, Settings, X } from 'lucide-react';
+import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
 import { type ReactNode, useRef, useState, useSyncExternalStore } from 'react';
+import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
+import { useInputModality } from '../hooks/use-input-modality.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -108,6 +110,11 @@ export interface SessionsBarProps {
   /** Drawer only: closes it. */
   readonly onClose?: () => void;
   readonly onAddMachine: () => void;
+  /**
+   * Opens "Pair a phone with ‹this machine›". Absent when the reader may not pair a device with this
+   * machine (`pairing.use` is closed), and then the switcher does not offer it.
+   */
+  readonly onPairPhone?: () => void;
   /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
   readonly rails?: WorkspaceRailPreferenceStore;
 }
@@ -155,24 +162,73 @@ function SessionRow({
   );
 }
 
-function MachineSwitcher({
+/**
+ * The machine menu: every paired machine, then the acts. Two of those acts both "add" something, in
+ * opposite directions, so they are worded and marked apart: "Pair a phone with ‹this machine›…" (a QR
+ * mark) hands ANOTHER device access to this machine; "Add a machine…" (＋) pairs THIS browser with
+ * another computer. The divider is the line between the list and the acts.
+ */
+const machineMenuItems = ({
   daemonId,
   machineName,
   machines,
   onNavigate,
   onAddMachine,
-}: Pick<SessionsBarProps, 'daemonId' | 'machineName' | 'machines' | 'onNavigate' | 'onAddMachine'>) {
+  onPairPhone,
+}: Pick<
+  SessionsBarProps,
+  'daemonId' | 'machineName' | 'machines' | 'onNavigate' | 'onAddMachine' | 'onPairPhone'
+>): readonly ContextMenuItem[] => [
+  ...machines.map(machine => ({
+    key: String(machine.daemonId),
+    label: machine.name,
+    ...(machine.daemonId === daemonId ? { detail: 'this one' } : {}),
+    onSelect: () => onNavigate(daemonSessionsPath(machine.daemonId)),
+  })),
+  ...(onPairPhone === undefined
+    ? []
+    : [
+        {
+          key: 'pair-phone',
+          label: `${pairPhoneLabel(machineName)}…`,
+          icon: <QrCode aria-hidden="true" size={14} />,
+          onSelect: onPairPhone,
+          separatorBefore: true,
+        },
+      ]),
+  {
+    key: 'add-machine',
+    label: 'Add a machine…',
+    icon: <Plus aria-hidden="true" size={14} />,
+    onSelect: onAddMachine,
+    ...(onPairPhone === undefined ? { separatorBefore: true } : {}),
+  },
+];
+
+function MachineSwitcher(
+  props: Pick<
+    SessionsBarProps,
+    'daemonId' | 'machineName' | 'machines' | 'onNavigate' | 'onAddMachine' | 'onPairPhone'
+  >,
+) {
+  const { machineName, onPairPhone } = props;
   const trigger = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
-  const items: readonly ContextMenuItem[] = [
-    ...machines.map(machine => ({
-      key: String(machine.daemonId),
-      label: machine.name,
-      ...(machine.daemonId === daemonId ? { detail: 'this one' } : {}),
-      onSelect: () => onNavigate(daemonSessionsPath(machine.daemonId)),
-    })),
-    { key: 'add-machine', label: 'Add a machine…', onSelect: onAddMachine },
-  ];
+  const { touchAffected } = useInputModality();
+  const items = machineMenuItems({
+    ...props,
+    // The sheet that opens captures whatever has focus as the place to return to. The menu's own
+    // activation hands focus to nobody (the item is about to unmount), so it is put back on the
+    // switcher first: closing the sheet then lands the reader where they started.
+    ...(onPairPhone === undefined
+      ? {}
+      : {
+          onPairPhone: () => {
+            trigger.current?.focus();
+            onPairPhone();
+          },
+        }),
+  });
   return (
     <>
       <button
@@ -198,6 +254,7 @@ function MachineSwitcher({
         onClose={() => setAnchor(null)}
         open={anchor !== null}
         triggerRef={trigger}
+        touch={touchAffected}
       />
     </>
   );
@@ -356,6 +413,7 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
         machines={props.machines}
         onAddMachine={props.onAddMachine}
         onNavigate={props.navigate}
+        {...(props.onPairPhone === undefined ? {} : { onPairPhone: props.onPairPhone })}
       />
       <RouteLink
         aria-label="New session"

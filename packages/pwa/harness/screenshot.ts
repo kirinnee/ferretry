@@ -32,6 +32,7 @@
  *   bun harness/screenshot.ts --pairing-failures-only   # the two pairing failures that are one sentence
  *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
+ *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
@@ -88,6 +89,8 @@ const ATTENTION_ONLY = process.argv.includes('--attention-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
+/** "Pair a phone" from the machine menu: the switcher, the sheet and the minted (fake) QR. */
+const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
 
 /**
  * The Projects hub states, each on a page of its own.
@@ -126,6 +129,7 @@ const WALKS_SETTINGS = !(
   PROJECTS_ONLY ||
   PAIRING_FAILURES_ONLY ||
   MCP_SIGN_IN_ONLY ||
+  PAIR_FROM_MENU_ONLY ||
   SESSION_LAYOUT_ONLY
 );
 
@@ -523,6 +527,62 @@ const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void>
   } finally {
     await ferretryTab.close();
   }
+};
+
+/**
+ * "Pair a phone" from the machine menu (`?pair-from-menu`, `harness/pair-from-menu.tsx`): the journey a
+ * reader takes, driven rather than posed — open the machine menu, choose "Pair a phone with studio…",
+ * mint a code, see the QR, and Escape back to the switcher.
+ *
+ * THE CODE ON SCREEN MUST BE THE FIXED FAKE. A capture of anything else would be a real credential in a
+ * PNG, so the run fails rather than write one (`docs/pairing.md`).
+ *
+ * A narrow mode, so it owes no Settings tally; its own sideways check runs on every frame instead.
+ */
+const PAIR_FROM_MENU_FAKE_CODE = '7F3K-Q2ND';
+const capturePairFromMenu = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`pair-from-menu ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `pair-from-menu-${name}-${SCHEME}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 pair from menu ${name} ${SCHEME} ${viewportName} -> ${target}\n`);
+  };
+  await page.goto(`${server.url}?pair-from-menu`);
+  const machine = page.locator('[data-sbar-machine]').first();
+  await machine.waitFor({ state: 'visible' });
+  await machine.click();
+  const menu = page.getByRole('menu', { name: 'Switch machine' });
+  await menu.waitFor({ state: 'visible' });
+  const labels = (await menu.getByRole('menuitem').allTextContents()).map(label => label.trim());
+  const expected = ['studiothis one', 'laptop', 'Pair a phone with studio…', 'Add a machine…'];
+  if (JSON.stringify(labels) !== JSON.stringify(expected))
+    fail(`the machine menu reads ${JSON.stringify(labels)}, expected ${JSON.stringify(expected)}`);
+  if ((await menu.locator('[data-menu-separator]').count()) !== 1) fail('the machine menu has no single divider');
+  if (viewportName === 'mobile') {
+    const short = await menu
+      .getByRole('menuitem')
+      .evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height).filter(height => height < 44));
+    if (short.length > 0) fail(`machine menu rows under the 44px touch floor on a phone: ${short.join(', ')}`);
+  }
+  await shot('menu');
+
+  await menu.getByRole('menuitem', { name: 'Pair a phone with studio…' }).click();
+  const body = page.locator('[data-pair-phone-body]');
+  await body.locator('[data-pair-mint]').waitFor({ state: 'visible' });
+  await shot('sheet');
+
+  await body.locator('[data-pair-mint]').click();
+  await body.locator('[data-pair-qr]').waitFor({ state: 'visible' });
+  if (!(await body.innerText()).includes(PAIR_FROM_MENU_FAKE_CODE))
+    fail('the pairing sheet is not showing the fixed fake code, so it will not be captured');
+  await shot('qr');
+
+  await page.keyboard.press('Escape');
+  await page.locator('[data-pair-phone-body]').waitFor({ state: 'detached' });
+  const focusedSwitcher = await page.evaluate(() => document.activeElement?.hasAttribute('data-sbar-machine') === true);
+  if (!focusedSwitcher)
+    fail(`closing the pairing sheet did not return focus to the machine switcher at ${viewportName}`);
 };
 
 /**
@@ -1806,6 +1866,10 @@ try {
           }
           if (MCP_SIGN_IN_ONLY) {
             await captureMcpSignIn(page, viewport.name);
+            continue;
+          }
+          if (PAIR_FROM_MENU_ONLY) {
+            await capturePairFromMenu(page, viewport.name);
             continue;
           }
           if (TASK_BOARD_ONLY) {

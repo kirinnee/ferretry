@@ -515,7 +515,11 @@ function CommandOption({
       onHover={onHover}
       className="kt-navrow min-h-[44px] cursor-pointer items-start"
     >
-      <KeyRound size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+      {entry.Icon === undefined ? (
+        <KeyRound size={14} className="mt-0.5 shrink-0 text-warn" aria-hidden="true" />
+      ) : (
+        <entry.Icon size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+      )}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="font-semibold text-fg">{entry.label}</span>
         <span className="truncate text-meta text-muted">{entry.description}</span>
