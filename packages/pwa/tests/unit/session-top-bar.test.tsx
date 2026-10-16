@@ -94,6 +94,38 @@ describe('SessionTopBar', () => {
 });
 
 describe('SessionTopBar turn word', () => {
+  test('says which dialog a needs-input session is parked on, and only then', async () => {
+    const prompt = 'Make auto mode your default permission mode?';
+    for (const [turn, compact] of [
+      ['needs-input', false],
+      ['needs-input', true],
+      ['your-turn', false],
+    ] as const) {
+      view = await mount(
+        <SessionTopBar
+          actions={null}
+          compact={compact}
+          project={null}
+          session={sessionView('s1', { state: { status: 'running', turnState: turn, turnPrompt: prompt } })}
+          turn={turn}
+        />,
+      );
+      const status = must(view.container.querySelector('.fy-session-bar__status'), 'the status');
+      const shown = status.querySelector('[data-session-blocked-by]');
+      if (turn === 'needs-input') {
+        expect(status.getAttribute('title')).toBe(`On screen: ${prompt}`);
+        expect(shown?.textContent).toBe(`, on screen: ${prompt}`);
+        // A phone keeps the words for a screen reader; the room goes to the name.
+        expect(shown?.className).toBe(compact ? 'sr-only' : 'fy-session-bar__blocked');
+      } else {
+        expect(status.getAttribute('title')).toBeNull();
+        expect(shown).toBeNull();
+      }
+      await view.unmount();
+      view = null;
+    }
+  });
+
   test("says whose turn it is in the person's words, and marks it for the page", async () => {
     for (const [turn, word] of [
       ['working', 'working'],

@@ -3,6 +3,7 @@ import should from 'should';
 import {
   isTurnStatus,
   observeTurn,
+  settleTurnPrompt,
   settleTurnState,
   type TurnEvidence,
   type TurnPaneEvidence,
@@ -151,6 +152,33 @@ describe('settleTurnState', () => {
     should(settleTurnState('working', idleWeak, working, true)).equal('working');
     should(settleTurnState('working', idleWeak, idleWeak, true)).equal('your-turn');
     should(settleTurnState('working', idleWeak, undefined, true)).equal('working');
+  });
+});
+
+describe('a harness dialog on the pane', () => {
+  const NUDGE = 'Make auto mode your default permission mode?';
+  const PARKED: TurnPaneEvidence = { working: false, atPrompt: true, permission: false, prompt: NUDGE };
+
+  it('should call a session parked on a dialog needs-input, and say which, even when its cursor row reads as a prompt', () => {
+    should(observeTurn(evidence({ pane: PARKED }))).deepEqual({ state: 'needs-input', confirmed: true, prompt: NUDGE });
+    should(observeTurn(evidence({ pane: PARKED, transcript: 'working' }))).deepEqual({
+      state: 'needs-input',
+      confirmed: true,
+      prompt: NUDGE,
+    });
+  });
+
+  it('should record the dialog only beside needs-input, and keep it while nothing decides the turn', () => {
+    const seen = observeTurn(evidence({ pane: PARKED }));
+    should(settleTurnPrompt(undefined, 'needs-input', seen)).equal(NUDGE);
+    // A permission prompt names no dialog: the conversation itself shows it.
+    should(settleTurnPrompt(NUDGE, 'needs-input', observeTurn(evidence({ pane: ASKING })))).be.undefined();
+    // Nothing to look at, or a weak your-turn not yet confirmed: what was recorded stands.
+    should(settleTurnPrompt(NUDGE, 'needs-input', undefined)).equal(NUDGE);
+    should(settleTurnPrompt(NUDGE, 'needs-input', { state: 'your-turn', confirmed: false })).equal(NUDGE);
+    // Answered: the turn moved on, and the dialog goes with it.
+    should(settleTurnPrompt(NUDGE, 'your-turn', observeTurn(evidence({ pane: IDLE })))).be.undefined();
+    should(settleTurnPrompt(NUDGE, undefined, undefined)).be.undefined();
   });
 });
 

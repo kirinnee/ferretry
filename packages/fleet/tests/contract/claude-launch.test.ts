@@ -10,6 +10,9 @@
  * - `--permission-mode auto` and `bypassPermissions` are accepted (O4).
  * - `--settings <file>` is an OVERLAY: a key only it carries takes effect, and a key only the config
  *   dir's own `settings.json` carries still does — the fixed layer adds to, never replaces, the file.
+ * - The one-shot "Make auto mode your default permission mode?" dialog parks a runtime whose USER
+ *   `settings.json` names a non-auto mode; `hasSeenAutoDefaultNudge` in `.claude.json`, or the same mode
+ *   named by the `--settings` overlay, each keeps it away.
  *
  * The credential is a fake in a shared store and every request dies at the recording proxy, so the
  * session never gets further than its first screen.
@@ -31,6 +34,16 @@ const BYPASS_WARNING = /Bypass Permissions mode/;
 const BYPASS_ON = /bypass permissions on/;
 const AUTO_ON = /auto mode on/;
 const SETTLED = [ONBOARDING, TRUST, PROMPT, BYPASS_WARNING];
+/** The one-shot "Make auto mode your default permission mode?" dialog (shouldShowAutoDefaultNudge). */
+const AUTO_NUDGE = /Make auto mode your default permission mode/;
+/**
+ * The nudge is rolled out behind a remote flag, which a session that cannot reach the flag service
+ * reads from the flag cache in `.claude.json`. Planting it there turns the dialog ON, so the control
+ * below shows what the fixed layer suppresses.
+ */
+const NUDGE_FLAG = { cachedGrowthBookFeatures: { tengu_maple_pier: true } };
+/** The flag cache is read only when the flag client is on, which non-essential traffic being off turns off. */
+const NUDGE_ENV = { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '' };
 
 describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent runtime', () => {
   let box: Sandbox;
@@ -50,7 +63,13 @@ describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent
 
   /** A runtime: a config dir, a shared store holding a fresh fake credential, and a working folder. */
   const runtime = async (
-    options: { onboarded?: boolean; trusted?: boolean; settings?: Record<string, unknown> } = {},
+    options: {
+      onboarded?: boolean;
+      trusted?: boolean;
+      settings?: Record<string, unknown>;
+      state?: Record<string, unknown>;
+      env?: Record<string, string>;
+    } = {},
   ) => {
     counter++;
     const root = box.dir(`r${counter}`);
@@ -65,16 +84,22 @@ describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent
     const state: Record<string, unknown> = {};
     if (options.onboarded === true) state.hasCompletedOnboarding = true;
     if (options.trusted === true) state.projects = { [cwd]: { hasTrustDialogAccepted: true } };
+    Object.assign(state, options.state ?? {});
     if (Object.keys(state).length > 0) await writeFile(path.join(config, '.claude.json'), JSON.stringify(state));
     if (options.settings !== undefined)
       await writeFile(path.join(config, 'settings.json'), JSON.stringify(options.settings));
-    const env = harnessEnv(home, proxy.port, { CLAUDE_CONFIG_DIR: config, CLAUDE_SECURESTORAGE_CONFIG_DIR: store });
+    const env = harnessEnv(home, proxy.port, {
+      CLAUDE_CONFIG_DIR: config,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: store,
+      ...options.env,
+    });
     const overlay = async (document: Record<string, unknown>) => {
       const file = path.join(root, 'fixed.json');
       await writeFile(file, JSON.stringify(document));
       return file;
     };
-    const screen = (args: string[]) => screenOf([claude().bin, ...args], { env, cwd, settled: SETTLED });
+    const screen = (args: string[], settled: readonly RegExp[] = SETTLED, timeoutMs?: number) =>
+      screenOf([claude().bin, ...args], { env, cwd, settled, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
     return { screen, overlay, env, cwd };
   };
 
@@ -141,5 +166,58 @@ describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent
     const screen = await r.screen(['--settings', fixed]);
     should(screen).match(BYPASS_ON);
     should(screen).not.match(BYPASS_WARNING);
+  });
+
+  /**
+   * The auto-mode nudge: shown once to a config dir whose USER settings.json names a non-auto mode,
+   * when no other settings source names one. A fixed-layer agent runtime is exactly that dir, so it
+   * parked on the dialog and every message to it failed. Either half of the fix suppresses it alone.
+   */
+  const nudgeRuntime = (state: Record<string, unknown> = {}) =>
+    runtime({
+      onboarded: true,
+      trusted: true,
+      settings: { permissions: { defaultMode: 'bypassPermissions' } },
+      state: { ...NUDGE_FLAG, ...state },
+      env: NUDGE_ENV,
+    });
+  const NUDGE_WAIT_MS = 15_000;
+
+  it('parks a bypass runtime on the auto-mode nudge when nothing suppresses it (the control)', async () => {
+    const r = await nudgeRuntime();
+    const fixed = await r.overlay({ skipDangerousModePermissionPrompt: true });
+    const screen = await r.screen(
+      ['--permission-mode', 'bypassPermissions', '--settings', fixed],
+      [AUTO_NUDGE],
+      NUDGE_WAIT_MS,
+    );
+    should(screen).match(AUTO_NUDGE);
+  });
+
+  it('never shows the auto-mode nudge once .claude.json records hasSeenAutoDefaultNudge', async () => {
+    const r = await nudgeRuntime({ hasSeenAutoDefaultNudge: true });
+    const fixed = await r.overlay({ skipDangerousModePermissionPrompt: true });
+    const screen = await r.screen(
+      ['--permission-mode', 'bypassPermissions', '--settings', fixed],
+      [AUTO_NUDGE],
+      NUDGE_WAIT_MS,
+    );
+    should(screen).match(BYPASS_ON);
+    should(screen).not.match(AUTO_NUDGE);
+  });
+
+  it('never shows the auto-mode nudge when the --settings overlay names the permission mode itself', async () => {
+    const r = await nudgeRuntime();
+    const fixed = await r.overlay({
+      permissions: { defaultMode: 'bypassPermissions' },
+      skipDangerousModePermissionPrompt: true,
+    });
+    const screen = await r.screen(
+      ['--permission-mode', 'bypassPermissions', '--settings', fixed],
+      [AUTO_NUDGE],
+      NUDGE_WAIT_MS,
+    );
+    should(screen).match(BYPASS_ON);
+    should(screen).not.match(AUTO_NUDGE);
   });
 });
