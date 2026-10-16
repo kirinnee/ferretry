@@ -83,6 +83,7 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'security-log',
   'carrier',
   'host-checks',
+  'files',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));

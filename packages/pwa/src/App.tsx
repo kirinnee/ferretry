@@ -32,6 +32,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
@@ -1256,6 +1257,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
       speedupsSettingsTab(createDaemonClient),
       securityLogSettingsTab(createDaemonClient),
+      configFilesSettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
   );

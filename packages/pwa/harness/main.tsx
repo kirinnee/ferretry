@@ -148,6 +148,7 @@ import type { SecretClient } from '../src/features/secrets/secrets-api.ts';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { ConfigFilesSurface } from '../src/features/config-files/config-files-settings.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -265,6 +266,7 @@ import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { harnessConfigFilesClient } from './config-files-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 
@@ -729,6 +731,9 @@ const harnessCgroupClient = async (connection: DaemonConnection) => {
   };
 };
 
+/** The Files panel's in-memory daemon (`config-files-fixture.ts`). */
+const HARNESS_CONFIG_FILES_CLIENT = harnessConfigFilesClient(unreachableDaemon.daemonId);
+
 /**
  * The panels the composition root supplies, in the order it supplies them (production also
  * supplies Model pricing, which this fixture leaves out).
@@ -774,6 +779,18 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
     description: 'Recent pairings, removals, refused attempts and other security events on this machine.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
       <SecurityLogSurface connection={connection} createClient={harnessSecurityClient} />
+    ),
+  },
+  {
+    id: 'files',
+    label: 'Files',
+    description: 'The YAML files this machine’s settings live in.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <ConfigFilesSurface
+        key={connection.daemonId}
+        connection={connection}
+        createClient={HARNESS_CONFIG_FILES_CLIENT}
+      />
     ),
   },
 ];

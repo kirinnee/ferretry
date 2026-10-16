@@ -132,10 +132,11 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and forty-eight: fifty-four MACHINES frames at each viewport, plus forty other frames
- * across the two viewports (54 + 54 + 40). Of the extras at each viewport, one is the
+ * One hundred and fifty-two: fifty-four MACHINES frames at each viewport, plus forty-four other frames
+ * across the two viewports (54 + 54 + 44). Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
- * shows, and two are the Security settings block's loosening sentence and out-of-bounds sentence.
+ * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
+ * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
  *
  * MACHINES, fifty-four per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, ten Runtimes and
@@ -147,8 +148,8 @@ const WALKS_SETTINGS = !(
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
- * The rest, sixteen at both viewports plus the open device-capabilities disclosure and the unlock screen at both: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its nine other panels (Security, the passkey panel, and Security log among them), the unreachable daemon's Warden and Carrier, and the
+ * The rest, seventeen at both viewports plus the open device-capabilities disclosure, the unlock screen and the Files editor's refused save at both: three Settings sections (Appearance, Behaviour, Daemons), the
+ * healthy daemon's Warden and its ten other panels (Security, the passkey panel, Security log and Files among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -168,7 +169,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 148;
+const SETTINGS_SIDEWAYS_CHECKS = 152;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -2185,10 +2186,10 @@ try {
           const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
           await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
           // The fixture is only evidence about the real frame if it carries the panels the composition
-          // root supplies: the app's eleven less Model pricing, which this fixture has never mounted.
+          // root supplies: the app's twelve less Model pricing, which this fixture has never mounted.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 10)
-            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 10 it mounts`);
+          if (daemonPanels !== 11)
+            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 11 it mounts`);
           await wardenFrame.scrollIntoViewIfNeeded();
           // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
           await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
@@ -2219,6 +2220,8 @@ try {
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
             // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
             ['Security log', 'security-log', '[data-security-log-panel]'],
+            // The configuration files: an invalid file, a held loosening and a login naming its key by reference.
+            ['Files', 'files', '[data-config-files-panel]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {
@@ -2276,9 +2279,29 @@ try {
               )
                 throw new Error(`resource-limit evidence does not fit in the ${viewport.name} viewport`);
             }
+            // The Files panel's evidence is its head — where the files are, what waits and what is wrong — so
+            // its frame starts there rather than wherever the previous panel left the page scrolled.
+            if (slug === 'files') await readySurface.evaluate(element => element.scrollIntoView({ block: 'start' }));
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+            if (slug === 'files') {
+              // EDIT AS YAML, SAVED AND REFUSED: the invalid file's located issues inline under the editor,
+              // reached by pressing Save, because the issue rows are the widest thing the sheet can show.
+              await readySurface.locator('[data-config-edit="warden.yaml"]').click();
+              const editor = page.locator('[data-bottom-sheet="config-file-editor"]');
+              await editor.locator('[data-config-editor-text]').waitFor({ state: 'visible' });
+              await editor.locator('[data-config-submit]').click();
+              const refused = editor.locator('[data-config-save="invalid"]');
+              await refused.waitFor({ state: 'visible' });
+              await refused.scrollIntoViewIfNeeded();
+              await assertNoSidewaysScroll(page, `the Edit as YAML sheet at ${viewport.name}`);
+              const editTarget = join(outDir, `settings-daemon-files-edit-${viewport.name}.png`);
+              await page.screenshot({ path: editTarget, animations: 'disabled' });
+              process.stdout.write(`📸 Settings daemon Files edit ${viewport.name} -> ${editTarget}\n`);
+              await editor.locator('[data-config-cancel]').click();
+              await editor.waitFor({ state: 'detached' });
+            }
             if (slug === 'devices') {
               // The per-device capability switches: seven rows by two axes, the longest block this panel
               // can grow, with a blocked widen's reason and host command beside its switch. Opened on the
