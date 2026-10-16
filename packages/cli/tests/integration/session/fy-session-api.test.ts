@@ -63,6 +63,10 @@ class SpyClient {
     return this.record('signal', [id, kind, message, options], view);
   }
 
+  rename(id: string, name?: string, teammate?: string): Promise<SessionView> {
+    return this.record('rename', [id, name, teammate], view);
+  }
+
   upload(id: string, file: string | Blob): Promise<AttachmentView> {
     return this.record('upload', [id, file], attachment);
   }
@@ -86,6 +90,7 @@ describe('FySessionApi', () => {
       await subject.resume('ses-1', 'carry on'),
       await subject.signal('ses-1', 'waiting', undefined, { peer: 'ses-2' }),
       await subject.upload('ses-1', 'shot.png'),
+      await subject.rename('ses-1', 'Ship It', 'marin'),
     ];
 
     // Assert
@@ -100,6 +105,7 @@ describe('FySessionApi', () => {
       'resume',
       'signal',
       'upload',
+      'rename',
     ]);
     should(client.calls[2]?.args).deepEqual([3]);
     should(client.calls[3]?.args).deepEqual([{ mode: 'auto', prompt: 'go', agent: 'a' }, 'req-1', 'cap-1']);
@@ -107,6 +113,7 @@ describe('FySessionApi', () => {
     should(client.calls[8]?.args).deepEqual(['ses-1', 'waiting', undefined, { peer: 'ses-2' }]);
     should(results[0]).deepEqual([view]);
     should(results[9]).deepEqual(attachment);
+    should(client.calls[10]?.args).deepEqual(['ses-1', 'Ship It', 'marin']);
   });
 
   it('should open one connection however many calls a command makes', async () => {

@@ -80,7 +80,7 @@ describe('AgentToolService — terminals', () => {
     should(read).deepEqual({ summary: 'The last 1 line of %terminal:dev.', output: '$ ls\r\u0003x' });
     should(readDefault.summary).equal('The last 200 lines of %terminal:dev.');
     should(closed.summary).equal('Closed %terminal:dev.');
-    should(empty).deepEqual({ summary: 'No terminals are open in this session.', surfaces: [] });
+    should(empty).deepEqual({ summary: 'No terminals are open for you in this session.', surfaces: [] });
   });
 
   it('should list an unnamed terminal by its id, and act on it by that id', async () => {
@@ -443,7 +443,7 @@ describe('AgentToolService — browser pages', () => {
     should(tree.output).equal('- button "Sign in"');
     should(shot).match({ summary: /^A screenshot of %browser:app/u, screenshotBase64: 'iVBORw0KGgo=' });
     should(listed.surfaces).deepEqual([
-      { id: 'page-1', name: 'app', title: '', url: 'http://localhost:5173/', available: true },
+      { id: 'page-1', name: 'app', title: 'Page at localhost:5173', url: 'http://localhost:5173/', available: true },
     ]);
     should(listed.summary).equal('1 browser page: %browser:app.');
     should(closed.summary).equal('Closed %browser:app.');
@@ -456,7 +456,7 @@ describe('AgentToolService — browser pages', () => {
       's1:page-1:screenshot',
     ]);
     should((await world.service.call(agent, { tool: 'browser.list' })).summary).equal(
-      'No browser pages are open in this session.',
+      'No browser pages are open for you in this session.',
     );
   });
 
@@ -708,8 +708,8 @@ describe('AgentToolService — an agent acts only on what it opened, or was hand
     should([typed.code, unrecorded.code, page.code]).deepEqual(['forbidden', 'forbidden', 'forbidden']);
     should(world.terminals.typed.size).equal(0);
     should(world.browser.acts).deepEqual([]);
-    should(terminals.summary).equal('2 terminals: %terminal:mine (not yours), %terminal:000000000002 (not yours).');
-    should(terminals.surfaces?.map(surface => surface.available)).deepEqual([false, false]);
+    // The agent's listing does not so much as name a surface it may not use.
+    should(terminals).deepEqual({ summary: 'No terminals are open for you in this session.', surfaces: [] });
     // A person's own listing carries no availability: it is all theirs.
     should(pages.surfaces?.[0]).not.have.property('available');
   });
@@ -743,6 +743,37 @@ describe('AgentToolService — an agent acts only on what it opened, or was hand
     should(listed.surfaces?.[0]?.available).be.true();
     should(world.events.published.filter(event => event.type === 'surface.handed')).have.length(2);
     should(world.audit.entries.filter(entry => entry.detail?.action === 'handover')).have.length(3);
+  });
+});
+
+describe('AgentToolService — what an agent may see', () => {
+  it("should keep a person's page — its name, URL and title — out of the agent's list until it is handed over", async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'docs', url: 'https://docs.example.test/' });
+    await world.service.call(person, { tool: 'browser.open', name: 'bank', url: 'https://bank.example.test/acct' });
+    const personView = await world.service.call(person, { tool: 'browser.list' });
+    const secret = personView.surfaces?.find(surface => surface.name === 'bank');
+
+    // Act
+    const before = await world.service.call(agent, { tool: 'browser.list' });
+    await world.service.control('s1', 'browser', { action: 'handover', key: 'bank' }, { by: 'local' }, person);
+    const after = await world.service.call(agent, { tool: 'browser.list' });
+
+    // Assert
+    should(secret).match({ url: 'https://bank.example.test/acct' });
+    const hidden = JSON.stringify(before);
+    should(hidden).not.containEql('bank');
+    should(hidden).not.containEql(secret?.url ?? 'unset');
+    should(hidden).not.containEql(secret?.id ?? 'unset');
+    should(secret?.title).equal('Page at bank.example.test');
+    should(hidden).not.containEql(secret?.title ?? 'unset');
+    should(before.summary).equal('1 browser page: %browser:docs.');
+    should(after.surfaces?.map(surface => surface.name)).deepEqual(['docs', 'bank']);
+    should(after.surfaces?.find(surface => surface.name === 'bank')).match({
+      url: 'https://bank.example.test/acct',
+      available: true,
+    });
   });
 });
 

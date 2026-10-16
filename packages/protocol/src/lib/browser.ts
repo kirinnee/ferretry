@@ -116,6 +116,13 @@ export const BrowserPageSummarySchema = z.object({
   incognito: z.literal(true).optional(),
   /** The page that opened this one, when it is a popup. */
   openerId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
+  /**
+   * The session the page belongs to, and that session's display name — what a reader groups pages by
+   * ("Hadi's browser": every page one agent opened, together). Each page has its own window; the
+   * grouping is the session, not the window.
+   */
+  ownerSessionId: z.string().min(1).max(128).optional(),
+  ownerName: z.string().min(1).max(128).optional(),
 });
 export type BrowserPageSummary = z.infer<typeof BrowserPageSummarySchema>;
 

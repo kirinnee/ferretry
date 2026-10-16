@@ -646,10 +646,27 @@ export const MigrateSessionRequestSchema = z.strictObject({
 export type MigrateSessionRequest = z.infer<typeof MigrateSessionRequestSchema>;
 export type MigrateSessionRequestInput = z.input<typeof MigrateSessionRequestSchema>;
 
+/**
+ * An agent's first name as a caller may type it: `Hadi`, `marin`, `mary-jane`.
+ *
+ * It is the session's `teammate` callsign — the one fact the list, the header, the picker, the chips
+ * and the notifications all read — so its grammar is the callsign's: a letter, then letters, digits
+ * or hyphens, at most {@link AGENT_NAME_MAX_LENGTH} characters. Case is not part of the name: the
+ * daemon stores it lowercase and every surface title-cases it for display, so `Hadi` and `hadi` are
+ * one name and cannot belong to two agents.
+ */
+export const AGENT_NAME_MAX_LENGTH = 32;
+export const AgentNameSchema = z
+  .string()
+  .trim()
+  .min(1, 'a name must not be empty')
+  .max(AGENT_NAME_MAX_LENGTH, `a name must be at most ${AGENT_NAME_MAX_LENGTH} characters`)
+  .regex(/^[A-Za-z][A-Za-z0-9-]*$/, 'a name must start with a letter and contain only letters, digits or hyphens');
+
 export const RenameSessionRequestSchema = z
   .strictObject({
     name: z.string().trim().min(1).optional(),
-    teammate: z.string().trim().min(1).optional(),
+    teammate: AgentNameSchema.optional(),
     clearParent: z.boolean().optional(),
   })
   .superRefine((value, context) => {

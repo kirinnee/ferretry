@@ -372,7 +372,7 @@ export class AgentToolService {
         }),
       ),
     );
-    return { summary: listed('terminal', surfaces), surfaces };
+    return shown('terminal', surfaces);
   }
 
   private async listPages(caller: AgentToolCaller): Promise<AgentToolResult> {
@@ -390,14 +390,17 @@ export class AgentToolService {
         }),
       ),
     );
-    return { summary: listed('browser', surfaces), surfaces };
+    return shown('browser', surfaces);
   }
 
-  /** One row of a listing. An agent is told, per row, whether it may act there. */
+  /**
+   * One row of a listing — or nothing, for a surface an agent may not use. An agent sees its own
+   * surfaces and the ones handed to it, and never so much as the name, title or URL of a person's.
+   */
   private async listed(
     caller: AgentToolCaller,
     row: ResolvedSurface & { readonly title: string; readonly url?: string },
-  ): Promise<AgentSurface> {
+  ): Promise<AgentSurface | undefined> {
     const base: AgentSurface = {
       id: row.id,
       ...(row.name === undefined ? {} : { name: row.name }),
@@ -410,7 +413,7 @@ export class AgentToolService {
       () => true,
       () => false,
     );
-    return { ...base, available };
+    return available ? { ...base, available } : undefined;
   }
 
   /** The surface a name or id addresses, looked up in this session's own listing and nowhere else. */
@@ -529,15 +532,13 @@ function callFacts(call: AgentToolCall): AuditDetail {
   }
 }
 
-function listed(surface: SurfaceKind, surfaces: readonly AgentSurface[]): string {
+/** A listing's result: the rows the caller may see, and a sentence naming them. */
+function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]): AgentToolResult {
+  const surfaces = rows.filter((row): row is AgentSurface => row !== undefined);
   const word = surface === 'terminal' ? 'terminal' : 'browser page';
-  if (surfaces.length === 0) return `No ${word}s are open in this session.`;
-  const names = surfaces
-    .map(
-      entry => `${surfaceReference(surface, entry.name ?? entry.id)}${entry.available === false ? ' (not yours)' : ''}`,
-    )
-    .join(', ');
-  return `${plural(surfaces.length, word)}: ${names}.`;
+  if (surfaces.length === 0) return { summary: `No ${word}s are open for you in this session.`, surfaces };
+  const names = surfaces.map(entry => surfaceReference(surface, entry.name ?? entry.id)).join(', ');
+  return { summary: `${plural(surfaces.length, word)}: ${names}.`, surfaces };
 }
 
 /**

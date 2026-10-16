@@ -17,7 +17,7 @@
 #                  without this pass ever guessing at the expression that made it unreadable. Pay one off
 #                  by making the verb readable at the dial, never by editing the line.
 #
-# 32 LINES AT SEEDING, 23 NOW, after peaking at 52. Every added line exposed an address the old list
+# 32 LINES AT SEEDING, 22 NOW, after peaking at 52. Every added line exposed an address the old list
 # could not hold anybody to; later fixes then paid thirteen exact exemptions back. The peak arithmetic
 # stays here so that temporary growth cannot be quoted as a relaxation:
 #
@@ -41,6 +41,7 @@
 #   -13 Subsequent fixes made the previously hidden facts readable or aligned the two ends. Nine of
 #       those are this task-board correction: all twelve gateway arms now state their literal method,
 #       retiring every task-board `verb-unproven` line.
+#   -1  `POST …/rename` is served: agent names made the rename sheet's route real.
 #   -4  The old account routes were deleted (U21) — `GET /v1/fleet/plan`, `GET /v1/fleet/usage`,
 #       `PUT /v1/fleet/environment` and `POST /v1/fleet/apply` with them, the last two of which were
 #       the defect and the dead write this list had been holding open.
@@ -67,11 +68,10 @@ unserved POST /v1/task-boards/mark-done # DEFECT: the CLI dials it; packages/dae
 unserved POST /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages/daemon serves no such route
 
 # `FyApiClient.#post` builds `/v1/sessions/${id}/${action}` and nine sites in its own file pass `action`
-# as a string literal. Those nine addresses are now READ, so this list names the two that nothing
-# serves instead of one wildcard that hid them. The wildcard line that used to sit here claimed the
-# concrete call sites were checked separately; they were not, and it is the sentence that kept
-# `POST …/rename` invisible while the PWA shipped a rename sheet against it.
-unserved POST /v1/sessions/*/rename # DEFECT: IFyApiClient.rename() POSTs it; no daemon route has `rename` in its path
+# as a string literal. Those nine addresses are now READ, instead of one wildcard that hid them. The
+# wildcard line that used to sit here claimed the concrete call sites were checked separately; they were
+# not, and it is the sentence that kept `POST …/rename` invisible while the PWA shipped a rename sheet
+# against it. The daemon serves `rename` now (agent names), which paid that line back.
 
 # Correct as written: not the daemon.
 unserved GET /v1/default-relay # CORRECT: dialled against the relay DISCOVERY ORIGIN, a Ferretry service, never a daemon

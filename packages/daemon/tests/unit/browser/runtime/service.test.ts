@@ -115,7 +115,16 @@ const known = new Set(['s1', 's2']);
 function harness(tabs = new Tabs(), idle?: BrowserIdlePolicy) {
   let launches = 0;
   const service = new BrowserSessionService(
-    { get: async id => (known.has(id) ? {} : undefined) },
+    {
+      get: async id =>
+        known.has(id)
+          ? id === 's1'
+            ? { config: { name: 'Fix the login page', teammate: 'hadi' } }
+            : id === 's2'
+              ? { config: { name: 'Docs' } }
+              : {}
+          : undefined,
+    },
     {
       launch: async () => {
         launches += 1;
@@ -154,6 +163,10 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     should(mine.pages.map(page => page.name)).deepEqual(['app']);
     should(theirs.pages.map(page => page.name)).deepEqual(['docs']);
     should(mine).match({ state: 'running', activePageId: app.id, url: 'https://app.test/', canGoBack: true });
+    // Every page names the session it belongs to, and that session's display name when it has one.
+    should(mine.pages[0]).match({ ownerSessionId: 's1', ownerName: 'Hadi' });
+    // …its task title when it has no first name.
+    should(theirs.pages[0]).match({ ownerSessionId: 's2', ownerName: 'Docs' });
     // Chrome's own first tab belongs to nobody, so it is in nobody's listing.
     should(mine.pages.some(page => page.id === 'p0')).be.false();
   });
@@ -234,7 +247,27 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     // Assert
     should(pages).deepEqual([app.id, 'popup']);
     should(viaPopup.status).match({ sessionId: 's1' });
+    should((await service.status('s1')).pages[1]).match({ id: 'popup', ownerSessionId: 's1', ownerName: 'Hadi' });
     should((await service.status('s2')).pages).deepEqual([]);
+  });
+
+  it('should count the popups an agent’s clicks opened toward the machine’s cap', async () => {
+    // Arrange — 50 pages opened by name, and 10 popups those pages opened: 60 session pages.
+    const { tabs, service } = harness();
+    known.add('s5');
+    const first = await service.openPage('s1', 'app');
+    for (let page = 1; page < 20; page += 1) await service.openPage('s1', `p-${String(page)}`);
+    for (let page = 0; page < 20; page += 1) await service.openPage('s2', `a-${String(page)}`);
+    for (let page = 0; page < 10; page += 1) await service.openPage('s5', `b-${String(page)}`);
+    for (let page = 0; page < 10; page += 1)
+      tabs.pages.push({ id: `pop-${String(page)}`, url: 'https://pop.test/', title: '', openerId: first.id });
+
+    // Act
+    const refused = await failure(service.openPage('s5', 'one-more'));
+
+    // Assert
+    should(refused).match({ code: 'capacity', message: /this machine's browser already has 60 pages open/u });
+    should((await service.status('s5')).capacity).deepEqual({ running: 60, maximum: 60 });
   });
 
   it('should close a page by name, and close every page of a session that ended', async () => {
