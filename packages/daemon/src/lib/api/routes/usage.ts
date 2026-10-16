@@ -1,3 +1,4 @@
+import { unattendedUsageFeed } from '../../usage/provider-quota/watched-feed.ts';
 import type { UsageFeedPort, UsageSnapshot } from '../../usage/types.ts';
 import { renderUsageMetrics } from '../metrics.ts';
 import { jsonResponse, PROMETHEUS_CONTENT_TYPE, textResponse } from '../responses.ts';
@@ -66,9 +67,14 @@ function versionedDocument(snapshot: UsageSnapshot | undefined): VersionedUsageF
  * that hold no daemon token; the percentages it carries are operational telemetry, not secrets. The
  * `/v1` one is the surface the CLI and the recommender use, and it stays behind a token so the
  * versioned API has one consistent authorization story.
+ *
+ * ONLY `/v1/usage` IS A WATCHER. The PWA polls it while a quota is on screen, so it may let the
+ * environment logins' provider quotas be read (at most once a minute each). `/usage` and `/metrics`
+ * are scraped on somebody else's timer, so they read the cached readings and ask no provider anything.
  */
 export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): readonly ApiRoute[] {
-  const publicUsage = async () => jsonResponse(document(await currentSnapshot(feed)));
+  const scraped = unattendedUsageFeed(feed);
+  const publicUsage = async () => jsonResponse(document(await currentSnapshot(scraped)));
   const versionedUsage = async () => jsonResponse(versionedDocument(await currentSnapshot(feed)));
   return [
     { method: 'GET', path: '/usage', minimum: 'none', noStore: true, handle: publicUsage },
@@ -85,7 +91,7 @@ export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): r
       minimum: 'none',
       noStore: true,
       handle: async () =>
-        textResponse(renderUsageMetrics(await currentSnapshot(feed), clock.now()), 200, PROMETHEUS_CONTENT_TYPE),
+        textResponse(renderUsageMetrics(await currentSnapshot(scraped), clock.now()), 200, PROMETHEUS_CONTENT_TYPE),
     },
   ];
 }

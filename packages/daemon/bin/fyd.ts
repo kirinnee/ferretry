@@ -21,9 +21,11 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  manifestRuntimes,
   resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
+  wrapperNameOf,
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
@@ -116,6 +118,7 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
+  AnalyticsTranscriptSpend,
   CachedUsageFeed,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -398,6 +401,9 @@ import {
   CodexTranscriptParser,
   CredentialAgentIdentities,
   CredentialUsageSource,
+  ProviderQuotaService,
+  unattendedUsageFeed,
+  WatchedUsageFeed,
   childGrantRequester,
   chooseRelayCarrierSources,
   claimStartName,
@@ -5076,6 +5082,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   let credentialList: (() => Promise<FleetCredentialList>) | undefined;
   /**
+   * Environment logins' provider quotas (docs/provider-quotas.md), once the subsystems are mounted. The
+   * usage feed is built before them and lays these readings over its rows; until then it has none.
+   */
+  let providerQuota: ProviderQuotaService | undefined;
+  /**
    * The one credential store the renewal, the credential status and the sign-in read through.
    *
    * A renewal classifies and then classifies again, which is what decides whether it fired and whether
@@ -5741,21 +5752,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // that could run a command would be an arbitrary command run on a schedule on behalf of no
       // request. There used to be one, configured as argv. It is deleted, along with the field that
       // named it, rather than left unmounted behind a default.
-      return new CachedUsageFeed(
-        [
-          new CredentialUsageSource({
-            enabled: async () => (await declaredAccountModel())?.advanced.usage.enabled ?? true,
-            manifest: publishedManifest,
-            credentials: async () => {
-              if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
-              return await credentialList();
-            },
-          }),
-          ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
-        ],
-        // The fleet's own declared probe interval. A host with no fleet configuration has not asked
-        // for a cadence at all, so it keeps the default rather than being given one by a refusal.
-        { refreshMs: await declaredUsageRefreshMs() },
+      // WATCHED, because a reader of this feed is somebody asking: a screen, the Warden, quota failover.
+      // Each read lets the environment logins' provider quotas be read first, at most once a minute each;
+      // the unattended refresh timer and the scrapes read its `unattended` half, which only reads the cache.
+      return new WatchedUsageFeed(
+        new CachedUsageFeed(
+          [
+            new CredentialUsageSource({
+              enabled: async () => (await declaredAccountModel())?.advanced.usage.enabled ?? true,
+              manifest: publishedManifest,
+              credentials: async () => {
+                if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
+                return await credentialList();
+              },
+            }),
+            ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
+          ],
+          // The fleet's own declared probe interval. A host with no fleet configuration has not asked
+          // for a cadence at all, so it keeps the default rather than being given one by a refusal.
+          { refreshMs: await declaredUsageRefreshMs() },
+        ),
+        () => providerQuota,
       );
     },
     usageRefreshMs: declaredUsageRefreshMs,
@@ -6563,6 +6580,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         probe: new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport()),
         clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
       });
+      // Provider quotas for environment logins (docs/provider-quotas.md): read through the SAME outbound
+      // holder, only when somebody watches, at most once a minute per login, and never inference. The
+      // fallback is what this machine's own sessions on the login cost, from the analytics index.
+      const quotaReader = new ProviderQuotaService({
+        logins: async () => {
+          const [{ entries }, presets, manifest] = await Promise.all([
+            fleetCredentialCatalog.entries(),
+            providerPresets.presets(),
+            publishedManifest(),
+          ]);
+          const runtimes = manifest === undefined ? [] : manifestRuntimes(manifest);
+          return entries
+            .filter(entry => entry.credential.store === 'environment')
+            .map(entry => ({
+              id: entry.id,
+              credential: entry.credential,
+              preset: presets.find(preset => preset.id === entry.credential.preset),
+              agents: runtimes
+                .filter(runtime => runtime.credential === entry.id)
+                .map(runtime => wrapperNameOf(runtime.wrapper)),
+            }));
+        },
+        authorizer: outboundAuthorizer,
+        spend: new AnalyticsTranscriptSpend(analyticsIngestion),
+        clock: { nowMs: () => millisecondClock.now() },
+      });
+      providerQuota = quotaReader;
       const fleetCredentials = createFleetCredentialsSubsystem({
         catalog: fleetCredentialCatalog,
         status: credentialStatus,
@@ -6582,6 +6626,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ),
           test: async (subject, consent) => await providerProbe.test(subject, consent),
         },
+        providerQuota: quotaReader,
       });
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
@@ -6754,7 +6799,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         carriers,
         harnessLogin,
         mcpOAuth,
-        fleetCredentials,
+        // The logins list is a WATCHER: somebody has it on screen, so the environment logins' provider
+        // quotas that are due are read first (at most once a minute each). The usage feed's unattended
+        // refresh reads `fleetCredentials.list` directly, which never asks a provider anything.
+        fleetCredentials: {
+          check: fleetCredentials.check.bind(fleetCredentials),
+          test: fleetCredentials.test.bind(fleetCredentials),
+          presets: fleetCredentials.presets.bind(fleetCredentials),
+          list: async () => {
+            await quotaReader.watch();
+            return await fleetCredentials.list();
+          },
+        },
         // The catalogue runs the setup service's import and clone as two of its reviewed changes.
         fleetCatalog: createFleetCatalogSubsystem({
           ...fleetCatalogDeps,
@@ -6812,7 +6868,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
         // health probe launches a wrapper and spends a real billable turn per account, which a timer
         // must never do. Health belongs where a person chose it.
-        fleetRefresh: new FleetRefreshService({ usage, credentials: fleetCredentials }),
+        fleetRefresh: new FleetRefreshService({ usage: unattendedUsageFeed(usage), credentials: fleetCredentials }),
         notifications,
         attention,
         pins: new PinService(
