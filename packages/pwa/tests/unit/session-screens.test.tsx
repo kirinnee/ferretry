@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
@@ -17,6 +17,12 @@ import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { isTerminalSessionStatus, relativeTime } from '../../src/lib/session-screens.ts';
 import { StatusMark, statusMark } from '../../src/shell/status-mark.tsx';
 import { render, run, runAsync } from '../support/react.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
 
 const daemonA = daemonConnection({
   daemonId: 'daemon-a',
@@ -482,7 +488,10 @@ describe('session screen components', () => {
     const textarea = composer.root.findByType('textarea');
     expect(textarea.props.value).toBe('Saved only for A');
     expect(drafts.load(daemonSessionScope(daemonB, 'same-id'))).toBe('');
-    expect(findText(composer.root, 'Queue')).toHaveLength(1);
+    // While the agent works, Interrupt & send stands beside Send.
+    expect(
+      composer.root.findAll(node => node.type === 'button' && node.props['aria-label'] === 'Interrupt & send'),
+    ).toHaveLength(1);
     await runAsync(async () => {
       composer.root.findByType('form').props.onSubmit({ preventDefault() {} });
       await Promise.resolve();
