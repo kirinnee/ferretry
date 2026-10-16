@@ -2,6 +2,7 @@
 label: OpenAI API key
 harness: codex
 summary: Codex with an OpenAI platform API key, billed per token, through the Responses API.
+group: popular
 docs: https://developers.openai.com/codex/config-advanced
 verified: '2026-10-16'
 env:

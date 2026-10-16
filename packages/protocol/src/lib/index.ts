@@ -1,4 +1,6 @@
 export * from './address.ts';
+export * from './agent-address.ts';
+export * from './agent-messages.ts';
 export * from './agent-tools.ts';
 export * from './agent-tools-lessons.ts';
 export * from './advertisement.ts';
@@ -10,6 +12,7 @@ export * from './analytics-query.ts';
 export * from './attention.ts';
 export * from './audit.ts';
 export * from './browser.ts';
+export * from './browser-stream.ts';
 export * from './browser-login.ts';
 export * from './carriers.ts';
 export * from './catalog.ts';

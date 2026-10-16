@@ -597,6 +597,11 @@ export interface BrowserPage {
   getAttribute(selector: string, name: string): Promise<string | null>;
   textContent(selector: string): Promise<string | null>;
   evaluate<T>(expression: string): Promise<T>;
+  focus(selector: string, options?: { timeout?: number }): Promise<void>;
+  readonly keyboard: { type(text: string): Promise<void> };
+  setViewportSize(size: { width: number; height: number }): Promise<void>;
+  emulateMedia(options: { colorScheme: 'light' | 'dark' }): Promise<void>;
+  screenshot(options: { path: string; timeout?: number }): Promise<unknown>;
   on(event: string, handler: (payload: unknown) => void): void;
   close(): Promise<void>;
 }
@@ -606,11 +611,18 @@ export interface BrowserSession {
   /** Everything the page logged, so a silent failure in product code is visible to the report. */
   readonly console: readonly string[];
   readonly pageErrors: readonly string[];
+  /** A DevTools session on the page, for what only the protocol can do — a virtual authenticator. */
+  cdp(): Promise<BrowserCdpSession>;
   stop(): Promise<void>;
+}
+
+interface BrowserCdpSession {
+  send<T = unknown>(method: string, params?: Readonly<Record<string, unknown>>): Promise<T>;
 }
 
 interface BrowserContextLike {
   newPage(): Promise<BrowserPage>;
+  newCDPSession(page: BrowserPage): Promise<BrowserCdpSession>;
   grantPermissions(permissions: readonly string[], options?: { origin?: string }): Promise<void>;
 }
 
@@ -708,7 +720,12 @@ export async function launchChrome(teardown: HarnessTeardown, options: ChromeOpt
     await closeChromeBounded(browser);
   };
   teardown.add('chrome', stop);
-  return { page, console: consoleLines, pageErrors, stop };
+  let session: Promise<BrowserCdpSession> | undefined;
+  const cdp = (): Promise<BrowserCdpSession> => {
+    session ??= context.newCDPSession(page);
+    return session;
+  };
+  return { page, console: consoleLines, pageErrors, cdp, stop };
 }
 
 // ─── the step ledger ──────────────────────────────────────────────────────────────────────────

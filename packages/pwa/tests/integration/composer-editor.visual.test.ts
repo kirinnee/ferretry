@@ -491,8 +491,11 @@ describe('the composer on a phone with the keyboard up', () => {
           status: getComputedStyle(document.querySelector('[data-composer-status-chrome]') as Element).display,
         };
       });
-      expect(measured.editor).toBeLessThanOrEqual(88 + 1);
-      expect(measured.composer).toBeLessThanOrEqual(150);
+      // The phone composer is a writing surface now (its controls stack beside the field), so the
+      // keyboard-up ceiling is six 24px lines rather than four 22px ones — still small enough that the
+      // turn being answered keeps more than half the visible viewport.
+      expect(measured.editor).toBeLessThanOrEqual(144 + 1);
+      expect(measured.composer).toBeLessThanOrEqual(175);
       expect(measured.transcript).toBeGreaterThanOrEqual(KEYBOARD_VISIBLE_PX * 0.55);
       expect(measured.bottom).toBeLessThanOrEqual(KEYBOARD_VISIBLE_PX);
       expect(measured.status).toBe('none');

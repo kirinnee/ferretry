@@ -6,9 +6,12 @@ import {
   detectionSentence,
   detectTable,
   gridPresets,
+  gridSections,
   oneClickDraft,
   pasteTarget,
+  PROVIDER_SEARCH_THRESHOLD,
   prefillFrom,
+  presetMatches,
   readPaste,
   secretFields,
 } from '../../../../../src/features/fleet/credentials/provider-model.ts';
@@ -29,6 +32,31 @@ describe('provider-model', () => {
       'amazon-bedrock',
       'custom-gateway',
     ]);
+  });
+
+  it('files the tiles under their headings, the ungrouped after the clouds, and leaves no heading empty', () => {
+    const shape = (query?: string) =>
+      gridSections(PRESETS, query).map(section => [section.key, section.heading, section.presets.map(p => p.id)]);
+    expect(shape()).toEqual([
+      ['popular', 'Popular', ['deepseek', 'zai-glm', 'zai-glm-codex']],
+      ['cloud', 'Cloud', ['azure-openai', 'amazon-bedrock']],
+      ['other', 'More providers', ['deepseek-mirror']],
+      ['self-hosted', 'Self-hosted', ['custom-gateway']],
+    ]);
+    expect(shape('  deepseek ')).toEqual([
+      ['popular', 'Popular', ['deepseek']],
+      ['other', 'More providers', ['deepseek-mirror']],
+    ]);
+    expect(shape('nothing-is-called-this')).toEqual([]);
+    expect(PROVIDER_SEARCH_THRESHOLD).toBe(8);
+  });
+
+  it('matches a search on every word, in the name, the id or the summary, ignoring case', () => {
+    expect(presetMatches(AZURE, '')).toBe(true);
+    expect(presetMatches(AZURE, 'AZURE')).toBe(true);
+    expect(presetMatches(DEEPSEEK_MIRROR, 'mirror deepseek')).toBe(true);
+    expect(presetMatches(GATEWAY, 'claude code')).toBe(true);
+    expect(presetMatches(GATEWAY, 'gateway bedrock')).toBe(false);
   });
 
   it('asks for each secret NAME once, with the variables it fills, and for blank required values', () => {

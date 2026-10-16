@@ -22,7 +22,8 @@ import {
   scripted,
   stagedFrom,
 } from '../account-support.ts';
-import { ENVIRONMENT, FOUNDRY, PROVIDERS } from './environment-support.ts';
+import { LONG_PRESS_MS } from '../../../../../src/shell/agent-sidebar-model.ts';
+import { DEEPSEEK, DEEPSEEK_MIRROR, ENVIRONMENT, FOUNDRY, PROVIDERS } from './environment-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
@@ -144,11 +145,19 @@ const grid = (container: HTMLElement) => container.querySelector('[data-provider
 const form = (container: HTMLElement) => container.querySelector('[data-env-login="form"]');
 const tiles = (container: HTMLElement) =>
   Array.from(container.querySelectorAll('[data-provider-tile]')).map(tile => tile.getAttribute('data-provider-tile'));
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/** A pointer event as React reads it: `pointerover`/`pointerout` from outside are its enter and leave. */
+const pointer = (target: HTMLElement, type: string, pointerType: string): void => {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, { pointerId: 1, pointerType, relatedTarget: document.body });
+  target.dispatchEvent(event);
+};
 const sent = (calls: readonly Call[], route: string) =>
   calls.filter(call => `${call.method} ${call.path}` === route).map(call => call.body);
 
 describe('AddLoginStep · Environment · providers', () => {
-  it('shows a tile per provider in the daemon’s order, the gateway and Paste last, with scope chips', async () => {
+  it('files a tile per provider under its heading, nothing picked, the gateway and Paste last, with scope chips', async () => {
     const { view } = await open();
     await until(() => grid(view.container) !== null, 'the grid');
     const c = view.container;
@@ -157,24 +166,144 @@ describe('AddLoginStep · Environment · providers', () => {
       'zai-glm',
       'zai-glm-codex',
       'azure-openai',
-      'deepseek-mirror',
       'amazon-bedrock',
+      'deepseek-mirror',
       'custom-gateway',
       'paste',
     ]);
+    const headings = Array.from(c.querySelectorAll('[data-provider-section]')).map(section => [
+      section.getAttribute('data-provider-section'),
+      section.querySelector('h4')?.textContent,
+    ]);
+    expect(headings).toEqual([
+      ['popular', 'Popular'],
+      ['cloud', 'Cloud'],
+      ['other', 'More providers'],
+      ['self-hosted', 'Self-hosted'],
+    ]);
+    // Seven tiles: no search box, and no tile is pressed until somebody taps one.
+    expect(c.querySelector('[data-provider-search]')).toBeNull();
+    expect(c.querySelector('[data-provider-tile][aria-pressed="true"], [data-provider-tile][aria-current]')).toBeNull();
+    expect(form(c)).toBeNull();
     const chip = (id: string) =>
       c.querySelector(`[data-provider-tile="${id}"] [data-login-scope]`)?.getAttribute('data-login-scope');
     expect(chip('deepseek')).toBe('both');
-    expect(c.querySelector('[data-provider-tile="deepseek"]')?.textContent).toContain('Claude + Codex');
+    expect(c.querySelector('[data-provider-tile="deepseek"]')?.textContent).toBe('DeepSeekClaude + Codex');
     expect(chip('deepseek-mirror')).toBe('claude');
     expect(chip('azure-openai')).toBe('codex');
     expect(chip('zai-glm-codex')).toBe('codex');
-    const blocked = must(c.querySelector<HTMLButtonElement>('[data-provider-tile="zai-glm-codex"]'), 'GLM on Codex');
-    expect(blocked.disabled).toBe(true);
-    expect(blocked.textContent).toContain('Not offered here: Codex needs a model catalogue file.');
     expect(c.querySelector('[data-stepper-position]')?.textContent).toBe('Step 1 of 2 · Environment');
     await click(c.querySelector('[data-add-login-kind-option="signin"] input'), 'Sign in');
     expect(c.querySelector('[data-add-login-step="tool"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('shows a tile’s one line on hover and keyboard focus, hides it on leave, blur and Escape', async () => {
+    const { view } = await open();
+    await until(() => grid(view.container) !== null, 'the grid');
+    const c = view.container;
+    const tile = must(c.querySelector<HTMLButtonElement>('[data-provider-tile="deepseek"]'), 'DeepSeek');
+    const note = must(c.querySelector<HTMLElement>('[data-provider-tile-note="deepseek"]'), 'its note');
+    const shown = () => !note.className.split(' ').includes('hidden');
+    // Always its accessible description, shown or not.
+    expect(tile.getAttribute('aria-describedby')).toBe(note.id);
+    expect(note.getAttribute('role')).toBe('tooltip');
+    expect(note.textContent).toBe(DEEPSEEK.summary);
+    expect(shown()).toBe(false);
+    await interact(() => pointer(tile, 'pointerover', 'mouse'));
+    expect(shown()).toBe(true);
+    await interact(() => pointer(tile, 'pointerout', 'mouse'));
+    expect(shown()).toBe(false);
+    // A pen hovering is not a mouse: it shows nothing until it presses.
+    await interact(() => pointer(tile, 'pointerover', 'pen'));
+    expect(shown()).toBe(false);
+    await interact(() => tile.focus());
+    expect(shown()).toBe(true);
+    await interact(() => tile.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true })));
+    expect(shown()).toBe(true);
+    await interact(() => tile.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(shown()).toBe(false);
+    await interact(() => tile.focus());
+    const other = must(c.querySelector<HTMLButtonElement>('[data-provider-tile="zai-glm"]'), 'GLM');
+    await interact(() => other.focus());
+    expect(shown()).toBe(false);
+    expect(c.querySelector('[data-provider-tile-note="zai-glm"]')?.className).not.toContain('hidden');
+    await interact(() => other.blur());
+    expect(c.querySelector('[data-provider-tile-note="zai-glm"]')?.className).toContain('hidden');
+    await view.unmount();
+  });
+
+  it('shows the note on a long press and swallows the tap that ends it; a short tap opens the form', async () => {
+    const { view } = await open();
+    await until(() => grid(view.container) !== null, 'the grid');
+    const c = view.container;
+    const tile = must(c.querySelector<HTMLButtonElement>('[data-provider-tile="deepseek"]'), 'DeepSeek');
+    const shown = () =>
+      !c.querySelector('[data-provider-tile-note="deepseek"]')?.className.split(' ').includes('hidden');
+    await interact(() => pointer(tile, 'pointerdown', 'touch'));
+    await interact(() => sleep(LONG_PRESS_MS + 50));
+    expect(shown()).toBe(true);
+    await interact(() => pointer(tile, 'pointerup', 'touch'));
+    const menu = new Event('contextmenu', { bubbles: true, cancelable: true });
+    await interact(() => tile.dispatchEvent(menu));
+    expect(menu.defaultPrevented).toBe(true);
+    await click(tile, 'the tap that ends the press');
+    expect(form(c)).toBeNull();
+    // A press that a scroll took over is cancelled before it shows anything.
+    await interact(() => pointer(tile, 'pointerout', 'mouse'));
+    await interact(() => pointer(tile, 'pointerdown', 'touch'));
+    await interact(() => pointer(tile, 'pointercancel', 'touch'));
+    await interact(() => sleep(LONG_PRESS_MS + 50));
+    const untouched = new Event('contextmenu', { bubbles: true, cancelable: true });
+    await interact(() => tile.dispatchEvent(untouched));
+    expect(untouched.defaultPrevented).toBe(false);
+    // A mouse press is a click, never a long press; a short tap opens the form at once.
+    await interact(() => pointer(tile, 'pointerdown', 'mouse'));
+    await interact(() => pointer(tile, 'pointerdown', 'touch'));
+    await interact(() => pointer(tile, 'pointerup', 'touch'));
+    await click(tile, 'a short tap');
+    expect(form(c)?.getAttribute('data-one-click')).toBe('deepseek');
+    await view.unmount();
+  });
+
+  it('keeps a provider that is not offered focusable, and a tap on it says why instead of opening it', async () => {
+    const { view } = await open();
+    await until(() => grid(view.container) !== null, 'the grid');
+    const c = view.container;
+    const blocked = must(c.querySelector<HTMLButtonElement>('[data-provider-tile="zai-glm-codex"]'), 'GLM on Codex');
+    expect(blocked.disabled).toBe(false);
+    expect(blocked.getAttribute('aria-disabled')).toBe('true');
+    expect(blocked.querySelector('[data-provider-tile-unoffered]')?.textContent).toBe('Not offered here');
+    expect(c.querySelector('[data-provider-tile="deepseek"]')?.hasAttribute('aria-disabled')).toBe(false);
+    const note = must(c.querySelector<HTMLElement>('[data-provider-tile-note="zai-glm-codex"]'), 'its note');
+    expect(note.querySelector('[data-provider-tile-reason]')?.textContent).toBe(
+      'Not offered here: Codex needs a model catalogue file.',
+    );
+    await click(blocked, 'GLM on Codex');
+    expect(form(c)).toBeNull();
+    expect(note.className).not.toContain('hidden');
+    await view.unmount();
+  });
+
+  it('puts a search box over more than eight tiles, narrows them by name, and says when nothing matches', async () => {
+    const more = ['one', 'two', 'three'].map(n => ({ ...DEEPSEEK_MIRROR, id: `extra-${n}`, label: `Extra ${n}` }));
+    const { view } = await open({ [PRESETS_READ]: { presets: [...PROVIDERS.presets, ...more] } });
+    await until(() => grid(view.container) !== null, 'the grid');
+    const c = view.container;
+    const search = must(c.querySelector<HTMLInputElement>('[data-provider-search]'), 'the search box');
+    expect(search.type).toBe('search');
+    expect(search.closest('label')?.textContent).toContain('Search providers');
+    await type(search, 'DEEPSEEK');
+    expect(tiles(c)).toEqual(['deepseek', 'deepseek-mirror', 'paste']);
+    await type(search, 'extra two');
+    expect(tiles(c)).toEqual(['extra-two', 'paste']);
+    await type(search, 'nothing-is-called-this ');
+    expect(tiles(c)).toEqual(['paste']);
+    expect(c.querySelector('[data-provider-no-match]')?.textContent).toBe(
+      'No provider matches “nothing-is-called-this”. Try another name, or paste your variables below.',
+    );
+    await type(search, '');
+    expect(tiles(c)).toHaveLength(11);
     await view.unmount();
   });
 
@@ -191,6 +320,11 @@ describe('AddLoginStep · Environment · providers', () => {
     expect(c.querySelector('[data-env-preset-facts="deepseek"] [data-login-scope]')?.textContent).toBe(
       'Claude + Codex',
     );
+    // The key comes first: what the provider is follows it.
+    expect(
+      field.compareDocumentPosition(must(c.querySelector('[data-env-preset-facts="deepseek"]'), 'the facts')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     await type(c.querySelector('[data-env-secret-input="DEEPSEEK_API_KEY"]'), 'a-pasted-deepseek-key');
     expect(c.querySelector('[data-env-problem]')).toBeNull();
     await click(c.querySelector('[data-change-submit]'), 'Add');

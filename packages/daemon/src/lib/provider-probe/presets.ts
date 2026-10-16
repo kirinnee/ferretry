@@ -83,6 +83,7 @@ export function presetView(preset: ProviderPreset): FleetProviderPresetView {
     label: preset.label,
     harness: preset.harness,
     summary: preset.summary,
+    ...(preset.group === undefined ? {} : { group: preset.group }),
     docs: preset.docs,
     origin: preset.origin,
     variables: Object.entries(preset.env).map(([name, variable]) => ({

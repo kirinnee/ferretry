@@ -23,8 +23,9 @@ import { DEFAULT_CALLSIGN_POOL, suggestCallsigns, type NameClaim } from '../../n
  *
  * WHAT COUNTS AS TAKEN is therefore read from the live fleet rather than from a reservation ledger:
  * a callsign a session is currently using is not free, and one whose session has aged out of the
- * resolution window is. That is the same window `resolveSessionReference` uses to decide which
- * session a bare callsign still names, so the two cannot disagree about who owns a name.
+ * resolution window is. A name freed that way can end up held by two sessions — the dormant one that
+ * aged out and the new one that took it — which is why addressing by name (`resolveAgentAddress` in the
+ * protocol) prefers the live holder and refuses a tie rather than guessing.
  */
 
 /** The name pool as the route needs it: who holds what, and where to start looking. */

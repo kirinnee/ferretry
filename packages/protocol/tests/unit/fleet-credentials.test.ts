@@ -87,6 +87,7 @@ const preset = {
   harness: 'claude',
   summary: 'Claude Code on GLM models with a Z.ai Coding Plan key.',
   docs: 'https://docs.z.ai/devpack/tool/claude',
+  group: 'popular',
   origin: 'built-in',
   variables: [
     {
@@ -186,6 +187,7 @@ const ENVIRONMENT_CASES: readonly SchemaCase[] = [
   { name: 'FleetCredentialTestCodeSchema', schema: credentials.FleetCredentialTestCodeSchema, value: 'not_testable' },
   { name: 'FleetCredentialTestResultSchema', schema: credentials.FleetCredentialTestResultSchema, value: testResult },
   { name: 'FleetPresetVariableSchema', schema: credentials.FleetPresetVariableSchema, value: preset.variables[0] },
+  { name: 'FleetPresetGroupSchema', schema: credentials.FleetPresetGroupSchema, value: 'self-hosted' },
   { name: 'FleetPresetDetectSchema', schema: credentials.FleetPresetDetectSchema, value: detect },
   { name: 'FleetProviderPresetViewSchema', schema: credentials.FleetProviderPresetViewSchema, value: preset },
   {
@@ -344,16 +346,23 @@ describe('the environment-login wire contract (docs/provider-presets.md)', () =>
     should(legacy.harnesses).be.undefined();
   });
 
-  it('should carry a dual preset’s halves and its detection clues, and parse without either from an older daemon', () => {
+  it('should carry a dual preset’s halves, its detection clues and its grid group, and parse without any from an older daemon', () => {
     // Act
     const parsed = credentials.FleetProviderPresetViewSchema.parse(preset);
-    const legacy = credentials.FleetProviderPresetViewSchema.parse({ ...preset, halves: undefined, detect: undefined });
+    const legacy = credentials.FleetProviderPresetViewSchema.parse({
+      ...preset,
+      halves: undefined,
+      detect: undefined,
+      group: undefined,
+    });
 
     // Assert
     should(parsed.halves).deepEqual(preset.halves);
     should(parsed.detect).deepEqual(detect);
     should(legacy.halves).be.undefined();
     should(legacy.detect).be.undefined();
+    should(parsed.group).equal('popular');
+    should(legacy.group).be.undefined();
   });
 
   it('should name which half a variable belongs to, absent meaning shared by every half', () => {

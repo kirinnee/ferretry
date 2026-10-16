@@ -1,6 +1,6 @@
 import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
 
-/** A viewer's socket, seen from the domain: one binary envelope out, a close code at the end. */
+/** A viewer's socket, seen from the domain: binary frame chunks out, a close code at the end. */
 export interface ViewerDownstream {
   /** `0` means the transport dropped the message; anything else (including nothing) is accepted. */
   send(envelope: Uint8Array): number | void;
@@ -42,6 +42,11 @@ export interface ViewerStreamOptions {
   readonly maxBufferedBytes?: number;
   /** How often a retained frame retries while the transport is congested. */
   readonly recoveryPollMs?: number;
+  /**
+   * The largest message the transport carries whole, which a frame is chunked to fit. Defaults to the
+   * raw byte budget of one §14 `data` record, because every viewer stream is a stream session.
+   */
+  readonly chunkBytes?: number;
 }
 
 /** WebSocket close codes the transport uses, named so call sites read as decisions. */

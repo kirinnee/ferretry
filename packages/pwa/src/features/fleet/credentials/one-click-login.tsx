@@ -224,7 +224,6 @@ export function OneClickLogin({
         </Button>
         <h4 className="m-0 mt-1 text-title font-semibold text-fg">{preset.label}</h4>
       </div>
-      <PresetFacts preset={preset} />
       {prefill === undefined ? null : (
         <p className="m-0 text-cell leading-base text-fg" data-one-click-prefilled="">
           Filled in from what you pasted. Check it, then Add.
@@ -290,6 +289,9 @@ export function OneClickLogin({
           </fieldset>
         ) : null}
       </div>
+
+      {/* What the provider is comes after its key: tapping a tile lands on the field to paste into. */}
+      <PresetFacts preset={preset} />
 
       {storeError === null ? null : (
         <p role="alert" className="m-0 text-cell leading-base text-err" data-env-store-error="">

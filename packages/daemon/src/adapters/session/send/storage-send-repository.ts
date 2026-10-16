@@ -1,11 +1,12 @@
 import { jsonObject, type JsonValue } from '../../../lib/json.ts';
-import { resolveSessionReference, type CallsignReference } from '../../../lib/names/policy.ts';
+import { resolveSessionReference } from '../../../lib/names/policy.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import { tryParseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import type { SendRepository, SendTarget, SendTransition } from '../../../lib/session/send/types.ts';
 import { signalStatusOf } from '../../../lib/session/signal/types.ts';
 import { turnStatePatch } from '../../../lib/session/turn/policy.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
+import { sessionAddressCandidates } from '../session-address-candidates.ts';
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -66,17 +67,9 @@ export class StorageSendRepository implements SendRepository {
    * eventually disagree about which session that is.
    */
   async resolveSender(reference: string): Promise<SendTarget | undefined> {
-    const references: CallsignReference[] = [];
-    for (const indexed of this.storage.listSessions()) {
-      const config = record(await this.storage.readConfig(indexed.id).catch(() => undefined));
-      const claimedAt = Date.parse(text(config.createdAt) ?? '');
-      references.push({
-        id: indexed.id,
-        ...(text(config.teammate) === undefined ? {} : { callsign: text(config.teammate) }),
-        claimedAtMs: Number.isFinite(claimedAt) ? claimedAt : 0,
-      });
-    }
-    const resolved = tryParseSessionId(resolveSessionReference(reference, references, Date.parse(this.clock.now())));
+    const resolved = tryParseSessionId(
+      resolveSessionReference(reference, await sessionAddressCandidates(this.storage)) ?? '',
+    );
     return resolved === undefined ? undefined : await this.read(resolved);
   }
 

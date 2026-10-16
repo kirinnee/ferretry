@@ -26,10 +26,10 @@ import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
 import {
-  type ComposerSuggestionSwitches,
-  DEFAULT_COMPOSER_SUGGESTIONS,
   type ComposerField,
   type ComposerFieldKeyEvent,
+  type ComposerSuggestionSwitches,
+  DEFAULT_COMPOSER_SUGGESTIONS,
   useComposerAutocomplete,
 } from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
@@ -38,12 +38,12 @@ import {
   type ComposerSkillsCatalog,
   createComposerAutocompleteProviders,
 } from './composer-autocomplete-providers.ts';
+import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
+import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
-import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
-import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
 export interface ComposerProps {
@@ -121,15 +121,20 @@ export interface ComposerProps {
  * Growth is capped for the opposite reason — a pasted essay must not swallow
  * the conversation it is about.
  *
- * The phone gets a slightly taller rest ceiling than the desktop because its
- * lines are shorter, and a much LOWER one while the keyboard is up: with ~430px of
- * visible viewport, the turn being answered has to stay readable above the box, so
- * four lines is the ceiling (the status line also steps aside then; see
- * `.fy-composer-status-chrome`).
+ * THE PHONE COMPOSER IS A WRITING SURFACE, not a one-line chat box (owner: "way too
+ * small … make buttons vertical so there's more space for typing"). Its controls
+ * stack in a narrow column on the right (`.fy-composer-dock`), so the field takes
+ * the full remaining width, and it rests at about four lines — a CSS floor on the
+ * phone layout, `[data-composer-layout='phone']` in session-screens.css. It grows
+ * to ten lines at rest, and while the keyboard is up its ceiling drops to six:
+ * with ~430px of visible viewport the turn being answered has to stay readable
+ * above the box. Six lines is no lower than the stacked controls already make the
+ * row, so a lower ceiling would only add a scrollbar inside a box that is taller
+ * anyway (the status line also steps aside then; see `.fy-composer-status-chrome`).
  */
 const MAX_TEXTAREA_PX = 148;
-const COMPACT_MAX_TEXTAREA_PX = 160;
-const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 88;
+const COMPACT_MAX_TEXTAREA_PX = 240;
+const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 144;
 /** ONE LINE at rest, the same 22px `.fy-composer textarea` declares — stated here so the two cannot
  *  drift. The touch target is the row around it (36px controls plus its padding, 44px tall), not the
  *  bare line, which is what lets an idle composer be a single compact line. */
@@ -793,10 +798,27 @@ export function Composer({
   const interruptTitle = `Interrupt & send — stops the agent's turn and sends now (${modifierLabel}⇧↵)`;
   const fieldDisabled = disabled || sending;
 
+  // ONE attach control, placed by layout: before the field on a desktop, at the top of the stacked
+  // dock on a phone, so the field there spans every pixel the dock leaves.
+  const attachButton = (
+    <button
+      aria-label="Attach an image, audio or a file"
+      className="fy-composer-icon"
+      data-composer-attach=""
+      disabled={fieldDisabled}
+      onClick={() => fileInput.current?.click()}
+      title="Attach an image, audio or a file — or drop or paste one here"
+      type="button"
+    >
+      <Plus aria-hidden="true" size={18} />
+    </button>
+  );
+
   return (
     <form
       className="fy-composer"
       data-composer-dropping={dropping ? '' : undefined}
+      data-composer-layout={compact ? 'phone' : undefined}
       data-composer-style={editorStyle}
       onDragLeave={() => setDropping(false)}
       onDragOver={event => {
@@ -849,17 +871,7 @@ export function Composer({
         />
       ) : null}
       <div className="fy-composer-row">
-        <button
-          aria-label="Attach an image, audio or a file"
-          className="fy-composer-icon"
-          data-composer-attach=""
-          disabled={fieldDisabled}
-          onClick={() => fileInput.current?.click()}
-          title="Attach an image, audio or a file — or drop or paste one here"
-          type="button"
-        >
-          <Plus aria-hidden="true" size={18} />
-        </button>
+        {compact ? null : attachButton}
         <input
           aria-hidden="true"
           className="hidden"
@@ -912,45 +924,51 @@ export function Composer({
               under the on-screen keyboard. */}
           <ComposerAutocompletePopover surface={autocomplete} />
         </div>
-        {dictationSettings ? (
-          <DictationControl
-            {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
-            className="fy-composer-icon"
-            composerRef={elementRef}
-            daemon={daemon}
-            disabled={fieldDisabled}
-            draft={draft}
-            layout="compact"
-            onDraftChange={applyDictation}
-            {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
-            selectionRef={inputRef}
-            sessionId={sessionId}
-            settings={dictationSettings}
-          />
-        ) : null}
-        {busy ? (
+        {/* The controls after the field. A desktop lays them inline in the row (`display: contents`); a
+            phone stacks them in a narrow column — attach, mic, Interrupt & send, Send — with Send at the
+            bottom, nearest the thumb. */}
+        <div className="fy-composer-dock" data-composer-dock="">
+          {compact ? attachButton : null}
+          {dictationSettings ? (
+            <DictationControl
+              {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
+              className="fy-composer-icon"
+              composerRef={elementRef}
+              daemon={daemon}
+              disabled={fieldDisabled}
+              draft={draft}
+              layout="compact"
+              onDraftChange={applyDictation}
+              {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
+              selectionRef={inputRef}
+              sessionId={sessionId}
+              settings={dictationSettings}
+            />
+          ) : null}
+          {busy ? (
+            <button
+              aria-label="Interrupt & send"
+              className="fy-composer-interrupt"
+              data-composer-interrupt=""
+              disabled={!canSubmit}
+              onClick={() => void submit(true)}
+              title={interruptTitle}
+              type="button"
+            >
+              <Zap aria-hidden="true" size={17} strokeWidth={2.25} />
+            </button>
+          ) : null}
           <button
-            aria-label="Interrupt & send"
-            className="fy-composer-interrupt"
-            data-composer-interrupt=""
+            aria-label={sendLabel}
+            className="fy-composer-send"
+            data-composer-send=""
             disabled={!canSubmit}
-            onClick={() => void submit(true)}
-            title={interruptTitle}
-            type="button"
+            title={sendTitle}
+            type="submit"
           >
-            <Zap aria-hidden="true" size={17} strokeWidth={2.25} />
+            <ArrowUp aria-hidden="true" size={18} strokeWidth={2.5} />
           </button>
-        ) : null}
-        <button
-          aria-label={sendLabel}
-          className="fy-composer-send"
-          data-composer-send=""
-          disabled={!canSubmit}
-          title={sendTitle}
-          type="submit"
-        >
-          <ArrowUp aria-hidden="true" size={18} strokeWidth={2.5} />
-        </button>
+        </div>
       </div>
       <div className="fy-composer-actions" data-composer-status="">
         {/* The session's readouts. On a phone with the keyboard up they step aside (CSS, never an

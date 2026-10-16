@@ -84,6 +84,11 @@ describe('presetView', () => {
     should(presetView(preset('custom-gateway')).detect).be.undefined();
   });
 
+  it('should carry the grid heading a preset files itself under, and none for a preset without one', () => {
+    should(presetView(preset('google-vertex')).group).equal('cloud');
+    should(presetView(preset('qwen-coding-plan'))).not.have.property('group');
+  });
+
   it('should give a variable its description when the preset has one', () => {
     should(presetView(preset('anthropic-api-key')).variables[0]).containDeep({
       description: 'the API key, sent as x-api-key',

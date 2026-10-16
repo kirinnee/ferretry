@@ -2,6 +2,7 @@
 label: Bedrock Mantle (AWS profile)
 harness: claude
 summary: Claude Code through Bedrock Mantle, using an AWS profile from ~/.aws on this machine. Mantle model ids have no version suffix.
+group: cloud
 docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-16'
 env:

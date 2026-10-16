@@ -1,8 +1,11 @@
+import { clockOfInstant, clockOfLabel } from '../lib/send-receipt.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
+import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
-import { LedgerMessage, SendChip, type SendRetry } from './ledger-message.tsx';
+import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
+import { MessageFooter } from './send-receipt.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -16,6 +19,8 @@ export interface TranscriptRowProps {
   readonly isLast?: boolean;
   /** Offered on a ledger row, and only when a retry is possible at all. */
   readonly onRetry?: SendRetry;
+  /** An assistant row follows this one, so a delivered send on it reads as `read`. */
+  readonly answered?: boolean;
 }
 
 /**
@@ -25,7 +30,14 @@ export interface TranscriptRowProps {
  * renders as the collapsed tool group, and a `command` row as the one-line slash
  * command; attachments remain owned by a later port.
  */
-export function TranscriptRow({ entry, previous, live = false, isLast = false, onRetry }: TranscriptRowProps) {
+export function TranscriptRow({
+  entry,
+  previous,
+  live = false,
+  isLast = false,
+  onRetry,
+  answered = false,
+}: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
@@ -48,7 +60,38 @@ export function TranscriptRow({ entry, previous, live = false, isLast = false, o
       </div>
     );
   }
+  if (entry.kind === 'user' && entry.peer !== undefined)
+    return <PeerMessageRow entry={entry} peer={entry.peer} rhythm={rhythm} />;
+  if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
+  if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
+}
+
+/**
+ * The reader's own message: no "You · 14:02:55" header — the bubble's alignment already says who — and
+ * its time and receipt as one small faded line at its foot (`send-receipt.tsx`). The clock is the
+ * row's own instant when it has one, else the time the daemon printed in its label.
+ */
+function OwnMessageRow({
+  entry,
+  rhythm,
+  answered,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly rhythm: Record<string, string | undefined>;
+  readonly answered: boolean;
+}) {
+  return (
+    <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
+      <span className="sr-only">You said:</span>
+      <p>{entry.text}</p>
+      <MessageFooter
+        answered={answered}
+        clock={clockOfInstant(entry.at) ?? clockOfLabel(entry.label)}
+        record={entry.send}
+      />
+    </article>
+  );
 }
 
 function TranscriptTextRow({
@@ -72,7 +115,6 @@ function TranscriptTextRow({
       <header>
         <span>{label}</span>
         {validTimestamp ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleTimeString()}</time> : null}
-        {entry.send === undefined ? null : <SendChip record={entry.send} />}
       </header>
       {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
     </article>
@@ -102,7 +144,9 @@ function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
   return entry.kind === 'user' || entry.kind === 'assistant' || entry.kind === 'ledger' ? 'message' : 'chrome';
 }
 
-function speakerOf(entry: TranscriptEntry): 'user' | 'assistant' | undefined {
+function speakerOf(entry: TranscriptEntry): string | undefined {
+  // Another agent is its own speaker, so a peer message after yours reads as a change of turn.
+  if (entry.kind === 'user' && entry.peer !== undefined) return `peer:${entry.peer.name}`;
   if (entry.kind === 'user' || entry.kind === 'ledger') return 'user';
   return entry.kind === 'assistant' ? 'assistant' : undefined;
 }
@@ -129,19 +173,15 @@ function AssistantProse({ text }: { readonly text: string }) {
   return <Markdown enableFyRender text={text} {...useReferenceSurface()} />;
 }
 
-const defaultLabel = (kind: TranscriptEntry['kind']): string => {
-  switch (kind) {
-    case 'user':
-      return 'You';
-    case 'assistant':
-      return 'Assistant';
-    case 'tool':
-      return 'Tool';
-    case 'command':
-      return 'Command';
-    case 'notice':
-      return 'Daemon';
-    case 'ledger':
-      return 'Send ledger';
-  }
+/** What a row with no label of its own is headed by. */
+const DEFAULT_LABELS: Readonly<Record<TranscriptEntry['kind'], string>> = {
+  user: 'You',
+  assistant: 'Assistant',
+  tool: 'Tool',
+  command: 'Command',
+  notice: 'Daemon',
+  system: 'Ferretry',
+  ledger: 'Send ledger',
 };
+
+const defaultLabel = (kind: TranscriptEntry['kind']): string => DEFAULT_LABELS[kind];

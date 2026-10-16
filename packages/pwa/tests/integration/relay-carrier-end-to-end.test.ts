@@ -25,8 +25,15 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import should from 'should';
+import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
 import { type ApiRequest, type ApiResponse, headersFrom } from '../../../daemon/src/lib/api/http.ts';
 import type { SocketDownstream, SocketFrame, SocketUpgradeDecision } from '../../../daemon/src/lib/api/socket.ts';
+import type { FrameClock } from '../../../daemon/src/lib/browser/transport/contracts.ts';
+import type {
+  BrowserViewerHost,
+  ViewerAttachment,
+} from '../../../daemon/src/lib/browser/transport/viewer-contracts.ts';
+import { BrowserViewerStream } from '../../../daemon/src/lib/browser/transport/viewer-stream.ts';
 import {
   RelayLink,
   type RelayLinkDependencies,
@@ -56,6 +63,7 @@ import {
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
 import { redeemPairingInSession } from '../../src/lib/relay-pairing.ts';
+import { decodeRemoteBrowserFrame, remoteBrowserStreamSocketFactory } from '../../src/lib/remote-browser.ts';
 import {
   RELAY_DATA_BYTE_BUDGET,
   type RelayClientSession,
@@ -1031,5 +1039,177 @@ describe('a relayed terminal stream, browser to daemon, through the real rendezv
     // An empty needle would match every frame ever recorded; the search refuses it rather than
     // reporting a leak that is an artefact of asking for nothing.
     should(() => carrierLeaks(rawFrame, { nothing: '' })).throw(/empty needle/u);
+  });
+});
+
+/* ---------- the remote browser's live view, as the app opens it ------------- */
+
+/** Pixels too large for one record, so the frame has to cross as several chunks. */
+const PAGE_ID = 'page-relayed-7';
+const PIXELS = Uint8Array.from({ length: RELAY_DATA_BYTE_BUDGET * 2 + 1234 }, (_, index) => (index * 7 + 3) & 0xff);
+/** A run inside the pixels a relay must not be able to find, even though it forwarded all of them. */
+const PIXEL_MARKER = 'FyRelayedPixelsMarker';
+PIXELS.set(utf8Bytes(PIXEL_MARKER), 4_096);
+
+const base64Of = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+
+/** The browser session, as the daemon's viewer stream sees it: a frame source and an input sink. */
+class ScreencastHost implements BrowserViewerHost {
+  readonly dispatched: BrowserInputEvent[] = [];
+  publish: ((frame: BrowserScreencastFrame) => void) | undefined;
+  detached = 0;
+
+  async attachViewer(_sessionId: string, onFrame: (frame: BrowserScreencastFrame) => void): Promise<ViewerAttachment> {
+    this.publish = onFrame;
+    return {
+      detach: () => {
+        this.detached += 1;
+      },
+    };
+  }
+
+  async dispatchHumanInput(_sessionId: string, input: BrowserInputEvent): Promise<void> {
+    this.dispatched.push(input);
+  }
+}
+
+const timerClock: FrameClock = {
+  now: () => Date.now(),
+  schedule: (callback, delayMs) => {
+    const handle = setTimeout(callback, delayMs);
+    return { cancel: () => clearTimeout(handle) };
+  },
+};
+
+describe('a relayed remote browser view, browser to daemon, through the real rendezvous', () => {
+  /**
+   * THE LIVE VIEW A PHONE ON 5G COULD NOT SEE.
+   *
+   * The viewer used to dial a ticketed WebSocket nobody could buy, so the display never streamed over
+   * any carrier. Here it is the daemon's real `BrowserViewerStream` mounted on the daemon's real
+   * `RelayLink`, the real rendezvous forwarding it, and the PWA's real stream socket — the one the
+   * viewer component opens — reassembling frames larger than one record.
+   */
+  it('should stream browser frames larger than a record, skip an unchanged one, and carry input back', async () => {
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [
+        { kind: 'direct', daemonUrl: DAEMON_URL },
+        { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      ],
+    });
+    const scope = daemonSessionScope(daemon, SESSION_ID);
+    const streamPath = `/v1/sessions/${encodeURIComponent(SESSION_ID)}/browser/stream`;
+    const host = new ScreencastHost();
+    const sentByDaemon: number[] = [];
+
+    const bridge = new RelayBridge();
+    await bridge.admitDaemon(identity, answered('{}'), undefined, {
+      reauthorize: () => true,
+      upgrade: async request => {
+        if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
+        return {
+          outcome: 'accepted',
+          attach: async socket => {
+            let viewer: BrowserViewerStream | undefined;
+            const counted: SocketDownstream = {
+              send: frame => {
+                sentByDaemon.push(typeof frame === 'string' ? frame.length : frame.byteLength);
+                return socket.send(frame);
+              },
+              close: (code, reason) => socket.close(code, reason),
+              bufferedBytes: () => socket.bufferedBytes(),
+            };
+            return {
+              // The composition root's own shape (`fyd.ts`): the viewer connects on open.
+              open: async () => {
+                viewer = await BrowserViewerStream.connect(host, SESSION_ID, counted, timerClock);
+              },
+              fromClient: frame => viewer?.fromClient(clientFrame(frame)),
+              close: () => viewer?.close(),
+            };
+          },
+        } satisfies SocketUpgradeDecision;
+      },
+    });
+
+    const router = new DaemonCarrierRouter({
+      crypto,
+      deviceKey: async () => DEVICE.claim.key,
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+      dial: url =>
+        new URL(url).hostname === new URL(DAEMON_URL).hostname ? bridge.unreachable() : bridge.dial(identity.daemonId),
+      heartbeat: () => () => undefined,
+    });
+    await router.send(daemon, `${DAEMON_URL}/v1/carriers`);
+    await bridge.settle();
+    should(router.activeMethod(daemon.daemonId)?.kind).equal('relay');
+
+    const socket = remoteBrowserStreamSocketFactory(
+      async (target, request) => await router.openStream(target, request),
+    )(daemon, scope);
+    const frames: ArrayBuffer[] = [];
+    const closes: number[] = [];
+    let opened = 0;
+    socket.addEventListener('open', () => {
+      opened += 1;
+    });
+    socket.addEventListener('message', event => {
+      if (event instanceof MessageEvent && event.data instanceof ArrayBuffer) frames.push(event.data);
+    });
+    socket.addEventListener('close', event => {
+      if (event instanceof CloseEvent) closes.push(event.code);
+    });
+    await bridge.settle();
+    should(opened).equal(1);
+    should(host.publish).be.a.Function();
+
+    // daemon → browser: one frame bigger than a record, then the same pixels again, then a change.
+    host.publish?.({ dataBase64: base64Of(PIXELS), width: 1280, height: 800, pageId: PAGE_ID });
+    await bridge.settle();
+    host.publish?.({ dataBase64: base64Of(PIXELS), width: 1280, height: 800, pageId: PAGE_ID });
+    await bridge.settle();
+    const changed = PIXELS.slice();
+    changed[0] = 0xfe;
+    host.publish?.({ dataBase64: base64Of(changed), width: 1280, height: 800, pageId: PAGE_ID });
+    await bridge.settle();
+
+    should(frames).have.length(2);
+    const first = decodeRemoteBrowserFrame(frames[0] as ArrayBuffer);
+    const second = decodeRemoteBrowserFrame(frames[1] as ArrayBuffer);
+    should(first?.kind === 'tagged' && first.pageId).equal(PAGE_ID);
+    should([...new Uint8Array(first?.jpegBytes ?? new ArrayBuffer(0))]).eql([...PIXELS]);
+    should(new Uint8Array(second?.jpegBytes ?? new ArrayBuffer(0))[0]).equal(0xfe);
+    // Every daemon write fit one record, and the unchanged frame cost nothing on the wire.
+    should(sentByDaemon.every(size => size <= RELAY_DATA_BYTE_BUDGET)).be.true();
+    should(sentByDaemon.length).equal(
+      2 * Math.ceil((PIXELS.byteLength + 7 + PAGE_ID.length) / (RELAY_DATA_BYTE_BUDGET - 21)),
+    );
+
+    // browser → daemon: a person's input, one complete text record.
+    socket.send(JSON.stringify({ kind: 'insertText', text: 'typed over the relay' }));
+    await bridge.settle();
+    should(host.dispatched).eql([{ kind: 'insertText', text: 'typed over the relay' }]);
+
+    // A viewer leaving says so, and the daemon gives the page's viewer slot back.
+    socket.close(1000, 'viewer detached');
+    await bridge.settle();
+    should(host.detached).equal(1);
+    should(closes).be.empty();
+
+    should(
+      carrierLeaks(bridge, {
+        'the device id': DEVICE_ID,
+        'the page the viewer is watching': PAGE_ID,
+        'the pixels on screen': PIXEL_MARKER,
+        'what the person typed': 'typed over the relay',
+        'the stream path': streamPath,
+      }),
+    ).be.empty();
   });
 });

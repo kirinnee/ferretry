@@ -21,9 +21,10 @@ export type SettingId =
   | 'composer-enter-key'
   | 'composer-suggestions'
   | 'dictation'
-  | 'notifications';
+  | 'notifications'
+  | 'install-app';
 
-export type SettingsSectionId = 'appearance' | 'behaviour' | 'machines';
+export type SettingsSectionId = 'appearance' | 'behaviour' | 'device' | 'machines';
 
 export interface SettingsSectionDefinition {
   readonly id: SettingsSectionId;
@@ -222,6 +223,23 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'install-app',
+    label: 'Install app',
+    description:
+      'Add Ferretry to this device as an app — its own icon on the home screen or app list, full screen, without the browser bar.',
+    keywords: [
+      'install',
+      'app',
+      'home screen',
+      'add to home screen',
+      'pwa',
+      'standalone',
+      'icon',
+      'launcher',
+      'shortcut',
+    ],
+  },
+  {
     id: 'motion',
     label: 'Motion',
     description: 'Follow this device’s reduced-motion setting, or always keep spinners and transitions still here.',
@@ -247,6 +265,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     label: 'Behaviour',
     description: 'How composing, dictation, and notifications behave on this device.',
     settingIds: ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
+  },
+  {
+    id: 'device',
+    label: 'This device',
+    description: 'Ferretry as an app on this device.',
+    settingIds: ['install-app'],
   },
   {
     /**

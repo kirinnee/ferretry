@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
   describeSnapshotError,
+  FIT_MAX_FONT_PX,
+  FIT_MIN_FONT_PX,
+  fitFontPx,
   formatSnapshotAge,
   formatSnapshotClock,
+  paneColumns,
   readPaneSnapshot,
   snapshotUrl,
 } from '../../src/components/terminal-snapshot-model.ts';
@@ -86,5 +90,22 @@ describe('snapshot freshness strings', () => {
     const at = new Date(2026, 6, 31, 9, 5, 3).getTime();
     expect(formatSnapshotClock(at)).toBe('09:05:03');
     expect(formatSnapshotClock(Number.NaN)).toBe('');
+  });
+});
+
+describe('fit to width', () => {
+  it('counts the columns the text really uses: the widest line, trailing blanks and wide glyphs as one each', () => {
+    expect(paneColumns('')).toBe(0);
+    expect(paneColumns('ab\nabcd   \nabc')).toBe(4);
+    expect(paneColumns('╭──╮\n│ ✻ │')).toBe(5);
+  });
+
+  it('sizes the text so the widest line fits, never above 12px nor below the readable floor', () => {
+    // An 80-column pane in a 390px phone's ~342px of text: a little over 7px.
+    expect(fitFontPx(80, 342)).toBe(7);
+    expect(fitFontPx(20, 342)).toBe(FIT_MAX_FONT_PX);
+    expect(fitFontPx(400, 342)).toBe(FIT_MIN_FONT_PX);
+    expect(fitFontPx(0, 342)).toBe(FIT_MAX_FONT_PX);
+    expect(fitFontPx(80, 0)).toBe(FIT_MAX_FONT_PX);
   });
 });

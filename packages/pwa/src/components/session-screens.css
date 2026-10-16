@@ -546,6 +546,78 @@
   max-width: min(85%, 580px);
   padding: 10px 12px;
 }
+/* The reader's own message has no header row, so its text starts at the bubble's top padding. */
+.fy-message-user > p {
+  margin-top: 0;
+}
+/* THE RECEIPT LINE: the time and the receipt mark, small and faded at the foot of the reader's own
+   bubble, right-aligned the way a messaging app draws it (`send-receipt.tsx`). The mark carries the
+   state's shape; colour only adds to it — grey ticks, accent ticks once the agent has replied, red only
+   for a send proven never to have arrived. */
+.fy-receipt-line {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+.fy-receipt-line .fy-receipt {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--faint, var(--fy-muted));
+  display: inline-flex;
+  font-family: var(--font-ui, inherit);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  gap: 3px;
+  line-height: 16px;
+  margin: 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+button.fy-receipt {
+  cursor: pointer;
+}
+.fy-receipt-line .fy-receipt[data-send-receipt='read'] .fy-receipt-mark {
+  color: var(--fy-accent);
+}
+.fy-receipt-line .fy-receipt[data-send-receipt='failed'] .fy-receipt-mark {
+  color: var(--err, #b42318);
+}
+.fy-receipt-chip {
+  border: 1px solid var(--border, var(--fy-border));
+  border-radius: 4px;
+  color: var(--fy-muted);
+  font-size: 10.5px;
+  line-height: 14px;
+  padding: 0 4px;
+}
+.fy-receipt-chip[data-send-chip='failed'] {
+  border-color: var(--err-border, var(--fy-border));
+  color: var(--err, #b42318);
+}
+.fy-receipt-detail {
+  color: var(--fy-muted);
+  font-size: 11px;
+  margin: 2px 0 0;
+  text-align: right;
+}
+/* A finger still gets 44px: an invisible hit area laid over the small mark, so the line keeps its
+   height. The same move `.kt-content` makes for a tool row's chevron (styles/index.css). */
+@media (pointer: coarse) {
+  .fy-receipt-line button.fy-receipt::after {
+    content: '';
+    height: var(--target-floor, 44px);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, var(--target-floor, 44px));
+  }
+}
 .fy-message-assistant {
   padding: 0 2px;
 }
@@ -1304,6 +1376,79 @@
   padding: 0;
   white-space: pre-wrap;
 }
+/* The controls after the field. On a desktop the dock is no box at all — its buttons sit in the row
+   exactly where they always did. */
+.fy-composer-dock {
+  display: contents;
+}
+/* THE PHONE COMPOSER (Composer.tsx `compact`, i.e. the drawer-width layout — the same instance
+   `.kt-composer--compact` scopes, never a media query, so a coarse tablet on the desktop layout keeps
+   the desktop composer). The owner: "way too small … make buttons vertical so there's more space for
+   typing". So:
+     - the controls stack in a 44px column on the right — attach, mic, Interrupt & send, Send — and the
+       field takes the whole remaining width;
+     - the field rests at four lines and fills the row's height, so the column never leaves a dead gap
+       beside it; it grows to the JS ceiling while typing (ten lines, six with the keyboard up);
+     - its text is the phone body size, 17px, never below the 16px iOS focus-zoom floor. */
+.fy-composer[data-composer-layout='phone'] .fy-composer-row {
+  align-items: stretch;
+  padding: 4px 4px 4px 8px;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer-dock {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  justify-content: flex-end;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer-input-layer {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  font-size: max(16px, var(--font-size-base, 16px));
+  line-height: 24px;
+  padding: 6px 2px;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer-input-layer textarea,
+.fy-composer[data-composer-layout='phone'] .fy-composer-input-layer .fy-live-editor {
+  flex: 1 1 auto;
+  font-size: inherit;
+  line-height: 24px;
+  min-height: calc(4 * 24px);
+}
+.fy-composer[data-composer-layout='phone'] .fy-live-editor [data-line] {
+  min-height: 24px;
+}
+/* The keyboard is up and the agent is working, so the column holds four 44px controls — 182px, which
+   would cost the transcript the room #511 gave it. The column is capped at three: it fills from the
+   bottom (Send, then Interrupt & send, then the mic) and the fourth, attach, steps into a second
+   column beside it. Send stays bottom-right under the thumb. At rest, or with three controls, nothing
+   wraps. */
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock {
+  flex-direction: column-reverse;
+  flex-wrap: wrap-reverse;
+  justify-content: flex-start;
+  max-height: calc(3 * 44px + 2 * 2px);
+  column-gap: 2px;
+}
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > * {
+  order: 3;
+}
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > .fy-composer-send {
+  order: 1;
+}
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > .fy-composer-interrupt {
+  order: 2;
+}
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > [data-composer-attach] {
+  order: 4;
+}
+/* The keyboard is up: three lines is the floor, so the transcript keeps the room #511 gave it. The
+   stacked controls still set the row's height, and the field fills it. */
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer textarea,
+html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer .fy-live-editor {
+  min-height: calc(3 * 24px);
+}
 /* The status line under the row: model, effort, context, quota and the key hint, small and quiet. */
 .fy-composer-actions {
   color: var(--faint, var(--fy-muted));
@@ -1429,5 +1574,138 @@
   }
   html[data-keyboard='open'] .fy-ac-list {
     max-height: min(calc(4 * 44px + 8px), max(96px, calc(var(--app-h, 100dvh) * 0.3)));
+  }
+}
+
+/* PHONE TYPE. These surfaces used to pin `font: 14px/1.45` — a size no theme could reach — so on a
+   phone the conversation, the session list and the composer stayed at desktop size while every
+   token-driven surface around them grew. They follow the phone body token now (17px; styles/index.css
+   DENSITY RAMP), and the reader's own bubble text does too. */
+@media (max-width: 640px) {
+  .fy-session-list,
+  .fy-session-details,
+  .fy-transcript-shell,
+  .fy-composer,
+  .fy-question-form,
+  .fy-session-context {
+    font-size: var(--font-size-base);
+  }
+  .kt-bubble .kt-user-copy {
+    font-size: var(--font-size-base);
+  }
+  .fy-message header {
+    font-size: var(--chrome-font-size);
+  }
+}
+
+/* A MESSAGE FROM ANOTHER AGENT. It arrives on the user channel but is not the person, so it sits on
+   the left like the assistant's side of the conversation, in a card of its own with the sender's
+   monogram and name, never as a right-hand "You" bubble. Every colour is a theme token. */
+.fy-message-peer {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-left: 3px solid var(--fy-accent);
+  border-radius: 3px 12px 12px 12px;
+  margin-right: auto;
+  max-width: min(85%, 640px);
+  padding: 8px 12px 10px;
+}
+.fy-message-peer header {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  justify-content: flex-start;
+}
+.fy-peer-chip {
+  align-items: center;
+  color: var(--fy-fg);
+  display: inline-flex;
+  font-weight: 600;
+  gap: 6px;
+}
+.fy-peer-avatar {
+  align-items: center;
+  background: var(--accent-soft, var(--fy-surface-2));
+  border: 1px solid var(--fy-border);
+  border-radius: 50%;
+  color: var(--fy-accent);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+.fy-peer-reference {
+  display: inline-block;
+  width: auto;
+}
+.fy-peer-reference p {
+  display: inline;
+  margin: 0;
+}
+.fy-peer-awaiting {
+  background: var(--warn-bg, var(--fy-surface-2));
+  border: 1px solid var(--warn-border, var(--fy-border));
+  border-radius: 999px;
+  color: var(--warn, var(--fy-fg));
+  font-size: 11px;
+  padding: 0 8px;
+}
+.fy-peer-clock {
+  margin-left: auto;
+}
+.fy-peer-body {
+  margin-top: 6px;
+}
+.fy-peer-note {
+  color: var(--fy-muted);
+  font-size: 11.5px;
+  margin-top: 6px;
+}
+.fy-peer-note summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.fy-peer-note p {
+  margin: 4px 0 0;
+}
+/* A NOTICE FROM FERRETRY ITSELF: the chrome tier, one compact line with its source named. */
+.fy-message-system {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin: 2px 0;
+}
+.fy-system-label {
+  color: var(--fy-fg);
+  font-weight: 600;
+}
+.fy-system-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.fy-system-text p {
+  display: inline;
+  margin: 0;
+}
+/* The folded delivery note keeps the transcript's density on a touch screen: the summary stays its own
+   size and gets the same invisible, centred 44px hit area the transcript's other disclosures get. */
+@media (pointer: coarse) {
+  .fy-message-peer .fy-peer-note summary {
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+  }
+  .fy-message-peer .fy-peer-note summary::after {
+    content: '';
+    height: var(--target-floor);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: var(--target-floor);
   }
 }

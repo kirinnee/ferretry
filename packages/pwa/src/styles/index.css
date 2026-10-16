@@ -953,6 +953,22 @@ body {
     z-index: 0;
   }
 
+  /* THE PHONE'S CHAT / CONSOLE SWITCH IS SLIM (phone-chip-row.tsx): a ~32px strip of
+     28px chips instead of a 53px band of 44px ones, because it is a switch and the
+     owner asked for the height back. Each chip stays wide (a word plus an icon,
+     ≥60px), well above WCAG 2.5.8's 24px minimum; the 44px floor is lifted for
+     this one row only. */
+  :root [data-phone-tab-row] button {
+    min-height: 0;
+    min-width: 0;
+  }
+  /* The same trade for the Console's Fit / Scroll toggle (terminal-snapshot.tsx): a 24px chip in a
+     header row that exists to stay one line. */
+  :root button[data-terminal-fit] {
+    min-height: 0;
+    min-width: 0;
+  }
+
   /* THE ONE EXEMPTION: a link inside a sentence. WCAG 2.5.8 exempts targets in
      a block of text for the obvious reason — a 44px box around a word in the
      middle of a paragraph would break the line box and overlap its neighbours.
@@ -1010,13 +1026,17 @@ body {
        Android use for body copy, it is the size below which Safari zooms a
        focused field, and the reader's actual complaint was that this app was
        unreadable on a phone. The transcript matches it — the conversation is the
-       content, so it gets body size, not caption size. */
-    --font-size-base: 16px;
+       content, so it gets body size, not caption size.
+
+       One step above that baseline now (17px, code 14.5, chrome 13.5): read on a
+       real phone, 16px still drew "make the text and everything bigger" from the
+       owner. 17px is what iOS's own Large text setting renders body copy at. */
+    --font-size-base: 17px;
     --leading-base: 1.55;
-    --md-font-size: 16px;
+    --md-font-size: 17px;
     --md-leading: 1.6;
-    --code-font-size: 14px;
-    --chrome-font-size: 12.5px;
+    --code-font-size: 14.5px;
+    --chrome-font-size: 13.5px;
   }
   /* Rendered prose gets a little more room to breathe between blocks, since the
      line count per paragraph roughly doubles at this width. */

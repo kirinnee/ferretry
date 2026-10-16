@@ -30,6 +30,7 @@ describe('shared settings catalog', () => {
       'theme',
       'dictation',
       'notifications',
+      'install-app',
       'motion',
     ]);
     expect(new Set(SETTINGS_DEFINITIONS.map(setting => setting.id)).size).toBe(SETTINGS_DEFINITIONS.length);
@@ -40,12 +41,18 @@ describe('shared settings catalog', () => {
     }
   });
 
-  test('groups every control exactly once under the three stable logical sections', () => {
-    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'machines']);
-    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Machines']);
+  test('groups every control exactly once under the four stable logical sections', () => {
+    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'device', 'machines']);
+    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual([
+      'Appearance',
+      'Behaviour',
+      'This device',
+      'Machines',
+    ]);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
       ['text-size', 'theme', 'motion', 'density', 'chat-width'],
       ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
+      ['install-app'],
       [],
     ]);
 
@@ -65,12 +72,14 @@ describe('shared settings catalog', () => {
     // Daemons merged into Machines: its address is a legacy anchor the page redirects, not a section.
     expect(isSettingsSectionId('daemons')).toBe(false);
     expect(isSettingsSectionId('machines')).toBe(true);
+    expect(isSettingsSectionId('device')).toBe(true);
     expect(isSettingsSectionId('notifications')).toBe(false);
     expect(isSettingsSectionId(null)).toBe(false);
     expect(isSettingsSectionId(undefined)).toBe(false);
 
     expect(settingsSectionForSetting('text-size')).toBe('appearance');
     expect(settingsSectionForSetting('theme')).toBe('appearance');
+    expect(settingsSectionForSetting('install-app')).toBe('device');
     expect(settingsSectionForSetting('composer-markdown')).toBe('behaviour');
     expect(settingsSectionForSetting('composer-enter-key')).toBe('behaviour');
     expect(settingsSectionForSetting('composer-suggestions')).toBe('behaviour');

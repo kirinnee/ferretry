@@ -38,37 +38,35 @@ describe('RenameSessionController', () => {
     should(api.calls).be.empty();
   });
 
-  it('should refuse a first name that matches more than one session, naming their ids', async () => {
-    // Arrange
-    const { api, subject } = controller({
-      list: [sessionView({ id: 'ses-1', teammate: 'mary-jane' }), sessionView({ id: 'ses-2', teammate: 'Mary-Jane' })],
-    });
+  it('should send a first name to the daemon as typed, which resolves it like any session route', async () => {
+    // Arrange — the daemon owns the name rule, so the CLI no longer lists the fleet to guess at it.
+    const renamed = sessionView({ id: 'ses-1', teammate: 'marin' });
+    const { api, subject } = controller({ rename: renamed });
 
     // Act
-    const failure = await subject.execute('MARY-JANE', 'marin').catch((error: unknown) => error);
+    await subject.execute(' MARY-JANE ', 'marin');
 
     // Assert
-    should((failure as Error).message).equal('Mary-Jane names 2 sessions (ses-1, ses-2); rename by id');
-    should(api.methods()).deepEqual(['list']);
+    should(api.calls).deepEqual([{ method: 'rename', args: ['MARY-JANE', undefined, 'marin'] }]);
   });
 
   it('should pass an unknown reference through so the daemon answers for it', async () => {
     // Arrange
     const renamed = sessionView({ id: 'ses-9', name: 'Untitled' });
-    const { api, io, subject } = controller({ list: [], rename: renamed });
+    const { api, io, subject } = controller({ rename: renamed });
 
     // Act
     await subject.execute('ses-9', 'marin');
 
     // Assert
-    should(api.calls[1]).deepEqual({ method: 'rename', args: ['ses-9', undefined, 'marin'] });
+    should(api.calls[0]).deepEqual({ method: 'rename', args: ['ses-9', undefined, 'marin'] });
     should(io.out).deepEqual(['renamed ses-9: Untitled']);
   });
 
   it('should show the new first name title-cased after a rename', async () => {
     // Arrange
     const renamed = sessionView({ teammate: 'mary-jane' });
-    const { io, subject } = controller({ list: [sessionView()], rename: renamed });
+    const { io, subject } = controller({ rename: renamed });
 
     // Act
     await subject.execute('ses-1', 'Mary-Jane');

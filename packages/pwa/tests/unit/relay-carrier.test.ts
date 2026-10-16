@@ -26,6 +26,7 @@ import {
   type DaemonCarrierRouterOptions,
   DaemonOutdatedError,
   DEVICE_NOT_ACCEPTED_SENTENCE,
+  DIRECT_SESSION_DEADLINE_MS,
   DeviceNotAcceptedError,
   openRelaySession,
   relayResponse,
@@ -410,7 +411,7 @@ describe('opening one session', () => {
 });
 
 /** Which addresses a scripted network of carriers answers on. */
-type Reach = (url: URL) => 'live' | 'refuse';
+type Reach = (url: URL) => 'live' | 'refuse' | 'silent';
 
 /**
  * A dial that plays a correct daemon on the addresses `reach` calls live, and a refused socket on the
@@ -421,6 +422,8 @@ const carriersFor = (identity: Awaited<ReturnType<typeof newDaemonIdentity>>, re
   const dialled: string[] = [];
   const dial = (url: string): ScriptedSocket => {
     dialled.push(url);
+    // An address whose packets are dropped: the socket neither opens nor closes.
+    if (reach(new URL(url)) === 'silent') return new ScriptedSocket();
     if (reach(new URL(url)) === 'refuse') {
       const refused = new ScriptedSocket();
       queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
@@ -554,6 +557,38 @@ describe('the carrier router', () => {
     should((await router.fetch(`${DAEMON_URL}/v1/usage`)).status).equal(200);
     should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
     await settle(5);
+  });
+
+  it('should give a direct address that drops packets seconds, not the whole grace, before the relay', async () => {
+    // From cellular a private direct address neither answers nor refuses. Waiting out the 45-second
+    // heartbeat grace before trying the relay made every page load away from home that slow.
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const carriers = carriersFor(identity, url => (url.hostname === DIRECT_HOST ? 'silent' : 'live'));
+    const asked: number[] = [];
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey,
+      dial: carriers.dial,
+      // The direct deadline fires at once; nothing else ever does.
+      heartbeat: (tick, interval) => {
+        asked.push(interval);
+        if (interval === DIRECT_SESSION_DEADLINE_MS) queueMicrotask(tick);
+        return () => undefined;
+      },
+      network: unreachable,
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    should((await router.fetch(`${DAEMON_URL}/v1/projects`)).status).equal(200);
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
+    should(asked.slice(0, 2)).eql([DIRECT_SESSION_DEADLINE_MS, HEARTBEAT_GRACE_SECONDS * 1_000]);
+    should(DIRECT_SESSION_DEADLINE_MS).be.below(HEARTBEAT_GRACE_SECONDS * 1_000);
   });
 
   it('should walk on with a write whose direct session never opened, because nothing of it was sent', async () => {

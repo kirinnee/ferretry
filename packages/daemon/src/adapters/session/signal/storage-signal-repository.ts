@@ -1,5 +1,5 @@
 import { type JsonValue, jsonObject } from '../../../lib/json.ts';
-import { type CallsignReference, resolveSessionReference } from '../../../lib/names/policy.ts';
+import { resolveSessionReference } from '../../../lib/names/policy.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import {
   type SignalRepository,
@@ -9,6 +9,7 @@ import {
 } from '../../../lib/session/signal/types.ts';
 import { type SessionId, tryParseSessionId } from '../../../lib/session-id.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
+import { sessionAddressCandidates } from '../session-address-candidates.ts';
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -80,26 +81,15 @@ export class StorageSignalRepository implements SignalRepository {
   /**
    * The session a peer reference names, over the callsign resolution the names domain already owns.
    *
-   * An exact id wins outright; otherwise the most recently claimed live callsign does. Reading the
-   * configurations is the only way to do it — the session index carries no callsign — and the cost is
-   * one read per session on a path taken once per declared wait.
+   * An exact id wins outright; otherwise the live holder of the name does, and a name two sessions
+   * hold on the same footing names none. Reading the documents is the only way to do it — the session
+   * index carries no name — and the cost is two reads per session on a path taken once per wait.
    */
   async resolvePeer(reference: string): Promise<SignalTarget | undefined> {
-    const references: CallsignReference[] = [];
-    const configs = new Map<SessionId, Record<string, unknown>>();
-    for (const indexed of this.storage.listSessions()) {
-      const config = record(await this.storage.readConfig(indexed.id).catch(() => undefined));
-      configs.set(indexed.id, config);
-      const claimedAt = Date.parse(text(config.createdAt) ?? '');
-      references.push({
-        id: indexed.id,
-        ...(text(config.teammate) === undefined ? {} : { callsign: text(config.teammate) }),
-        claimedAtMs: Number.isFinite(claimedAt) ? claimedAt : 0,
-      });
-    }
-    const resolved = tryParseSessionId(resolveSessionReference(reference, references, Date.parse(this.clock.now())));
-    if (resolved === undefined || !configs.has(resolved)) return undefined;
-    return await this.read(resolved);
+    const resolved = tryParseSessionId(
+      resolveSessionReference(reference, await sessionAddressCandidates(this.storage)) ?? '',
+    );
+    return resolved === undefined ? undefined : await this.read(resolved);
   }
 
   async transition(id: SessionId, change: SignalTransition): Promise<SignalTarget> {

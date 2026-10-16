@@ -6,7 +6,11 @@ import {
   type TerminalStreamService,
   type TerminalStreamTimer,
 } from '../../../src/adapters/index.ts';
-import { TERMINAL_MAX_BUFFERED_OUTPUT_BYTES } from '../../../src/lib/index.ts';
+import {
+  TERMINAL_INPUT_REDRAW_MS,
+  TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
+  TERMINAL_REDRAW_POLL_MS,
+} from '../../../src/lib/index.ts';
 
 class FakeService implements TerminalStreamService {
   readonly calls: string[] = [];
@@ -38,8 +42,10 @@ class FakeService implements TerminalStreamService {
 class FakeScheduler implements TerminalStreamScheduler {
   callback?: () => void;
   cleared = false;
-  schedule(callback: () => void): TerminalStreamTimer {
+  readonly delays: number[] = [];
+  schedule(callback: () => void, milliseconds: number): TerminalStreamTimer {
     this.callback = callback;
+    this.delays.push(milliseconds);
     return {
       cancel: () => {
         this.cleared = true;
@@ -211,5 +217,78 @@ describe('TerminalStreamBridge', () => {
     should(whileBehind).deepEqual([0, 0]);
     should(sent).deepEqual([Uint8Array.of(27)]);
     should(service.calls).deepEqual(['capture']);
+  });
+
+  it('should not resend an unchanged pane, but resend one the transport dropped or a resize reflowed', async () => {
+    // An idle terminal polled ten times a second was ten identical full redraws a second for as long
+    // as anyone watched — each a sealed record and a metered frame over a relay. A redraw equal to the
+    // one the viewer already holds carries nothing. A redraw the transport answered `0` for never
+    // reached the viewer, so it is not "already held"; and a resize reflows the viewer's emulator.
+    // Arrange
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const sent: Uint8Array[] = [];
+    let answer = 0;
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      {
+        send: bytes => {
+          sent.push(bytes);
+          return answer;
+        },
+        close: () => undefined,
+        bufferedBytes: () => 0,
+      },
+      scheduler,
+    );
+    const poll = async (): Promise<void> => {
+      scheduler.callback?.();
+      await Bun.sleep(1);
+    };
+
+    // Act — the first redraw is dropped, so the next poll must send the very same picture again.
+    await bridge.open();
+    answer = 1;
+    await poll();
+    const afterDrop = sent.length;
+    await poll();
+    await poll();
+    const unchanged = sent.length;
+    bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
+    await Bun.sleep(1);
+    await poll();
+
+    // Assert
+    should(afterDrop).equal(2);
+    should(unchanged).equal(2);
+    should(sent).have.length(3);
+    should(service.calls.filter(call => call === 'capture')).have.length(5);
+  });
+
+  it('should capture the echo of a keystroke soon after it reaches the pane, not on the next ordinary tick', async () => {
+    // Arrange
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: () => 1, close: () => undefined, bufferedBytes: () => 0 },
+      scheduler,
+    );
+
+    // Act
+    await bridge.open();
+    bridge.fromClient(Uint8Array.of(97));
+    await Bun.sleep(1);
+    scheduler.callback?.();
+    await Bun.sleep(1);
+
+    // Assert — the armed tick was replaced by a short one, and the poll after it is ordinary again.
+    should(scheduler.cleared).be.true();
+    should(scheduler.delays).deepEqual([TERMINAL_REDRAW_POLL_MS, TERMINAL_INPUT_REDRAW_MS, TERMINAL_REDRAW_POLL_MS]);
+    should(TERMINAL_INPUT_REDRAW_MS).be.below(TERMINAL_REDRAW_POLL_MS);
   });
 });

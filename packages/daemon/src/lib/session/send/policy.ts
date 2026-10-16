@@ -1,3 +1,4 @@
+import { peerEnvelopePreamble } from '@ferretry/protocol';
 import type { SessionSendSettings } from './settings.ts';
 import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
 import {
@@ -84,26 +85,15 @@ export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRo
  * peer message reads as the human lead speaking — and a teammate that cannot tell a peer from its
  * lead cannot judge whether to comply, push back, or escalate.
  *
- * The reply instruction appears only when the sender is actually parked on one, so a fire-and-forget
- * note never nags its receiver into answering.
+ * The wording is the protocol's (`peerEnvelopePreamble`), because the app parses it back out of the
+ * transcript to show the message as coming FROM the sender; this only says who the sender is.
  */
 export function peerPreamble(
   sender: Pick<SendTarget, 'id' | 'teammate'>,
   replyExpected: boolean,
   clientName: string,
 ): string {
-  const from = sender.teammate ?? sender.id;
-  const lines = [`[peer message from teammate ${from} (session ${sender.id}) — not from the human lead]`];
-  if (replyExpected)
-    lines.push(
-      `${from} is PARKED waiting for your reply and cannot continue until it arrives. ` +
-        `Answer with: ${clientName} send ${from} "<your reply>"`,
-    );
-  else
-    lines.push(
-      `No reply is required; ${from} has carried on. Reply with \`${clientName} send ${from} "…"\` if useful.`,
-    );
-  return `${lines.join('\n')}\n\n`;
+  return peerEnvelopePreamble({ name: sender.teammate ?? sender.id, sessionId: sender.id, replyExpected, clientName });
 }
 
 /** The last C0 code point, and DEL. Everything at or below the first, plus the second, is a control. */

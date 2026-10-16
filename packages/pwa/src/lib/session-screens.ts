@@ -1,5 +1,6 @@
 import type { SessionStatus } from '@ferretry/protocol';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
+import type { PeerFrom } from './peer-message.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 import type { SlashCommand } from './slash-commands.ts';
 import type { ToolResultData, ToolUseData } from './tool-extract.ts';
@@ -24,7 +25,9 @@ export interface ToolCall {
 /** A browser-safe, display-only transcript row. Content remains daemon-owned. */
 export interface TranscriptEntry {
   readonly id: string;
-  readonly kind: 'user' | 'assistant' | 'tool' | 'command' | 'notice' | 'ledger';
+  /** `system` is Ferretry speaking INTO the session (a send that did not arrive); `notice` is daemon
+   *  bookkeeping, shown only as an alert. */
+  readonly kind: 'user' | 'assistant' | 'tool' | 'command' | 'notice' | 'system' | 'ledger';
   readonly text: string;
   readonly at?: number;
   readonly label?: string;
@@ -40,6 +43,8 @@ export interface TranscriptEntry {
   readonly placement?: LedgerBlockPlacement;
   /** The delivered send a `user` row IS, so the row can wear its chip. */
   readonly send?: LedgerSendRecord;
+  /** The agent a `user` row came from, when another session sent it rather than the person. */
+  readonly peer?: PeerFrom;
   /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }
@@ -56,6 +61,8 @@ export const hiddenFromTranscript = (entry: TranscriptEntry): boolean =>
 export interface TranscriptItem {
   readonly entry: TranscriptEntry;
   readonly previous?: TranscriptEntry;
+  /** An assistant row comes after this one: the agent has handled the turn this message was in. */
+  readonly answered?: true;
 }
 
 /** The rows a reader sees, in order, each paired with the visible row before it. */
@@ -67,7 +74,9 @@ export const transcriptItems = (entries: readonly TranscriptEntry[]): readonly T
     items.push(previous === undefined ? { entry } : { entry, previous });
     previous = entry;
   }
-  return items;
+  // Every row before the LAST assistant reply has been answered by it or by an earlier one.
+  const lastReply = items.findLastIndex(item => item.entry.kind === 'assistant');
+  return items.map((item, index) => (index < lastReply ? { ...item, answered: true } : item));
 };
 
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>

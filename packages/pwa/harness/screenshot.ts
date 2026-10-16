@@ -136,16 +136,17 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and fifty-four: fifty-five MACHINES frames at each viewport, plus forty-four other frames
- * across the two viewports (55 + 55 + 44). Of the extras at each viewport, one is the
+ * One hundred and fifty-nine: fifty-seven MACHINES frames on a desktop and fifty-eight on a phone, plus
+ * forty-four other frames across the two viewports (57 + 58 + 44). Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
  * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
  *
- * MACHINES, fifty-five per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * MACHINES, fifty-seven per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
  * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
- * its callback port held by another program, finishing), the old pairing a reset left, two Add a login steps,
+ * its callback port held by another program, finishing), the old pairing a reset left, four Add a login steps (its tool,
+ * its sign-in, the provider tiles and a provider's key),
  * eighteen Profiles and Components pages (a profile page, a delete card, a refused mix, an override chip,
  * the Resolved view, Edit as YAML, a mixed profile, a new profile built by drag and drop — and on a phone its
  * Add picker too, the one frame a desktop has no equivalent of — a component with every badge, a
@@ -174,7 +175,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 155;
+const SETTINGS_SIDEWAYS_CHECKS = 159;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -184,11 +185,12 @@ const SETTINGS_SIDEWAYS_CHECKS = 155;
  * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Profiles
  * as a bag of components (R5) replaced the profile page's Advanced part, its layer editor and the three
  * Build a profile steps with the drag-and-drop editor's frames — a refused mix, an override chip, the
- * Resolved view, Edit as YAML and a new profile — plus the phone's Add picker: one more in all. Same tripwire as the number above, for the same reason — a check
+ * Resolved view, Edit as YAML and a new profile — plus the phone's Add picker: one more in all. The provider
+ * tiles added four: the grid and a provider's key form, at each viewport. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 110;
+const MACHINES_GEOMETRY_CHECKS = 114;
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -2667,6 +2669,23 @@ try {
           await credentialsPanel.locator('[data-add-login]').first().click();
           await credentialsPanel.locator('[data-add-login-step="tool"]').waitFor({ state: 'visible' });
           await accountShot('add-login-tool', 'Add a login tool step');
+          // ENVIRONMENT: the provider tiles under their headings, two to a row on a phone, with the search
+          // box thirteen providers earn; then one tap, straight to the key it asks for.
+          await credentialsPanel.locator('[data-add-login-kind-option="environment"]').click();
+          await credentialsPanel.locator('[data-provider-search]').waitFor({ state: 'visible' });
+          // Each frame starts where the new part does, because on a phone the Type choice fills the top.
+          const toTop = (selector: string) => async (): Promise<void> => {
+            await credentialsPanel
+              .locator(selector)
+              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+          };
+          await accountShot('add-login-providers', 'Add a login provider tiles', toTop('[data-provider-grid]'));
+          await themedShot('add-login-providers');
+          await credentialsPanel.locator('[data-provider-tile="deepseek"]').click();
+          await credentialsPanel.locator('[data-one-click="deepseek"]').waitFor({ state: 'visible' });
+          await accountShot('add-login-provider-key', 'Add a login provider key', toTop('[data-one-click="deepseek"]'));
+          await credentialsPanel.locator('[data-add-login-kind-option="signin"]').click();
+          await credentialsPanel.locator('[data-add-login-tool]').first().waitFor({ state: 'visible' });
           await credentialsPanel.locator('[data-add-login-tool] input:not([disabled])').first().check();
           await credentialsPanel.locator('[data-step-next]').click();
           await credentialsPanel.locator('[data-add-login-step="start"]').waitFor({ state: 'visible' });

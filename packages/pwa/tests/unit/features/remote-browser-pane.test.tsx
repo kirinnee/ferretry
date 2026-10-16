@@ -265,13 +265,7 @@ describe('RemoteBrowserPane composition', () => {
     const transport = new FakeTransport(runningStatus());
     const poll = pollSeam();
     const renderer = await mountPane(
-      <RemoteBrowserPane
-        daemon={daemonA}
-        scope={scopeA}
-        streamTicket={null}
-        transport={transport}
-        schedule={poll.schedule}
-      />,
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={poll.schedule} />,
     );
     const markup = json(renderer);
     const order = [
@@ -294,13 +288,7 @@ describe('RemoteBrowserPane composition', () => {
     const transport = new FakeTransport(runningStatus());
     const poll = pollSeam();
     const renderer = await mountPane(
-      <RemoteBrowserPane
-        daemon={daemonA}
-        scope={scopeA}
-        streamTicket={null}
-        transport={transport}
-        schedule={poll.schedule}
-      />,
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={poll.schedule} />,
     );
     const tabs = renderer.root.findAll(node => node.props.role === 'tab');
     await runAsync(async () => tabs[1]?.props.onClick());
@@ -326,13 +314,7 @@ describe('RemoteBrowserPane composition', () => {
     const transport = new FakeTransport(stoppedStatus());
     const poll = pollSeam();
     const renderer = await mountPane(
-      <RemoteBrowserPane
-        daemon={daemonA}
-        scope={scopeA}
-        streamTicket="ticket"
-        transport={transport}
-        schedule={poll.schedule}
-      />,
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={poll.schedule} />,
     );
     // A stopped daemon reports no pages, so there is no invented client tab.
     expect(renderer.root.findAll(node => node.props.role === 'tab')).toHaveLength(0);
@@ -353,9 +335,9 @@ describe('RemoteBrowserPane composition', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket={null}
         transport={new FakeTransport(loadingStatus())}
         schedule={pollSeam().schedule}
+        socketFactory={sockets().factory}
       />,
     );
     const progress = loading.root.find(node => node.props.role === 'status');
@@ -365,7 +347,6 @@ describe('RemoteBrowserPane composition', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket={null}
         transport={new FakeTransport(unavailableStatus())}
         schedule={pollSeam().schedule}
       />,
@@ -376,9 +357,9 @@ describe('RemoteBrowserPane composition', () => {
 
   it('refuses a scope that belongs to another daemon', () => {
     const transport = new FakeTransport(runningStatus());
-    expect(() =>
-      render(<RemoteBrowserPane daemon={daemonA} scope={scopeB} streamTicket={null} transport={transport} />),
-    ).toThrow('remote browser scope must belong to the paired daemon');
+    expect(() => render(<RemoteBrowserPane daemon={daemonA} scope={scopeB} transport={transport} />)).toThrow(
+      'remote browser scope must belong to the paired daemon',
+    );
   });
 });
 
@@ -407,7 +388,6 @@ describe('RemoteBrowserPane scoping', () => {
       <RemoteBrowserPane
         daemon={daemon}
         scope={scope}
-        streamTicket="ticket"
         transport={transport}
         schedule={poll.schedule}
         socketFactory={stream.factory}
@@ -461,7 +441,6 @@ describe('RemoteBrowserPane scoping', () => {
       <RemoteBrowserPane
         daemon={daemon}
         scope={scope}
-        streamTicket="ticket"
         transport={transport}
         schedule={poll.schedule}
         socketFactory={stream.factory}
@@ -498,7 +477,6 @@ describe('RemoteBrowserPane scoping', () => {
     const props = {
       daemon: daemonA,
       scope: scopeA,
-      streamTicket: 'ticket',
       transport,
       schedule: poll.schedule,
       observeSize: observer.observeSize,
@@ -533,7 +511,6 @@ describe('RemoteBrowserPane viewport', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket={null}
         transport={transport}
         schedule={poll.schedule}
         observeSize={observer.observeSize}
@@ -582,7 +559,6 @@ describe('RemoteBrowserPane viewport', () => {
   it('switches the frame between fit and true pixels', async () => {
     const stream = sockets();
     const { renderer } = await mountResizable({
-      streamTicket: 'ticket',
       socketFactory: stream.factory,
       createObjectUrl: () => 'blob:frame',
       revokeObjectUrl: () => undefined,
@@ -642,7 +618,6 @@ describe('RemoteBrowserPane viewport', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket={null}
         transport={transport}
         schedule={pollSeam().schedule}
         observeSize={observer.observeSize}
@@ -672,7 +647,6 @@ describe('RemoteBrowserPane viewport', () => {
         <RemoteBrowserPane
           daemon={daemonA}
           scope={scopeA}
-          streamTicket={null}
           transport={transport}
           schedule={pollSeam().schedule}
           resizeDebounceMs={1}
@@ -704,13 +678,7 @@ describe('RemoteBrowserPane viewport', () => {
     try {
       const transport = new FakeTransport(runningStatus());
       const renderer = await mountPane(
-        <RemoteBrowserPane
-          daemon={daemonA}
-          scope={scopeA}
-          streamTicket={null}
-          transport={transport}
-          schedule={pollSeam().schedule}
-        />,
+        <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} />,
         nodeMock,
       );
       // The daemon keeps its last negotiated viewport; the pane still works.
@@ -730,7 +698,6 @@ describe('RemoteBrowserPane text entry', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket="ticket"
         transport={transport}
         schedule={pollSeam().schedule}
         socketFactory={stream.factory}
@@ -953,7 +920,6 @@ describe('RemoteBrowserPane clipboard', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket="ticket"
         transport={transport}
         schedule={pollSeam().schedule}
         socketFactory={stream.factory}
@@ -984,7 +950,6 @@ describe('RemoteBrowserPane clipboard', () => {
       <RemoteBrowserPane
         daemon={daemon}
         scope={scope}
-        streamTicket="ticket"
         transport={transport}
         schedule={poll.schedule}
         socketFactory={stream.factory}
@@ -1069,13 +1034,7 @@ describe('RemoteBrowserPane errors', () => {
     const transport = new FakeTransport(runningStatus());
     transport.failure = new Error('the daemon is unreachable');
     const renderer = await mountPane(
-      <RemoteBrowserPane
-        daemon={daemonA}
-        scope={scopeA}
-        streamTicket={null}
-        transport={transport}
-        schedule={pollSeam().schedule}
-      />,
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} />,
     );
     expect(json(renderer)).toContain('the daemon is unreachable');
     await runAsync(async () => control(renderer, 'Dismiss').props.onClick());
@@ -1085,13 +1044,7 @@ describe('RemoteBrowserPane errors', () => {
   it('rejects an address the daemon would never accept, without dispatching it', async () => {
     const transport = new FakeTransport(runningStatus());
     const renderer = await mountPane(
-      <RemoteBrowserPane
-        daemon={daemonA}
-        scope={scopeA}
-        streamTicket={null}
-        transport={transport}
-        schedule={pollSeam().schedule}
-      />,
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} />,
     );
     const address = renderer.root.findByType('input');
     run(() => address.props.onFocus());
@@ -1104,13 +1057,7 @@ describe('RemoteBrowserPane errors', () => {
   it('shows the page failure the daemon reports', async () => {
     const transport = new FakeTransport(pageErrorStatus());
     const renderer = await mountPane(
-      <RemoteBrowserPane
-        daemon={daemonA}
-        scope={scopeA}
-        streamTicket={null}
-        transport={transport}
-        schedule={pollSeam().schedule}
-      />,
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} />,
     );
     expect(json(renderer)).toContain('The page could not be loaded.');
     expect(json(renderer)).toContain('Page failed');
@@ -1123,7 +1070,6 @@ describe('RemoteBrowserPane errors', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket="ticket"
         transport={transport}
         schedule={pollSeam().schedule}
         socketFactory={stream.factory}
@@ -1152,7 +1098,6 @@ describe('RemoteBrowserPane as a hosted engine', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket={null}
         showNavigation={false}
         onStateChange={state => states.push(state)}
         transport={transport}
@@ -1189,7 +1134,6 @@ describe('RemoteBrowserPane as a hosted engine', () => {
       <RemoteBrowserPane
         daemon={daemonA}
         scope={scopeA}
-        streamTicket={null}
         showNavigation={false}
         onStateChange={state => states.push(state)}
         transport={transport}

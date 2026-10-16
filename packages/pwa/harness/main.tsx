@@ -87,6 +87,7 @@ import { SessionCommandControls } from '../src/components/session-command-contro
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
+import { transcriptEntriesFromLog } from '../src/components/session-workspace-model.ts';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
 import { SessionTaskKanban, SessionTaskList } from '../src/components/session-tasks.tsx';
@@ -5665,7 +5666,6 @@ function Shell() {
           <RemoteBrowserPane
             daemon={daemon}
             scope={scope}
-            streamTicket="harness-ticket"
             transport={HARNESS_BROWSER_TRANSPORT}
             schedule={HARNESS_BROWSER_SCHEDULE}
             socketFactory={HARNESS_BROWSER_SOCKET_FACTORY}
@@ -6547,7 +6547,6 @@ function Shell() {
             onOpenLoginWindow={async () => ({ state: 'opening', profilePrimed: false })}
             presentation="pane"
             scope={UNIFIED_PREVIEW_SCOPE}
-            streamTicket={null}
             titleId="harness-unified-browser-preview-title"
           />
         </section>
@@ -6572,7 +6571,6 @@ function Shell() {
             onClose={() => {}}
             presentation="pane"
             scope={UNIFIED_REMOTE_SCOPE}
-            streamTicket="harness-ticket"
             titleId="harness-unified-browser-real-title"
           />
         </section>
@@ -7379,9 +7377,56 @@ const WIDE_ENTRIES: readonly TranscriptEntry[] = [
     ],
   },
 ];
-const SESSION_ENTRIES: readonly TranscriptEntry[] = new URLSearchParams(window.location.search).has('wide')
-  ? [...WORKSPACE_ENTRIES, ...WIDE_ENTRIES]
-  : WORKSPACE_ENTRIES;
+/**
+ * `?peer=receiver` and `?peer=sender`: agent-to-agent messaging as each side's transcript shows it.
+ *
+ * Built from the daemon's rendered LOG rather than from hand-made entries, so the capture proves the
+ * parse: the receiver's peer messages arrive wrapped in Claude's `<pasted_content>` block exactly as
+ * the owner's report showed them, and must come out as messages FROM Jaylynn and Kamila. The sender
+ * addressed its peer by NAME (`fy send jaylynn …`), which is the other half of the fix, and its last
+ * row is the notice Ferretry types into a session whose message did not arrive.
+ */
+const PEER_RECEIVER_LOG = [
+  '[09:58:01] user/message: Run the dev server and check @CLAUDE.md before you touch the login page.',
+  '[09:58:12] assistant/message: Started `bun dev` in %terminal:dev and read @CLAUDE.md.',
+  '[10:01:02] user/message: <pasted_content id="1fd4">',
+  '    [peer message from teammate jaylynn (session harness-jaylynn) — not from the human lead]',
+  '    No reply is required; jaylynn has carried on. Reply with `fy send jaylynn "…"` if useful.',
+  '    ',
+  "    Hey! How's your day going? I just landed the **flake bump** — the rebuild is green.",
+  '    </pasted_content id="1fd4">',
+  "[10:01:20] assistant/message: Going well, thanks :jaylynn — I'm on the login page now.",
+  '[10:03:40] user/message: <pasted_content id="aa01">',
+  '    [peer message from teammate kamila (session harness-kamila) — not from the human lead]',
+  '    kamila is PARKED waiting for your reply and cannot continue until it arrives. Answer with: fy send kamila "<your reply>"',
+  '    ',
+  '    Is CI green on your branch? I need it before I rebase:',
+  '    ',
+  '    - `fix/pwa-session-layout`',
+  '    - `feat/learning`',
+  '    </pasted_content id="aa01">',
+  '[10:04:02] user/message: <pasted_content id="bb02">',
+  '    A long note I pasted myself:',
+  '    keep the composer inside the chat column.',
+  '    </pasted_content id="bb02">',
+].join('\n');
+const PEER_SENDER_LOG = [
+  '[10:00:31] user/message: :jaylynn ask her about her day',
+  '[10:00:40] assistant/message: Sending it to :jaylynn by name.',
+  `[10:00:41] assistant/tool-call: Bash(${JSON.stringify({ command: 'fy send jaylynn "Hey! How\'s your day going?"' })})`,
+  '[10:00:43] tool/tool-result: delivered',
+  '[10:00:44] assistant/message: Sent — :jaylynn has it.',
+  '[10:09:12] user/message: [ferretry] Your message to kamila (send 7f3a) did not reach it: it could not be confirmed (timeout) — it may still have landed. Decide whether to send it again with `fy send kamila …`.',
+].join('\n');
+const PEER_VIEW = new URLSearchParams(window.location.search).get('peer');
+const SESSION_ENTRIES: readonly TranscriptEntry[] =
+  PEER_VIEW === 'receiver'
+    ? transcriptEntriesFromLog(PEER_RECEIVER_LOG, HARNESS_NOW)
+    : PEER_VIEW === 'sender'
+      ? transcriptEntriesFromLog(PEER_SENDER_LOG, HARNESS_NOW)
+      : new URLSearchParams(window.location.search).has('wide')
+        ? [...WORKSPACE_ENTRIES, ...WIDE_ENTRIES]
+        : WORKSPACE_ENTRIES;
 
 /**
  * The whole daemon surface this page can reach, answered locally.
@@ -7615,6 +7660,7 @@ function SessionWorkspaceHarness() {
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
           entries={SESSION_ENTRIES}
+          {...(PEER_VIEW === null ? {} : { onNavigate: () => undefined })}
           onSessionChange={setSession}
           {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}
@@ -7745,7 +7791,6 @@ function BrowserFullViewportHarness() {
               onClose={onClose}
               presentation={surfacePresentation}
               scope={FULL_VIEWPORT_BROWSER_SCOPE}
-              streamTicket="harness-ticket"
               titleId={titleId}
             />
           ) : (

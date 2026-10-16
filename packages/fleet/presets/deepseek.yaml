@@ -1,6 +1,7 @@
 # DeepSeek for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: DeepSeek
 summary: Claude Code and Codex on DeepSeek models with one DeepSeek platform key.
+group: popular
 docs: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 verified: '2026-10-16'
 claude:

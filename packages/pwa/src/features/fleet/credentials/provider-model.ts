@@ -13,7 +13,7 @@ import {
   type ProviderDetection,
   parseVariableBlock,
 } from '@ferretry/fleet/detect';
-import type { FleetCredentialList, FleetProviderPresetView } from '@ferretry/protocol';
+import type { FleetCredentialList, FleetPresetGroup, FleetProviderPresetView } from '@ferretry/protocol';
 import { type EnvironmentDraft, offeredHarnesses, presetDraft } from './environment-model.ts';
 
 /** The preset the grid keeps last, beside Paste variables: it is the one for everything else. */
@@ -24,6 +24,45 @@ export const gridPresets = (presets: readonly FleetProviderPresetView[]): readon
   ...presets.filter(preset => preset.id !== CUSTOM_GATEWAY),
   ...presets.filter(preset => preset.id === CUSTOM_GATEWAY),
 ];
+
+/** One heading of the grid and its tiles. `other` holds every preset that names no group. */
+export interface GridSection {
+  readonly key: FleetPresetGroup | 'other';
+  readonly heading: string;
+  readonly presets: readonly FleetProviderPresetView[];
+}
+
+/** The headings, in the order they are shown: what a person runs themselves comes last, beside Paste. */
+const SECTIONS: readonly { readonly key: GridSection['key']; readonly heading: string }[] = [
+  { key: 'popular', heading: 'Popular' },
+  { key: 'cloud', heading: 'Cloud' },
+  { key: 'other', heading: 'More providers' },
+  { key: 'self-hosted', heading: 'Self-hosted' },
+];
+
+/** More tiles than this and the grid gets a search box above it. */
+export const PROVIDER_SEARCH_THRESHOLD = 8;
+
+/** Whether a preset is what a search asks for: every word of it in the name, the id or the summary. */
+export const presetMatches = (preset: FleetProviderPresetView, query: string): boolean => {
+  const haystack = `${preset.label} ${preset.id} ${preset.summary}`.toLowerCase();
+  return query
+    .toLowerCase()
+    .split(/\s+/u)
+    .every(word => haystack.includes(word));
+};
+
+/**
+ * The grid, under its headings: each preset under the group it names, in the daemon's order within
+ * it, the custom gateway last; only the presets a search matches; and no heading left empty.
+ */
+export const gridSections = (presets: readonly FleetProviderPresetView[], query = ''): readonly GridSection[] => {
+  const shown = gridPresets(presets).filter(preset => presetMatches(preset, query.trim()));
+  return SECTIONS.map(section => ({
+    ...section,
+    presets: shown.filter(preset => (preset.group ?? 'other') === section.key),
+  })).filter(section => section.presets.length > 0);
+};
 
 /** One secret the minimal form asks for, by NAME: the variables it fills, and whether the login needs it. */
 export interface SecretField {
