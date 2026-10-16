@@ -67,6 +67,12 @@ export interface StatusMarkInfo {
 export function statusMark(view: SessionView): StatusMarkInfo {
   const status = view.state.status;
   const parked = !!view.state.waiting;
+  // WHOSE TURN, when the daemon's turn watcher says. A live session at its prompt is waiting on the
+  // person — so it is drawn and filed as waiting — and one blocked on a permission prompt is a
+  // request for a human, exactly as an unanswered question is. Only a working one breathes.
+  const turn = TERMINAL_STATUSES.has(status) || parked ? undefined : view.state.turnState;
+  if (turn === 'your-turn') return YOUR_TURN_MARK;
+  if (turn === 'needs-input') return NEEDS_INPUT_MARK;
 
   if (TERMINAL_STATUSES.has(status)) {
     const ok = status === 'completed';
@@ -106,6 +112,39 @@ export function statusMark(view: SessionView): StatusMarkInfo {
 }
 
 /**
+ * A LIVE session sitting at its prompt — launched, nothing asked of it yet, or
+ * its last turn over. Still a circle, because it is live, but it does not
+ * breathe and its tone is `ok`: nothing is happening, and nothing is wrong.
+ * Only a surface that has the pane's evidence (`lib/session-activity.ts`) may
+ * claim it; the daemon's own `running` cannot tell the two apart.
+ */
+export const READY_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'circle',
+  klass: 'active',
+  tone: 'ok',
+  label: 'ready — at its prompt',
+  live: false,
+});
+
+/** The daemon says it is the person's turn: parked on them, so a diamond, in the calm `ok` tone. */
+export const YOUR_TURN_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'diamond',
+  klass: 'waiting',
+  tone: 'ok',
+  label: 'waiting — your turn',
+  live: false,
+});
+
+/** Blocked on a person — a permission prompt or a question — in the same accent a question uses. */
+export const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'diamond',
+  klass: 'waiting',
+  tone: 'accent',
+  label: 'waiting — needs your input',
+  live: false,
+});
+
+/**
  * How a ROW carrying this session should treat its name, so a dense list has
  * vertical variation without re-adding any fact. A finished session is over, so
  * its name recedes to `--muted`; live and waiting work stays at full `--fg`
@@ -138,14 +177,16 @@ export interface StatusMarkProps {
   readonly view: SessionView;
   readonly size?: number;
   readonly className?: string;
+  /** The surface has evidence the session is idle at its prompt; see {@link READY_MARK}. */
+  readonly ready?: boolean;
 }
 
 /**
  * The glyph. `role="img"` + `aria-label` so it is announced as one thing rather
  * than as an empty span, and `title` so the same words are available on hover.
  */
-export function StatusMark({ view, size = 8, className = '' }: StatusMarkProps) {
-  const info = statusMark(view);
+export function StatusMark({ view, size = 8, className = '', ready = false }: StatusMarkProps) {
+  const info = ready ? READY_MARK : statusMark(view);
   return (
     <span
       role="img"

@@ -82,6 +82,7 @@ export * from './session/send/index.ts';
 export * from './session/signal/index.ts';
 export * from './session/snapshot/index.ts';
 export * from './session/transcript/index.ts';
+export * from './session/turn/index.ts';
 export * from './security/index.ts';
 export * from './step-up/index.ts';
 export * from './session-id.ts';

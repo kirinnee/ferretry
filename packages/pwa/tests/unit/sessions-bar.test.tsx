@@ -177,6 +177,60 @@ describe('SessionsBar as a column', () => {
     await interact(() => pressKey(document, 'Escape'));
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
+
+  test('offers "Pair a phone with ‹this machine›" above Add a machine, divided from the machines', async () => {
+    const { calls, element } = bar({ onPairPhone: () => calls.push('pair-phone') });
+    view = await mount(element);
+    const machine = must(view.container.querySelector<HTMLButtonElement>('[data-sbar-machine]'), 'the machine');
+    await click(machine, 'the machine switcher');
+    const menu = must(document.querySelector('[role="menu"]'), 'the machine menu');
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    expect(items.map(item => item.textContent)).toEqual([
+      'work-macthis one',
+      'kirin-box',
+      'Pair a phone with work-mac…',
+      'Add a machine…',
+    ]);
+    // One divider, between the machine list and the acts; each act carries its own mark.
+    const separators = [...menu.querySelectorAll('[data-menu-separator]')];
+    expect(separators).toHaveLength(1);
+    expect(separators[0]?.nextElementSibling).toBe(items[2] as Element);
+    expect(items[2]?.querySelector('svg')).not.toBeNull();
+    expect(items[3]?.querySelector('svg')).not.toBeNull();
+
+    await click(items[2] ?? null, 'Pair a phone');
+    expect(calls).toEqual(['pair-phone']);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    // Focus is back on the switcher before the sheet opens, so closing the sheet returns there.
+    expect(document.activeElement).toBe(machine);
+  });
+
+  test('does not offer pairing when the reader may not pair a device with this machine', async () => {
+    const { element } = bar();
+    view = await mount(element);
+    await click(view.container.querySelector('[data-sbar-machine]'), 'the machine switcher');
+    const menu = must(document.querySelector('[role="menu"]'), 'the machine menu');
+    expect(menu.textContent).not.toContain('Pair a phone');
+    // The divider still separates the machines from the one act left.
+    expect(menu.querySelector('[data-menu-separator]')?.nextElementSibling?.textContent).toBe('Add a machine…');
+  });
+
+  test('carries the pairing entry into the phone drawer', async () => {
+    const { calls, element } = bar({
+      presentation: 'drawer',
+      onClose: () => calls.push('close'),
+      onPairPhone: () => calls.push('pair-phone'),
+    });
+    view = await mount(element);
+    await click(view.container.querySelector('[data-sbar-machine]'), 'the machine switcher');
+    await click(
+      [...document.querySelectorAll('[role="menuitem"]')].find(item => item.textContent?.startsWith('Pair a phone')) ??
+        null,
+      'Pair a phone',
+    );
+    // Pairing opens a sheet over the drawer; it is not a navigation, so the drawer stays.
+    expect(calls).toEqual(['pair-phone']);
+  });
 });
 
 describe('SessionsBar column width', () => {

@@ -7,14 +7,17 @@ import {
   codexReasoningObservationChanged,
   modelObservationChanged,
   type RuntimeSwitchLifecycle,
+  launchedModel,
+  runtimeEffortReadout,
   runtimeModelChipLabel,
   runtimeSwitchDisabledReason,
 } from '../../src/components/composer-runtime.tsx';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
 /**
- * The bar's contract is what its two chips CLAIM: a readout that never asserts an
- * unobserved runtime, a refusal reason carried non-visually, and a stale marker
+ * The bar's contract is what its two chips CLAIM: what the harness reported,
+ * else the runtime the session was launched with — said as such — and never a
+ * blank chip; a refusal reason carried non-visually, and a stale marker
  * that clears only on fresh harness evidence. All of it is asserted through a real
  * mount, because the chips are dialog triggers and the sheets are document facts.
  */
@@ -30,6 +33,8 @@ interface SessionOverrides {
   readonly status?: string;
   readonly model?: string;
   readonly modelHint?: string;
+  readonly harnessFlags?: readonly string[];
+  readonly launchReasoningEffort?: string;
   readonly observedModel?: string;
   readonly observedModelAt?: string;
   readonly observedReasoningEffort?: string;
@@ -42,6 +47,8 @@ const session = (overrides: SessionOverrides): SessionView =>
       harness: overrides.harness ?? 'claude',
       model: overrides.model,
       modelHint: overrides.modelHint ?? 'claude-opus-5',
+      harnessFlags: overrides.harnessFlags ?? [],
+      launchReasoningEffort: overrides.launchReasoningEffort,
     },
     state: {
       status: overrides.status ?? 'running',
@@ -123,15 +130,87 @@ describe('runtimeModelChipLabel', () => {
     should(runtimeModelChipLabel(session({ observedModel: ' gpt-5.6 ', model: 'requested' }))).equal('gpt-5.6');
   });
 
-  test('should not present a launch request or hint as the running model', () => {
+  test('should fall back to the model the session was launched on before the harness reports one', () => {
     // Assert
-    should(runtimeModelChipLabel(session({ model: 'requested' }))).equal('model unavailable');
-    should(runtimeModelChipLabel(session({ modelHint: 'hinted' }))).equal('model unavailable');
+    should(runtimeModelChipLabel(session({ model: 'launched' }))).equal('launched');
+    should(runtimeModelChipLabel(session({ modelHint: 'hinted' }))).equal('hinted');
   });
 
-  test('should show unavailable when no model observation exists', () => {
+  test('should show unavailable only when neither an observation nor a launch model exists', () => {
     // Assert
     should(runtimeModelChipLabel(session({ modelHint: '   ' }))).equal('model unavailable');
+  });
+});
+
+describe('launchedModel', () => {
+  test("should let the operator's own --model flag win over the resolved default, last one first", () => {
+    // Assert
+    should(
+      launchedModel(session({ model: 'default', harnessFlags: ['--model', 'first', '--model', 'last'] }).config),
+    ).equal('last');
+    should(launchedModel(session({ model: 'default', harnessFlags: ['--model=inline'] }).config)).equal('inline');
+    should(
+      launchedModel(session({ harness: 'codex', model: 'default', harnessFlags: ['-m', 'gpt-5.6'] }).config),
+    ).equal('gpt-5.6');
+  });
+
+  test('should ignore a model flag with no usable value', () => {
+    // Assert
+    should(launchedModel(session({ model: 'default', harnessFlags: ['--model'] }).config)).equal('default');
+    should(launchedModel(session({ model: 'default', harnessFlags: ['--model=  ', '--verbose'] }).config)).equal(
+      'default',
+    );
+  });
+
+  test('should read a hand-built view with no flags at all', () => {
+    // Assert
+    const view = session({ model: 'default' });
+    should(launchedModel({ ...view.config, harnessFlags: undefined } as unknown as SessionView['config'])).equal(
+      'default',
+    );
+  });
+});
+
+describe('runtimeEffortReadout', () => {
+  test('should prefer what the harness reported or what was sent over the launch level', () => {
+    // Assert
+    should(
+      runtimeEffortReadout(
+        session({ harness: 'codex', observedReasoningEffort: 'high', launchReasoningEffort: 'low' }),
+        undefined,
+      ),
+    ).deepEqual({
+      label: 'high',
+      aria: 'Set reasoning level — currently high',
+    });
+    should(runtimeEffortReadout(session({ launchReasoningEffort: 'low' }), 'max')).deepEqual({
+      label: 'max',
+      aria: 'Set reasoning effort — last set to max this session',
+    });
+  });
+
+  test('should say the launch level before anything is reported, for both harnesses', () => {
+    // Assert
+    should(runtimeEffortReadout(session({ launchReasoningEffort: 'high' }), undefined)).deepEqual({
+      label: 'high',
+      aria: 'Set reasoning effort — launched with high',
+    });
+    should(runtimeEffortReadout(session({ harness: 'codex', launchReasoningEffort: 'medium' }), undefined)).deepEqual({
+      label: 'medium',
+      aria: 'Set reasoning level — launched with medium',
+    });
+  });
+
+  test('should name the harness default rather than leave the chip blank', () => {
+    // Assert
+    should(runtimeEffortReadout(session({}), undefined)).deepEqual({
+      label: 'default',
+      aria: 'Set reasoning effort — the harness default',
+    });
+    should(runtimeEffortReadout(session({ harness: 'codex' }), '  ')).deepEqual({
+      label: 'default',
+      aria: 'Set reasoning level — the harness default',
+    });
   });
 });
 
@@ -144,9 +223,27 @@ describe('ComposerRuntime chips', () => {
 
     // Assert
     should(labelOf(modelChip(view))).equal('claude-opus-5');
-    should(labelOf(effortChip(view))).equal('effort');
+    should(labelOf(effortChip(view))).equal('default');
     should(ariaOf(modelChip(view))).equal('Switch model — currently claude-opus-5');
-    should(ariaOf(effortChip(view))).equal('Set reasoning effort');
+    should(ariaOf(effortChip(view))).equal('Set reasoning effort — the harness default');
+    await view.unmount();
+  });
+
+  test('should name the launch runtime on a brand-new session the harness has said nothing about', async () => {
+    // Act
+    const view = await mount(
+      <ComposerRuntime
+        busy={false}
+        canControl
+        view={session({ model: 'claude-opus-5[1m]', launchReasoningEffort: 'high' })}
+      />,
+    );
+
+    // Assert
+    should(labelOf(modelChip(view))).equal('claude-opus-5[1m]');
+    should(ariaOf(modelChip(view))).equal('Switch model — launched on claude-opus-5[1m]');
+    should(labelOf(effortChip(view))).equal('high');
+    should(ariaOf(effortChip(view))).equal('Set reasoning effort — launched with high');
     await view.unmount();
   });
 
@@ -162,13 +259,13 @@ describe('ComposerRuntime chips', () => {
     await view.unmount();
   });
 
-  test('should say the Codex level is unknown rather than guess it', async () => {
+  test('should say the Codex level is the harness default rather than leave it blank', async () => {
     // Act
     const view = await mount(<ComposerRuntime busy={false} canControl view={session({ harness: 'codex' })} />);
 
     // Assert
-    should(labelOf(effortChip(view))).equal('reasoning');
-    should(ariaOf(effortChip(view))).containEql('currently unknown');
+    should(labelOf(effortChip(view))).equal('default');
+    should(ariaOf(effortChip(view))).equal('Set reasoning level — the harness default');
     await view.unmount();
   });
 
@@ -365,7 +462,7 @@ describe('ComposerRuntime stale-until-evidence', () => {
 
     // Assert
     should(ariaOf(modelChip(view))).not.endWith(', switching');
-    should(labelOf(effortChip(view))).equal('effort');
+    should(labelOf(effortChip(view))).equal('default');
     await view.unmount();
   });
 });

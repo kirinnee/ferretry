@@ -28,8 +28,10 @@
  *                   yields one row and not two that go to the same place.
  */
 
+import type { LucideIcon } from 'lucide-react';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonNewSessionPath, daemonSessionsPath, parseRoute, routePath } from '../lib/pages/routes.ts';
+import type { PaletteCommand } from './palette-model.ts';
 
 /**
  * The shape the palette needs from a top-bar destination. Structural on purpose:
@@ -95,6 +97,34 @@ const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   learning: ['learning', 'proposals', 'rules', 'lessons', 'scan'],
   settings: ['settings', 'preferences', 'appearance', 'theme', 'density', 'options', 'configure'],
 };
+
+/**
+ * "Pair a phone with ‹machine›" — the one destination here that is not a page.
+ *
+ * It opens the Add-a-device surface in a sheet over the page the reader is on, the same sheet the
+ * machine switcher opens, so it has no href for `destinationExists` to resolve and travels as a palette
+ * COMMAND (an action the host injects) instead. Its wording and search words live here, beside the
+ * destinations, because a reader looks for it the way they look for a place: "pair", "phone", "QR".
+ *
+ * The host passes it only when the reader may pair a device with this machine; a palette that offered
+ * it otherwise would open onto a refusal.
+ */
+export const PAIR_PHONE_SEARCH_TERMS =
+  'pair phone device add qr code scan invite mobile tablet browser another connect link';
+
+export const pairPhonePaletteCommand = (
+  label: string,
+  description: string,
+  Icon: LucideIcon,
+  run: () => void,
+): PaletteCommand => ({
+  id: 'pair-phone',
+  label,
+  description,
+  searchTerms: PAIR_PHONE_SEARCH_TERMS,
+  run,
+  Icon,
+});
 
 /**
  * Does the router resolve this href to the page it advertises? A compatibility

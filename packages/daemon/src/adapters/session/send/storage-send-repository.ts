@@ -4,6 +4,7 @@ import type { ClockPort } from '../../../lib/ports.ts';
 import { tryParseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import type { SendRepository, SendTarget, SendTransition } from '../../../lib/session/send/types.ts';
 import { signalStatusOf } from '../../../lib/session/signal/types.ts';
+import { turnStatePatch } from '../../../lib/session/turn/policy.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 
 function record(value: unknown): Record<string, unknown> {
@@ -106,6 +107,15 @@ export class StorageSendRepository implements SendRepository {
         next.lastActivityAt = stamp;
         next.turnCompleted = false;
         delete next.nudgedAt;
+        // A turn just started: it is the agent's now. Recorded here, through the turn policy, so a turn
+        // shorter than one watcher tick still has a start for its end to be measured against.
+        const started = turnStatePatch(
+          { turnState: next.turnState === 'working' ? 'working' : undefined },
+          'working',
+          stamp,
+        );
+        if (started?.turnState !== undefined) next.turnState = started.turnState;
+        if (started?.turnStateAt !== undefined) next.turnStateAt = started.turnStateAt;
       }
       return next;
     });
