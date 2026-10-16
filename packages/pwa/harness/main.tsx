@@ -279,10 +279,21 @@ const checkingDaemon = daemonConnection({
   deviceId: 'checking-harness-token',
   daemonName: 'build-runner',
 });
+/**
+ * The studio's pairing from before it was reset: same name, same address, an identity nothing answers
+ * any more. A newer pairing replaced it, so it reads as the old pairing and offers to be removed.
+ */
+const resetDaemon = daemonConnection({
+  daemonId: 'harness-daemon-before-reset',
+  baseUrl: 'https://daemon.invalid/',
+  deviceId: 'harness-old-token',
+  daemonName: 'studio-mac',
+});
 const HARNESS_SETTINGS_CONNECTIONS = [
   { ...daemon, label: 'Studio workstation', pairedAt: 1, lastSelectedAt: 3 },
   { ...unreachableDaemon, label: 'Travel laptop', pairedAt: 1, lastSelectedAt: 2 },
   { ...checkingDaemon, pairedAt: 1, lastSelectedAt: 1 },
+  { ...resetDaemon, label: 'Studio workstation', pairedAt: 0, lastSelectedAt: 0 },
 ] as const satisfies readonly DaemonConnectionRecord[];
 /**
  * A set-up machine Clone can copy FROM, so the preview's "Runs on" review is walkable. Offered to Clone

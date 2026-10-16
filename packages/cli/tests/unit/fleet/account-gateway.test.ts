@@ -130,9 +130,13 @@ describe('ProtocolAccountGateway Codex method', () => {
     // Act
     await gateway.startSignIn('codex-you', 'link');
     await gateway.startSignIn('codex-you');
+    await gateway.startSignIn('codex-you', undefined, true);
+    await gateway.startSignIn('codex-you', undefined, false);
 
     // Assert
     should(body(fake.sent[0])).eql({ credentialId: 'codex-you', method: 'link' });
     should(body(fake.sent[1])).eql({ credentialId: 'codex-you' });
+    should(body(fake.sent[2])).eql({ credentialId: 'codex-you', restart: true });
+    should(body(fake.sent[3])).eql({ credentialId: 'codex-you' });
   });
 });

@@ -33,24 +33,52 @@ export type DaemonReachabilityProbe = (connection: DaemonConnection) => Promise<
 export const daemonDisplayName = (connection: DaemonConnection & { readonly label?: string }): string =>
   connection.label?.trim() || connection.daemonName || connection.baseUrl;
 
+/** A pairing as the naming rules below read it: its name, its address, and when this browser made it. */
+type NamedPairing = DaemonConnection & { readonly label?: string; readonly pairedAt?: number };
+
 /**
- * {@link daemonDisplayName}, told apart from every other paired machine that would read the same.
+ * Whether a NEWER pairing with the same name at the same address has replaced this one.
+ *
+ * One address answers for one machine at a time, so two pairings that agree on both are one machine
+ * paired twice — almost always because it was reset (`fy daemon reset` gives it a new identity, and the
+ * browser keeps the old pairing). The newer is the one that answers; the older has nothing left to talk
+ * to. It is only ever labelled and offered for removal — never removed behind the owner's back.
+ */
+export const replacedPairing = (connection: NamedPairing, paired: readonly NamedPairing[]): boolean =>
+  paired.some(
+    other =>
+      other.daemonId !== connection.daemonId &&
+      other.baseUrl === connection.baseUrl &&
+      daemonDisplayName(other) === daemonDisplayName(connection) &&
+      (other.pairedAt ?? 0) > (connection.pairedAt ?? 0),
+  );
+
+/** "3 Oct": the day a pairing was made, which is how a person remembers it. */
+const pairedDay = (pairedAt: number): string =>
+  new Date(pairedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+/**
+ * {@link daemonDisplayName}, told apart from every other paired machine that would read the same — in
+ * words a person can use, never the machine's fingerprint.
  *
  * Two machines on one host both call themselves by its name, so a prompt naming "kirin-box" could not
- * say WHICH machine wants the passkey. A twin is followed by its address, and by its fingerprint when
- * even the address is shared.
+ * say WHICH machine wants the passkey. A twin is followed by its address. A pairing a newer one replaced
+ * ({@link replacedPairing}) is called the old pairing, and the live one then needs no suffix at all.
+ * Two that still share an address are told apart by the day each was paired.
  */
-export const distinctDaemonName = (
-  connection: DaemonConnection & { readonly label?: string },
-  paired: readonly (DaemonConnection & { readonly label?: string })[],
-): string => {
+export const distinctDaemonName = (connection: NamedPairing, paired: readonly NamedPairing[]): string => {
   const name = daemonDisplayName(connection);
-  const twins = paired.filter(other => other.daemonId !== connection.daemonId && daemonDisplayName(other) === name);
+  if (replacedPairing(connection, paired)) return `${name} (old pairing)`;
+  const twins = paired.filter(
+    other =>
+      other.daemonId !== connection.daemonId && daemonDisplayName(other) === name && !replacedPairing(other, paired),
+  );
   if (twins.length === 0) return name;
   const sharedAddress = name === connection.baseUrl || twins.some(other => other.baseUrl === connection.baseUrl);
-  return sharedAddress
-    ? `${name} (${connection.daemonId.slice(0, 16)})`
-    : `${name} (${connection.baseUrl.replace(/^[a-z]+:\/\//u, '')})`;
+  if (!sharedAddress) return `${name} (${connection.baseUrl.replace(/^[a-z]+:\/\//u, '')})`;
+  return connection.pairedAt === undefined
+    ? `${name} (another pairing)`
+    : `${name} (paired ${pairedDay(connection.pairedAt)})`;
 };
 
 type Reachability = 'checking' | 'reachable' | 'unreachable';

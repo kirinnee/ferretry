@@ -17,12 +17,14 @@ import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
 import type { CodexCallbackDelivery } from '../../../src/lib/fleet-login/codex-link.ts';
+import type { CallbackPortHolder } from '../../../src/lib/fleet-login/port-holders.ts';
 import type {
   HarnessLoginCallbackDeliver,
   HarnessLoginChild,
   HarnessLoginChildSpec,
 } from '../../../src/lib/fleet-login/ports.ts';
 import {
+  HARNESS_LOGIN_IDLE_MINUTES,
   HARNESS_LOGIN_SHUTDOWN_GRACE_MS,
   HARNESS_LOGIN_WINDOW_MINUTES,
   HarnessLoginRefusal,
@@ -142,6 +144,9 @@ interface Fixture {
   readonly logins: Set<string>;
   /** Every request a Codex link sign-in delivered to Codex's listener, in order. */
   readonly deliveries: CodexCallbackDelivery[];
+  /** Every pid starting over stopped, in order, and every port list it asked about. */
+  readonly stopped: number[];
+  readonly askedPorts: (readonly number[])[];
   /** Let the not-awaited login work run. Everything in the fixture is synchronous or a microtask. */
   settle(): Promise<void>;
   /** The child a flow spawned, once it has. `index` picks one out of a run of several flows. */
@@ -156,7 +161,14 @@ interface FixtureOptions {
   readonly locate?: (harness: HarnessKind) => string | undefined;
   /** What Codex's listener answers a delivery with. Delivered, by default. */
   readonly deliver?: HarnessLoginCallbackDeliver;
+  /** Who the port table says listens on the callback ports. Nobody, by default. */
+  readonly holders?: readonly CallbackPortHolder[] | undefined;
+  /** Whether a stop lands. It does, by default. */
+  readonly stops?: boolean;
 }
+
+/** This daemon's own OS user in the fixture. */
+const OWN_UID = 501;
 
 const LOCATED = (harness: HarnessKind): string => `/usr/local/bin/${harness}`;
 
@@ -167,6 +179,8 @@ function fixture(options: FixtureOptions = {}): Fixture {
   const prepared: string[] = [];
   const logins = new Set<string>();
   const deliveries: CodexCallbackDelivery[] = [];
+  const stopped: number[] = [];
+  const askedPorts: (readonly number[])[] = [];
   let minted = 0;
 
   const fallback = (id: string): CredentialSignInTarget => {
@@ -232,6 +246,17 @@ function fixture(options: FixtureOptions = {}): Fixture {
       deliveries.push(delivery);
       return options.deliver === undefined ? 'delivered' : await options.deliver(delivery);
     },
+    portHolders: {
+      ownUid: OWN_UID,
+      holders: async ports => {
+        askedPorts.push(ports);
+        return 'holders' in options ? options.holders : [];
+      },
+      stop: async pid => {
+        stopped.push(pid);
+        return options.stops ?? true;
+      },
+    },
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
   });
 
@@ -249,6 +274,8 @@ function fixture(options: FixtureOptions = {}): Fixture {
     prepared,
     logins,
     deliveries,
+    stopped,
+    askedPorts,
     settle,
     child: async (index = 0) => {
       await settle();
@@ -358,34 +385,110 @@ describe('starting a harness login', () => {
     should(subject.children).be.empty();
   });
 
-  it('should refuse a second sign-in for one credential, naming the flow that holds it', async () => {
-    // Arrange
+  it('should pick up the sign-in already running for a credential instead of launching a second', async () => {
+    // Arrange — a page that reloaded mid sign-in: the link is already on its way to the person.
     const subject = fixture();
     const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    (await subject.child()).emit(CLAUDE_URL_LINE);
 
     // Act
-    const actual = await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST));
+    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     await subject.settle();
 
+    // Assert — the same flow, its link intact, said to be picked up; and still one child.
+    should(actual).match({ flowId: first.flowId, state: 'awaiting-code', verificationUrl: CLAUDE_URL, resumed: true });
+    should(subject.children).have.length(1);
+    should(await subject.service.status(first.flowId)).not.have.property('resumed');
+  });
+
+  it('should pick up a running sign-in for a governed caller too, whichever method it asks for', async () => {
+    // Arrange — a Codex device code started from setup, then "Sign in" again from Credentials.
+    const subject = fixture();
+    const first = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, BROWSER);
+    (await subject.child()).emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+
+    // Act
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, BROWSER);
+
     // Assert
-    should(actual.code).equal('fleet_login_in_progress');
-    should(actual.message).equal(
-      `a sign-in for "${CLAUDE_CREDENTIAL}" is already running as flow "${first.flowId}"; finish or cancel it first`,
-    );
+    should(actual).match({ flowId: first.flowId, state: 'awaiting-approval', userCode: '0IER-FFQW6', resumed: true });
     should(subject.children).have.length(1);
   });
 
-  it('should refuse a second sign-in for one credential from a governed caller too', async () => {
-    // Arrange
+  it('should start over on request: end the running flow, wait for its child, then launch a fresh one', async () => {
+    // Arrange — a Codex link sign-in, whose child holds this machine's callback port until it exits.
     const subject = fixture();
-    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    const first = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link' }, HOST);
+    const old = await subject.child();
+    old.stubborn = true;
 
     // Act
-    const actual = await refusalOf(async () => subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER));
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, restart: true }, HOST);
+    await subject.settle();
+    const launchedBeforeExit = subject.children.length;
+    const grace = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_SHUTDOWN_GRACE_MS);
+    if (grace === undefined) throw new Error('no grace timer was armed');
+    grace.run();
+    await subject.settle();
+
+    // Assert — a new flow on the method asked for; the old one ended in words, and its child was
+    // killed outright before the new one launched, so the two never held the port together.
+    should(actual.flowId).not.equal(first.flowId);
+    should(actual).not.have.property('resumed');
+    should(await subject.service.status(first.flowId)).match({
+      state: 'failed',
+      reason: 'this sign-in was replaced by a new one',
+    });
+    should(old.signals).deepEqual(['SIGTERM', 'SIGKILL']);
+    should(launchedBeforeExit).equal(1);
+    should(subject.children).have.length(2);
+    should(subject.children[1]?.spec.command).containEql('--device-auth');
+  });
+
+  it('should launch at once when starting over finds nothing running', async () => {
+    // Arrange
+    const subject = fixture();
+
+    // Act
+    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, restart: true }, HOST);
+    await subject.settle();
 
     // Assert
-    should(actual.code).equal('fleet_login_in_progress');
+    should(actual).have.property('state', 'starting');
     should(subject.children).have.length(1);
+  });
+
+  it('should spawn nothing for a fresh start that is cancelled while the old child is still exiting', async () => {
+    // Arrange
+    const subject = fixture();
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    (await subject.child()).stubborn = true;
+    const fresh = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, restart: true }, HOST);
+
+    // Act
+    await subject.service.cancel(fresh.flowId);
+    subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_SHUTDOWN_GRACE_MS)?.run();
+    await subject.settle();
+
+    // Assert
+    should(subject.children).have.length(1);
+    should(subject.prepared).deepEqual([CLAUDE_CREDENTIAL]);
+  });
+
+  it('should not pick up a flow whose window closed while nobody looked, and start a fresh one', async () => {
+    // Arrange
+    let now = NOW;
+    const subject = fixture({ now: () => now });
+    const first = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.child();
+
+    // Act
+    now = NOW + HARNESS_LOGIN_WINDOW_MINUTES * 60_000;
+    const actual = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+
+    // Assert
+    should(actual.flowId).not.equal(first.flowId);
+    should(actual).not.have.property('resumed');
   });
 
   it('should allow a sign-in for a DIFFERENT credential while one is running', async () => {
@@ -1019,8 +1122,91 @@ describe('a login’s lifetime', () => {
     // Assert
     should(actual.code).equal('fleet_login_unknown');
     should(actual.message).equal(
-      'no sign-in "flow-nobody-minted" is running on this host; it may have finished or run out of time',
+      'that sign-in is no longer running on this machine; it may have finished or run out of time',
     );
+    should(actual.message).not.containEql('flow-nobody-minted');
+  });
+
+  /** The idle deadline armed last and still live, which is the one that decides. */
+  const idleTimer = (subject: Fixture) => {
+    const armed = subject.timers.filter(
+      timer => timer.milliseconds === HARNESS_LOGIN_IDLE_MINUTES * 60_000 && !timer.disarmed,
+    );
+    const last = armed.at(-1);
+    if (last === undefined) throw new Error('no idle deadline is armed');
+    return last;
+  };
+
+  it('should end a flow waiting for a code that nobody has read for the idle time', async () => {
+    // Arrange — the link was shown, then the page went away.
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+
+    // Act
+    idleTimer(subject).run();
+    await subject.settle();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(child.killed).be.true();
+    should(actual).match({ state: 'failed', lastCode: 'expired' });
+  });
+
+  it('should keep a Codex device code running with nobody reading, because the provider can still approve it', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+
+    // Act
+    const first = idleTimer(subject);
+    first.run();
+    const rearmed = idleTimer(subject);
+    child.exit(0);
+    subject.logins.add(CODEX_CREDENTIAL);
+    await subject.settle();
+
+    // Assert — looked again later rather than ended, and finished on its own.
+    should(rearmed).not.equal(first);
+    should(child.killed).be.false();
+    should(await subject.service.status(started.flowId)).have.property('state', 'complete');
+  });
+
+  it('should restart the idle clock on every read, and end a flow lazily once it went unread too long', async () => {
+    // Arrange
+    let now = NOW;
+    const subject = fixture({ now: () => now });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    (await subject.child()).emit(CLAUDE_URL_LINE);
+    const idle = HARNESS_LOGIN_IDLE_MINUTES * 60_000;
+
+    // Act — read just inside the idle time, then leave it a whole idle time unread.
+    now = NOW + idle - 1;
+    const kept = await subject.service.status(started.flowId);
+    now += idle;
+    const ended = await subject.service.status(started.flowId);
+
+    // Assert
+    should(kept).have.property('state', 'awaiting-code');
+    should(ended).match({ state: 'failed', lastCode: 'expired' });
+  });
+
+  it('should leave the idle deadline alone once a flow has settled', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    await subject.child();
+    const idle = idleTimer(subject);
+    await subject.service.cancel(started.flowId);
+
+    // Act — a timer that fired anyway, as a real one can after its disarm raced it.
+    idle.run();
+
+    // Assert
+    should(await subject.service.status(started.flowId)).have.property('reason', 'this sign-in was cancelled');
   });
 
   /** Run one whole sign-in to a settled flow, the way a person would. */
@@ -1824,5 +2010,160 @@ describe('a daemon that stops', () => {
     // Assert
     should(refusal.code).equal('fleet_login_unavailable');
     should(subject.children).be.empty();
+  });
+});
+
+describe('starting a Codex sign-in over with its callback port taken', () => {
+  /** A leftover `codex login` this daemon's user left behind, listening on one callback port. */
+  const leftover = (port: number, pid: number): CallbackPortHolder => ({
+    port,
+    pid,
+    name: 'codex',
+    uid: OWN_UID,
+    commandLine: `/opt/codex/bin/codex -c cli_auth_credentials_store="file" login`,
+  });
+  /** A local proxy the owner runs on a callback port. Never Ferretry's to stop. */
+  const proxy = (port: number): CallbackPortHolder => ({
+    port,
+    pid: 4242,
+    name: 'nginx',
+    uid: OWN_UID,
+    commandLine: 'nginx: master process /usr/sbin/nginx',
+  });
+
+  it('should stop a leftover Codex sign-in on the port, then launch the fresh one', async () => {
+    // Arrange
+    const subject = fixture({ holders: [leftover(1455, 777)] });
+
+    // Act
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.askedPorts).deepEqual([[1455, 1457]]);
+    should(subject.stopped).deepEqual([777]);
+    should(subject.children).have.length(1);
+    should(await subject.service.status(actual.flowId)).have.property('state', 'starting');
+  });
+
+  it('should name, and never stop, a program that is not a Codex sign-in on every port', async () => {
+    // Arrange
+    const subject = fixture({ holders: [proxy(1455), proxy(1457)] });
+
+    // Act
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.settle();
+    const flow = await subject.service.status(actual.flowId);
+
+    // Assert
+    should(subject.stopped).be.empty();
+    should(subject.children).be.empty();
+    should(flow).match({
+      state: 'failed',
+      reason:
+        'Codex cannot listen for the sign-in: ports 1455 and 1457 are in use by "nginx" (pid 4242), which is not a Codex sign-in, so Ferretry will not stop it',
+      remedy: /device code/u,
+    });
+  });
+
+  it('should not stop a Codex login another user runs, or one whose command line nobody could read', async () => {
+    // Arrange
+    const subject = fixture({
+      holders: [
+        { ...leftover(1455, 778), uid: OWN_UID + 1 },
+        { ...leftover(1457, 779), commandLine: undefined },
+      ],
+    });
+
+    // Act
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.stopped).be.empty();
+    should(await subject.service.status(actual.flowId)).match({ state: 'failed', reason: /pid 778.*pid 779/u });
+  });
+
+  it('should say so when a leftover Codex sign-in could not be stopped', async () => {
+    // Arrange
+    const subject = fixture({ holders: [leftover(1455, 780), proxy(1457)], stops: false });
+
+    // Act
+    const actual = await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.stopped).deepEqual([780]);
+    should(await subject.service.status(actual.flowId)).match({
+      state: 'failed',
+      reason: /"codex" \(pid 780\), a leftover Codex sign-in Ferretry could not stop/u,
+    });
+  });
+
+  it('should launch a link sign-in while one callback port is still free', async () => {
+    // Arrange
+    const subject = fixture({ holders: [proxy(1455)] });
+
+    // Act
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.children).have.length(1);
+  });
+
+  it('should launch a device code whoever holds the port, because a device code never listens', async () => {
+    // Arrange
+    const subject = fixture({ holders: [proxy(1455), proxy(1457), leftover(1455, 781)] });
+
+    // Act
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL, restart: true }, HOST);
+    await subject.settle();
+
+    // Assert — the leftover is still cleared; the proxy is still left alone.
+    should(subject.stopped).deepEqual([781]);
+    should(subject.children).have.length(1);
+  });
+
+  it('should launch as before when this machine cannot say who holds the port', async () => {
+    // Arrange
+    const subject = fixture({ holders: undefined });
+
+    // Act
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL, method: 'link', restart: true }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.children).have.length(1);
+  });
+
+  it('should look at the port only when starting a Codex sign-in over', async () => {
+    // Arrange
+    const subject = fixture({ holders: [leftover(1455, 782)] });
+
+    // Act
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    await subject.service.start({ credentialId: CLAUDE_CREDENTIAL, restart: true }, HOST);
+    await subject.settle();
+
+    // Assert
+    should(subject.askedPorts).be.empty();
+    should(subject.stopped).be.empty();
+  });
+
+  it('should clear nothing for a fresh start cancelled while its predecessor exits', async () => {
+    // Arrange
+    const subject = fixture({ holders: [leftover(1455, 783)] });
+    await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+    (await subject.child()).stubborn = true;
+    const fresh = await subject.service.start({ credentialId: CODEX_CREDENTIAL, restart: true }, HOST);
+
+    // Act
+    await subject.service.cancel(fresh.flowId);
+    subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_SHUTDOWN_GRACE_MS)?.run();
+    await subject.settle();
+
+    // Assert
+    should(subject.askedPorts).be.empty();
   });
 });

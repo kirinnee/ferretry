@@ -312,8 +312,12 @@ class FakeGateway implements IAccountGateway {
   exportBundle() {
     return this.#record('exportBundle', [], this.answers.exportBundle);
   }
-  startSignIn(id: string, method?: HarnessLoginCodexMethod) {
-    return this.#record('startSignIn', [id, ...(method === undefined ? [] : [method])], this.answers.startSignIn);
+  startSignIn(id: string, method?: HarnessLoginCodexMethod, restart?: boolean) {
+    return this.#record(
+      'startSignIn',
+      [id, ...(method === undefined ? [] : [method]), ...(restart === true ? ['restart'] : [])],
+      this.answers.startSignIn,
+    );
   }
   signInStatus(id: string) {
     return this.#record('signInStatus', [id], this.answers.signInStatus);

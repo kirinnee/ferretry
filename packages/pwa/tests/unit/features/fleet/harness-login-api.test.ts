@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 
 import type { FleetClient } from '../../../../src/features/fleet/fleet-client.ts';
@@ -6,6 +7,7 @@ import {
   cancelCredentialSignIn,
   FLEET_LOGIN_PATH,
   readCredentialSignIn,
+  restartCredentialSignIn,
   startCredentialSignIn,
   submitCredentialSignInCode,
   switchCredentialSignInToLink,
@@ -109,5 +111,96 @@ describe('switchCredentialSignInToLink', () => {
     expect(outcome).toEqual({ outcome: 'refused', reason: 'Claude Code has one way to sign in' });
     expect(calls[0]?.path).toBe(`${FLEET_LOGIN_PATH}/flow-one`);
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ method: 'link' });
+  });
+});
+
+/** A client that answers each call from a script keyed by method and path; an Error answer is thrown. */
+const scriptedFor = (
+  answers: Record<string, unknown | (() => unknown)>,
+): { client: FleetClient; calls: { readonly key: string; readonly body: unknown }[] } => {
+  const calls: { key: string; body: unknown }[] = [];
+  const client: FleetClient = {
+    request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
+      const key = `${init?.method ?? 'GET'} ${path}`;
+      calls.push({ key, body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined });
+      const scripted = answers[key];
+      const answer = typeof scripted === 'function' ? (scripted as () => unknown)() : scripted;
+      if (answer instanceof Error) throw answer;
+      return schema.parse(answer);
+    },
+  };
+  return { client, calls };
+};
+
+describe('a sign-in already running', () => {
+  const legacy = new FyHttpError(
+    `a sign-in for "${CLAUDE_CREDENTIAL_ID}" is already running as flow "flow-one"; finish or cancel it first`,
+    409,
+    'fleet_login_in_progress',
+  );
+
+  it('is picked up from a daemon too old to do it itself, by reading the flow its refusal named', async () => {
+    const { client, calls } = scriptedFor({
+      [`POST ${FLEET_LOGIN_PATH}`]: legacy,
+      [`GET ${FLEET_LOGIN_PATH}/flow-one`]: claudeFlow('awaiting-code'),
+    });
+
+    const flow = await startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID });
+
+    expect(flow).toMatchObject({ flowId: 'flow-one', state: 'awaiting-code', resumed: true });
+    expect(calls.map(call => call.key)).toEqual([`POST ${FLEET_LOGIN_PATH}`, `GET ${FLEET_LOGIN_PATH}/flow-one`]);
+  });
+
+  it('passes every other refusal through, including one that names no flow', async () => {
+    const other = new FyHttpError('not installed', 409, 'fleet_login_unavailable');
+    const unnamed = new FyHttpError('already running', 409, 'fleet_login_in_progress');
+
+    for (const refusal of [other, unnamed, new Error('offline')]) {
+      const { client } = scriptedFor({ [`POST ${FLEET_LOGIN_PATH}`]: refusal });
+      await expect(startCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID })).rejects.toBe(refusal);
+    }
+  });
+
+  it('is started over by cancelling it, then asking for a restart', async () => {
+    const { client, calls } = scriptedFor({
+      [`DELETE ${FLEET_LOGIN_PATH}/flow-one`]: new FyHttpError('gone', 409, 'fleet_login_unknown'),
+      [`POST ${FLEET_LOGIN_PATH}`]: claudeFlow('starting'),
+    });
+
+    await restartCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, 'flow-one');
+    await restartCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, undefined);
+
+    expect(calls).toEqual([
+      { key: `DELETE ${FLEET_LOGIN_PATH}/flow-one`, body: undefined },
+      { key: `POST ${FLEET_LOGIN_PATH}`, body: { credentialId: CLAUDE_CREDENTIAL_ID, restart: true } },
+      { key: `POST ${FLEET_LOGIN_PATH}`, body: { credentialId: CLAUDE_CREDENTIAL_ID, restart: true } },
+    ]);
+  });
+
+  it('falls back to an ordinary start on a daemon that refuses the restart field as a malformed body', async () => {
+    let posts = 0;
+    const { client, calls } = scriptedFor({
+      [`POST ${FLEET_LOGIN_PATH}`]: () => {
+        posts += 1;
+        return posts === 1 ? new FyHttpError('unrecognised key: restart', 400, 'bad_request') : claudeFlow('starting');
+      },
+    });
+
+    const flow = await restartCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, undefined);
+
+    expect(flow.state).toBe('starting');
+    expect(calls.map(call => call.body)).toEqual([
+      { credentialId: CLAUDE_CREDENTIAL_ID, restart: true },
+      { credentialId: CLAUDE_CREDENTIAL_ID },
+    ]);
+  });
+
+  it('passes any other start-over refusal through', async () => {
+    const refusal = new FyHttpError('stopping', 409, 'fleet_login_unavailable');
+    const { client } = scriptedFor({ [`POST ${FLEET_LOGIN_PATH}`]: refusal });
+
+    await expect(restartCredentialSignIn(client, { credentialId: CLAUDE_CREDENTIAL_ID }, undefined)).rejects.toBe(
+      refusal,
+    );
   });
 });

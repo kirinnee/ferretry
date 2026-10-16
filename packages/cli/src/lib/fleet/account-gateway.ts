@@ -127,8 +127,16 @@ export class ProtocolAccountGateway implements IAccountGateway {
     return await this.client.request(FLEET_EXPORT_PATH, FleetCloneBundleSchema, GET);
   }
 
-  async startSignIn(credentialId: string, method?: HarnessLoginCodexMethod): Promise<HarnessLoginFlow> {
-    const request = { credentialId, ...(method === undefined ? {} : { method }) };
+  async startSignIn(
+    credentialId: string,
+    method?: HarnessLoginCodexMethod,
+    restart?: boolean,
+  ): Promise<HarnessLoginFlow> {
+    const request = {
+      credentialId,
+      ...(method === undefined ? {} : { method }),
+      ...(restart === true ? { restart } : {}),
+    };
     return await this.client.request(
       FLEET_LOGIN_PATH,
       HarnessLoginFlowSchema,

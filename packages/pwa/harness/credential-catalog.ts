@@ -278,17 +278,39 @@ const CODEX_LINK = {
 };
 let codexStage: Record<string, unknown> = CODEX_DEVICE;
 
+/** The logins whose Claude sign-in this harness already started, so a second start picks it up. */
+const claudeStarted = new Set<string>();
+/** The first start-over of the Codex link finds the callback ports held by somebody else's program. */
+let codexPortsHeld = true;
+const CODEX_PORTS_HELD = {
+  state: 'failed',
+  reason:
+    'Codex cannot listen for the sign-in: ports 1455 and 1457 are in use by "nginx" (pid 4242), which is not a Codex sign-in, so Ferretry will not stop it',
+  remedy: 'Stop that program yourself and start over, or sign in with a device code instead.',
+};
+
 /** The answer for a Runtimes or Credentials path, or `undefined` when it is not one of theirs. */
 export function harnessCredentialAnswer(path: string, init?: RequestInit): unknown {
   if (path === '/v1/fleet/credentials') return CREDENTIALS;
   if (path === '/v1/fleet/runtimes') return RUNTIMES;
   if (path === '/v1/fleet/login' && init?.method === 'POST') {
-    const body = JSON.parse(String(init.body ?? '{}')) as { credentialId?: string; method?: string };
+    const body = JSON.parse(String(init.body ?? '{}')) as {
+      credentialId?: string;
+      method?: string;
+      restart?: boolean;
+    };
     if (body.credentialId === 'codex-team') {
+      if (body.restart === true && body.method === 'link' && codexPortsHeld) {
+        codexPortsHeld = false;
+        return codexFlow(CODEX_PORTS_HELD);
+      }
       codexStage = body.method === 'link' ? CODEX_LINK : CODEX_DEVICE;
       return codexFlow(codexStage);
     }
-    return flow(body.credentialId ?? 'claude-team');
+    const credentialId = body.credentialId ?? 'claude-team';
+    const resumed = body.restart !== true && claudeStarted.has(credentialId);
+    claudeStarted.add(credentialId);
+    return { ...flow(credentialId), ...(resumed ? { resumed: true } : {}) };
   }
   if (path === `/v1/fleet/login/${CODEX_FLOW_ID}`) {
     if (init?.method === 'POST') {

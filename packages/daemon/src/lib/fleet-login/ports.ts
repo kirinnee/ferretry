@@ -10,6 +10,7 @@
  */
 
 import type { CodexCallbackDelivery } from './codex-link.ts';
+import type { CallbackPortHolder } from './port-holders.ts';
 
 /** Every flow state carries these, whichever harness it is. Facts about the FLOW, not about a harness. */
 export interface HarnessLoginFlowBase {
@@ -106,4 +107,19 @@ export type HarnessLoginSpawn = (spec: HarnessLoginChildSpec) => HarnessLoginChi
  */
 export interface HarnessLoginTimer {
   after(milliseconds: number, run: () => void): () => void;
+}
+
+/**
+ * The programs listening on this machine's Codex callback ports, and stopping one of them.
+ *
+ * Reading and stopping only. Whether a holder MAY be stopped is decided in `./port-holders.ts`, and the
+ * service stops nothing that decision did not prove to be a leftover Codex sign-in.
+ */
+export interface HarnessLoginPortHolders {
+  /** This daemon's own OS user id, which a holder must share to be stopped. Undefined where there is none. */
+  readonly ownUid: number | undefined;
+  /** Every listener on these ports. Undefined when this machine offers no way to tell. */
+  holders(ports: readonly number[]): Promise<readonly CallbackPortHolder[] | undefined>;
+  /** Stop one program and wait for it to exit, outright if it will not. False if it could not be signalled. */
+  stop(pid: number): Promise<boolean>;
 }
