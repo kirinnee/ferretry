@@ -2,10 +2,10 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   auditHost,
-  clipOutput,
-  controlRefusal,
   CredentialAgentIdentities,
   type CredentialedSession,
+  clipOutput,
+  controlRefusal,
   isShellForeground,
   secretsMatch,
   terminalInput,
@@ -38,6 +38,9 @@ describe('agent-tools policy', () => {
   it('should name the setting in every refusal, files included', () => {
     should(controlRefusal('files')).equal(
       'This machine does not let agents control files: "What agents may control › Files" is off in this machine\'s settings. Ask the person to turn it on if you need it.',
+    );
+    should(controlRefusal('settings')).equal(
+      'This machine does not let agents control Ferretry settings: "What agents may control › Ferretry settings" is off in this machine\'s settings. Ask the person to turn it on if you need it.',
     );
   });
 });

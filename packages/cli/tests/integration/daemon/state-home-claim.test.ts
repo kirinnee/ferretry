@@ -125,7 +125,7 @@ describe('provisioning a fleet and then booting the daemon, across the package s
     // the marker as well as the boot is what pins the regression: a boot alone passes for reasons
     // that have nothing to do with the claim.
     should(afterTheCli).containDeep(['fleet', 'layout-version']);
-    should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('1\n');
+    should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('2\n');
     should((await stat(join(stateHome, 'layout-version'))).mode & 0o777).equal(0o600);
     // The daemon ADOPTED the client's claim rather than initializing over it: the home was already
     // ours, so this is a `proceed`, not a fresh bootstrap.
@@ -220,6 +220,6 @@ describe('provisioning a fleet and then booting the daemon, across the package s
 
     // Assert — a repair a person may have run once already must not become a second failure mode.
     should(again.kind).equal('already-claimed');
-    should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('1\n');
+    should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('2\n');
   });
 });

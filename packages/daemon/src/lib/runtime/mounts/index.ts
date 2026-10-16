@@ -34,6 +34,7 @@ import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes }
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
+import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
@@ -165,6 +166,10 @@ export interface MountedSubsystems {
    *  supervision it runs are outside the capped slice, and the surface PROVES both from placements
    *  rather than repeating the claim. */
   readonly cgroups: CgroupSubsystem;
+  /** The configuration files (docs/config-files.md): what is in effect and what is wrong, an edit, the
+   *  owner's confirmation of an edit that loosens, and the agent's `config.*` tools. The subsystem owns
+   *  the WATCHER as well as the routes, for the reason the warden owns its sweep. */
+  readonly configFiles: ConfigFilesSubsystem;
   /** The daemon-scoped timer target that refreshes the daemon's quota evidence. It serves no route:
    *  an unattended pass exists to make the existing routes current before anyone asks them. Keeping
    *  it here proves production constructs it rather than leaving a dead timer. Account health is
@@ -397,6 +402,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
       // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this
       // table can neither shadow nor be shadowed by anything around it.
       ...cgroupRoutes(subsystems.cgroups),
+      // The configuration files, beside the machine-wide settings they hold. Every path is under
+      // `/v1/config` or is the one literal `/v1/agent/config`, which no other subsystem uses, so this
+      // table can neither shadow nor be shadowed by anything around it.
+      ...configFilesRoutes(subsystems.configFiles),
       // Imported harness history is intentionally outside `/v1/sessions`: no foreign transcript has
       // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
       // looking like one.

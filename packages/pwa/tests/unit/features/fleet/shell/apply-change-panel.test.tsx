@@ -15,7 +15,7 @@ const CHANGE = {
   kind: 'machine.settings',
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
 } as const;
 const STUDIO = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 't' });
 const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });

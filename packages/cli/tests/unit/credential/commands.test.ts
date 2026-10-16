@@ -211,3 +211,30 @@ describe('registerCredentialCommands', () => {
     ).be.rejectedWith(/--clear/);
   });
 });
+
+describe('registerCredentialCommands — the product’s word for a credential', () => {
+  it('should list the logins under `logins` exactly as under `credentials`', async () => {
+    const gateway = { credentials: () => ({ format: 2 as const, machine: 'studio', credentials: [credential()] }) };
+    const long = fakeWorld({ gateway });
+    const short = fakeWorld({ gateway });
+    await runCommand(registerCredentialCommands, long, ['credentials']);
+    await runCommand(registerCredentialCommands, short, ['logins']);
+    should(short.out.text('report')).equal(long.out.text('report'));
+  });
+
+  it('should add a login under `login` exactly as under `credential`', async () => {
+    const long = fakeWorld();
+    const short = fakeWorld();
+    await runCommand(registerCredentialCommands, long, [
+      'credential',
+      'add',
+      'codex',
+      '--id',
+      'codex-x',
+      '--no-sign-in',
+    ]);
+    await runCommand(registerCredentialCommands, short, ['login', 'add', 'codex', '--id', 'codex-x', '--no-sign-in']);
+    should(short.gateway.called('stage')[0]?.args[0]).eql(long.gateway.called('stage')[0]?.args[0]);
+    should(short.out.text('report')).equal(long.out.text('report'));
+  });
+});

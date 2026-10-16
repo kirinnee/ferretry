@@ -24,8 +24,19 @@
  * can grow a second copy, exactly as the two-name model and the default daemon address are pinned.
  */
 
-/** The layout this release creates and the only one it can serve. */
-export const CURRENT_LAYOUT_VERSION = 1 as const;
+/**
+ * The layout this release creates and the only one it serves.
+ *
+ * Version 2 moved the machine's configuration out of the one `fleet/config.yaml` into a file per
+ * building block under `config/` (docs/config-files.md). A version-1 home is UPGRADED in place — only
+ * the marker changes, and the old `config.yaml` is then refused by sentence, never converted — so a
+ * paired device, a session and a secret survive the upgrade, while an older release that would still
+ * read `config.yaml` refuses the upgraded home instead of acting on a configuration nobody edits.
+ */
+export const CURRENT_LAYOUT_VERSION = 2 as const;
+
+/** The layout versions this release upgrades in place by rewriting the marker. */
+export const UPGRADABLE_LAYOUT_VERSIONS: readonly number[] = [1];
 
 /**
  * The marker's file name, relative to the state home.
@@ -56,6 +67,8 @@ export type LayoutRefusalReason = 'missing-marker' | 'invalid-version' | 'unsupp
 export type LayoutDecision =
   | { readonly kind: 'initialize'; readonly version: typeof CURRENT_LAYOUT_VERSION }
   | { readonly kind: 'proceed'; readonly version: typeof CURRENT_LAYOUT_VERSION }
+  /** An older layout this release upgrades by rewriting the marker; the caller that owns the home does it. */
+  | { readonly kind: 'upgrade'; readonly from: number; readonly version: typeof CURRENT_LAYOUT_VERSION }
   | {
       readonly kind: 'refuse';
       readonly reason: LayoutRefusalReason;
@@ -86,6 +99,9 @@ export function decideLayout(
     return { kind: 'refuse', reason: 'invalid-version', found: value, expected: CURRENT_LAYOUT_VERSION };
   }
   const version = Number(value);
+  if (UPGRADABLE_LAYOUT_VERSIONS.includes(version)) {
+    return { kind: 'upgrade', from: version, version: CURRENT_LAYOUT_VERSION };
+  }
   return version === CURRENT_LAYOUT_VERSION
     ? { kind: 'proceed', version: CURRENT_LAYOUT_VERSION }
     : { kind: 'refuse', reason: 'unsupported-version', found: value, expected: CURRENT_LAYOUT_VERSION };

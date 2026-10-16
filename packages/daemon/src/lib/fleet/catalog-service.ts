@@ -5,10 +5,10 @@
  *
  * ## Reads
  *
- * The machine, components, profile and runtime reads answer the configuration as it is, and no
- * configuration at all as an empty model. A `config.yaml` still in the old account format is refused
- * as unreadable, with the sentence saying how to set the machine up again — never converted, never
- * touched. Nothing is launched and no provider is called; the only facts outside the configuration
+ * The machine, components, profile and runtime reads answer the configuration IN EFFECT — the
+ * configuration files, each at its last good version (docs/config-files.md) — and no configuration at
+ * all as an empty model. A retired single-file `fleet/config.yaml` is refused as unreadable, with the
+ * sentence saying how to set the machine up again — never converted, never touched. Nothing is launched and no provider is called; the only facts outside the configuration
  * are the component files it names, the harness commands this daemon's one rule resolves, and the
  * credential statuses the credentials surface already knows.
  *
@@ -16,7 +16,7 @@
  *
  * A caller names ONE intent; {@link deriveAccountChange} derives the next model from the current one.
  * The model is materialised by the fleet library into the exact plan the provisioner previews, and the
- * apply writes `config.yaml`, every component document the change carries, and that plan inside the
+ * apply writes the configuration files that change, every component document the change carries, and that plan inside the
  * provisioner's single rollback boundary — so a machine is never left declaring a runtime whose
  * directory was never made, or a component whose file was never written. Each document carries the
  * digest it was composed against, and the provisioner refuses one that moved.
@@ -33,6 +33,7 @@
 import {
   type AccountModel,
   type ClaudeStatuslineCommand,
+  EMPTY_RUNTIME_IDS,
   expandAssetPath,
   FleetApplyFailureError,
   type FleetApplyPreview,
@@ -44,9 +45,7 @@ import {
   type MaterialiseBodies,
   materialiseFleet,
   parseSettings,
-  renderConfig,
   type RuntimeIds,
-  EMPTY_RUNTIME_IDS,
   type SettingsObject,
   skillFrontmatterKeys,
   skillSourceReference,
@@ -88,7 +87,7 @@ import {
   FleetMutationRefusal,
   isAccountPlanChange,
 } from './mutations.ts';
-import { FleetProposalRefusal, type FleetProposalRecord, FleetProposalStore, redactProposal } from './proposals.ts';
+import { type FleetProposalRecord, FleetProposalRefusal, FleetProposalStore, redactProposal } from './proposals.ts';
 import { applyFailureSummary, applyResultSummary, operationSummary } from './wire.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
@@ -118,12 +117,17 @@ export class FleetCatalogFreshStepUpRequired extends Error {
   }
 }
 
-const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = ['terminals', 'browsers', 'files'];
+const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = [
+  'terminals',
+  'browsers',
+  'files',
+  'ferretrySettings',
+];
 
 /** Whether `next` turns ON a kind `current` did not already allow — the half of a write that ever
- *  needs a fresh passkey. Unchanged values and a narrowed kind never count. */
-function agentControlWidened(current: FleetAgentControl, next: FleetAgentControl): boolean {
-  return AGENT_CONTROL_KINDS.some(kind => !current[kind] && next[kind]);
+ *  needs a fresh passkey. Unchanged values, a narrowed kind and a kind left out never count. */
+function agentControlWidened(current: FleetAgentControl, next: Partial<FleetAgentControl>): boolean {
+  return AGENT_CONTROL_KINDS.some(kind => !current[kind] && next[kind] === true);
 }
 
 /** What `apply` needs to enforce and spend the fresh-passkey rule above. Absent reads as "no proof
@@ -138,10 +142,16 @@ export interface FreshStepUpContext {
 /** The machine's configuration as one read: its format, its model, and the digest it was read at. */
 export interface AccountDocumentReading {
   readonly format: FleetCatalogFormat;
-  /** The model itself, or an empty one when there is no configuration. */
+  /** The model in effect, or an empty one when there is no configuration. */
   readonly model: AccountModel;
-  /** sha256 of the raw file, or `ABSENT_DOCUMENT_REVISION` when there is none. */
+  /** A digest of the fleet files in effect, or `ABSENT_DOCUMENT_REVISION` when there are none. */
   readonly revision: string;
+  /**
+   * The writes that move the configuration files from this model to `next` (docs/config-files.md):
+   * each changed file rewritten key by key with its comments kept, each file `next` drops removed —
+   * every one carrying the revision it was composed against, which the provisioner checks.
+   */
+  documents(next: AccountModel): readonly FleetDocumentWrite[];
 }
 
 /** A first-run import or a clone, carried out by its own executor (U15). */
@@ -577,14 +587,7 @@ export class FleetCatalogService {
     } catch (error) {
       throw error instanceof Error ? new FleetCatalogRefusal('fleet_change_refused', errorMessage(error)) : error;
     }
-    const documents: FleetDocumentWrite[] = [
-      {
-        path: `${layout.fleetDirectory}/config.yaml`,
-        content: renderConfig(edit.model),
-        mode: DOCUMENT_MODE,
-        expect: reading.revision,
-      },
-    ];
+    const documents: FleetDocumentWrite[] = [...reading.documents(edit.model)];
     for (const file of edit.files) {
       const path = assetPath(layout, file.file);
       documents.push({

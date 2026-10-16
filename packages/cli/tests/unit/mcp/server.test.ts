@@ -1,14 +1,25 @@
 import { describe, it } from 'bun:test';
-import { AGENT_TOOL_NAMES, type AgentToolCall, type AgentToolResult } from '@ferretry/protocol';
+import {
+  AGENT_TOOL_NAMES,
+  type AgentConfigToolCall,
+  type AgentConfigToolResult,
+  type AgentToolCall,
+  type AgentToolResult,
+} from '@ferretry/protocol';
 import should from 'should';
 import type { TerminalWait } from '../../../src/lib/agent-tools/client';
 import { McpServer } from '../../../src/lib/mcp/server';
-import { MCP_TOOLS } from '../../../src/lib/mcp/tools';
+import { MCP_CONFIG_TOOLS, MCP_TOOLS } from '../../../src/lib/mcp/tools';
 
 function harness(
   answer: (call: AgentToolCall | TerminalWait) => Promise<AgentToolResult> = async () => ({ summary: 'ok' }),
+  options: {
+    config?: (call: AgentConfigToolCall) => Promise<AgentConfigToolResult>;
+    instructions?: string;
+  } = {},
 ) {
   const calls: (AgentToolCall | TerminalWait)[] = [];
+  const configCalls: AgentConfigToolCall[] = [];
   const server = new McpServer(
     {
       call: async call => {
@@ -19,12 +30,20 @@ function harness(
         calls.push(wait);
         return await answer(wait);
       },
+      config: async call => {
+        configCalls.push(call);
+        return await (options.config ?? (async () => ({ summary: 'ok' })))(call);
+      },
     },
-    { name: 'ferretry', version: '9.9.9' },
+    {
+      name: 'ferretry',
+      version: '9.9.9',
+      ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
+    },
   );
   const request = async (method: string, params?: unknown, id: number | string = 1) =>
     await server.handle({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
-  return { server, calls, request };
+  return { server, calls, configCalls, request };
 }
 
 const toolCall = (name: string, args?: Record<string, unknown>) => ({
@@ -53,6 +72,10 @@ describe('McpServer — the protocol', () => {
         serverInfo: { name: 'ferretry', version: '9.9.9' },
       },
     });
+    should(await harness(undefined, { instructions: '# Set up' }).request('initialize')).match({
+      result: { instructions: '# Set up' },
+    });
+    should((agreed as { result: object }).result).not.have.property('instructions');
     should(offered).match({ result: { protocolVersion: '2025-06-18' } });
     should(bare).match({ result: { protocolVersion: '2025-06-18' } });
     should(odd).match({ result: { protocolVersion: '2025-06-18' } });
@@ -100,10 +123,16 @@ describe('McpServer — the tools', () => {
 
     // Assert
     const names = answer.result.tools.map(tool => tool.name);
-    should(names).deepEqual(AGENT_TOOL_NAMES.map(name => name.replace('.', '_')));
+    should(names).deepEqual([
+      ...AGENT_TOOL_NAMES.map(name => name.replace('.', '_')),
+      'config_read',
+      'config_validate',
+      'config_write',
+    ]);
     should(names.every(name => /^[a-zA-Z0-9_-]{1,64}$/u.test(name))).be.true();
     should(answer.result.tools.every(tool => tool.inputSchema.type === 'object')).be.true();
     should(MCP_TOOLS.map(tool => tool.tool)).deepEqual([...AGENT_TOOL_NAMES]);
+    should(MCP_CONFIG_TOOLS.map(tool => tool.configTool)).deepEqual(['config.read', 'config.validate', 'config.write']);
   });
 
   it('should send each tool as its wire call, and answer with the daemon’s words', async () => {
@@ -227,5 +256,130 @@ describe('McpServer — the tools', () => {
       error: { code: -32_602, message: 'there is no tool shell_exec' },
     });
     should(await request('tools/call', { arguments: {} })).match({ error: { code: -32_602 } });
+  });
+});
+
+describe('McpServer — the config tools', () => {
+  it('should route each config tool to the config port as its wire call, whatever an argument claimed', async () => {
+    // Arrange
+    const { calls, configCalls, request } = harness();
+
+    // Act
+    await request('tools/call', toolCall('config_read'));
+    await request('tools/call', toolCall('config_read', { path: 'machine.yaml', tool: 'config.write' }));
+    await request('tools/call', toolCall('config_validate', { path: 'warden.yaml', text: 'enabled: true\n' }));
+    await request('tools/call', toolCall('config_write', { path: 'voice.yaml', text: '', etag: 'abc' }));
+
+    // Assert
+    should(calls).deepEqual([]);
+    should(configCalls).deepEqual([
+      { tool: 'config.read' },
+      { tool: 'config.read', path: 'machine.yaml' },
+      { tool: 'config.validate', path: 'warden.yaml', text: 'enabled: true\n' },
+      { tool: 'config.write', path: 'voice.yaml', text: '', etag: 'abc' },
+    ]);
+  });
+
+  it('should answer with the summary alone when there is nothing more to say', async () => {
+    const { request } = harness();
+    should(await request('tools/call', toolCall('config_read'))).deepEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { content: [{ type: 'text', text: 'ok' }] },
+    });
+  });
+
+  it('should render the summary, etag, files, located issues and text', async () => {
+    // Arrange
+    const { request } = harness(undefined, {
+      config: async () => ({
+        summary: 'Read 2 files.',
+        etag: 'etag-9',
+        files: [
+          { path: 'machine.yaml', kind: 'machine', schema: 'machine', state: 'ok' },
+          { path: 'warden.yaml', kind: 'warden', schema: 'warden', state: 'pending' },
+        ],
+        issues: [
+          { path: 'machine.yaml', line: 3, column: 7, severity: 'error', message: 'not a thing', fix: 'make it one' },
+          { path: 'voice.yaml', severity: 'warning', message: 'odd', fix: 'tidy it' },
+        ],
+        text: 'enabled: true\n',
+      }),
+    });
+
+    // Act
+    const answer = await request('tools/call', toolCall('config_read'));
+
+    // Assert
+    should(answer).deepEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: [
+              'Read 2 files.',
+              'etag: etag-9',
+              'machine.yaml (ok)',
+              'warden.yaml (pending)',
+              'machine.yaml:3:7 error: not a thing — fix: make it one',
+              'voice.yaml warning: odd — fix: tidy it',
+              'enabled: true\n',
+            ].join('\n'),
+          },
+        ],
+      },
+    });
+  });
+
+  it('should refuse arguments the call schema refuses before asking the daemon', async () => {
+    // Arrange
+    const { configCalls, request } = harness();
+
+    // Act
+    const notAConfigFile = await request('tools/call', toolCall('config_validate', { path: 'notes.txt', text: '' }));
+    const noText = await request('tools/call', toolCall('config_write', { path: 'voice.yaml' }));
+    const huge = await request(
+      'tools/call',
+      toolCall('config_validate', { path: 'voice.yaml', text: 'x'.repeat(256 * 1024 + 1) }),
+    );
+
+    // Assert
+    should(configCalls).deepEqual([]);
+    should(notAConfigFile).match({
+      result: { isError: true, content: [{ text: /^path: not a Ferretry configuration file/u }] },
+    });
+    should(noText).match({ result: { isError: true, content: [{ text: /^text: / }] } });
+    should(huge).match({
+      result: { isError: true, content: [{ text: /^text: a configuration file is at most 256 KiB/u }] },
+    });
+  });
+
+  it('should hand a thrown refusal back as a tool error, not as a protocol error', async () => {
+    // Arrange
+    const refused = harness(undefined, {
+      config: async () => {
+        throw new Error('Agents may not change Ferretry settings on this machine.');
+      },
+    });
+    const odd = harness(undefined, {
+      config: async () => {
+        throw 'a bare string';
+      },
+    });
+
+    // Act + Assert
+    should(await refused.request('tools/call', toolCall('config_read'))).deepEqual({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        content: [{ type: 'text', text: 'Agents may not change Ferretry settings on this machine.' }],
+        isError: true,
+      },
+    });
+    should(await odd.request('tools/call', toolCall('config_read'))).match({
+      result: { isError: true, content: [{ text: 'a bare string' }] },
+    });
   });
 });

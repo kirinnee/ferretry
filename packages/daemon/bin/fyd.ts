@@ -23,6 +23,7 @@ import {
   resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
+  configJsonSchemaFiles,
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
@@ -60,6 +61,7 @@ import {
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
+  CONFIG_ACCEPTED_FILE,
 } from '@ferretry/protocol';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
@@ -76,15 +78,15 @@ import {
   NodeRawDeflate,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
-import { fileFleetCatalogDeps } from '../src/adapters/fleet/account-model-files.ts';
+import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import {
   CredentialEmailReader,
   ensurePrivateDirectory,
-  readAccountModelFile,
   rolloutFiles,
   runCredentialHarness,
 } from '../src/adapters/fleet-credentials/credential-facts.ts';
@@ -304,8 +306,8 @@ import {
   StorageTransferSourceReader,
 } from '../src/adapters/transfer/index.ts';
 import {
+  ConfigFileWardenConfigStore,
   FileWardenArtifacts,
-  FileWardenConfigStore,
   FileWardenStateStore,
   NodeWardenReportFileSystem,
   WardenReportReader,
@@ -322,6 +324,7 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
+import { ConfigFilesService, watchConfigFiles } from '../src/lib/config-files/index.ts';
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
@@ -2778,6 +2781,8 @@ interface WardenParts {
   readonly wardenRoot: string;
   readonly reportsDirectory: string;
   readonly supervision: WardenSupervisionState;
+  /** The configuration files: `warden.yaml` is read and written through them. */
+  readonly config: ConfigFilesService;
 }
 
 /**
@@ -2838,7 +2843,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       },
       artifacts,
       state: new FileWardenStateStore(parts.files, parts.wardenRoot),
-      config: new FileWardenConfigStore(parts.files, parts.wardenRoot),
+      config: new ConfigFileWardenConfigStore(parts.config),
       agents: {
         installed: async () => selectableAutoAccounts(await parts.accounts.accounts()).map(account => account.id),
       },
@@ -3845,15 +3850,58 @@ function createAgentToolsSubsystem(input: {
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
-    identities: new CredentialAgentIdentities(
-      new StorageTaskBoardSessionDirectory({
-        sessionIds: () => input.storage.listSessions().map(session => session.id),
-        readConfig: async id => await input.storage.readConfig(id as SessionId),
-        readState: async id => await input.storage.readState(id as SessionId),
-      }),
-      capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
-      secretsMatch,
-    ),
+    identities: agentIdentities(input.storage),
+  };
+}
+
+/** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
+function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
+  return new CredentialAgentIdentities(
+    new StorageTaskBoardSessionDirectory({
+      sessionIds: () => storage.listSessions().map(session => session.id),
+      readConfig: async id => await storage.readConfig(id as SessionId),
+      readState: async id => await storage.readState(id as SessionId),
+    }),
+    capability => createHash('sha256').update(capability, 'utf8').digest('hex'),
+    secretsMatch,
+  );
+}
+
+/**
+ * The configuration files' routes, and the watcher they arm (docs/config-files.md).
+ *
+ * ARMED ONCE SERVING, like every other loop: the first load runs then — so the accepted record, the
+ * schemas an editor reads and the first report of a broken file all happen against an opened state
+ * home — and the watcher keeps loading after that whenever a file changes.
+ */
+function createConfigFilesSubsystem(input: {
+  readonly service: ConfigFilesService;
+  readonly agentControl: AgentControlPolicy;
+  readonly identities: CredentialAgentIdentities;
+  readonly notices: BootNoticePort;
+}): MountedSubsystems['configFiles'] {
+  return {
+    service: input.service,
+    agentControl: input.agentControl,
+    identities: input.identities,
+    arm: async () => {
+      await input.service.load();
+      await input.service.publishSchemas(configJsonSchemaFiles());
+      return watchConfigFiles({
+        fingerprint: async () => await input.service.fingerprint(),
+        onChange: async () => {
+          await input.service.load();
+        },
+        onError: error =>
+          input.notices.state(`config watcher: ${error instanceof Error ? error.message : String(error)}`),
+        timers: {
+          setInterval: (callback, ms) => setInterval(callback, ms),
+          clearInterval: handle => clearInterval(handle as ReturnType<typeof setInterval>),
+          setTimeout: (callback, ms) => setTimeout(callback, ms),
+          clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+        },
+      });
+    },
   };
 }
 
@@ -4001,23 +4049,6 @@ function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 
 /**
- * The learning schedule this daemon reports.
- *
- * Mining is now mounted for explicit runs. The configuration remains deployment-owned until a
- * scheduler lands; reporting it enabled tells an operator that `POST /v1/learning/run` can start a
- * bounded miner and later ingest its verified output.
- */
-const LEARNING_CONFIG = {
-  enabled: true,
-  agent: 'claude',
-  intervalMinutes: 60,
-  batchSize: 20,
-  maxMinersPerRun: 2,
-  maxSessionsPerRun: 40,
-  minSpawnGapMinutes: 30,
-} as const satisfies LearningConfig;
-
-/**
  * The learning review board, over the state home's own `learning/` directory.
  *
  * ONE executor for the whole process, keyed on the board: a verdict is a read-decide-rewrite of a
@@ -4140,22 +4171,16 @@ function createLearningSubsystem(
   sessions: SessionDirectorySubsystem,
   transcripts: SessionTranscriptReader,
   sessionControl: SessionControlSubsystem,
+  config: () => LearningConfig,
 ): LearningSubsystem {
   const store = new FileLearningStore(paths, files, clock);
-  const miner = new LearningMiner(
-    paths,
-    files,
-    store,
-    sessions,
-    transcripts,
-    sessionControl,
-    () => LEARNING_CONFIG,
-    () => clock.now(),
+  const miner = new LearningMiner(paths, files, store, sessions, transcripts, sessionControl, config, () =>
+    clock.now(),
   );
   return {
     store,
     transaction: async work => await serial.run('learning', work),
-    config: () => LEARNING_CONFIG,
+    config,
     now: () => clock.now(),
     run: async spawn => await miner.run(spawn),
   };
@@ -4630,6 +4655,37 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const stateFiles = new StateFileSystem(paths, undefined, {
     hostCodexAuth: hostCodexCredentialFile(process.env.CODEX_HOME, userHome),
   });
+  /**
+   * This boot's journal, held as a local because several things write to it.
+   *
+   * Hoisted out of the world literal below rather than duplicated: a second journal would be a second
+   * `+Nms` baseline, so two lines a person reads in one stream would disagree about when this daemon
+   * started. Nothing else about it moved.
+   */
+  const bootNotices = bootJournal(overrides.logLevel);
+  /**
+   * The configuration files (docs/config-files.md): ONE service every in-process reader of the
+   * machine's configuration goes through — the fleet catalogue, the agent-control switches, the Warden,
+   * Learning — so none of them can disagree about which version of a file is in effect. A broken file
+   * and a held loosening are said in this boot's journal, once each, when they are first seen.
+   */
+  const configFiles = new ConfigFilesService({
+    directory: new FileConfigDirectory(paths.config, stateFiles),
+    accepted: new FileAcceptedConfigStore(join(paths.state, CONFIG_ACCEPTED_FILE), stateFiles),
+    log: {
+      issue: issue =>
+        bootNotices.state(
+          `config ${issue.path}${issue.line === undefined ? '' : `:${String(issue.line)}:${String(issue.column)}`} ${issue.severity}: ${issue.message} — ${issue.fix}`,
+        ),
+      pending: pending =>
+        bootNotices.state(
+          `config ${pending.path} waits for your confirmation (${pending.changes.join('; ')}) — run \`${CLIENT_NAME} config confirm ${pending.path}\``,
+        ),
+    },
+    digest: text => new Bun.CryptoHasher('sha256').update(text).digest('hex'),
+    now: () => new Date(),
+  });
+  const configLocations = { configDirectory: paths.config, fleetDirectory: paths.fleet };
   // The login window is created before a state home is opened, while browser sessions are created
   // from that opened home. Keep the callback live so a human login always closes the real workers
   // that currently hold the shared profile rather than racing their lease.
@@ -4703,7 +4759,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Absent is a host with no fleet, which names nothing. Anything else — unreadable, a typo in the
       // YAML, the old account format — raises, because a reference list quietly missing half its
       // entries is how somebody deletes a secret their fleet still wants.
-      new FleetSecretReferences(async () => await readAccountModelFile(join(paths.fleet, 'config.yaml'))),
+      new FleetSecretReferences(async () => await readDeclaredAccountModel(configFiles, configLocations)),
     ),
     uses: new SecretUseService(secretVault, new BunSecretChildRunner(), secretRecipes),
   };
@@ -4804,7 +4860,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * launch is about to use — that is the only refresh there is; no timer.
    */
   const mcpOAuth = new McpOAuthService({
-    servers: new AccountModelMcpServers(async () => await readAccountModelFile(join(paths.fleet, 'config.yaml'))),
+    servers: new AccountModelMcpServers(async () => await readDeclaredAccountModel(configFiles, configLocations)),
     http: new FetchMcpOAuthHttp(),
     crypto: webCryptoMcpOAuth,
     clock: millisecondClock,
@@ -4863,7 +4919,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * cadence — so none of them can disagree about what this machine declares or has published. A
    * configuration that is absent is a host with no fleet; one in the old account format refuses.
    */
-  const declaredAccountModel = async () => await readAccountModelFile(join(paths.fleet, 'config.yaml'));
+  const declaredAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations);
   const publishedManifest = async () => await readFleetManifest(stateFiles, paths.fleetManifest);
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
@@ -4935,14 +4991,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       which: harnessBinary,
     }),
   });
-  /**
-   * This boot's journal, held as a local because two things now write to it.
-   *
-   * Hoisted out of the world literal below rather than duplicated: a second journal would be a second
-   * `+Nms` baseline, so two lines a person reads in one stream would disagree about when this daemon
-   * started. Nothing else about it moved.
-   */
-  const bootNotices = bootJournal(overrides.logLevel);
   // The lease, its cap and the idle day, shortened only for a test run and never lengthened. A value
   // that would lengthen one refuses the boot; any shortening in force is said once, here.
   const timings = parseDaemonTimings(process.env[TEST_TIMINGS_VARIABLE]);
@@ -4973,7 +5021,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   });
   /**
    * The account model's credentials (docs/design/account-model.md §3.2): which logins this machine has
-   * and where each one's login lives, read from `config.yaml` on every call. Built here because a
+   * and where each one's login lives, read from the configuration files on every call. Built here because a
    * sign-in by credential id resolves through it, and the credentials subsystem below reads it too.
    */
   const credentialClassifier = new StoredCredentialClassifier({
@@ -6387,6 +6435,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         locate: locateHarness,
         machineName: () => hostname(),
         clientName: CLIENT_NAME,
+        config: configFiles,
+        configDirectory: paths.config,
       });
       /**
        * First-run import, Import again, tool install, and the Clone export and import
@@ -6690,6 +6740,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           audit: auditLog,
           policy: agentControl,
         }),
+        configFiles: createConfigFilesSubsystem({
+          service: configFiles,
+          agentControl,
+          identities: agentIdentities(storage),
+          notices: bootNotices,
+        }),
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(
           paths,
@@ -6699,6 +6755,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sessions,
           createTranscriptReader(storage),
           sessionControl,
+          () => configFiles.current().evaluation.effective.learning,
         ),
         recommend: createRecommendSubsystem(advisorOver, usage),
         sttEnhancement,
@@ -6730,6 +6787,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           wardenRoot: wardenPaths.root,
           reportsDirectory: wardenPaths.reports,
           supervision: wardenSupervision,
+          config: configFiles,
         }),
         // The three operator reads, each over the evidence that actually holds the answer: the durable
         // journal this storage opened, the pane the lifecycle document names, and the transcript the
@@ -7379,6 +7437,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // firing at closed storage. A failure to arm is swallowed for the reason the ticks swallow theirs:
   // a daemon whose fleet is fine must not fail to serve because its supervisor could not start, and
   // the absence is already visible as `wardenTimerArmed: false` on its own health report.
+  // The configuration files: first load, editors' schemas, and the watcher (docs/config-files.md).
+  cleanups.push(await subsystems.configFiles.arm());
   await subsystems.warden
     .arm()
     .then(disarm => cleanups.push(disarm))

@@ -20,14 +20,14 @@ import {
   looksSecret,
   newlyMisfitRuntimes,
   newlyMixedProfiles,
-  parseSettings,
   type ProfileScope,
+  parseSettings,
   profileScope,
-  type SettingsObject,
-  serializeSettings,
   resolveProfile,
-  scopeFits,
   type SettingsFormat,
+  type SettingsObject,
+  scopeFits,
+  serializeSettings,
   slugName,
 } from '@ferretry/fleet';
 import type {
@@ -438,8 +438,13 @@ function applyAccountChange(
   }
 }
 
-/** The three things "What agents may control" names, in the order a summary lists them. */
-const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = ['terminals', 'browsers', 'files'];
+/** The four things "What agents may control" names, in the order a summary lists them. */
+const AGENT_CONTROL_KINDS: readonly (keyof FleetAgentControl)[] = [
+  'terminals',
+  'browsers',
+  'files',
+  'ferretrySettings',
+];
 
 /**
  * `machine.settings` (T): a caller always sends all three machine settings together, so this writes
@@ -482,13 +487,16 @@ function putMachineSettings(
     );
   }
 
-  const movedControls = AGENT_CONTROL_KINDS.filter(
-    kind => change.agentControl[kind] !== model.machine.agentControl[kind],
-  );
+  // A client that predates Ferretry settings leaves it out, and leaves it as it is.
+  const agentControl: FleetAgentControl = {
+    ...change.agentControl,
+    ferretrySettings: change.agentControl.ferretrySettings ?? model.machine.agentControl.ferretrySettings,
+  };
+  const movedControls = AGENT_CONTROL_KINDS.filter(kind => agentControl[kind] !== model.machine.agentControl[kind]);
   if (movedControls.length > 0) {
-    draft.machine.agentControl = { ...change.agentControl };
+    draft.machine.agentControl = agentControl;
     parts.push(
-      `what agents may control (${movedControls.map(kind => `${kind} ${change.agentControl[kind] ? 'on' : 'off'}`).join(', ')})`,
+      `what agents may control (${movedControls.map(kind => `${kind} ${agentControl[kind] ? 'on' : 'off'}`).join(', ')})`,
     );
     consequences.push('Applies to an agent’s next action; nothing already running is interrupted.');
   }

@@ -214,8 +214,31 @@ describe('state-home lifecycle', () => {
     // Assert
     should(first.layout.created).be.true();
     should(firstEntries).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'logs', 'state']);
-    should(await readFile(second.paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await readFile(second.paths.layoutVersion, 'utf8')).equal('2\n');
     should(second.layout.created).be.false();
+  });
+
+  it('should upgrade a version-1 home in place, rewriting only the marker and keeping its sessions', async () => {
+    // Arrange — a home an older release left: a session, and the retired single-file configuration.
+    const home = await createTemporaryHome();
+    const older = await openStorage(home);
+    const id = parseSessionId('kept-session');
+    await older.storage.writeConfig(id, { name: 'kept' });
+    await closeStorage(older.storage);
+    await writeFile(older.paths.layoutVersion, '1\n', { mode: 0o600 });
+    const retired = join(older.paths.fleet, 'config.yaml');
+    await writeFile(retired, 'version: 2\ncredentials: {}\n', { mode: 0o600 });
+
+    // Act
+    const upgraded = await openStorage(home);
+
+    // Assert — not a fresh home; the old configuration is left for its reader to refuse, never converted.
+    should(upgraded.layout.created).be.false();
+    should(await readFile(upgraded.paths.layoutVersion, 'utf8')).equal('2\n');
+    should((await stat(upgraded.paths.layoutVersion)).mode & 0o777).equal(0o600);
+    should(await upgraded.storage.readConfig(id)).match({ name: 'kept' });
+    should(await readFile(retired, 'utf8')).equal('version: 2\ncredentials: {}\n');
+    await closeStorage(upgraded.storage);
   });
 
   it('should recover an empty bootstrap scaffold after the layout marker write fails', async () => {
@@ -238,10 +261,10 @@ describe('state-home lifecycle', () => {
     // Assert
     should(String(failure)).containEql('injected marker write failure');
     should(recovered.layout.created).be.true();
-    should(await readFile(recovered.paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await readFile(recovered.paths.layoutVersion, 'utf8')).equal('2\n');
   });
 
-  it.each(['0', '2', 'invalid'])('should refuse layout version %s before mutating the home', async marker => {
+  it.each(['0', '3', 'invalid'])('should refuse layout version %s before mutating the home', async marker => {
     // Arrange
     const home = await createTemporaryHome();
     const markerPath = join(home, 'layout-version');

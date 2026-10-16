@@ -6,6 +6,7 @@ import {
   LAYOUT_VERSION_FILENAME,
   LAYOUT_VERSION_MODE,
   layoutVersionContent,
+  UPGRADABLE_LAYOUT_VERSIONS,
 } from '../../src/lib/state-home-layout.ts';
 
 describe('the layout claim both writers must agree on', () => {
@@ -13,7 +14,7 @@ describe('the layout claim both writers must agree on', () => {
     // Assert — a daemon looking for one name while its client writes another is a daemon that
     // refuses the very home the client just claimed, and neither end explains why.
     should(LAYOUT_VERSION_FILENAME).equal('layout-version');
-    should(layoutVersionContent()).equal('1\n');
+    should(layoutVersionContent()).equal('2\n');
     should(LAYOUT_VERSION_MODE).equal(0o600);
   });
 
@@ -53,24 +54,39 @@ describe('deciding whether a directory may be used as a state home', () => {
 
   it('should proceed on a home carrying the version this release serves', () => {
     // Act + Assert
-    should(decideLayout('1\n', ['layout-version', 'fleet'])).deepEqual({
+    should(decideLayout('2\n', ['layout-version', 'fleet'])).deepEqual({
       kind: 'proceed',
       version: CURRENT_LAYOUT_VERSION,
     });
   });
 
+  it('should upgrade a home carrying the previous layout, whatever the marker spacing', () => {
+    // Act + Assert — only the marker changes; the caller that owns the home does the rewrite.
+    const expected = { kind: 'upgrade', from: 1, version: CURRENT_LAYOUT_VERSION };
+    should(decideLayout('1\n', ['layout-version', 'fleet'])).deepEqual(expected);
+    should(decideLayout('  1  \n', ['layout-version'])).deepEqual(expected);
+  });
+
+  it('should upgrade only the versions it names, and never a version it has not met', () => {
+    // Assert
+    should(UPGRADABLE_LAYOUT_VERSIONS).deepEqual([1]);
+    should(UPGRADABLE_LAYOUT_VERSIONS.includes(CURRENT_LAYOUT_VERSION)).be.false();
+    should(CURRENT_LAYOUT_VERSION).equal(2);
+    should(decideLayout('0', ['layout-version']).kind).equal('refuse');
+  });
+
   it('should tolerate surrounding whitespace in a marker', () => {
     // A person repairing a home by hand will not reproduce the bytes exactly, and refusing them over
     // a stray newline would be a refusal with no safety value.
-    should(decideLayout('  1  \n', ['layout-version']).kind).equal('proceed');
+    should(decideLayout('  2  \n', ['layout-version']).kind).equal('proceed');
   });
 
   it('should refuse a version this release cannot serve, reporting what it found', () => {
     // Act + Assert
-    should(decideLayout('2', ['layout-version'])).deepEqual({
+    should(decideLayout('3', ['layout-version'])).deepEqual({
       kind: 'refuse',
       reason: 'unsupported-version',
-      found: '2',
+      found: '3',
       expected: CURRENT_LAYOUT_VERSION,
     });
   });

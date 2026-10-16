@@ -445,6 +445,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // Unconditional, deliberately: a write that expected to find a file and finds nothing is a
     // write whose author never saw the deletion, and recreating the file would silently undo it.
     if (document.expect !== undefined) await this.assertExpected(document, journal);
+    // The capture has already moved the old document aside, so leaving the path empty IS the removal,
+    // and the journal restores it like any other write if a later step fails.
+    if (document.remove === true) return;
     await mkdir(path.dirname(document.path), { recursive: true });
     await this.writeFileAtomically(document.path, document.content, document.mode, journal);
   }

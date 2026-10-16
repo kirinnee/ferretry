@@ -254,7 +254,7 @@ describe('MachineSettingsTab', () => {
               kind: 'machine.settings',
               agentPermissions: 'auto',
               defaultRuntime: 'claude-review',
-              agentControl: { terminals: true, browsers: true, files: true },
+              agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
             },
           });
           expect(retried.count).toBe(1);
@@ -311,7 +311,7 @@ describe('MachineSettingsTab', () => {
               kind: 'machine.settings',
               agentPermissions: 'auto',
               defaultRuntime: 'claude-default',
-              agentControl: { terminals: false, browsers: true, files: true },
+              agentControl: { terminals: false, browsers: true, files: true, ferretrySettings: false },
             },
           });
           expect(retried.count).toBe(1);
@@ -328,6 +328,25 @@ describe('MachineSettingsTab', () => {
         expect(q('[data-setup-choice="terminals"] input')).toHaveProperty('checked', true);
         expect(q('[data-setup-choice="files"] input')).toHaveProperty('checked', true);
         expect(q('[data-change-submit]')).toBeNull();
+      });
+    });
+
+    it('offers Ferretry settings as a fourth switch, off by default, and Save turns it on', async () => {
+      await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
+        const choice = must(q('[data-setup-choice="ferretrySettings"]'), 'Ferretry settings switch');
+        expect(choice.textContent).toContain('Ferretry settings');
+        expect(choice.textContent).toContain("an agent's edit that loosens anything still waits for you");
+        expect(choice.querySelector('input')).toHaveProperty('checked', false);
+
+        await click(choice.querySelector('input'), 'Ferretry settings checkbox');
+        await click(q('[data-change-submit]'), 'save agent control');
+        const staged = must(
+          calls.find(call => call.path === '/v1/fleet/proposals'),
+          'the staged change call',
+        );
+        expect(staged.body).toMatchObject({
+          change: { agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true } },
+        });
       });
     });
   });

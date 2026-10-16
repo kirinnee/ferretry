@@ -22,7 +22,7 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
-import { isLoopbackHost } from '@ferretry/protocol';
+import { CONFIG_COMPONENT_KINDS, isLoopbackHost } from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
@@ -102,6 +102,13 @@ export const AgentControlSchema = z
     terminals: z.boolean().default(true),
     browsers: z.boolean().default(true),
     files: z.boolean().default(true),
+    /**
+     * Whether an agent may read and edit this machine's configuration files through the `config.*`
+     * tools (docs/config-files.md). OFF by default, unlike the three above: it is how an agent changes
+     * what every other agent may do. Even on, an agent's edit that loosens spend or authority is held
+     * until the owner confirms it — this switch is a kill switch, the confirmation is the guard.
+     */
+    ferretrySettings: z.boolean().default(false),
   })
   .prefault({});
 export type AgentControl = z.infer<typeof AgentControlSchema>;
@@ -113,20 +120,21 @@ export type AgentControl = z.infer<typeof AgentControlSchema>;
  */
 export const DEFAULT_RUNTIME_NAME = 'claude-default';
 
-export const MachineSchema = z
-  .strictObject({
-    agentPermissions: AgentPermissionsSchema.default('auto'),
-    /**
-     * "Default runtime for new agents" (T): the runtime a session starts on when nobody names one.
-     * Unset rather than defaulted to {@link DEFAULT_RUNTIME_NAME} here, so a machine with no such
-     * runtime still parses — {@link resolveDefaultRuntime} is where the fallback actually happens.
-     * When set, it must name an agent runtime on this machine (checked below, by `AccountModelSchema`,
-     * where the runtimes it is checked against are in scope).
-     */
-    defaultRuntime: RuntimeNameSchema.optional(),
-    agentControl: AgentControlSchema,
-  })
-  .prefault({});
+/** The machine's settings, as a shape `machine.yaml` extends with `advanced` (`../config-files/kinds.ts`). */
+export const MACHINE_SHAPE = {
+  agentPermissions: AgentPermissionsSchema.default('auto'),
+  /**
+   * "Default runtime for new agents" (T): the runtime a session starts on when nobody names one.
+   * Unset rather than defaulted to {@link DEFAULT_RUNTIME_NAME} here, so a machine with no such
+   * runtime still parses — {@link resolveDefaultRuntime} is where the fallback actually happens.
+   * When set, it must name an agent runtime on this machine (checked below, by `AccountModelSchema`,
+   * where the runtimes it is checked against are in scope).
+   */
+  defaultRuntime: RuntimeNameSchema.optional(),
+  agentControl: AgentControlSchema,
+};
+
+export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});
 export type Machine = z.infer<typeof MachineSchema>;
 
 // ── Credential ───────────────────────────────────────────────────────────────────────────────────
@@ -200,7 +208,7 @@ export type Credential = z.infer<typeof CredentialSchema>;
  * The six kinds of component, spelled exactly as the `components` block's keys and as the first half
  * of a layer reference (`instructions/main`, `modelSets/heavy`).
  */
-export const COMPONENT_KINDS = ['instructions', 'mcp', 'skills', 'settings', 'hooks', 'modelSets'] as const;
+export const COMPONENT_KINDS = CONFIG_COMPONENT_KINDS;
 export const ComponentKindSchema = z.enum(COMPONENT_KINDS);
 export type ComponentKind = z.infer<typeof ComponentKindSchema>;
 

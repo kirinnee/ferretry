@@ -7,13 +7,13 @@ where the two disagree, read that one and fix this one.
 
 ## The five things
 
-| Thing          | Is                                                                                                                                                                                                                                                                                                                                |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`auto` or `skip`), the **default runtime for new agents** (optional; must be an agent runtime), **what agents may control** (terminals/browsers/files, each on by default), and knows which tools (Claude Code, Codex) are installed. |
-| **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`.                                                                                                                                     |
-| **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                                                                                                                                                    |
-| **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins. Its scope — Generic, Claude only or Codex only — is derived from its layers; Claude only + Codex only is refused.                                                                                                                           |
-| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`). An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last.                                                                                                                                                        |
+| Thing          | Is                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Machine**    | One daemon. Everything below belongs to exactly one machine. It owns **Agent permissions** (`auto` or `skip`), the **default runtime for new agents** (optional; must be an agent runtime), **what agents may control** (terminals/browsers/files, each on by default; Ferretry settings, off by default), and knows which tools (Claude Code, Codex) are installed. |
+| **Credential** | A login to Claude or Codex, stored once and never copied. Its store is `host` (your own `claude` / `codex` login, shared in place), `ferretry` (signed in through Ferretry) or `environment`.                                                                                                                                                                        |
+| **Component**  | A piece of setup saved once and referenced: Instructions, MCP servers, Skills, Settings, Hooks or a Model set.                                                                                                                                                                                                                                                       |
+| **Profile**    | An ordered list of layers, each a component or another profile. The newer layer wins. Its scope — Generic, Claude only or Codex only — is derived from its layers; Claude only + Codex only is refused.                                                                                                                                                              |
+| **Runtime**    | One credential plus one profile, under a name you type (`claude-default`). An **agent** runtime is one Ferretry may launch unattended; it gets a fixed layer applied last.                                                                                                                                                                                           |
 
 A credential's status is one of **Ready**, **Refresh due**, **Needs sign-in** or **Checking**. Ferretry
 never refreshes a login on a timer and never spends a model turn to learn a status. History is one pool
@@ -21,16 +21,21 @@ per harness, shared by every runtime of that harness.
 
 ## Where state lives
 
+The configuration is **one human-editable YAML file per building block** under `<FY_HOME>/config/` —
+`machine.yaml`, `logins/<id>.yaml`, `components/<kind>/<name>.yaml`, `profiles/<name>.yaml` (its
+`contents:` are the layers), `runtimes/<name>.yaml` — and the files are the source of truth: the app,
+`fy` and agents are all editors of them. How they are read, checked and edited, and what happens to a
+broken one, is [config-files.md](config-files.md).
+
 Under `<FY_HOME>/fleet/`:
 
-| Path                   | Holds                                                                               |
-| ---------------------- | ----------------------------------------------------------------------------------- |
-| `config.yaml`          | the machine settings, credentials, components, profiles and runtimes (`version: 2`) |
-| `assets/components/**` | component bodies                                                                    |
-| `credentials/<id>/`    | a `ferretry`-store login (never a `host` one, which stays in your own home)         |
-| `shared/<harness>/`    | the history pool                                                                    |
-| `ids.json`             | each runtime's opaque id                                                            |
-| `manifest.json`        | the runtimes Ferretry published, which launches read                                |
+| Path                   | Holds                                                                       |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `assets/components/**` | component bodies                                                            |
+| `credentials/<id>/`    | a `ferretry`-store login (never a `host` one, which stays in your own home) |
+| `shared/<harness>/`    | the history pool                                                            |
+| `ids.json`             | each runtime's opaque id                                                    |
+| `manifest.json`        | the runtimes Ferretry published, which launches read                        |
 
 A change is a reviewed **proposal**: the person or agent proposes it, reads what it would do, and
 applies it. No route, command or log line ever returns a credential value
@@ -64,17 +69,17 @@ Settings. The link is `#machines/<name>/<tab>`.
 
 **Terminal** (`fy`; the name is derived from `packages/cli/package.json`):
 
-| Verb                                                                                       | Does                                                           |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked  |
-| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex      |
-| `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (logins arrive as empty slots) |
-| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                       |
-| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage                                 |
-| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                  |
-| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                     |
-| `fy start --agent <runtime>`                                                               | launch an agent runtime                                        |
-| `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)      |
+| Verb                                                                                       | Does                                                            |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked   |
+| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex       |
+| `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (logins arrive as empty slots)  |
+| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                        |
+| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too) |
+| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                   |
+| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                      |
+| `fy start --agent <runtime>`                                                               | launch an agent runtime                                         |
+| `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)       |
 
 ## Routes
 
@@ -92,13 +97,19 @@ not on the host also needs a passkey step-up ([grants.md](grants.md)); nothing i
 | `GET /export`                                                                        | the clone bundle: no login, no history                            |
 | `POST /proposals`, `GET /proposals/:proposalId`, `POST /proposals/:proposalId/apply` | stage, read and apply any change                                  |
 
-## Version 1 is retired
+## The single file is retired
 
-A `config.yaml` with no `version` key, or `version: 1`, is **refused, never converted**. Nothing is
+A `fleet/config.yaml` — any version — is **refused, never converted**, while it is there. Nothing is
 read from it and nothing is deleted. The same sentence reaches `fy` and the browser:
 
-> _path_ uses the old account format, which this Ferretry no longer reads. Move it aside (for example
-> rename it to config.yaml.old), then set this machine up again from the app or with `fy daemon setup`.
+> _path_ is the old single-file configuration, which this Ferretry no longer reads: each login,
+> component, profile and runtime is now its own file under config/ in the state home. Move it aside (for
+> example rename it to config.yaml.old), then set this machine up again from the app or with
+> `fy daemon setup`.
+
+The state home's layout version is 2. A version-1 home is upgraded in place — only its marker changes —
+so paired devices, sessions and secrets survive, and an older Ferretry refuses the upgraded home rather
+than acting on a configuration nobody edits.
 
 A `config/daemon.json` that still has an `accountModel` key, or the retired `fleet.prepareDefaults`
 key (which every earlier boot wrote itself), still boots; the key is ignored and the boot says so

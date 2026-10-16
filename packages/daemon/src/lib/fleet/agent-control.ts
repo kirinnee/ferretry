@@ -1,6 +1,6 @@
 /**
  * "What agents may control" (T, session-spec.html Settings › Agents): whether an agent runtime may
- * use terminals, browsers or the project filesystem on this machine — stored in the account model's
+ * use terminals, browsers, the project filesystem or this machine's own configuration files — stored in the account model's
  * `machine.agentControl` (`@ferretry/fleet`'s `MachineSchema`) and read fresh for every call, so a
  * change applies to an agent's very next action with no restart and no cache.
  *
@@ -11,8 +11,9 @@
 import type { AccountModel } from '@ferretry/fleet';
 import { parseAccountModel } from '@ferretry/fleet';
 
-/** The three things "What agents may control" switches independently. */
-export type AgentControlKind = 'terminal' | 'browser' | 'files';
+/** The four things "What agents may control" switches independently. `settings` is the `config.*`
+ *  tools: editing this machine's configuration files (docs/config-files.md), off by default. */
+export type AgentControlKind = 'terminal' | 'browser' | 'files' | 'settings';
 
 export interface AgentControlPolicy {
   /** Whether an agent runtime may use `kind` on this machine, right now. */
@@ -32,6 +33,7 @@ const FIELD: Readonly<Record<AgentControlKind, keyof AccountModel['machine']['ag
   terminal: 'terminals',
   browser: 'browsers',
   files: 'files',
+  settings: 'ferretrySettings',
 };
 
 /**

@@ -1683,7 +1683,7 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
       setUp,
       agentPermissions: 'auto',
       defaultRuntime: setUp ? 'claude-default' : null,
-      agentControl: { terminals: true, browsers: true, files: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       tools: [{ harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' }],
       runtimeCount: setUp ? 5 : 0,
       runningSessions: 0,

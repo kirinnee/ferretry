@@ -1334,7 +1334,12 @@ describe('deriveAccountChange: machine.settings', () => {
 
     // Assert
     should(edit.summary).equal('Set what agents may control (terminals off, files off)');
-    should(edit.model.machine.agentControl).deepEqual({ terminals: false, browsers: true, files: false });
+    should(edit.model.machine.agentControl).deepEqual({
+      terminals: false,
+      browsers: true,
+      files: false,
+      ferretrySettings: false,
+    });
     should(edit.consequences).deepEqual(['Applies to an agent’s next action; nothing already running is interrupted.']);
   });
 
@@ -1351,6 +1356,47 @@ describe('deriveAccountChange: machine.settings', () => {
     should(edit.summary).equal(
       'Set agent permissions to Skip all permission checks; the default runtime for new agents to beta; what agents may control (terminals off)',
     );
+  });
+
+  it('should name Ferretry settings when a change turns the config tools on', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true },
+    });
+
+    // Assert
+    should(edit.summary).equal('Set what agents may control (ferretrySettings on)');
+    should(edit.model.machine.agentControl.ferretrySettings).be.true();
+  });
+
+  it('should leave Ferretry settings as it is when a client that predates it leaves it out', () => {
+    // Arrange — the owner turned it on; an older client sends only the three it knows.
+    const model = modelOf({
+      machine: { agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true } },
+    });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
+        agentControl: { terminals: false, browsers: true, files: true },
+      },
+      model,
+    );
+
+    // Assert — only terminals moved, and Ferretry settings is still on.
+    should(edit.summary).equal('Set what agents may control (terminals off)');
+    should(edit.model.machine.agentControl).deepEqual({
+      terminals: false,
+      browsers: true,
+      files: true,
+      ferretrySettings: true,
+    });
   });
 });
 

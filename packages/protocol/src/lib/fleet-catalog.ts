@@ -40,8 +40,8 @@ import {
   FleetWriteOperationSchema,
 } from './fleet-changes.ts';
 import {
-  FleetCredentialStoreSchema,
   FleetCredentialStatusWordSchema,
+  FleetCredentialStoreSchema,
   FleetCredentialViewSchema,
 } from './fleet-credentials.ts';
 import { GrantRefusalSchema } from './grants.ts';
@@ -130,11 +130,16 @@ export const FleetMachineAuthoritySchema = z.strictObject({
 });
 export type FleetMachineAuthority = z.infer<typeof FleetMachineAuthoritySchema>;
 
-/** "What agents may control" (T, session-spec.html Settings): terminals, browsers and files, each on/off. */
+/**
+ * "What agents may control" (T, session-spec.html Settings): terminals, browsers and files, each on/off,
+ * and Ferretry settings — whether an agent may edit this machine's configuration files with the
+ * `config.*` tools (docs/config-files.md), off unless the owner turns it on.
+ */
 export const FleetAgentControlSchema = z.strictObject({
   terminals: z.boolean(),
   browsers: z.boolean(),
   files: z.boolean(),
+  ferretrySettings: z.boolean(),
 });
 export type FleetAgentControl = z.infer<typeof FleetAgentControlSchema>;
 
@@ -554,7 +559,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
      * unsets the explicit "Default runtime" override and falls back to the machine's own resolution.
      */
     defaultRuntime: NonEmptyStringSchema.nullable(),
-    agentControl: FleetAgentControlSchema,
+    /** `ferretrySettings` may be left out by a client that predates it, and is then left as it is. */
+    agentControl: FleetAgentControlSchema.extend({ ferretrySettings: z.boolean().optional() }),
   }),
   z.strictObject({
     kind: z.literal('setup.import'),

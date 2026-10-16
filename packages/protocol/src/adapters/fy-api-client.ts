@@ -166,6 +166,12 @@ export class FyHttpError extends Error {
     message: string,
     readonly status: number,
     readonly code: string | undefined,
+    /**
+     * The whole error body as the daemon sent it, for a refusal that carries more than a sentence —
+     * a `422 config_invalid` names every located issue (docs/config-files.md). Parsed by the caller
+     * that knows its shape; never trusted as anything but data.
+     */
+    readonly body?: unknown,
   ) {
     super(message);
   }
@@ -394,7 +400,12 @@ export class FyApiClient implements IFyApiClient {
           payload.code,
         );
       }
-      throw new FyHttpError(payload?.error ?? `fyd returned HTTP ${response.status}`, response.status, payload?.code);
+      throw new FyHttpError(
+        payload?.error ?? `fyd returned HTTP ${response.status}`,
+        response.status,
+        payload?.code,
+        candidate,
+      );
     }
 
     let payload: unknown;
