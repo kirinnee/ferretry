@@ -141,3 +141,31 @@ describe('Learning in a ferret’s Actions menu', () => {
     expect(item(mounted.container, 'scan-ferret')).toBeNull();
   });
 });
+
+/** What Info › Runtime reads: the same flag the Actions toggle flips, per ferret. */
+function PassiveForProbe({ daemon, ids }: { readonly daemon: FakeLearningDaemon; readonly ids: readonly string[] }) {
+  const { passiveFor } = useLearningSessionActions({ connection: learningDaemon, fetcher: daemon.fetch });
+  return <p data-probe="">{ids.map(id => `${id}=${String(passiveFor(id))}`).join(' ')}</p>;
+}
+
+describe('passiveFor — the flag Info › Runtime reads', () => {
+  it('is true, false, and off for a ferret the list omits, once the daemon has answered', async () => {
+    const daemon = fakeLearningDaemon();
+    daemon.state.sessions = [
+      { sessionId: 'session-on', passive: true, since: AT, setBy: 'default' },
+      { sessionId: 'session-off', passive: false, since: AT, setBy: 'default' },
+    ];
+    mounted = await mount(<PassiveForProbe daemon={daemon} ids={['session-on', 'session-off', 'session-new']} />);
+    const probe = must(mounted.container.querySelector('[data-probe]'), 'probe');
+    await waitFor(() => probe.textContent?.includes('session-on=true') === true, 'the learning read');
+    expect(probe.textContent).toBe('session-on=true session-off=false session-new=false');
+  });
+
+  it('stays null, never off, for a daemon that cannot answer', async () => {
+    const daemon = fakeLearningDaemon();
+    daemon.once('GET /v1/learning/sessions', { status: 404, body: { error: 'no such route' } });
+    mounted = await mount(<PassiveForProbe daemon={daemon} ids={['session-on']} />);
+    await waitFor(() => daemon.calls.some(call => call.path === '/v1/learning/sessions'), 'the read');
+    expect(must(mounted.container.querySelector('[data-probe]'), 'probe').textContent).toBe('session-on=null');
+  });
+});

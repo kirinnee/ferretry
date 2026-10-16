@@ -12,7 +12,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { effortLabel, harnessLabel, INFO_HINT, loginScope, modelFacts } from './info-model.ts';
+import { effortLabel, harnessLabel, INFO_HINT, learningLabel, loginScope, modelFacts } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
 
 /** A list read once for a row: unread, read, or failed with a reason. */
@@ -31,6 +31,12 @@ export interface InfoRuntimeProps {
   readonly skills: number | null;
   /** The model and effort pickers, when a host has them. */
   readonly controls?: ReactNode;
+  /**
+   * Whether this ferret is instructed to file lessons (the passive-learning flag the Actions toggle and
+   * the list chip read). Null: not read yet, or the daemon cannot say. Absent: the host has no such read,
+   * and the row is not drawn.
+   */
+  readonly learning?: boolean | null;
 }
 
 const listText = (read: InfoListRead, empty: string): ReactNode =>
@@ -44,7 +50,7 @@ const listText = (read: InfoListRead, empty: string): ReactNode =>
     read.items.join(', ')
   );
 
-export function InfoRuntime({ view, mcp, instructions, skills, controls }: InfoRuntimeProps) {
+export function InfoRuntime({ view, mcp, instructions, skills, controls, learning }: InfoRuntimeProps) {
   const model = modelFacts(view);
   return (
     <InfoSection>
@@ -90,6 +96,15 @@ export function InfoRuntime({ view, mcp, instructions, skills, controls }: InfoR
       <InfoRow label="Skills">
         {skills === null ? <span className="fy-info-muted">Reading…</span> : `${skills} available`}
       </InfoRow>
+      {learning === undefined ? null : (
+        <InfoRow hint={INFO_HINT.learning} label="Learning">
+          {learning === null ? (
+            <span className="fy-info-muted">Not reported yet</span>
+          ) : (
+            <span data-info-learning={learning ? 'on' : 'off'}>{learningLabel(learning)}</span>
+          )}
+        </InfoRow>
+      )}
     </InfoSection>
   );
 }

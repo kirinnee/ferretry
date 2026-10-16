@@ -7650,6 +7650,7 @@ function SessionWorkspaceHarness() {
           chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_PAGE_CLIENT}
           actionContributions={[...WORKSPACE_ACTIONS, ...learningActions.contributions]}
+          infoLearning={learningActions.passiveFor(session.config.id)}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}

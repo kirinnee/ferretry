@@ -2562,6 +2562,26 @@ describe('SessionChatPage Info and Actions', () => {
     }
   });
 
+  test('Info › Runtime is handed the host’s passive-learning flag, and no Learning row without one', async () => {
+    for (const [infoLearning, expected] of [
+      [true, true],
+      [false, false],
+      [null, null],
+      [undefined, undefined],
+    ] as const) {
+      const page = renderSessionChatPage(
+        chatPage({ initialInfo: 'runtime', ...(infoLearning === undefined ? {} : { infoLearning }) }),
+        fakeDaemon().factory,
+      );
+      try {
+        await flush();
+        expect(page.root.findByType(SessionInfo).props.learning).toBe(expected);
+      } finally {
+        run(() => page.unmount());
+      }
+    }
+  });
+
   test('Info reads through the page ports, and every Info link opens where the page keeps it', async () => {
     const daemon = fakeDaemon();
     const layouts = new WorkspaceLayoutStore(NO_STORAGE);

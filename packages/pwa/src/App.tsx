@@ -1142,6 +1142,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         <SessionChatPage
           accountPicker={store.accountPicker}
           actionContributions={sessionActions}
+          infoLearning={learningActions.passiveFor(scope.sessionId)}
           browserLogin={store.browserLogin}
           attention={attention}
           chatWidth={controls.chatWidth}

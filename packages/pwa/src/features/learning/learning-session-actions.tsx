@@ -42,6 +42,8 @@ export interface LearningSessionActions {
   readonly contributions: readonly SessionActionContribution<LearningActionContext>[];
   /** The scan dialog and the switch's status line; render it beside the page. */
   readonly host: ReactNode;
+  /** Whether one ferret is instructed to learn: null until the first read answers (or when the daemon cannot say). */
+  readonly passiveFor: (sessionId: string) => boolean | null;
 }
 
 const NO_PROJECTS: readonly FleetProject[] = [];
@@ -143,7 +145,12 @@ export function useLearningSessionActions({
     </>
   );
 
-  return { contributions, host };
+  const passiveFor = useCallback(
+    (sessionId: string) => (learning.sessions === null ? null : passive.has(sessionId)),
+    [learning.sessions, passive],
+  );
+
+  return { contributions, host, passiveFor };
 }
 
 /** Mounted only while the dialog is open, so a session page does not read scans it never shows. */

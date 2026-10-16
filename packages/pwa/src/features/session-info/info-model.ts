@@ -46,6 +46,8 @@ export const INFO_HINT = {
   context: 'How full the model’s context window is. Near 100% the CLI compacts the conversation.',
   cost: 'What the tokens would cost at the provider’s list prices. Without known pricing it says so, never a guess.',
   quota: 'The login’s own limits. Ferretry reads them only while someone is looking, at most once a minute.',
+  learning:
+    'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
 } as const;
 
 /** The CLI a harness is, in words. */
@@ -133,3 +135,7 @@ export const lineage = (
   const children = (sessions ?? []).filter(session => session.config.parent === view.config.id);
   return { parent, children };
 };
+
+/** The Learning row's value, from the session's passive flag: said as what the ferret was told to do. */
+export const learningLabel = (passive: boolean): string =>
+  passive ? 'On · instructed to file lessons' : 'Off · not instructed';
