@@ -4,6 +4,7 @@ import {
   type ClockPort,
   isTurnStatus,
   type PaneState,
+  paneBlockingPrompt,
   paneShowsActiveWork,
   paneShowsPermissionPrompt,
   type SessionId,
@@ -87,6 +88,7 @@ export class StorageTurnPorts implements SessionTurnPorts {
       working: paneShowsActiveWork(pane.visible),
       atPrompt: pane.promptReady,
       permission: paneShowsPermissionPrompt(pane.visible),
+      prompt: paneBlockingPrompt(pane.visible),
     };
   }
 
@@ -101,16 +103,25 @@ export class StorageTurnPorts implements SessionTurnPorts {
       if (change.to === undefined) {
         delete next.turnState;
         delete next.turnStateAt;
-      } else {
+      } else if (change.to !== change.from) {
+        // Only a CHANGED turn moves the boundary: a new dialog on the same `needs-input` is not one.
         next.turnState = change.to;
         next.turnStateAt = at;
       }
+      if (change.prompt === undefined) delete next.turnPrompt;
+      else next.turnPrompt = change.prompt;
       written = true;
       return next as typeof raw;
     });
     if (!written) return false;
     // Journaled, so the event stream wakes every open page at once rather than on its next poll.
-    await this.storage.append(id, 'turn.state', { from: change.from ?? null, to: change.to ?? null });
+    // A new dialog on the same 'needs-input' is its own event: 'turn.state' is a turn boundary, and
+    // what reacts to one (the Warden, a notification) must not fire twice for the same boundary.
+    await this.storage.append(id, change.to === change.from ? 'turn.prompt' : 'turn.state', {
+      from: change.from ?? null,
+      to: change.to ?? null,
+      prompt: change.prompt ?? null,
+    });
     if (change.to === undefined) this.tails.delete(id);
     return true;
   }

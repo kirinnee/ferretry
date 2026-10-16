@@ -9,8 +9,8 @@ import { DEFAULT_NOTIFICATION_FILTER_PREFERENCES } from '../../src/lib/notificat
 import {
   buildNotification,
   classifySessionNotification,
-  classifyTurnTransition,
   classifyTransition,
+  classifyTurnTransition,
   DaemonNotificationLedger,
   fleetNotificationEventKey,
   NOTIFY_BURST_LIMIT,
@@ -413,6 +413,23 @@ describe('turn-boundary notifications', () => {
     should(kinds(asked)).deepEqual(['question']);
     should(asked[0]?.body).equal('Needs your input to continue.');
     should(poll(ledger, [turnView('needs-input', 't2')], 2_000)).have.length(0);
+  });
+
+  it('says which dialog a needs-input session is parked on', () => {
+    const ledger = new DaemonNotificationLedger();
+    const parked = (at: string) =>
+      sessionView('s1', {
+        state: {
+          status: 'running',
+          turn: 4,
+          turnState: 'needs-input',
+          turnStateAt: at,
+          turnPrompt: 'Make auto mode your default permission mode?',
+        },
+      });
+    poll(ledger, [turnView('working', 't1')]);
+    const asked = poll(ledger, [parked('t2')]);
+    should(asked[0]?.body).equal('Blocked by a prompt on screen: Make auto mode your default permission mode?');
   });
 
   it("does not notify the status word a second time beside the turn fact, but keeps a session's ending", () => {

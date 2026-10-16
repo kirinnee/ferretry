@@ -373,6 +373,14 @@
 .fy-session-bar__word {
   display: inline-block;
 }
+/* The dialog a needs-input session is parked on; the full text is the status tooltip. */
+.fy-session-bar__blocked {
+  max-width: 36ch;
+  overflow: hidden;
+  color: var(--warn);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fy-session-bar__actions {
   display: flex;
   align-items: center;

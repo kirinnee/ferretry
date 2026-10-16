@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
-import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 
 export type { Harness } from './session-base.ts';
 export { HarnessSchema } from './session-base.ts';
@@ -47,6 +47,8 @@ export const SendUnaccountedReasonSchema = z.enum([
   'transcript_unreadable',
   /** The pane could not be read, so absence could not be proven. */
   'pane_unreadable',
+  /** A dialog on the agent's screen was waiting for an answer, so the message could not be typed. */
+  'blocked_by_prompt',
   /** Proven absent after every attempt. */
   'not_delivered',
 ]);
@@ -488,6 +490,12 @@ export const SessionStateSchema = z.object({
   turnState: SessionTurnStateSchema.optional(),
   /** When `turnState` last CHANGED — a new value here is a new turn boundary, once. */
   turnStateAt: InstantSchema.optional(),
+  /**
+   * What the agent's screen is asking, in the words a person is shown for it, while `turnState` is
+   * `needs-input` because a harness dialog is up ("Make auto mode your default permission mode?").
+   * Absent for every other turn, and for a permission prompt, which the conversation itself shows.
+   */
+  turnPrompt: z.string().min(1).max(200).optional(),
   waiting: DeclaredWaitSchema.optional(),
   waitingCreditSeconds: NonNegativeFiniteSchema.optional(),
 });

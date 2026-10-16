@@ -556,6 +556,7 @@ function modelSetView(resolved: ResolvedProfile | undefined): FleetRuntimeModelS
 const FIXED_ENTRY_WORDS: Readonly<Partial<Record<FixedEntry['purpose'], { key: string; value: string }>>> = {
   trust: { key: 'trust prompt', value: 'off' },
   onboarding: { key: 'onboarding screens', value: 'off' },
+  'one-time-prompts': { key: 'one-time prompts (nudges, upsells, notices)', value: 'off' },
   tools: { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
   instructions: { key: 'Ferretry tools instruction', value: 'on' },
 };
@@ -612,9 +613,10 @@ function fixedLayerView(
   return {
     view: {
       agentPermissions: fixed.agentPermissions,
-      entries: fixed.entries.map(
-        entry => FIXED_ENTRY_WORDS[entry.purpose] ?? { key: entry.key, value: shown(entry.value) },
-      ),
+      // One row per thing switched off: several keys share a purpose, and the person reads the purpose.
+      entries: fixed.entries
+        .map(entry => FIXED_ENTRY_WORDS[entry.purpose] ?? { key: entry.key, value: shown(entry.value) })
+        .filter((row, index, rows) => rows.findIndex(other => other.key === row.key) === index),
       overridden,
     },
   };

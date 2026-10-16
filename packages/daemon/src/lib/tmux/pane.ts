@@ -27,6 +27,29 @@ const STARTUP_BLOCKERS = [
   'do you want to use this api key',
   'sign in',
   'log in',
+  // One-shot dialogs Claude can raise once it is up. Each draws a `❯ <choice>` row that reads as a
+  // prompt line, so without these the daemon typed a message straight into the dialog.
+  'make auto mode your default permission mode?',
+  'switch your default effort to',
+  'try the new fullscreen renderer?',
+];
+
+/**
+ * The harness dialogs a session can sit on with NOBODY told why, each with the words a person is
+ * shown for it. Every marker is the dialog's own title or question, never a word that ordinary agent
+ * output could contain — this is read on every turn-watch tick, and a false match would turn a
+ * working agent into "needs input".
+ */
+const BLOCKING_PROMPTS: readonly { readonly marker: string; readonly says: string }[] = [
+  { marker: 'make auto mode your default permission mode?', says: 'Make auto mode your default permission mode?' },
+  { marker: 'switch your default effort to', says: 'Switch your default effort level?' },
+  { marker: 'try the new fullscreen renderer?', says: 'Try the new fullscreen renderer?' },
+  { marker: 'quick safety check: is this a project you created or one you trust', says: 'Do you trust this folder?' },
+  { marker: 'do you trust the files', says: 'Do you trust this folder?' },
+  { marker: 'do you trust the contents of this directory', says: 'Do you trust this folder?' },
+  { marker: 'choose the text style', says: 'Choose a text style (first-run setup)' },
+  { marker: 'do you want to use this api key', says: 'Use the custom API key it detected?' },
+  { marker: 'resume full session as-is', says: 'Resume from a summary, or the full session?' },
 ];
 
 /**
@@ -124,6 +147,24 @@ export function paneShowsPermissionPrompt(pane: string): boolean {
   if (choices < 2) return false;
   const lower = lines.join('\n').toLowerCase();
   return PERMISSION_QUESTIONS.some(question => lower.includes(question));
+}
+
+/**
+ * The harness dialog the VISIBLE pane is parked on, as the words a person is shown for it, or
+ * `undefined` when it shows none this module knows.
+ *
+ * Read from the bottom of the frame only, like {@link paneShowsPermissionPrompt}: a dialog that has
+ * scrolled up was answered.
+ */
+export function paneBlockingPrompt(pane: string): string | undefined {
+  const lower = pane
+    .replaceAll('\r\n', '\n')
+    .trimEnd()
+    .split('\n')
+    .slice(-PERMISSION_WINDOW_LINES)
+    .join('\n')
+    .toLowerCase();
+  return BLOCKING_PROMPTS.find(({ marker }) => lower.includes(marker))?.says;
 }
 
 export function promptIsReady(pane: string, cursorY?: number, cursorX?: number): boolean {

@@ -22,6 +22,7 @@ const REASONS: Readonly<Record<SendUnaccountedReason, string>> = {
   composer_discarded: 'the agent’s queue let go of it before reading it',
   transcript_unreadable: 'the agent’s transcript could not be read, so arrival could not be checked',
   pane_unreadable: 'the agent’s screen could not be read, so arrival could not be checked',
+  blocked_by_prompt: 'a prompt on the agent’s screen is waiting for an answer, so it could not be typed',
   not_delivered: 'it never reached the agent',
 };
 
