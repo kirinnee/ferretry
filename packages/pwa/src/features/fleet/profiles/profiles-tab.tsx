@@ -1,9 +1,8 @@
 /**
- * The Profiles tab (docs/design/account-model.md §4.2, P1–P6, E18, E19, E21): every profile with its
- * layer count and who uses it, and one profile's page — its Layers newest on top, its Conflicts, and
- * Where it is used — with **Edit layers** and **Delete profile…**.
+ * The Profiles tab (R5, docs/design/account-model.md §4.2, P6, E21): every profile with its size and
+ * who uses it, and one profile's page — its contents in the drag-and-drop editor, Where it is used,
+ * and **Delete profile…**. "+ New profile" opens the same editor with a name to fill in.
  *
- * "+ Build a new profile" and "Edit layers" open the Build a profile stepper in place of the page.
  * Every write is one change the daemon previews and applies; while this machine refuses changes the
  * panel says why in one sentence and the pages still read.
  */
@@ -11,11 +10,10 @@
 import type { FleetAccountChange, FleetLayeredProfileView } from '@ferretry/protocol';
 import { useId, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
-import { type AccountCatalog, allComponents, useAccountCatalog } from '../components/account-catalog.ts';
+import { type AccountCatalog, useAccountCatalog } from '../components/account-catalog.ts';
 import {
   CatalogNote,
   ComponentBadges,
-  Disclosure,
   Hint,
   LinkRow,
   OpenRow,
@@ -27,73 +25,22 @@ import {
 import { counted, listed, profileScopeBadge, profileScopeWord } from '../components/component-model.ts';
 import { itemHref, useHashItem } from '../components/machine-links.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
-import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { type StepperState, startStepper } from '../shell/stepper-model.ts';
-import { BuildProfileStep } from './build-profile-step.tsx';
-import { ConflictList, LayerStack, ProfileSummary } from './layer-stack.tsx';
-import {
-  buildProfileFlowInput,
-  includedBy,
-  profileUseLine,
-  runtimesReaching,
-  stackConflicts,
-} from './profile-model.ts';
+import { ProfileEditor } from './profile-editor.tsx';
+import { includedBy, profileUseLine, runtimesReaching } from './profile-model.ts';
 
-type Page = { readonly kind: 'list' } | { readonly kind: 'detail'; readonly name: string };
+type Page = { readonly kind: 'list' } | { readonly kind: 'detail'; readonly name: string } | { readonly kind: 'new' };
 
 export function ProfilesTab(props: MachineTabProps) {
-  const { connection, machineName, createClient, online, checking, onRetry, machine } = props;
+  const { connection, machineName, createClient } = props;
   const { read, reload } = useAccountCatalog(connection, createClient);
   const [page, setPage] = useState<Page>({ kind: 'list' });
-  const [stepper, setStepper] = useState<{ state: StepperState; editing?: string } | null>(null);
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const open = (next: Page) => {
     setSaved(undefined);
     setPage(next);
   };
-  useHashItem('profiles', name => {
-    setStepper(null);
-    open({ kind: 'detail', name });
-  });
-  const build = (editing?: string) => {
-    setSaved(undefined);
-    setStepper({
-      state: startStepper(buildProfileFlowInput(editing === undefined ? {} : { editing })),
-      ...(editing === undefined ? {} : { editing }),
-    });
-  };
-
-  if (stepper !== null)
-    return (
-      <MachineStepper
-        state={stepper.state}
-        onChange={next => setStepper(next === null ? null : { ...stepper, state: next })}
-        machineName={machineName}
-        online={online}
-        checking={checking}
-        onRetry={onRetry}
-      >
-        <BuildProfileStep
-          state={stepper.state}
-          onChange={next => setStepper({ ...stepper, state: next })}
-          onBuilt={name => {
-            setStepper(null);
-            void reload().then(() => {
-              setPage({ kind: 'detail', name });
-              setSaved(
-                stepper.editing === undefined ? `Profile ${name} saved.` : 'Saved. New sessions use the new layers.',
-              );
-            });
-          }}
-          machineName={machineName}
-          machine={machine}
-          connection={connection}
-          createClient={createClient}
-          {...(stepper.editing === undefined ? {} : { editing: stepper.editing })}
-        />
-      </MachineStepper>
-    );
+  useHashItem('profiles', name => open({ kind: 'detail', name }));
 
   if (read.kind === 'loading')
     return (
@@ -105,16 +52,31 @@ export function ProfilesTab(props: MachineTabProps) {
   const catalog = read.catalog;
   const profile =
     page.kind === 'detail' ? catalog.profiles.profiles.find(candidate => candidate.name === page.name) : undefined;
+  const shown = page.kind === 'new' ? 'new' : profile === undefined ? 'list' : 'detail';
+  const afterSave = (name: string, message: string) =>
+    void reload().then(() => {
+      setPage({ kind: 'detail', name });
+      setSaved(message);
+    });
 
   return (
-    <div className="flex min-w-0 flex-col gap-4" data-profiles-page={profile === undefined ? 'list' : 'detail'}>
+    <div className="flex min-w-0 flex-col gap-4" data-profiles-page={shown}>
       {saved === undefined ? null : (
         <p className="m-0 text-cell text-ok" role="status" data-profiles-saved="">
           {saved}
         </p>
       )}
-      {profile === undefined ? (
-        <ListPage catalog={catalog} open={open} build={() => build()} />
+      {page.kind === 'new' ? (
+        <>
+          <PageHead title="New profile" sub="Profile" onBack={() => open({ kind: 'list' })} />
+          <ProfileEditor {...props} catalog={catalog} onSaved={name => afterSave(name, `Profile ${name} saved.`)}>
+            <Button type="button" variant="ghost" data-profile-cancel="" onClick={() => open({ kind: 'list' })}>
+              Cancel
+            </Button>
+          </ProfileEditor>
+        </>
+      ) : profile === undefined ? (
+        <ListPage catalog={catalog} open={open} />
       ) : (
         <DetailPage
           key={profile.name}
@@ -122,8 +84,9 @@ export function ProfilesTab(props: MachineTabProps) {
           catalog={catalog}
           profile={profile}
           onBack={() => open({ kind: 'list' })}
-          onEdit={() => build(profile.name)}
           onOpenProfile={name => open({ kind: 'detail', name })}
+          onSaved={name => afterSave(name, 'Saved. New sessions use the new contents.')}
+          onFileChanged={() => void reload()}
           onDeleted={message =>
             void reload().then(() => {
               setPage({ kind: 'list' });
@@ -136,34 +99,28 @@ export function ProfilesTab(props: MachineTabProps) {
   );
 }
 
-function ListPage({
-  catalog,
-  open,
-  build,
-}: {
-  catalog: AccountCatalog;
-  open: (page: Page) => void;
-  build: () => void;
-}) {
+function ListPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Page) => void }) {
   const profiles = catalog.profiles.profiles;
+  const create = (
+    <Button type="button" variant="primary" data-profile-new="" onClick={() => open({ kind: 'new' })}>
+      + New profile
+    </Button>
+  );
   if (profiles.length === 0)
     return (
       <section className="kt-panel flex min-w-0 flex-col items-start gap-2 p-panel" data-profiles-empty="">
         <h3 className="m-0 text-row font-semibold text-fg">No profiles yet</h3>
-        <Hint>A profile is a stack of layers: other profiles and components. The newer layer wins.</Hint>
-        <Button type="button" variant="primary" data-profile-build="" onClick={build}>
-          Build a profile
-        </Button>
+        <Hint>
+          A profile is a bag of components — MCP servers, skills, instructions, settings, hooks — and other profiles.
+          Where two set the same thing, the later one wins.
+        </Hint>
+        {create}
       </section>
     );
   return (
     <>
       <PageHead title="Profiles" sub={counted(profiles.length, 'profile')} />
-      <div>
-        <Button type="button" variant="primary" data-profile-build="" onClick={build}>
-          + Build a new profile
-        </Button>
-      </div>
+      <div>{create}</div>
       <RowList label="Profiles">
         {profiles.map(profile => {
           const runtimes = runtimesReaching(profile, catalog.runtimes.runtimes).length;
@@ -187,51 +144,38 @@ interface DetailProps extends MachineTabProps {
   readonly catalog: AccountCatalog;
   readonly profile: FleetLayeredProfileView;
   readonly onBack: () => void;
-  readonly onEdit: () => void;
   readonly onOpenProfile: (name: string) => void;
+  readonly onSaved: (name: string) => void;
+  readonly onFileChanged: () => void;
   readonly onDeleted: (message: string) => void;
 }
 
 function DetailPage(props: DetailProps) {
-  const { catalog, profile, machineName, onBack, onEdit, onOpenProfile } = props;
+  const { catalog, profile, machineName, onBack, onOpenProfile } = props;
   const [deleting, setDeleting] = useState(false);
   const includers = includedBy(profile);
   const runtimes = runtimesReaching(profile, catalog.runtimes.runtimes);
-  const components = allComponents(catalog);
   return (
     <>
       <PageHead title={profile.name} sub="Profile" onBack={onBack} />
-      <ProfileSummary
-        scope={profile.scope}
-        stacks={profile.harnesses}
-        layers={profile.layers}
-        components={components}
-      />
       {profile.scope.kind === 'mixed' ? (
         <CatalogNote tone="warn" spot="mixed" title={profile.scope.sentence}>
           <span>
-            It still runs, skipping the other tool’s layers. Edit its layers so it is Claude only or Codex only.
+            It still runs, skipping the other tool’s items. Take out the Claude-only or the Codex-only items so it is
+            one tool’s.
           </span>
         </CatalogNote>
       ) : null}
-      <Disclosure label="Advanced: how these combine" spot="layers">
-        <Section title="Layers">
-          <LayerStack
-            layers={profile.layers}
-            components={components}
-            profiles={catalog.profiles.profiles}
-            machineName={machineName}
-          />
-          {profile.harnesses.flatMap(stack =>
-            stack.skipped.length === 0
-              ? []
-              : [<Hint key={stack.harness}>{stack.skipped.map(skip => skip.sentence).join(' ')}</Hint>],
-          )}
-        </Section>
-        <Section title="Conflicts" spot="conflicts">
-          <ConflictList conflicts={stackConflicts(profile.harnesses)} />
-        </Section>
-      </Disclosure>
+      <ProfileEditor
+        catalog={catalog}
+        profile={profile}
+        machineName={machineName}
+        online={props.online}
+        connection={props.connection}
+        createClient={props.createClient}
+        onSaved={props.onSaved}
+        onFileChanged={props.onFileChanged}
+      />
       <Section title="Where it is used">
         {includers.length === 0 && runtimes.length === 0 ? (
           <Hint>Nothing uses this profile yet.</Hint>
@@ -241,7 +185,7 @@ function DetailPage(props: DetailProps) {
               <OpenRow
                 key={name}
                 title={`Profile · ${name}`}
-                sub={`Builds on ${profile.name}`}
+                sub={`Contains ${profile.name}`}
                 onOpen={() => onOpenProfile(name)}
                 data={{ 'data-profile-includer': name }}
               />
@@ -262,10 +206,13 @@ function DetailPage(props: DetailProps) {
         <DeletePanel {...props} onKeep={() => setDeleting(false)} />
       ) : (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="primary" data-profile-edit="" onClick={onEdit}>
-            Edit layers
-          </Button>
-          <Button type="button" variant="ghost" data-profile-delete="" onClick={() => setDeleting(true)}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="kt-btn--flush-start"
+            data-profile-delete=""
+            onClick={() => setDeleting(true)}
+          >
             Delete profile…
           </Button>
         </div>
@@ -274,7 +221,7 @@ function DetailPage(props: DetailProps) {
   );
 }
 
-/** P6, E21: blocked while it is a base; runtimes on it pick a replacement; its components stay saved. */
+/** P6, E21: blocked while another profile contains it; runtimes on it pick a replacement; its components stay saved. */
 function DeletePanel(props: DetailProps & { onKeep: () => void }) {
   const { catalog, profile, machineName, online, connection, createClient, onKeep, onDeleted } = props;
   const id = useId();
@@ -306,7 +253,7 @@ function DeletePanel(props: DetailProps & { onKeep: () => void }) {
         }
       >
         <span>
-          It is the base of {listed(profile.baseFor)}
+          It is inside {listed(profile.baseFor)}
           {profile.usedBy.length === 0 ? (
             ''
           ) : (
@@ -346,7 +293,7 @@ function DeletePanel(props: DetailProps & { onKeep: () => void }) {
             {profile.usedBy.length === 1 ? 'moves' : 'move'} to:
           </span>
           {others.length === 0 ? (
-            <span>There is no other profile to move to yet. Build one first.</span>
+            <span>There is no other profile to move to yet. Make one first.</span>
           ) : (
             <select
               id={id}

@@ -346,10 +346,58 @@ export const FleetProfileDraftRequestSchema = z.strictObject({
 });
 export type FleetProfileDraftRequest = z.infer<typeof FleetProfileDraftRequestSchema>;
 
+/**
+ * Which part of the merge a resolved value is in (§3.4): an MCP server or a skill by its name, a
+ * settings key, an environment variable, a launch flag, an instructions or hooks component, the model.
+ */
+export const FleetResolvedFieldSchema = z.enum([
+  'instructions',
+  'mcp',
+  'skills',
+  'settings',
+  'env',
+  'flags',
+  'hooks',
+  'model',
+]);
+export type FleetResolvedField = z.infer<typeof FleetResolvedFieldSchema>;
+
+/**
+ * One value as a content item set it. `from` is the profile's OWN content item that brought it in —
+ * the component itself, or the `profile/<name>` it arrived through — so a list can mark that item.
+ * `hidden` says a secret-looking value was replaced by `‹hidden›` before it left the daemon.
+ */
+export const FleetResolvedSetterSchema = z.strictObject({
+  value: z.string(),
+  hidden: z.literal(true).optional(),
+  from: NonEmptyStringSchema,
+});
+export type FleetResolvedSetter = z.infer<typeof FleetResolvedSetterSchema>;
+
+/**
+ * One FINAL value of a profile for one harness (R5 "Resolved"): what the runtime gets for `key`, the
+ * item it came from, and every earlier value it overrode, oldest first.
+ */
+export const FleetResolvedEntrySchema = z.strictObject({
+  harness: HarnessKindSchema,
+  field: FleetResolvedFieldSchema,
+  key: NonEmptyStringSchema,
+  value: z.string(),
+  hidden: z.literal(true).optional(),
+  from: NonEmptyStringSchema,
+  overridden: z.array(FleetResolvedSetterSchema).readonly(),
+});
+export type FleetResolvedEntry = z.infer<typeof FleetResolvedEntrySchema>;
+
 /** The draft resolved per harness exactly as a saved profile is, or why it cannot be. */
 export const FleetProfileDraftViewSchema = z.strictObject({
   /** Claude Code, then Codex. */
   harnesses: z.array(FleetStackViewSchema).readonly(),
+  /**
+   * Every final value per harness, Claude Code then Codex, in merge order (R5). Absent from a daemon
+   * older than the Resolved view; empty for a draft that cannot be resolved.
+   */
+  resolved: z.array(FleetResolvedEntrySchema).readonly().optional(),
   /** What the draft's layers make it (P7). A mixed draft also carries the same sentence as `refusal`. */
   scope: FleetProfileScopeSchema,
   /** A layer that does not exist, or one that would include the profile itself. */

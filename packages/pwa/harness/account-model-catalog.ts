@@ -388,6 +388,61 @@ const APPLIED = {
   },
 };
 
+/** What each component sets, by key, as the harness's stand-in for the daemon's Resolved projection. */
+const SETS: Readonly<Record<string, readonly (readonly [field: string, key: string, value: string, hidden?: true])[]>> =
+  {
+    'instructions/Main instructions': [
+      ['instructions', 'Main instructions', 'components/instructions/Main instructions.md'],
+    ],
+    'mcp/github': [['mcp', 'github', 'npx -y @modelcontextprotocol/server-github']],
+    'mcp/notes': [['mcp', 'notes', 'uvx notes-mcp --vault /Users/kirin-on-a-long-machine-name/Documents/Notes']],
+    'skills/My skills': [
+      ['skills', 'release-notes', 'included'],
+      ['skills', 'pr-review', 'included'],
+    ],
+    'settings/Claude settings': [
+      ['settings', 'permissions.defaultMode', 'plan'],
+      ['env', 'env.LOG_LEVEL', 'info'],
+      ['env', 'env.ANTHROPIC_API_KEY', '‹hidden›', true],
+    ],
+    'settings/Agent settings': [['settings', 'permissions.defaultMode', 'acceptEdits']],
+    'settings/Codex settings': [['settings', 'approval_policy', 'on-request']],
+    'modelSets/Claude models': [['model', 'model', 'claude-sonnet-5']],
+    'modelSets/Codex models': [['model', 'model', 'gpt-6']],
+  };
+
+/** A content item flattened to its components, each with the item that brought it in. */
+const flatten = (layers: readonly string[], origin?: string): readonly (readonly [string, string])[] =>
+  layers.flatMap(layer => {
+    if (!layer.startsWith('profile/')) return [[layer, origin ?? layer] as const];
+    const named = PROFILES.profiles.find(each => `profile/${each.name}` === layer);
+    return named === undefined ? [] : flatten(named.layers, origin ?? layer);
+  });
+
+/** Every final value per harness, later winning, each with what it overrode. */
+const resolvedOf = (layers: readonly string[]) =>
+  (['claude', 'codex'] as const).flatMap(harness => {
+    const final = new Map<string, Record<string, unknown>>();
+    for (const [reference, from] of flatten(layers)) {
+      const scope = LAYER_SCOPES[reference];
+      if (scope !== undefined && scope !== harness) continue;
+      for (const [field, key, value, hidden] of SETS[reference] ?? []) {
+        const id = `${field}\n${key}`;
+        const before = final.get(id);
+        const overridden =
+          before === undefined
+            ? []
+            : [
+                ...(before.overridden as unknown[]),
+                { value: before.value, ...(before.hidden ? { hidden: true } : {}), from: before.from },
+              ];
+        final.delete(id);
+        final.set(id, { harness, field, key, value, ...(hidden ? { hidden } : {}), from, overridden });
+      }
+    }
+    return [...final.values()];
+  });
+
 /** A draft's layers, resolved the way the daemon would for the review step: the conflict appears with both bases. */
 const draftView = (init: RequestInit | undefined) => {
   const layers = (JSON.parse(String(init?.body ?? '{}')) as { layers?: string[] }).layers ?? [];
@@ -398,10 +453,10 @@ const draftView = (init: RequestInit | undefined) => {
   if (claude !== undefined && codex !== undefined) {
     const words = (layer: string) => layer.replace('/', ' ').replace('modelSets', 'model set');
     const sentence = `A profile can't be both Claude only and Codex only: ${words(claude)} is Claude only and ${words(codex)} is Codex only.`;
-    return { harnesses, scope: { kind: 'mixed', sentence }, refusal: sentence };
+    return { harnesses, scope: { kind: 'mixed', sentence }, refusal: sentence, resolved: resolvedOf(layers) };
   }
   const scope = claude !== undefined ? 'claude' : codex !== undefined ? 'codex' : 'generic';
-  return { harnesses, scope: { kind: 'scoped', scope } };
+  return { harnesses, scope: { kind: 'scoped', scope }, resolved: resolvedOf(layers) };
 };
 
 /** The catalogue's answer for `path`, or `undefined` when it is not a catalogue path. */
