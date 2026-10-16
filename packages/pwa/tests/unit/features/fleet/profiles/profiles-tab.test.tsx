@@ -42,20 +42,38 @@ const open = async (machine: Machine = scriptedMachine(), overrides: Parameters<
 };
 
 describe('ProfilesTab — list and page', () => {
-  it('lists each profile with its layers, the runtimes it reaches and what builds on it', async () => {
+  it('leads each profile with its name, its scope badge and one line: its size and what runs on it', async () => {
     const root = await open();
     expect(text(root, 'h3')).toBe('Profiles');
     expect(root.textContent).toContain('3 profiles');
-    expect(text(root, '[data-profile-row="Default"]')).toContain('4 layers · used by 3 runtimes · base for 2 profiles');
-    expect(text(root, '[data-profile-row="Review"]')).toContain('2 layers · used by 1 runtime');
-    expect(text(root, '[data-profile-row="Review"]')).not.toContain('base for');
+    expect(text(root, '[data-profile-row="Default"] [data-component-badges]')).toBe('Claude only');
+    expect(text(root, '[data-profile-row="Default"]')).toContain('4 parts · used by 3 runtimes');
+    expect(text(root, '[data-profile-row="Review"] [data-component-badges]')).toBe('Generic');
+    expect(text(root, '[data-profile-row="Review"]')).toContain('used by 1 runtime');
+    expect(root.textContent).not.toContain('base for');
+    expect(root.querySelector('[data-layer-stack]')).toBeNull();
   });
 
-  it('shows the layers newest on top, what is skipped, conflicts and where it is used', async () => {
+  it('leads with what the profile gives and what it is built from; how the layers combine waits behind Advanced', async () => {
     const root = await open();
     await click(root, '[data-profile-row="Default"]');
     expect(text(root, 'h3')).toBe('Default');
-    expect(root.textContent).toContain('Profile · 4 layers');
+    expect(text(root, '[data-profile-summary] [data-component-badges]')).toBe('Claude only');
+    expect(text(root, '[data-profile-gives]')).toBe(
+      'Instructions: Main instructions · 1 MCP server · 4 settings · Models: Claude models',
+    );
+    expect(text(root, '[data-profile-built-from]')).toBe(
+      'Built from Main instructions + github + Claude settings + Claude models',
+    );
+    expect(root.querySelector('[data-layer-stack]')).toBeNull();
+    const toggle = must(root.querySelector('[data-disclosure-toggle="layers"]'));
+    expect(toggle.textContent).toBe('Advanced: how these combine');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await click(root, '[data-disclosure-toggle="layers"]');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-disclosure-body="layers"]')?.id).toBe(
+      toggle.getAttribute('aria-controls') ?? 'none',
+    );
     const layers = [...root.querySelectorAll('[data-layer]')].map(layer => layer.getAttribute('data-layer'));
     expect(layers).toEqual([
       'modelSets/Claude models',
@@ -78,6 +96,7 @@ describe('ProfilesTab — list and page', () => {
     );
     await click(root, '[data-profile-includer="Agent work"]');
     expect(text(root, 'h3')).toBe('Agent work');
+    await click(root, '[data-disclosure-toggle="layers"]');
     const conflict = must(root.querySelector('[data-conflicts] li'));
     expect(conflict.querySelector('.font-mono')?.textContent).toBe('permissions.defaultMode');
     expect(conflict.textContent).toBe(CONFLICT.sentence.replaceAll('`', ''));
@@ -94,9 +113,27 @@ describe('ProfilesTab — list and page', () => {
     const root = await open(scriptedMachine({ catalog }));
     await click(root, '[data-profile-row="Lonely"]');
     expect(root.textContent).toContain('Nothing uses this profile yet.');
+    expect(text(root, '[data-profile-gives]')).toBe('Nothing for the agent yet.');
+    expect(text(root, '[data-profile-built-from]')).toBe('Built from Missing profile + widgets/x + unknown');
+    await click(root, '[data-disclosure-toggle="layers"]');
     expect(text(root, '[data-layer="widgets/x"]')).toBe('2widgets/x');
     expect(text(root, '[data-layer="profile/Missing"]')).toContain('0 parts, used as a base');
     expect(text(root, '[data-layer="mcp/unknown"]')).toContain('MCP server · unknown');
+  });
+
+  it('P7: a profile written before scopes reads as Mixed, naming the layers that disagree', async () => {
+    const sentence =
+      "Profile Old can't be both Claude only and Codex only: settings claude is Claude only and settings codex is Codex only.";
+    const catalog = studioCatalog({
+      profiles: profileCatalog([profile('Old', ['mcp/github'], { scope: { kind: 'mixed', sentence } })]),
+      runtimes: runtimeCatalog([]),
+    });
+    const root = await open(scriptedMachine({ catalog }));
+    expect(text(root, '[data-profile-row="Old"] [data-component-badges]')).toBe('Mixed');
+    await click(root, '[data-profile-row="Old"]');
+    const note = text(root, '[data-catalog-note="mixed"]');
+    expect(note).toContain(sentence);
+    expect(note).toContain('Edit its layers so it is Claude only or Codex only.');
   });
 
   it('offers to build the first profile on an empty machine', async () => {
@@ -166,6 +203,10 @@ describe('ProfilesTab — delete (E21)', () => {
     await click(root, '[data-profile-delete]');
     expect(text(root, '[data-catalog-note="delete"]')).toContain('Pick another profile for these runtimes first');
     expect(text(root, '[data-catalog-note="delete"]')).toContain('a, b move to:');
+    expect([...root.querySelectorAll('[data-profile-switch] option')].map(option => option.textContent)).toEqual([
+      'New · Generic',
+      'Other · Generic',
+    ]);
     await choose(root, '[data-profile-switch]', 'Other');
     expect(text(root, '[data-change-submit]')).toBe('Switch 2 runtimes and delete Old');
     machine.onApply = current => {
@@ -205,7 +246,13 @@ describe('ProfilesTab — delete (E21)', () => {
 describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', () => {
   it('builds a profile from two bases and a component, reviews the conflict, names it and opens it', async () => {
     const machine = scriptedMachine({
-      preview: { harnesses: [stack('claude', { conflicts: [CONFLICT] }), stack('codex', { conflicts: [CONFLICT] })] },
+      preview: {
+        harnesses: [
+          stack('claude', { applied: ['instructions/Main instructions'], conflicts: [CONFLICT] }),
+          stack('codex', { conflicts: [CONFLICT] }),
+        ],
+        scope: { kind: 'scoped', scope: 'claude' },
+      },
     });
     const root = await open(machine);
     await click(root, '[data-profile-build]');
@@ -213,6 +260,8 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     expect(text(root, '[data-stepper-position]')).toBe('Step 1 of 8 · Start from');
     await tick(root, '[data-build-base="Review"]');
     await tick(root, '[data-build-base="Default"]');
+    expect(root.querySelector('[data-build-order]')).toBeNull();
+    await click(root, '[data-disclosure-toggle="order"]');
     expect(text(root, '[data-build-order]')).toContain('Default · wins');
     await click(root, '[aria-label="Move Default earlier"]');
     expect(text(root, '[data-build-order]')).toContain('Review · wins');
@@ -238,6 +287,12 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     await click(root, '[data-build-next]');
 
     expect(text(root, '[data-stepper-position]')).toBe('Step 7 of 8 · Review layers');
+    expect(text(root, '[data-profile-summary] [data-component-badges]')).toBe('Claude only');
+    expect(text(root, '[data-profile-gives]')).toBe('Instructions: Main instructions');
+    expect(text(root, '[data-profile-built-from]')).toBe(
+      'Built from Default profile + Agent work profile + Main instructions',
+    );
+    await click(root, '[data-disclosure-toggle="layers"]');
     const layers = [...root.querySelectorAll('[data-layer]')].map(layer => layer.getAttribute('data-layer'));
     expect(layers).toEqual(['instructions/Main instructions', 'profile/Agent work', 'profile/Default']);
     expect(text(root, '[data-conflicts]')).toContain('permissions.defaultMode');
@@ -249,6 +304,7 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     await click(root, '[data-build-next]');
 
     expect(text(root, '[data-stepper-position]')).toBe('Step 8 of 8 · Name');
+    expect(text(root, '[data-build-scope]')).toBe('This profile will be Claude only');
     expect(root.textContent).toContain('3 layers.');
     expect(root.textContent).not.toContain('You go back to choosing a profile');
     await typeName(root, 'Default');
@@ -283,10 +339,42 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
     await click(root, '[data-stepper-back]');
     await tick(root, '[data-build-pick="modelSets/Claude models"]');
     await click(root, '[data-build-next]');
-    expect(root.textContent).toContain('did not answer, so the conflicts cannot be shown yet');
-    machine.preview = { harnesses: [], refusal: 'no profile Ghost exists on this machine' };
+    expect(root.textContent).toContain('did not answer, so what it gives cannot be shown yet');
+    machine.preview = {
+      harnesses: [],
+      scope: { kind: 'scoped', scope: 'generic' },
+      refusal: 'no profile Ghost exists on this machine',
+    };
     await click(root, '[data-catalog-retry]');
     expect(text(root, '[data-catalog-note="refused"]')).toBe('no profile Ghost exists on this machine');
+    await click(root, '[data-disclosure-toggle="layers"]');
+    expect(text(root, '[data-catalog-section="conflicts"]')).toContain('Shown once the profile can be saved.');
+    expect(root.querySelector<HTMLButtonElement>('[data-build-next]')?.disabled).toBe(true);
+  });
+
+  it('P7: badges every base by scope, and refuses a Claude-and-Codex draft in one sentence until it is fixed', async () => {
+    const sentence =
+      "A profile can't be both Claude only and Codex only: profile Default is Claude only and profile Codex is Codex only.";
+    const catalog = studioCatalog({
+      profiles: profileCatalog([
+        ...profileCatalog().profiles,
+        profile('Codex', ['mcp/github'], { scope: { kind: 'scoped', scope: 'codex' } }),
+      ]),
+    });
+    const machine = scriptedMachine({
+      catalog,
+      preview: { harnesses: [stack('claude'), stack('codex')], scope: { kind: 'mixed', sentence }, refusal: sentence },
+    });
+    const root = await open(machine);
+    await click(root, '[data-profile-build]');
+    expect(text(root, '[data-build-base="Default"] [data-component-badges]')).toBe('Claude only');
+    expect(text(root, '[data-build-base="Codex"] [data-component-badges]')).toBe('Codex only');
+    await tick(root, '[data-build-base="Default"]');
+    await tick(root, '[data-build-base="Codex"]');
+    for (let step = 0; step < 6; step += 1) await click(root, '[data-build-next]');
+    expect(text(root, '[data-stepper-position]')).toBe('Step 7 of 8 · Review layers');
+    expect(text(root, '[data-catalog-note="refused"]')).toBe(sentence);
+    expect(root.querySelector('[data-build-scope]')).toBeNull();
     expect(root.querySelector<HTMLButtonElement>('[data-build-next]')?.disabled).toBe(true);
   });
 
@@ -321,7 +409,9 @@ describe('ProfilesTab — Build a profile and Edit layers (§4.5, E18, E19)', ()
   });
 
   it('edits a profile’s layers: itself and what includes it would include itself, and it saves under its name', async () => {
-    const machine = scriptedMachine({ preview: { harnesses: [stack('claude'), stack('codex')] } });
+    const machine = scriptedMachine({
+      preview: { harnesses: [stack('claude'), stack('codex')], scope: { kind: 'scoped', scope: 'generic' } },
+    });
     const root = await open(machine);
     await click(root, '[data-profile-row="Default"]');
     await click(root, '[data-profile-edit]');

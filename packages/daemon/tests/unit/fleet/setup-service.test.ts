@@ -321,7 +321,7 @@ describe('scan', () => {
     should(claude?.skills).deepEqual(['review']);
     should(claude?.secretKeys).deepEqual(['env.GITHUB_TOKEN']);
     should(JSON.stringify(scan)).not.containEql(SECRET_VALUE);
-    should(scan.runtimes).deepEqual([{ harness: 'claude', name: 'claude-default', profile: 'default' }]);
+    should(scan.runtimes).deepEqual([{ harness: 'claude', name: 'claude-default', profile: 'claude-default' }]);
     should(scan.updates).deepEqual([]);
     should(scan.duplicates).deepEqual([]);
     should(scan.importing).deepEqual({ available: true });
@@ -878,6 +878,18 @@ describe('parseImportRecord', () => {
       profile: 'default',
     });
     should(parseImportRecord(JSON.stringify({ version: 1, components: {} }))).deepEqual({ version: 1, components: {} });
+  });
+
+  it('should read the profile each harness got, keeping only a name per known harness (P7)', () => {
+    should(
+      parseImportRecord(
+        JSON.stringify({ version: 1, components: {}, profiles: { claude: 'claude-default', codex: 3, other: 'x' } }),
+      ),
+    ).deepEqual({ version: 1, components: {}, profiles: { claude: 'claude-default' } });
+    should(parseImportRecord(JSON.stringify({ version: 1, components: {}, profiles: { codex: 1 } }))).deepEqual({
+      version: 1,
+      components: {},
+    });
   });
 });
 

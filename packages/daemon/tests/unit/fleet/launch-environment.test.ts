@@ -55,6 +55,29 @@ const store = (entries: Record<string, string> = {}): LaunchSecretValues & { ope
 };
 
 describe('FleetLaunchEnvironment', () => {
+  it('should give an MCP sign-in its chance to refresh the secrets a launch is about to resolve, first', async () => {
+    // Arrange — the renewal writes a fresh value before the store is opened (docs/mcp-oauth.md).
+    const values: Record<string, string> = { MCP_X_ACCESS: 'stale-value' };
+    const asked: (readonly SecretName[])[] = [];
+    const subject = new FleetLaunchEnvironment(
+      inventory(account({ secretEnv: { FY_TOKEN: '${secret:MCP_X_ACCESS}', OTHER: 'a ${secret:MCP_X_ACCESS} b' } })),
+      { values: async () => new Map(Object.entries(values)) },
+      {
+        refreshForLaunch: async names => {
+          asked.push(names);
+          values.MCP_X_ACCESS = 'fresh-value';
+        },
+      },
+    );
+
+    // Act
+    const actual = await subject.forWrapper('/state/fleet/bin/claude-auto-kirin');
+
+    // Assert — asked once, with each name once, and the launch read what it wrote.
+    should(asked).deepEqual([['MCP_X_ACCESS']]);
+    should(actual).deepEqual({ FY_TOKEN: 'fresh-value', OTHER: 'a fresh-value b' });
+  });
+
   it('should resolve the account published at this executable, by the name it publishes', async () => {
     // Arrange
     const secrets = store({ WORK_KEY: 'fixture-value' });

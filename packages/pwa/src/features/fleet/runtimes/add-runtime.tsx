@@ -18,7 +18,8 @@ import type { ComponentType, ReactNode } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
-import { HARNESS_NAMES } from '../components/component-model.ts';
+import { ComponentBadges } from '../components/catalog-ui.tsx';
+import { HARNESS_NAMES, profileScopeBadge } from '../components/component-model.ts';
 import { ADD_LOGIN_FLOW_KIND, AddLoginStep, addLoginFlowInput } from '../credentials/add-login.tsx';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
 import { credentialEmail, HARNESSES, type HarnessKind, plural } from '../credentials/credentials-model.ts';
@@ -37,7 +38,7 @@ import {
 import type { MachineData } from './machine-data.ts';
 import {
   harnessInstalled,
-  profileFit,
+  profilesFitFirst,
   profileSummary,
   runtimeNameProblem,
   sameLoginAndProfile,
@@ -383,8 +384,7 @@ export function AddRuntime({
         ) : (
           <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
             <legend className="sr-only">Profile</legend>
-            {profiles.map(profile => {
-              const fit = profileFit(profile, harness);
+            {profilesFitFirst(profiles, harness).map(({ profile, fit }) => {
               return (
                 <Choice
                   key={profile.name}
@@ -395,21 +395,19 @@ export function AddRuntime({
                   title={profile.name}
                   sub={profileSummary(profile, harness)}
                   extra={
-                    fit.fits ? (
-                      fit.notes.length === 0 ? null : (
-                        <span className="flex flex-wrap gap-1">
-                          {fit.notes.map(note => (
-                            <Badge key={note} tone="warn" className="max-w-full !whitespace-normal">
-                              {note}
-                            </Badge>
-                          ))}
+                    <>
+                      <ComponentBadges
+                        badges={[
+                          profileScopeBadge(profile.scope),
+                          ...(fit.fits ? fit.notes.map(note => ({ text: note, tone: 'warn' as const })) : []),
+                        ]}
+                      />
+                      {fit.fits ? null : (
+                        <span className="text-cell text-warn" data-profile-unavailable="">
+                          {fit.reason}
                         </span>
-                      )
-                    ) : (
-                      <span className="text-cell text-warn" data-profile-unavailable="">
-                        {fit.reason}
-                      </span>
-                    )
+                      )}
+                    </>
                   }
                   data={{ 'data-add-runtime-profile': profile.name }}
                 />

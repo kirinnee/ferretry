@@ -11,15 +11,22 @@ import {
   AccountModelSchema,
   type ComponentKind,
   componentFilePath,
+  describeScopeConflict,
   freeName,
   HARNESS_DISPLAY_NAMES,
+  HARNESS_SCOPE_WORDS,
   type HarnessKind,
   isRuntimeName,
   looksSecret,
+  newlyMisfitRuntimes,
+  newlyMixedProfiles,
   parseSettings,
+  type ProfileScope,
+  profileScope,
   type SettingsObject,
   serializeSettings,
   resolveProfile,
+  scopeFits,
   type SettingsFormat,
   slugName,
 } from '@ferretry/fleet';
@@ -40,6 +47,8 @@ import {
   runtimesUsingCredential,
   runtimesUsingProfile,
 } from './catalog.ts';
+
+type MixedScope = Extract<ProfileScope, { kind: 'mixed' }>;
 
 /** A refusal the caller can act on, rather than a schema violation or a daemon defect. */
 export class FleetMutationRefusal extends Error {
@@ -253,6 +262,7 @@ function componentOf(
           ...(input.command === undefined ? {} : { command: input.command }),
           ...(input.args === undefined ? {} : { args: [...input.args] }),
           ...(input.url === undefined ? {} : { url: input.url }),
+          ...(input.auth === undefined ? {} : { auth: input.auth }),
           ...(env === undefined ? {} : { env }),
           ...harness,
         },
@@ -325,7 +335,18 @@ export function deriveAccountChange(
   if (!parsed.success) {
     refuse(`this change would leave the setup invalid: ${parsed.error.issues.map(issue => issue.message).join('; ')}`);
   }
-  return { model: (parsed as { data: AccountModel }).data, files, summary, consequences };
+  const next = (parsed as { data: AccountModel }).data;
+  // P7: no change may make a profile both Claude only and Codex only — not by its own layers (refused
+  // above, by name) and not by narrowing a component or editing a base it reaches.
+  const mixed = newlyMixedProfiles(model, next)[0];
+  if (mixed !== undefined) refuse(describeScopeConflict(profileScope(next, mixed) as MixedScope, mixed));
+  const misfit = newlyMisfitRuntimes(model, next)[0];
+  if (misfit !== undefined) {
+    refuse(
+      `Runtime ${misfit.runtime} uses a ${HARNESS_DISPLAY_NAMES[misfit.harness]} login, and this change would make its profile ${misfit.profile} ${HARNESS_SCOPE_WORDS[misfit.scope]}. Move it to another profile first.`,
+    );
+  }
+  return { model: next, files, summary, consequences };
 }
 
 function applyAccountChange(
@@ -455,6 +476,16 @@ function putRuntime(
   if (credential === undefined) return refuse(`no login ${change.credential} exists on this machine`);
   if (model.profiles[change.profile] === undefined)
     return refuse(`no profile ${change.profile} exists on this machine`);
+  // P7: a Claude-only profile never runs on a Codex login, nor the other way round. A profile mixed
+  // before P7 existed is refused only when a runtime is moved ONTO it.
+  const scope = profileScope(model, change.profile);
+  const moving = model.runtimes[change.name]?.profile !== change.profile;
+  if (scope.kind === 'scoped' && !scopeFits(scope.scope, credential.harness)) {
+    refuse(
+      `Profile ${change.profile} is ${HARNESS_SCOPE_WORDS[scope.scope]} and ${change.credential} is a ${HARNESS_DISPLAY_NAMES[credential.harness]} login. Pick a Generic or ${HARNESS_SCOPE_WORDS[credential.harness]} profile.`,
+    );
+  }
+  if (scope.kind === 'mixed' && moving) refuse(describeScopeConflict(scope, change.profile));
   // P5, E14: a profile with nothing for this login's harness launches nothing of the person's setup.
   const resolved = resolveProfile({ model, profile: change.profile, harness: credential.harness });
   if (resolved.ok && !resolved.resolved.availability.available) {

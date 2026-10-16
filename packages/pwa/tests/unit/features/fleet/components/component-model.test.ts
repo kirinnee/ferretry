@@ -11,6 +11,9 @@ import {
   draftProblem,
   listed,
   mcpCommandLine,
+  mcpDraftIsUrl,
+  profileScopeBadge,
+  profileScopeWord,
   profilesWithLayer,
   reuseLabel,
   settingsEntries,
@@ -34,18 +37,25 @@ import {
 const all = [instructions, github, notes, skills, claudeSettings, hooks, models];
 
 describe('componentBadges', () => {
-  it('says a generic component works in both harnesses and a harness one belongs to one', () => {
-    expect(componentBadges(instructions, 'studio-mac')).toEqual([{ text: 'Claude Code and Codex', tone: 'pend' }]);
-    expect(componentBadges(hooks, 'studio-mac')).toEqual([{ text: 'Claude Code only', tone: 'accent' }]);
+  it('leads with the scope the daemon derived: Generic quiet, one harness as the accent (P7)', () => {
+    expect(componentBadges(instructions, 'studio-mac')).toEqual([{ text: 'Generic', tone: 'pend' }]);
+    expect(componentBadges(hooks, 'studio-mac')).toEqual([{ text: 'Claude only', tone: 'accent' }]);
+    expect(componentBadges({ ...models, scope: 'codex' }, 'studio-mac')).toEqual([
+      { text: 'Codex only', tone: 'accent' },
+    ]);
+  });
+
+  it("words a profile's scope, and draws a mixed one as a warning", () => {
+    expect(profileScopeWord({ kind: 'scoped', scope: 'claude' })).toBe('Claude only');
+    expect(profileScopeWord({ kind: 'mixed', sentence: 'x' })).toBe('Mixed');
+    expect(profileScopeBadge({ kind: 'scoped', scope: 'generic' })).toEqual({ text: 'Generic', tone: 'pend' });
+    expect(profileScopeBadge({ kind: 'mixed', sentence: 'x' })).toEqual({ text: 'Mixed', tone: 'warn', warn: true });
   });
 
   it('adds partial support (E22), warnings (E8), a path to check (E30) and stored secrets (E7)', () => {
-    expect(componentBadges(skills, 'm').map(badge => badge.text)).toEqual([
-      'Claude Code and Codex',
-      'Partly supported on Codex',
-    ]);
+    expect(componentBadges(skills, 'm').map(badge => badge.text)).toEqual(['Generic', 'Partly supported on Codex']);
     expect(componentBadges(notes, 'work-linux')).toEqual([
-      { text: 'Claude Code and Codex', tone: 'pend' },
+      { text: 'Generic', tone: 'pend' },
       { text: 'Command not found: uvx', tone: 'warn', warn: true },
       { text: 'Check this path on work-linux', tone: 'warn', warn: true },
     ]);
@@ -209,6 +219,31 @@ describe('componentChange', () => {
     expect(
       changeOf(componentChange({ ...blankDraft('mcp'), name: 'one', body: 'serve' }, true), 'component.put').component,
     ).toEqual({ kind: 'mcp', command: 'serve' });
+  });
+
+  it('sends a web-address server that signs in with auth: oauth, and a command server never', () => {
+    const remote = component({
+      reference: 'mcp/linear',
+      kind: 'mcp',
+      name: 'linear',
+      detail: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth', env: [] },
+    });
+    const draft = draftFromComponent(remote);
+    expect(draft).toMatchObject({ body: 'https://mcp.linear.example/mcp', oauth: true });
+    expect(mcpDraftIsUrl(draft)).toBe(true);
+    expect(changeOf(valid(componentChange(draft, false)), 'component.put').component).toEqual({
+      kind: 'mcp',
+      url: 'https://mcp.linear.example/mcp',
+      auth: 'oauth',
+    });
+    expect(draftFromComponent(github).oauth).toBe(false);
+    const command = { ...draft, body: 'npx serve' };
+    expect(mcpDraftIsUrl(command)).toBe(false);
+    expect(changeOf(componentChange(command, false), 'component.put').component).toEqual({
+      kind: 'mcp',
+      command: 'npx',
+      args: ['serve'],
+    });
   });
 
   it('sends skills once each', () => {

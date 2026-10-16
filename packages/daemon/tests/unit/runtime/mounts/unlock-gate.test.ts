@@ -12,6 +12,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher } from '../../../../src/lib/api/socket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import { mcpOAuthRoutes, type McpOAuthSubsystem } from '../../../../src/lib/runtime/mounts/mcp-oauth.ts';
 import { securityRoutes } from '../../../../src/lib/runtime/mounts/security.ts';
 import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
 import { stepUpRoutes } from '../../../../src/lib/runtime/mounts/step-up.ts';
@@ -132,6 +133,21 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
   await grants.refresh();
   const terminals = new FakeTerminals();
   const control = new FakeSessionControl();
+  /** The MCP sign-in, recording every call that reached it — so "refused at the door" is a fact. */
+  const mcpCalls: string[] = [];
+  const mcp: McpOAuthSubsystem = {
+    connections: async () => (mcpCalls.push('connections'), []),
+    start: async component => {
+      mcpCalls.push(`start ${component}`);
+      throw new Error('not exercised');
+    },
+    complete: async flowId => {
+      mcpCalls.push(`complete ${flowId}`);
+      throw new Error('not exercised');
+    },
+    cancel: flowId => (mcpCalls.push(`cancel ${flowId}`), { flowId, cancelled: false }),
+    signOut: async component => (mcpCalls.push(`signOut ${component}`), { component, removed: false, revoked: false }),
+  };
   const credentials = {
     admin: 'admin-secret',
     warden: 'warden-secret',
@@ -141,6 +157,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     new ApiRouter([
       ...stepUpRoutes(service),
       ...securityRoutes(security),
+      ...mcpOAuthRoutes(mcp),
       ...terminalRoutes(terminals),
       ...sessionControlRoutes(control, { guard: grants, knownRoots: async () => [PROJECT] }),
     ]),
@@ -201,6 +218,7 @@ async function machine(initial: Partial<SecuritySettings> = {}) {
     upgrade,
     sockets,
     control,
+    mcpCalls,
   };
 }
 
@@ -516,5 +534,29 @@ describe('changing the settings from a device inside an unlock', () => {
 
     // Assert
     refusedAs(change, 401, UNLOCK_REQUIRED_CODE);
+  });
+});
+
+describe('the MCP sign-in behind the unlock (docs/mcp-oauth.md)', () => {
+  it('should refuse a remote device every MCP sign-in act until it unlocks, and never reach the service', async () => {
+    // Arrange — the phone is off this host (`loopback: false`), which is what a relayed caller always is.
+    const world = await machine();
+    const callback = json({ callback: 'https://pwa.example.test/oauth/mcp-callback/x?code=c&state=s' });
+
+    // Act
+    const blocked = [
+      await world.ask('GET', '/v1/fleet/mcp-auth'),
+      await world.ask('POST', '/v1/fleet/mcp-auth/linear', json({})),
+      await world.ask('POST', '/v1/fleet/mcp-auth/flows/f1', callback),
+      await world.ask('DELETE', '/v1/fleet/mcp-auth/flows/f1'),
+      await world.ask('DELETE', '/v1/fleet/mcp-auth/linear'),
+    ];
+    await world.unlock();
+    const signedOut = await world.ask('DELETE', '/v1/fleet/mcp-auth/linear');
+
+    // Assert
+    for (const response of blocked) refusedAs(response, 401, UNLOCK_REQUIRED_CODE);
+    should(signedOut.status).equal(200);
+    should(world.mcpCalls).deepEqual(['signOut linear']);
   });
 });

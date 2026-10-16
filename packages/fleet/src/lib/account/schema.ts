@@ -22,9 +22,16 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
+import { isLoopbackHost } from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
+
+/** A URL a bearer token may be sent to: HTTPS, or plain HTTP only to this machine. */
+const secureMcpUrl = (url: string): boolean => {
+  const parsed = new URL(url);
+  return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname));
+};
 
 const NonEmptyString = z.string().min(1);
 
@@ -187,6 +194,11 @@ export const McpComponentSchema = z
     args: z.array(z.string()).optional(),
     env: EnvSchema.optional(),
     url: z.url().optional(),
+    /**
+     * `oauth`: a server reached at `url` that is signed in to from Ferretry. The daemon keeps its tokens
+     * in the secret store and the runtime reads the access token by variable name (docs/mcp-oauth.md).
+     */
+    auth: z.literal('oauth').optional(),
     harness: HarnessKindSchema.optional(),
     ...CLONE_ORIGIN_SHAPE,
   })
@@ -207,6 +219,23 @@ export const McpComponentSchema = z
         message: '"args" and "env" start a command — a server reached at a "url" takes neither',
         input: server,
         path: [server.args === undefined ? 'env' : 'args'],
+      });
+    }
+    if (server.auth !== undefined && server.url === undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: '"auth" signs in to a server reached at a "url" — a server Ferretry starts has nothing to sign in to',
+        input: server,
+        path: ['auth'],
+      });
+    }
+    // A signed-in server is sent a bearer token on every launch: never over cleartext to another host.
+    if (server.auth !== undefined && server.url !== undefined && !secureMcpUrl(server.url)) {
+      ctx.issues.push({
+        code: 'custom',
+        message: '"auth" sends a token to this server, so its "url" must be https:// (plain http only on this machine)',
+        input: server,
+        path: ['url'],
       });
     }
   });

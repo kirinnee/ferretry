@@ -260,6 +260,26 @@ describe('AccountModelSchema', () => {
       should(actual).matchAny(new RegExp(`mcp\\.remote\\.${field}: "args" and "env" start a command`));
     });
 
+    it('should refuse auth on a server Ferretry starts, and accept it on one reached at a url', () => {
+      // Act
+      const started = withComponents({ mcp: { local: { command: 'npx', auth: 'oauth' } } });
+      const remote = withComponents({ mcp: { remote: { url: 'https://example.test/mcp', auth: 'oauth' } } });
+
+      // Assert
+      should(started).matchAny(/mcp\.local\.auth: "auth" signs in to a server reached at a "url"/);
+      should(remote).deepEqual([]);
+    });
+
+    it('should refuse auth on a server reached over plain HTTP on another host, and allow this machine', () => {
+      // Act
+      const cleartext = withComponents({ mcp: { remote: { url: 'http://mcp.example.com/mcp', auth: 'oauth' } } });
+      const local = withComponents({ mcp: { dev: { url: 'http://127.0.0.1:8080/mcp', auth: 'oauth' } } });
+
+      // Assert
+      should(cleartext).matchAny(/mcp\.remote\.url: "auth" sends a token to this server, so its "url" must be https/);
+      should(local).deepEqual([]);
+    });
+
     it('should refuse a skill item listed twice and an empty selection', () => {
       // Act
       const actual = withComponents({

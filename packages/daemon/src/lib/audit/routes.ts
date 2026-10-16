@@ -128,6 +128,36 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'flowId',
     detail: { action: 'sign-in-cancel' },
   },
+  // MCP sign-in (docs/mcp-oauth.md): the component NAME and the flow id, never an address or a token.
+  {
+    method: 'POST',
+    path: '/v1/fleet/mcp-auth/:component',
+    event: 'fleet.configured',
+    subject: 'component',
+    detail: { action: 'mcp-sign-in' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/fleet/mcp-auth/flows/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    responseNames: 'component',
+    detail: { action: 'mcp-sign-in-finish' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/fleet/mcp-auth/flows/:flowId',
+    event: 'fleet.configured',
+    subject: 'flowId',
+    detail: { action: 'mcp-sign-in-cancel' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/fleet/mcp-auth/:component',
+    event: 'fleet.configured',
+    subject: 'component',
+    detail: { action: 'mcp-sign-out' },
+  },
   {
     method: 'POST',
     path: '/v1/fleet/machine/tools/install',

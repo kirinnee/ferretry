@@ -20,6 +20,7 @@ const component = {
   reference: 'mcp/notes',
   kind: 'mcp',
   name: 'notes',
+  scope: 'generic',
   detail: {
     kind: 'mcp',
     command: 'uvx',
@@ -64,6 +65,7 @@ const profile = {
   usedBy: ['claude-default'],
   baseFor: [],
   wouldIncludeItself: ['default'],
+  scope: { kind: 'scoped', scope: 'claude' },
   harnesses: [stack],
   remove: { available: true },
 } satisfies FleetLayeredProfileView;
@@ -130,6 +132,12 @@ const cases: readonly SchemaCase[] = [
   { name: 'FleetComponentNameSchema', schema: catalog.FleetComponentNameSchema, value: 'main notes' },
   { name: 'FleetComponentKindSchema', schema: catalog.FleetComponentKindSchema, value: 'modelSets' },
   { name: 'FleetCatalogFormatSchema', schema: catalog.FleetCatalogFormatSchema, value: 'none' },
+  { name: 'FleetHarnessScopeSchema', schema: catalog.FleetHarnessScopeSchema, value: 'codex' },
+  {
+    name: 'FleetProfileScopeSchema',
+    schema: catalog.FleetProfileScopeSchema,
+    value: { kind: 'mixed', sentence: "Profile default can't be both Claude only and Codex only." },
+  },
   { name: 'FleetCatalogActSchema', schema: catalog.FleetCatalogActSchema, value: { available: true } },
   {
     name: 'FleetMachineToolSchema',
@@ -249,7 +257,11 @@ const cases: readonly SchemaCase[] = [
   {
     name: 'FleetProfileDraftViewSchema',
     schema: catalog.FleetProfileDraftViewSchema,
-    value: { harnesses: [stack], refusal: 'no profile ghost exists on this machine' },
+    value: {
+      harnesses: [stack],
+      scope: { kind: 'scoped', scope: 'generic' },
+      refusal: 'no profile ghost exists on this machine',
+    },
   },
 ];
 

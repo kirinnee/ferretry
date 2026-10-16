@@ -134,7 +134,11 @@ describe('the first run and Clone over real files', () => {
     });
     const model = parseAccountModel(Bun.YAML.parse(await readFile(path.join(studio.fleet, 'config.yaml'), 'utf8')));
     should(model.credentials['claude-you']).deepEqual({ harness: 'claude', store: 'host' });
-    should(model.runtimes['claude-default']).deepEqual({ credential: 'claude-you', profile: 'default', agent: true });
+    should(model.runtimes['claude-default']).deepEqual({
+      credential: 'claude-you',
+      profile: 'claude-default',
+      agent: true,
+    });
     should(await lstat(path.join(studio.fleet, 'bin', 'claude-default'))).be.ok();
     should(await lstat(path.join(studio.fleet, 'assets', 'skills', 'review', 'SKILL.md'))).be.ok();
 

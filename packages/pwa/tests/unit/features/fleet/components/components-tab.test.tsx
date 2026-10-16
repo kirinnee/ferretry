@@ -5,7 +5,7 @@ import { ComponentsSurface, ComponentsTab } from '../../../../../src/features/fl
 import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
-import { type Mounted, mount } from '../../../../support/dom.ts';
+import { type Mounted, mount, must } from '../../../../support/dom.ts';
 import {
   claudeSettings,
   component,
@@ -149,6 +149,53 @@ describe('ComponentsTab — a component’s page', () => {
     await click(root, '[data-catalog-back]');
     await toDetail(root, 'hooks', 'hooks/Format on save');
     expect(root.textContent).toContain('{"PostToolUse": []}');
+  });
+
+  it('reads instructions as Markdown — headings, lists, code — with no raw HTML, and View source shows the text', async () => {
+    const markdown = [
+      '# How we work',
+      '',
+      '- Small PRs.',
+      '- Run the tests.',
+      '',
+      '```sh',
+      'bun test',
+      '```',
+      '',
+      '<img src=x onerror="alert(1)"><script>alert(2)</script>',
+    ].join('\n');
+    const catalog = studioCatalog({
+      components: componentCatalog({
+        instructions: [
+          component({
+            ...instructions,
+            reference: 'instructions/Rich',
+            name: 'Rich',
+            content: { form: 'text', text: markdown, redacted: false },
+          }),
+        ],
+      }),
+    });
+    const root = await open(scriptedMachine({ catalog }));
+    await toDetail(root, 'instructions', 'instructions/Rich');
+    const rendered = must(root.querySelector('[data-component-rendered]'), 'rendered markdown');
+    expect(rendered.querySelector('h1')?.textContent).toBe('How we work');
+    expect([...rendered.querySelectorAll('li')].map(item => item.textContent)).toEqual([
+      'Small PRs.',
+      'Run the tests.',
+    ]);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('bun test');
+    expect(rendered.querySelector('img')).toBeNull();
+    expect(rendered.querySelector('script')).toBeNull();
+    expect(root.querySelector('[data-component-source]')).toBeNull();
+    expect(text(root, '[data-component-view-source]')).toBe('View source');
+
+    await click(root, '[data-component-view-source]');
+    expect(root.querySelector('[data-component-rendered]')).toBeNull();
+    expect(must(root.querySelector('[data-component-source]'), 'source').textContent).toBe(markdown);
+    expect(text(root, '[data-component-view-source]')).toBe('View formatted');
+    await click(root, '[data-component-view-source]');
+    expect(root.querySelector('[data-component-rendered] h1')).not.toBeNull();
   });
 
   it('says what it cannot show: an empty settings file, a hooks folder, unreadable text', async () => {
@@ -395,5 +442,69 @@ describe('ComponentsSurface — where a copy came from', () => {
     const root = mounted.container;
     await toDetail(root, 'mcp', 'mcp/copied');
     expect(root.textContent).toContain('Copied from Work laptop');
+  });
+});
+
+describe('ComponentsTab — a server that signs in with OAuth', () => {
+  const linear = component({
+    reference: 'mcp/linear',
+    kind: 'mcp',
+    name: 'linear',
+    detail: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth', env: [] },
+  });
+  const withLinear = () =>
+    scriptedMachine({ catalog: studioCatalog({ components: componentCatalog({ mcp: [linear] }) }) });
+
+  it('shows its address and where its sign-in stands, and no sign-in for a command server', async () => {
+    const root = await open(withLinear());
+    await toDetail(root, 'mcp', 'mcp/linear');
+    expect(root.querySelector('[data-catalog-section="Address"]')).not.toBeNull();
+    expect(text(root, '[data-catalog-section="mcp-sign-in"]')).toContain('Needs sign-in');
+    await click(root, '[data-catalog-back]');
+    await click(root, '[data-component-row="mcp/github"]');
+    expect(root.querySelector('[data-catalog-section="Command"]')).not.toBeNull();
+    expect(root.querySelector('[data-catalog-section="mcp-sign-in"]')).toBeNull();
+  });
+
+  it('keeps auth: oauth through an edit, and drops it when the switch is turned off', async () => {
+    const machine = withLinear();
+    const root = await open(machine);
+    await toDetail(root, 'mcp', 'mcp/linear');
+    await click(root, '[data-component-edit]');
+    const toggle = () => root.querySelector('[data-component-field="oauth"]');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    await submit(root);
+    expect(stagedChanges(machine)[0]).toMatchObject({
+      component: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth' },
+    });
+
+    await click(root, '[data-component-edit]');
+    await click(root, '[data-component-field="oauth"]');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    await submit(root);
+    expect(stagedChanges(machine)[1]).toEqual({
+      kind: 'component.put',
+      name: 'linear',
+      component: { kind: 'mcp', url: 'https://mcp.linear.example/mcp' },
+      create: false,
+    });
+  });
+
+  it('offers the switch on a new server only once it is a web address', async () => {
+    const machine = scriptedMachine();
+    const root = await open(machine);
+    await click(root, '[data-component-kind="mcp"]');
+    await click(root, '[data-component-new="mcp"]');
+    await type(root, '[data-component-field="name"]', 'linear');
+    await type(root, '[data-component-field="body"]', 'npx linear-mcp');
+    expect(root.querySelector('[data-component-field="oauth"]')).toBeNull();
+    await type(root, '[data-component-field="body"]', 'https://mcp.linear.example/mcp');
+    expect(root.textContent).toContain('Signs in with OAuth');
+    await click(root, '[data-component-field="oauth"]');
+    await submit(root);
+    expect(stagedChanges(machine)[0]).toMatchObject({
+      component: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth' },
+      create: true,
+    });
   });
 });

@@ -124,27 +124,28 @@ instructions", "settings", "MCP servers" and "skills" (§4.3).
 
 ### 3.3 Component
 
-| Rule | Statement                                                                                                                                                                                                                                                          |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| K1   | A component is **saved once and referenced**. Editing it changes every profile and runtime that uses it; the edit screen says how many and the button reads **Save for all** (E20). Running sessions keep the old version until restarted.                         |
-| K2   | Kinds and harness scope: **Instructions**, **MCP servers**, **Skills** are **generic**, adapted per harness by Ferretry (§8.3). **Settings** and **Hooks** belong to **one harness**. A **Model set** is named models plus a default.                              |
-| K3   | A generic component may be narrowed to one harness. The import does this when `CLAUDE.md` and `AGENTS.md` differ: "Claude instructions" and "Codex instructions" (E9).                                                                                             |
-| K4   | **Settings is where flags and environment live** (`env.LOG_LEVEL = debug`). There is no separate "flags" or "env" field anywhere. Secret values never sit in a component: they live in the secret store and the component holds a `${secret:NAME}` reference (E7). |
-| K5   | A generic component that one harness can only partly honour carries **Partly supported on _harness_** with the reason (E22).                                                                                                                                       |
-| K6   | A component can carry a **warning** that does not block saving it: "Command not found: uvx" (E8), "Check this path on _machine_" after a clone (E30). Editing the cause clears it.                                                                                 |
-| K7   | A component cannot be deleted while a profile has it as a layer. The block names those profiles and the runtimes behind them, and offers **Remove from those first** (E21).                                                                                        |
-| K8   | A model set's models are ids; the UI shows names. A model the runtime's credential cannot use is struck through as "Not available on this login", and the default falls back to the first available one, saying so (E23).                                          |
+| Rule | Statement                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| K1   | A component is **saved once and referenced**. Editing it changes every profile and runtime that uses it; the edit screen says how many and the button reads **Save for all** (E20). Running sessions keep the old version until restarted.                                                                                                                                                                                            |
+| K2   | Kinds and harness scope: **Instructions**, **MCP servers**, **Skills** are **generic**, adapted per harness by Ferretry (§8.3). **Settings** and **Hooks** belong to **one harness**. A **Model set** is named models plus a default.                                                                                                                                                                                                 |
+| K3   | A generic component may be narrowed to one harness. The import does this when `CLAUDE.md` and `AGENTS.md` differ: "Claude instructions" and "Codex instructions" (E9). Every component shows its **scope** — Generic, Claude only or Codex only — derived, never set: Settings and Hooks from their harness, a narrowed component from its narrowing, a model set from its model ids (one harness's ids only make it that harness's). |
+| K4   | **Settings is where flags and environment live** (`env.LOG_LEVEL = debug`). There is no separate "flags" or "env" field anywhere. Secret values never sit in a component: they live in the secret store and the component holds a `${secret:NAME}` reference (E7).                                                                                                                                                                    |
+| K5   | A generic component that one harness can only partly honour carries **Partly supported on _harness_** with the reason (E22).                                                                                                                                                                                                                                                                                                          |
+| K6   | A component can carry a **warning** that does not block saving it: "Command not found: uvx" (E8), "Check this path on _machine_" after a clone (E30). Editing the cause clears it.                                                                                                                                                                                                                                                    |
+| K7   | A component cannot be deleted while a profile has it as a layer. The block names those profiles and the runtimes behind them, and offers **Remove from those first** (E21).                                                                                                                                                                                                                                                           |
+| K8   | A model set's models are ids; the UI shows names. A model the runtime's credential cannot use is struck through as "Not available on this login", and the default falls back to the first available one, saying so (E23).                                                                                                                                                                                                             |
 
 ### 3.4 Profile
 
-| Rule | Statement                                                                                                                                                                                                          |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| P1   | A profile is an **ordered list of layers**, oldest first. A layer is a component or another profile (used as a base).                                                                                              |
-| P2   | **The newer layer always overrides the older.** The same component reached twice counts once, at its **newest** position.                                                                                          |
-| P3   | A profile can never include itself, directly or through a base. Bases that would are disabled with "Would include itself" (E19).                                                                                   |
-| P4   | A **conflict** is two layers setting one key (per harness) to different values. Profiles show them as "`key`: _new_ (from _layer_) overrides _old_ (from _layer_)" (E18). A conflict is information, not an error. |
-| P5   | A profile applies to a credential's harness by **skipping** the layers that belong to the other harness. A profile in which nothing applies is unavailable for that credential, with the reason (E14).             |
-| P6   | A profile used by a runtime cannot be deleted until each such runtime picks another profile; a profile used as a base must be removed from those profiles first. Its components stay saved (E21).                  |
+| Rule | Statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| P1   | A profile is an **ordered list of layers**, oldest first. A layer is a component or another profile (used as a base).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| P2   | **The newer layer always overrides the older.** The same component reached twice counts once, at its **newest** position.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| P3   | A profile can never include itself, directly or through a base. Bases that would are disabled with "Would include itself" (E19).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| P4   | A **conflict** is two layers setting one key (per harness) to different values. Profiles show them as "`key`: _new_ (from _layer_) overrides _old_ (from _layer_)" (E18). A conflict is information, not an error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| P5   | A profile applies to a credential's harness by **skipping** the layers that belong to the other harness. A profile in which nothing applies is unavailable for that credential, with the reason (E14). Since P7 only a profile written before it can hold the other harness's layers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| P6   | A profile used by a runtime cannot be deleted until each such runtime picks another profile; a profile used as a base must be removed from those profiles first. Its components stay saved (E21).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| P7   | A profile's **scope** is **Generic**, **Claude only** or **Codex only**, DERIVED from its layers and never set by hand (owner decision, 2026-10-16): the union of its layers' scopes (K3), a base profile counting as its own derived scope. Generic + Claude only is Claude only. **Claude only + Codex only is refused** — by the builder, the API and the CLI — in one sentence naming the two layers: "Profile _work_ can't be both Claude only and Codex only: settings _a_ is Claude only and settings _b_ is Codex only." A change that would make a profile mixed indirectly (narrowing a component, editing a base) or leave a runtime on a profile for the other harness is refused the same way. A runtime only takes a Generic profile or one of its login's harness. A profile mixed before P7 still reads and launches (P5 skips the other harness's layers), shows **Mixed** with that sentence, and cannot be saved until it is split. |
 
 How each kind merges when several layers carry it (the newer layer is "later"):
 
@@ -244,13 +245,13 @@ old Daemons section is merged in: each machine is ONE place, its connection and 
 Each machine has five views, drawn as underlined tabs in sentence case (they scroll sideways on a
 phone, keeping the current one centred):
 
-| Tab             | Shows                                                                                                                                                                                                                                                            | Primary action               |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| **Runtimes**    | each runtime: status shape, name, credential email (+ label), profile, default model, **Agent** badge; a missing-harness note with Install                                                                                                                       | **+ Add runtime**            |
-| **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars                                                                                                                | **+ Add a login**            |
-| **Profiles**    | name, layer count, "used by _n_ runtimes", "base for _n_ profiles"                                                                                                                                                                                               | **+ Build a new profile**    |
-| **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                                                                                                                                       | **+ New _kind_** (in a list) |
-| **Machine**     | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Connection and security (Warden, Secrets, devices, grants, Security, Security log, Carrier, Host checks…); About this machine | —                            |
+| Tab             | Shows                                                                                                                                                                                                                                                                                              | Primary action               |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| **Runtimes**    | each runtime: status shape, name, credential email (+ label), profile, default model, **Agent** badge; a missing-harness note with Install                                                                                                                                                         | **+ Add runtime**            |
+| **Credentials** | grouped by harness: email, label, "Shared with claude in your terminal", "Copied slot from _machine_", status, "Used by _n_ runtimes", usage bars                                                                                                                                                  | **+ Add a login**            |
+| **Profiles**    | each row leads with the name and a **scope badge** (Generic, Claude only, Codex only; Mixed for one written before P7) and ONE line, "Claude only · 4 parts · Used by 2 runtimes"; the layer stack, conflicts and per-harness detail open behind a tap (owner: the old tab was "VERY complicated") | **+ Build a new profile**    |
+| **Components**  | the six kinds with a one-line description and a count; each opens its list                                                                                                                                                                                                                         | **+ New _kind_** (in a list) |
+| **Machine**     | Agent permissions; Tools on _machine_ (installed + version, or Install); Setup (**Clone from another machine**, **Import again**); Connection and security (Warden, Secrets, devices, grants, Security, Security log, Carrier, Host checks…); About this machine                                   | —                            |
 
 Detail pages (one concept each):
 
@@ -288,9 +289,11 @@ claude-code`, `npm install -g @openai/codex`, …; §8.6), and, from a phone or 
    (`settings.json`, "6 settings, 1 hook"), MCP servers (names), Skills (names), with warnings
    inline. **Import** or **Skip** (Skip moves on; Back asks again). "Importing copies your setup into
    Ferretry. Claude Code on _machine_ keeps working as before." Import creates: the credential
-   (`store: host`, shared in place), one component per item found, and a **Default** profile that
-   matches the person's setup (or a plain **Starter** profile with only a model set when nothing was
-   found, E5). Because the login is shared in place, the screen says so in words: "Ferretry and your
+   (`store: host`, shared in place), one component per item found, and a **Default** profile FOR THIS
+   HARNESS that matches the person's setup — `claude-default`, Claude only: the generic parts plus
+   Claude's own, so Codex gets its own `codex-default` and no profile mixes the two (P7) — or a plain
+   **Starter** profile with only a model set when nothing was found (E5). An import made before P7
+   left ONE shared `default`; Import again keeps extending that one. Because the login is shared in place, the screen says so in words: "Ferretry and your
    own `claude` share this login: signing out in one signs out both." (the prototype shows the shorter
    badge "Shared with claude in your terminal" on the credential). The result screen lists "Login · _email_" and "Default profile · Now has your
    instructions, settings, 3 MCP servers and 5 skills", plus notes (E6–E9).
@@ -324,9 +327,10 @@ Four steps. The page title is "Add a runtime".
    "used by _n_ runtimes", and "isn't installed here" where true; then **+ Add a new login**. With no
    credentials the step is "Add a login first" with Sign in to Claude Code / Codex (E12). Picking a
    Needs-sign-in credential shows the sign-in panel inline and allows **Next, sign in later** (E13).
-2. **Profile.** "Which profile should it use with _email_ on _harness_?" Profiles that cannot apply
-   are disabled with the reason; mixed ones carry "Claude settings will be skipped on Codex" or
-   "Partly supported on Codex" (E14). Then **+ Build a new profile** (§4.5), which returns here with
+2. **Profile.** "Which profile should it use with _email_ on _harness_?" Each profile shows its scope
+   badge, and only Generic profiles and those of the login's harness can be picked (P7); one for the
+   other harness, or a Mixed one, is disabled with the reason. One that cannot apply is disabled the
+   same way, and one partly supported carries "Partly supported on Codex" (E14). Then **+ Build a new profile** (§4.5), which returns here with
    the new profile picked. A duplicate pair asks first (E15).
 3. **Name.** A summary row, **Runtime name** (validated, suggestion on clash, E16), and the checkbox
    **Ferretry launches this as an agent** — "Adds Ferretry's fixed layer last: no trust or onboarding
@@ -343,11 +347,13 @@ Name.**
   later wins** list and ↑/↓ to reorder. While editing, the profile itself and any profile that
   includes it are disabled ("Would include itself", E19).
 - **Instructions, MCP, Skills, Settings**: pick existing (multi-select), **Create new …** inline
-  ("Save and use it"), or **Skip, add no …**. Badges show harness scope, partial support and warnings.
+  ("Save and use it"), or **Skip, add no …**. Badges show scope (Generic, Claude only, Codex only),
+  partial support and warnings; base profiles carry their scope badge too.
 - **Model set**: single choice, or "No model set — use the one from a base layer, or the harness
   default".
-- **Review layers**: the stack newest on top and its **Conflicts** (E18). An empty stack cannot
-  continue.
+- **Review layers**: the stack newest on top, the scope it makes, and its **Conflicts** (E18). An
+  empty stack cannot continue, and neither can one that is both Claude only and Codex only: the step
+  says the P7 sentence naming the two layers.
 - **Name**: validated against existing profiles; when this stepper was opened from Add runtime, the
   hint says "You go back to choosing a profile, with this one picked." **Save profile** / **Save
   changes**.
@@ -429,22 +435,28 @@ components:
     claude-models: { models: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5], default: claude-opus-5-5 }
     codex-models: { models: [gpt-6], default: gpt-6 }
 
-profiles:
-  default:
+profiles: # one per harness (P7): the generic parts plus that harness's own
+  claude-default: # Claude only
     layers:
       - instructions/main
       - mcp/github
       - mcp/linear
       - skills/my-skills
       - settings/claude-settings
-      - settings/codex-settings
       - hooks/format-on-save
       - modelSets/claude-models
+  codex-default: # Codex only
+    layers:
+      - instructions/main
+      - mcp/github
+      - mcp/linear
+      - skills/my-skills
+      - settings/codex-settings
       - modelSets/codex-models
 
 runtimes:
-  claude-default: { credential: claude-you, profile: default, agent: true } # first-run runtimes are agents (O2)
-  codex-default: { credential: codex-you, profile: default, agent: true }
+  claude-default: { credential: claude-you, profile: claude-default, agent: true } # first-run runtimes are agents (O2)
+  codex-default: { credential: codex-you, profile: codex-default, agent: true }
 ```
 
 A layered agent profile and runtime from the prototype's set-up machine:
@@ -452,7 +464,7 @@ A layered agent profile and runtime from the prototype's set-up machine:
 ```yaml
 profiles:
   agent: { layers: [settings/agent-settings, modelSets/heavy] }
-  agent-work: { layers: [profile/default, profile/agent] } # newer layer (agent) wins
+  agent-work: { layers: [profile/claude-default, profile/agent] } # newer layer (agent) wins; Claude only
 runtimes:
   claude-agent: { credential: claude-you, profile: agent-work, agent: true }
 ```
@@ -546,7 +558,7 @@ takes `--dry-run` and `--yes`.
 | `fy credentials`                                                                                           | the Credentials tab, with status and usage                                                             |
 | `fy credential add claude\|codex [--label L] [--id <id>] [--no-sign-in]`                                   | Add a login (link + code, or device code)                                                              |
 | `fy credential check <id>` / `signin <id>` / `signout <id>` / `label <id> <L>` / `rm <id>`                 | Check now; sign in again; sign out (names every runtime, confirms); label; remove (refused while used) |
-| `fy profiles` / `fy profile show <name>`                                                                   | layers, conflicts, where used                                                                          |
+| `fy profiles` / `fy profile ls` / `fy profile show <name>`                                                 | scope (Generic, Claude only, Codex only), layers, conflicts, where used                                |
 | `fy profile build <name> --layer <kind>/<name>…` / `edit <name> --layer …` / `rm <name>`                   | Build / Edit layers / Delete (P6)                                                                      |
 | `fy components [<kind>]` / `fy component show\|add\|edit\|rm <kind>/<name>`                                | the Components tab                                                                                     |
 | `fy start --agent <runtime>`                                                                               | refused unless the runtime is an agent runtime                                                         |

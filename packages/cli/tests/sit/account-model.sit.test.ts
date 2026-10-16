@@ -13,11 +13,12 @@ import { afterAll, beforeAll, describe, it } from 'bun:test';
 import {
   type FleetAccountChange,
   FleetAccountChangeRequestSchema,
+  FleetLayeredProfileCatalogSchema,
   FleetProposalApplyRequestSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import pkg from '../../package.json' with { type: 'json' };
-import { CHANGE_ID, changeView, committed, credential, machine, runtime } from '../unit/fleet/account-fakes';
+import { CHANGE_ID, changeView, committed, credential, machine, profile, runtime } from '../unit/fleet/account-fakes';
 import { BinaryCliDriver, type CliDriver, type CliResult, InProcessCliDriver } from './driver';
 
 const binaryName = Object.keys(pkg.bin)[0] ?? pkg.name;
@@ -53,6 +54,16 @@ class FakeAccountDaemon {
         return Response.json({ format: 'version-2', runtimes: [runtime()] });
       case 'GET /v1/fleet/machine':
         return Response.json(machine());
+      case 'GET /v1/fleet/profiles':
+        return Response.json(
+          FleetLayeredProfileCatalogSchema.parse({
+            format: 'version-2',
+            profiles: [
+              profile({ name: 'claude-default', scope: { kind: 'scoped', scope: 'claude' } }),
+              profile({ name: 'shared', usedBy: [] }),
+            ],
+          }),
+        );
       case 'POST /v1/fleet/proposals': {
         const { change } = FleetAccountChangeRequestSchema.parse(await request.json());
         this.staged.push(change);
@@ -142,6 +153,14 @@ describe(`account model commands (SIT, ${useInProcess ? 'in-process' : 'compiled
     should(appliedBefore).equal(1);
     should(confirmed.code).equal(0, confirmed.err);
     should(daemon.applied).have.length(2);
+  });
+
+  it('should list profiles each with its scope through `profile ls`', async () => {
+    const listed = await cli(['profile', 'ls']);
+    should(listed.code).equal(0, listed.err);
+    should(listed.out)
+      .match(/claude-default {2}Claude only · 1 layer/)
+      .and.match(/shared {2}Generic · 1 layer/);
   });
 
   it('should exit non-zero when a check finds the login needs sign-in, naming the command', async () => {

@@ -49,6 +49,25 @@ import { GrantRefusalSchema } from './grants.ts';
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
 /**
+ * Which harnesses a component or a profile can be used with (§3.4 P7): both, or one. DERIVED by the
+ * daemon — a component from its harness or its model ids, a profile from the union of its layers —
+ * and never sent by a caller.
+ */
+export const FleetHarnessScopeSchema = z.enum(['generic', 'claude', 'codex']);
+export type FleetHarnessScope = z.infer<typeof FleetHarnessScopeSchema>;
+
+/**
+ * A profile's derived scope. `mixed` is a profile written before P7 that layers Claude-only and
+ * Codex-only parts together: it still reads and launches, but no change may create or keep one, and
+ * `sentence` names the layers that disagree.
+ */
+export const FleetProfileScopeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('scoped'), scope: FleetHarnessScopeSchema }),
+  z.strictObject({ kind: z.literal('mixed'), sentence: NonEmptyStringSchema }),
+]);
+export type FleetProfileScope = z.infer<typeof FleetProfileScopeSchema>;
+
+/**
  * A runtime's name or a credential's id as a person typed it. The grammar (R1) is checked by the
  * daemon rather than here, because a name it refuses comes back with a suggestion (E16).
  */
@@ -142,6 +161,8 @@ export const FleetComponentDetailSchema = z.discriminatedUnion('kind', [
     command: NonEmptyStringSchema.optional(),
     args: z.array(z.string()).readonly().optional(),
     url: NonEmptyStringSchema.optional(),
+    /** `oauth`: the server is signed in to from Ferretry (docs/mcp-oauth.md). */
+    auth: z.literal('oauth').optional(),
     env: z.array(FleetEnvEntrySchema).readonly(),
   }),
   z.strictObject({ kind: z.literal('skills'), items: z.array(NonEmptyStringSchema).readonly() }),
@@ -201,6 +222,8 @@ export const FleetComponentViewSchema = z.strictObject({
   name: NonEmptyStringSchema,
   /** The one harness it belongs to; absent for a generic component. */
   harness: HarnessKindSchema.optional(),
+  /** Generic, or the one harness it can be used with — for a model set, derived from its model ids. */
+  scope: FleetHarnessScopeSchema,
   detail: FleetComponentDetailSchema,
   partial: z.array(FleetPartialSupportSchema).readonly(),
   /** Notes that do not block saving (K6): "Command not found: uvx". */
@@ -277,6 +300,8 @@ export const FleetLayeredProfileViewSchema = z.strictObject({
   baseFor: z.array(NonEmptyStringSchema).readonly(),
   /** Profiles that cannot be a base of this one because they include it (P3, E19). */
   wouldIncludeItself: z.array(NonEmptyStringSchema).readonly(),
+  /** Generic, Claude only or Codex only, derived from its layers (P7). */
+  scope: FleetProfileScopeSchema,
   harnesses: z.array(FleetStackViewSchema).readonly(),
   /** Whether it can be deleted now (P6, E21), and which runtimes must pick another profile first. */
   remove: FleetCatalogActSchema,
@@ -305,6 +330,8 @@ export type FleetProfileDraftRequest = z.infer<typeof FleetProfileDraftRequestSc
 export const FleetProfileDraftViewSchema = z.strictObject({
   /** Claude Code, then Codex. */
   harnesses: z.array(FleetStackViewSchema).readonly(),
+  /** What the draft's layers make it (P7). A mixed draft also carries the same sentence as `refusal`. */
+  scope: FleetProfileScopeSchema,
   /** A layer that does not exist, or one that would include the profile itself. */
   refusal: NonEmptyStringSchema.optional(),
 });
@@ -408,6 +435,8 @@ export const FleetComponentInputSchema = z.discriminatedUnion('kind', [
     command: NonEmptyStringSchema.optional(),
     args: z.array(z.string()).optional(),
     url: NonEmptyStringSchema.optional(),
+    /** `oauth` on a `url` server: signed in to from Ferretry (docs/mcp-oauth.md). */
+    auth: z.literal('oauth').optional(),
     env: FleetEnvInputSchema.optional(),
     harness: HarnessKindSchema.optional(),
   }),

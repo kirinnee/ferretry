@@ -8,6 +8,7 @@ import {
   modelRows,
   modelSetNote,
   profileFit,
+  profilesFitFirst,
   profileSummary,
   runtimeDefaultModel,
   runtimeNameProblem,
@@ -97,6 +98,23 @@ describe('sameLoginAndProfile', () => {
 });
 
 describe('profileFit', () => {
+  it('P7: refuses a profile for the other tool, and a mixed one in its own sentence', () => {
+    expect(profileFit(profile({ name: 'C', scope: { kind: 'scoped', scope: 'codex' } }), 'claude')).toEqual({
+      fits: false,
+      reason: 'Codex only — this login is Claude Code',
+    });
+    expect(profileFit(profile({ name: 'C', scope: { kind: 'scoped', scope: 'codex' } }), 'codex')).toEqual({
+      fits: true,
+      notes: [],
+    });
+    expect(profileFit(profile({ name: 'M', scope: { kind: 'mixed', sentence: 'Profile M mixes.' } }), 'codex')).toEqual(
+      {
+        fits: false,
+        reason: 'Profile M mixes.',
+      },
+    );
+  });
+
   it('fits freely when the profile says nothing about the harness', () => {
     expect(profileFit(profile({ name: 'Bare', harnesses: [] }), 'codex')).toEqual({ fits: true, notes: [] });
   });
@@ -141,20 +159,33 @@ describe('profileFit', () => {
 });
 
 describe('profileSummary', () => {
-  it('counts layers and parts for the named harness', () => {
-    expect(profileSummary(profileNamed('Default'), 'codex')).toBe('4 layers · 3 parts');
-    expect(profileSummary(profileNamed('Default'), 'claude')).toBe('4 layers · 2 parts');
+  it('counts the parts for the named harness; the scope is the badge beside it', () => {
+    expect(profileSummary(profileNamed('Default'), 'codex')).toBe('3 parts');
+    expect(profileSummary(profileNamed('Default'), 'claude')).toBe('2 parts');
   });
 
   it('falls back to the first stack with no harness, or one the profile lacks', () => {
-    expect(profileSummary(profileNamed('Review'))).toBe('1 layer · 2 parts');
-    expect(profileSummary(profileNamed('Review'), undefined)).toBe('1 layer · 2 parts');
+    expect(profileSummary(profileNamed('Review'))).toBe('2 parts');
+    expect(profileSummary(profileNamed('Review'), undefined)).toBe('2 parts');
   });
 
-  it('says only the layers when the profile has no stack at all', () => {
+  it('says no parts when the profile has no stack at all', () => {
     expect(profileSummary(profile({ name: 'Bare', layers: ['profile/Default'], harnesses: [] }), 'claude')).toBe(
-      '1 layer',
+      '0 parts',
     );
+  });
+});
+
+describe('profilesFitFirst', () => {
+  it('puts what this login can use first, each group in the catalogue order', () => {
+    const codexOnly = profile({ name: 'Codex', scope: { kind: 'scoped', scope: 'codex' } });
+    const generic = profile({ name: 'Shared' });
+    const claudeOnly = profile({ name: 'Claude', scope: { kind: 'scoped', scope: 'claude' } });
+    expect(profilesFitFirst([codexOnly, generic, claudeOnly], 'claude').map(entry => entry.profile.name)).toEqual([
+      'Shared',
+      'Claude',
+      'Codex',
+    ]);
   });
 });
 

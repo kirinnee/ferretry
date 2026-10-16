@@ -13,12 +13,15 @@
 import type {
   FleetAccountChange,
   FleetComponentKind,
+  FleetComponentView,
   FleetLayerConflict,
   FleetLayeredProfileView,
+  FleetProfileScope,
   FleetRuntimeView,
   FleetStackView,
 } from '@ferretry/protocol';
 import { FleetComponentNameSchema } from '@ferretry/protocol';
+import { counted } from '../components/component-model.ts';
 import type { StepperFlowInput, StepperStep } from '../shell/stepper-model.ts';
 
 export const PROFILE_PREFIX = 'profile/';
@@ -69,6 +72,13 @@ export function partCount(profile: FleetLayeredProfileView): number {
   const stack = profile.harnesses[0];
   return stack === undefined ? 0 : stack.applied.length + stack.skipped.length;
 }
+
+/**
+ * The one line under a profile's name on the Profiles tab: how big it is and whether anything uses
+ * it — "4 parts · used by 2 runtimes". Its scope is the badge beside it; the layers are on its page.
+ */
+export const profileUseLine = (profile: FleetLayeredProfileView, runtimes: number): string =>
+  `${counted(partCount(profile), 'part')} · ${runtimes === 0 ? 'not used yet' : `used by ${counted(runtimes, 'runtime')}`}`;
 
 /** Every conflict across both harnesses, once each. */
 export function stackConflicts(stacks: readonly FleetStackView[]): readonly FleetLayerConflict[] {
@@ -210,3 +220,66 @@ export const profileChange = (draft: ProfileDraft, editing?: string): FleetAccou
   layers: [...draftLayers(draft)],
   create: editing === undefined,
 });
+
+// ── What a profile gives ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The stack a profile's summary reads: the one harness it is for, or — for a Generic or mixed one —
+ * every component either harness applies, once each, in the order they apply.
+ */
+function summaryLayers(scope: FleetProfileScope, stacks: readonly FleetStackView[]): readonly string[] {
+  const own = scope.kind === 'scoped' && scope.scope !== 'generic' ? scope.scope : undefined;
+  const read = own === undefined ? stacks : stacks.filter(stack => stack.harness === own);
+  return [...new Set(read.flatMap(stack => stack.applied))];
+}
+
+/**
+ * WHAT A PROFILE GIVES the agent, in words, before anything about how its layers combine — the owner
+ * found the layer stack "very complicated", so the page leads with this: "Instructions: Main
+ * instructions", "28 skills", "3 MCP servers", "11 settings", "1 hook", "Models: Claude models".
+ *
+ * Read from what the catalogue already answers: the components each harness applies, and each
+ * component's own detail. A kind the profile has none of says nothing.
+ */
+export function profileGives(
+  scope: FleetProfileScope,
+  stacks: readonly FleetStackView[],
+  components: readonly FleetComponentView[],
+): readonly string[] {
+  const applied = summaryLayers(scope, stacks).flatMap(reference => {
+    const found = components.find(component => component.reference === reference);
+    return found === undefined ? [] : [found];
+  });
+  const of = (kind: FleetComponentKind) => applied.filter(component => component.kind === kind);
+  const facts: string[] = [];
+  const instructions = of('instructions');
+  if (instructions.length > 0) facts.push(`Instructions: ${instructions.map(each => each.name).join(', ')}`);
+  const skills = new Set(of('skills').flatMap(each => (each.detail.kind === 'skills' ? each.detail.items : [])));
+  if (skills.size > 0) facts.push(counted(skills.size, 'skill'));
+  const servers = of('mcp').length;
+  if (servers > 0) facts.push(counted(servers, 'MCP server'));
+  const settings = of('settings').reduce((total, each) => {
+    const entries = each.content?.form === 'entries' ? each.content.entries.length : 0;
+    const flags = each.detail.kind === 'settings' ? (each.detail.flags?.length ?? 0) : 0;
+    return total + Math.max(entries + flags, 1);
+  }, 0);
+  if (settings > 0) facts.push(counted(settings, 'setting'));
+  const hooks = of('hooks').length;
+  if (hooks > 0) facts.push(counted(hooks, 'hook'));
+  const models = of('modelSets').at(-1);
+  if (models !== undefined) facts.push(`Models: ${models.name}`);
+  return facts;
+}
+
+/**
+ * "Built from": the profile's own parts by name, oldest first — "Default profile", "My skills",
+ * "Claude settings" — so a reader sees what it is made of without reading a stack.
+ */
+export function builtFrom(layers: readonly string[], components: readonly FleetComponentView[]): readonly string[] {
+  return layers.map(text => {
+    const layer = parseLayer(text);
+    if (layer === undefined) return text;
+    if (layer.kind === 'profile') return `${layer.name} profile`;
+    return components.find(component => component.reference === text)?.name ?? layer.name;
+  });
+}

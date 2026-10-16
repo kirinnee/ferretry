@@ -20,13 +20,32 @@ import {
   type FleetComponentView,
   type FleetEnvEntry,
   type FleetEnvInput,
+  type FleetHarnessScope,
   type FleetLayeredProfileView,
+  type FleetProfileScope,
 } from '@ferretry/protocol';
 import { cloneOriginName } from '../setup/clone-model.ts';
 
 export type CatalogHarness = 'claude' | 'codex';
 
 export const HARNESS_NAMES: Readonly<Record<CatalogHarness, string>> = { claude: 'Claude Code', codex: 'Codex' };
+
+/**
+ * A scope in words (§3.4 P7): what every badge on a component or a profile says. The ONE place the PWA
+ * spells them, so the Profiles tab, the builder, Add runtime and the Components tab can never disagree.
+ */
+export const SCOPE_WORDS: Readonly<Record<FleetHarnessScope, string>> = {
+  generic: 'Generic',
+  claude: 'Claude only',
+  codex: 'Codex only',
+};
+
+/** A profile written before P7 that layers Claude-only and Codex-only parts together. */
+const MIXED_WORD = 'Mixed';
+
+/** The scope a profile shows: its word, or "Mixed". */
+export const profileScopeWord = (scope: FleetProfileScope): string =>
+  scope.kind === 'mixed' ? MIXED_WORD : SCOPE_WORDS[scope.scope];
 
 /** The six kinds in the order the tab lists them (the prototype's TYPE_ORDER). */
 export const COMPONENT_KINDS: readonly FleetComponentKind[] = [
@@ -82,6 +101,16 @@ const storedSecrets = (env: readonly FleetEnvEntry[]): number =>
 const detailEnv = (component: FleetComponentView): readonly FleetEnvEntry[] =>
   component.detail.kind === 'mcp' || component.detail.kind === 'settings' ? component.detail.env : [];
 
+/** A scope's badge: Generic reads quiet, one harness reads as the accent it narrows to. */
+const scopeBadge = (scope: FleetHarnessScope): ComponentBadge => ({
+  text: SCOPE_WORDS[scope],
+  tone: scope === 'generic' ? 'pend' : 'accent',
+});
+
+/** A profile's scope badge; a mixed one is a warning. */
+export const profileScopeBadge = (scope: FleetProfileScope): ComponentBadge =>
+  scope.kind === 'mixed' ? { text: MIXED_WORD, tone: 'warn', warn: true } : scopeBadge(scope.scope);
+
 /**
  * The prototype's `compBadges`: harness scope, where a copy came from, partial support, warnings, a path
  * to check, stored secrets. `machineNames` is this browser's own label for each machine it paired, by
@@ -92,11 +121,7 @@ export function componentBadges(
   machineName: string,
   machineNames: ReadonlyMap<string, string> = new Map(),
 ): readonly ComponentBadge[] {
-  const badges: ComponentBadge[] = [
-    component.harness === undefined
-      ? { text: 'Claude Code and Codex', tone: 'pend' }
-      : { text: `${HARNESS_NAMES[component.harness]} only`, tone: 'accent' },
-  ];
+  const badges: ComponentBadge[] = [scopeBadge(component.scope)];
   const origin = cloneOriginName(component, machineNames);
   if (origin !== undefined) badges.push({ text: `Copied from ${origin}`, tone: 'pend' });
   for (const partial of component.partial)
@@ -150,6 +175,8 @@ export interface ComponentDraft {
   readonly redacted: boolean;
   /** Hooks read from a folder rather than one file: edited in that folder. */
   readonly directory: boolean;
+  /** An MCP server at a web address that signs in with OAuth (docs/mcp-oauth.md). Kept by an edit. */
+  readonly oauth: boolean;
 }
 
 export const blankDraft = (kind: FleetComponentKind): ComponentDraft => ({
@@ -163,6 +190,7 @@ export const blankDraft = (kind: FleetComponentKind): ComponentDraft => ({
   flags: [],
   redacted: false,
   directory: false,
+  oauth: false,
 });
 
 const QUOTE_NEEDED = /[\s"'\\]/u;
@@ -233,7 +261,12 @@ export function draftFromComponent(component: FleetComponentView): ComponentDraf
         directory: detail.kind === 'hooks' && detail.directory !== undefined,
       };
     case 'mcp':
-      return { ...base, body: mcpCommandLine(detail), keptEnv: detail.env.map(entry => entry.name) };
+      return {
+        ...base,
+        body: mcpCommandLine(detail),
+        keptEnv: detail.env.map(entry => entry.name),
+        oauth: detail.auth === 'oauth',
+      };
     case 'skills':
       return { ...base, body: detail.items.join('\n') };
     case 'settings': {
@@ -320,6 +353,9 @@ const withHarness = (harness: CatalogHarness | undefined) => (harness === undefi
 
 const URL_LINE = /^https?:\/\//iu;
 
+/** Whether an MCP draft names a server by its web address rather than a command: only those sign in. */
+export const mcpDraftIsUrl = (draft: Pick<ComponentDraft, 'body'>): boolean => URL_LINE.test(draft.body.trim());
+
 /** The ONE change a saved form asks for. Call only when {@link draftProblem} says nothing. */
 export function componentChange(draft: ComponentDraft, create: boolean): FleetAccountChange {
   const name = draft.name.trim();
@@ -340,7 +376,7 @@ export function componentChange(draft: ComponentDraft, create: boolean): FleetAc
       const line = draft.body.trim();
       const env = keepAll(draft.keptEnv);
       const target = URL_LINE.test(line)
-        ? { url: line }
+        ? { url: line, ...(draft.oauth ? { auth: 'oauth' as const } : {}) }
         : (([command, ...args]) => ({ command: command as string, ...(args.length === 0 ? {} : { args }) }))(
             splitCommandLine(line),
           );

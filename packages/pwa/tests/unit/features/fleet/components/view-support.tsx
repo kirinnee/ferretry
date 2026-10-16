@@ -25,6 +25,8 @@ export interface Machine {
   preview?: unknown;
   /** Answers the staging of a change; default is the staged change. */
   stage?: unknown;
+  /** Answers `GET /v1/fleet/mcp-auth`; absent answers that nothing is signed in. */
+  mcpSignIns?: unknown;
   /** Runs after a change is applied, before the next read. */
   onApply?: (machine: Machine) => void;
   readonly calls: Call[];
@@ -48,6 +50,7 @@ const machineFactory =
         '/v1/fleet/runtimes': catalog(() => machine.catalog.runtimes),
         '/v1/fleet/profiles/preview': () => machine.preview ?? new Error('unreachable'),
         '/v1/fleet/machine': machineAnswer(),
+        '/v1/fleet/mcp-auth': () => machine.mcpSignIns ?? { connections: [] },
         '/v1/fleet/proposals': (call: Call) =>
           machine.stage ?? { ...STAGED, change: (call.body as { change: unknown }).change },
         [APPLY_PATH]: () => {

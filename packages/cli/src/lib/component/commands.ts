@@ -106,6 +106,7 @@ export function componentInput(
         ...(command === undefined ? {} : { command }),
         ...(args === undefined ? {} : { args }),
         ...(url === undefined ? {} : { url }),
+        ...(was?.auth === undefined || url === undefined ? {} : { auth: was.auth }),
         ...(env === undefined ? {} : { env }),
         ...withHarness,
       };

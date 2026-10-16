@@ -177,6 +177,7 @@ describe('the catalogue wire client', () => {
           partial: [],
         },
       ],
+      scope: { kind: 'scoped', scope: 'generic' },
     } satisfies FleetProfileDraftView;
     const { client, calls } = clientFor(draft);
 

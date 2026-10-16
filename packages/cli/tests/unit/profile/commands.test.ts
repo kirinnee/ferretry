@@ -5,6 +5,7 @@ import { fakeWorld, profile, runCommand, stack } from '../fleet/account-fakes.ts
 
 const layered = profile({
   name: 'agent-work',
+  scope: { kind: 'scoped', scope: 'claude' },
   layers: ['profile/default', 'settings/agent'],
   usedBy: [],
   baseFor: ['later'],
@@ -28,8 +29,19 @@ const layered = profile({
 describe('profile renderings', () => {
   it('should list profiles with their layer and override counts', () => {
     const text = renderProfileList({ format: 'version-2', profiles: [profile(), layered] }, 'fz');
-    should(text).match(/^default {2}1 layer\n {2}Used by: claude-default/);
-    should(text).match(/agent-work {2}2 layers · 1 override\n {2}Used by: no runtime/);
+    should(text).match(/^default {2}Generic · 1 layer\n {2}Used by: claude-default/);
+    should(text).match(/agent-work {2}Claude only · 2 layers · 1 override\n {2}Used by: no runtime/);
+  });
+
+  it('should flag a profile mixed before P7 with the sentence naming its layers', () => {
+    const sentence =
+      "Profile default can't be both Claude only and Codex only: settings a is Claude only and settings b is Codex only.";
+    const mixed = profile({ scope: { kind: 'mixed', sentence } });
+    should(renderProfileList({ format: 'version-2', profiles: [mixed] }, 'fz')).match(
+      /^default {2}Mixed · 1 layer\n {2}Used by: claude-default\n {2}Profile default can't/,
+    );
+    should(renderProfile(mixed)).match(/^default {2}\(Mixed\)\n {2}Profile default can't/);
+    should(renderProfile(profile({ scope: { kind: 'scoped', scope: 'codex' } }))).match(/^default {2}\(Codex only\)/);
   });
 
   it('should say how to build the first profile', () => {
@@ -55,7 +67,17 @@ describe('registerProfileCommands', () => {
     await runCommand(registerProfileCommands, world, ['profiles', '--json']);
     await runCommand(registerProfileCommands, world, ['profile', 'show', 'default']);
     await runCommand(registerProfileCommands, world, ['profile', 'show', 'default', '--json']);
-    should(world.out.lines.map(line => line.text.slice(0, 7))).eql(['default', '{\n  "fo', 'default', '{\n  "na']);
+    await runCommand(registerProfileCommands, world, ['profile', 'ls']);
+    await runCommand(registerProfileCommands, world, ['profile', 'list', '--json']);
+    should(world.out.lines.map(line => line.text.slice(0, 7))).eql([
+      'default',
+      '{\n  "fo',
+      'default',
+      '{\n  "na',
+      'default',
+      '{\n  "fo',
+    ]);
+    should(world.out.lines[4]?.text).match(/^default {2}Generic · 1 layer/);
     await should(runCommand(registerProfileCommands, world, ['profile', 'show', 'nope'])).be.rejectedWith(
       /fz profiles/,
     );

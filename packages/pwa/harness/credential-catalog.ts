@@ -213,6 +213,7 @@ const RUNTIMES = {
     runtime({
       name: 'codex-default',
       harness: 'codex',
+      profile: 'Codex',
       credential: { id: 'codex', store: 'host', status: 'ready' },
       stack: stack('codex', {
         applied: ['instructions/Main instructions', 'mcp/github', 'mcp/linear', 'mcp/notes', 'skills/My skills'],

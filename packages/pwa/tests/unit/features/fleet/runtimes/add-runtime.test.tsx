@@ -385,8 +385,8 @@ describe('Add runtime: Profile', () => {
       row.getAttribute('data-add-runtime-profile'),
     );
     expect(names).toEqual(['Default', 'Claude hooks', 'Agent work', 'Review']);
-    expect(text(view.container, '[data-add-runtime-profile="Default"]')).toContain('4 layers · 2 parts');
-    expect(view.container.querySelector('[data-add-runtime-profile="Default"] [data-tone]')).toBeNull();
+    expect(text(view.container, '[data-add-runtime-profile="Default"]')).toContain('2 parts');
+    expect(view.container.querySelector('[data-add-runtime-profile="Default"] [data-tone="warn"]')).toBeNull();
     expect(view.container.querySelector('[data-profile-unavailable]')).toBeNull();
     const next = must(view.container.querySelector<HTMLButtonElement>('[data-step-next]'), 'next');
     expect(next.disabled).toBe(true);
@@ -423,9 +423,39 @@ describe('Add runtime: Profile', () => {
       'Claude settings will be skipped on Codex',
       'Partly supported on Codex',
     ]);
-    expect(text(view.container, '[data-add-runtime-profile="Default"]')).toContain('4 layers · 3 parts');
+    expect(text(view.container, '[data-add-runtime-profile="Default"]')).toContain('3 parts');
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
     expect(draftOf(view.container).profile).toBeNull();
+    await view.unmount();
+  });
+
+  it("P7: offers Generic and this login's own profiles first; the other tool's and a mixed one wait below, disabled, saying why", async () => {
+    const scoped: MachineData = {
+      ...DATA,
+      profiles: FleetLayeredProfileCatalogSchema.parse({
+        ...PROFILES,
+        profiles: [
+          profile({ name: 'Codex work', scope: { kind: 'scoped', scope: 'codex' } }),
+          profile({ name: 'Old mix', scope: { kind: 'mixed', sentence: "Profile Old mix can't be both." } }),
+          profile({ name: 'Claude work', scope: { kind: 'scoped', scope: 'claude' } }),
+        ],
+      }),
+    };
+    const view = await mountHost({ ...profileStep, data: scoped, draft: { credentialId: 'claude-personal' } });
+    const rows = [...view.container.querySelectorAll<HTMLElement>('[data-add-runtime-profile]')];
+    expect(rows.map(row => row.dataset.addRuntimeProfile)).toEqual(['Claude work', 'Codex work', 'Old mix']);
+    expect(text(view.container, '[data-add-runtime-profile="Claude work"]')).toContain('Claude only');
+    const codex = must(
+      view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Codex work"] input'),
+      'codex',
+    );
+    expect(codex.disabled).toBe(true);
+    expect(text(view.container, '[data-add-runtime-profile="Codex work"] [data-profile-unavailable]')).toBe(
+      'Codex only — this login is Claude Code',
+    );
+    expect(text(view.container, '[data-add-runtime-profile="Old mix"] [data-profile-unavailable]')).toBe(
+      "Profile Old mix can't be both.",
+    );
     await view.unmount();
   });
 

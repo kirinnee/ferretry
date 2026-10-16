@@ -10,6 +10,7 @@
 import type { FleetAccountChange, FleetComponentKind, FleetComponentView, FleetMachineView } from '@ferretry/protocol';
 import { Lock } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { Markdown } from '../../../components/markdown.tsx';
 import { useConnectionSnapshot } from '../../../lib/store.tsx';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { Button } from '../../../shell/primitives.tsx';
@@ -47,6 +48,8 @@ import {
   SECRET_REFERENCE,
 } from './component-model.ts';
 import { itemHref, useHashItem } from './machine-links.ts';
+import { signsInWithOAuth } from './mcp-sign-in-model.ts';
+import { McpSignInSection } from './mcp-sign-in-section.tsx';
 
 type Page =
   | { readonly kind: 'kinds' }
@@ -328,18 +331,55 @@ function Content({ component }: { component: FleetComponentView }) {
     default:
       if (detail.kind === 'hooks' && detail.directory !== undefined)
         return <Hint>These hooks come from a folder on this machine, so they are edited there.</Hint>;
-      return content?.form === 'text' ? (
-        <pre className="kt-panel m-0 max-h-[360px] overflow-auto whitespace-pre-wrap break-words p-panel font-mono text-cell text-fg">
-          {content.text}
-        </pre>
-      ) : (
-        <Hint>The text could not be read on this machine.</Hint>
-      );
+      if (content?.form !== 'text') return <Hint>The text could not be read on this machine.</Hint>;
+      return detail.kind === 'instructions' ? <MarkdownText text={content.text} /> : <SourceText text={content.text} />;
   }
 }
 
+/** A file's text exactly as written, escaped by React. */
+function SourceText({ text }: { text: string }) {
+  return (
+    <pre
+      className="kt-panel m-0 max-h-[360px] overflow-auto whitespace-pre-wrap break-words p-panel font-mono text-cell text-fg"
+      data-component-source=""
+    >
+      {text}
+    </pre>
+  );
+}
+
+/**
+ * Instructions are Markdown (`CLAUDE.md`, `AGENTS.md`), so they read as Markdown: headings, lists and
+ * code blocks, through the app's one renderer — the transcripts' — which never lets raw HTML from the
+ * file through and highlights fences under the app's Trusted Types policy. "View source" shows the
+ * text exactly as written.
+ */
+function MarkdownText({ text }: { text: string }) {
+  const [source, setSource] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <Button
+        type="button"
+        variant="ghost"
+        className="kt-btn--flush-start self-start"
+        data-component-view-source=""
+        onClick={() => setSource(!source)}
+      >
+        {source ? 'View formatted' : 'View source'}
+      </Button>
+      {source ? (
+        <SourceText text={text} />
+      ) : (
+        <div className="kt-panel max-h-[360px] min-w-0 overflow-auto p-panel" data-component-rendered="">
+          <Markdown text={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DetailPage(props: SharedProps & { component: FleetComponentView }) {
-  const { component, catalog, machineName, machineNames, open, onBack } = props;
+  const { component, catalog, machineName, machineNames, open, onBack, online, connection, createClient } = props;
   const [deleting, setDeleting] = useState(false);
   const layerIn = profilesWithLayer(component.reference, catalog.profiles.profiles);
   return (
@@ -386,9 +426,26 @@ function DetailPage(props: SharedProps & { component: FleetComponentView }) {
           </span>
         </CatalogNote>
       )}
-      <Section title={component.kind === 'mcp' ? 'Command' : 'Content'}>
+      <Section
+        title={
+          component.kind !== 'mcp'
+            ? 'Content'
+            : component.detail.kind === 'mcp' && component.detail.url !== undefined
+              ? 'Address'
+              : 'Command'
+        }
+      >
         <Content component={component} />
       </Section>
+      {signsInWithOAuth(component) ? (
+        <McpSignInSection
+          component={component}
+          machineName={machineName}
+          online={online}
+          connection={connection}
+          createClient={createClient}
+        />
+      ) : null}
       <Section title="Used by">
         <Prose>
           Used by {counted(component.usedBy.profiles.length, 'profile')} and{' '}
