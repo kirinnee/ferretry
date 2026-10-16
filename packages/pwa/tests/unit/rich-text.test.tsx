@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { Composer } from '../../src/components/composer.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { applyBlockShortcut, RichTextEditor, renderRichDocument } from '../../src/components/rich-text-editor.tsx';
@@ -35,6 +35,11 @@ const rendered = (markdown: string): HTMLElement => {
   renderRichDocument(root, markdown);
   return root;
 };
+
+// The editor and its tests place a document selection; a later suite must not start inside one.
+afterEach(() => {
+  document.getSelection()?.removeAllRanges();
+});
 
 describe('rich text round trip', () => {
   test('renders every block it knows and reads back the exact markdown', () => {
