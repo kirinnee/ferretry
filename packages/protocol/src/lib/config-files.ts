@@ -289,7 +289,17 @@ export const VOICE_POST_PROCESSORS = ['off', 'groq', 'cerebras', 'login'] as con
 export const VoicePostProcessorSchema = z.enum(VOICE_POST_PROCESSORS);
 export type VoicePostProcessor = z.infer<typeof VoicePostProcessorSchema>;
 
+/** The speech engines a device can use: Parakeet in the browser, or the browser's/phone's own recognition. */
+export const VOICE_ENGINES = ['parakeet', 'browser'] as const;
+export const VoiceEngineSchema = z.enum(VOICE_ENGINES);
+export type VoiceEngine = z.infer<typeof VoiceEngineSchema>;
+
 export const VoiceConfigSchema = z.strictObject({
+  /**
+   * The speech engine a device paired to this machine uses until that device picks its own (New machine
+   * setup's Voice step writes it). Transcription always runs ON the device; this only names the default.
+   */
+  defaultEngine: VoiceEngineSchema.optional(),
   postProcessing: z
     .strictObject({
       provider: VoicePostProcessorSchema.default('off'),

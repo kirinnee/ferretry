@@ -11,6 +11,13 @@
 import { z } from 'zod';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import type { FirstRunAnswers } from './first-run-model.ts';
+import {
+  type MachineSetupProgress,
+  type MachineSetupStepId,
+  type MachineSetupTaskId,
+  ONBOARDING_STEPS,
+  ONBOARDING_TASKS,
+} from './onboarding-model.ts';
 
 /** The one browser-storage key for setup progress. */
 export const SETUP_PROGRESS_KEY = 'fy-setup-progress-v1';
@@ -76,5 +83,57 @@ export const browserSetupStorage = (): Storage | null => {
     return window.localStorage;
   } catch {
     return null;
+  }
+};
+
+// ── New machine setup ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The browser-storage key for the New machine setup rail: which step is open, which were set or
+ * skipped, and fresh-or-clone. Step ids and those two words only — never a value from the machine.
+ */
+export const MACHINE_SETUP_PROGRESS_KEY = 'fy-onboarding-progress-v1';
+
+const StepState = z.enum(['done', 'skipped']);
+const MachineSetupProgressSchema = z.object({
+  at: z.enum(ONBOARDING_STEPS.map(step => step.id) as [MachineSetupStepId, ...MachineSetupStepId[]]),
+  states: z.partialRecord(z.enum(ONBOARDING_TASKS as [MachineSetupTaskId, ...MachineSetupTaskId[]]), StepState),
+  start: z.enum(['fresh', 'clone']),
+});
+const StoredMachineSetupSchema = z.record(z.string(), MachineSetupProgressSchema);
+
+/** What the rail is handed: what was kept, and how to keep more (`null` forgets it). */
+export interface MachineSetupProgressPort {
+  readonly saved: MachineSetupProgress | null;
+  readonly save: (progress: MachineSetupProgress | null) => void;
+}
+
+const readAllMachineSetup = (storage: Pick<Storage, 'getItem'>): Record<string, MachineSetupProgress> => {
+  try {
+    const parsed = StoredMachineSetupSchema.safeParse(JSON.parse(storage.getItem(MACHINE_SETUP_PROGRESS_KEY) ?? '{}'));
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+};
+
+export const readMachineSetupProgress = (
+  storage: Pick<Storage, 'getItem'>,
+  daemonId: DaemonId,
+): MachineSetupProgress | null => readAllMachineSetup(storage)[String(daemonId)] ?? null;
+
+export const writeMachineSetupProgress = (
+  storage: Pick<Storage, 'getItem' | 'setItem'>,
+  daemonId: DaemonId,
+  progress: MachineSetupProgress | null,
+): void => {
+  const { [String(daemonId)]: _previous, ...others } = readAllMachineSetup(storage);
+  try {
+    storage.setItem(
+      MACHINE_SETUP_PROGRESS_KEY,
+      JSON.stringify(progress === null ? others : { ...others, [daemonId]: progress }),
+    );
+  } catch {
+    // Full or blocked storage: the setup still works, it just starts at the top next time.
   }
 };

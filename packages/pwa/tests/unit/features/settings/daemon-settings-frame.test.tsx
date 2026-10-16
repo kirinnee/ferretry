@@ -42,6 +42,7 @@ const PRODUCTION_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [
   { id: 'resource-limits', label: 'Resource limits', description: 'CPU and RAM caps.', Surface: () => null },
   { id: 'doctor', label: 'Doctor', description: 'Programs this host needs.', Surface: () => null },
   { id: 'model-pricing', label: 'Model pricing', description: 'Model rates and provenance.', Surface: () => null },
+  { id: 'speedups', label: 'Speed-ups', description: 'Optional provider keys.', Surface: () => null },
   { id: 'security-log', label: 'Security log', description: 'Recent security events.', Surface: () => null },
   { id: 'files', label: 'Files', description: 'The YAML files this machine’s settings live in.', Surface: () => null },
   { id: 'learning', label: 'Learning', description: 'What new ferrets are taught.', Surface: () => null },
@@ -84,6 +85,7 @@ describe('daemon settings panel rail', () => {
       'resource-limits',
       'doctor',
       'model-pricing',
+      'speedups',
       'security-log',
       'files',
       'learning',
@@ -100,7 +102,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(13);
+    expect(glyphs).toHaveLength(14);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
@@ -172,7 +174,9 @@ describe('daemon settings panel list', () => {
       const section = must(view.container.querySelector<HTMLElement>('[data-daemon-settings-frame="alpha"]'), 'frame');
       expect(section.getAttribute('aria-labelledby')).toBe('daemon-settings-heading');
       expect(section.querySelector('#daemon-settings-heading')?.textContent).toBe('Connection and security');
-      expect(section.textContent).toContain('Shared by every browser paired to Alpha');
+      expect(section.textContent).toContain(
+        'This machine: shared by every device paired to Alpha. Appearance and behaviour stay on each device.',
+      );
       expect(section.querySelector('ul')?.getAttribute('aria-label')).toBe('Alpha connection and security');
       expect(section.querySelector('[data-daemon-panel-open]')).toBeNull();
 
@@ -229,7 +233,7 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'retired-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
-      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(13);
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(14);
     } finally {
       await view.unmount();
     }

@@ -100,5 +100,7 @@ installed iPhone/iPad Home Screen app cannot use it.
   platform, and inside the Nix build's pinned dependency hash), a 460 MB archive download and
   extraction on the daemon, an audio route plus its PWA dial and a `grants` capability for it. That is
   its own change, not part of this one.
-- **A machine-wide default** chosen during onboarding. The choice is per device today; onboarding can
-  render the exported `VoiceEngineChoice` (and `ParakeetInstallStep`) as its own step.
+- ~~A machine-wide default chosen during onboarding~~ — done: New machine setup's Voice step renders
+  `VoiceEngineChoice` and saves the choice as `voice.yaml`'s `defaultEngine`; a device that has not picked an
+  engine dictates with it until it picks its own. Settings › Dictation still shows the device's own choice
+  (none) rather than the machine default it is using.

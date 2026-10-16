@@ -1457,6 +1457,8 @@ function ImportedHistoryRoute({ connection }: DaemonPageProps) {
 /** One machine's full-screen first run: no app chrome, only its own stepper. */
 function MachineSetupRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
+  // The Voice step's clean-up choice is THIS device's dictation setting, the same one Settings › Dictation edits.
+  const dictation = useSttSettings(store.stt);
   const { connections } = useConnectionSnapshot();
   const { navigate } = useRouter();
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
@@ -1472,6 +1474,7 @@ function MachineSetupRoute({ connection }: DaemonPageProps) {
       createClient={createClient}
       onNavigate={navigate}
       storage={browserSetupStorage()}
+      voiceCleanup={dictation}
     />
   );
 }
