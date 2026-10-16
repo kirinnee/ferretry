@@ -321,6 +321,7 @@ export * from './pages/warden-page.tsx';
 export * from './pair-scan.ts';
 export * from './pairing.ts';
 export * from './pairing-invite.ts';
+export * from './pairing-unreachable.ts';
 export * from './pane-activity.ts';
 export * from './passkeys.ts';
 export * from './peer-message.ts';
