@@ -2,11 +2,20 @@ import { describe, expect, it } from 'bun:test';
 import {
   wardenAccountLabel,
   wardenAccountTitle,
-  wardenAnomalyCountLabel,
   wardenAnomalyDigest,
   wardenExhaustionLabel,
+  wardenNeedsYouCount,
+  wardenTriageLabel,
 } from '../../../src/features/warden/warden-status-model.ts';
-import { wardenAccount, wardenAnomaly, wardenFailover } from '../../support/warden.ts';
+import {
+  wardenAccount,
+  wardenAction,
+  wardenAnomaly,
+  wardenConfig,
+  wardenFailover,
+  wardenInvestigation,
+  wardenStatus,
+} from '../../support/warden.ts';
 
 describe('wardenExhaustionLabel', () => {
   it('says nothing at all while failover is healthy', () => {
@@ -76,40 +85,98 @@ describe('wardenAnomalyDigest', () => {
     expect(wardenAnomalyDigest([])).toEqual({ count: 0, clean: true, summary: '', detail: '' });
   });
 
-  it('names each anomaly by callsign, falling back to the session id', () => {
-    const digest = wardenAnomalyDigest([
+  it('should name each anomaly by a plain chip and callsign, falling back to the session id', () => {
+    // Arrange
+    const anomalies = [
       wardenAnomaly({ teammate: 'ms-98', sessionId: 'sess-1' }),
       wardenAnomaly({ kind: 'sus_thinking', sessionId: 'sess-2' }),
-    ]);
+    ];
 
-    expect(digest.detail).toBe('dead_monitor: Ms-98\nsus_thinking: sess-2');
+    // Act
+    const digest = wardenAnomalyDigest(anomalies);
+
+    // Assert
+    expect(digest.detail).toBe('pane lost: Ms-98\nlong think: sess-2');
   });
 
-  it('caps the glance at three kinds and counts the rest', () => {
-    const digest = wardenAnomalyDigest([
+  it('should cap the glance at three distinct chips and count the rest', () => {
+    // Arrange
+    const anomalies = [
       wardenAnomaly({ kind: 'dead_monitor' }),
       wardenAnomaly({ kind: 'sus_thinking' }),
       wardenAnomaly({ kind: 'sus_subprocess' }),
       wardenAnomaly({ kind: 'quota_reset_passed' }),
       wardenAnomaly({ kind: 'bootstrap_degraded' }),
-    ]);
+    ];
 
-    expect(digest.summary).toBe('dead_monitor, sus_thinking, sus_subprocess +2');
+    // Act
+    const digest = wardenAnomalyDigest(anomalies);
+
+    // Assert
+    expect(digest.summary).toBe('pane lost, long think, long command +2');
     expect(digest.count).toBe(5);
     expect(digest.clean).toBe(false);
   });
 
-  it('adds no overflow marker at exactly three', () => {
-    const digest = wardenAnomalyDigest([wardenAnomaly(), wardenAnomaly(), wardenAnomaly()]);
+  it('should say a repeated kind once and add no overflow marker', () => {
+    // Arrange
+    const anomalies = [wardenAnomaly(), wardenAnomaly(), wardenAnomaly()];
 
-    expect(digest.summary).toBe('dead_monitor, dead_monitor, dead_monitor');
+    // Act
+    const digest = wardenAnomalyDigest(anomalies);
+
+    // Assert
+    expect(digest.summary).toBe('pane lost');
+    expect(digest.count).toBe(3);
   });
 });
 
-describe('wardenAnomalyCountLabel', () => {
-  it('pluralises the count and states cleanliness positively', () => {
-    expect(wardenAnomalyCountLabel(0)).toBe('no anomalies');
-    expect(wardenAnomalyCountLabel(1)).toBe('1 anomaly');
-    expect(wardenAnomalyCountLabel(4)).toBe('4 anomalies');
+describe('wardenNeedsYouCount', () => {
+  it('should count held actions and flags nothing investigates or cleared, once per session', () => {
+    // Arrange
+    const status = wardenStatus({
+      anomalies: [
+        wardenAnomaly({ sessionId: 'flagged' }),
+        wardenAnomaly({ sessionId: 'investigated' }),
+        wardenAnomaly({ sessionId: 'blessed' }),
+        wardenAnomaly({ sessionId: 'held' }),
+      ],
+      investigations: [
+        wardenInvestigation({ targetSession: 'investigated', state: 'queued' }),
+        wardenInvestigation({ id: 'w2', targetSession: 'flagged', state: 'done' }),
+      ],
+      blessings: [{ sessionId: 'blessed', kinds: ['dead_monitor'], expiresAt: '2026-07-31T13:00:00.000Z', by: 'jev' }],
+      actions: [
+        wardenAction({ sessionId: 'held', action: 'stop', outcome: 'held' }),
+        wardenAction({ sessionId: 'done', outcome: 'done' }),
+      ],
+    });
+
+    // Act
+    const count = wardenNeedsYouCount(status);
+
+    // Assert
+    expect(count).toBe(2);
+  });
+});
+
+describe('wardenTriageLabel', () => {
+  it('should name the triage in effect, a cap fallback, or Off', () => {
+    // Arrange
+    const jev = wardenStatus({ config: wardenConfig({ triage: 'jev' }) });
+    const capped = wardenStatus({
+      triage: { configured: 'jev', effective: 'rules', reason: 'jev_cap' },
+    });
+    const investigationCapped = wardenStatus({
+      triage: { configured: 'llm', effective: 'rules', reason: 'investigation_cap' },
+    });
+    const off = wardenStatus({ config: wardenConfig({ enabled: false }) });
+    const disabled = wardenStatus({ triage: { configured: 'rules', effective: 'rules', reason: 'disabled' } });
+
+    // Act
+    const labels = [jev, capped, investigationCapped, off, disabled].map(wardenTriageLabel);
+
+    // Assert
+    expect(labels).toEqual(['Jev guard', 'Rules only (cap hit)', 'Rules only (cap hit)', 'Off', 'Off']);
   });
 });

@@ -577,9 +577,11 @@ describe('the mounted daemon surface', () => {
       1 + // an agent's rename: a new first name or task title
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
-      4; // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
+      4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
+      1; // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 6, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
+    // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
+    should(minima).deepEqual({ none: 6, authenticated: 8, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual(['POST /v1/agent/config', 'POST /v1/agent/tools', 'GET /v1/sessions/:sessionId/attach']);
@@ -811,6 +813,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/warden/verdicts',
       'GET /v1/warden/report',
       'POST /v1/warden/run',
+      'GET /v1/warden/attention',
+      'POST /v1/warden/investigate',
       'GET /v1/warden/config',
       'PATCH /v1/warden/config',
       // The operator reads: the history the daemon recorded, the screen the agent is looking at, and

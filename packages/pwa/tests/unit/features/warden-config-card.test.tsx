@@ -1,218 +1,401 @@
 import { describe, expect, it } from 'bun:test';
-import type { IFyApiClient, WardenConfigView, WardenStatusView } from '@ferretry/protocol';
 import {
-  editableWardenConfig,
+  SPEEDUPS_PATH,
+  type SpeedupsView,
+  type WardenConfig,
+  type WardenConfigPatch,
+  type WardenConfigView,
+} from '@ferretry/protocol';
+import { useState } from 'react';
+import type { ReactTestRenderer } from 'react-test-renderer';
+
+import {
+  jevKeyStatus,
   WardenConfigCard,
+  type WardenClientFactory,
   WardenConfigSurface,
-  wardenAccountHealth,
-  wardenConfigPatch,
 } from '../../../src/features/warden/warden-config-card.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
-import { wardenFailover, wardenStatus } from '../../support/warden.ts';
+import { wardenConfig, wardenFailover, wardenStatus } from '../../support/warden.ts';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
-const view = (agent = 'claude-auto-loge'): WardenConfigView => ({
-  config: { ...wardenStatus().config, accounts: [{ agent }] },
-  accounts: [{ agent }],
-  warnings: ['Account order is applied on the next sweep.'],
+
+const view = (config: WardenConfig = wardenConfig(), warnings: string[] = []): WardenConfigView => ({
+  config,
+  accounts: config.accounts,
+  warnings,
+});
+
+const speedups = (set: boolean, vault: SpeedupsView['vault'] = 'ok'): SpeedupsView => ({
+  vault,
+  providers: [
+    {
+      provider: 'jev',
+      label: 'Jev',
+      purpose: 'Triage.',
+      costNote: 'Cheap.',
+      privacyNote: 'A summary.',
+      keyUrl: 'https://keys.example.test/',
+      testNote: 'One decision.',
+      secretName: 'JEV_API_KEY',
+      set,
+      testStale: false,
+    },
+  ],
+});
+
+const json = (renderer: ReactTestRenderer): string => JSON.stringify(renderer.toJSON());
+
+const button = (renderer: ReactTestRenderer, label: string) => {
+  const found = renderer.root.findAll(node => node.type === 'button' && node.children.join('') === label)[0];
+  if (found === undefined) throw new Error(`no ${label} button`);
+  return found;
+};
+
+const settle = async (): Promise<void> => {
+  await runAsync(async () => {
+    for (let index = 0; index < 6; index += 1) await Promise.resolve();
+  });
+};
+
+/** A config whose next state the test can drive by setting one field. */
+const turnOff = (renderer: ReactTestRenderer): void => {
+  run(() => renderer.root.findByProps({ role: 'switch' }).props.onClick());
+};
+
+describe('jevKeyStatus', () => {
+  it('should never call an unread or damaged store "missing"', () => {
+    // Arrange + Act + Assert
+    expect(jevKeyStatus(null)).toEqual({ state: 'unknown' });
+    expect(jevKeyStatus({ vault: 'ok', providers: [] })).toEqual({ state: 'unknown' });
+    expect(jevKeyStatus(speedups(false, 'damaged'))).toEqual({
+      state: 'unknown',
+      keyUrl: 'https://keys.example.test/',
+    });
+    expect(jevKeyStatus(speedups(true))).toEqual({ state: 'set', keyUrl: 'https://keys.example.test/' });
+    expect(jevKeyStatus(speedups(false))).toEqual({ state: 'missing', keyUrl: 'https://keys.example.test/' });
+  });
 });
 
 describe('WardenConfigCard', () => {
-  it('preserves account health, ordering and the live failover patch', () => {
-    const saved: unknown[] = [];
-    const renderer = render(
+  function Harness({
+    base,
+    saves,
+    saving,
+    error,
+    saved,
+  }: {
+    readonly base: WardenConfigView;
+    readonly saves: WardenConfigPatch[];
+    readonly saving?: boolean;
+    readonly error?: string | null;
+    readonly saved?: boolean;
+  }) {
+    const [draft, setDraft] = useState(base.config);
+    return (
       <WardenConfigCard
+        view={base}
+        draft={draft}
+        onChange={setDraft}
+        jevKey={{ state: 'set' }}
+        onSave={patch => saves.push(patch)}
+        {...(saving === undefined ? {} : { saving })}
+        {...(error === undefined ? {} : { error })}
+        {...(saved === undefined ? {} : { saved })}
+      />
+    );
+  }
+
+  it('should save only what changed, and discard back to the daemon’s settings', () => {
+    // Arrange
+    const saves: WardenConfigPatch[] = [];
+    const renderer = render(<Harness base={view()} saves={saves} />);
+    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    expect(json(renderer)).not.toContain('Discard changes');
+
+    // Act
+    turnOff(renderer);
+    run(() => button(renderer, 'Save').props.onClick());
+    run(() => button(renderer, 'Discard changes').props.onClick());
+
+    // Assert
+    expect(saves).toEqual([{ enabled: false }]);
+    expect(renderer.root.findByProps({ role: 'switch' }).props['aria-checked']).toBe(true);
+    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    run(() => renderer.unmount());
+  });
+
+  it('should refuse to save settings with an error in them', () => {
+    // Arrange
+    const renderer = render(<Harness base={view(wardenConfig({ triage: 'llm', maxAssignedWardens: 9 }))} saves={[]} />);
+
+    // Act
+    turnOff(renderer);
+
+    // Assert
+    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    run(() => renderer.unmount());
+  });
+
+  it('should show saving, the saved note, an error and the daemon’s warnings verbatim', () => {
+    // Arrange + Act
+    const saving = render(<Harness base={view()} saves={[]} saving />);
+    turnOff(saving);
+    const saved = render(<Harness base={view(wardenConfig(), ['Loosened: confirm on the host.'])} saves={[]} saved />);
+    const failed = render(<Harness base={view()} saves={[]} saved error="save refused" />);
+
+    // Assert
+    expect(json(saving)).toContain('Saving…');
+    expect(json(saving)).not.toContain('Discard changes');
+    expect(json(saved)).toContain('Saved — in effect now.');
+    expect(json(saved)).toContain('Loosened: confirm on the host.');
+    expect(json(failed)).toContain('save refused');
+    expect(json(failed)).not.toContain('Saved — in effect now.');
+    for (const renderer of [saving, saved, failed]) run(() => renderer.unmount());
+  });
+});
+
+type Client = Awaited<ReturnType<WardenClientFactory>>;
+
+const client = (overrides: Partial<Client> = {}): Client => ({
+  wardenConfig: async () => view(wardenConfig({ triage: 'llm' })),
+  wardenStatus: async () =>
+    wardenStatus({ failover: wardenFailover({ accounts: [{ agent: 'codex-auto-terra', eligible: true }] }) }),
+  updateWardenConfig: async patch => view(wardenConfig({ ...patch } as Partial<WardenConfig>)),
+  request: (async (path: string) => {
+    if (path !== SPEEDUPS_PATH) throw new Error(`unexpected ${path}`);
+    return speedups(false);
+  }) as Client['request'],
+  ...overrides,
+});
+
+describe('WardenConfigSurface', () => {
+  it('should load the settings, the key status and the logins the daemon knows', async () => {
+    // Arrange + Act
+    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => client()} />);
+    await settle();
+
+    // Assert
+    expect(json(renderer)).toContain('codex-auto-terra');
+    const link = renderer.root.findAll(node => node.type === 'a' && node.props.href === '/d/a/settings#speedups');
+    expect(link).toHaveLength(0);
+    run(() => renderer.root.findByProps({ role: 'switch' }).props.onClick());
+    run(() => renderer.unmount());
+  });
+
+  it('should link the missing Jev key to Speed-ups through the router', async () => {
+    // Arrange
+    const navigated: string[] = [];
+    const renderer = render(
+      <WardenConfigSurface
         connection={connection('a')}
-        view={view()}
-        failover={wardenFailover()}
-        availableAccounts={[{ agent: 'codex-auto-terra' }]}
-        onSave={patch => {
-          saved.push(patch);
-        }}
+        createClient={async () => client({ wardenConfig: async () => view(wardenConfig({ triage: 'jev' })) })}
+        onNavigate={to => navigated.push(to)}
       />,
     );
+    await settle();
 
-    run(() =>
-      renderer.root
-        .findByProps({ 'aria-label': 'Add warden account' })
-        .props.onChange({ target: { value: 'codex-auto-terra' } }),
-    );
-    run(() => renderer.root.findByProps({ 'aria-label': 'Add selected warden account' }).props.onClick());
-    run(() => renderer.root.findByProps({ 'aria-label': 'Move codex-auto-terra up' }).props.onClick());
-    run(() =>
-      renderer.root
-        .findByProps({ 'aria-label': 'Enable LLM escalation' })
-        .props.onChange({ target: { checked: false } }),
-    );
-    run(() => {
-      const save = renderer.root.findAllByType('button').find(button => button.children.join('') === 'Save');
-      if (!save) throw new Error('Save button is missing');
-      save.props.onClick();
-    });
+    // Act
+    const link = renderer.root.find(node => node.type === 'a' && String(node.props.href).endsWith('#speedups'));
+    run(() => link.props.onClick({ button: 0, preventDefault: () => {} }));
 
-    expect(saved).toEqual([
-      {
-        enabled: false,
-        accounts: [{ agent: 'codex-auto-terra' }, { agent: 'claude-auto-loge' }],
-        failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-      },
-    ]);
-    expect(renderer.root.findByProps({ 'data-testid': 'warden-config-card' }).type).toBe('section');
+    // Assert
+    expect(json(renderer)).toContain('needs Jev key');
+    expect(navigated).toEqual([link.props.href]);
+    run(() => renderer.unmount());
   });
 
-  it('keeps view-derived helpers safe for missing or rejected health', () => {
-    expect(editableWardenConfig(view()).accounts).toEqual([{ agent: 'claude-auto-loge' }]);
-    expect(
-      wardenConfigPatch({
-        enabled: true,
-        accounts: [{ agent: 'a' }],
-        policy: 'fallback',
-        failureThreshold: 0,
-        cooldownMinutes: Number.NaN,
-      }),
-    ).toEqual({
-      enabled: true,
-      accounts: [{ agent: 'a' }],
-      failover: { policy: 'fallback', failureThreshold: 1, cooldownMinutes: 1 },
-    });
-    expect(wardenAccountHealth({ agent: 'absent' }, undefined)).toEqual({ label: 'health unknown', tone: 'muted' });
-    expect(
-      wardenAccountHealth(
-        { agent: 'claude-auto-loge' },
-        wardenFailover({ accounts: [{ agent: 'claude-auto-loge', eligible: false, reason: 'at limit' }] }),
-      ),
-    ).toEqual({ label: 'at limit', tone: 'warn' });
-  });
-
-  it('removes an account without leaving a stale entry in the draft', () => {
+  it('should call the key unknown and offer no logins when those reads fail', async () => {
+    // Arrange + Act
     const renderer = render(
-      <WardenConfigCard
+      <WardenConfigSurface
         connection={connection('a')}
-        view={view()}
-        availableAccounts={[{ agent: 'codex-auto-terra' }]}
-        onSave={() => {}}
+        createClient={async () =>
+          client({
+            wardenConfig: async () => view(wardenConfig({ triage: 'jev' })),
+            wardenStatus: async () => Promise.reject(new Error('no status')),
+            request: (async () => Promise.reject(new Error('no speedups'))) as Client['request'],
+          })
+        }
       />,
     );
+    await settle();
 
-    run(() =>
-      renderer.root
-        .findByProps({ 'aria-label': 'Add warden account' })
-        .props.onChange({ target: { value: 'codex-auto-terra' } }),
-    );
-    run(() => renderer.root.findByProps({ 'aria-label': 'Add selected warden account' }).props.onClick());
-    run(() => renderer.root.findByProps({ 'aria-label': 'Remove codex-auto-terra' }).props.onClick());
-
-    expect(renderer.root.findByProps({ 'aria-label': 'Warden accounts' }).children).toHaveLength(1);
-    expect(renderer.root.findByProps({ 'aria-label': 'Remove claude-auto-loge' }).props.disabled).toBe(true);
+    // Assert
+    expect(json(renderer)).toContain('key status unknown');
+    expect(json(renderer)).not.toContain('codex-auto-terra');
+    run(() => renderer.unmount());
   });
 
-  it("drops a late daemon response instead of showing another daemon's configuration", async () => {
+  it('should hide an unreadable daemon by default and say so in Settings', async () => {
+    // Arrange
+    const failing: WardenClientFactory = async () => Promise.reject(new Error('older daemon'));
+
+    // Act
+    const hidden = render(<WardenConfigSurface connection={connection('a')} createClient={failing} />);
+    const message = render(
+      <WardenConfigSurface connection={connection('a')} createClient={failing} unavailable="message" />,
+    );
+    await settle();
+
+    // Assert
+    expect(hidden.toJSON()).toBeNull();
+    expect(json(message)).toContain('Warden settings unavailable');
+    for (const renderer of [hidden, message]) run(() => renderer.unmount());
+  });
+
+  it("should drop a late answer instead of showing another daemon's settings", async () => {
+    // Arrange
     let releaseA: ((value: WardenConfigView) => void) | undefined;
-    const client = (
-      response: Promise<WardenConfigView>,
-    ): Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig'> => ({
-      wardenConfig: () => response,
-      wardenStatus: async () => wardenStatus() as WardenStatusView,
-      updateWardenConfig: async () => view(),
-    });
     const lateA = new Promise<WardenConfigView>(resolve => {
       releaseA = resolve;
     });
-    const createClient = (active: ReturnType<typeof connection>) =>
-      Promise.resolve(active.daemonId === 'a' ? client(lateA) : client(Promise.resolve(view('codex-auto-terra'))));
+    const createClient: WardenClientFactory = async active =>
+      active.daemonId === 'a'
+        ? client({ wardenConfig: () => lateA })
+        : client({
+            wardenConfig: async () => view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] })),
+          });
     const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={createClient} />);
+
+    // Act
     run(() => renderer.update(<WardenConfigSurface connection={connection('b')} createClient={createClient} />));
+    await settle();
     await runAsync(async () => {
-      if (!releaseA) throw new Error('daemon A request did not begin');
-      releaseA(view('claude-auto-loge'));
+      releaseA?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })));
       await Promise.resolve();
     });
-    await runAsync(async () => {
-      await Promise.resolve();
-    });
+    await settle();
 
-    expect(JSON.stringify(renderer.toJSON())).toContain('codex-auto-terra');
-    expect(JSON.stringify(renderer.toJSON())).not.toContain('claude-auto-loge');
+    // Assert
+    expect(json(renderer)).toContain('claude-auto-beta');
+    expect(json(renderer)).not.toContain('claude-auto-alpha');
+    run(() => renderer.unmount());
   });
 
-  it('loads and saves only through the paired daemon client', async () => {
-    const updateCalls: unknown[] = [];
-    const nextView = view('codex-auto-terra');
-    const client: Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig'> = {
-      wardenConfig: async () => view(),
-      wardenStatus: async () => wardenStatus() as WardenStatusView,
-      updateWardenConfig: async patch => {
-        updateCalls.push(patch);
-        return nextView;
-      },
-    };
-    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => client} />);
-    await runAsync(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    run(() =>
-      renderer.root
-        .findByProps({ 'aria-label': 'Enable LLM escalation' })
-        .props.onChange({ target: { checked: false } }),
-    );
-    const save = renderer.root.findAllByType('button').find(button => button.children.join('') === 'Save');
-    if (!save) throw new Error('Save button is missing');
-    await runAsync(async () => {
-      save.props.onClick();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(updateCalls).toEqual([
-      {
-        enabled: false,
-        accounts: [{ agent: 'claude-auto-loge' }],
-        failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-      },
-    ]);
-    expect(JSON.stringify(renderer.toJSON())).toContain('Saved — the next sweep uses this configuration.');
-  });
-
-  it('hides an unavailable editor and reports a save rejection in the rendered card', async () => {
-    const unavailable = render(
+  it('should save the change, then edit from the daemon’s answer', async () => {
+    // Arrange
+    const patches: WardenConfigPatch[] = [];
+    const renderer = render(
       <WardenConfigSurface
         connection={connection('a')}
-        createClient={async () => Promise.reject(new Error('older daemon'))}
+        createClient={async () =>
+          client({
+            updateWardenConfig: async patch => {
+              patches.push(patch);
+              return view(wardenConfig({ enabled: false }), ['Noted.']);
+            },
+          })
+        }
       />,
     );
-    await runAsync(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(unavailable.toJSON()).toBeNull();
+    await settle();
 
-    const client: Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig'> = {
-      wardenConfig: async () => view(),
-      wardenStatus: async () => wardenStatus() as WardenStatusView,
-      updateWardenConfig: async () => Promise.reject(new Error('save refused')),
-    };
-    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => client} />);
+    // Act
+    turnOff(renderer);
     await runAsync(async () => {
-      await Promise.resolve();
+      button(renderer, 'Save').props.onClick();
       await Promise.resolve();
     });
-    run(() =>
-      renderer.root
-        .findByProps({ 'aria-label': 'Enable LLM escalation' })
-        .props.onChange({ target: { checked: false } }),
+    await settle();
+
+    // Assert
+    expect(patches).toEqual([{ enabled: false }]);
+    expect(json(renderer)).toContain('Saved — in effect now.');
+    expect(json(renderer)).toContain('Noted.');
+    expect(button(renderer, 'Save').props.disabled).toBe(true);
+    run(() => renderer.unmount());
+  });
+
+  it('should show a refused save and keep the draft', async () => {
+    // Arrange
+    const renderer = render(
+      <WardenConfigSurface
+        connection={connection('a')}
+        createClient={async () => client({ updateWardenConfig: async () => Promise.reject('save refused') })}
+      />,
     );
-    const save = renderer.root.findAllByType('button').find(button => button.children.join('') === 'Save');
-    if (!save) throw new Error('Save button is missing');
+    await settle();
+
+    // Act
+    turnOff(renderer);
     await runAsync(async () => {
-      save.props.onClick();
-      await Promise.resolve();
+      button(renderer, 'Save').props.onClick();
       await Promise.resolve();
     });
+    await settle();
 
-    expect(JSON.stringify(renderer.toJSON())).toContain('save refused');
+    // Assert
+    expect(json(renderer)).toContain('save refused');
+    expect(renderer.root.findByProps({ role: 'switch' }).props['aria-checked']).toBe(false);
+    run(() => renderer.unmount());
+  });
+
+  it('should keep a save that lands after a daemon switch away from the new daemon', async () => {
+    // Arrange
+    let finish: ((value: WardenConfigView) => void) | undefined;
+    const createClient: WardenClientFactory = async active =>
+      active.daemonId === 'a'
+        ? client({
+            updateWardenConfig: () =>
+              new Promise<WardenConfigView>(resolve => {
+                finish = resolve;
+              }),
+          })
+        : client({
+            wardenConfig: async () => view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] })),
+          });
+    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={createClient} />);
+    await settle();
+    turnOff(renderer);
+    run(() => button(renderer, 'Save').props.onClick());
+
+    // Act
+    run(() => renderer.update(<WardenConfigSurface connection={connection('b')} createClient={createClient} />));
+    await settle();
+    await runAsync(async () => {
+      finish?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })));
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert
+    expect(json(renderer)).toContain('claude-auto-beta');
+    expect(json(renderer)).not.toContain('claude-auto-alpha');
+    expect(json(renderer)).not.toContain('Saved — in effect now.');
+    run(() => renderer.unmount());
+  });
+
+  it('should not show a refusal from the daemon the reader left', async () => {
+    // Arrange
+    let refuse: ((reason: Error) => void) | undefined;
+    const createClient: WardenClientFactory = async active =>
+      active.daemonId === 'a'
+        ? client({
+            updateWardenConfig: () =>
+              new Promise<WardenConfigView>((_, reject) => {
+                refuse = reject;
+              }),
+          })
+        : client();
+    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={createClient} />);
+    await settle();
+    turnOff(renderer);
+    run(() => button(renderer, 'Save').props.onClick());
+
+    // Act
+    run(() => renderer.update(<WardenConfigSurface connection={connection('b')} createClient={createClient} />));
+    await settle();
+    await runAsync(async () => {
+      refuse?.(new Error('daemon a refused'));
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert
+    expect(json(renderer)).not.toContain('daemon a refused');
+    run(() => renderer.unmount());
   });
 });

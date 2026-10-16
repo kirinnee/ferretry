@@ -18,10 +18,6 @@ import {
   sessionIdleFrame,
   sessionView,
   usageFeedView,
-  wardenConfig,
-  wardenConfigView,
-  wardenRunView,
-  wardenStatusView,
 } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
@@ -241,31 +237,6 @@ const sessionCases: SchemaCase[] = [
   { name: 'signal request', schema: session.SignalSessionRequestSchema, value: { kind: 'done' } },
 ];
 
-const anomaly = {
-  kind: 'sus_thinking',
-  sessionId: 'session-1',
-  status: 'thinking',
-  detail: 'tokens stopped',
-};
-
-const wardenVerdict = {
-  at: INSTANT,
-  verdict: 'needs_human',
-  reportPath: '/state/reports/warden-1.md',
-  recommendation: { action: 'nudge', reason: 'The session has stalled.', agent: 'warden' },
-  spawn: {
-    agent: 'warden',
-    model: 'gpt-5',
-    modelSource: 'configured',
-    harness: 'codex',
-    failedOver: false,
-    policy: 'fallback',
-    selection: 'preferred',
-    configuredFirst: 'warden',
-    skipped: {},
-  },
-};
-
 const serviceCases: SchemaCase[] = [
   { name: 'health', schema: service.HealthViewSchema, value: healthView },
   { name: 'cgroup limit', schema: service.CgroupLimitSchema, value: { cpuPercent: 50, memoryPercent: 50 } },
@@ -275,35 +246,6 @@ const serviceCases: SchemaCase[] = [
   { name: 'PWA config', schema: service.PwaConfigSchema, value: pwaConfigView.config },
   { name: 'PWA patch', schema: service.PwaConfigPatchSchema, value: { name: 'New Name', icon: 'F' } },
   { name: 'PWA view', schema: service.PwaConfigViewSchema, value: pwaConfigView },
-  { name: 'warden policy', schema: service.WardenFailoverPolicySchema, value: 'fallback' },
-  { name: 'warden account', schema: service.WardenAccountSchema, value: wardenConfig.accounts[0] },
-  { name: 'warden failover', schema: service.WardenFailoverConfigSchema, value: wardenConfig.failover },
-  { name: 'provider outage', schema: service.ProviderOutageConfigSchema, value: wardenConfig.providerOutage },
-  { name: 'warden config', schema: service.WardenConfigSchema, value: wardenConfig },
-  { name: 'warden patch', schema: service.WardenConfigPatchSchema, value: { enabled: false } },
-  { name: 'warden anomaly kind', schema: service.WardenAnomalyKindSchema, value: 'sus_thinking' },
-  { name: 'liveness ledger', schema: service.LivenessLedgerSchema, value: { lastTranscriptAt: INSTANT } },
-  { name: 'warden anomaly', schema: service.WardenAnomalySchema, value: anomaly },
-  {
-    name: 'failover account view',
-    schema: service.WardenFailoverAccountViewSchema,
-    value: { agent: 'agent', eligible: true },
-  },
-  {
-    name: 'failover status',
-    schema: service.WardenFailoverStatusSchema,
-    value: { policy: 'fallback', failureThreshold: 2, cooldownMinutes: 5, accounts: [] },
-  },
-  { name: 'warden config view', schema: service.WardenConfigViewSchema, value: wardenConfigView },
-  { name: 'warden status', schema: service.WardenStatusViewSchema, value: wardenStatusView },
-  { name: 'warden verdict kind', schema: service.WardenVerdictKindSchema, value: 'needs_human' },
-  { name: 'warden recommended action', schema: service.WardenRecommendedActionSchema, value: 'nudge' },
-  { name: 'warden recommendation', schema: service.WardenRecommendationSchema, value: wardenVerdict.recommendation },
-  { name: 'warden verdict spawn', schema: service.WardenVerdictSpawnSchema, value: wardenVerdict.spawn },
-  { name: 'warden verdict', schema: service.WardenVerdictSchema, value: wardenVerdict },
-  { name: 'warden verdicts', schema: service.WardenVerdictsViewSchema, value: [wardenVerdict] },
-  { name: 'warden run', schema: service.WardenRunViewSchema, value: wardenRunView },
-  { name: 'warden run request', schema: service.WardenRunRequestSchema, value: { spawn: true } },
   { name: 'usage account', schema: service.UsageAccountViewSchema, value: usageFeedView.accounts[0] },
   { name: 'usage feed', schema: service.UsageFeedViewSchema, value: usageFeedView },
   { name: 'attachment', schema: service.AttachmentViewSchema, value: attachmentView },

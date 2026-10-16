@@ -121,7 +121,8 @@ describe('the assigned warden prompt', () => {
     { kind: 'sus_thinking' as const, expected: /work counters advancing/u },
     { kind: 'sus_subprocess' as const, expected: /background subprocess/u },
     { kind: 'unattended_question' as const, expected: /waiting on an unanswered question/u },
-    { kind: 'peer_wait_unanswerable' as const, expected: /waiting on an unanswered question/u },
+    { kind: 'peer_wait_unanswerable' as const, expected: /The sweep flagged: /u },
+    { kind: 'owner_request' as const, expected: /The OWNER asked for this investigation/u },
   ])('should explain what to weigh for $kind', ({ kind, expected }) => {
     // Arrange / Act
     const actual = buildAssignedWardenPrompt(anomaly({ kind }), session(), REPORT, ACTING);

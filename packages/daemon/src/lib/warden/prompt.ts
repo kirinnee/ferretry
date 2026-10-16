@@ -142,6 +142,19 @@ function kindGuidance(
       'appearing? A legitimate long task should show movement between two looks a minute apart.',
     ];
   }
+  if (anomaly.kind === 'owner_request') {
+    return [
+      'The OWNER asked for this investigation; no rule flagged it. Their note is the anomaly detail above.',
+      'Find out what the ferret is doing, whether it is stuck, looping or failing, and what would get it moving.',
+      'Read its transcript, its recent turns, the workspace diff and any CI it is waiting on.',
+    ];
+  }
+  if (anomaly.kind !== 'unattended_question') {
+    return [
+      `The sweep flagged: ${anomaly.detail}`,
+      'Judge whether that is a real problem for this ferret or an expected, healthy state, and what would fix it.',
+    ];
+  }
   return [
     'The session has been waiting on an unanswered question for a long time.',
     'Read its pending question and its own transcript and turns.',
@@ -172,7 +185,9 @@ export function buildAssignedWardenPrompt(
   const teammate = teammateOf(session.config);
   return [
     `You are an ASSIGNED warden for exactly one session: ${id} (teammate ${teammate}).`,
-    'It was flagged sus (alive but weird) by the fleet sweep. Investigate THIS session only and deliver one verdict.',
+    anomaly.kind === 'owner_request'
+      ? 'The owner asked the Warden to look at it. Investigate THIS session only and deliver one verdict.'
+      : 'It was flagged sus (alive but weird) by the fleet sweep. Investigate THIS session only and deliver one verdict.',
     '',
     '## The anomaly',
     '```json',

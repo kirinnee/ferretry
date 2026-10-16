@@ -42,6 +42,8 @@ export interface Blessing {
   readonly expiresAt: string;
   /** The warden that issued the clearance, for provenance in the journal. */
   readonly wardenId?: string;
+  /** Who judged it healthy: an investigation, or the Jev guard's confident skip. Absent means a warden. */
+  readonly by?: 'jev' | 'warden';
 }
 
 /** At most one active blessing per session. A later clearance replaces it. */
@@ -90,6 +92,7 @@ export interface BlessingRequest {
   readonly kinds: readonly WardenAnomalyKind[];
   readonly status: WardenSessionStatus;
   readonly wardenId?: string;
+  readonly by?: 'jev' | 'warden';
 }
 
 /**
@@ -114,6 +117,7 @@ export function recordBlessing(
       blessedAt: isoFromMs(nowMs),
       expiresAt: isoFromMs(nowMs + Math.max(MINIMUM_BLESSING_MS, ttlMs)),
       ...(request.wardenId === undefined ? {} : { wardenId: request.wardenId }),
+      ...(request.by === undefined ? {} : { by: request.by }),
     },
   };
 }

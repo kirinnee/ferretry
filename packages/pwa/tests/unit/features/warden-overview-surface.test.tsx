@@ -1,0 +1,279 @@
+import { describe, expect, it } from 'bun:test';
+import type { WardenInvestigateRequest, WardenStatusView } from '@ferretry/protocol';
+
+import {
+  type WardenOverviewClient,
+  WardenOverviewSurface,
+  wardenSettingsHref,
+} from '../../../src/features/warden/warden-overview-surface.tsx';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { interact, mount, must } from '../../support/dom.ts';
+import {
+  attentionItem,
+  wardenAnomaly,
+  wardenAttention,
+  wardenInvestigation,
+  wardenStatus,
+} from '../../support/warden.ts';
+
+const NOW = Date.parse('2026-07-31T12:00:00.000Z');
+const connection = (id: string) =>
+  daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
+const POLL = { isHidden: () => false, pollMs: 3_600_000 } as const;
+
+const settle = async (): Promise<void> => {
+  for (let index = 0; index < 3; index += 1)
+    await interact(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+};
+
+interface FakeOptions {
+  readonly status?: WardenStatusView;
+  readonly run?: WardenOverviewClient['wardenRun'];
+  readonly investigate?: WardenOverviewClient['wardenInvestigate'];
+}
+
+const fake = (options: FakeOptions = {}) => {
+  const calls = { status: 0, runs: [] as (boolean | undefined)[], investigations: [] as WardenInvestigateRequest[] };
+  const client: WardenOverviewClient = {
+    wardenStatus: async () => {
+      calls.status += 1;
+      return (
+        options.status ??
+        wardenStatus({
+          lastSweepAt: '2026-07-31T11:59:00.000Z',
+          investigations: [
+            wardenInvestigation({
+              id: 'done-1',
+              state: 'done',
+              targetSession: 'sess-done',
+              verdict: 'killed',
+              reportPath: 'reports/done.md',
+            }),
+          ],
+        })
+      );
+    },
+    wardenAttention: async () =>
+      wardenAttention({
+        outcome: 'items',
+        items: [attentionItem({ sessionId: 'sess-flag', source: 'warden-anomaly', anomalyKind: 'dead_monitor' })],
+      }),
+    wardenRun: async spawn => {
+      calls.runs.push(spawn);
+      return await (options.run ?? (async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [] })))(spawn);
+    },
+    wardenInvestigate: async request => {
+      calls.investigations.push(request);
+      return await (
+        options.investigate ??
+        (async () => ({ sessionId: request.sessionId, state: 'queued' as const, message: 'Queued: next in line.' }))
+      )(request);
+    },
+    wardenReport: async path => `# Evidence from ${path}`,
+  };
+  return { client, calls };
+};
+
+const button = (container: HTMLElement, text: string): HTMLButtonElement =>
+  must(
+    [...container.querySelectorAll('button')].find(candidate => candidate.textContent?.includes(text)),
+    `the ${text} button`,
+  );
+
+describe('WardenOverviewSurface', () => {
+  it('should point Settings at the daemon’s Warden panel', () => {
+    // Arrange
+    const daemon = connection('a');
+
+    // Act
+    const href = wardenSettingsHref(daemon);
+
+    // Assert
+    expect(href).toBe('/d/a/settings#warden');
+  });
+
+  it('should read through the paired client, sweep without spawning and say nothing was flagged', async () => {
+    // Arrange
+    const { client, calls } = fake();
+    const view = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    try {
+      await settle();
+      const before = calls.status;
+
+      // Act
+      await interact(() => button(view.container, 'Sweep now').click());
+      await settle();
+
+      // Assert
+      expect(view.container.textContent).toContain('Swept: nothing flagged.');
+      expect(calls.runs).toEqual([false]);
+      expect(calls.status).toBeGreaterThan(before);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('should count what a sweep flagged, prefer the daemon’s own words, and report a failed sweep', async () => {
+    // Arrange
+    const counted = fake({
+      run: async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [wardenAnomaly(), wardenAnomaly()] }),
+    });
+    const worded = fake({
+      run: async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [], message: 'Swept by the daemon.' }),
+    });
+    const failed = fake({
+      run: async () => {
+        throw 'refused';
+      },
+    });
+    const views = [];
+    for (const { client } of [counted, worded, failed])
+      views.push(
+        await mount(
+          <WardenOverviewSurface
+            connection={connection('a')}
+            createClient={async () => client}
+            now={() => NOW}
+            pollOptions={POLL}
+          />,
+        ),
+      );
+    try {
+      await settle();
+
+      // Act
+      for (const view of views)
+        await interact(() =>
+          must(
+            [...view.container.querySelectorAll('button')].find(node => node.textContent?.includes('Sweep now')),
+            'sweep',
+          ).click(),
+        );
+      await settle();
+
+      // Assert
+      expect(views[0]?.container.textContent).toContain('Swept: 2 flagged.');
+      expect(views[1]?.container.textContent).toContain('Swept by the daemon.');
+      expect(views[2]?.container.textContent).toContain('The sweep did not run: refused');
+    } finally {
+      for (const view of views) await view.unmount();
+    }
+  });
+
+  it('should send an investigate request and show the daemon’s answer or its refusal', async () => {
+    // Arrange
+    const accepted = fake();
+    const refused = fake({
+      investigate: async () => {
+        throw new Error('409: the daily investigation cap is hit');
+      },
+    });
+    const ok = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => accepted.client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    const no = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => refused.client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    try {
+      await settle();
+      const click = (container: HTMLElement) =>
+        must(
+          [...container.querySelectorAll('button')].find(node => node.textContent?.includes('Investigate')),
+          'investigate',
+        ).click();
+
+      // Act
+      await interact(() => click(ok.container));
+      await interact(() => click(no.container));
+      await settle();
+
+      // Assert
+      expect(accepted.calls.investigations).toEqual([{ sessionId: 'sess-flag' }]);
+      expect(ok.container.textContent).toContain('Queued: next in line.');
+      expect(no.container.textContent).toContain('No investigation: 409: the daily investigation cap is hit');
+    } finally {
+      await ok.unmount();
+      await no.unmount();
+    }
+  });
+
+  it('should open a finished investigation’s report and close it again', async () => {
+    // Arrange
+    const { client } = fake();
+    const view = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    try {
+      await settle();
+
+      // Act
+      await interact(() =>
+        must(
+          [...view.container.querySelectorAll('button')].find(node => node.textContent === 'Report'),
+          'report',
+        ).click(),
+      );
+      await settle();
+      const opened = view.container.textContent ?? '';
+      await interact(() =>
+        must(
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="Close Warden report"]'),
+          'close',
+        ).click(),
+      );
+
+      // Assert
+      expect(opened).toContain('Evidence from reports/done.md');
+      expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('should remount for another daemon and refuse outside the app store without a client', async () => {
+    // Arrange
+    const { client } = fake({ status: wardenStatus({ anomalies: [wardenAnomaly({ sessionId: 'only-a' })] }) });
+    const view = await mount(
+      <WardenOverviewSurface connection={connection('a')} createClient={async () => client} pollOptions={POLL} />,
+    );
+    try {
+      await settle();
+      const onA = view.container.textContent ?? '';
+
+      // Act
+      await view.render(<WardenOverviewSurface connection={connection('b')} pollOptions={POLL} />);
+      await settle();
+
+      // Assert
+      expect(onA).toContain('only-a');
+      expect(view.container.textContent).not.toContain('only-a');
+      expect(view.container.textContent).toContain('no daemon client exists outside the app store');
+    } finally {
+      await view.unmount();
+    }
+  });
+});

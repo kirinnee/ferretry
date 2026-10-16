@@ -14,10 +14,10 @@ import {
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
-const WARDEN_OFF = '# the Warden, kept off\nenabled: false\n';
-const WARDEN_ON = '# the Warden, switched on\nenabled: true\n';
-const WARDEN_BROKEN = 'enabled: [\n';
-const WARDEN_UNKNOWN_KEY = 'enabled: false\nsurprise: 1\n';
+const WARDEN_OFF = '# the Warden, rules only\ntriage: rules\n';
+const WARDEN_ON = '# the Warden, investigating every flag\ntriage: llm\n';
+const WARDEN_BROKEN = 'triage: [\n';
+const WARDEN_UNKNOWN_KEY = 'enabled: true\nsurprise: 1\n';
 const LEARNING_OFF = 'enabled: false\n';
 const MACHINE_SKIP = 'agentPermissions: skip\n';
 
@@ -120,7 +120,7 @@ describe('ConfigFilesService before any load', () => {
     const snapshot = service.current();
 
     // Assert
-    should(snapshot.evaluation.effective.warden.enabled).be.false();
+    should(snapshot.evaluation.effective.warden.triage).equal('rules');
     should(snapshot.files.size).equal(0);
     should(snapshot.at).equal(at);
     should(service.current()).equal(snapshot);
@@ -153,7 +153,7 @@ describe('ConfigFilesService.load', () => {
 
     // Assert
     for (const snapshot of [first, second]) {
-      should(snapshot.evaluation.effective.warden.enabled).be.true();
+      should(snapshot.evaluation.effective.warden.triage).equal('llm');
       should(snapshot.evaluation.files).containDeep([{ path: 'warden.yaml', state: 'invalid' }]);
     }
     should(store.value).eql(acceptedAs('warden.yaml', WARDEN_ON));
@@ -179,7 +179,7 @@ describe('ConfigFilesService.load', () => {
     const snapshot = await service.load();
 
     // Assert
-    should(snapshot.evaluation.effective.warden.enabled).be.false();
+    should(snapshot.evaluation.effective.warden.triage).equal('rules');
     should(snapshot.evaluation.pending).containDeep([{ path: 'warden.yaml', etag: digest(WARDEN_ON) }]);
   });
 
@@ -216,7 +216,7 @@ describe('ConfigFilesService.load', () => {
     const snapshot = await service.load();
 
     // Assert
-    should(snapshot.evaluation.effective.warden.enabled).be.true();
+    should(snapshot.evaluation.effective.warden.triage).equal('llm');
     should(snapshot.evaluation.issues).containDeep([{ path: 'warden.yaml', severity: 'error' }]);
     should(snapshot.unreadable).eql(['warden.yaml']);
   });
@@ -351,7 +351,7 @@ describe('ConfigFilesService.write', () => {
     // Assert
     should(outcome).eql({ etag: digest(WARDEN_OFF), outcome: 'applied', loosened: false });
     should(directory.files.get('warden.yaml')).equal(WARDEN_OFF);
-    should(service.current().evaluation.effective.warden.enabled).be.false();
+    should(service.current().evaluation.effective.warden.triage).equal('rules');
   });
 
   it('should write a loosening but hold it when the caller may not confirm it', async () => {
@@ -363,10 +363,10 @@ describe('ConfigFilesService.write', () => {
 
     // Assert
     should(outcome).containDeep({ etag: digest(WARDEN_ON), outcome: 'pending', loosened: false });
-    should(outcome.pending?.changes).eql(['the Warden may now spend on AI investigations']);
+    should(outcome.pending?.changes).eql(['the Warden may now spend on an AI investigation of every flag']);
     should(directory.files.get('warden.yaml')).equal(WARDEN_ON);
     should(store.value).eql(acceptedAs('warden.yaml', WARDEN_OFF));
-    should(service.current().evaluation.effective.warden.enabled).be.false();
+    should(service.current().evaluation.effective.warden.triage).equal('rules');
   });
 
   it('should put a loosening into effect and say so when the caller may confirm it', async () => {
@@ -379,7 +379,7 @@ describe('ConfigFilesService.write', () => {
     // Assert
     should(outcome).eql({ etag: digest(WARDEN_ON), outcome: 'applied', loosened: true });
     should(store.value).eql(acceptedAs('warden.yaml', WARDEN_ON));
-    should(service.current().evaluation.effective.warden.enabled).be.true();
+    should(service.current().evaluation.effective.warden.triage).equal('llm');
   });
 
   it('should judge a machine loosening against the machine in effect', async () => {
@@ -465,7 +465,7 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
 
     // Assert
     should(snapshot.evaluation.pending).eql([]);
-    should(snapshot.evaluation.effective.warden.enabled).be.true();
+    should(snapshot.evaluation.effective.warden.triage).equal('llm');
     should(store.value).eql(acceptedAs('warden.yaml', WARDEN_ON));
     should(log.held).eql([]);
   });
@@ -485,7 +485,7 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
 
     // Assert
     should(snapshot.evaluation.pending).containDeep([{ path: 'warden.yaml', etag: digest(WARDEN_ON) }]);
-    should(snapshot.evaluation.effective.warden.enabled).be.false();
+    should(snapshot.evaluation.effective.warden.triage).equal('rules');
   });
 
   it('should not consume an acknowledgement when the bytes on disk differ, and honour it once they match', async () => {
@@ -502,9 +502,9 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
 
     // Assert
     should(differing.evaluation.pending).containDeep([{ path: 'warden.yaml', etag: digest(other) }]);
-    should(differing.evaluation.effective.warden.enabled).be.false();
+    should(differing.evaluation.effective.warden.triage).equal('rules');
     should(matching.evaluation.pending).eql([]);
-    should(matching.evaluation.effective.warden.enabled).be.true();
+    should(matching.evaluation.effective.warden.triage).equal('llm');
   });
 
   it('should let an acknowledgement lapse after its time to live, the loosening then held', async () => {
@@ -522,9 +522,9 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
 
     // Assert
     should(ACKNOWLEDGEMENT_TTL_MS).equal(10 * 60_000);
-    should(stillLive.evaluation.effective.warden.enabled).be.false();
+    should(stillLive.evaluation.effective.warden.triage).equal('rules');
     should(snapshot.evaluation.pending).containDeep([{ path: 'warden.yaml', etag: digest(WARDEN_ON) }]);
-    should(snapshot.evaluation.effective.warden.enabled).be.false();
+    should(snapshot.evaluation.effective.warden.triage).equal('rules');
   });
 
   it('should not touch the accepted record until a load finds the acknowledged bytes', async () => {
@@ -548,7 +548,7 @@ describe('ConfigFilesService.acknowledge and writeOwn', () => {
 
     // Assert
     should(directory.files.get('warden.yaml')).equal(WARDEN_ON);
-    should(service.current().evaluation.effective.warden.enabled).be.true();
+    should(service.current().evaluation.effective.warden.triage).equal('llm');
     should(service.current().evaluation.pending).eql([]);
   });
 });
@@ -560,16 +560,16 @@ describe('ConfigFilesService.confirm', () => {
 
     // Act
     const stale = await service.confirm('warden.yaml', digest(WARDEN_OFF));
-    const afterStale = service.current().evaluation.effective.warden.enabled;
+    const afterStale = service.current().evaluation.effective.warden.triage;
     const confirmed = await service.confirm('warden.yaml', digest(WARDEN_ON));
     const again = await service.confirm('warden.yaml', digest(WARDEN_ON));
 
     // Assert
     should(stale).be.false();
-    should(afterStale).be.false();
+    should(afterStale).equal('rules');
     should(confirmed).be.true();
     should(again).be.false();
-    should(service.current().evaluation.effective.warden.enabled).be.true();
+    should(service.current().evaluation.effective.warden.triage).equal('llm');
     should(store.value).eql(acceptedAs('warden.yaml', WARDEN_ON));
   });
 
@@ -626,6 +626,6 @@ describe('ConfigFilesService serialisation', () => {
 
     // Assert
     await should(failed).be.rejectedWith('disk gone');
-    should((await next).evaluation.effective.warden.enabled).be.false();
+    should((await next).evaluation.effective.warden.triage).equal('rules');
   });
 });

@@ -180,8 +180,13 @@ import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
-import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
-import { type WardenClientFactory, WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import {
+  type WardenClientFactory,
+  WardenConfigCard,
+  WardenConfigSurface,
+} from '../src/features/warden/warden-config-card.tsx';
+import { WardenOverview } from '../src/features/warden/warden-overview.tsx';
+import { WardenOverviewSurface } from '../src/features/warden/warden-overview-surface.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import type { ConsoleTyper } from '../src/features/workspace/console-surface.tsx';
@@ -207,6 +212,7 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.t
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
+import { WardenPage } from '../src/lib/pages/warden-page.tsx';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
@@ -241,7 +247,7 @@ import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from '../src/shell/command-palette.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
-import { InsightsFrame } from '../src/shell/insights-frame.tsx';
+import { INSIGHTS_COLUMN_CLASS, InsightsFrame } from '../src/shell/insights-frame.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
@@ -268,6 +274,13 @@ import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
 import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
+import {
+  WARDEN_FIXTURE_ATTENTION,
+  WARDEN_FIXTURE_CONFIG,
+  WARDEN_FIXTURE_NOW,
+  WARDEN_FIXTURE_STATUS,
+  wardenFixtureRequest,
+} from './warden-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
@@ -1042,6 +1055,14 @@ function AppChromeHarness({ active }: { readonly active: string }) {
         now={() => ANALYTICS_FIXTURE_NOW}
         initialQuery={null}
       />
+    ) : destination === 'warden' ? (
+      <WardenPage connection={daemon} slots={{ Overview: HarnessWardenOverview }} />
+    ) : active === 'warden-settings' ? (
+      <main className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5" data-harness="warden-settings">
+        <div className={INSIGHTS_COLUMN_CLASS}>
+          <WardenConfigSurface connection={daemon} createClient={HARNESS_WARDEN_CLIENT} unavailable="message" />
+        </div>
+      </main>
     ) : (
       <main className="min-h-0 flex-1 p-panel text-cell text-muted">The page goes here.</main>
     );
@@ -1330,43 +1351,7 @@ const TASKS: readonly TaskSummary[] = [
 ];
 const TASK_DAG = taskDag(TASKS);
 
-const WARDEN: WardenStatusView = {
-  config: {
-    enabled: true,
-    accounts: [{ agent: 'claude-auto-loge' }],
-    failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
-    providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 40 },
-    intervalMinutes: 5,
-    unattendedMinutes: 20,
-    minSpawnGapMinutes: 10,
-    susThinkingSeconds: 600,
-    susSubprocessSeconds: 900,
-    maxAssignedWardens: 2,
-    assignedCooldownMinutes: 15,
-    blessMinutes: 30,
-  },
-  lastSweepAt: '2026-07-31T11:57:00.000Z',
-  anomalies: [
-    { kind: 'sus_thinking', sessionId: 'sess-1', status: 'thinking', detail: 'thinking for 14m', teammate: 'ms-98' },
-  ],
-  fingerprint: 'harness',
-  liveWarden: 'sess-9',
-  failover: {
-    policy: 'fallback',
-    failureThreshold: 3,
-    cooldownMinutes: 30,
-    accounts: [
-      { agent: 'claude-auto-loge', eligible: true },
-      { agent: 'codex-auto-terra', eligible: false, reason: 'at limit' },
-    ],
-    lastSelection: {
-      agent: 'claude-auto-loge',
-      policy: 'fallback',
-      at: '2026-07-31T11:00:00.000Z',
-      reason: 'first eligible',
-    },
-  },
-};
+const WARDEN: WardenStatusView = WARDEN_FIXTURE_STATUS;
 
 /** A daemon that has its configuration but has never produced a report. */
 const WARDEN_NOT_REPORTING: WardenStatusView = {
@@ -1377,11 +1362,7 @@ const WARDEN_NOT_REPORTING: WardenStatusView = {
   liveWarden: undefined,
 };
 
-const WARDEN_CONFIG: WardenConfigView = {
-  config: WARDEN.config,
-  accounts: WARDEN.config.accounts,
-  warnings: ['Account order takes effect on the next sweep.'],
-};
+const WARDEN_CONFIG: WardenConfigView = WARDEN_FIXTURE_CONFIG;
 
 /** One concrete host diagnosis keeps the Doctor tab reviewable without a daemon. */
 const HARNESS_DOCTOR: DoctorReport = {
@@ -1889,8 +1870,51 @@ const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
     wardenConfig: async () => WARDEN_CONFIG,
     wardenStatus: async () => WARDEN,
     updateWardenConfig: async () => WARDEN_CONFIG,
+    request: wardenFixtureRequest,
   };
 };
+
+/** The Warden page's reads, answered from the fixture day; a sweep or investigate request answers in words. */
+const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
+  wardenStatus: async () => WARDEN_FIXTURE_STATUS,
+  wardenAttention: async () => WARDEN_FIXTURE_ATTENTION,
+  wardenRun: async () => ({ sweptAt: new Date(WARDEN_FIXTURE_NOW).toISOString(), anomalies: [] }),
+  wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
+    sessionId,
+    state: 'queued' as const,
+    position: 1,
+    message: 'Queued: next in line for an investigation.',
+  }),
+  wardenReport: async (reportPath: string) => `# Verdict: KILL\n\nEvidence from ${reportPath}.`,
+});
+
+/** The Warden page as the app mounts it, on the fixture day. */
+function HarnessWardenOverview({ connection }: { readonly connection: DaemonConnection }) {
+  return (
+    <WardenOverviewSurface
+      connection={connection}
+      sessions={WORKSPACE_FLEET}
+      createClient={HARNESS_WARDEN_OVERVIEW_CLIENT}
+      now={() => WARDEN_FIXTURE_NOW}
+    />
+  );
+}
+
+/** Settings › Warden, controlled the way Settings holds it, without a daemon. */
+function HarnessWardenConfig() {
+  const [draft, setDraft] = useState(WARDEN_CONFIG.config);
+  return (
+    <WardenConfigCard
+      view={WARDEN_CONFIG}
+      draft={draft}
+      onChange={setDraft}
+      jevKey={{ state: 'missing', keyUrl: 'https://typesafe.ai/keys' }}
+      loginOptions={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
+      speedupsHref="#speedups"
+      onSave={() => {}}
+    />
+  );
+}
 
 const LEARNING_STATUS: LearningStatus = {
   enabled: true,
@@ -4949,35 +4973,21 @@ function Shell() {
       ),
     },
     {
-      label: 'Warden attention',
+      label: 'Warden page',
       render: () => (
-        <WardenAttention
-          connection={daemon}
-          now={HARNESS_NOW}
-          state={{
-            status: 'ready',
-            view: {
-              lastSweepAt: '2026-07-31T11:57:00.000Z',
-              items: [
-                {
-                  id: 'A3',
-                  sessionId: 'sess-1',
-                  teammate: 'ms-98',
-                  sessionStatus: 'awaiting_user',
-                  subject: 'Approve this browser pairing request',
-                  why: 'The device needs permission before it can read this daemon’s session ledger.',
-                  context: 'The pairing link identifies this daemon at runtime; its credential is never bundled.',
-                  waitingSince: '2026-07-31T11:30:00.000Z',
-                  judgement: { state: 'pending', reportPath: 'warden/2026-07-31T11-58.md' },
-                  recommendation: { action: 'nudge', reason: 'Ask the session to report its exact blocker.' },
-                },
-              ],
-            },
-          }}
-          onOpenSession={() => {}}
-          onOpenReport={() => {}}
-          onRunAction={() => {}}
-        />
+        <div data-harness="warden-overview">
+          <WardenOverview
+            connection={daemon}
+            now={WARDEN_FIXTURE_NOW}
+            status={{ status: 'ready', view: WARDEN_FIXTURE_STATUS }}
+            attention={{ status: 'ready', view: WARDEN_FIXTURE_ATTENTION }}
+            sessions={WORKSPACE_FLEET}
+            settingsHref="#warden"
+            onSweep={() => {}}
+            onInvestigate={() => {}}
+            onOpenReport={() => {}}
+          />
+        </div>
       ),
     },
     {
@@ -5504,15 +5514,7 @@ function Shell() {
     },
     {
       label: 'Warden configuration',
-      render: () => (
-        <WardenConfigCard
-          connection={daemon}
-          view={WARDEN_CONFIG}
-          failover={WARDEN.failover}
-          availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
-          onSave={() => {}}
-        />
-      ),
+      render: () => <HarnessWardenConfig />,
     },
     {
       label: 'Analytics cost chart',

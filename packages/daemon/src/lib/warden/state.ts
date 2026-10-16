@@ -19,11 +19,20 @@
  * Pure: no IO, no clock, no globals.
  */
 
-import { SessionStatusSchema } from '@ferretry/protocol';
+import {
+  SessionStatusSchema,
+  type WardenAction,
+  WardenActionSchema,
+  WardenGuardFailureCodeSchema,
+  type WardenInvestigationOrigin,
+  WardenInvestigationOriginSchema,
+  WardenVerdictKindSchema,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import type { Blessing, BlessingStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
+import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
 
 const Instant = z.string().min(1);
@@ -47,6 +56,7 @@ export const WARDEN_ANOMALY_KINDS = [
   'sus_thinking',
   'sus_subprocess',
   'provider_unavailable',
+  'owner_request',
 ] as const satisfies readonly WardenAnomalyKind[];
 
 const AnomalyKindSchema = z.enum(WARDEN_ANOMALY_KINDS);
@@ -83,6 +93,7 @@ const BlessingSchema = z.object({
   blessedAt: Instant,
   expiresAt: Instant,
   wardenId: z.string().min(1).optional(),
+  by: z.enum(['jev', 'warden']).optional(),
 }) satisfies z.ZodType<unknown, Blessing>;
 
 /**
@@ -130,6 +141,72 @@ const FailoverStateSchema = z.object({
   exhaustedSince: Instant.optional(),
 }) satisfies z.ZodType<unknown, WardenFailoverState>;
 
+const TriageDaySchema = z.object({
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  flags: z.number().int().min(0),
+  jevDecisions: z.number().int().min(0),
+  jevSkips: z.number().int().min(0),
+  jevUsd: z.number().finite().min(0),
+}) satisfies z.ZodType<unknown, WardenTriageDay>;
+
+const InvestigationRecordSchema = z.object({
+  id: z.string().min(1),
+  scope: z.enum(['session', 'fleet']),
+  origin: WardenInvestigationOriginSchema,
+  targetId: z.string().min(1).optional(),
+  anomalyKind: AnomalyKindSchema.optional(),
+  startedAt: Instant,
+  finishedAt: Instant.optional(),
+  reportPath: z.string().min(1),
+  verdict: WardenVerdictKindSchema.optional(),
+  costUsd: z.number().finite().min(0).optional(),
+  agent: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+}) satisfies z.ZodType<unknown, WardenInvestigationRecord>;
+
+const CostAverageSchema = z.object({
+  count: z.number().int().min(0),
+  totalUsd: z.number().finite().min(0),
+}) satisfies z.ZodType<unknown, WardenCostAverage>;
+
+const GuardHealthSchema = z.object({
+  lastFailure: z.object({ code: WardenGuardFailureCodeSchema, at: Instant }).optional(),
+  backoffUntil: Instant.optional(),
+}) satisfies z.ZodType<unknown, WardenGuardHealth>;
+
+/** Why a target is in the investigation queue, and since when. */
+export interface WardenQueueEntryMeta {
+  readonly queuedAt: string;
+  readonly origin: WardenInvestigationOrigin;
+  /** The owner's words, for an investigation the owner asked for. */
+  readonly note?: string;
+}
+
+const QueueMetaSchema = z.object({
+  queuedAt: Instant,
+  origin: WardenInvestigationOriginSchema,
+  note: z.string().min(1).optional(),
+}) satisfies z.ZodType<unknown, WardenQueueEntryMeta>;
+
+/**
+ * The flags the live FLEET warden was sent about, so the "who needs you" feed can say they are being
+ * looked at rather than that nobody has. Cleared once that warden is gone and its report judges them.
+ */
+export interface WardenSweepCoverage {
+  readonly wardenId: string;
+  readonly reportPath: string;
+  readonly anomalies: readonly { readonly sessionId: string; readonly kind: WardenAnomalyKind }[];
+}
+
+const SweepCoverageSchema = z.object({
+  wardenId: z.string().min(1),
+  reportPath: z.string().min(1),
+  anomalies: z.array(z.object({ sessionId: z.string().min(1), kind: AnomalyKindSchema })),
+}) satisfies z.ZodType<unknown, WardenSweepCoverage>;
+
+/** How many investigations and actions the state remembers beyond today's. */
+export const WARDEN_HISTORY_LIMIT = 50;
+
 /** Everything one sweep carries to the next. */
 export interface WardenRuntimeState {
   readonly lastSweepAt?: string;
@@ -167,6 +244,17 @@ export interface WardenRuntimeState {
    *  investigation is never silently lost. */
   readonly assignedQueue?: readonly WardenAnomaly[];
   readonly failover?: WardenFailoverState;
+  /** Today's Jev counters; reset at UTC midnight. */
+  readonly triageDay?: WardenTriageDay;
+  /** Investigations started, newest first: today's, plus up to {@link WARDEN_HISTORY_LIMIT} more. */
+  readonly investigations?: readonly WardenInvestigationRecord[];
+  readonly costAverage?: WardenCostAverage;
+  readonly guard?: WardenGuardHealth;
+  /** What the Warden did or holds for the owner, newest first, at most {@link WARDEN_HISTORY_LIMIT}. */
+  readonly actions?: readonly WardenAction[];
+  /** Why each queued target is queued, keyed by target session id. */
+  readonly queueMeta?: Readonly<Record<string, WardenQueueEntryMeta>>;
+  readonly sweepCoverage?: WardenSweepCoverage;
 }
 
 const RuntimeStateSchema = z.object({
@@ -181,6 +269,13 @@ const RuntimeStateSchema = z.object({
   assignedCooldowns: z.record(z.string(), Instant).optional(),
   assignedQueue: z.array(AnomalySchema).optional(),
   failover: FailoverStateSchema.optional(),
+  triageDay: TriageDaySchema.optional(),
+  investigations: z.array(InvestigationRecordSchema).optional(),
+  costAverage: CostAverageSchema.optional(),
+  guard: GuardHealthSchema.optional(),
+  actions: z.array(WardenActionSchema).optional(),
+  queueMeta: z.record(z.string(), QueueMetaSchema).optional(),
+  sweepCoverage: SweepCoverageSchema.optional(),
 });
 
 export const EMPTY_WARDEN_STATE: WardenRuntimeState = {};

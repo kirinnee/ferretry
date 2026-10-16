@@ -208,9 +208,14 @@ describe('daemon settings panel list', () => {
     const view = await mount(frame({ panel: 'warden', backLabel: 'Alpha' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-back]')?.textContent).toBe('Alpha');
-      // Warden's own panel: the status read is missing, and it says so rather than reading as clean.
-      expect(view.container.querySelector('[aria-label="Warden status unavailable"]')).not.toBeNull();
-      expect(view.container.textContent).toContain('Recent verdicts unavailable');
+      // Warden's own panel holds only its settings now: an unreadable daemon says so, never a default.
+      await interact(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(view.container.querySelector('[aria-label="Warden settings unavailable"]')).not.toBeNull();
+      expect(view.container.textContent).not.toContain('Fleet checks');
+      expect(view.container.textContent).not.toContain('Recent verdicts unavailable');
     } finally {
       await view.unmount();
     }
