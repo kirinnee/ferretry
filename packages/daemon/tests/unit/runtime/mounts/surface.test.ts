@@ -318,6 +318,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
   },
   sessionSignal: new FakeSessionSignal(),
+  sessionRename: {
+    rename: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionRuntime: {
     models: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -521,7 +526,8 @@ describe('the mounted daemon surface', () => {
       1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
-      1; // the Console's input: typing into a session's own pane, governed as `terminal.use`
+      1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
+      1; // an agent's rename: a new first name or task title
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
@@ -657,6 +663,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/runtime-models',
       'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
+      'POST /v1/sessions/:sessionId/rename',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
       'POST /v1/sessions/:sessionId/answer',

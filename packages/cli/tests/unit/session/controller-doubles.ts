@@ -66,6 +66,7 @@ export class RecordingApi implements ISessionApi {
       interrupt?: SessionView;
       resume?: SessionView;
       signal?: SessionView;
+      rename?: SessionView;
       upload?: AttachmentView;
       failWith?: Error;
     } = {},
@@ -113,6 +114,10 @@ export class RecordingApi implements ISessionApi {
 
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView> {
     return this.record('signal', [id, kind, message, options], this.responses.signal);
+  }
+
+  rename(id: string, name?: string, teammate?: string): Promise<SessionView> {
+    return this.record('rename', [id, name, teammate], this.responses.rename);
   }
 
   upload(id: string, file: string): Promise<AttachmentView> {
