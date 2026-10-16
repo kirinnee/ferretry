@@ -441,8 +441,10 @@ export function UnifiedBrowserSurface({
         <Heading id={titleId} className="sr-only">
           Browser
         </Heading>
-        <div className="flex items-center gap-xs">
-          <form onSubmit={navigate} className="flex min-w-0 flex-1 items-center gap-xs">
+        {/* On a phone the address takes the whole first line (it was ~90px between six controls) and the
+            navigation buttons wrap under it; the ⋯ menu stays at the top right, beside the address. */}
+        <div className="flex items-start gap-xs sm:items-center">
+          <form onSubmit={navigate} className="flex min-w-0 flex-1 flex-wrap items-center gap-xs sm:flex-nowrap">
             <Button
               type="button"
               variant="ghost"
@@ -476,7 +478,7 @@ export function UnifiedBrowserSurface({
             >
               <RefreshCw size={16} aria-hidden="true" />
             </Button>
-            <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-xs rounded-control border border-strong bg-surface-2 px-2">
+            <label className="order-first flex min-h-[44px] min-w-0 flex-1 basis-full items-center gap-xs rounded-control border border-strong bg-surface-2 px-2 sm:order-none sm:basis-0">
               <span className="sr-only">URL or DuckDuckGo search</span>
               <Globe2 size={14} aria-hidden="true" className="shrink-0 text-muted" />
               {/* Typed text is NOT reset on blur: tapping Go blurs this input
