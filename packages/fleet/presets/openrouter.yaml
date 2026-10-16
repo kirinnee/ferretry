@@ -1,6 +1,7 @@
 # OpenRouter for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: OpenRouter
 summary: Claude Code and Codex through OpenRouter with one key, on Anthropic and OpenAI models or any other it routes to.
+group: popular
 docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
 verified: '2026-10-16'
 claude:

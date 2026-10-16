@@ -2,6 +2,7 @@
 label: Microsoft Foundry (API key)
 harness: claude
 summary: Claude Code through your Microsoft Foundry resource with its API key. The model variables are your deployment names.
+group: cloud
 docs: https://code.claude.com/docs/en/microsoft-foundry
 verified: '2026-10-16'
 unverified:

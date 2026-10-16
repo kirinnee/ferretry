@@ -136,16 +136,16 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and fifty-four: fifty-five MACHINES frames at each viewport, plus forty-four other frames
- * across the two viewports (55 + 55 + 44). Of the extras at each viewport, one is the
+ * One hundred and fifty-eight: fifty-seven MACHINES frames at each viewport, plus forty-four other frames
+ * across the two viewports (57 + 57 + 44). Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
  * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
  *
- * MACHINES, fifty-five per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * MACHINES, fifty-seven per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
  * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
- * its callback port held by another program, finishing), the old pairing a reset left, two Add a login steps,
+ * its callback port held by another program, finishing), the old pairing a reset left, four Add a login steps (its tool, its sign-in, the provider tiles and a provider's key),
  * eighteen Profiles and Components pages (a profile page, its Advanced part open, a mixed profile, a
  * delete card, three stepper steps including a refused mixed draft, a component with every badge, a
  * Settings list with scope badges, instructions as Markdown and as source, two edit forms), and seven other-machine states (offline; the first run that opens by
@@ -173,18 +173,19 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 154;
+const SETTINGS_SIDEWAYS_CHECKS = 158;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
  * Machines frame, at each viewport — fifty-five frames (the section itself is measured once
  * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
  * machine: 55 + 54 (P3 added an environment login's quota page). Profile scope (P7) added six: a profile's Advanced part open, a mixed profile, a refused
- * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Same tripwire as the number above, for the same reason — a check
+ * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. The provider
+ * tiles added four: the grid and a provider's key form, at each viewport. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 109;
+const MACHINES_GEOMETRY_CHECKS = 113;
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -2669,6 +2670,17 @@ try {
           await credentialsPanel.locator('[data-add-login]').first().click();
           await credentialsPanel.locator('[data-add-login-step="tool"]').waitFor({ state: 'visible' });
           await accountShot('add-login-tool', 'Add a login tool step');
+          // ENVIRONMENT: the provider tiles under their headings, two to a row on a phone, with the search
+          // box thirteen providers earn; then one tap, straight to the key it asks for.
+          await credentialsPanel.locator('[data-add-login-kind-option="environment"]').click();
+          await credentialsPanel.locator('[data-provider-search]').waitFor({ state: 'visible' });
+          await accountShot('add-login-providers', 'Add a login provider tiles');
+          await themedShot('add-login-providers');
+          await credentialsPanel.locator('[data-provider-tile="deepseek"]').click();
+          await credentialsPanel.locator('[data-one-click="deepseek"]').waitFor({ state: 'visible' });
+          await accountShot('add-login-provider-key', 'Add a login provider key');
+          await credentialsPanel.locator('[data-add-login-kind-option="signin"]').click();
+          await credentialsPanel.locator('[data-add-login-tool]').first().waitFor({ state: 'visible' });
           await credentialsPanel.locator('[data-add-login-tool] input:not([disabled])').first().check();
           await credentialsPanel.locator('[data-step-next]').click();
           await credentialsPanel.locator('[data-add-login-step="start"]').waitFor({ state: 'visible' });

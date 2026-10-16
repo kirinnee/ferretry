@@ -1,6 +1,7 @@
 # Kimi (Moonshot AI) for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
 label: Kimi / Moonshot
 summary: Claude Code and Codex on Kimi models with one Moonshot platform key (platform.kimi.ai; keys from platform.kimi.com are a separate system).
+group: popular
 docs: https://platform.kimi.ai/docs/guide/claude-code-kimi
 verified: '2026-10-16'
 claude:

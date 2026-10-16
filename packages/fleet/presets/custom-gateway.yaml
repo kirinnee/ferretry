@@ -2,6 +2,7 @@
 label: Custom gateway
 harness: claude
 summary: Claude Code through any gateway that speaks the Anthropic Messages API. Fill in its address and the model it serves.
+group: self-hosted
 docs: https://code.claude.com/docs/en/llm-gateway
 verified: '2026-10-16'
 env:

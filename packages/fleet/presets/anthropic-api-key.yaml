@@ -2,6 +2,7 @@
 label: Anthropic API key
 harness: claude
 summary: Claude Code with an API key from the Claude Platform console, billed per token.
+group: popular
 docs: https://code.claude.com/docs/en/model-config
 verified: '2026-10-16'
 env:

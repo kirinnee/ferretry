@@ -2,6 +2,7 @@
 label: Amazon Bedrock (AWS profile)
 harness: claude
 summary: Claude Code through Amazon Bedrock, using an AWS profile from ~/.aws on this machine. The profile is named, never copied.
+group: cloud
 docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-16'
 unverified:
