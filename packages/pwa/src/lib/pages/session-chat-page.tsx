@@ -134,8 +134,6 @@ export interface SessionChatPageProps {
   readonly composerEnterKey?: ComposerEnterKeyPreference | null;
   /** Browser-local return-key preference on a phone. */
   readonly composerPhoneEnterKey?: ComposerEnterKeyPreference | null;
-  /** Whether the transcript's folded bookkeeping starts open (Settings › Show details). */
-  readonly showDetails?: boolean;
   /** Browser-local dictation settings; supplied by the application store. */
   readonly dictationSettings?: SttSettings;
   /**
@@ -282,7 +280,6 @@ export function SessionChatPage({
   chatWidth = 'readable',
   composerEnterKey,
   composerPhoneEnterKey = null,
-  showDetails = false,
   composerSuggestions,
   composerVimMode = false,
   composerFetch,
@@ -460,6 +457,13 @@ export function SessionChatPage({
   );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // Bumped when the reader sends: they want to watch the reply arrive, so the transcript returns to
+  // the tail and follows again even if they had scrolled up to re-read while composing.
+  const [pinSignal, setPinSignal] = useState(0);
+  const onSent = useCallback(() => {
+    setPinSignal(signal => signal + 1);
+    onRefresh?.();
+  }, [onRefresh]);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [pendingAction, setPendingAction] = useState<SessionAction | null>(null);
@@ -813,11 +817,11 @@ export function SessionChatPage({
           activity={pane.activity}
           activityFallback={session.state.activity ?? null}
           agentName={agentName}
-          detailsShown={showDetails}
           busy={busy}
           daemonId={connection.daemonId}
           entries={entries}
           {...(onRetry === undefined ? {} : { onRetry })}
+          pinSignal={pinSignal}
           sessionId={session.config.id}
         />
       </div>
@@ -870,7 +874,7 @@ export function SessionChatPage({
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-              onSent={onRefresh}
+              onSent={onSent}
               quota={quota}
               sessionId={session.config.id}
               {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
