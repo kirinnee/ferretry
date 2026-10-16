@@ -3,12 +3,7 @@
  *
  * Every family is reachable two ways, and both ways read ONE source. `/` merges
  * harness-valid built-in commands with the exact session account's discovered
- * skills, and `/**
- * Daemon-bound candidate providers for the composer autocomplete engine.
- *
- * Every family is reachable two ways, and both ways read ONE source. `/` merges
- * harness-valid built-in commands with the exact session account's discovered
- offers those same skills from the same catalog read. A
+ * skills, and `$` offers those same skills from the same catalog read. A
  * repeated `@` run selects one reference family — Files, Agents, Attention —
  * and `:` and `!` open the last two of those directly, from the same host
  * getters the ladder reads. A second read would be a second definition: a menu
