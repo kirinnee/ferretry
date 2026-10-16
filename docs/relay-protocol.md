@@ -1479,6 +1479,19 @@ exist. The daemon reassembles at most four request bodies per session at once. T
 Answers carry an `id` because the daemon replies in whatever order its own handlers finish. Sequence
 numbers order the wire; they do not order the work.
 
+**The daemon runs a session's requests side by side, at most 16 at once** (`MAX_CONCURRENT_REQUESTS`
+in `packages/daemon/src/lib/relay/link.ts`). Records are still opened and parsed strictly in sequence
+order — the receive counter advances inside that step — but a request's handler is not part of it, so
+a slow route (a `git` call, a filesystem index) delays only its own answer, never the requests,
+renewals and terminal keystrokes behind it on the same link. A whole request past the bound waits in
+arrival order and **keeps the credit for its own record until it starts**: §8's credit is returned
+for everything else as usual, so a client that keeps sending past the bound runs out of allowance
+exactly as it would against a daemon that had stopped reading, while the other sessions on the link
+keep moving. Parts of one answer still leave consecutively (above). A daemon that receives more
+waiting requests than one window could have carried ends the session `4430`, which a rendezvous
+would have done first; a direct socket has no rendezvous to count for it. Nothing on the wire
+changed, so this is not a version: a client that sent one request at a time sees the same session.
+
 ### Stream sessions
 
 The daemon's protocol-switching surfaces — `/v1/events`,

@@ -394,6 +394,23 @@ export const ACCESS_LEASE_ENDED_REASON = 'the access lease ended';
 /** How many request bodies one session may be assembling at once. Each is bounded on its own. */
 export const MAX_INCOMING_BODIES = 4;
 
+/**
+ * How many requests one session runs at once. A request beyond it waits, in arrival order, for one of
+ * these to answer — and keeps the credit for its own record while it waits.
+ *
+ * THE BOUND IS PER SESSION AND IT NEVER STOPS THE LINK, which is the whole correction. Requests used
+ * to be served inside the carrier's inbound chain, one at a time, so one slow handler — a `git` call,
+ * a filesystem index, a provider quota read — held up every other request of every session on the
+ * link, and every keystroke of every relayed terminal with them. Now a record is opened and parsed in
+ * order and its handler runs beside the others; the answer carries the `id` that §14 gives it for
+ * exactly this, because handlers finish in their own order.
+ *
+ * SIXTEEN, because that is the burst a cold app fires at once, so an ordinary first load runs whole.
+ * Back-pressure past it is credit rather than a queue this daemon has to bound itself: see
+ * {@link RelayLink.dispatch}.
+ */
+export const MAX_CONCURRENT_REQUESTS = 16;
+
 /** A request whose body is still arriving in parts. */
 interface IncomingBody {
   readonly request: RelayTunnelRequest;
@@ -435,6 +452,31 @@ interface PendingRecord {
   readonly payload: boolean;
 }
 
+/** A whole request waiting for one of its session's {@link MAX_CONCURRENT_REQUESTS} slots. */
+interface WaitingRequest {
+  readonly request: RelayTunnelRequest;
+  readonly body: string;
+  /** Settles the receipt of the record that queued it, once this request has been answered. */
+  readonly settle: { resolve(): void; reject(error: unknown): void };
+}
+
+/**
+ * What one frame set running that outlives its own handling: the answer to a request it completed.
+ * An object rather than a bare promise, because an `async` method returning a promise would await it —
+ * and not awaiting it is the point.
+ */
+interface Answering {
+  readonly answered: Promise<void>;
+}
+
+/**
+ * What the link says about one frame it has taken. The frame itself has been handled, in order, when
+ * this exists; `settled` is everything it set running — its answer included — having been written.
+ */
+export interface RelayFrameReceipt {
+  readonly settled: Promise<void>;
+}
+
 interface LinkSession {
   readonly sessionId: SessionId;
   phase: SessionPhase;
@@ -457,6 +499,10 @@ interface LinkSession {
   receive: ReceiveWindow;
   /** Request identifiers already answered or in flight. A repeat ends the session. */
   readonly answered: Set<number>;
+  /** Requests whose handlers are running now. At most {@link MAX_CONCURRENT_REQUESTS}. */
+  running: number;
+  /** Whole requests waiting for a slot, in arrival order. Each holds its own record's credit. */
+  readonly backlog: WaitingRequest[];
   /** Answers waiting for the peer to return credit. Bounded by the peer's own send window. */
   readonly waiting: PendingRecord[];
   /**
@@ -534,45 +580,58 @@ export class RelayLink {
   }
 
   /**
-   * One binary message from the carrier: exactly one frame, or the end of the connection.
-   *
-   * It resolves once everything this frame caused has been written, including answers that were
-   * waiting on credit. A caller that has awaited this has therefore seen the whole effect of the
-   * frame, which is what lets the socket adapter hand frames over one at a time and be sure the
-   * second is never handled before the first has finished.
+   * One binary message from the carrier, and everything it caused: it resolves once all of that has
+   * been written, the answer to a request included, so a caller that awaited it has seen the frame's
+   * whole effect. A carrier must NOT feed frames through this one at a time — that is the
+   * head-of-line block {@link MAX_CONCURRENT_REQUESTS} describes. It uses {@link RelayLink.accept}.
    */
   async receiveBinary(bytes: Uint8Array): Promise<void> {
-    await this.#handle(bytes);
-    await this.#outbox;
+    const receipt = await this.accept(bytes);
+    await receipt.settled;
   }
 
-  async #handle(bytes: Uint8Array): Promise<void> {
+  /**
+   * One binary message from the carrier: exactly one frame, or the end of the connection.
+   *
+   * It resolves once the frame has been HANDLED — opened, checked, parsed, its effect on the session
+   * decided — and that is what a carrier waits for before it hands over the next one, so frame `n+1`
+   * is never opened before frame `n`: the receive sequence advances inside the handler. A request's
+   * answer is not part of that; it runs beside the frames that follow and the receipt says when it
+   * crossed. A receipt that rejects means the link failed while writing, exactly as a rejection of
+   * this promise does.
+   */
+  async accept(bytes: Uint8Array): Promise<RelayFrameReceipt> {
+    const answering = await this.#handle(bytes);
+    return { settled: answering === undefined ? this.#outbox : answering.answered.then(() => this.#outbox) };
+  }
+
+  async #handle(bytes: Uint8Array): Promise<Answering | undefined> {
     const decoded = decodeFrame(bytes);
     if (!decoded.ok) {
       this.#refuseSocket(decoded.code, decoded.reason);
-      return;
+      return undefined;
     }
     const frame = decoded.frame;
     if (frame.kind === FRAME_KINDS.control) {
       await this.#onControl(frame);
-      return;
+      return undefined;
     }
     const session = this.#sessions.get(frame.sessionId.text);
     if (session === undefined) {
       // In flight across a close this daemon made: dropped, and the other sessions keep running.
-      if (this.#ended.has(frame.sessionId.text)) return;
-      this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a frame named no live session');
-      return;
+      if (!this.#ended.has(frame.sessionId.text))
+        this.#refuseSocket(RELAY_CLOSE_CODES.protocolError, 'a frame named no live session');
+      return undefined;
     }
     if (frame.kind === FRAME_KINDS.credit) {
       this.#onCredit(session, frame);
-      return;
+      return undefined;
     }
     if (frame.kind === FRAME_KINDS.handshake) {
       await this.#onHandshake(session, frame);
-      return;
+      return undefined;
     }
-    await this.#onRecord(session, frame);
+    return await this.#onRecord(session, frame);
   }
 
   // ─── rendezvous control ─────────────────────────────────────────────────────────────────────
@@ -684,6 +743,8 @@ export class RelayLink {
       send: newSendWindow(),
       receive: newReceiveWindow(),
       answered: new Set(),
+      running: 0,
+      backlog: [],
       waiting: [],
       sealing: undefined,
       stream: undefined,
@@ -788,7 +849,7 @@ export class RelayLink {
     });
   }
 
-  async #onRecord(session: LinkSession, frame: RelayFrame): Promise<void> {
+  async #onRecord(session: LinkSession, frame: RelayFrame): Promise<Answering | undefined> {
     const channel = session.channel;
     if (channel === undefined) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a record arrived before the handshake');
@@ -835,14 +896,8 @@ export class RelayLink {
       await this.#onStreamRecord(session, message);
       return;
     }
-    if (session.phase === 'serving' && message.t === 'req') {
-      await this.#serve(session, message);
-      return;
-    }
-    if (session.phase === 'serving' && message.t === 'req-more') {
-      await this.#continueBody(session, message);
-      return;
-    }
+    if (session.phase === 'serving' && message.t === 'req') return this.#serve(session, message);
+    if (session.phase === 'serving' && message.t === 'req-more') return this.#continueBody(session, message);
     if (session.phase === 'serving' && message.t === 'renewed') {
       await this.#renewed(session, message.proof);
       return;
@@ -1045,35 +1100,33 @@ export class RelayLink {
     this.#closeStream(session, RELAY_STREAM_CLOSES.notAllowed.code, RELAY_STREAM_CLOSES.notAllowed.reason);
   }
 
-  async #serve(session: LinkSession, request: RelayTunnelRequest): Promise<void> {
+  #serve(session: LinkSession, request: RelayTunnelRequest): Answering | undefined {
     if (session.device === undefined) {
       // Unreachable while `serving` implies a proven device, and checked anyway: the alternative to
       // this branch is a request dispatched with no identity at all.
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session holds no credential');
-      return;
+      return undefined;
     }
     if (session.answered.has(request.id)) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a request identifier was reused');
-      return;
+      return undefined;
     }
     session.answered.add(request.id);
     // The ONE thing that keeps a device from idling out: a request the page marked as a person's.
     if (request.presence === true) this.deps.devices.seen(session.device.deviceId);
     const first = request.body ?? '';
-    if (request.more !== true) {
-      await this.#dispatch(session, request, first);
-      return;
-    }
+    if (request.more !== true) return this.#dispatch(session, request, first);
     if (session.incoming.size >= MAX_INCOMING_BODIES) {
       this.#endSession(
         session.sessionId,
         RELAY_CLOSE_CODES.protocolError,
         'too many request bodies are arriving at once',
       );
-      return;
+      return undefined;
     }
     const bytes = utf8Bytes(first).byteLength;
     session.incoming.set(request.id, { request, parts: [first], bytes, refused: bytes > MAX_TUNNEL_BODY_BYTES });
+    return undefined;
   }
 
   /**
@@ -1083,22 +1136,19 @@ export class RelayLink {
    * parts are dropped, not buffered to the end — and the request is answered `413` once its last part
    * arrives, so the peer still learns which request it was and the session survives.
    */
-  async #continueBody(session: LinkSession, part: RelayTunnelRequestPart): Promise<void> {
+  #continueBody(session: LinkSession, part: RelayTunnelRequestPart): Answering | undefined {
     const pending = session.incoming.get(part.id);
     if (pending === undefined) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a body part named no request in progress');
-      return;
+      return undefined;
     }
     pending.bytes += utf8Bytes(part.body).byteLength;
     if (pending.bytes > MAX_TUNNEL_BODY_BYTES) pending.refused = true;
     if (pending.refused) pending.parts.length = 0;
     else pending.parts.push(part.body);
-    if (part.more === true) return;
+    if (part.more === true) return undefined;
     session.incoming.delete(part.id);
-    if (!pending.refused) {
-      await this.#dispatch(session, pending.request, pending.parts.join(''));
-      return;
-    }
+    if (!pending.refused) return this.#dispatch(session, pending.request, pending.parts.join(''));
     this.#answer(session, pending.request.id, {
       status: 413,
       headers: new Map([['content-type', 'application/json']]),
@@ -1109,15 +1159,87 @@ export class RelayLink {
         },
       }),
     });
+    return undefined;
   }
 
-  async #dispatch(session: LinkSession, request: RelayTunnelRequest, body: string): Promise<void> {
-    const device = session.device;
-    if (device === undefined) return;
-    const response = await this.deps.dispatch(
-      tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival, session.transcript),
-    );
-    this.#answer(session, request.id, response);
+  /**
+   * Start a whole request beside the ones already running, or queue it behind them.
+   *
+   * NOT AWAITED BY THE FRAME THAT COMPLETED IT, which is the change from a link that served requests
+   * one at a time; see {@link MAX_CONCURRENT_REQUESTS}.
+   *
+   * A REQUEST THAT HAS TO WAIT KEEPS ITS RECORD'S CREDIT, and that is the whole back-pressure story
+   * rather than a second one beside §8's. The record was counted as consumed a moment ago, and
+   * `#returnCredit` deducts every request still in the backlog from that count — so a peer that keeps
+   * sending past the bound runs out of allowance, exactly as it did when the inbound path blocked,
+   * except that nothing else on the link waits with it. The backlog is therefore bounded by one window
+   * plus the one record whose credit may already have been returned before it was queued; a backlog
+   * past that is a peer sending beyond the allowance it was given, which a rendezvous refuses with
+   * `4430` and which a direct socket — with no rendezvous to count for it — is refused here the same way.
+   */
+  #dispatch(session: LinkSession, request: RelayTunnelRequest, body: string): Answering | undefined {
+    if (session.running < MAX_CONCURRENT_REQUESTS) return { answered: this.#run(session, request, body) };
+    if (session.backlog.length > CREDIT_WINDOW_FRAMES) {
+      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.flowViolation, 'more requests than the window allows');
+      return undefined;
+    }
+    const answered = Promise.withResolvers<void>();
+    session.backlog.push({ request, body, settle: answered });
+    return { answered: answered.promise };
+  }
+
+  /**
+   * One request, run to its answer; the slot it held then goes to the next one waiting.
+   *
+   * A handler that THROWS is answered `500`, in the words the route dispatcher already uses for a
+   * route that threw, rather than failing the link: with requests running side by side a failure no
+   * longer belongs to the frame being handled, and one bad route must not end every session the
+   * carrier holds. A session that ended while its handler ran is owed nothing, and is sent nothing.
+   */
+  async #run(session: LinkSession, request: RelayTunnelRequest, body: string): Promise<void> {
+    session.running += 1;
+    try {
+      const device = session.device;
+      if (device === undefined) return;
+      // A try rather than `.catch()`: a port implemented without `async` throws instead of rejecting.
+      let response: ApiResponse;
+      try {
+        response = await this.deps.dispatch(
+          tunnelApiRequest({ ...request, body }, device, session.sessionId.text, this.deps.arrival, session.transcript),
+        );
+      } catch {
+        response = {
+          status: 500,
+          headers: new Map([['content-type', 'application/json']]),
+          body: JSON.stringify({
+            error: { code: 'internal_error', message: 'the daemon failed to handle this request' },
+          }),
+        };
+      }
+      if (this.#live(session)) this.#answer(session, request.id, response);
+    } finally {
+      session.running -= 1;
+      this.#startNext(session);
+    }
+  }
+
+  /**
+   * Give a freed slot to the request that has waited longest, and return the credit it was holding.
+   *
+   * The lease is asked again here, for the reason `#onRecord` asks it of every record: a request that
+   * waited behind slow ones may reach its turn after the authority it arrived under has ended.
+   */
+  #startNext(session: LinkSession): void {
+    if (!this.#live(session)) return;
+    const next = session.backlog.shift();
+    if (next === undefined) return;
+    if (this.deps.clock.now() >= session.leaseExpiresAtMs) {
+      next.settle.resolve();
+      this.#endSession(session.sessionId, RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, ACCESS_LEASE_ENDED_REASON);
+      return;
+    }
+    this.#returnCredit(session);
+    this.#run(session, next.request, next.body).then(next.settle.resolve, next.settle.reject);
   }
 
   /** One answer, as one record or as its ordered parts. */
@@ -1390,6 +1512,9 @@ export class RelayLink {
     session.renewal = undefined;
     session.renewNonce = undefined;
     session.incoming.clear();
+    // A request still waiting will never run, and the receipt of the record that queued it says so by
+    // settling: nothing it owes the wire is left to write.
+    for (const waiting of session.backlog.splice(0)) waiting.settle.resolve();
     session.owesConclusion = false;
     // Nothing queued can be delivered now. Emptying it is not what makes a late send impossible —
     // `#flush` may already hold a record under a suspended seal, and the liveness gate there is what
@@ -1473,7 +1598,15 @@ export class RelayLink {
   /** Count one consumed end-to-end frame and return credit once half a window is owed. */
   #consume(session: LinkSession): void {
     session.receive = recordConsumed(session.receive);
-    const owed = creditToReturn(session.receive);
+    this.#returnCredit(session);
+  }
+
+  /**
+   * Return credit once half a window is owed — counting a request still waiting for a slot as NOT
+   * consumed yet, so its credit goes back only when it starts. See {@link RelayLink.dispatch}.
+   */
+  #returnCredit(session: LinkSession): void {
+    const owed = creditToReturn({ ...session.receive, consumed: session.receive.consumed - session.backlog.length });
     if (owed === 0) return;
     session.receive = recordCredited(session.receive, owed);
     this.#sendSessionFrame(session, {

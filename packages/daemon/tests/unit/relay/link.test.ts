@@ -87,6 +87,7 @@ import {
 import {
   ACCESS_LEASE_ENDED_REASON,
   type AccessLeasePolicy,
+  MAX_CONCURRENT_REQUESTS,
   MAX_INCOMING_BODIES,
   MAX_PRE_CREDENTIAL_SESSIONS,
   RELAY_CREDENTIAL_DEADLINE_MS,
@@ -3485,5 +3486,233 @@ describe('the key an unknown device id is verified against', () => {
 
     should(await verifyDeviceProof(crypto_, UNKNOWN_DEVICE_KEY, honest, message)).be.false();
     should(await verifyDeviceProof(crypto_, UNKNOWN_DEVICE_KEY, forged, message)).be.false();
+  });
+});
+
+describe('requests that run side by side', () => {
+  /** A request handler that answers only when the test says so, one gate per path. */
+  function gated() {
+    const gates = new Map<string, () => void>();
+    const answer = async (request: ApiRequest): Promise<ApiResponse> => {
+      if (request.path.startsWith('/slow')) await new Promise<void>(resolve => gates.set(request.path, resolve));
+      if (request.path === '/throws') throw new Error('a route that threw');
+      return json(200, { path: request.path });
+    };
+    const open = (path: string): void => {
+      const gate = gates.get(path);
+      if (gate === undefined) throw new Error(`no request is waiting at ${path}`);
+      gates.delete(path);
+      gate();
+    };
+    return { gates, answer, open };
+  }
+
+  /** Seal one message as the client and hand it over the way a carrier does: handled, not answered. */
+  async function clientAccept(
+    link: RelayLink,
+    channel: ChannelState,
+    message: unknown,
+  ): Promise<{ state: ChannelState; settled: Promise<void> }> {
+    const sealed = await sealRecord(crypto_, channel, utf8Bytes(JSON.stringify(message)));
+    if (!sealed.ok) throw new Error(sealed.reason);
+    const receipt = await link.accept(encodeFrame(sealed.frame));
+    return { state: sealed.state, settled: receipt.settled };
+  }
+
+  async function serving(answer: (request: ApiRequest) => Promise<ApiResponse>, now?: () => number) {
+    const harnessed = harness(answer, DEVICE_TOKEN, undefined, undefined, now === undefined ? {} : { now });
+    const opened = await keyedSession(harnessed);
+    const channel = await clientSend(harnessed.link, opened.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+    return { harnessed, opened, channel };
+  }
+
+  const answeredIds = async (sent: Wire, channel: ChannelState): Promise<number[]> =>
+    (await clientReadAll(sent, channel)).messages
+      .filter((message): message is { t: 'res'; id: number } => (message as { t?: string }).t === 'res')
+      .map(message => message.id);
+
+  it('should answer a fast request while a slow one on the same link is still running', async () => {
+    // Arrange — the defect: requests were served inside the carrier's inbound chain, so one slow
+    // handler held up every request behind it on the link.
+    const routes = gated();
+    const { harnessed, opened, channel } = await serving(routes.answer);
+
+    // Act — the slow request first, then the fast one, each handed over the way a carrier does.
+    const slow = await clientAccept(harnessed.link, channel, { t: 'req', id: 1, method: 'GET', path: '/slow' });
+    const fast = await clientAccept(harnessed.link, slow.state, { t: 'req', id: 2, method: 'GET', path: '/fast' });
+    await fast.settled;
+
+    // Assert — the fast one crossed while the slow one is still running.
+    should(routes.gates.has('/slow')).be.true();
+    should(await answeredIds(harnessed.wire, opened.channel)).deepEqual([2]);
+
+    // Act + Assert — the slow one answers when its handler does, under its own id.
+    routes.open('/slow');
+    await slow.settled;
+    should(await answeredIds(harnessed.wire, opened.channel)).deepEqual([2, 1]);
+  });
+
+  it('should run at most the bound at once, and start a waiting request when one answers', async () => {
+    // Arrange
+    const routes = gated();
+    const { harnessed, opened, channel } = await serving(routes.answer);
+    let state = channel;
+    const receipts: Promise<void>[] = [];
+
+    // Act — one more request than the bound, every one of them slow.
+    for (let id = 1; id <= MAX_CONCURRENT_REQUESTS + 1; id += 1) {
+      const sent = await clientAccept(harnessed.link, state, { t: 'req', id, method: 'GET', path: `/slow/${id}` });
+      state = sent.state;
+      receipts.push(sent.settled);
+    }
+
+    // Assert — the last one waits rather than running.
+    should(harnessed.requests).have.length(MAX_CONCURRENT_REQUESTS);
+
+    // Act + Assert — one answer frees one slot, and the request that waited longest takes it.
+    routes.open('/slow/3');
+    await receipts[2];
+    should(harnessed.requests.map(request => request.path).at(-1)).equal(`/slow/${MAX_CONCURRENT_REQUESTS + 1}`);
+    for (const path of [...routes.gates.keys()]) routes.open(path);
+    await Promise.all(receipts);
+    should((await answeredIds(harnessed.wire, opened.channel)).toSorted((a, b) => a - b)).deepEqual(
+      Array.from({ length: MAX_CONCURRENT_REQUESTS + 1 }, (_, index) => index + 1),
+    );
+  });
+
+  it('should keep the credit of a waiting request until it starts, so the peer is held back by §8', async () => {
+    // Arrange — a full window of requests past the bound: the handshake, the credential, then the bound
+    // running and half a window waiting.
+    const routes = gated();
+    const { harnessed, channel } = await serving(routes.answer);
+    let state = channel;
+    const receipts: Promise<void>[] = [];
+    const credited = (): number =>
+      harnessed.wire.frames
+        .filter(frame => frame.kind === FRAME_KINDS.credit)
+        .reduce((total, frame) => total + (decodeCreditPayload(frame.payload) ?? 0), 0);
+    const total = MAX_CONCURRENT_REQUESTS + CREDIT_WINDOW_FRAMES / 2;
+
+    // Act
+    for (let id = 1; id <= total; id += 1) {
+      const sent = await clientAccept(harnessed.link, state, { t: 'req', id, method: 'GET', path: `/slow/${id}` });
+      state = sent.state;
+      receipts.push(sent.settled);
+    }
+
+    // Assert — the waiting half-window is not consumed as far as credit is concerned: one batch went
+    // back for what is running, none for what waits.
+    should(credited()).equal(CREDIT_WINDOW_FRAMES / 2);
+
+    // Act + Assert — once everything has run, the credit it held goes back too: the second batch, which
+    // a link that counted waiting records as consumed would have returned before any of them ran.
+    while (routes.gates.size > 0) {
+      for (const path of [...routes.gates.keys()]) routes.open(path);
+      await Promise.resolve();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    await Promise.all(receipts);
+    should(credited()).equal(CREDIT_WINDOW_FRAMES);
+  });
+
+  it('should answer a handler that throws with a 500 and keep the session serving', async () => {
+    const routes = gated();
+    const { harnessed, opened, channel } = await serving(routes.answer);
+
+    const thrown = await clientAccept(harnessed.link, channel, { t: 'req', id: 4, method: 'GET', path: '/throws' });
+    await thrown.settled;
+    const after = await clientAccept(harnessed.link, thrown.state, { t: 'req', id: 5, method: 'GET', path: '/ok' });
+    await after.settled;
+
+    const read = await clientReadAll(harnessed.wire, opened.channel);
+    should(read.messages.at(-2)).containDeep({ t: 'res', id: 4, status: 500 });
+    should(JSON.parse((read.messages.at(-2) as { body: string }).body)).deepEqual({
+      error: { code: 'internal_error', message: 'the daemon failed to handle this request' },
+    });
+    should(read.messages.at(-1)).containDeep({ t: 'res', id: 5, status: 200 });
+    should(harnessed.link.report().sessions).equal(1);
+  });
+
+  it('should send nothing for a request whose session ended while it ran, nor start the ones waiting', async () => {
+    // Arrange — the bound running, one more waiting.
+    const routes = gated();
+    const { harnessed, channel } = await serving(routes.answer);
+    let state = channel;
+    const receipts: Promise<void>[] = [];
+    for (let id = 1; id <= MAX_CONCURRENT_REQUESTS + 1; id += 1) {
+      const sent = await clientAccept(harnessed.link, state, { t: 'req', id, method: 'GET', path: `/slow/${id}` });
+      state = sent.state;
+      receipts.push(sent.settled);
+    }
+
+    // Act — the session ends under them (a malformed credit is the cheapest ending), then they finish.
+    await harnessed.link.receiveBinary(
+      encodeFrame({ kind: FRAME_KINDS.credit, sessionId: sessionOne(), sequence: 0, payload: new Uint8Array(3) }),
+    );
+    const framesAtEnd = harnessed.wire.frames.length;
+    for (const path of [...routes.gates.keys()]) routes.open(path);
+    await Promise.all(receipts);
+
+    // Assert — the close is the last thing said for that session, and the waiting request never ran.
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({ t: 'closed', code: RELAY_CLOSE_CODES.flowViolation });
+    should(harnessed.wire.frames).have.length(framesAtEnd);
+    should(harnessed.requests).have.length(MAX_CONCURRENT_REQUESTS);
+  });
+
+  it('should end the session with the lease code when a waiting request reaches its turn after the lease', async () => {
+    // Arrange
+    let now = 0;
+    const routes = gated();
+    const { harnessed, channel } = await serving(routes.answer, () => now);
+    let state = channel;
+    const receipts: Promise<void>[] = [];
+    for (let id = 1; id <= MAX_CONCURRENT_REQUESTS + 1; id += 1) {
+      const sent = await clientAccept(harnessed.link, state, { t: 'req', id, method: 'GET', path: `/slow/${id}` });
+      state = sent.state;
+      receipts.push(sent.settled);
+    }
+
+    // Act — the lease runs out while the request waits (its timer starved), then a slot frees.
+    now = 900_000;
+    routes.open('/slow/1');
+    await Promise.all([receipts[0], receipts[MAX_CONCURRENT_REQUESTS]]);
+
+    // Assert
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
+      reason: ACCESS_LEASE_ENDED_REASON,
+    });
+    should(harnessed.requests).have.length(MAX_CONCURRENT_REQUESTS);
+    for (const path of [...routes.gates.keys()]) routes.open(path);
+    await Promise.all(receipts);
+  });
+
+  it('should refuse a peer that queues more requests than its allowance could have carried', async () => {
+    // Arrange — a peer ignoring credit, which a rendezvous would refuse and a direct socket cannot.
+    const routes = gated();
+    const { harnessed, channel } = await serving(routes.answer);
+    let state = channel;
+    const receipts: Promise<void>[] = [];
+
+    // Act — the bound, then one more than a window plus the one record whose credit may already be back.
+    for (let id = 1; id <= MAX_CONCURRENT_REQUESTS + CREDIT_WINDOW_FRAMES + 2; id += 1) {
+      const sent = await clientAccept(harnessed.link, state, { t: 'req', id, method: 'GET', path: `/slow/${id}` });
+      state = sent.state;
+      receipts.push(sent.settled);
+    }
+
+    // Assert
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.flowViolation,
+      reason: 'more requests than the window allows',
+    });
+    for (const path of [...routes.gates.keys()]) routes.open(path);
+    await Promise.all(receipts);
   });
 });
