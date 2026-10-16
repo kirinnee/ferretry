@@ -77,6 +77,8 @@ export * from '../features/browser/unified-browser-model.ts';
 export * from '../features/browser/unified-browser-surface.tsx';
 export * from '../features/browser/use-session-browser.ts';
 export * from '../features/carrier/active-carrier-card.tsx';
+export * from '../features/config-files/config-files-api.ts';
+export * from '../features/config-files/config-files-settings.tsx';
 export * from '../features/context-rail/context-rail.tsx';
 export * from '../features/context-rail/context-rail-body.tsx';
 export * from '../features/context-rail/context-rail-lists.tsx';
