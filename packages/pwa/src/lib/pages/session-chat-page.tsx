@@ -45,7 +45,9 @@ import {
   useContextPlacement,
 } from '../../features/workspace/session-workspace.tsx';
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
-import { useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
+import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
+import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
+import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
@@ -69,7 +71,8 @@ import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
-import { useDaemonFetch } from '../store.tsx';
+import { useDaemonClient, useDaemonFetch } from '../store.tsx';
+import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
@@ -201,6 +204,11 @@ export interface SessionChatPageProps {
   readonly context?: SessionContextDependencies;
   /** The remote browser's engine, for a harness that scripts it. Absent: the real one. */
   readonly browser?: UnifiedBrowserDependencies;
+  /**
+   * This session's live journal, as the host already subscribes to it: `surface.*` events move the
+   * AGENT marker and Take over / Hand back at once. Absent, the page still reads them on a poll.
+   */
+  readonly surfaceEvents?: SurfaceEventFeed;
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
@@ -295,6 +303,7 @@ export function SessionChatPage({
   formFactor: formFactorOverride,
   context: contextDependencies,
   browser,
+  surfaceEvents,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
@@ -302,7 +311,14 @@ export function SessionChatPage({
   const formFactor = formFactorOverride ?? (presentation === 'sheet' ? 'phone' : measuredFormFactor);
   const workspace = useSessionWorkspace(workspaceLayouts, scope);
   const placement = useContextPlacement(formFactor);
-  const driving = useSurfaceDriving(scope);
+  // Who drives which terminal and page, and the session's pages: both through the daemon client, so a
+  // relay-only machine answers them as surely as one on the LAN.
+  const daemonClient = useDaemonClient();
+  const driving = useSurfaceDriving(scope, connection, {
+    client: daemonClient,
+    ...(surfaceEvents === undefined ? {} : { events: surfaceEvents }),
+  });
+  const browserPages = useSessionBrowser(scope, connection, { client: daemonClient });
   const terminals = useSessionTerminals(deck, connection, scope);
   const [utility, setUtility] = useState<SessionUtility | null>(null);
   const utilityId = useId();
@@ -373,12 +389,22 @@ export function SessionChatPage({
   const referenceDestinations = useMemo(
     () => ({
       openFile: (path: string, selection?: Parameters<typeof openFile>[1]) => openFile(path, selection),
-      openSurface: (reference: { readonly surface: 'terminal' | 'browser'; readonly key: string }) =>
-        openSurface(reference.surface, reference.key),
+      // A tab is keyed the way its body finds the surface: a terminal by the daemon's id (the deck
+      // shows one shell by id), a page by its name when it has one. The tab is labelled with the name.
+      openSurface: (reference: { readonly surface: 'terminal' | 'browser'; readonly key: string }) => {
+        if (reference.surface === 'terminal') {
+          const id = terminalIdForSurfaceKey(terminals, reference.key) ?? reference.key;
+          openSurface('terminal', id, id === reference.key ? undefined : reference.key);
+          return;
+        }
+        const page = browserPageForKey(browserPages.status, reference.key);
+        if (page === undefined) openSurface('browser', reference.key);
+        else openSurface('browser', page.name ?? page.id, browserPageLabel(page));
+      },
       openTasks,
       openSkills: () => reveal('skills'),
     }),
-    [openFile, openSurface, openTasks, reveal],
+    [openFile, openSurface, openTasks, reveal, terminals, browserPages.status],
   );
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
@@ -404,6 +430,7 @@ export function SessionChatPage({
           : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
         ...(terminals === null ? {} : { terminals }),
+        ...(browserPages.status === null ? {} : { browser: browserPages.status }),
         destinations: referenceDestinations,
         // Both halves or neither. The ledger alone proves `!A3` without giving
         // it anywhere to go, and an opener alone would link an unproved id — so
@@ -425,6 +452,7 @@ export function SessionChatPage({
       attentionKey,
       openAttention,
       terminals,
+      browserPages.status,
       referenceDestinations,
     ],
   );
@@ -902,6 +930,7 @@ export function SessionChatPage({
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
           {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
           {...(browser === undefined ? {} : { browser })}
+          browserPages={browserPages}
         />
         <BottomSheet
           ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}

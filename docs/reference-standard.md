@@ -109,7 +109,7 @@ never rewritten.
 | `!attention` | The Attention pane for this session                                           |
 | `/skill`     | The Skills tab of this session's "This folder" context                        |
 | `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
-| `%browser:`  | Nothing yet — no browser worker exists to prove a page, see section 7         |
+| `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view    |
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
 new tab.
@@ -222,7 +222,9 @@ that is not a listing proves nothing rather than promoting a path.
 **Surfaces have a third answer, and it is visible.** For every other family "we cannot prove it" and
 "it is not there" are the same answer, so both render as prose. For a surface they are not: the
 daemon's terminal listing for a session is a COMPLETE enumeration, so an id missing from it is proved
-gone. A proved-closed surface renders as an inert tombstone (struck through, never a link) rather than
+gone — and so is the session's browser status (`GET /v1/sessions/:id/browser`) for pages, while the
+browser is `running`, `stopping` or `stopped` (a stopped browser holds no pages: they end with it).
+While it is `starting` or in `error` its list proves nothing either way. A proved-closed surface renders as an inert tombstone (struck through, never a link) rather than
 as prose, because silently reprinting the token would leave the reader and the agent believing they
 still share a shell. No listing at all still proves nothing, and stays prose.
 
@@ -269,6 +271,7 @@ The grammar is meant to be extended in one place, not forked. To add a kind:
 4. Add its opener to the renderer and to the per-session surface. A kind with no opener stays prose,
    which is the correct intermediate state to ship.
 
-`%browser:` is in exactly that intermediate state today: it parses and encodes, and nothing can prove
-it — there is no browser worker and no authoritative page list, so a page is neither open nor
-demonstrably closed. Teaching one resolver about pages is the whole remaining change.
+`%browser:` went through exactly that intermediate state: it parsed and encoded for months while
+nothing could prove it. The surface resolver now reads the session's browser status as well as its
+terminal listing (`packages/pwa/src/lib/surface-references.ts`), and the session page opens a proved
+page in its own workspace tab.
