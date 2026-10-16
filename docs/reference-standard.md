@@ -92,15 +92,15 @@ never rewritten.
 
 ## 4. What each click opens
 
-| Reference    | Click opens                                                              |
-| ------------ | ------------------------------------------------------------------------ |
-| `:agent`     | That agent's session, **on the daemon the reference was proved against** |
-| `@file`      | A file tab in the side pane, scrolled to the referenced line or range    |
-| `&task`      | The Tasks pane for this session                                          |
-| `!attention` | The Attention pane for this session                                      |
-| `/skill`     | The Skills pane for this session                                         |
-| `%terminal:` | That exact terminal instance's tab                                       |
-| `%browser:`  | Nothing yet — no browser worker exists to prove a page, see section 7    |
+| Reference    | Click opens                                                                   |
+| ------------ | ----------------------------------------------------------------------------- |
+| `:agent`     | That agent's session, **on the daemon the reference was proved against**      |
+| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range |
+| `&task`      | The Tasks sheet for this session                                              |
+| `!attention` | The Attention pane for this session                                           |
+| `/skill`     | The Skills tab of this session's "This folder" context                        |
+| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
+| `%browser:`  | Nothing yet — no browser worker exists to prove a page, see section 7         |
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
 new tab.
@@ -114,24 +114,26 @@ one of the tokens in section 2.
 | ------- | ------------------- | ----------------------------------- |
 | `@`     | Files               | `@path`                             |
 | `@@`    | Fleet agents        | `:name`                             |
-| `@@@`   | Tasks               | `&ID`                               |
-| `@@@@`  | Attention           | `!AN`                               |
+| `@@@`   | Attention           | `!AN`                               |
 | `:`     | Fleet agents        | `:name`                             |
-| `&`     | Tasks               | `&ID`                               |
 | `!`     | Attention           | `!AN`                               |
 | `$`     | Skills              | `/name` on Claude, `$name` on Codex |
 | `/`     | Commands and skills | `/name` on Claude, `$name` on Codex |
 | `%`     | Live surfaces       | `%terminal:<key>`                   |
 
 Every family is reachable two ways, and both ways read one source. The repeated-`@` ladder is the
-DISCOVERABLE one — a single sigil, repeated, teaches four families from a legend — and the direct
+DISCOVERABLE one — a single sigil, repeated, teaches three families from a legend — and the direct
 sigil is what you use once you know, because it is the first character of the token itself.
+
+**No menu offers tasks** (owner decision, 2026-10-16): there is no `@@@` task tier and `&` opens
+nothing. Only the OFFER is withdrawn — an authored `&F12` still parses, proves and links (sections 2
+and 6), and Add to chat still inserts one.
 
 The picker inserts what the harness invokes, which is why `$` can insert `/name`: an invocation the
 harness ignores is a broken offer. That is not the same as rewriting an authored reference, which
 never happens.
 
-There is deliberately no fifth `@@@@@` tier: Pins are a top link strip, not a reference tier
+There is deliberately no fourth `@@@@` tier: Pins are a top link strip, not a reference tier
 (handover #63), and they are readable composer text rather than a second reference grammar. Template
 libraries are not an `@` tier either, and no build of this app has ever had one.
 
@@ -162,19 +164,20 @@ and is a known gap, not a second rule to copy: a new trigger asks `isReferenceLe
 While an IME composition is active no menu opens at all, and the trigger is re-read when the
 composition ends: a candidate window and a suggestion list must not fight over the same bytes.
 
-### Three switches, and the one thing they cannot do
+### Which keys open a menu, and the one thing that choice cannot do
 
-Settings carries three device-local switches, all on by default:
+Settings › Behaviour › **Open suggestions with** is a device-local choice (`suggestionKeys`):
 
-| Switch                       | Governs                                       |
-| ---------------------------- | --------------------------------------------- |
-| `mentionSuggestions`         | the whole `@` ladder, bare `@` files included |
-| `directReferenceSuggestions` | `:` `&` `!`                                   |
-| `skillSuggestions`           | `$` only                                      |
+| Choice               | Opens a menu                                                    |
+| -------------------- | --------------------------------------------------------------- |
+| `@ ladder` (default) | `@` files, `@@` agents, `@@@` attention; `:` and `!` stay prose |
+| `Symbols`            | `@` files, `:` agents, `!` attention; no `@@` tiers             |
+| `Both`               | every row of the matrix above                                   |
 
-`/` and `%` are never governed, so a skill and a live terminal always have a way in.
+A separate switch, `skillSuggestions` (on by default), governs `$` only. `/` and `%` open in every
+mode, so a skill and a live terminal always have a way in.
 
-**A disabled switch suppresses the MENU, never the grammar.** An authored reference still parses,
+**A key that opens no menu suppresses the MENU, never the grammar.** An authored reference still parses,
 still proves and still links, "Add to chat" still inserts one, and a skill may still be written
 either way. Turning a menu off removes an offer, never a capability.
 

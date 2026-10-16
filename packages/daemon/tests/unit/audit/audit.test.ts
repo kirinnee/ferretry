@@ -3,6 +3,7 @@ import type { AuditRecord, DaemonId, PairingCode, PushDeliveryResult, PushDevice
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from '../../../src/lib/api/index.ts';
+import type { SocketDownstream, SocketFrame, SocketRoute } from '../../../src/lib/api/socket.ts';
 import {
   AUDIT_FOLD_WINDOW_MS,
   AUDIT_INVALID_TEXT,
@@ -29,7 +30,6 @@ import {
   PushNewDeviceAlert,
   withinAuditBounds,
 } from '../../../src/lib/audit/index.ts';
-import type { SocketDownstream, SocketFrame, SocketRoute } from '../../../src/lib/api/socket.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
 import {
   type PairingCryptography,
@@ -168,7 +168,9 @@ describe('audit policy', () => {
       'A device calling itself “this computer” (…dddddd) was paired with workstation on the local network',
     );
     should(payload.eventKey).equal(`device-paired:${DEVICE_ID}`);
-    should('kind' in payload).be.false();
+    // `kind` IS carried now, so a reader's own local "new device" switch can filter it; it is the
+    // one kind a payload about no session may name.
+    should(payload.kind).equal('device-paired');
   });
 });
 
@@ -522,7 +524,6 @@ const enrolment = (id: string): PushDeviceView => ({
   createdAt: AT,
   updatedAt: AT,
   expirationTime: null,
-  prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
 });
 
 describe('PushNewDeviceAlert', () => {

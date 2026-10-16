@@ -44,9 +44,9 @@ export function authorizeSend(target: SendTarget, attachmentIds: readonly string
       `session ${target.id} is holding an unanswered structured question ` +
         `(${target.pendingQuestion.toolUseId}); answer or abandon it before sending prose`,
     );
-  // Per-session upload/download routes are mounted. Agent-side injection remains
-  // an explicit migration gap, but an attachment id is now a durable, daemon-keyed
-  // reference rather than a value this policy must blanket-refuse.
+  // An attachment id is a durable, daemon-keyed reference, not a value this policy
+  // must refuse: the send route copies each one out and names its path in the
+  // message (`attachments/delivery.ts`), refusing there if one is not this session's.
   void attachmentIds;
 }
 

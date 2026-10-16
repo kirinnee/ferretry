@@ -171,7 +171,25 @@ export interface SessionTerminalDeckProps {
    * one.
    */
   readonly focusTerminalId?: string;
+  /**
+   * ONE SHELL, NOT A DECK: a workspace tab names exactly one terminal, so its body shows that shell
+   * alone — no strip of its own, no ＋, no ledger — because the workspace's tab strip already is the
+   * strip. A shell missing from the daemon's listing says so instead of showing another one.
+   */
+  readonly solo?: boolean;
+  /** Rewrites what the reader typed before it is sent: the phone key bar's sticky ctrl. */
+  readonly interceptInput?: (data: string) => string;
+  /** Hands the host a way to type into, and focus, the shell on screen — the phone key bar. */
+  readonly onInputPort?: (port: TerminalInputPort | null) => void;
 }
+
+/** Typing into, and focusing, the one shell a host is showing. */
+export interface TerminalInputPort {
+  readonly write: (data: string) => void;
+  readonly focus: () => void;
+}
+
+const passInput = (data: string): string => data;
 
 /**
  * What a failed terminal call says.
@@ -223,6 +241,8 @@ interface TerminalCanvasProps {
   readonly dependencies: TerminalDeckDependencies;
   readonly onLink: (state: TerminalLinkState) => void;
   readonly onSelection: (selection: string) => void;
+  readonly interceptInput: (data: string) => string;
+  readonly onInputPort?: ((port: TerminalInputPort | null) => void) | undefined;
 }
 
 /**
@@ -241,6 +261,8 @@ function TerminalCanvas({
   dependencies,
   onLink,
   onSelection,
+  interceptInput,
+  onInputPort,
 }: TerminalCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<import('@xterm/xterm').Terminal | null>(null);
@@ -252,6 +274,10 @@ function TerminalCanvas({
   const onSelectionRef = useRef(onSelection);
   onLinkRef.current = onLink;
   onSelectionRef.current = onSelection;
+  const interceptRef = useRef(interceptInput);
+  interceptRef.current = interceptInput;
+  const onInputPortRef = useRef(onInputPort);
+  onInputPortRef.current = onInputPort;
   const [readyVersion, setReadyVersion] = useState(0);
   const [reopenVersion, setReopenVersion] = useState(0);
   const attemptRef = useRef(0);
@@ -306,7 +332,7 @@ function TerminalCanvas({
           // one frame. Neither answer belongs here, which is why this calls a port.
           streamRef.current?.write(bytes);
         };
-        dataDisposable = xterm.onData(value => send(new TextEncoder().encode(value)));
+        dataDisposable = xterm.onData(value => send(new TextEncoder().encode(interceptRef.current(value))));
         binaryDisposable = xterm.onBinary(value => send(bytesFromBinaryString(value)));
         selectionDisposable = xterm.onSelectionChange(() => onSelectionRef.current(xterm.getSelection()));
 
@@ -345,6 +371,20 @@ function TerminalCanvas({
       fitRef.current = null;
     };
   }, [dependencies, scrollback]);
+
+  // The key bar's port exists only while this shell is the one on screen and has an emulator to
+  // focus. `readyVersion` is the trigger for "the emulator now exists".
+  // biome-ignore lint/correctness/useExhaustiveDependencies: readyVersion is the re-run trigger
+  useEffect(() => {
+    const xterm = terminalRef.current;
+    const publish = onInputPortRef.current;
+    if (!active || xterm === null || publish === undefined) return;
+    publish({
+      write: data => streamRef.current?.write(new TextEncoder().encode(data)),
+      focus: () => xterm.focus(),
+    });
+    return () => publish(null);
+  }, [active, readyVersion]);
 
   // `readyVersion` and `reopenVersion` are in the list although the body never
   // reads them: they ARE the triggers. The first fires once the emulator exists
@@ -468,6 +508,9 @@ export function SessionTerminalDeck({
   cwd,
   dependencies,
   focusTerminalId,
+  solo = false,
+  interceptInput = passInput,
+  onInputPort,
 }: SessionTerminalDeckProps) {
   const [list, setList] = useState<TerminalListView | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -517,7 +560,9 @@ export function SessionTerminalDeck({
     return () => document.removeEventListener('keydown', onKey);
   }, [expanded]);
 
-  const terminals = list?.terminals ?? [];
+  const listed = list?.terminals ?? [];
+  // A solo body shows its one shell or nothing; it never falls back to whichever shell is first.
+  const terminals = solo ? listed.filter(terminal => terminal.id === focusTerminalId) : listed;
 
   // A tab opened FOR one terminal selects that terminal — once the listing has
   // proved it exists. Before the listing lands there is nothing to prove it
@@ -529,8 +574,8 @@ export function SessionTerminalDeck({
     setActiveId(current => (current === focusTerminalId ? current : focusTerminalId));
   }, [focusTerminalId, terminals]);
 
-  const active = terminals.find(terminal => terminal.id === activeId) ?? null;
-  const atSessionCap = list === null ? false : terminals.length >= list.limits.perSession;
+  const active = terminals.find(terminal => terminal.id === (solo ? focusTerminalId : activeId)) ?? null;
+  const atSessionCap = list === null ? false : listed.length >= list.limits.perSession;
   const atGlobalCap = list === null ? false : list.limits.runningGlobal >= list.limits.global;
   const activeLink = active === null ? 'idle' : (link[active.id] ?? 'idle');
   const ownership = ownershipOf(active);
@@ -629,48 +674,50 @@ export function SessionTerminalDeck({
       data-expanded={expanded ? '' : undefined}
       data-terminal-deck=""
     >
-      <div className="kt-webterm__deck">
-        <div aria-label="Open shell terminals" className="kt-webterm__tabs" role="tablist">
-          {terminals.map(terminal => (
+      {solo ? null : (
+        <div className="kt-webterm__deck">
+          <div aria-label="Open shell terminals" className="kt-webterm__tabs" role="tablist">
+            {terminals.map(terminal => (
+              <button
+                aria-controls={`web-terminal-panel-${terminal.id}`}
+                aria-selected={terminal.id === activeId}
+                className="kt-webterm__tab"
+                data-active={terminal.id === activeId ? true : undefined}
+                data-owner={ownershipOf(terminal).by}
+                id={`web-terminal-tab-${terminal.id}`}
+                key={terminal.id}
+                onClick={() => {
+                  setActiveId(terminal.id);
+                  setRenaming(false);
+                }}
+                role="tab"
+                title={`${terminal.title} · ${describeSurfaceOwnership(ownershipOf(terminal)).text.toLowerCase()}`}
+                type="button"
+              >
+                <span aria-hidden="true" className="kt-webterm__lamp" data-state={link[terminal.id] ?? 'idle'} />
+                <span>{terminal.title}</span>
+              </button>
+            ))}
             <button
-              aria-controls={`web-terminal-panel-${terminal.id}`}
-              aria-selected={terminal.id === activeId}
-              className="kt-webterm__tab"
-              data-active={terminal.id === activeId ? true : undefined}
-              data-owner={ownershipOf(terminal).by}
-              id={`web-terminal-tab-${terminal.id}`}
-              key={terminal.id}
-              onClick={() => {
-                setActiveId(terminal.id);
-                setRenaming(false);
-              }}
-              role="tab"
-              title={`${terminal.title} · ${describeSurfaceOwnership(ownershipOf(terminal)).text.toLowerCase()}`}
+              aria-label="Create terminal"
+              className="kt-webterm__new"
+              disabled={busy || atSessionCap || atGlobalCap}
+              onClick={() => void createTerminal()}
+              title={atSessionCap || atGlobalCap ? 'Terminal capacity reached' : 'Create terminal'}
               type="button"
             >
-              <span aria-hidden="true" className="kt-webterm__lamp" data-state={link[terminal.id] ?? 'idle'} />
-              <span>{terminal.title}</span>
+              <Plus aria-hidden="true" size={15} />
             </button>
-          ))}
-          <button
-            aria-label="Create terminal"
-            className="kt-webterm__new"
-            disabled={busy || atSessionCap || atGlobalCap}
-            onClick={() => void createTerminal()}
-            title={atSessionCap || atGlobalCap ? 'Terminal capacity reached' : 'Create terminal'}
-            type="button"
-          >
-            <Plus aria-hidden="true" size={15} />
-          </button>
-        </div>
+          </div>
 
-        <div className="kt-webterm__ledger">
-          <span className="kt-webterm__cwd" title={cwd ?? 'Session working directory'}>
-            {cwd ?? 'session cwd'}
-          </span>
-          <span>{list === null ? 'loading terminals…' : terminalLimitLabel(list)}</span>
+          <div className="kt-webterm__ledger">
+            <span className="kt-webterm__cwd" title={cwd ?? 'Session working directory'}>
+              {cwd ?? 'session cwd'}
+            </span>
+            <span>{list === null ? 'loading terminals…' : terminalLimitLabel(list)}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {error === null ? null : (
         <div className="kt-webterm__error" role="alert">
@@ -681,7 +728,13 @@ export function SessionTerminalDeck({
         </div>
       )}
 
-      {active === null ? (
+      {active === null && solo ? (
+        <p className="kt-webterm__empty" data-terminal-missing="" role="status">
+          {list === null
+            ? 'Asking the daemon for this terminal…'
+            : 'This terminal is no longer open on the daemon. Close this tab, or open a new terminal with ＋.'}
+        </p>
+      ) : active === null ? (
         <div className="kt-webterm__empty">
           <span aria-hidden="true" className="kt-webterm__empty-icon">
             <SquareTerminal size={24} />
@@ -809,6 +862,8 @@ export function SessionTerminalDeck({
                   active={terminal.id === activeId}
                   connection={connection}
                   dependencies={dependencies}
+                  interceptInput={interceptInput}
+                  onInputPort={onInputPort}
                   onLink={state =>
                     setLink(current =>
                       current[terminal.id] === state ? current : { ...current, [terminal.id]: state },

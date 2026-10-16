@@ -1,11 +1,11 @@
 import {
   AUDIT_KEPT_EVENTS,
-  auditShortId,
   type AuditActor,
   type AuditDetail,
   type AuditOutcome,
   type AuditRecord,
   AuditRecordSchema,
+  auditShortId,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
@@ -174,9 +174,12 @@ export const DEVICE_PAIRED_TITLE = 'A new device was paired';
 /**
  * What every other enrolled device reads when a new one is paired.
  *
- * NO `kind`, deliberately: a payload about no session bypasses a device's session preferences (see
- * `acceptsDispatch`), and "somebody new can now reach this machine" is not noise a person can
- * have meant to switch off by declining unattended-session alerts.
+ * `kind: 'device-paired'` IS SENT, so a reader's own local "new device" switch (see
+ * `packages/pwa/src/lib/notification-filter.ts`) can tell this apart from every other event — this
+ * daemon no longer stores or enforces any preference itself, so the client is the only place left to
+ * decide whether to show it. That is also why every enrolled device is sent it unconditionally
+ * (`PushService.notify`): "somebody new can now reach this machine" is a fact every other device is
+ * told, and which of them chooses to surface it is entirely local.
  *
  * THE NAME IS QUOTED AND NEVER STANDS ALONE. The person who paired chose it, so it is printed as a
  * label in quotes beside the facts nobody chose: the carrier it arrived over, the daemon's time, and
@@ -190,6 +193,7 @@ export function newDeviceAlert(device: PairedDeviceNotice, machineName: string):
   return PushNotificationPayloadSchema.parse({
     version: 1,
     eventKey: `${DEVICE_PAIRED_EVENT_PREFIX}${device.deviceId}`,
+    kind: 'device-paired',
     title: DEVICE_PAIRED_TITLE,
     body: `A device calling itself “${device.deviceName}” (${auditShortId(device.deviceId)}) was paired with ${machineName} ${over} at ${device.createdAt}. If that was not you, remove it in Settings.`,
     tag: `${DEVICE_PAIRED_EVENT_PREFIX}${device.deviceId}`,

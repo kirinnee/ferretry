@@ -8,10 +8,16 @@ import { BrowserProfileStore } from '../../../../src/adapters/browser/control/pr
 import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/session-browser-launcher.ts';
 import { BrowserWorkerClient } from '../../../../src/adapters/browser/transport/worker-client.ts';
 import { type BrowserAutomation, BrowserTransportError } from '../../../../src/lib/browser/transport/index.ts';
+import type { BrowserWorkerProgram } from '../../../../src/lib/browser/runtime/index.ts';
 
 /** The same scriptable worker the transport tier drives, reached here through the launcher's OWN
  *  default wiring rather than an injected one. */
-const WORKER_ENTRY = join(import.meta.dir, '..', 'transport', 'fixtures', 'fake-worker.mjs');
+const WORKER_ENTRY: BrowserWorkerProgram = {
+  kind: 'source',
+  entry: join(import.meta.dir, '..', 'transport', 'fixtures', 'fake-worker.mjs'),
+};
+/** A worker the injected `connectWorker` stands in for, so its path is never spawned. */
+const INJECTED_WORKER: BrowserWorkerProgram = { kind: 'source', entry: '/worker.ts' };
 
 const roots: string[] = [];
 const opened: BrowserAutomation[] = [];
@@ -35,7 +41,9 @@ afterEach(async () => {
  * signal and releases the lease is indistinguishable from one that waits, until the process refuses
  * the polite request.
  */
-async function fakeChrome(options: { readonly ignoreTerm?: boolean } = {}): Promise<string> {
+async function fakeChrome(
+  options: { readonly ignoreTerm?: boolean; readonly recordArguments?: boolean } = {},
+): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'ferretry-session-browser-'));
   roots.push(root);
   const file = join(root, 'chrome');
@@ -44,7 +52,7 @@ async function fakeChrome(options: { readonly ignoreTerm?: boolean } = {}): Prom
     file,
     `#!/bin/sh
 if [ "$1" = "--version" ]; then echo 'Google Chrome 150.0'; exit 0; fi
-port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
+${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
 exec node -e "${trap}require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{}')}).listen(process.argv[1],'127.0.0.1')" "$port"
 `,
   );
@@ -94,7 +102,7 @@ describe('NodeSessionBrowserLauncher', () => {
     };
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      '/worker.ts',
+      INJECTED_WORKER,
       process.execPath,
       { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
       async options => {
@@ -135,6 +143,61 @@ describe('NodeSessionBrowserLauncher', () => {
 
     // Assert — the answer came back through the worker's own protocol, so the whole chain is live.
     should(snapshot).have.property('activePageId', 'p1');
+  });
+
+  it('should refuse a missing worker with its remedy before it leases the profile or starts Chrome', async () => {
+    // Arrange — a compiled daemon with no worker beside it: the composition root resolves `missing`.
+    const chrome = await fakeChrome();
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const message = 'this install has no browser worker; reinstall Ferretry';
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      { kind: 'missing', message },
+      process.execPath,
+      environment(chrome),
+      async () => {
+        throw new Error('no worker may be connected when none exists');
+      },
+    );
+
+    // Act
+    const launched = launcher.launch('s1', { width: 800, height: 600 });
+
+    // Assert — the refusal is the plain sentence, and nothing was leased on the way to it.
+    await should(launched).be.rejectedWith(message);
+    should(await new BrowserProfileStore(root).acquire({ sessionId: 'next' })).have.property('sessionId', 'next');
+  });
+
+  it('should run a compiled worker directly and a Linux Chrome headless when the daemon has no display', async () => {
+    // Arrange — a Chrome stand-in that records the arguments it was started with.
+    const chrome = await fakeChrome({ recordArguments: true });
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const connected: { workerEntry: string; workerExecutable?: boolean }[] = [];
+    const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      { kind: 'executable', path: '/opt/ferretry/fyd-browser-worker' },
+      process.execPath,
+      { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
+      async options => {
+        connected.push({ workerEntry: options.workerEntry, workerExecutable: options.workerExecutable });
+        return worker as never;
+      },
+    );
+
+    // Act
+    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    opened.push(browser);
+
+    // Assert
+    should(connected).deepEqual([{ workerEntry: '/opt/ferretry/fyd-browser-worker', workerExecutable: true }]);
+    const started = await readFile(`${chrome}.args`, 'utf8');
+    if (process.platform === 'linux') {
+      should(started).containEql('--headless=new');
+      should(started).not.containEql('--ozone-platform=x11');
+    }
   });
 
   it('should carry a screencast frame from the worker to the viewer that asked for one', async () => {
@@ -326,7 +389,7 @@ describe('NodeSessionBrowserLauncher', () => {
     };
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      '/worker.ts',
+      INJECTED_WORKER,
       process.execPath,
       environment(chrome),
       async () => worker as never,
@@ -365,7 +428,7 @@ describe('NodeSessionBrowserLauncher', () => {
     };
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
-      '/worker.ts',
+      INJECTED_WORKER,
       process.execPath,
       environment(chrome),
       async () => worker as never,

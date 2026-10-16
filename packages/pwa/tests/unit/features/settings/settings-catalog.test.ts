@@ -29,6 +29,8 @@ describe('shared settings catalog', () => {
       'theme',
       'dictation',
       'notifications',
+      'show-details',
+      'motion',
     ]);
     expect(new Set(SETTINGS_DEFINITIONS.map(setting => setting.id)).size).toBe(SETTINGS_DEFINITIONS.length);
     for (const setting of SETTINGS_DEFINITIONS) {
@@ -42,7 +44,7 @@ describe('shared settings catalog', () => {
     expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'machines']);
     expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Machines']);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
-      ['text-size', 'theme', 'density', 'chat-width'],
+      ['text-size', 'theme', 'motion', 'density', 'chat-width', 'show-details'],
       ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
       [],
     ]);
@@ -95,8 +97,10 @@ describe('shared settings catalog', () => {
     expect(settingsPaletteEntries(alpha, 'density')[0]?.settingId).toBe('density');
     expect(settingsPaletteEntries(alpha, 'conversation width')[0]?.settingId).toBe('chat-width');
     expect(settingsPaletteEntries(alpha, 'full-bleed')[0]?.settingId).toBe('chat-width');
+    expect(settingsPaletteEntries(alpha, 'motion')[0]?.settingId).toBe('motion');
+    expect(settingsPaletteEntries(alpha, 'show details')[0]?.settingId).toBe('show-details');
     expect(settingsPaletteEntries(alpha, 'balanced')[0]?.settingId).toBe('chat-width');
-    expect(settingsPaletteEntries(alpha, 'markdown preview')[0]?.settingId).toBe('composer-markdown');
+    expect(settingsPaletteEntries(alpha, 'editor style')[0]?.settingId).toBe('composer-markdown');
     expect(settingsPaletteEntries(alpha, 'shift enter')[0]?.settingId).toBe('composer-enter-key');
     // Vim shares the composer-editing control rather than hiding in a new page.
     for (const query of ['vim', 'modal', 'hjkl', 'normal mode']) {

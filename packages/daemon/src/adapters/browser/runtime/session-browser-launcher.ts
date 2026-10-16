@@ -8,7 +8,7 @@ import {
   type BrowserProfilePort,
 } from '../../../lib/browser/control/index.ts';
 import type { BrowserAutomation } from '../../../lib/browser/transport/index.ts';
-import type { BrowserSessionLauncher } from '../../../lib/browser/runtime/index.ts';
+import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/worker-client.ts';
 
 /** Launches the private Chrome that one session's worker drives. The profile lease is held until both
@@ -18,31 +18,39 @@ import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/work
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   constructor(
     private readonly profile: BrowserProfilePort,
-    private readonly workerEntry: string,
+    private readonly worker: BrowserWorkerProgram,
     private readonly workerRuntime: string,
     private readonly environment: Readonly<Record<string, string | undefined>> = process.env,
     private readonly connectWorker: (options: WorkerClientOptions) => Promise<BrowserWorkerClient> = options =>
       BrowserWorkerClient.connect(options),
-    private readonly workerExecutable = false,
   ) {}
 
   async launch(
     sessionId: string,
     viewport: { readonly width: number; readonly height: number },
   ): Promise<BrowserAutomation> {
-    const executable = selectChromeExecutable(process.platform, this.environment.FY_CHROME_BIN, existsSync);
+    // Both preconditions are checked BEFORE the profile is leased: a machine with no worker or no
+    // browser has nothing to clean up, and the refusal is the one plain sentence that names the fix.
+    if (this.worker.kind === 'missing') throw new BrowserControlError('launch_failed', this.worker.message);
+    const executable = selectChromeExecutable(process.platform, this.environment.FY_CHROME_BIN, existsSync, {
+      home: this.environment.HOME,
+      path: this.environment.PATH,
+      available: command => Bun.which(command, { PATH: this.environment.PATH ?? '' }) !== null,
+    });
+    const display = process.platform === 'linux' ? this.environment.DISPLAY : undefined;
     const lease = await this.profile.acquire({ sessionId });
     let chrome: ReturnType<typeof Bun.spawn> | undefined;
     try {
       const port = await freePort();
       chrome = Bun.spawn({
-        cmd: [...chromeLaunchArguments(executable, lease.profile, port, viewport, process.platform)],
-        // Linux Chrome is intentionally non-headless so the operator and screencast see the same
-        // pixels; retain only the daemon-owned X display supplied by composition, never an ambient
-        // display invented here.
-        env: defined(
-          browserEnvironment(process.platform === 'linux' ? this.environment.DISPLAY : undefined, this.environment),
-        ),
+        cmd: [
+          ...chromeLaunchArguments(executable, lease.profile, port, viewport, process.platform, {
+            headless: process.platform !== 'linux' || !display,
+          }),
+        ],
+        // Linux Chrome draws into the display composition supplied so the operator and screencast see
+        // the same pixels, and runs headless when there is none; never an ambient display invented here.
+        env: defined(browserEnvironment(display, this.environment)),
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',
@@ -52,9 +60,9 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       await waitForCdp(endpoint, chrome);
       const worker = await this.connectWorker({
         runtime: this.workerRuntime,
-        workerEntry: this.workerEntry,
+        workerEntry: this.worker.kind === 'executable' ? this.worker.path : this.worker.entry,
         endpoint,
-        workerExecutable: this.workerExecutable,
+        workerExecutable: this.worker.kind === 'executable',
       });
       return new LeasedBrowser(worker, chrome, lease);
     } catch (error) {

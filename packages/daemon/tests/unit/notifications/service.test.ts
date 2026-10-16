@@ -426,7 +426,7 @@ describe('NotificationService direct delivery', () => {
     should(world.push.calls).equal(1);
   });
 
-  it('should thread authoritative auto and interactive modes into push dispatch', async () => {
+  it('should record the authoritative auto and interactive modes in the ledger, and dispatch no filter', async () => {
     // Arrange
     const world = fixture();
 
@@ -434,8 +434,16 @@ describe('NotificationService direct delivery', () => {
     await world.service.notifyDirect(SESSION, REQUEST, HUMAN, 'admin-cli', 'interactive');
     await world.service.notifyDirect(OTHER, REQUEST, HUMAN, 'admin-cli', 'auto');
 
-    // Assert
-    should(world.push.dispatches.map(dispatch => dispatch.interactive)).deepEqual([true, false]);
+    // Assert — the ledger still testifies to whether a human was sitting with the session; the push
+    // dispatch itself carries only the payload, because every enrolled device is sent every event now.
+    const requested = world.ledger.appends.filter(record => record.phase === 'requested');
+    should(requested.map(record => (record.phase === 'requested' ? record.sent.interactive : undefined))).deepEqual([
+      true,
+      false,
+    ]);
+    should(
+      world.push.dispatches.every(dispatch => Object.keys(dispatch).length === 1 && 'payload' in dispatch),
+    ).be.true();
   });
 });
 

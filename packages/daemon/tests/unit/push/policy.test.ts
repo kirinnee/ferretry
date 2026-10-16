@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { acceptsDispatch, enrolmentConfirmation, pushDeviceView } from '../../../src/lib/push/index.ts';
-import { AT, allEvents, LATER, pushId, record, subscription } from './support.ts';
+import { enrolmentConfirmation, pushDeviceView } from '../../../src/lib/push/index.ts';
+import { AT, LATER, pushId, record, subscription } from './support.ts';
 
 describe('pushDeviceView', () => {
   it('should describe an enrolment without the triple that can push to it', () => {
@@ -13,7 +13,6 @@ describe('pushDeviceView', () => {
       createdAt: AT,
       updatedAt: LATER,
       expirationTime: null,
-      prefs: allEvents,
     });
     // The endpoint and the key halves are the capability to wake somebody's phone. Their absence is
     // the whole point of projecting through the schema rather than spreading the record.
@@ -31,45 +30,6 @@ describe('pushDeviceView', () => {
 
   it('should refuse a record the wire could not describe', () => {
     should(() => pushDeviceView(record({ id: 'not-a-push-id' }))).throw();
-  });
-});
-
-describe('acceptsDispatch', () => {
-  const sessionPayload = (kind: 'attention' | 'failed') => ({
-    version: 1 as const,
-    eventKey: 'e1',
-    title: 'Session needs you',
-    body: '',
-    tag: 't1',
-    url: '/',
-    count: 1,
-    sessionId: 's1',
-    kind,
-  });
-
-  it('should deliver a notification about no session whatever the preferences say', () => {
-    const silent = {
-      events: { attention: false, question: false, failed: false, completed: false },
-      interactiveOnly: true,
-    };
-
-    should(acceptsDispatch(silent, { payload: enrolmentConfirmation('Pixel 8') })).be.true();
-  });
-
-  it('should refuse the kinds the device switched off and deliver the ones it kept', () => {
-    const partial = { events: { ...allEvents.events, failed: false }, interactiveOnly: false };
-
-    should(acceptsDispatch(partial, { payload: sessionPayload('failed') })).be.false();
-    should(acceptsDispatch(partial, { payload: sessionPayload('attention') })).be.true();
-  });
-
-  it('should refuse an unattended session when the device asked for interactive sessions only', () => {
-    const interactive = { events: allEvents.events, interactiveOnly: true };
-
-    should(acceptsDispatch(interactive, { payload: sessionPayload('attention'), interactive: false })).be.false();
-    should(acceptsDispatch(interactive, { payload: sessionPayload('attention'), interactive: true })).be.true();
-    // Unstated is not "unattended": a caller that did not say must not be read as having said no.
-    should(acceptsDispatch(interactive, { payload: sessionPayload('attention') })).be.true();
   });
 });
 

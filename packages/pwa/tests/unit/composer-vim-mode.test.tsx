@@ -139,6 +139,7 @@ describe('composer Vim adapter', () => {
         }
         daemon={daemon}
         enterKeyPreference="send"
+        phoneEnterKeyPreference="send"
         sessionId="session-a"
         vimMode
       />,
@@ -180,6 +181,7 @@ describe('composer Vim adapter', () => {
         }
         daemon={daemon}
         enterKeyPreference="send"
+        phoneEnterKeyPreference="send"
         sessionId="session-a"
         vimMode
       />,
@@ -278,7 +280,7 @@ describe('composer Vim adapter', () => {
     });
 
     test('a successful send', async () => {
-      const view = inNormalMode({ enterKeyPreference: 'send' });
+      const view = inNormalMode({ enterKeyPreference: 'send', phoneEnterKeyPreference: 'send' });
       await runAsync(async () => {
         textarea(view).props.onKeyDown({
           key: 'Enter',

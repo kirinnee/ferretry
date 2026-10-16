@@ -6,6 +6,8 @@ import { describe, expect, it } from 'bun:test';
 import type { PushNotificationPayload } from '@ferretry/protocol';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import {
+  FILTERED_PUSH_TAG_PREFIX,
+  filteredPushNotification,
   isPushScope,
   machineNotification,
   notificationUrl,
@@ -121,6 +123,36 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     ]) {
       expect(notificationUrl(elsewhere, ORIGIN, WORK)).toBe(home);
     }
+  });
+});
+
+describe('filteredPushNotification', () => {
+  it('never carries the suppressed content, is silent, and collapses to one tag per machine', () => {
+    const shown = filteredPushNotification(WORK, ORIGIN);
+
+    expect(shown.title).toBe('Work laptop · Notifications muted');
+    expect(shown.options.body).not.toContain('A new device was paired');
+    expect(shown.options.silent).toBe(true);
+    expect(shown.options.renotify).toBe(false);
+    expect(shown.options.tag).toBe(`${FILTERED_PUSH_TAG_PREFIX}sha256%3Awork%2Fone`);
+    // Never in a live machine's own push namespace, so it can neither replace nor be replaced by one.
+    expect(shown.options.tag?.startsWith('fy-push:')).toBe(false);
+    expect((shown.options.data as { url: string }).url).toBe(`${ORIGIN}/d/sha256%3Awork%2Fone`);
+  });
+
+  it('opens the app, under the app-wide tag, for a push tied to no machine', () => {
+    const shown = filteredPushNotification(null, ORIGIN);
+
+    expect(shown.title).toBe('Unverified · Notifications muted');
+    expect(shown.options.tag).toBe(`${FILTERED_PUSH_TAG_PREFIX}app`);
+    expect((shown.options.data as { url: string }).url).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('cannot reuse another machine’s quiet tag, so one machine’s filtered pushes never collapse into another’s', () => {
+    const other = { daemonId: 'sha256:home', label: 'Home' };
+    expect(filteredPushNotification(WORK, ORIGIN).options.tag).not.toBe(
+      filteredPushNotification(other, ORIGIN).options.tag,
+    );
   });
 });
 

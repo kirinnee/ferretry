@@ -44,6 +44,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { DEFAULT_SUGGESTION_KEYS, type SuggestionKeys } from '../lib/controls.ts';
 import {
   acceptsDirectReferenceQuery,
   DIRECT_REFERENCE_SIGILS,
@@ -93,7 +94,11 @@ export interface ComposerReferenceTierLegendItem {
  * routing, UI teaching and tests cannot drift independently — including the
  * tier-to-direct-sigil mapping, which is the same fact read from the other end.
  *
- * THERE IS NO FIFTH TIER. Pins were one; they are a top link strip rather than
+ * THREE TIERS, AND TASKS ARE NOT ONE OF THEM — the owner's call: the task board
+ * is out of the composer for now, so no menu offers `&ID`. The grammar is
+ * untouched: an authored `&F12` still parses, proves and links.
+ *
+ * There is no further tier. Pins were one; they are a top link strip rather than
  * a reference family (handover #63), and readable composer text rather than a
  * second grammar. Template libraries are not a tier either — no build of this
  * app has ever had one, and this list is the guard that keeps it that way.
@@ -101,9 +106,19 @@ export interface ComposerReferenceTierLegendItem {
 export const COMPOSER_REFERENCE_TIERS: readonly ComposerReferenceTierLegendItem[] = [
   { tier: 1, trigger: '@', label: 'Files' },
   { tier: 2, trigger: '@@', label: 'Agents', direct: ':' },
-  { tier: 3, trigger: '@@@', label: 'Tasks', direct: '&' },
-  { tier: 4, trigger: '@@@@', label: 'Attention', direct: '!' },
+  { tier: 3, trigger: '@@@', label: 'Attention', direct: '!' },
 ];
+
+/** The reader's choice of keys (`SuggestionKeys`, owned by `lib/controls.ts`), as the switches the providers answer from. */
+export const composerSuggestionSwitches = (
+  keys: SuggestionKeys,
+  skillSuggestions: boolean,
+): ComposerSuggestionSwitches => ({
+  mentionSuggestions: true,
+  ladderSuggestions: keys !== 'symbols',
+  directReferenceSuggestions: keys !== 'ladder',
+  skillSuggestions,
+});
 
 /**
  * Which suggestion families a host offers. Every switch is SUGGESTIONS ONLY: a
@@ -119,29 +134,24 @@ export interface ComposerSuggestionSwitches {
   /**
    * The WHOLE `@` ladder, bare `@` files included, not only the repeated tiers.
    *
-   * That is the harder reading of the two and it is the one the Settings switch
-   * promises out loud — "files with @, agents with @@, tasks with @@@, attention
-   * with @@@@". Exempting tier 1 would have left a reader who switched `@`
-   * suggestions off still getting a file menu, which is a copy that lies rather
-   * than a menu that helps. Authoring `@src/api.ts` by hand still parses, still
-   * proves and still links, and "Add to chat" still inserts one.
+   * Off, nothing `@`-shaped opens — not even a file menu. Authoring `@src/api.ts`
+   * by hand still parses, still proves and still links, and "Add to chat" still
+   * inserts one.
    */
   readonly mentionSuggestions: boolean;
-  /** The `:` `&` `!` direct sigils. */
+  /** The repeated `@@` and `@@@` tiers. Bare `@` files are `mentionSuggestions`' alone. */
+  readonly ladderSuggestions: boolean;
+  /** The `:` and `!` direct sigils. */
   readonly directReferenceSuggestions: boolean;
   /** `$` skills. `/` skills are unaffected, so a skill is always reachable. */
   readonly skillSuggestions: boolean;
 }
 
-/** Absent means enabled, so a host that knows nothing about these gets today's
- *  behaviour and an older stored preference reads as "all on". The field names
- *  are `DeviceControls`' own, because the persisted preference and the
- *  suppression rule are one fact and a rename between them is where it breaks. */
-export const DEFAULT_COMPOSER_SUGGESTIONS: ComposerSuggestionSwitches = {
-  mentionSuggestions: true,
-  directReferenceSuggestions: true,
-  skillSuggestions: true,
-};
+/** A host that passes no switches gets the shipped default: the `@` ladder, skills on. */
+export const DEFAULT_COMPOSER_SUGGESTIONS: ComposerSuggestionSwitches = composerSuggestionSwitches(
+  DEFAULT_SUGGESTION_KEYS,
+  true,
+);
 
 /**
  * The one place a switch decides anything.
@@ -160,9 +170,10 @@ export const DEFAULT_COMPOSER_SUGGESTIONS: ComposerSuggestionSwitches = {
  */
 export function composerSuggestionsAllow(
   suggestions: ComposerSuggestionSwitches,
-  match: Pick<ComposerTriggerMatch, 'trigger'>,
+  match: Pick<ComposerTriggerMatch, 'trigger' | 'referenceTier'>,
 ): boolean {
-  if (match.trigger === '@') return suggestions.mentionSuggestions;
+  if (match.trigger === '@')
+    return suggestions.mentionSuggestions && ((match.referenceTier ?? 1) <= 1 || suggestions.ladderSuggestions);
   if (match.trigger === '$') return suggestions.skillSuggestions;
   if (match.trigger === '/' || match.trigger === '%') return true;
   return suggestions.directReferenceSuggestions;

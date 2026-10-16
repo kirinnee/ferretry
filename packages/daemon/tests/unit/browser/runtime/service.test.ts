@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { BrowserActionResultSchema, BrowserStatusSchema } from '@ferretry/protocol';
 import type { BrowserAutomation } from '../../../../src/lib/browser/transport/automation-contracts.ts';
 import { BrowserSessionError, BrowserSessionService } from '../../../../src/lib/browser/runtime/service.ts';
 
@@ -104,6 +105,35 @@ describe('session browser runtime', () => {
     should(ends).deepEqual([{ code: 1000, reason: 'browser stopped' }]);
     should(driver.calls).containEql('stop-cast');
     should(driver.calls).containEql('close');
+  });
+
+  it('should report a status the strict wire schema accepts after every kind of action', async () => {
+    // Arrange — a real compiled daemon failed `fy browser open` here: the action's own fields
+    // (`actedPageId`, the text read, the screenshot taken) leaked into every later status.
+    const driver = new Driver();
+    const automation: BrowserAutomation = {
+      ...driver.automation,
+      navigate: async url => acted(url),
+      read: async () => ({ ...acted(), text: 'page text' }),
+      screenshot: async () => ({ ...acted(), screenshotBase64: 'aW1hZ2U=' }),
+    };
+    const service = new BrowserSessionService({ get: async () => ({}) }, { launch: async () => automation }, () => 0);
+
+    for (const action of [
+      { action: 'open', url: 'https://open.test' },
+      { action: 'read' },
+      { action: 'screenshot' },
+    ] as const) {
+      // Act
+      const result = await service.act('s1', action);
+
+      // Assert
+      should(BrowserActionResultSchema.safeParse(result).error?.issues).be.undefined();
+      should(BrowserStatusSchema.safeParse(await service.status('s1')).success).be.true();
+      should(result.status).not.have.property('actedPageId');
+      should(result.status).not.have.property('text');
+      should(result.status).not.have.property('screenshotBase64');
+    }
   });
 
   it('should name absent, failed, over-capacity and exited browsers honestly', async () => {

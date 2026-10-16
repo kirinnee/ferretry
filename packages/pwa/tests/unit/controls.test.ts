@@ -65,11 +65,13 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   includeFinished: true,
   dashboardView: 'table',
   density: 'compact',
-  chatWidth: 'readable',
+  chatWidth: 'full',
   composerEnterKey: 'send',
+  composerPhoneEnterKey: 'send',
+  showDetails: true,
+  motion: 'reduced',
   sidebarCollapsed: true,
-  mentionSuggestions: false,
-  directReferenceSuggestions: false,
+  suggestionKeys: 'both',
   skillSuggestions: false,
   composerVimMode: true,
 };
@@ -109,15 +111,16 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // A payload written before `chatWidth` existed degrades to 'full', which
       // IS the previous behaviour — so the field cannot change what an older
       // blob meant, which is why it needed no version bump.
-      chatWidth: 'full',
+      chatWidth: 'readable',
       // Enter follows the current device until the reader explicitly chooses.
       composerEnterKey: null,
+      composerPhoneEnterKey: null,
+      showDetails: false,
+      motion: 'system',
       sidebarCollapsed: true,
-      // Same precedent as chatWidth: a payload written before the composer
-      // fields existed means every suggestion family is offered and Vim keys
-      // are off, which is exactly what the app did then — so no version bump.
-      mentionSuggestions: true,
-      directReferenceSuggestions: true,
+      // A payload written before the composer fields existed opens suggestions
+      // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
+      suggestionKeys: 'ladder',
       skillSuggestions: true,
       composerVimMode: false,
     });
@@ -151,7 +154,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       );
     }
     should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { chatWidth: 'wide' } })).device.chatWidth).equal(
-      'full',
+      'readable',
     );
   });
 
@@ -167,20 +170,39 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     ).be.null();
   });
 
-  it('reads each composer suggestion family on its own and defaults an unreadable one to offered', () => {
-    for (const field of ['mentionSuggestions', 'directReferenceSuggestions', 'skillSuggestions'] as const) {
-      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { [field]: false } })).device[field]).be.false();
-      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { [field]: true } })).device[field]).be.true();
-      // A hand-edited non-boolean is that field's default, not another field's.
-      should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { [field]: 'off' } })).device[field]).be.true();
-    }
+  it('reads the suggestion keys and the skills switch, defaulting anything unreadable', () => {
+    for (const keys of ['ladder', 'symbols', 'both'] as const)
+      should(
+        parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { suggestionKeys: keys } })).device.suggestionKeys,
+      ).equal(keys);
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { suggestionKeys: 'all' } })).device.suggestionKeys,
+    ).equal('ladder');
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { skillSuggestions: false } })).device.skillSuggestions,
+    ).be.false();
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { skillSuggestions: 'off' } })).device.skillSuggestions,
+    ).be.true();
 
-    const mixed = parseControlsRecord(
-      stored({ v: CONTROLS_VERSION, device: { mentionSuggestions: 'nope', skillSuggestions: false } }),
+    // The two switches the choice replaced are left unread: an old "all on" is not a choice of keys.
+    const legacy = parseControlsRecord(
+      stored({ v: CONTROLS_VERSION, device: { mentionSuggestions: true, directReferenceSuggestions: true } }),
     ).device;
-    should(mixed.mentionSuggestions).be.true();
-    should(mixed.skillSuggestions).be.false();
-    should(mixed.directReferenceSuggestions).be.true();
+    should(legacy.suggestionKeys).equal('ladder');
+    should(legacy).not.have.property('directReferenceSuggestions');
+  });
+
+  it('reads the phone send key, Show details and motion, defaulting anything unreadable', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device;
+    should(read({ composerPhoneEnterKey: 'send' }).composerPhoneEnterKey).equal('send');
+    should(read({ composerPhoneEnterKey: 'newline' }).composerPhoneEnterKey).equal('newline');
+    should(read({ composerPhoneEnterKey: 'toggle' }).composerPhoneEnterKey).be.null();
+    should(read({ showDetails: true }).showDetails).be.true();
+    should(read({ showDetails: 'yes' }).showDetails).be.false();
+    should(read({ motion: 'reduced' }).motion).equal('reduced');
+    should(read({ motion: 'none' }).motion).equal('system');
   });
 
   it('keeps Vim-style composer editing off unless it was explicitly turned on', () => {
@@ -319,14 +341,13 @@ describe('pure transitions', () => {
   it('treats a composer switch already in that position as a no-op by identity', () => {
     const record = emptyControlsRecord();
     // The defaults ARE the pre-field behaviour, so re-asserting them writes nothing.
-    should(withDeviceControls(record, { mentionSuggestions: true, composerVimMode: false })).be.exactly(record);
+    should(withDeviceControls(record, { suggestionKeys: 'ladder', composerVimMode: false })).be.exactly(record);
 
     const quiet = withDeviceControls(record, { skillSuggestions: false });
     should(quiet).not.be.exactly(record);
     should(quiet.device.skillSuggestions).be.false();
     // Only the family that was asked for moves.
-    should(quiet.device.mentionSuggestions).be.true();
-    should(quiet.device.directReferenceSuggestions).be.true();
+    should(quiet.device.suggestionKeys).equal('ladder');
     should(withDeviceControls(quiet, { skillSuggestions: false })).be.exactly(quiet);
   });
 

@@ -17,7 +17,7 @@
  * names its connection.
  *
  * The reason this is domain-tier code rather than hook code is testability: the
- * enable, disable, preference-sync and revoke sequences each have a failure path
+ * enable, disable, and revoke sequences each have a failure path
  * that a reader sees as different wording, and none of them needs React.
  *
  * ONE SUBSCRIPTION PER DAEMON, TOO. A browser subscription is bound to the VAPID
@@ -28,19 +28,19 @@
  * the old shared subscription is dropped the first time any daemon moves over.
  */
 
-import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
+import type { PushDeviceView } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { daemonId } from './daemon-connection.ts';
 import type { DaemonNotificationPreferences } from './notification-preferences.ts';
+import { pushMachineOf, pushScopePath, pushWorkerUrl } from './push-scope.ts';
 import {
   applicationServerKey,
   fetchDaemonVapidKey,
   listDaemonPushDevices,
+  type PushSubscriptionLike,
   registerDaemonPushDevice,
   revokeDaemonPushDevice,
-  type PushSubscriptionLike,
 } from './push-subscriptions.ts';
-import { pushMachineOf, pushScopePath, pushWorkerUrl } from './push-scope.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { trustedWorkerUrl } from './trusted-types.ts';
 
@@ -159,7 +159,6 @@ export interface DaemonPushService {
     connection: DaemonConnection,
     subscription: PushSubscriptionLike,
     deviceName: string,
-    preferences: PushPreferences,
   ): Promise<PushDeviceView>;
   revoke(connection: DaemonConnection, deviceId: string): Promise<PushDeviceView>;
 }
@@ -167,8 +166,8 @@ export interface DaemonPushService {
 export const daemonPushService = (fetcher: DaemonFetch = browserFetch): DaemonPushService => ({
   vapidKey: connection => fetchDaemonVapidKey(connection, fetcher),
   list: connection => listDaemonPushDevices(connection, fetcher),
-  register: (connection, subscription, deviceName, preferences) =>
-    registerDaemonPushDevice(connection, subscription, deviceName, preferences, fetcher),
+  register: (connection, subscription, deviceName) =>
+    registerDaemonPushDevice(connection, subscription, deviceName, fetcher),
   revoke: (connection, deviceId) => revokeDaemonPushDevice(connection, deviceId, fetcher),
 });
 
@@ -259,12 +258,7 @@ export const enrolDaemonPushDevice = async (
     if (existing === null && !mayCreate) throw new Error('this browser has no push subscription for this daemon');
     const subscription = existing ?? (await subscribeForPush(registration, context));
     const previous = context.devices.get(daemon);
-    const device = await context.service.register(
-      context.connection,
-      subscription,
-      enrolment.deviceName(),
-      context.preferences.get(daemon),
-    );
+    const device = await context.service.register(context.connection, subscription, enrolment.deviceName());
     context.devices.remember(daemon, device.id);
     // The daemon still lists the device it issued for the shared endpoint; it is this browser's old
     // self, so it is revoked rather than left to deliver into a subscription that is about to vanish.
@@ -350,7 +344,6 @@ export const PUSH_INACTIVE_MESSAGE =
   'Closed-app delivery is not active on this device; the app still shows changes while it is open.';
 export const PUSH_UNREACHABLE_MESSAGE = 'Could not reach this daemon’s push service.';
 export const PUSH_CREATE_FAILED_MESSAGE = 'Could not create a Web Push subscription with this daemon.';
-export const PUSH_SYNC_FAILED_MESSAGE = 'Could not send the new notification preferences to this daemon.';
 export const PUSH_REVOKE_FAILED_MESSAGE = 'Could not revoke that device with this daemon.';
 
 const errorMessage = (error: unknown, fallback: string): string =>
@@ -432,28 +425,6 @@ export const disablePushDelivery = async (context: PushEnrolmentContext): Promis
   // this browser receiving anything in the meantime.
   if (deviceId !== null) await context.service.revoke(context.connection, deviceId).catch(() => null);
   if (context.enrolment !== null) await unsubscribeLocalPush(context.enrolment, daemon);
-  return await readPushDelivery(context);
-};
-
-/**
- * Stores changed event preferences and, when delivery is on, pushes them to the
- * daemon that holds this device. Answers `null` when there was nothing to send,
- * so a caller keeps the delivery readout it already had rather than flashing it.
- */
-export const syncPushPreferences = async (
-  context: PushEnrolmentContext,
-  preferences: PushPreferences,
-): Promise<PushDeliveryReport | null> => {
-  const stored = context.preferences.set(context.connection.daemonId, {
-    events: preferences.events,
-    interactiveOnly: preferences.interactiveOnly,
-  });
-  if (!stored.enabled || context.enrolment === null) return null;
-  try {
-    await enrolDaemonPushDevice(context, false);
-  } catch (error) {
-    return failed(context, error, PUSH_SYNC_FAILED_MESSAGE);
-  }
   return await readPushDelivery(context);
 };
 

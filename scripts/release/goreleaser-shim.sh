@@ -4,16 +4,20 @@ set -euo pipefail
 # Swap the prebuilt Bun binary over GoReleaser's Go stub (its prebuilt builder is Pro-only).
 dest="$1"
 
-# Match GoReleaser's destination to a package .bin key so the release never hardcodes either
-# executable name outside the manifest/configuration boundary.
+# Match GoReleaser's destination to a package .bin key so the release never hardcodes any
+# executable name outside the manifest/configuration boundary. EVERY bin key is a candidate: the
+# daemon package also ships its browser worker. The first key of each package is still checked to
+# exist, because it is the package's own executable name (the two-name model).
 prefix=""
 for package in packages/cli packages/daemon; do
-  candidate="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
-  [ -z "${candidate}" ] || [ "${candidate}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
-  if [ "$(basename "${dest}")" = "${candidate}" ]; then
-    prefix="${candidate}"
-    break
-  fi
+  own="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
+  [ -z "${own}" ] || [ "${own}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
+  while IFS= read -r candidate; do
+    if [ "$(basename "${dest}")" = "${candidate}" ]; then
+      prefix="${candidate}"
+      break 2
+    fi
+  done < <(jq -r '.bin | keys_unsorted[]' "${package}/package.json")
 done
 [ -z "${prefix}" ] && echo "❌ release destination does not match a standalone package binary: ${dest}" >&2 && exit 1
 

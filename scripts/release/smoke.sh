@@ -28,8 +28,14 @@ daemon_name="$(bin_name packages/daemon/package.json)"
 cli_base="$(basename "${bin}")"
 daemon_bin="${2:-$(dirname "${bin}")/${daemon_name}${cli_base#"${name}"}}"
 [ ! -f "${daemon_bin}" ] && echo "❌ no daemon binary at ${daemon_bin}" >&2 && exit 1
+# The browser worker is the daemon package's second bin entry, compiled beside the daemon with the same
+# target suffix. A release without it ships a daemon whose browser can never start.
+worker_name="$(jq -r '.bin | keys_unsorted[1] // empty' packages/daemon/package.json)"
+[ -z "${worker_name}" ] && echo "❌ packages/daemon/package.json declares no browser worker bin entry" >&2 && exit 1
+worker_bin="$(dirname "${daemon_bin}")/${worker_name}${cli_base#"${name}"}"
+[ ! -f "${worker_bin}" ] && echo "❌ no browser worker binary at ${worker_bin}" >&2 && exit 1
 
-for executable in "${bin}" "${daemon_bin}"; do
+for executable in "${bin}" "${daemon_bin}" "${worker_bin}"; do
   chmod +x "${executable}"
   xattr -d com.apple.quarantine "${executable}" 2>/dev/null || true # mac-only; harmless elsewhere
 done
@@ -53,6 +59,8 @@ tools="${root}/bin"
 mkdir -p "${tools}" "${root}/work"
 cp "${bin}" "${tools}/${name}"
 cp "${daemon_bin}" "${tools}/${daemon_name}"
+# Installed beside the daemon under its bin name, exactly as the archive, cask and packages lay it out.
+cp "${worker_bin}" "${tools}/${worker_name}"
 
 # The fake harness: named like the real one so the daemon finds it the way it finds a real install.
 cat >"${tools}/claude" <<'HARNESS'
@@ -136,6 +144,33 @@ for _ in $(seq 1 60); do
 done
 [ "${status}" = "running" ] || fail "session ${session} never reached running (last status: ${status:-none})"
 echo "✅ session ${session} is running"
+
+# ── The browser worker ────────────────────────────────────────────────────────────────────────
+# The compiled worker must START: with no endpoint it reports its one fatal line and exits 2. That much
+# holds on every runner, including one with no browser installed.
+worker_out="$("${tools}/${worker_name}" </dev/null 2>/dev/null || true)"
+grep -q '"type":"fatal"' <<<"${worker_out}" || fail "the browser worker did not start: ${worker_out:-no output}"
+echo "✅ ${worker_name} starts"
+
+# Where the runner has a Chrome, the DAEMON must find the worker beside itself and drive a real browser
+# through it — a screenshot is only produced once the worker has attached over CDP. A Linux runner has
+# no display, so this also proves the headless fallback.
+chrome_found=""
+for candidate in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" /usr/bin/google-chrome \
+  /usr/bin/google-chrome-stable /usr/bin/chromium /usr/bin/chromium-browser /snap/bin/chromium; do
+  [ -x "${candidate}" ] && chrome_found="${candidate}" && break
+done
+if [ -n "${chrome_found}" ]; then
+  "${name}" browser --session "${session}" open about:blank </dev/null ||
+    fail "the daemon could not open a browser through ${worker_name} (Chrome: ${chrome_found})"
+  "${name}" browser --session "${session}" screenshot "${root}/browser.png" </dev/null ||
+    fail "the browser opened but produced no screenshot"
+  [ -s "${root}/browser.png" ] || fail "the browser screenshot is empty"
+  "${name}" browser --session "${session}" stop </dev/null || fail "the browser did not stop"
+  echo "✅ the daemon drove ${chrome_found} through ${worker_name}"
+else
+  echo "⚠️  no Chrome on this runner: proved ${worker_name} starts, not that it drives a browser"
+fi
 
 "${name}" stop orphan "${session}" --yes --reason "smoke test"
 for _ in $(seq 1 30); do

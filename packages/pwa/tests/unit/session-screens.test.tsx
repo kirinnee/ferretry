@@ -551,6 +551,7 @@ describe('session screen components', () => {
           daemon={daemonA}
           disabled
           enterKeyPreference="newline"
+          phoneEnterKeyPreference="newline"
           sessionId="disabled-id"
         />,
       );
@@ -568,7 +569,7 @@ describe('session screen components', () => {
       );
       expect(prevented).toBe(false);
       expect(textarea.props.disabled).toBe(true);
-      expect(composer.root.findByType('button').props.disabled).toBe(true);
+      expect(composer.root.findByProps({ type: 'submit' }).props.disabled).toBe(true);
       run(() => composer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
 
       Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: () => ({ matches: true }) });
@@ -578,6 +579,7 @@ describe('session screen components', () => {
           daemon={daemonA}
           disabled
           enterKeyPreference="send"
+          phoneEnterKeyPreference="send"
           sessionId="desktop-id"
         />,
       );
@@ -613,6 +615,7 @@ describe('session screen components', () => {
           daemon={daemonA}
           draftStore={drafts}
           enterKeyPreference={preference}
+          phoneEnterKeyPreference={preference}
           sessionId={sessionId}
         />,
       );

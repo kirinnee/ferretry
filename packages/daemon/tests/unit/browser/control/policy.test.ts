@@ -5,6 +5,7 @@ import {
   browserEnvironment,
   browserLoginChromeArguments,
   chromeExecutableCandidates,
+  chromeInstallCommand,
   chromeLaunchArguments,
   generateVncPassword,
   loginWindowMinutes,
@@ -66,6 +67,85 @@ describe('browser control policy', () => {
     should(chromeLaunchArguments('/chrome', '/profile', 1, { width: 320, height: 240 }, 'darwin')).containEql(
       '--headless=new',
     );
+  });
+
+  it('should look for a browser in the per-user, snap and PATH locations a fixed list misses', () => {
+    // Act
+    const linux = chromeExecutableCandidates('linux', undefined, { path: '/home/u/.nix-profile/bin/:relative/bin' });
+    const mac = chromeExecutableCandidates('darwin', undefined, { home: '/Users/u' });
+
+    // Assert — PATH directories are searched by every browser name, relative entries never.
+    should(linux).containEql('/snap/bin/chromium');
+    should(linux).containEql('/home/u/.nix-profile/bin/google-chrome');
+    should(linux).containEql('/home/u/.nix-profile/bin/chromium');
+    should(linux.some(candidate => candidate.startsWith('relative'))).be.false();
+    should(new Set(linux).size).equal(linux.length);
+    should(mac).containEql('/Users/u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    should(chromeExecutableCandidates('linux', ' /opt/chrome ', { path: '/usr/bin' })).deepEqual(['/opt/chrome']);
+  });
+
+  it('should name the one install command this machine can run when no browser exists', () => {
+    // Arrange
+    const has =
+      (...managers: string[]) =>
+      (command: string) =>
+        managers.includes(command);
+
+    // Act + Assert — the first manager present wins; snap outranks apt because Ubuntu ships Chromium as a snap.
+    should(chromeInstallCommand('darwin', has())).equal('brew install --cask google-chrome');
+    should(chromeInstallCommand('linux', has('apt-get', 'snap'))).equal('sudo snap install chromium');
+    should(chromeInstallCommand('linux', has('apt-get'))).equal('sudo apt-get install -y chromium');
+    should(chromeInstallCommand('linux', has('dnf'))).equal('sudo dnf install -y chromium');
+    should(chromeInstallCommand('linux', has('pacman'))).equal('sudo pacman -S --noconfirm chromium');
+    should(chromeInstallCommand('linux', has('zypper'))).equal('sudo zypper install -y chromium');
+    should(chromeInstallCommand('linux', has('nix'))).equal('nix profile install nixpkgs#chromium');
+    should(chromeInstallCommand('linux', has())).be.undefined();
+  });
+
+  it('should refuse a missing browser with one plain sentence naming the install command', () => {
+    // Act
+    const refusal = (run: () => unknown): string => {
+      try {
+        run();
+      } catch (error) {
+        should(error).instanceOf(BrowserControlError);
+        return (error as BrowserControlError).message;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    // Assert
+    should(
+      refusal(() =>
+        selectChromeExecutable('linux', undefined, () => false, { available: command => command === 'apt-get' }),
+      ),
+    ).equal(
+      'Chrome is not installed on this machine: install it with `sudo apt-get install -y chromium`, or set FY_CHROME_BIN to its path.',
+    );
+    should(refusal(() => selectChromeExecutable('darwin', undefined, () => false))).containEql(
+      '`brew install --cask google-chrome`',
+    );
+    should(refusal(() => selectChromeExecutable('linux', undefined, () => false))).equal(
+      'Chrome is not installed on this machine: install Google Chrome or Chromium, or set FY_CHROME_BIN to its path.',
+    );
+    should(refusal(() => selectChromeExecutable('linux', '/nope/chrome', () => false))).equal(
+      'FY_CHROME_BIN points at /nope/chrome, which does not exist.',
+    );
+  });
+
+  it('should run a Linux browser headless, without the X11 platform, only when asked to', () => {
+    // Act
+    const headed = chromeLaunchArguments('/chrome', '/profile', 1, { width: 320, height: 240 }, 'linux');
+    const headless = chromeLaunchArguments('/chrome', '/profile', 1, { width: 320, height: 240 }, 'linux', {
+      headless: true,
+    });
+
+    // Assert
+    should(headed).containEql('--ozone-platform=x11');
+    should(headed).not.containEql('--headless=new');
+    should(headless).containEql('--headless=new');
+    should(headless).not.containEql('--ozone-platform=x11');
+    should(headless).containEql('--no-sandbox');
   });
 
   it('should bound login duration and build loopback-only VNC supervision commands', () => {

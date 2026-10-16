@@ -13,11 +13,9 @@
  *   - `density` and `dashboardView` absent means `null`, not a written default,
  *     so the first-load pointer policy stays free to choose compact on a phone
  *     and full on a desktop.
- *   - `chatWidth` absent means `'full'`, which IS the behaviour that predates the
- *     field — which is why adding it needed no version bump. The four composer
- *     preferences follow that precedent exactly: absent means every suggestion
- *     family is offered and Vim keys are off, which is what this app did before
- *     they existed, so they add no version either.
+ *   - `chatWidth` absent means `'readable'` (Comfortable), the session redesign's
+ *     default; a stored choice is kept. Every later field follows the same rule:
+ *     absent reads as the shipped default, so none of them needs a version bump.
  *   - An empty `projectScope` is NO scope, not a folder named nothing.
  *   - A patch that changes nothing writes nothing and notifies nobody.
  *
@@ -51,6 +49,25 @@ import type { InteractionMode } from '@ferretry/protocol';
 import type { ComposerEnterKeyPreference } from './composer-keybinding.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
+/**
+ * WHICH KEYS OPEN A REFERENCE MENU — Settings › Behaviour › "Open suggestions with".
+ *
+ *   ladder   @ files, @@ agents, @@@ attention. Typing `:` or `!` in prose never pops a menu.
+ *   symbols  @ files, then the direct sigils `:` agents and `!` attention. No `@@` tiers.
+ *   both     either way works.
+ *
+ * `/` and `%` open in every mode. The default is the ladder because a single repeated key
+ * teaches itself from the legend, while the symbols are ordinary punctuation in prose.
+ */
+export type SuggestionKeys = 'ladder' | 'symbols' | 'both';
+
+export const SUGGESTION_KEYS: readonly SuggestionKeys[] = ['ladder', 'symbols', 'both'];
+
+export const DEFAULT_SUGGESTION_KEYS: SuggestionKeys = 'ladder';
+
+/** Settings › Appearance › Motion. `system` follows prefers-reduced-motion; `reduced` always reduces. */
+export type MotionPreference = 'system' | 'reduced';
+
 /** The sole browser-storage key for persisted UI controls. */
 export const CONTROLS_KEY = 'fy-controls-v1';
 export const CONTROLS_VERSION = 1;
@@ -82,22 +99,26 @@ export interface DeviceControls {
   readonly density: Density | null;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
-  /** null follows this device’s input capability rather than another device’s choice. */
+  /** Bare Enter on a keyboard (desktop). null = the default, Enter sends. */
   readonly composerEnterKey: ComposerEnterKeyPreference | null;
+  /** Return on a phone or other touch-first device. null = the default, return starts a new line. */
+  readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
+  /** Whether the transcript opens its folded bookkeeping (reasoning, usage, notices) by default. */
+  readonly showDetails: boolean;
+  /** Reduced motion: follow the operating system, or always reduce it on this device. */
+  readonly motion: MotionPreference;
   readonly sidebarCollapsed: boolean;
   /**
-   * Whether the composer OFFERS the whole `@` ladder — bare `@` files and the
-   * repeated `@@` / `@@@` / `@@@@` tiers alike.
+   * Which keys open the composer's reference menu: the `@` ladder, the direct
+   * symbols, or both (`SuggestionKeys`).
    *
-   * Every suggestion field below governs a MENU and nothing else. An authored
+   * Every suggestion field governs a MENU and nothing else. An authored
    * reference is still parsed, still proved and still linked with the menu off,
    * and inserting one from elsewhere (the transcript's Add to chat) is not a
    * suggestion and never consults these. That asymmetry is the whole contract:
    * turning a family off removes an offer, never a capability.
    */
-  readonly mentionSuggestions: boolean;
-  /** Whether the direct sigils `:` agent, `&` task and `!` attention open a menu. */
-  readonly directReferenceSuggestions: boolean;
+  readonly suggestionKeys: SuggestionKeys;
   /** Whether `$` opens the skill menu. `/` is a command surface and is never governed. */
   readonly skillSuggestions: boolean;
   /**
@@ -124,11 +145,13 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   includeFinished: false,
   dashboardView: null,
   density: null,
-  chatWidth: 'full',
+  chatWidth: 'readable',
   composerEnterKey: null,
+  composerPhoneEnterKey: null,
+  showDetails: false,
+  motion: 'system',
   sidebarCollapsed: false,
-  mentionSuggestions: true,
-  directReferenceSuggestions: true,
+  suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
   composerVimMode: false,
 });
@@ -217,13 +240,20 @@ const readDeviceControls = (value: unknown): DeviceControls => {
     composerEnterKey:
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
     sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
-    mentionSuggestions: readFlag(fields.mentionSuggestions, DEFAULT_DEVICE_CONTROLS.mentionSuggestions),
-    directReferenceSuggestions: readFlag(
-      fields.directReferenceSuggestions,
-      DEFAULT_DEVICE_CONTROLS.directReferenceSuggestions,
-    ),
+    // The two switches this choice replaced (`mentionSuggestions`, `directReferenceSuggestions`) may
+    // still sit in a stored record; they are left unread rather than translated, because the new
+    // default is a deliberate change of offer and an old "all on" is not a choice of keys.
+    suggestionKeys: (SUGGESTION_KEYS as readonly unknown[]).includes(fields.suggestionKeys)
+      ? (fields.suggestionKeys as SuggestionKeys)
+      : DEFAULT_DEVICE_CONTROLS.suggestionKeys,
     skillSuggestions: readFlag(fields.skillSuggestions, DEFAULT_DEVICE_CONTROLS.skillSuggestions),
     composerVimMode: readFlag(fields.composerVimMode, DEFAULT_DEVICE_CONTROLS.composerVimMode),
+    composerPhoneEnterKey:
+      fields.composerPhoneEnterKey === 'send' || fields.composerPhoneEnterKey === 'newline'
+        ? fields.composerPhoneEnterKey
+        : null,
+    showDetails: readFlag(fields.showDetails, DEFAULT_DEVICE_CONTROLS.showDetails),
+    motion: fields.motion === 'reduced' ? 'reduced' : 'system',
   };
 };
 

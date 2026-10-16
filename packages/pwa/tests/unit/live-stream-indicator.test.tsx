@@ -181,3 +181,36 @@ describe('LiveStreamIndicator', () => {
     await view.unmount();
   });
 });
+
+describe('LiveStreamIndicator, quiet (the session bar’s form)', () => {
+  test('draws nothing while the feed is healthy, a word and Reconnect once it is not, and always announces', async () => {
+    let reconnects = 0;
+    const view = await mount(<LiveStreamIndicator quiet status="live" onReconnect={() => (reconnects += 1)} />);
+    try {
+      const seen: Array<readonly [string, string, string, boolean]> = [];
+      for (const status of ALL) {
+        await view.render(<LiveStreamIndicator quiet status={status} onReconnect={() => (reconnects += 1)} />);
+        const region = must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+        expect(region.getAttribute('role')).toBe('status');
+        seen.push([
+          region.getAttribute('data-live-stream') ?? '',
+          region.querySelector('[aria-hidden="true"]')?.textContent ?? '',
+          region.getAttribute('data-tone') ?? '',
+          reconnectButton(view.container) !== null,
+        ]);
+      }
+      expect(seen).toEqual([
+        ['connecting', '', 'pend', false],
+        ['live', '', 'ok', false],
+        ['reconnecting', 'Reconnecting', 'warn', true],
+        ['disconnected', 'Offline', 'err', true],
+        ['unavailable', 'Unreachable', 'err', false],
+      ]);
+      await view.render(<LiveStreamIndicator quiet status="disconnected" onReconnect={() => (reconnects += 1)} />);
+      await interact(() => reconnectButton(view.container)?.click());
+      expect(reconnects).toBe(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+});

@@ -58,42 +58,41 @@ const surface = (vimEnabled = false, onChangeVim: (enabled: boolean) => void = (
   <MarkdownComposerSettings vimEnabled={vimEnabled} onChangeVim={onChangeVim} />
 );
 
-/** The highlight switch first, the Vim switch second, in rendered order. */
+/** The Vim switch is the only switch; the editor style is a radio group. */
 const switches = (renderer: ReturnType<typeof render>) => renderer.root.findAllByProps({ role: 'switch' });
 
 describe('MarkdownComposerSettings', () => {
-  it('renders an honest default-off, 44px switch and changes the live preference on click', () => {
+  it('offers the editor styles as radios and changes the live preference', () => {
     withBrowser(storage => {
-      writeMdComposePref('off');
+      writeMdComposePref('on');
       const renderer = render(surface());
-      const control = switches(renderer)[0];
+      const styles = () =>
+        renderer.root.findAll(node => node.type === 'input' && node.props.name === 'composer-editor-style');
 
-      expect(control?.props['aria-checked']).toBe(false);
-      expect(control?.props.className).toContain('min-h-[44px]');
-      expect(JSON.stringify(renderer.toJSON())).toContain('Highlight Markdown syntax');
+      expect(styles().map(style => [style.props.value, style.props.checked])).toEqual([
+        ['on', true],
+        ['off', false],
+      ]);
+      expect(JSON.stringify(renderer.toJSON())).toContain('Markdown, Notion-style');
+      expect(JSON.stringify(renderer.toJSON())).toContain('Plain text box');
 
-      run(() => control?.props.onClick());
-
-      expect(switches(renderer)[0]?.props['aria-checked']).toBe(true);
-      expect(storage.getItem(MD_COMPOSE_KEY)).toBe('on');
-
-      // Turning it back off is the same control, not a second one.
-      run(() => switches(renderer)[0]?.props.onClick());
+      run(() => styles()[1]?.props.onChange());
       expect(storage.getItem(MD_COMPOSE_KEY)).toBe('off');
+      expect(styles()[1]?.props.checked).toBe(true);
+      run(() => styles()[0]?.props.onChange());
+      expect(storage.getItem(MD_COMPOSE_KEY)).toBe('on');
       run(() => renderer.unmount());
     });
   });
 
-  it('keeps the native textarea as the only editor and explains the bounded preview truthfully', () => {
+  it('says what is sent is the markdown typed, and keeps the native textarea as the only editor', () => {
     withBrowser(() => {
-      writeMdComposePref('off');
       const renderer = render(surface());
       const tree = JSON.stringify(renderer.toJSON());
 
-      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('separate bounded preview');
-      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('markers stay visible');
-      expect(tree).toContain('real-device mobile Safari pass');
-      expect(tree).toContain('original textarea still owns input, selection, dictation, autocomplete and drafts');
+      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('exactly the markdown you typed');
+      expect(MARKDOWN_COMPOSER_EXPLANATION).toContain('markers kept faintly visible');
+      expect(tree).toContain('Editor style');
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);
       expect(renderer.root.findAll(node => 'contentEditable' in node.props)).toHaveLength(0);
       run(() => renderer.unmount());
@@ -105,9 +104,9 @@ describe('MarkdownComposerSettings', () => {
       writeMdComposePref('off');
       const chosen: boolean[] = [];
       const renderer = render(surface(false, enabled => chosen.push(enabled)));
-      const vim = switches(renderer)[1];
+      const vim = switches(renderer)[0];
 
-      expect(switches(renderer)).toHaveLength(2);
+      expect(switches(renderer)).toHaveLength(1);
       expect(vim?.props['aria-checked']).toBe(false);
       expect(vim?.props.className).toContain('min-h-[44px]');
       expect(JSON.stringify(renderer.toJSON())).toContain('Vim-style editing');
@@ -125,7 +124,7 @@ describe('MarkdownComposerSettings', () => {
       const renderer = render(surface(true, enabled => chosen.push(enabled)));
       const tree = JSON.stringify(renderer.toJSON());
 
-      expect(switches(renderer)[1]?.props['aria-checked']).toBe(true);
+      expect(switches(renderer)[0]?.props['aria-checked']).toBe(true);
       // Escape has no on-screen key, so the limit is stated rather than implied.
       expect(VIM_COMPOSER_EXPLANATION).toContain('Off by default');
       expect(VIM_COMPOSER_EXPLANATION).toContain('normal and insert');
@@ -135,7 +134,7 @@ describe('MarkdownComposerSettings', () => {
       expect(tree).toContain('native textarea keeps input');
       expect(renderer.root.findAllByType('textarea')).toHaveLength(0);
 
-      run(() => switches(renderer)[1]?.props.onClick());
+      run(() => switches(renderer)[0]?.props.onClick());
       expect(chosen).toEqual([false]);
       run(() => renderer.unmount());
     });
