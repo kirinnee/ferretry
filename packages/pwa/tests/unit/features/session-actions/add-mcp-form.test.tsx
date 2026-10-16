@@ -248,6 +248,16 @@ describe('AddMcpForm — the project listing', () => {
   });
 });
 
+describe('AddMcpForm — a URL server in the project', () => {
+  it('says Claude Code signs in to a project server itself, and offers no Ferretry sign-in', async () => {
+    const { root } = await openForm();
+    await settleUntil(() => root.querySelector('[data-choice]') !== null, 'the choice cards', interact);
+    await click(typeRadio(root, 'url'));
+    expect(root.textContent).toContain('Claude Code signs in to a project server itself, the first time it uses it.');
+    expect(root.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+});
+
 describe('AddMcpForm — the inline refusal', () => {
   it('shows nothing while the fields are simply empty', async () => {
     const { root } = await openForm();
