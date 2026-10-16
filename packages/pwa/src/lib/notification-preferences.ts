@@ -4,40 +4,27 @@
  * kteam's source `ui/src/lib/notify.ts` owned one module-global preference
  * snapshot under one localStorage key. That was safe only while the browser
  * could talk to exactly one daemon. Ferretry can keep several pairings alive,
- * and each daemon owns an independent push-device preference record, so a
- * singleton would make whichever daemon was read last silently configure all
- * the others.
+ * so a singleton would make whichever daemon was read last silently configure
+ * all the others.
  *
- * This store keeps the source's tolerant, field-by-field decoding and nested
- * event merging, but every snapshot and subscription is keyed by `DaemonId`.
- * Storage is injected: the public static bundle contains no daemon identity,
- * URL, token, or browser-global singleton. A composition host may register the
- * store as a `DaemonScopedCache`, because `clearDaemon` has the same seam used
- * by the pairing registry on unpair, eviction, and credential rotation.
+ * This store keeps the source's tolerant, field-by-field decoding, but every
+ * snapshot and subscription is keyed by `DaemonId`. Storage is injected: the
+ * public static bundle contains no daemon identity, URL, token, or
+ * browser-global singleton. A composition host may register the store as a
+ * `DaemonScopedCache`, because `clearDaemon` has the same seam used by the
+ * pairing registry on unpair, eviction, and credential rotation.
+ *
+ * WHICH EVENT KINDS AND QUIET HOURS SHOW IS NOT HERE. That decision is made
+ * once per browser, not once per daemon — see
+ * `packages/pwa/src/lib/notification-filter.ts`. What stays per-daemon is only
+ * what is genuinely about ONE machine: whether this device even wants Web
+ * Push from it (`enabled`, which is also this screen's "per machine on/off"),
+ * and whether a foreground notification should wait until the tab is hidden.
  */
-
-import type { PushNotificationKind, PushPreferences } from '@ferretry/protocol';
 
 import { type DaemonId, daemonId } from './daemon-connection.ts';
 
-/**
- * The PWA needs this literal key map for its presentation order. The mapped type is deliberately
- * exhaustive: `satisfies readonly PushNotificationKind[]` would reject an invented kind but let a
- * new protocol kind disappear from the UI.
- */
-const NOTIFICATION_KIND_FIELDS = {
-  attention: true,
-  question: true,
-  failed: true,
-  completed: true,
-} as const satisfies { readonly [K in PushNotificationKind]: true };
-
-/** Every protocol notification kind, in the PWA's declared presentation order. */
-export const NOTIFICATION_KINDS: readonly PushNotificationKind[] = Object.keys(
-  NOTIFICATION_KIND_FIELDS,
-) as PushNotificationKind[];
-
-export interface NotificationPreferences extends PushPreferences {
+export interface NotificationPreferences {
   /** Quiet until the reader explicitly enables delivery for this daemon. */
   readonly enabled: boolean;
   /** Suppress foreground notifications while the page is visible. */
@@ -46,22 +33,11 @@ export interface NotificationPreferences extends PushPreferences {
 
 export type NotificationPreferencePatch = Readonly<{
   enabled?: boolean;
-  events?: Readonly<Partial<Record<PushNotificationKind, boolean>>>;
-  interactiveOnly?: boolean;
   onlyWhenHidden?: boolean;
 }>;
 
-const DEFAULT_EVENTS: Readonly<Record<PushNotificationKind, boolean>> = Object.freeze({
-  attention: true,
-  question: true,
-  failed: true,
-  completed: true,
-});
-
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = Object.freeze({
   enabled: false,
-  events: DEFAULT_EVENTS,
-  interactiveOnly: false,
   onlyWhenHidden: true,
 });
 
@@ -77,31 +53,13 @@ type UnknownRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const copyDefaults = (): NotificationPreferences => ({
-  enabled: DEFAULT_NOTIFICATION_PREFERENCES.enabled,
-  events: { ...DEFAULT_NOTIFICATION_PREFERENCES.events },
-  interactiveOnly: DEFAULT_NOTIFICATION_PREFERENCES.interactiveOnly,
-  onlyWhenHidden: DEFAULT_NOTIFICATION_PREFERENCES.onlyWhenHidden,
-});
+const copyDefaults = (): NotificationPreferences => ({ ...DEFAULT_NOTIFICATION_PREFERENCES });
 
 /** Decode one daemon's row without allowing one malformed field to poison it. */
 export const parseNotificationPreferences = (value: unknown): NotificationPreferences => {
   if (!isRecord(value)) return copyDefaults();
-  const rawEvents = isRecord(value.events) ? value.events : {};
-  const events = {} as Record<PushNotificationKind, boolean>;
-  for (const kind of NOTIFICATION_KINDS) {
-    const current = rawEvents[kind];
-    // Read-only migration for the source UI's pre-attention vocabulary.
-    const migrated = kind === 'attention' && typeof current !== 'boolean' ? rawEvents.needsYou : current;
-    events[kind] = typeof migrated === 'boolean' ? migrated : DEFAULT_NOTIFICATION_PREFERENCES.events[kind];
-  }
   return {
     enabled: typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_NOTIFICATION_PREFERENCES.enabled,
-    events,
-    interactiveOnly:
-      typeof value.interactiveOnly === 'boolean'
-        ? value.interactiveOnly
-        : DEFAULT_NOTIFICATION_PREFERENCES.interactiveOnly,
     onlyWhenHidden:
       typeof value.onlyWhenHidden === 'boolean'
         ? value.onlyWhenHidden
@@ -131,19 +89,10 @@ export const parseNotificationPreferenceStore = (
 const mergePreferences = (
   current: NotificationPreferences,
   patch: NotificationPreferencePatch,
-): NotificationPreferences => {
-  const events = { ...current.events };
-  for (const kind of NOTIFICATION_KINDS) {
-    const value = patch.events?.[kind];
-    if (typeof value === 'boolean') events[kind] = value;
-  }
-  return {
-    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
-    events,
-    interactiveOnly: typeof patch.interactiveOnly === 'boolean' ? patch.interactiveOnly : current.interactiveOnly,
-    onlyWhenHidden: typeof patch.onlyWhenHidden === 'boolean' ? patch.onlyWhenHidden : current.onlyWhenHidden,
-  };
-};
+): NotificationPreferences => ({
+  enabled: typeof patch.enabled === 'boolean' ? patch.enabled : current.enabled,
+  onlyWhenHidden: typeof patch.onlyWhenHidden === 'boolean' ? patch.onlyWhenHidden : current.onlyWhenHidden,
+});
 
 /** A synchronously readable external store with one immutable slice per daemon. */
 export class DaemonNotificationPreferences {

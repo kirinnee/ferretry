@@ -31,7 +31,6 @@ function record(overrides: Partial<PushSubscriptionRecord> = {}): PushSubscripti
     deviceId: deviceId('a'),
     deviceName: 'Pixel 8',
     subscription: subscription('https://fcm.googleapis.com/send/one'),
-    prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -146,6 +145,34 @@ describe('StatePushRepository', () => {
     should((await refused(damaged.repository.list())).code).equal('corrupt_store');
     should((await refused(wrongShape.repository.list())).code).equal('corrupt_store');
     should((await refused(duplicated.repository.list())).code).equal('corrupt_store');
+  });
+
+  it('should read a document an older binary of this daemon wrote, ignoring its now-deleted prefs field', async () => {
+    // A binary upgrade does not rewrite push.json, so the first read afterwards meets rows an older
+    // version of this same process wrote. Refusing them would turn an ordinary upgrade into every
+    // existing enrolment going dark, so this one named field is tolerated — everything else about
+    // the row still has to be exactly right.
+    const legacy = await fixture('push-legacy-prefs');
+    const enrolment = record();
+    await legacy.files.writeTextAtomic(
+      legacy.document,
+      JSON.stringify({
+        schemaVersion: 1,
+        subscriptions: [{ ...enrolment, prefs: { events: { attention: true }, interactiveOnly: false } }],
+      }),
+    );
+
+    const listed = await legacy.repository.list();
+
+    should(listed).deepEqual([enrolment]);
+    should(Object.hasOwn(listed[0] ?? {}, 'prefs')).be.false();
+
+    // Re-saving that same enrolment through the current code drops the legacy field for good.
+    await legacy.repository.save(enrolment);
+    const resaved = JSON.parse((await legacy.files.readText(legacy.document)) ?? '{}') as {
+      subscriptions: readonly Record<string, unknown>[];
+    };
+    should(Object.hasOwn(resaved.subscriptions[0] ?? {}, 'prefs')).be.false();
   });
 
   it('should refuse to persist an enrolment the wire could not describe', async () => {

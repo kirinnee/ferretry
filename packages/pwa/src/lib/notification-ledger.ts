@@ -12,15 +12,24 @@ import { displayCallsign } from './callsign.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from './daemon-scope.ts';
 import type { FleetSnapshot } from './fleet-store.ts';
+import type { DeviceNotificationFilterPreferences } from './notification-filter.ts';
+import { shouldShowNotification } from './notification-filter.ts';
 import type { NotificationPreferences } from './notification-preferences.ts';
 import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
 
 export type NotifyKind = PushNotificationKind;
 
+/**
+ * The kinds a SESSION transition can produce. `device-paired` is never one of them — no session
+ * transition ever means "a new browser was paired" — so it is excluded here rather than given a
+ * dead switch case below.
+ */
+export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired'>;
+
 const FAILED_STATUSES: ReadonlySet<SessionStatus> = new Set(['failed', 'stalled', 'kill_failed']);
 
 /** First sight and non-notifying transitions deliberately remain silent. */
-export const classifyTransition = (prev: SessionStatus | undefined, next: SessionStatus): NotifyKind | null => {
+export const classifyTransition = (prev: SessionStatus | undefined, next: SessionStatus): SessionNotifyKind | null => {
   if (prev === undefined || prev === next) return null;
   if (next === 'awaiting_question') return 'question';
   if (next === 'awaiting_user') return 'attention';
@@ -113,14 +122,14 @@ export interface NotificationSpec {
   /** Present for session notifications; fleet summaries intentionally omit it. */
   readonly sessionId?: string;
   readonly scope?: DaemonSessionScope;
-  readonly kind?: NotifyKind;
+  readonly kind?: SessionNotifyKind;
   readonly eventKey: string;
   readonly count: number;
 }
 
 const QUESTION_PREVIEW_LEN = 120;
 
-const bodyFor = (view: SessionView, kind: NotifyKind): string => {
+const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
   switch (kind) {
     case 'question': {
       const question = view.state.pendingQuestion?.questions[0]?.question;
@@ -140,14 +149,14 @@ const bodyFor = (view: SessionView, kind: NotifyKind): string => {
   }
 };
 
-export const notificationEventKey = (scope: DaemonSessionScope, view: SessionView, kind: NotifyKind): string =>
+export const notificationEventKey = (scope: DaemonSessionScope, view: SessionView, kind: SessionNotifyKind): string =>
   JSON.stringify(notificationEventParts(scope, view, kind));
 
 const notificationEventParts = (
   scope: DaemonSessionScope,
   view: SessionView,
-  kind: NotifyKind,
-): readonly [DaemonId, string, NotifyKind, SessionStatus, number, string] => {
+  kind: SessionNotifyKind,
+): readonly [DaemonId, string, SessionNotifyKind, SessionStatus, number, string] => {
   if (scope.sessionId !== view.config.id) throw new Error('notification scope must match the session view');
   return [
     scope.daemonId,
@@ -170,7 +179,7 @@ export const notificationTitle = (view: SessionView): string => {
 export const buildNotification = (
   scope: DaemonSessionScope,
   view: SessionView,
-  kind: NotifyKind,
+  kind: SessionNotifyKind,
   count = 1,
 ): NotificationSpec => ({
   title: notificationTitle(view),
@@ -210,28 +219,31 @@ export const summaryNotification = (
   count: 1,
 });
 
-/** Diffs one daemon's fleet while always consuming the transition baseline. */
+/**
+ * Diffs one daemon's fleet while always consuming the transition baseline.
+ *
+ * `prefs.enabled` is this daemon's own master switch — "per machine on/off" — and is checked first,
+ * so a muted machine never even reaches the device-wide filter. `filter` is the single pure decision
+ * (`notification-filter.ts`): the four category switches and quiet hours, which are the same for
+ * every daemon because they describe this browser, not this machine.
+ */
 export const planNotifications = (
   daemonId: DaemonId,
   views: readonly SessionView[],
   ledger: DaemonNotificationLedger,
   prefs: NotificationPreferences,
+  filter: DeviceNotificationFilterPreferences,
   at: number,
 ): readonly NotificationSpec[] => {
   const liveSessionIds = new Set<string>();
   const specs: NotificationSpec[] = [];
+  const now = new Date(at);
   for (const view of views) {
     const scope = daemonSessionScope({ daemonId }, view.config.id);
     liveSessionIds.add(scope.sessionId);
     const kind = classifyTransition(ledger.status(scope), view.state.status);
     ledger.setStatus(scope, view.state.status);
-    if (
-      kind === null ||
-      !prefs.enabled ||
-      !prefs.events[kind] ||
-      (prefs.interactiveOnly && view.config.mode !== 'interactive')
-    )
-      continue;
+    if (kind === null || !prefs.enabled || !shouldShowNotification({ kind, daemonId }, filter, now)) continue;
     const eventKey = notificationEventKey(scope, view, kind);
     if (!ledger.shouldFire(scope, kind, at, eventKey)) continue;
     specs.push(buildNotification(scope, view, kind, ledger.nextGroupCount(scope, at)));
@@ -259,6 +271,8 @@ export interface SessionsSource {
 
 export interface NotificationWatchEnvironment {
   prefs(daemonId: DaemonId): NotificationPreferences;
+  /** This browser's device-wide filter — the same for every daemon (`notification-filter.ts`). */
+  filter(): DeviceNotificationFilterPreferences;
   hidden(): boolean;
   foregroundSession(): DaemonSessionScope | null;
   show(spec: NotificationSpec): void;
@@ -281,10 +295,11 @@ export const startNotificationWatch = (
     const visible = !env.hidden();
     const foreground = visible ? env.foregroundSession() : null;
     const foregroundKey = foreground === null ? undefined : daemonSessionKey(foreground);
+    const filter = env.filter();
     for (const [daemonId, fleet] of snapshot.daemons) {
       if (fleet.sessions === null) continue;
       const prefs = env.prefs(daemonId);
-      const specs = planNotifications(daemonId, fleet.sessions, ledger, prefs, env.now());
+      const specs = planNotifications(daemonId, fleet.sessions, ledger, prefs, filter, env.now());
       if (visible && prefs.onlyWhenHidden) continue;
       for (const spec of specs)
         if (spec.scope === undefined || daemonSessionKey(spec.scope) !== foregroundKey) env.show(spec);

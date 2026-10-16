@@ -32,10 +32,11 @@
  * the only URL this module ever follows is the in-app path the ledger produced.
  */
 
-import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
+import type { PushDeviceView } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import type { DeviceNotificationFilterPreferences, DeviceNotificationFilterStore } from '../lib/notification-filter.ts';
 import { type SessionsSource, startNotificationWatch } from '../lib/notification-ledger.ts';
 import type { DaemonNotificationPreferences, NotificationPreferences } from '../lib/notification-preferences.ts';
 import {
@@ -55,7 +56,6 @@ import {
   type PushEnrolmentContext,
   readPushDelivery,
   revokePushDevice,
-  syncPushPreferences,
 } from '../lib/push-enrolment.ts';
 
 /** One daemon's live preference slice; another pairing's changes never re-render it. */
@@ -68,10 +68,16 @@ export const useNotificationPreferences = (
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 };
 
+/** This browser's one device-wide filter — the same for every daemon (`notification-filter.ts`). */
+export const useNotificationFilterPreferences = (
+  store: DeviceNotificationFilterStore,
+): DeviceNotificationFilterPreferences => useSyncExternalStore(store.subscribe, store.get, store.get);
+
 export interface NotificationWatchHost {
   /** The fleet cache, whose `null` snapshot means "not yet" rather than "empty". */
   readonly sessions: SessionsSource;
   readonly preferences: DaemonNotificationPreferences;
+  readonly filter: DeviceNotificationFilterStore;
   readonly surface: NotificationSurface;
   /** Whether the app is currently out of sight. */
   readonly hidden: () => boolean;
@@ -94,6 +100,7 @@ export const useNotificationWatch = (host: NotificationWatchHost, permission: No
     if (permission !== 'granted') return;
     return startNotificationWatch(host.sessions, {
       prefs: daemon => host.preferences.get(daemon),
+      filter: () => host.filter.get(),
       hidden: host.hidden,
       foregroundSession: host.foregroundSession,
       show: spec => {
@@ -143,7 +150,6 @@ export interface NotificationControls {
    * does not have.
    */
   readonly setEnabled: (enabled: boolean) => void;
-  readonly setPreferences: (preferences: PushPreferences) => void;
   /** Per-device revocation against the daemon that issued the device id. */
   readonly revokeDevice: (deviceId: string) => void;
   readonly refresh: () => void;
@@ -250,17 +256,6 @@ export const useNotificationControls = (
     [connection.daemonId, context, host, markChecking, publish],
   );
 
-  const setPreferences = useCallback(
-    (next: PushPreferences) => {
-      const started = context;
-      void syncPushPreferences(started, next).then(result => {
-        // `null` means nothing was sent onward, so the existing readout stands.
-        if (result !== null) publish(started)(result);
-      });
-    },
-    [context, publish],
-  );
-
   const revokeDevice = useCallback(
     (deviceId: string) => {
       markChecking();
@@ -279,7 +274,6 @@ export const useNotificationControls = (
     devices: report.devices,
     currentDeviceId: report.currentDeviceId,
     setEnabled,
-    setPreferences,
     revokeDevice,
     refresh,
   };

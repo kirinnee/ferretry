@@ -6,12 +6,12 @@ import {
   type RegisterPushDeviceRequest,
 } from '@ferretry/protocol';
 import type { PairingDeviceStore } from '../pairing/index.ts';
-import { acceptsDispatch, enrolmentConfirmation, pushDeviceView } from './policy.ts';
+import { enrolmentConfirmation, pushDeviceView } from './policy.ts';
 import {
-  PushError,
   type PushClock,
   type PushDeviceDirectory,
   type PushDispatch,
+  PushError,
   type PushIdentifiers,
   type PushSubscriptionRecord,
   type PushSubscriptionStore,
@@ -67,9 +67,8 @@ export interface PushServiceOptions {
  *   whether a tab drew a toast — but push is not end-to-end until that lands.
  *
  * The notification domain owns when to speak: a committed Attention creation or an explicit audited
- * direct request. It supplies `interactive` from the authoritative session mode and calls `notify`
- * rather than creating a second fan-out here. Session lifecycle changes remain deliberately silent so
- * native harness notifications are not duplicated.
+ * direct request. It calls `notify` rather than creating a second fan-out here. Session lifecycle
+ * changes remain deliberately silent so native harness notifications are not duplicated.
  */
 export class PushService {
   constructor(private readonly options: PushServiceOptions) {}
@@ -134,7 +133,6 @@ export class PushService {
       deviceId: PairedDeviceIdSchema.parse(deviceId),
       deviceName: request.deviceName,
       subscription: request.subscription,
-      prefs: request.prefs,
       createdAt: existing?.createdAt ?? at,
       updatedAt: at,
     };
@@ -176,12 +174,14 @@ export class PushService {
   }
 
   /**
-   * Tells every device that agreed to hear it.
+   * Tells every enrolled device, unconditionally.
    *
    * `to` narrows to named enrolments, which is what a confirmation wants: it is addressed to the
-   * browser that just enrolled and to nobody else. Devices whose preferences decline the notification
-   * are counted in NEITHER total — they were not asked, so reporting them as failures would make a
-   * reader's own choice look like a fault.
+   * browser that just enrolled and to nobody else. EVERY OTHER EVENT GOES TO EVERY ADDRESSED DEVICE —
+   * there is no preference row here to consult, so a browser this daemon has never described before
+   * is told exactly what every other one is. Which events a reader is actually shown is a decision
+   * their own browser makes from its own local storage; see
+   * `packages/pwa/src/lib/notification-filter.ts`.
    *
    * An endpoint a push service reports as gone is forgotten here, which is the only place that
    * discovery can be made: nothing else in this daemon ever learns that a browser is unreachable.
@@ -190,12 +190,13 @@ export class PushService {
   async notify(dispatch: PushDispatch, to?: readonly string[]): Promise<PushDeliveryResult> {
     const enrolled = await this.enrolments();
     const addressed = to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id));
-    const chosen = addressed.filter(record => acceptsDispatch(record.prefs, dispatch));
     const payload = JSON.stringify(dispatch.payload);
     const outcomes = await Promise.all(
-      chosen.map(async record => await this.options.transport.deliver({ subscription: record.subscription, payload })),
+      addressed.map(
+        async record => await this.options.transport.deliver({ subscription: record.subscription, payload }),
+      ),
     );
-    const expired = chosen.filter((_, index) => outcomes[index] === 'expired').map(record => record.id);
+    const expired = addressed.filter((_, index) => outcomes[index] === 'expired').map(record => record.id);
     if (expired.length > 0) await this.options.store.forget(expired);
     const delivered = outcomes.filter(outcome => outcome === 'delivered').length;
     return PushDeliveryResultSchema.parse({ delivered, failed: outcomes.length - delivered });

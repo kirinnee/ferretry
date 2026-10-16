@@ -1,27 +1,26 @@
 import { describe, expect, it } from 'bun:test';
-import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
+import type { PushDeviceView } from '@ferretry/protocol';
 import should from 'should';
 
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonNotificationPreferences } from '../../src/lib/notification-preferences.ts';
 import {
+  type ContainerPushEnrolmentDeps,
+  containerPushEnrolment,
   DaemonPushDevices,
   type DaemonPushService,
   daemonPushService,
   disablePushDelivery,
   enablePushDelivery,
   enrolDaemonPushDevice,
+  type MachinePushRegistrationLike,
   moveOffSharedPush,
   PUSH_CREATE_FAILED_MESSAGE,
   PUSH_DEVICE_STORAGE_KEY,
   PUSH_INACTIVE_MESSAGE,
   PUSH_REVOKE_FAILED_MESSAGE,
-  PUSH_SYNC_FAILED_MESSAGE,
   PUSH_UNREACHABLE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
-  type ContainerPushEnrolmentDeps,
-  containerPushEnrolment,
-  type MachinePushRegistrationLike,
   type PushEnrolment,
   type PushEnrolmentContext,
   type PushRegistrationLike,
@@ -30,17 +29,11 @@ import {
   readPushDelivery,
   revokePushDevice,
   supportsWebPush,
-  syncPushPreferences,
   unsubscribeLocalPush,
 } from '../../src/lib/push-enrolment.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
-
-const prefs: PushPreferences = {
-  events: { attention: true, question: true, failed: false, completed: false },
-  interactiveOnly: true,
-};
 
 const deviceView = (id: string, deviceName = 'this browser'): PushDeviceView =>
   ({
@@ -49,7 +42,6 @@ const deviceView = (id: string, deviceName = 'this browser'): PushDeviceView =>
     createdAt: '2026-08-01T10:00:00.000Z',
     updatedAt: '2026-08-01T10:00:00.000Z',
     expirationTime: null,
-    prefs,
   }) satisfies PushDeviceView;
 
 const DEVICE_A = deviceView('push-00000000-0000-4000-8000-000000000000');
@@ -91,7 +83,7 @@ const vapidKey = (): string =>
     .replaceAll('=', '');
 
 interface ServiceLog {
-  readonly registered: { daemonId: string; deviceName: string; preferences: PushPreferences }[];
+  readonly registered: { daemonId: string; deviceName: string }[];
   readonly revoked: { daemonId: string; deviceId: string }[];
   readonly listed: string[];
 }
@@ -106,8 +98,8 @@ const service = (
       log.listed.push(connection.daemonId);
       return [DEVICE_A, DEVICE_B];
     },
-    register: async (connection, _subscription, deviceName, preferences) => {
-      log.registered.push({ daemonId: connection.daemonId, deviceName, preferences });
+    register: async (connection, _subscription, deviceName) => {
+      log.registered.push({ daemonId: connection.daemonId, deviceName });
       return DEVICE_A;
     },
     revoke: async (connection, deviceId) => {
@@ -279,7 +271,7 @@ describe('daemonPushService', () => {
     });
 
     should(await bound.vapidKey(daemonA)).equal(vapidKey());
-    should(await bound.register(daemonA, subscriptionHandle(), 'this browser', prefs)).deepEqual(DEVICE_A);
+    should(await bound.register(daemonA, subscriptionHandle(), 'this browser')).deepEqual(DEVICE_A);
     should(await bound.list(daemonA)).deepEqual([DEVICE_A]);
     should(await bound.revoke(daemonB, DEVICE_A.id)).deepEqual(DEVICE_A);
 
@@ -292,12 +284,10 @@ describe('enrolDaemonPushDevice', () => {
   it('registers an existing subscription under this daemon and remembers its device id', async () => {
     const { service: push, log } = service();
     const ctx = context({ service: push });
-    ctx.preferences.set(daemonA.daemonId, { interactiveOnly: true });
 
     should(await enrolDaemonPushDevice(ctx, false)).deepEqual(DEVICE_A);
     should(log.registered[0]?.daemonId).equal('daemon-a');
     should(log.registered[0]?.deviceName).equal('this browser');
-    should(log.registered[0]?.preferences.interactiveOnly).be.true();
     should(ctx.devices.get(daemonA.daemonId)).equal(DEVICE_A.id);
     should(ctx.devices.get(daemonB.daemonId)).be.null();
   });
@@ -493,50 +483,6 @@ describe('disablePushDelivery', () => {
 
     should((await disablePushDelivery(ctx)).message).equal(PUSH_UNSUPPORTED_MESSAGE);
     should(log.revoked).be.empty();
-  });
-});
-
-describe('syncPushPreferences', () => {
-  it('sends changed events to the daemon holding this device', async () => {
-    const { service: push, log } = service();
-    const ctx = context({ service: push });
-    ctx.preferences.set(daemonA.daemonId, { enabled: true });
-
-    const report = await syncPushPreferences(ctx, { events: prefs.events, interactiveOnly: false });
-
-    should(ctx.preferences.get(daemonA.daemonId).events.completed).be.false();
-    should(ctx.preferences.get(daemonA.daemonId).interactiveOnly).be.false();
-    should(log.registered).have.length(2);
-    should(report?.status).equal('active');
-  });
-
-  it('stores the preference without a daemon round trip while delivery is off', async () => {
-    const { service: push, log } = service();
-    const ctx = context({ service: push });
-
-    should(await syncPushPreferences(ctx, prefs)).be.null();
-    should(ctx.preferences.get(daemonA.daemonId).interactiveOnly).be.true();
-    should(log.registered).be.empty();
-  });
-
-  it('stores the preference where this browser cannot enrol at all', async () => {
-    const ctx = context({ enrolment: null });
-    ctx.preferences.set(daemonA.daemonId, { enabled: true });
-
-    should(await syncPushPreferences(ctx, prefs)).be.null();
-  });
-
-  it('reports a preference the daemon would not accept', async () => {
-    const ctx = context({
-      service: service({
-        register: async () => {
-          throw new Error('   ');
-        },
-      }).service,
-    });
-    ctx.preferences.set(daemonA.daemonId, { enabled: true });
-
-    should((await syncPushPreferences(ctx, prefs))?.message).equal(PUSH_SYNC_FAILED_MESSAGE);
   });
 });
 

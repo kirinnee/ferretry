@@ -918,14 +918,9 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         <NotificationSettingsView
           permission="granted"
           enabled
-          preferences={{
-            events: { attention: true, question: true, failed: true, completed: false },
-            interactiveOnly: false,
-          }}
           delivery="active"
           devices={[]}
           onEnabled={() => {}}
-          onPreferences={() => {}}
           onRevokeDevice={() => {}}
         />
       }
@@ -5487,14 +5482,9 @@ function Shell() {
             <NotificationSettingsView
               permission="granted"
               enabled
-              preferences={{
-                events: { attention: true, question: true, failed: true, completed: false },
-                interactiveOnly: false,
-              }}
               delivery="active"
               devices={[]}
               onEnabled={() => {}}
-              onPreferences={() => {}}
               onRevokeDevice={() => {}}
             />
           </PanelBody>
