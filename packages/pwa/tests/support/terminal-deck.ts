@@ -187,6 +187,8 @@ export interface XtermInstance {
   key(event: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; code: string }): boolean;
   /** How many times something focused the pane — the phone key bar's ⌨. */
   focused(): number;
+  /** The font the emulator was constructed with, and the one it holds now. */
+  font(): { readonly initial: string | undefined; readonly current: string | undefined };
 }
 
 /**
@@ -218,7 +220,7 @@ export function xtermSpy(
     rows = 24;
     /** `theme` is an accessor so a repaint is observable: the deck assigns
      *  `xterm.options.theme`, which is a write THROUGH this object. */
-    readonly options: { theme?: unknown } = {
+    readonly options: { theme?: unknown; fontFamily?: string } = {
       get theme(): unknown {
         return themes.at(-1);
       },
@@ -233,8 +235,9 @@ export function xtermSpy(
     #key: (event: never) => boolean = () => true;
     #focused = 0;
 
-    constructor() {
+    constructor(init?: { readonly fontFamily?: string }) {
       instances.push({
+        font: () => ({ initial: init?.fontFamily, current: this.options.fontFamily }),
         focused: () => this.#focused,
         written: this.written,
         type: value => this.#data(value),

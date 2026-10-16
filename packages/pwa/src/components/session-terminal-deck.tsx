@@ -59,6 +59,7 @@ import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SurfaceOwnership } from '../lib/surface-references.ts';
+import { terminalFontFamily } from '../lib/terminal-font.ts';
 import {
   describeCoControl,
   shouldReopenTerminalStream,
@@ -79,6 +80,7 @@ import {
   terminalLimitLabel,
 } from '../lib/web-terminals.ts';
 import { Button } from '../shell/primitives.tsx';
+import { loadTerminalFont } from './terminal-font-loader.ts';
 
 type XtermModules = {
   readonly Terminal: typeof import('@xterm/xterm').Terminal;
@@ -225,6 +227,13 @@ function terminalTheme(): import('@xterm/xterm').ITheme {
   };
 }
 
+/**
+ * The font, read from the live theme like the colours are, with the bundled face before the generic —
+ * see `lib/terminal-font.ts` for why a theme's own stack alone drew `b u n  d e v`.
+ */
+const terminalFont = (): string =>
+  terminalFontFamily(getComputedStyle(document.documentElement).getPropertyValue('--font-mono'));
+
 /** xterm hands binary input back as a byte-per-char string, not a buffer. */
 function bytesFromBinaryString(value: string): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(value.length);
@@ -292,16 +301,16 @@ function TerminalCanvas({
     let dataDisposable: { dispose(): void } | undefined;
     let binaryDisposable: { dispose(): void } | undefined;
 
-    void dependencies
-      .loadXterm()
-      .then(({ Terminal, FitAddon }) => {
+    // The face is loaded BEFORE the emulator exists: xterm measures its cell once, on open.
+    void Promise.all([dependencies.loadXterm(), loadTerminalFont()])
+      .then(([{ Terminal, FitAddon }]) => {
         if (disposed) return;
         const xterm = new Terminal({
           allowProposedApi: false,
           convertEol: false,
           cursorBlink: true,
           cursorStyle: 'bar',
-          fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
+          fontFamily: terminalFont(),
           fontSize: 12.5,
           lineHeight: 1.14,
           scrollback,
@@ -311,6 +320,9 @@ function TerminalCanvas({
         xterm.loadAddon(fit);
         stopWatchingTheme = dependencies.watchTheme(() => {
           xterm.options.theme = terminalTheme();
+          // A theme family brings its own monospace stack; a changed font re-measures the cells.
+          const font = terminalFont();
+          if (xterm.options.fontFamily !== font) xterm.options.fontFamily = font;
         });
         xterm.open(host);
         terminalRef.current = xterm;

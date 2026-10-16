@@ -8,7 +8,8 @@
 import { useSyncExternalStore } from 'react';
 
 export const MD_COMPOSE_KEY = 'fy-markdown-composer-v1';
-export type MdComposePref = 'on' | 'off';
+/** The composer's editor style: `on` Markdown (Notion-style), `rich` Rich text, `off` Plain text box. */
+export type MdComposePref = 'on' | 'off' | 'rich';
 /** Markdown, Notion-style is the default editor style (Settings › Composer › Editor style). */
 export const MD_COMPOSE_DEFAULT: MdComposePref = 'on';
 
@@ -19,7 +20,7 @@ const CHANGE_EVENT = 'ferretry:markdown-composer-change';
 let volatilePref: MdComposePref | null = null;
 
 export const parseMdComposePref = (raw: string | null): MdComposePref =>
-  raw === 'on' || raw === 'off' ? raw : MD_COMPOSE_DEFAULT;
+  raw === 'on' || raw === 'off' || raw === 'rich' ? raw : MD_COMPOSE_DEFAULT;
 
 /** Browser privacy settings may make even accessing localStorage throw. */
 const browserStorage = (): Storage | null => {

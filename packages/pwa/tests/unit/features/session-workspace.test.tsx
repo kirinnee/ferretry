@@ -36,6 +36,8 @@ import {
   useWorkspaceFormFactor,
 } from '../../../src/features/workspace/use-workspace-environment.ts';
 import { WorkspaceView } from '../../../src/features/workspace/workspace-view.tsx';
+import { ConsoleSurface } from '../../../src/features/workspace/console-surface.tsx';
+import { ContextMenu } from '../../../src/shell/context-menu.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { openWorkspaceTab, workspaceTab } from '../../../src/lib/workspace-layout.ts';
@@ -308,7 +310,89 @@ describe('SessionWorkspace on a desktop', () => {
   });
 });
 
+describe('closing a terminal tab', () => {
+  test('asks Close tab or End shell, and End shell ends it through the deck', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(TERMINAL)]));
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL, { label: 'dev' })));
+    const { page } = mountWorkspace('desktop', { deck: deck.dependencies }, store);
+    try {
+      await settle();
+      const menu = () => page.root.findByType(ContextMenu);
+      run(() =>
+        page.root.findByType(WorkspaceView).props.onEndTerminal(store.snapshot(scope).tabs[`terminal:${TERMINAL}`]),
+      );
+      await settle();
+      expect(deck.closed).toEqual([TERMINAL]);
+      expect(menu().props.open).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('says so when the shell could not be ended', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(TERMINAL)]));
+    deck.dependencies = {
+      ...deck.dependencies,
+      close: async () => {
+        throw new Error('the shell is already gone');
+      },
+    };
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL, { label: 'dev' })));
+    const { page } = mountWorkspace('desktop', { deck: deck.dependencies }, store);
+    try {
+      await settle();
+      run(() =>
+        page.root.findByType(WorkspaceView).props.onEndTerminal(store.snapshot(scope).tabs[`terminal:${TERMINAL}`]),
+      );
+      await settle();
+      const alerts = page.root.findAll(node => node.props.role === 'alert' && node.type === 'p').map(textOf);
+      expect(alerts).toContain('Could not end the shell: the shell is already gone');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('offers no End shell where the page has no terminals', () => {
+    const { page } = mountWorkspace('desktop');
+    try {
+      expect(page.root.findByType(WorkspaceView).props.onEndTerminal).toBeUndefined();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});
+
 describe('SessionWorkspace on a phone and a tablet', () => {
+  test('types into the Console from the key bar and the field, through the injected typer', async () => {
+    const typed: string[] = [];
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    const { page, captured } = mountWorkspace(
+      'phone',
+      {
+        readSnapshot: async () => 'pane text',
+        typeIntoConsole: async (_daemon, _scope, data) => {
+          typed.push(data);
+        },
+      },
+      store,
+    );
+    try {
+      run(() => captured.workspace.showAgentTab('console'));
+      await settle();
+      const phone = () => page.root.findByType(PhoneWorkspace);
+      expect(phone().props.activeId).toBe('console');
+      expect(page.root.findByType(ConsoleSurface).props.scope).toBe(scope);
+      run(() => phone().props.onTerminalInput('console', '\x1b[A'));
+      run(() => phone().props.onFocusTerminal('console'));
+      await settle();
+      expect(typed).toEqual(['\x1b[A']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('shows one tab at a time, with the key bar typing into the terminal on screen', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(TERMINAL)]));
     const store = new WorkspaceLayoutStore(NO_STORAGE);
@@ -323,7 +407,8 @@ describe('SessionWorkspace on a phone and a tablet', () => {
       const phone = () => page.root.findByType(PhoneWorkspace);
       expect(phone().props.tabs.map((tab: { id: string }) => tab.id)).toEqual([`terminal:${TERMINAL}`]);
       expect(phone().props.activeId).toBe(`terminal:${TERMINAL}`);
-      expect(phone().props.consoleTakesKeys).toBe(false);
+      // The Console types through its own route now, so it gets the key bar a terminal gets.
+      expect(phone().props.consoleTakesKeys).toBeUndefined();
 
       const socket = deck.sockets[0];
       if (socket === undefined) throw new Error('the terminal tab did not attach');

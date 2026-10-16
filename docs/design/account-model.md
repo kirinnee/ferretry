@@ -415,6 +415,8 @@ machine:
   agentPermissions: auto # auto | skip
   defaultRuntime: claude-default # optional; must name an agent runtime (T); unset falls back to claude-default if it is one
   agentControl: { terminals: true, browsers: true, files: true } # "What agents may control" (T), default all on
+  # Turning one of the three OFF asks nothing beyond the ordinary fleet.configure step-up; turning one
+  # back ON from a remote device always wants a passkey proved for that act (docs/grants.md, owner decision).
 
 credentials:
   claude-you: { harness: claude, store: host } # shared in place with your own `claude`
