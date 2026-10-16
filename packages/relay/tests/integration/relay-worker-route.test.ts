@@ -134,6 +134,49 @@ describe('relay worker route', () => {
     should((await relayWorker.fetch(upgrade(`/v1/rendezvous/${daemonId}/daemon`), value)).status).equal(101);
   });
 
+  it('should answer a hosted upgrade through the default export when the platform passes its context', async () => {
+    // Workers calls `fetch(request, env, ctx)`. When the export was `relayFetch` itself, `ctx` became
+    // its `runtime` and every hosted upgrade threw reading `ctx.crypto.randomBytes` (1101 in
+    // production, for daemon and browser alike). This is the call shape the platform really makes.
+    const harness = hostedEnvironment();
+    const platformContext = { waitUntil: () => undefined, passThroughOnException: () => undefined };
+    const call = relayWorker.fetch as (request: Request, env: RelayEnvironment, ctx: unknown) => Promise<Response>;
+    for (const side of ['daemon', 'client'] as const) {
+      const response = await call(upgrade(`/v1/rendezvous/${daemonId}/${side}`), harness.value, platformContext);
+      should(response.status).equal(101);
+    }
+    should(harness.rendezvousRequests).have.length(2);
+    for (const request of harness.rendezvousRequests) {
+      should(request.headers.get('x-ferretry-relay-reservation')).match(/^[A-Za-z0-9_-]{22}$/);
+    }
+  });
+
+  it('should answer an escaped exception with a typed error rather than the platform 1101', async () => {
+    const throwing: RelayEnvironment = {
+      RELAY_DAEMON_IDS: daemonId,
+      RENDEZVOUS: {
+        idFromName: () => {
+          throw new TypeError('binding exploded');
+        },
+        get: () => ({ fetch: async () => new Response(null, { status: 101 }) }),
+      },
+    };
+    const originalError = console.error;
+    const logged: unknown[] = [];
+    console.error = (...args: unknown[]) => {
+      logged.push(args);
+    };
+    try {
+      const response = await relayWorker.fetch(upgrade(`/v1/rendezvous/${daemonId}/daemon`), throwing);
+      should(response.status).equal(500);
+      should(response.headers.get('Cache-Control')).equal('no-store, max-age=0');
+      should(await response.json()).deepEqual({ error: 'relay worker failed unexpectedly' });
+      should(logged).have.length(1);
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   it('should keep an explicit self-hosted mode on the existing allowlist path', async () => {
     const { value } = environment(daemonId);
     const explicit = { ...value, RELAY_MODE: 'self-hosted' };
