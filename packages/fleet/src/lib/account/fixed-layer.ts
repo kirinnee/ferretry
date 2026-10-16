@@ -28,6 +28,16 @@
  * - The bypass-permissions warning is suppressed by a `--settings` overlay holding
  *   `skipDangerousModePermissionPrompt`, returned here as `claudeSettingsOverlay` for the wrapper
  *   (`./materialise.ts`) to write and pass, because where that file lives is the wrapper's fact.
+ * - The overlay ALSO names the permission mode. Claude 2.1.281 shows a one-shot "Make auto mode your
+ *   default permission mode?" dialog to any config dir whose USER `settings.json` names a non-auto
+ *   `permissions.defaultMode` while no project, local, FLAG or policy source names one — which is
+ *   exactly what the settings entry below writes. The `--permission-mode` argument is not a settings
+ *   source, so it did not count, and an agent nobody watches sat on the dialog with every message
+ *   failing. A `--settings` file IS the flag source, so naming the same mode there removes the
+ *   condition; {@link CLAUDE_PROMPTS_SEEN} records the dialog as seen as well, and either alone holds.
+ * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
+ *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
+ *   `config.toml`'s own `[notice]` like the trust table does.
  *
  * Owner question O4, built with the lead's default: when the installed Claude does not accept
  * `--permission-mode auto`, the agent runtime is REFUSED with the fix named. Auto mode is never
@@ -54,6 +64,7 @@ export type FixedEntryPurpose =
   | 'skip-prompt'
   | 'trust'
   | 'onboarding'
+  | 'one-time-prompts'
   | 'no-questions'
   | 'no-alt-screen'
   | 'tools'
@@ -122,6 +133,44 @@ export const CLAUDE_PERMISSION_MODES: Readonly<Record<AgentPermissions, string>>
   auto: 'auto',
   skip: 'bypassPermissions',
 };
+
+/**
+ * The one-time screens Claude records as SEEN in a config directory's `.claude.json`, each a dialog
+ * that parks a launch until somebody answers it. Read off Claude 2.1.281's bundle, where each is the
+ * gate of its dialog:
+ *
+ * - `hasSeenAutoDefaultNudge` — "Make auto mode your default permission mode?" (`shouldShowAutoDefaultNudge`).
+ * - `hasSeenEffortMediumNudge` and `hasSeenEffortMediumNudgeByModel` — "Switch your default effort to
+ *   …?", per model, for the two models it is served for.
+ * - `fullscreenUpsellSeenCount` — "Try the new fullscreen renderer?", shown until it reaches 3.
+ *
+ * Each says only "already seen": none of them changes a mode, an effort or a renderer, so answering
+ * them for an agent decides nothing on the owner's behalf. The wrapper re-asserts them before every
+ * launch (`../wrappers.ts`); a value already past what is written here is kept.
+ */
+export const CLAUDE_PROMPTS_SEEN = {
+  hasSeenAutoDefaultNudge: true,
+  hasSeenEffortMediumNudge: true,
+  hasSeenEffortMediumNudgeByModel: { 'claude-opus-5': true, 'claude-fable-5-1': true },
+  fullscreenUpsellSeenCount: 3,
+} as const;
+
+/**
+ * Codex's `[notice]` keys that hide a one-shot prompt, read off codex-cli 0.156.1's `Notice` table.
+ * Every one is a boolean "hide it"; `fast_default_opt_out` and `model_migrations` are choices rather
+ * than hides, so they are left alone.
+ */
+export const CODEX_HIDDEN_NOTICES: readonly string[] = [
+  'hide_full_access_warning',
+  'hide_world_writable_warning',
+  'hide_rate_limit_model_nudge',
+  'hide_gpt5_1_migration_prompt',
+  'hide_gpt-5.1-codex-max_migration_prompt',
+];
+
+/** The `-c notice={…}` inline table hiding every {@link CODEX_HIDDEN_NOTICES}. */
+export const codexNoticeOverride = (): string =>
+  `notice={${CODEX_HIDDEN_NOTICES.map(key => `${/^[A-Za-z0-9_-]+$/.test(key) ? key : tomlString(key)}=true`).join(',')}}`;
 
 /** Codex's spelling of each Agent permissions choice (§3.6). */
 export const CODEX_PERMISSIONS: Readonly<
@@ -245,6 +294,10 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
       entry('trust', 'claude-json', ['projects', cwd, 'hasTrustDialogAccepted'], true),
       entry('onboarding', 'claude-json', ['hasCompletedOnboarding'], true),
+      ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) =>
+        entry('one-time-prompts', 'claude-json', [key], value),
+      ),
+      ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
       entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
       entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
       entry('instructions', 'launch', ['--append-system-prompt'], AGENT_TOOLS_INSTRUCTION),
@@ -264,8 +317,17 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
           `--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}`,
         ],
-        ...(skip ? { claudeSettingsOverlay: { skipDangerousModePermissionPrompt: true } } : {}),
-        claudeJson: { hasCompletedOnboarding: true, projects: { [cwd]: { hasTrustDialogAccepted: true } } },
+        // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one
+        // is what keeps the auto-default dialog away (see the header).
+        claudeSettingsOverlay: {
+          permissions: { defaultMode: mode },
+          ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
+        },
+        claudeJson: {
+          hasCompletedOnboarding: true,
+          ...CLAUDE_PROMPTS_SEEN,
+          projects: { [cwd]: { hasTrustDialogAccepted: true } },
+        },
       },
     };
   }
@@ -280,6 +342,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
         entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
         entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
         entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
+        ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
         entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
         entry('instructions', 'settings', ['developer_instructions'], AGENT_TOOLS_INSTRUCTION),
       ],
@@ -291,6 +354,8 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
         '-c',
         codexTrustOverride(cwd),
         CODEX_NO_ALT_SCREEN_FLAG,
+        '-c',
+        codexNoticeOverride(),
         '-c',
         `mcp_servers.${FERRETRY_MCP_SERVER}.command=${tomlString(fyCommand)}`,
         '-c',

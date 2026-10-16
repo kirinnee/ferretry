@@ -19,7 +19,8 @@
  *
  * Pure: every function here is string in, string out.
  */
-import { secretReferencesIn, type SecretName } from '@ferretry/protocol';
+import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
+import { CLAUDE_PROMPTS_SEEN } from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
 
 /** A generated executable that runs one runtime's wrapper with flags prepended. */
@@ -124,6 +125,24 @@ const secretGuardLine = (name: string, secrets: readonly SecretName[]): string =
 const FIRST_RUN_SEED_TOGGLE = 'FY_SEED_FIRST_RUN';
 
 /**
+ * The "already seen" leaves of {@link CLAUDE_PROMPTS_SEEN} as jq paths. A boolean is seen when it is
+ * `true`; a number is a count the harness shows the screen until it reaches, so a larger one is kept.
+ */
+const PROMPTS_SEEN_LEAVES: readonly { readonly path: string; readonly value: boolean | number }[] = Object.entries(
+  CLAUDE_PROMPTS_SEEN,
+).flatMap(([key, value]) =>
+  typeof value === 'object'
+    ? Object.keys(value).map(inner => ({ path: `.[${JSON.stringify(key)}][${JSON.stringify(inner)}]`, value: true }))
+    : [{ path: `.[${JSON.stringify(key)}]`, value }],
+);
+
+const seenAlready = ({ path, value }: (typeof PROMPTS_SEEN_LEAVES)[number]): string =>
+  typeof value === 'number' ? `((${path} // 0) >= ${value})` : `(${path} == true)`;
+
+const seedSeen = ({ path, value }: (typeof PROMPTS_SEEN_LEAVES)[number]): string =>
+  typeof value === 'number' ? `${path} = ([(${path} // 0), ${value}] | max)` : `${path} = true`;
+
+/**
  * jq filter proving every first-run flag is already what it needs to be, so the usual launch does
  * nothing at all. `$ENV` rather than `--arg`: the same mechanism carries the API key below, and one
  * way of passing a value into jq is easier to keep right than two.
@@ -133,6 +152,7 @@ const SEEDED_ALREADY = [
   'and (.hasCompletedOnboarding == true)',
   'and (.hasCompletedClaudeInChromeOnboarding == true)',
   'and (.claudeInChromeDefaultEnabled != null)',
+  ...PROMPTS_SEEN_LEAVES.map(leaf => `and ${seenAlready(leaf)}`),
 ].join(' ');
 
 /**
@@ -145,14 +165,11 @@ const SEED_FILTER = [
   '| .hasCompletedOnboarding = true',
   '| .hasCompletedClaudeInChromeOnboarding = true',
   '| (if .claudeInChromeDefaultEnabled == null then .claudeInChromeDefaultEnabled = false else . end)',
+  ...PROMPTS_SEEN_LEAVES.map(leaf => `| ${seedSeen(leaf)}`),
 ].join(' ');
 
-const SEED_NEW_DOCUMENT = [
-  '{projects: {($ENV.FY_SEED_PWD): {hasTrustDialogAccepted: true}}',
-  ', hasCompletedOnboarding: true',
-  ', hasCompletedClaudeInChromeOnboarding: true',
-  ', claudeInChromeDefaultEnabled: false}',
-].join('');
+/** A home with no `.claude.json` yet gets the same filter, applied to an empty document. */
+const SEED_NEW_DOCUMENT = `{} | ${SEED_FILTER}`;
 
 /**
  * The one-time prompts that would otherwise stall a launch nobody is watching, seeded into the
@@ -166,7 +183,9 @@ const SEED_NEW_DOCUMENT = [
  *
  * **What it seeds, and why each one.** Folder trust for the working directory, the onboarding flow,
  * the browser-onboarding step, and `claudeInChromeDefaultEnabled` — the actual gate for the "use my
- * browser?" prompt, which shows while that key is null. Then, when the account exports its own API
+ * browser?" prompt, which shows while that key is null. Then every one-shot dialog the harness
+ * records as seen ({@link CLAUDE_PROMPTS_SEEN}): the auto-mode default nudge that parked a bypass
+ * agent with every message failing, the effort nudge and the fullscreen upsell. Then, when the account exports its own API
  * key, the key is recorded as approved: the harness's "detected a custom API key, use it?" dialog
  * defaults to **No** and blocks the session until somebody answers, and the wrapper exported that key
  * on purpose.

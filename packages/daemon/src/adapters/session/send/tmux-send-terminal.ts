@@ -1,6 +1,11 @@
 import type { SendPaneObservation, SendQueueOutcome, SendTerminal } from '../../../lib/session/send/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import { composerEvidence, paneShowsActiveWork, type TmuxController } from '../../../lib/tmux/index.ts';
+import {
+  composerEvidence,
+  paneBlockingPrompt,
+  paneShowsActiveWork,
+  type TmuxController,
+} from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
 
@@ -32,6 +37,7 @@ export class TmuxSendTerminal implements SendTerminal {
       dead: state.dead,
       promptReady: state.promptReady,
       activeWork: paneShowsActiveWork(state.visible),
+      blockingPrompt: paneBlockingPrompt(state.visible),
     };
   }
 

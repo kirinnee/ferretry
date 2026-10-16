@@ -336,6 +336,18 @@ describe('first-run seeding', () => {
     should(actual).containEql('claudeInChromeDefaultEnabled');
   });
 
+  it('should seed every one-shot dialog the fixed layer records as seen, the auto-mode nudge first among them', () => {
+    // Act
+    const actual = render(claude());
+
+    // Assert — the dialog that parked a bypass agent with every message failing.
+    should(actual).containEql('.["hasSeenAutoDefaultNudge"] = true');
+    should(actual).containEql('.["hasSeenEffortMediumNudgeByModel"]["claude-opus-5"] = true');
+    // A count is raised to its floor, never lowered.
+    should(actual).containEql('.["fullscreenUpsellSeenCount"] = ([(.["fullscreenUpsellSeenCount"] // 0), 3] | max)');
+    should(actual).containEql('((.["fullscreenUpsellSeenCount"] // 0) >= 3)');
+  });
+
   it('should seed on every launch rather than trusting a write made once', () => {
     // Act
     const actual = render(claude());

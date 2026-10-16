@@ -203,13 +203,25 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     verdict: SendVerdict | undefined,
     now: number,
   ): Promise<SendRecord> {
-    if (!reading.readable) return await this.settle(id, record, 'unaccounted', 'transcript_unreadable');
+    if (!reading.readable) {
+      // A harness parked on a dialog writes no transcript at all, so "unreadable" was true and useless:
+      // the screen says what is wrong, and the person can fix it.
+      const blocked = await this.ports.terminal.observe(id).catch(() => undefined);
+      return await this.settle(
+        id,
+        record,
+        'unaccounted',
+        blocked?.blockingPrompt === undefined ? 'transcript_unreadable' : 'blocked_by_prompt',
+      );
+    }
     const target = await this.ports.repository.read(id);
     if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))
       return await this.settle(id, record, 'timed_out', 'session_ended');
     const pane = await this.ports.terminal.observe(id).catch(() => undefined);
     if (pane === undefined) return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
     if (!pane.alive || pane.dead) return await this.settle(id, record, 'timed_out', 'session_ended');
+    // Not delivered, and nothing will be until somebody answers the dialog: retyping would type into it.
+    if (pane.blockingPrompt !== undefined) return await this.settle(id, record, 'unaccounted', 'blocked_by_prompt');
     const inPane = await this.ports.terminal.holds(id, record.matchText ?? record.message).catch(() => undefined);
     if (inPane === undefined) return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
     if (verdict?.holding === true || inPane) {

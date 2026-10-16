@@ -544,6 +544,21 @@ describe('the tmux send terminal', () => {
     should(actual.activeWork).be.false();
   });
 
+  it('should name the harness dialog a pane is parked on, and never call that pane ready', async () => {
+    // Arrange — Claude's one-shot auto-mode dialog, whose cursor row reads as a prompt line.
+    const tmux = new ScriptedTmux([
+      ' Make auto mode your default permission mode?\n\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep bypass permissions',
+    ]);
+
+    // Act
+    const actual = await terminal(tmux).observe(ID);
+
+    // Assert
+    should(actual.blockingPrompt).equal('Make auto mode your default permission mode?');
+    should(actual.promptReady).be.false();
+    should((await terminal(new ScriptedTmux(['❯ '])).observe(ID)).blockingPrompt).be.undefined();
+  });
+
   it('should press Escape and re-read the pane when a caller ends the active turn', async () => {
     // Escape is the safe stop-the-turn key in both harness TUIs; `C-c` is the QUIT path. Exactly one
     // keystroke per call, with no internal retries.
