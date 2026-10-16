@@ -607,6 +607,69 @@
   line-height: 1.35;
   margin: 0;
 }
+/* THE LIVE ACTIVITY LINE: the harness's own verb with a ring spinner, its clock and tokens. */
+.fy-live-activity {
+  align-items: center;
+  color: var(--fy-muted);
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  line-height: 1.35;
+  min-width: 0;
+}
+.fy-live-activity b {
+  color: var(--fy-fg);
+  font-weight: 600;
+}
+.fy-live-activity-detail {
+  font-variant-numeric: tabular-nums;
+}
+.fy-live-activity-spinner {
+  animation: fy-live-activity-spin 1s linear infinite;
+  border: 2px solid var(--fy-border);
+  border-radius: 50%;
+  border-top-color: var(--fy-accent);
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
+}
+@keyframes fy-live-activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-live-activity-spinner {
+    animation: none;
+  }
+}
+/* "Show details": a quiet dashed link at rest, the folded rows in small mono when open. */
+.fy-transcript-details-toggle {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--border-strong, var(--fy-border));
+  color: var(--faint, var(--fy-muted));
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.fy-transcript-details-toggle:hover {
+  color: var(--fy-fg);
+}
+.fy-transcript-details-list {
+  color: var(--faint, var(--fy-muted));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  list-style: none;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+  padding: 0;
+  white-space: pre-wrap;
+}
+.fy-transcript-details-label {
+  color: var(--fy-muted);
+}
 .fy-jump-latest-shell {
   align-items: end;
   background: linear-gradient(

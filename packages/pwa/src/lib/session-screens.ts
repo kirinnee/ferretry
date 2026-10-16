@@ -35,7 +35,45 @@ export interface TranscriptEntry {
   readonly ledger?: LedgerSendRecord;
   /** Where that attempt sits relative to the loaded transcript. */
   readonly placement?: LedgerBlockPlacement;
+  /**
+   * Bookkeeping — reasoning, token usage, turn and settings records. Kept, but folded behind
+   * "Show details" so the conversation reads as a conversation.
+   */
+  readonly detail?: boolean;
 }
+
+/** One rendered transcript item: a row, or a folded run of consecutive detail rows. */
+export type TranscriptItem =
+  | { readonly kind: 'entry'; readonly entry: TranscriptEntry; readonly previous?: TranscriptEntry }
+  | { readonly kind: 'details'; readonly id: string; readonly entries: readonly TranscriptEntry[] };
+
+/**
+ * Folds every run of consecutive detail rows into one item, keeping order. A run is keyed by its first
+ * row, so expanding one stays expanded while the tail of the transcript grows underneath it. `previous`
+ * is the last VISIBLE row before an entry, which is what the transcript's rhythm reads.
+ */
+export const transcriptItems = (entries: readonly TranscriptEntry[]): readonly TranscriptItem[] => {
+  const items: TranscriptItem[] = [];
+  let previous: TranscriptEntry | undefined;
+  let run: TranscriptEntry[] | null = null;
+  for (const entry of entries) {
+    if (entry.detail === true) {
+      if (run === null) {
+        run = [];
+        items.push({ kind: 'details', id: `details:${entry.id}`, entries: run });
+      }
+      run.push(entry);
+      continue;
+    }
+    run = null;
+    items.push(previous === undefined ? { kind: 'entry', entry } : { kind: 'entry', entry, previous });
+    previous = entry;
+  }
+  return items;
+};
+
+/** "2 system events" — the fold's own count, in words. */
+export const detailsLabel = (count: number): string => `${count} system ${count === 1 ? 'event' : 'events'}`;
 
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'stopped';
