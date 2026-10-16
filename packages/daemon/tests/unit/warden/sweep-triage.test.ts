@@ -1013,3 +1013,17 @@ describe('who needs you', () => {
     should(actual.outcome).equal('no-sweep');
   });
 });
+
+describe('the settings in effect', () => {
+  it('should read them without touching the fleet or the accounts', async () => {
+    // Arrange
+    const subject = harness({ config: jev({ events: { turnEnd: false, question: true, paneDied: true } }) });
+
+    // Act
+    const actual = await subject.service.currentConfig();
+
+    // Assert
+    should(actual.triage).equal('jev');
+    should(actual.events.turnEnd).be.false();
+  });
+});

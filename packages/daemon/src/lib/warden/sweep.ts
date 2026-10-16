@@ -772,6 +772,11 @@ export class WardenSweepService {
     };
   }
 
+  /** The settings in effect, and nothing else — cheap enough to read on every session event. */
+  async currentConfig(): Promise<WardenConfig> {
+    return parseStoredWardenConfig(await this.ports.config.read()).config;
+  }
+
   /** How often the timer that drives this should fire. */
   async intervalMs(): Promise<number> {
     return sweepIntervalMs(parseStoredWardenConfig(await this.ports.config.read()).config);

@@ -3081,9 +3081,9 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         const trigger = wardenEventTrigger(event.type, event.data);
         if (trigger === undefined) return;
         void service
-          .view()
-          .then(view => {
-            if (view.config.enabled && wardenTriggerEnabled(trigger, view.config.events)) loop.trigger();
+          .currentConfig()
+          .then(config => {
+            if (config.enabled && wardenTriggerEnabled(trigger, config.events)) loop.trigger();
           })
           .catch(() => undefined);
       });
