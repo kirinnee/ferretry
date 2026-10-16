@@ -265,4 +265,83 @@ describe('terminal snapshot view', () => {
       globalThis.fetch = original;
     }
   });
+
+  describe('on a phone', () => {
+    const PANE = `${'x'.repeat(80)}\nshort`;
+    const width = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    const clientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    const asPhone = (): void => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 366 });
+    };
+    const restore = (): void => {
+      if (width) Object.defineProperty(window, 'innerWidth', width);
+      if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth');
+    };
+    const pre = (container: HTMLElement): HTMLElement => must(container.querySelector('pre'), 'the pane text');
+    const toggle = (container: HTMLElement): HTMLButtonElement =>
+      must(container.querySelector<HTMLButtonElement>('[data-terminal-fit]'), 'the Fit / Scroll toggle');
+
+    it('fits the widest line to the pane by default, and scrolls at full size after one tap', async () => {
+      setHidden(false);
+      asPhone();
+      try {
+        const view = await mount(
+          <TerminalSnapshotView daemon={daemon} scope={scope} live now={() => 0} readSnapshot={async () => PANE} />,
+        );
+        try {
+          // 366px less the pre's 24px of padding, over 80 columns.
+          expect(pre(view.container).style.fontSize).toBe('7px');
+          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('true');
+          expect(toggle(view.container).textContent).toBe('Fit');
+          expect(view.container.querySelector('[data-terminal-live-dot]')).not.toBeNull();
+
+          await interact(() => toggle(view.container).click());
+
+          expect(pre(view.container).style.fontSize).toBe('');
+          expect(toggle(view.container).getAttribute('aria-pressed')).toBe('false');
+          expect(toggle(view.container).textContent).toBe('Scroll');
+        } finally {
+          await view.unmount();
+        }
+      } finally {
+        restore();
+      }
+    });
+
+    it('keeps its first measurement where the browser has no ResizeObserver', async () => {
+      setHidden(false);
+      asPhone();
+      const observer = globalThis.ResizeObserver;
+      Reflect.deleteProperty(globalThis, 'ResizeObserver');
+      try {
+        const view = await mount(
+          <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
+        );
+        try {
+          expect(pre(view.container).style.fontSize).toBe('7px');
+        } finally {
+          await view.unmount();
+        }
+      } finally {
+        globalThis.ResizeObserver = observer;
+        restore();
+      }
+    });
+
+    it('opens at full size on a desktop, where the toggle can still fit it', async () => {
+      setHidden(false);
+      const view = await mount(
+        <TerminalSnapshotView daemon={daemon} scope={scope} now={() => 0} readSnapshot={async () => PANE} />,
+      );
+      try {
+        expect(pre(view.container).style.fontSize).toBe('');
+        await interact(() => toggle(view.container).click());
+        expect(pre(view.container).style.fontSize).not.toBe('');
+      } finally {
+        await view.unmount();
+      }
+    });
+  });
 });

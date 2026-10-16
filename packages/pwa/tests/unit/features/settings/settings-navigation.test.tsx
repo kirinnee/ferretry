@@ -50,6 +50,7 @@ describe('SettingsSidebar', () => {
       expect([...browserList.querySelectorAll('[data-settings-section-choice]')].map(row => row.textContent)).toEqual([
         'Appearance',
         'Behaviour',
+        'This device',
       ]);
       const machineList = must(
         view.container.querySelector('[aria-labelledby="settings-group-machines"]'),
@@ -76,7 +77,7 @@ describe('SettingsSidebar', () => {
         [...view.container.querySelectorAll('[data-settings-section-choice]')].map(row =>
           row.getAttribute('aria-current'),
         ),
-      ).toEqual([null, 'page']);
+      ).toEqual([null, 'page', null]);
       expect(view.container.querySelector('[data-settings-machine][aria-current]')).toBeNull();
     } finally {
       await view.unmount();
@@ -143,7 +144,7 @@ describe('SettingsHome', () => {
       expect(view.container.textContent).toContain('Only this phone. Your machines aren’t affected.');
       expect(
         [...view.container.querySelectorAll('[data-settings-section-choice]')].map(row => row.textContent),
-      ).toEqual(['Appearance', 'Behaviour']);
+      ).toEqual(['Appearance', 'Behaviour', 'This device']);
       const alphaRow = button(view.container, '[data-settings-machine="daemon-alpha"]');
       expect(alphaRow.textContent).toContain('Alpha workstation');
       expect(alphaRow.textContent).toContain('Online · 1 runtime');

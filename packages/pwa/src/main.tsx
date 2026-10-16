@@ -17,11 +17,20 @@
  * asset. Without it the bundle would ship logic and no design system: the
  * harness compiles the same stylesheet with the Tailwind CLI instead, which is
  * why a green harness never proved this line existed.
+ *
+ * ONE EXCEPTION TO "MOUNTING ONLY": the install offer. Chromium fires
+ * `beforeinstallprompt` once, whenever it decides the app is installable, and a
+ * page that was not listening has lost the only handle that can open the install
+ * dialog. So the listener is attached HERE, before React mounts, and the store
+ * that holds the event is handed to the app through context
+ * (`lib/install-prompt.ts`, `hooks/use-install-prompt.ts`).
  */
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
+import { InstallPromptContext } from './hooks/use-install-prompt.ts';
+import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
 import './styles/index.css';
 
 const host = document.getElementById('root');
@@ -30,8 +39,12 @@ const host = document.getElementById('root');
 // something else is serving the HTML.
 if (!host) throw new Error('missing #root — the host document is not this app’s index.html');
 
+const installPrompt = createBrowserInstallPrompt(window);
+
 createRoot(host).render(
   <StrictMode>
-    <App />
+    <InstallPromptContext.Provider value={installPrompt}>
+      <App />
+    </InstallPromptContext.Provider>
   </StrictMode>,
 );

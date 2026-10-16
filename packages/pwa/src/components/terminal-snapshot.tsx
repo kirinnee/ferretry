@@ -12,6 +12,12 @@
  *  - the header states the tmux session plus a "cached · updated <n>s ago"
  *    hint, so freshness is never a guess.
  *
+ * ON A PHONE (the drawer layout) two more things hold. The pane FITS ITS WIDTH by default — the text
+ * is sized so the widest captured line fits (`fitFontPx`), instead of being cut at the right edge
+ * behind a sideways scroll — with a Fit / Scroll toggle in the header for the reader who wants 12px
+ * and a scrollbar. And the header is one short row: the terminal glyph and a "live" dot, its words
+ * kept for screen readers and the tooltip.
+ *
  * What changed for Ferretry: the read is bound to one paired daemon. The
  * original polled a page-global client, which cannot be right when two daemons
  * are paired and both know a session by that id.
@@ -19,6 +25,7 @@
 
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
@@ -26,10 +33,15 @@ import { useDaemonFetch } from '../lib/store.tsx';
 import { JumpToLatest } from './jump-to-latest.tsx';
 import {
   describeSnapshotError,
+  fitFontPx,
   formatSnapshotAge,
   formatSnapshotClock,
+  paneColumns,
   readPaneSnapshot,
 } from './terminal-snapshot-model.ts';
+
+/** The `<pre>`'s horizontal padding (`px-3`), which the fitted text does not get to use. */
+const PANE_PADDING_X_PX = 24;
 
 const POLL_MS = 3_000;
 
@@ -153,6 +165,29 @@ export const TerminalSnapshotView = ({
     return () => clearInterval(timer);
   }, [now]);
 
+  // FIT TO WIDTH: the phone's default, the reader's choice after one tap. The pane's width is measured
+  // and re-measured as it resizes (rotation, the keyboard); a browser without ResizeObserver keeps the
+  // first measurement.
+  const phone = useLayoutMode() === 'drawer';
+  const [fitChoice, setFitChoice] = useState<boolean | null>(null);
+  const fit = fitChoice ?? phone;
+  const [paneWidth, setPaneWidth] = useState(0);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (viewport === null) return;
+    const measure = (): void => setPaneWidth(viewport.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [viewportRef]);
+  const fontSize = fit ? fitFontPx(paneColumns(text), paneWidth - PANE_PADDING_X_PX) : undefined;
+  const preStyle = {
+    ...(fontFamily === undefined ? {} : { fontFamily }),
+    ...(fontSize === undefined ? {} : { fontSize: `${fontSize}px` }),
+  };
+
   const age = lastUpdatedAt === null ? '—' : formatSnapshotAge(tick - lastUpdatedAt);
   const absolute = lastUpdatedAt === null ? '' : formatSnapshotClock(lastUpdatedAt);
 
@@ -161,26 +196,52 @@ export const TerminalSnapshotView = ({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-soft bg-surface-2 px-3 py-1.5 text-[11.5px] text-fg-soft">
         <span className="inline-flex shrink-0 items-center gap-1.5">
           <Terminal size={13} className="text-muted" aria-hidden="true" />
-          <span className="font-semibold text-fg">Terminal</span>
+          <span className="font-semibold text-fg max-md:sr-only">Terminal</span>
         </span>
         {tmuxSession === undefined ? (
-          <span className="mono min-w-0 max-w-[18rem] truncate text-muted">managed session pane</span>
+          <span className="mono min-w-0 max-w-[18rem] truncate text-muted max-md:hidden">managed session pane</span>
         ) : (
-          <span className="mono min-w-0 max-w-[18rem] truncate text-muted" title={tmuxSession}>
+          <span className="mono min-w-0 max-w-[18rem] truncate text-muted max-md:hidden" title={tmuxSession}>
             tmux: {tmuxSession}
           </span>
         )}
         <span className="mono ml-auto inline-flex shrink-0 items-center gap-1.5 text-[11px]" role="status">
           {stale ? (
             <span className="text-warn" title={errorMessage ?? 'stale'}>
-              stale · last update {age} ago{errorMessage ? ` · ${errorMessage}` : ''}
+              stale
+              <span className="max-md:sr-only">
+                {' '}
+                · last update {age} ago{errorMessage ? ` · ${errorMessage}` : ''}
+              </span>
             </span>
           ) : (
-            <span className="text-muted" title={absolute}>
-              {live ? 'live' : 'cached'} · updated {age} ago
+            <span
+              className="inline-flex items-center gap-1 text-muted"
+              title={`updated ${age} ago${absolute === '' ? '' : ` (${absolute})`}`}
+            >
+              {live ? (
+                <span aria-hidden="true" className="size-1.5 rounded-full bg-ok" data-terminal-live-dot="" />
+              ) : null}
+              {live ? 'live' : 'cached'}
+              <span className="max-md:sr-only"> · updated {age} ago</span>
             </span>
           )}
         </span>
+        <button
+          type="button"
+          aria-pressed={fit}
+          aria-label="Fit the pane to the screen width"
+          className="mono h-6 rounded-sm border border-border-soft px-2 text-[11px] text-muted hover:text-fg md:hidden"
+          data-terminal-fit=""
+          onClick={() => setFitChoice(!fit)}
+          title={
+            fit
+              ? 'Fitted to the screen — tap to scroll sideways at full size'
+              : 'Full size — tap to fit the screen width'
+          }
+        >
+          {fit ? 'Fit' : 'Scroll'}
+        </button>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
@@ -192,7 +253,8 @@ export const TerminalSnapshotView = ({
           <div className="min-w-max" ref={contentRef}>
             <pre
               className="mono m-0 min-w-max whitespace-pre px-3 py-2 text-[12px] leading-[1.5]"
-              {...(fontFamily === undefined ? {} : { style: { fontFamily } })}
+              data-terminal-fit-px={fontSize}
+              style={preStyle}
             >
               {text || '(no snapshot yet)'}
             </pre>

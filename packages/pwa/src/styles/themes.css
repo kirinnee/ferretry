@@ -2297,63 +2297,84 @@
    screenshot. These remain FAMILY tokens: Mission stays the tightest,
    Neo/Ember broaden their headlines, and High Contrast keeps the largest
    instrument labels. The 44px control/row floors above supply the matching
-   touch spacing without erasing each family's horizontal density. */
+   touch spacing without erasing each family's horizontal density.
+
+   EVERY FAMILY HAS A PHONE RAMP NOW. The first block is the baseline for the
+   families with no phone character of their own (Blueprint, Broadsheet, Ledger,
+   Ma, Phosphor, Wayfinding): they used to keep their DESKTOP 10–13px tokens on a
+   390px screen, which is the "so damn small" the owner reported. The named
+   families after it re-tune it — equal specificity, later source order wins.
+   The whole ramp also sits about a point above where it started: the owner read
+   the first phone ramp on a real phone and asked for "the text and everything
+   bigger". Spacing is NOT scaled here — the root rem stays 16px, so Tailwind's
+   rem padding and the 390px geometry gates are unaffected; only type grows. */
 @media (max-width: 640px) {
-  :root[data-theme^='studio-'] {
-    --text-2xs: 12px;
-    --text-xs: 13px;
-    --text-sm: 14px;
-    --text-base: 15px;
-    --text-md: 16px;
-    --text-lg: 18px;
-    --text-display: 1.375rem;
-    --label-size: 12px;
-  }
-
-  :root[data-theme^='mission-'] {
-    --text-2xs: 12px;
-    --text-xs: 12.5px;
-    --text-sm: 13.5px;
-    --text-base: 14.5px;
-    --text-md: 15.5px;
-    --text-lg: 17.5px;
-    --text-display: 1.25rem;
-    --label-size: 12px;
-  }
-
-  :root[data-theme^='neo-'] {
-    --text-2xs: 12px;
+  :root[data-theme] {
+    --text-2xs: 12.5px;
     --text-xs: 13.5px;
     --text-sm: 14.5px;
     --text-base: 15.5px;
     --text-md: 16.5px;
-    --text-lg: 19px;
-    --text-display: 1.5rem;
+    --text-lg: 18.5px;
+    --text-display: 1.4rem;
     --label-size: 12.5px;
   }
 
-  :root[data-theme^='contrast-'] {
-    --text-2xs: 13px;
+  :root[data-theme^='studio-'] {
+    --text-2xs: 12.5px;
     --text-xs: 14px;
     --text-sm: 15px;
     --text-base: 16px;
+    --text-md: 17px;
+    --text-lg: 19px;
+    --text-display: 1.45rem;
+    --label-size: 12.5px;
+  }
+
+  :root[data-theme^='mission-'] {
+    --text-2xs: 12.5px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 18.5px;
+    --text-display: 1.3rem;
+    --label-size: 12.5px;
+  }
+
+  :root[data-theme^='neo-'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14.5px;
+    --text-sm: 15.5px;
+    --text-base: 16.5px;
     --text-md: 17.5px;
     --text-lg: 20px;
-    --text-display: 1.5rem;
+    --text-display: 1.6rem;
     --label-size: 13px;
+  }
+
+  :root[data-theme^='contrast-'] {
+    --text-2xs: 13.5px;
+    --text-xs: 15px;
+    --text-sm: 16px;
+    --text-base: 17px;
+    --text-md: 18.5px;
+    --text-lg: 21px;
+    --text-display: 1.6rem;
+    --label-size: 13.5px;
   }
 
   /* Geist stays the most restrained on a phone too — small, precise, the least
      enlarged of any family, keeping its engineered read. The 44px control/row
      floors above still supply the touch spacing. */
   :root[data-theme^='geist-'] {
-    --text-2xs: 11.5px;
-    --text-xs: 12.5px;
-    --text-sm: 13.5px;
-    --text-base: 14.5px;
-    --text-md: 15.5px;
-    --text-lg: 17px;
-    --text-display: 1.3rem;
-    --label-size: 12px;
+    --text-2xs: 12px;
+    --text-xs: 13.5px;
+    --text-sm: 14.5px;
+    --text-base: 15.5px;
+    --text-md: 16.5px;
+    --text-lg: 18px;
+    --text-display: 1.35rem;
+    --label-size: 12.5px;
   }
 }

@@ -12,7 +12,7 @@
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
-import { browserFetch, DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
 
 /**
  * `live=false` is the original's choice and the reason the header says
@@ -69,4 +69,29 @@ export const formatSnapshotClock = (at: number): string => {
   if (Number.isNaN(date.getTime())) return '';
   const pad = (value: number): string => String(value).padStart(2, '0');
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
+
+/**
+ * FIT TO WIDTH — a phone's default for a pane captured wider than the phone.
+ *
+ * A host pane is routinely 80+ columns and a 390px phone holds ~45 at 12px, so every line was cut at
+ * the right edge behind a sideways scroll ("Switch anyt…", "prompts automa…"). Fit sizes the text so
+ * the WIDEST line fits the pane instead: the pane's own columns, never a reflow, because rewrapping a
+ * TUI's box-drawing breaks it. Scroll mode is one tap away, and pinch-zoom still works on the page.
+ */
+export const FIT_MAX_FONT_PX = 12;
+/** Below this a monospace face stops being text; the pane scrolls sideways again rather than shrink further. */
+export const FIT_MIN_FONT_PX = 6.5;
+/** A monospace glyph's advance as a fraction of its size — 0.6em for every face the theme ships, rounded up. */
+export const MONO_ADVANCE_EM = 0.61;
+
+/** The widest line's length in characters, trailing blanks ignored — the columns the text really uses. */
+export const paneColumns = (text: string): number =>
+  text.split('\n').reduce((widest, line) => Math.max(widest, [...line.trimEnd()].length), 0);
+
+/** The font size that fits `columns` into `widthPx`, clamped; 12px when there is nothing to fit. */
+export const fitFontPx = (columns: number, widthPx: number): number => {
+  if (columns === 0 || widthPx <= 0) return FIT_MAX_FONT_PX;
+  const fitted = Math.floor((widthPx / (columns * MONO_ADVANCE_EM)) * 10) / 10;
+  return Math.min(FIT_MAX_FONT_PX, Math.max(FIT_MIN_FONT_PX, fitted));
 };

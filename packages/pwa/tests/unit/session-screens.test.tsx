@@ -420,7 +420,9 @@ describe('session screen components', () => {
     );
     expect(rows.root.findByProps({ 'data-transcript-kind': 'tool' }).props['data-transcript-density']).toBe('chrome');
     expect(rows.root.findByProps({ 'data-transcript-kind': 'notice' }).props['data-transcript-density']).toBe('chrome');
-    expect(findText(rows.root, 'You')).toHaveLength(1);
+    // The reader's own row has no "You" label any more — its alignment says who — only a screen-reader one.
+    expect(findText(rows.root, 'You')).toHaveLength(0);
+    expect(findText(rows.root, 'You said:')).toHaveLength(1);
     expect(findText(rows.root, 'Assistant')).toHaveLength(1);
     expect(findText(rows.root, 'Tool')).toHaveLength(1);
     expect(findText(rows.root, 'Daemon')).toHaveLength(1);
