@@ -184,10 +184,22 @@ function MachineSwitcher({
   );
 }
 
-function FindButton({ onOpen, iconOnly }: { readonly onOpen: () => void; readonly iconOnly: boolean }) {
+/**
+ * The finder's opener. It claims Cmd/Ctrl+K only where the chord opens it: on a session page the
+ * chord belongs to that session's own search, so the icon beside it stays silent about a key.
+ */
+function FindButton({
+  onOpen,
+  iconOnly,
+  shortcut,
+}: {
+  readonly onOpen: () => void;
+  readonly iconOnly: boolean;
+  readonly shortcut: boolean;
+}) {
   return (
     <button
-      aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
+      aria-keyshortcuts={shortcut ? PALETTE_KEYSHORTCUTS : undefined}
       aria-label="Find sessions, settings and places"
       className={iconOnly ? 'fy-sbar__icon' : 'kt-findbox fy-sbar__find'}
       data-app-bar-destination-search=""
@@ -199,7 +211,7 @@ function FindButton({ onOpen, iconOnly }: { readonly onOpen: () => void; readonl
       {iconOnly ? null : (
         <>
           <span>Find</span>
-          <kbd>{paletteShortcutLabel()}</kbd>
+          {shortcut ? <kbd>{paletteShortcutLabel()}</kbd> : null}
         </>
       )}
     </button>
@@ -215,7 +227,14 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
     <>
       {props.notice}
       <div className="fy-sbar__search">
-        {props.search ?? <FindButton iconOnly={false} onOpen={props.onOpenPalette} />}
+        {props.search === undefined ? (
+          <FindButton iconOnly={false} onOpen={props.onOpenPalette} shortcut />
+        ) : (
+          <>
+            <div className="min-w-0 flex-1">{props.search}</div>
+            <FindButton iconOnly onOpen={props.onOpenPalette} shortcut={false} />
+          </>
+        )}
       </div>
       <fieldset aria-label="Show sessions" className="fy-sbar__filters">
         {FILTER_ORDER.map(id => (
@@ -349,7 +368,7 @@ function SessionsRail(props: SessionsBarProps) {
       >
         <Plus aria-hidden="true" size={16} />
       </RouteLink>
-      <FindButton iconOnly onOpen={props.onOpenPalette} />
+      <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
       <ul className="fy-sbar__list fy-sbar__dots scroll-thin">
         {view.groups.flatMap(group =>
           group.rows.map(row => {

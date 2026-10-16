@@ -99,6 +99,9 @@
   justify-content: center;
 }
 .fy-sbar__search {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
   padding: 0 var(--gap-sm) var(--gap-sm);
 }
 .fy-sbar__find {

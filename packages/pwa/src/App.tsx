@@ -1696,6 +1696,8 @@ export function AppShell() {
     [pushToTalk],
   );
   const { touchAffected } = useInputModality();
+  const sidebarCollapsed = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot()).device
+    .sidebarCollapsed;
   const currentSessionScope = useMemo(
     () =>
       connection !== undefined && pageRoute.kind === 'session'
@@ -1719,6 +1721,11 @@ export function AppShell() {
    * the browser has already placed focus, and stealing it would skip whatever
    * the reader was given.
    */
+  /**
+   * WHERE THIS SESSION'S SEARCH IS MOUNTED: in the sessions bar's full column, on a session page. A rail
+   * and a phone have no room for it, so there Cmd/Ctrl+K opens the finder instead of focusing nothing.
+   */
+  const barSessionSearch = currentSessionScope !== null && layout === 'full' && !sidebarCollapsed;
   const pageKey = routePageKey(effectiveRoute);
   const routeAnnouncer = useRef<HTMLParagraphElement>(null);
   // Seed the previous key during render instead of latching the first effect.
@@ -1750,7 +1757,7 @@ export function AppShell() {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
-      const sessionScoped = currentSessionScope !== null;
+      const sessionScoped = barSessionSearch;
       if (isModalShortcutTarget(event.target)) return;
       if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();
@@ -1759,7 +1766,7 @@ export function AppShell() {
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [currentSessionScope, openPalette]);
+  }, [barSessionSearch, openPalette]);
 
   let content: ReactNode;
   if (effectiveRoute.kind === 'setup') {
@@ -1810,7 +1817,7 @@ export function AppShell() {
         route={pageRoute}
         // ONE SEARCH. On a session page it is that session's own file search, which Cmd/Ctrl+K focuses;
         // everywhere else the bar's box opens the finder.
-        search={currentSessionScope === null || phone ? undefined : <SessionSearchControl shortcutTarget />}
+        search={barSessionSearch ? <SessionSearchControl shortcutTarget /> : undefined}
         updateReady={updateReady}
         onApplyUpdate={applyUpdate}
       />
@@ -1883,7 +1890,7 @@ export function AppShell() {
               onNavigate={navigate}
               settings={paletteSettings}
               touchAffected={touchAffected}
-              shortcutAvailable={currentSessionScope === null}
+              shortcutAvailable={!barSessionSearch}
             />
           </div>
         </SessionsDrawerContext.Provider>
