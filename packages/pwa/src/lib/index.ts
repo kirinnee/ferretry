@@ -164,6 +164,8 @@ export * from '../features/skills/skills-api.ts';
 export * from '../features/skills/skills-catalog.ts';
 export * from '../features/skills/skills-composer.ts';
 export * from '../features/skills/skills-surface.tsx';
+export * from '../features/speedups/speedups-api.ts';
+export * from '../features/speedups/speedups-surface.tsx';
 export * from '../features/tasks/task-assignee-link.tsx';
 export * from '../features/tasks/task-board-model.ts';
 export type { FilteredTaskDag, TaskDag, TaskDagLayout, TaskDagNode, TaskDagTask } from '../features/tasks/task-dag.ts';

@@ -14,15 +14,27 @@
  *   ?draft=<text>         a saved draft to open with
  *   ?layout=chat          a phone chat page: a transcript above the composer, sized by the app's own
  *                         viewport hook, so a (faked) keyboard shrinks it exactly as in the app
+ *   ?entries=1            every Add to chat / quote entry point beside the composer — the shipped
+ *                         transcript, terminal list, task row and skills surface, each delivering
+ *                         through its own production path, inside a reference surface that proves
+ *                         the tokens they add (so a chip is a link, as in the app)
  */
+import type { TerminalListView } from '@ferretry/protocol';
 import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../../../src/components/composer.tsx';
+import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../../src/components/reference-surface.tsx';
+import { SessionSurfaceReferences } from '../../../src/components/session-surface-references.tsx';
+import { Transcript } from '../../../src/components/transcript.tsx';
+import { SessionSkillsSurface } from '../../../src/features/skills/session-skills-surface.tsx';
+import { TaskRow } from '../../../src/features/tasks/task-row.tsx';
 import { useAppViewport } from '../../../src/hooks/use-app-viewport.ts';
+import { addReferenceToComposer } from '../../../src/lib/composer-references.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
 import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
+import { taskSummary } from '../../support/tasks.ts';
 
 const parameters = new URLSearchParams(location.search);
 const editor = parameters.get('editor');
@@ -33,8 +45,9 @@ const sent: unknown[] = [];
 (window as unknown as { __sent: unknown[] }).__sent = sent;
 
 const daemon = daemonConnection({ daemonId: 'scene', baseUrl: 'http://127.0.0.1', deviceId: 'scene' });
+const scope = daemonSessionScope(daemon, 'scene-session');
 const drafts = new DaemonDraftStore();
-drafts.save(daemonSessionScope(daemon, 'scene-session'), parameters.get('draft') ?? '');
+drafts.save(scope, parameters.get('draft') ?? '');
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('the scene has no #root to mount into');
@@ -60,6 +73,55 @@ function ChatPage({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/** One named shell, so the terminal list offers `%terminal:dev`. */
+const TERMINALS: TerminalListView = {
+  sessionId: scope.sessionId,
+  terminals: [
+    {
+      id: 'a1b2c3d4e5f6',
+      sessionId: scope.sessionId,
+      name: 'dev',
+      title: 'Dev server',
+      state: 'running',
+      cols: 80,
+      rows: 24,
+      viewers: 0,
+      createdAt: '2026-10-16T10:00:00.000Z',
+      lastActivityAt: '2026-10-16T10:05:00.000Z',
+    },
+  ],
+  limits: { perSession: 6, global: 24, runningGlobal: 1, idleTimeoutSeconds: 900, scrollbackLines: 5_000 },
+};
+const TASK = taskSummary({ id: 'F12' });
+const SKILLS = {
+  harness: 'claude' as const,
+  skills: [
+    { name: 'summary', description: 'Recap the work so far.', scope: 'global' as const, origin: 'claude' as const },
+  ],
+};
+
+/** Every Add to chat / quote entry point, each through its own shipped delivery path. */
+function EntryPoints() {
+  return (
+    <section className="scene-entries" data-scene-entries="">
+      <Transcript
+        daemonId={daemon.daemonId}
+        entries={[{ id: 'turn-1', kind: 'assistant', text: 'The build passed on the second try.' }]}
+        sessionId={scope.sessionId}
+      />
+      <SessionSurfaceReferences connection={daemon} listTerminals={async () => TERMINALS} scope={scope} />
+      {/* The session search's own Add to chat, verbatim: the row hands its task up, the host adds it. */}
+      <TaskRow
+        daemonId={daemon.daemonId}
+        onAddToChat={task => addReferenceToComposer({ kind: 'task', id: task.id }, scope)}
+        onOpen={() => undefined}
+        task={TASK}
+      />
+      <SessionSkillsSurface connection={daemon} loadCatalog={async () => SKILLS} scope={scope} />
+    </section>
+  );
+}
+
 const composer = (
   <Composer
     api={{
@@ -78,8 +140,27 @@ const composer = (
   />
 );
 
-createRoot(root).render(
-  <StrictMode>
-    {parameters.get('layout') === 'chat' ? <ChatPage>{composer}</ChatPage> : <main className="scene">{composer}</main>}
-  </StrictMode>,
-);
+const scene =
+  parameters.get('layout') === 'chat' ? (
+    <ChatPage>{composer}</ChatPage>
+  ) : parameters.get('entries') === '1' ? (
+    <ReferenceSurfaceProvider
+      surface={sessionReferenceSurface({
+        connection: daemon,
+        fetcher: async () => new Response('not here', { status: 404 }),
+        scope,
+        skills: SKILLS.skills.map(skill => skill.name),
+        tasks: [TASK],
+        terminals: TERMINALS,
+      })}
+    >
+      <main className="scene">
+        <EntryPoints />
+        {composer}
+      </main>
+    </ReferenceSurfaceProvider>
+  ) : (
+    <main className="scene">{composer}</main>
+  );
+
+createRoot(root).render(<StrictMode>{scene}</StrictMode>);

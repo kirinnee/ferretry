@@ -133,6 +133,7 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
+  FileSpeedupTestLedger,
   foreignHistoryRoots,
   HostedRelayDirectory,
   HttpUsageSource,
@@ -150,7 +151,6 @@ import {
   PaneProcessInventory,
   PerformanceStopwatch,
   ProcCgroupPlacements,
-  ProcessSecretReader,
   quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
@@ -322,7 +322,7 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
-import { type AgentControlPolicy, AccountModelAgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
+import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -364,20 +364,19 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
-  CredentialAgentIdentities,
   advertisesForeignAddress,
+  agentSpokenName,
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
   type BootNoticePort,
   type BootRefusal,
   type BrowserLoginLifecycle,
-  BrowserSessionService,
   type BrowserSessionLauncher,
+  BrowserSessionService,
   type BrowserViewerHost,
-  type BrowserWorkerProgram,
   BrowserViewerStream,
-  selectBrowserWorker,
+  type BrowserWorkerProgram,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -389,9 +388,11 @@ import {
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
+  CredentialAgentIdentities,
   CredentialUsageSource,
   childGrantRequester,
   chooseRelayCarrierSources,
+  claimStartName,
   combinedReferences,
   configuredAt,
   contextWindowForSession,
@@ -456,6 +457,7 @@ import {
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isTaskBoardError,
+  JevTriageGuard,
   jsonObject,
   type LearningSubsystem,
   LiveDeviceConnections,
@@ -472,9 +474,6 @@ import {
   mayTrustDirectLoopback,
   messageWithAttachments,
   type NameAllocationErrorCode,
-  claimStartName,
-  sessionNameClaim,
-  agentSpokenName,
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
@@ -485,6 +484,7 @@ import {
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
   OperatorReadService,
+  OutboundProviderAuthorizer,
   observedRuntimeStatePatch,
   overriddenBy,
   PairedPushDevices,
@@ -588,6 +588,9 @@ import {
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
   SessionReadError,
+  SessionRenameError,
+  SessionRenameService,
+  type SessionRenameSubsystem,
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
@@ -598,9 +601,6 @@ import {
   SessionSendService,
   type SessionSendSubsystem,
   SessionSignalError,
-  SessionRenameError,
-  SessionRenameService,
-  type SessionRenameSubsystem,
   SessionSignalService,
   type SessionSignalSubsystem,
   type SessionTranscriptMessageTokenCodec,
@@ -609,6 +609,7 @@ import {
   type SessionTranscriptTail,
   SignalRefused,
   type SocketRoute,
+  SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   StepUpRegistry,
   StepUpService,
@@ -618,10 +619,14 @@ import {
   StructuredQuestionService,
   SttEnhancementService,
   type SttEnhancementSubsystem,
+  SurfaceControl,
   searchTranscript,
+  secretsMatch,
   selectableAutoAccounts,
+  selectBrowserWorker,
   sendRecordView,
   sessionHealthSettingsAt,
+  sessionNameClaim,
   sessionScopedAttachments,
   structuredQuestionStatePatch,
   supersededCarrierKeys,
@@ -647,8 +652,6 @@ import {
   type TranscriptSource,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
-  SurfaceControl,
-  secretsMatch,
   transcriptKey,
   tryParseSessionId,
   UnknownPeerRefused,
@@ -4685,6 +4688,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const secretDocuments = new FileSecretDocumentStore(paths, stateFiles);
   const secretCipher = new WebCryptoSecretCipher(new FileSecretKey(secretDocuments.keyFile, stateFiles));
   const secretVault = new SecretVault(secretDocuments, secretCipher);
+  // THE FIFTH HOLDER of the vault (see `docs/secrets.md`): it puts one named provider key on one HTTPS
+  // request to a host that key may reach, and hands back only the reply. Dictation clean-up, the Jev
+  // guard and the Speed-ups Test all spend keys through it; none of them is ever handed a value.
+  const outboundAuthorizer = new OutboundProviderAuthorizer(secretVault, new FetchEnhancementTransport());
+  const speedupStopwatch = new PerformanceStopwatch();
   const secrets: SecretSubsystem = {
     directory: new SecretDirectory(secretDocuments, secretCipher, clock),
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
@@ -6694,6 +6702,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ),
         recommend: createRecommendSubsystem(advisorOver, usage),
         sttEnhancement,
+        // Names-only status over the store's listing, and a Test that spends a key once through the
+        // outbound holder above. Jev's Test goes through the same guard the Warden will use.
+        speedups: new SpeedupsService({
+          authorizer: outboundAuthorizer,
+          secrets: secrets.directory,
+          ledger: new FileSpeedupTestLedger(stateFiles, join(paths.state, 'speedups.json')),
+          clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
+          guard: new JevTriageGuard(outboundAuthorizer, speedupStopwatch),
+        }),
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
@@ -6810,11 +6827,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
-    sttEnhancement: new SttEnhancementService(
-      new FetchEnhancementTransport(),
-      new ProcessSecretReader(),
-      new PerformanceStopwatch(),
-    ),
+    sttEnhancement: new SttEnhancementService(outboundAuthorizer, speedupStopwatch),
     untilShutdown: untilTerminated,
   };
 }
