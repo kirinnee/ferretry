@@ -112,7 +112,18 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     label: 'Send key',
     description:
       'Choose, separately for a keyboard and for a phone, whether Enter sends or starts a new line. On a keyboard ↵ sends and ⇧↵ starts a line by default; on a phone return starts a line and the ↑ button sends. ⌘/Ctrl+↵ always sends.',
-    keywords: ['enter', 'return', 'send', 'send key', 'newline', 'new line', 'shift enter', 'composer', 'keyboard', 'phone'],
+    keywords: [
+      'enter',
+      'return',
+      'send',
+      'send key',
+      'newline',
+      'new line',
+      'shift enter',
+      'composer',
+      'keyboard',
+      'phone',
+    ],
   },
   {
     id: 'composer-suggestions',
