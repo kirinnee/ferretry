@@ -273,7 +273,14 @@ async function bootAgentToolsDaemon(home: string) {
     const response = await fetch(`${base}/v1/sessions`, {
       method: 'POST',
       headers: { ...human, 'x-fy-request-id': requestId },
-      body: JSON.stringify({ agent: WRAPPER, cwd: home, prompt: 'drive the tools', name, mode: 'auto' }),
+      body: JSON.stringify({
+        agent: WRAPPER,
+        cwd: home,
+        prompt: 'drive the tools',
+        name: `${name}'s task`,
+        teammate: name.toLowerCase(),
+        mode: 'auto',
+      }),
     });
     const body: unknown = await response.json();
     if (!response.ok) throw new Error(`the session did not start: ${JSON.stringify(body)}`);
