@@ -199,7 +199,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'notifications',
     label: 'Notifications',
     description:
-      'System notification when a session needs attention — waiting at the prompt, asking a question, failed, or finished. Off by default; turning it on asks the browser for permission.',
+      'System notification when a session needs you, finishes, or fails — or a new device is paired. Every paired machine sends every event; these switches, quiet hours, and the per-machine list decide what this browser shows. Off by default; turning it on asks the browser for permission.',
     keywords: [
       'notify',
       'notification',
@@ -210,6 +210,8 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'needs attention',
       'question',
       'background',
+      'quiet hours',
+      'new device',
     ],
   },
   {

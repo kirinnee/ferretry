@@ -1,17 +1,16 @@
 import {
+  type BrowserPushSubscription,
   BrowserPushSubscriptionSchema,
+  FY_REQUEST_ID_HEADER,
   PushDeviceListResponseSchema,
+  type PushDeviceView,
   PushDeviceViewSchema,
   RegisterPushDeviceRequestSchema,
   VapidPublicKeyResponseSchema,
-  type BrowserPushSubscription,
-  type PushDeviceView,
-  type PushPreferences,
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { browserFetch, DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
-import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 /** VAPID P-256 public keys are uncompressed EC points: one tag byte plus X and Y. */
 const VAPID_KEY_BYTES = 65;
@@ -118,13 +117,11 @@ export const registerDaemonPushDevice = async (
   daemon: DaemonConnection,
   subscription: PushSubscriptionLike,
   deviceName: string,
-  prefs: PushPreferences,
   fetcher: DaemonFetch = browserFetch,
 ): Promise<PushDeviceView> => {
   const body = RegisterPushDeviceRequestSchema.parse({
     deviceName,
     subscription: pushSubscriptionJson(subscription),
-    prefs: { events: prefs.events, interactiveOnly: prefs.interactiveOnly },
   });
   return PushDeviceViewSchema.parse(
     await pushJson(daemon, '/v1/push/subscriptions', { method: 'POST', body: JSON.stringify(body) }, fetcher),

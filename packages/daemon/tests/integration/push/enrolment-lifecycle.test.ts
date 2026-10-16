@@ -14,9 +14,9 @@ import { StatePushRepository, StateVapidKeys, WebPushFetchTransport } from '../.
 import { ApiDispatcher, type ApiRequest, ApiRouter, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
 import {
   CapabilityGrantService,
-  DeviceGrantService,
   createFoundationPaths,
   DEFAULT_CAPABILITY_GRANTS,
+  DeviceGrantService,
   PairedPushDevices,
   PairingDeviceRegistry,
   PairingService,
@@ -248,7 +248,6 @@ describe('push enrolment over the real route surface', () => {
         body: JSON.stringify({
           deviceName: 'Pixel 8',
           subscription,
-          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
@@ -309,10 +308,6 @@ describe('push enrolment over the real route surface', () => {
           body: JSON.stringify({
             deviceName,
             subscription: await subscribed(endpoint),
-            prefs: {
-              events: { attention: true, question: true, failed: true, completed: true },
-              interactiveOnly: false,
-            },
           }),
         }),
       );
@@ -349,7 +344,6 @@ describe('push enrolment over the real route surface', () => {
         body: JSON.stringify({
           deviceName: 'Pixel 8',
           subscription: await subscribed('https://fcm.googleapis.com/send/dead'),
-          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );
@@ -371,7 +365,6 @@ describe('push enrolment over the real route surface', () => {
     const body = JSON.stringify({
       deviceName: 'Pixel 8',
       subscription: await subscribed('https://fcm.googleapis.com/send/unconfirmed'),
-      prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     });
 
     const unconfirmed = await world.surface.dispatch(
@@ -404,7 +397,6 @@ describe('push enrolment over the real route surface', () => {
         body: JSON.stringify({
           deviceName: 'The machine',
           subscription: await subscribed('https://fcm.googleapis.com/send/host'),
-          prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
         }),
       }),
     );

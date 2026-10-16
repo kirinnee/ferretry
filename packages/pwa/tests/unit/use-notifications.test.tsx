@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { PushDeviceView, PushPreferences, SessionStatus, SessionView } from '@ferretry/protocol';
+import type { PushDeviceView, SessionStatus, SessionView } from '@ferretry/protocol';
 
 import {
   type NotificationControls,
@@ -12,6 +12,7 @@ import {
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { FleetSnapshot } from '../../src/lib/fleet-store.ts';
+import { DeviceNotificationFilterStore } from '../../src/lib/notification-filter.ts';
 import type { SessionsSource } from '../../src/lib/notification-ledger.ts';
 import { DaemonNotificationPreferences } from '../../src/lib/notification-preferences.ts';
 import type {
@@ -22,10 +23,10 @@ import type {
 import {
   DaemonPushDevices,
   type DaemonPushService,
+  type MachinePushRegistrationLike,
   PUSH_INACTIVE_MESSAGE,
   PUSH_UNSUPPORTED_MESSAGE,
   type PushEnrolment,
-  type MachinePushRegistrationLike,
   type PushSubscriptionHandle,
 } from '../../src/lib/push-enrolment.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -48,18 +49,12 @@ const movedA = daemonConnection({
   deviceId: 'token-a',
 });
 
-const prefs: PushPreferences = {
-  events: { attention: true, question: true, failed: true, completed: true },
-  interactiveOnly: false,
-};
-
 const DEVICE: PushDeviceView = {
   id: 'push-00000000-0000-4000-8000-000000000000',
   deviceName: 'this browser',
   createdAt: '2026-08-01T10:00:00.000Z',
   updatedAt: '2026-08-01T10:00:00.000Z',
   expirationTime: null,
-  prefs,
 };
 
 /** A second device record, so a readout can be told apart by identity alone. */
@@ -324,6 +319,7 @@ describe('useNotificationWatch', () => {
   ): NotificationWatchHost => ({
     sessions: source,
     preferences: new DaemonNotificationPreferences(),
+    filter: new DeviceNotificationFilterStore(),
     surface: view,
     hidden: () => true,
     foregroundSession: () => null,
@@ -430,6 +426,22 @@ describe('useNotificationWatch', () => {
       }),
       'granted',
     );
+
+    run(() => fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    await settle();
+
+    expect(target.shown).toHaveLength(0);
+    probe.unmount();
+  });
+
+  it('defers to the device-wide filter store, not just the per-daemon master switch', async () => {
+    const fleet = sessionsSource(snapshot([view('s1', 'running')]));
+    const target = surface('granted');
+    const store = new DaemonNotificationPreferences();
+    store.set(daemonA.daemonId, { enabled: true });
+    const filter = new DeviceNotificationFilterStore();
+    filter.set({ categories: { 'needs-you': false } });
+    const probe = mount(watchHost(fleet.source, target.surface, { preferences: store, filter }), 'granted');
 
     run(() => fleet.publish(snapshot([view('s1', 'awaiting_user')])));
     await settle();
@@ -570,37 +582,6 @@ describe('useNotificationControls', () => {
 
     expect(push.log.revoked).toEqual([DEVICE.id]);
     expect(probe.controls().enabled).toBe(false);
-
-    await probe.unmount();
-  });
-
-  it('sends changed events onward only while delivery is on', async () => {
-    const push = service();
-    const host = controlsHost({ service: push.service });
-    const probe = await mount(host);
-    const quiet = push.log.registered;
-
-    await runAsync(async () => {
-      probe.controls().setPreferences({ events: { ...prefs.events, completed: false }, interactiveOnly: true });
-    });
-    await settle();
-
-    expect(push.log.registered).toBe(quiet);
-    expect(probe.controls().preferences.interactiveOnly).toBe(true);
-    expect(probe.controls().preferences.events.completed).toBe(false);
-
-    // The mounted probe subscribes to this store, so turning the master switch on
-    // re-renders it: an unwrapped write here is a state update outside `act`.
-    run(() => {
-      host.preferences.set(daemonA.daemonId, { enabled: true });
-    });
-    await runAsync(async () => {
-      probe.controls().setPreferences({ events: prefs.events, interactiveOnly: false });
-    });
-    await settle();
-
-    expect(push.log.registered).toBeGreaterThan(quiet);
-    expect(probe.controls().delivery).toBe('active');
 
     await probe.unmount();
   });

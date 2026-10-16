@@ -4,14 +4,13 @@ import {
   InstantSchema,
   PairedDeviceIdSchema,
   PushDeviceViewSchema,
-  PushPreferencesSchema,
   RegisterPushDeviceRequestSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import {
-  PushError,
   type FileSystemPort,
   type FoundationPaths,
+  PushError,
   type PushSubscriptionRecord,
   type PushSubscriptionStore,
 } from '../../lib/index.ts';
@@ -48,7 +47,6 @@ const RecordSchema = z.strictObject({
   deviceId: PairedDeviceIdSchema,
   deviceName: RegisterPushDeviceRequestSchema.shape.deviceName,
   subscription: BrowserPushSubscriptionSchema,
-  prefs: PushPreferencesSchema,
   createdAt: InstantSchema,
   updatedAt: InstantSchema,
 });

@@ -3633,6 +3633,90 @@ describe('the fleet notification watch', () => {
   });
 });
 
+describe('the notifications settings card', () => {
+  /**
+   * Every machine sends every event now (the daemon no longer stores a preference); this device's
+   * own four category switches, quiet hours, and the per-machine list are the only filter left, and
+   * they live in `NotificationFilterSettingsView`, stacked under the per-daemon Web Push card.
+   */
+  const open = async () => {
+    const { store, view } = await renderShell(`/d/${ALPHA}/settings#behaviour`, [alpha.daemonId, beta.daemonId]);
+    await settle();
+    const card = must(
+      view.container.querySelector<HTMLElement>('[data-setting-id="notifications"]'),
+      'the notifications settings card',
+    );
+    return { store, view, card };
+  };
+
+  const switches = (card: HTMLElement): HTMLElement[] => [...card.querySelectorAll<HTMLElement>('[role="switch"]')];
+
+  it('flips exactly the category switch pressed, leaving the others on', async () => {
+    const { store, view, card } = await open();
+
+    const failedSwitch = must(
+      switches(card).find(toggle => toggle.textContent?.includes('Failed')),
+      'the Failed category switch',
+    );
+    expect(failedSwitch.getAttribute('aria-checked')).toBe('true');
+
+    await interact(() => failedSwitch.click());
+
+    expect(store.notificationFilter.get().categories).toEqual({
+      'needs-you': true,
+      finished: true,
+      failed: false,
+      'new-device': true,
+    });
+
+    await view.unmount();
+  });
+
+  it('reveals the two time inputs only once quiet hours is on, and reports a parsed minute', async () => {
+    const { store, view, card } = await open();
+
+    expect(card.querySelectorAll('input[type="time"]')).toHaveLength(0);
+    const quietSwitch = must(
+      switches(card).find(toggle => toggle.textContent?.includes('Quiet hours')),
+      'the quiet-hours switch',
+    );
+
+    await interact(() => quietSwitch.click());
+
+    expect(store.notificationFilter.get().quietHours.enabled).toBe(true);
+    const start = must(card.querySelector<HTMLInputElement>('input[type="time"]'), 'the quiet-hours start time input');
+    const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'input setter');
+
+    await interact(() => {
+      setter.call(start, '22:30');
+      start.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(store.notificationFilter.get().quietHours.startMinute).toBe(22 * 60 + 30);
+
+    await view.unmount();
+  });
+
+  it('mutes exactly the other paired machine pressed, through the local filter only', async () => {
+    const { store, view, card } = await open();
+
+    expect(store.notificationFilter.get().machines[beta.daemonId]).toBeUndefined();
+    const machineSwitch = must(
+      switches(card).find(toggle => toggle.textContent?.includes('beta.example.test')),
+      'the per-machine switch for beta',
+    );
+    expect(machineSwitch.getAttribute('aria-checked')).toBe('true');
+
+    await interact(() => machineSwitch.click());
+
+    expect(store.notificationFilter.get().machines).toEqual({ [beta.daemonId]: false });
+    // The active connection's own Web Push master switch — a different control entirely — is untouched.
+    expect(store.notificationPreferences.get(alpha.daemonId).enabled).toBe(false);
+
+    await view.unmount();
+  });
+});
+
 describe('App', () => {
   it('mounts the public root with its own router and store', async () => {
     setPath('/');

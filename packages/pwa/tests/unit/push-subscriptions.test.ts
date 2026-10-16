@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, type PushDeviceView, type PushPreferences } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER, type PushDeviceView } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
   applicationServerKey,
@@ -18,19 +18,12 @@ const P256DH = 'B'.repeat(87);
 const AUTH = 'C'.repeat(22);
 const DEVICE_ID = 'push-00000000-0000-4000-8000-000000000000';
 
-/** Every notification kind must be present: the wire schema records all four, not a subset. */
-const prefs: PushPreferences = {
-  events: { attention: true, question: true, failed: false, completed: false },
-  interactiveOnly: true,
-};
-
 const device = {
   id: DEVICE_ID,
   deviceName: 'kirin phone',
   createdAt: '2026-07-31T10:00:00.000Z',
   updatedAt: '2026-07-31T10:05:00.000Z',
   expirationTime: null,
-  prefs,
 } satisfies PushDeviceView;
 
 const subscription = (over: Record<string, unknown> = {}): PushSubscriptionLike => ({
@@ -83,7 +76,7 @@ describe('daemon push enrolment', () => {
 
   it('enrols against one daemon, stamping a request id and the subscription body', async () => {
     const { calls, fetcher } = recorder(device);
-    expect(await registerDaemonPushDevice(daemonA, subscription(), 'kirin phone', prefs, fetcher)).toEqual(device);
+    expect(await registerDaemonPushDevice(daemonA, subscription(), 'kirin phone', fetcher)).toEqual(device);
     const headers = new Headers(calls[0]?.init?.headers);
     expect(calls[0]?.init?.method).toBe('POST');
     expect(headers.get('content-type')).toBe('application/json');
@@ -95,7 +88,6 @@ describe('daemon push enrolment', () => {
         expirationTime: null,
         keys: { p256dh: P256DH, auth: AUTH },
       },
-      prefs,
     });
   });
 
@@ -145,7 +137,7 @@ describe('daemon push enrolment', () => {
     await expect(fetchDaemonVapidKey(daemonA, async () => response({}))).rejects.toThrow();
     await expect(listDaemonPushDevices(daemonA, async () => response({ devices: [{ id: 'nope' }] }))).rejects.toThrow();
     await expect(
-      registerDaemonPushDevice(daemonA, subscription(), 'phone', prefs, async () => response({ id: 'nope' })),
+      registerDaemonPushDevice(daemonA, subscription(), 'phone', async () => response({ id: 'nope' })),
     ).rejects.toThrow();
   });
 });

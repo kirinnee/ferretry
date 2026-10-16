@@ -39,6 +39,8 @@ import { type DeviceKeyStore, IndexedDbDeviceKeyStore, mintDeviceKey } from './d
 import { documentDraftStore } from './drafts.ts';
 import { DaemonEventTransport } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
+import { KeyRotation } from './key-rotation.ts';
+import { DeviceNotificationFilterStore } from './notification-filter.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import type { CredentialsPort } from './passkeys.ts';
@@ -54,7 +56,6 @@ import {
   outdatedSide,
   type RelayDial,
 } from './relay-carrier.ts';
-import { KeyRotation } from './key-rotation.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
@@ -335,6 +336,8 @@ export interface AppStore {
   /** Every agent's remembered split workspace, forgotten with the machine it belongs to. */
   readonly workspaceLayouts: WorkspaceLayoutStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
+  /** This browser's one device-wide notification filter — see `notification-filter.ts`. */
+  readonly notificationFilter: DeviceNotificationFilterStore;
   readonly pushDevices: DaemonPushDevices;
   /**
    * The daemon push API bound to the SAME fetcher as every other daemon call.
@@ -554,6 +557,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const stt = new SttSettingsStore(browserStorage);
   const workspaceLayouts = new WorkspaceLayoutStore();
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
+  const notificationFilter = new DeviceNotificationFilterStore(browserStorage);
   const pushDevices = new DaemonPushDevices(browserStorage);
   const pushService = daemonPushService(carried);
   const connections = await DaemonConnectionStore.open({
@@ -624,6 +628,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     stt,
     workspaceLayouts,
     notificationPreferences,
+    notificationFilter,
     pushDevices,
     pushService,
     readDefaultRelay,

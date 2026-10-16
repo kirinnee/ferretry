@@ -5,10 +5,10 @@ import {
   DirectNotificationResponseSchema,
 } from '@ferretry/protocol';
 import {
-  agentConfinedTo,
-  isAttentionSessionId,
   type AttentionActor,
   type AttentionRaisedObserver,
+  agentConfinedTo,
+  isAttentionSessionId,
 } from '../attention/index.ts';
 import {
   attentionNotificationAttribution,
@@ -19,10 +19,10 @@ import {
   notificationKey,
 } from './policy.ts';
 import {
-  NotificationRecordSchema,
   type NotificationClock,
   type NotificationDeliveryLedger,
   type NotificationPushDispatcher,
+  NotificationRecordSchema,
   type NotificationResult,
   type NotificationSerialExecutor,
   type NotificationSessionDirectory,
@@ -99,7 +99,7 @@ export class NotificationService implements AttentionRaisedObserver {
         let delivered: number;
         let failed: number;
         try {
-          ({ delivered, failed } = await this.options.push.notify({ payload, interactive: session.interactive }));
+          ({ delivered, failed } = await this.options.push.notify({ payload }));
         } catch (error) {
           const message = errorText(error);
           const at = this.options.clock.now();
@@ -178,7 +178,7 @@ export class NotificationService implements AttentionRaisedObserver {
         let delivered: number;
         let failed: number;
         try {
-          ({ delivered, failed } = await this.options.push.notify({ payload, interactive: session.interactive }));
+          ({ delivered, failed } = await this.options.push.notify({ payload }));
         } catch (error) {
           await this.options.ledger
             .append(

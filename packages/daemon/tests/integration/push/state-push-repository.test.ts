@@ -31,7 +31,6 @@ function record(overrides: Partial<PushSubscriptionRecord> = {}): PushSubscripti
     deviceId: deviceId('a'),
     deviceName: 'Pixel 8',
     subscription: subscription('https://fcm.googleapis.com/send/one'),
-    prefs: { events: { attention: true, question: true, failed: true, completed: true }, interactiveOnly: false },
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -140,12 +139,22 @@ describe('StatePushRepository', () => {
       duplicated.document,
       JSON.stringify({ schemaVersion: 1, subscriptions: [record(), record()] }),
     );
+    // A document a pre-removal daemon wrote, with the now-deleted `prefs` field still on the row.
+    const legacy = await fixture('push-legacy-prefs');
+    await legacy.files.writeTextAtomic(
+      legacy.document,
+      JSON.stringify({
+        schemaVersion: 1,
+        subscriptions: [{ ...record(), prefs: { events: {}, interactiveOnly: false } }],
+      }),
+    );
 
     // The benign reading is the dangerous one: it answers every list with nobody enrolled, drops every
     // notification, and looks exactly like a machine with nothing to say.
     should((await refused(damaged.repository.list())).code).equal('corrupt_store');
     should((await refused(wrongShape.repository.list())).code).equal('corrupt_store');
     should((await refused(duplicated.repository.list())).code).equal('corrupt_store');
+    should((await refused(legacy.repository.list())).code).equal('corrupt_store');
   });
 
   it('should refuse to persist an enrolment the wire could not describe', async () => {
