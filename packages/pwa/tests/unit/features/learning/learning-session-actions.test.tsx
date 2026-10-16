@@ -36,6 +36,9 @@ function Page({
     connection: learningDaemon,
     fetcher: daemon.fetch,
     sessions: [HADI],
+    // A running scan is re-read every 2s in production; at that pace the next read raced every
+    // wait below for the same 2s, and a mutated scan was seen only when the read happened to win.
+    scanPollMs: 5,
     ...options,
   });
   const [form, setForm] = useState<string | null>(null);

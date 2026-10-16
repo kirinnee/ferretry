@@ -103,8 +103,21 @@ const estimates = (daemon: ReturnType<typeof fakeLearningDaemon>) =>
 describe('the scan dialog', () => {
   it('estimates the default scope, names who is in it, and starts only on the button', async () => {
     const started = control(null);
-    const { view, daemon } = await dialog({ control: started });
+    // The estimate is HELD so "disabled until it lands" is a fact this test sees, not a race: with no
+    // delay it could otherwise land inside the mount on a slow runner, and Start was already enabled.
+    const lessons = fakeLearningDaemon();
+    let release: (() => void) | undefined;
+    lessons.once(
+      'POST /v1/learning/scan/estimate',
+      () =>
+        new Promise(resolve => {
+          release = () => resolve({ body: lessons.state.estimate });
+        }),
+    );
+    const { view, daemon } = await dialog({ control: started }, lessons);
     expect(startButton(view.container).disabled).toBe(true);
+    await waitFor(() => release !== undefined, 'the estimate to be asked for');
+    await interact(() => release?.());
     await waitForText(view.container, 'In scope: Hadi, Kofi');
     expect(textOf(view.container)).toContain('2 ferrets · ~320K tokens · ~$0.32');
     expect(textOf(view.container)).toContain('An estimate, run by claude-default. Nothing runs until you press Start.');
