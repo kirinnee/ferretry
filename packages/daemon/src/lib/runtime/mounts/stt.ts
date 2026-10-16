@@ -11,7 +11,8 @@ import { SttEnhancementError } from '../../stt/errors.ts';
  * Recognition itself now happens in the browser, so the model store, the worker supervisor, the
  * audio decoder and their six routes are gone. What could not follow the browser is this one:
  * enhancement is an outbound call to a hosted chat model authenticated with a credential only the
- * daemon holds (`GROQ_API_KEY`, read from this daemon's own environment — see `lib/stt/ports.ts`).
+ * daemon holds (`GROQ_API_KEY` or `CEREBRAS_API_KEY`, in its secret store, spent only through the outbound
+ * holder — see `lib/speedups/authorizer.ts`).
  * A static public bundle has no way to carry that key, so a browser that wants its transcript
  * repaired by a hosted model asks a daemon it is paired to, and the daemon spends its own credential.
  *

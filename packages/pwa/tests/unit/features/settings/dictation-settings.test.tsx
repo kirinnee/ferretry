@@ -9,7 +9,11 @@ import {
   ENHANCEMENT_EXPLANATION,
   ENHANCEMENT_SOURCES_EXPLANATION,
   ENHANCEMENT_TOGGLE_EXPLANATION,
+  CEREBRAS_ENHANCEMENT_EXPLANATION,
   GROQ_ENHANCEMENT_EXPLANATION,
+  LOGIN_CLEANUP_UNAVAILABLE,
+  providerChoicePatch,
+  SPEEDUP_KEY_HINT,
   LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
   USER_CONTEXT_EXPLANATION,
 } from '../../../../src/features/settings/dictation-settings.tsx';
@@ -213,7 +217,7 @@ describe('<DictationSettings>', () => {
       select.value = 'groq';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    expect(patches).toEqual([{ enhancementProvider: 'groq' }]);
+    expect(patches).toEqual([{ enhancementProvider: 'groq', enhancementModel: 'llama-3.1-8b-instant' }]);
 
     const groq: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' };
     await view.render(<DictationSettings {...settingsProps({ settings: groq })} />);
@@ -235,6 +239,42 @@ describe('<DictationSettings>', () => {
     });
     expect(patches).toEqual([{ enhancementProvider: 'local' }]);
     await view.unmount();
+  });
+
+  it('offers Cerebras with its own model default, explanation and the Speed-ups key hint', async () => {
+    const cerebras: SttSettings = {
+      ...DEFAULT_STT_SETTINGS,
+      enhancementProvider: 'cerebras',
+      enhancementModel: 'gpt-oss-120b',
+    };
+    const view = await mount(<DictationSettings {...settingsProps({ settings: cerebras })} />);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Cerebras model');
+    expect(text).toContain(CEREBRAS_ENHANCEMENT_EXPLANATION);
+    expect(text).toContain(SPEEDUP_KEY_HINT);
+    expect(text).not.toContain(GROQ_ENHANCEMENT_EXPLANATION);
+    const model = must(view.container.querySelector<HTMLInputElement>('#stt-enhancement-model'), 'the model field');
+    expect(model.placeholder).toBe('gpt-oss-120b');
+    await view.unmount();
+  });
+
+  it('shows using a login as a choice that cannot be picked yet', async () => {
+    const view = await mount(<DictationSettings {...settingsProps()} />);
+    const login = must(view.container.querySelector<HTMLOptionElement>('option[value="login"]'), 'the login option');
+    expect(login.disabled).toBe(true);
+    expect(login.textContent).toBe(LOGIN_CLEANUP_UNAVAILABLE);
+    await view.unmount();
+  });
+
+  it('resets the model only when moving to a different hosted provider', () => {
+    const groq: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq', enhancementModel: 'custom' };
+    expect(providerChoicePatch(groq, 'cerebras')).toEqual({
+      enhancementProvider: 'cerebras',
+      enhancementModel: 'gpt-oss-120b',
+    });
+    expect(providerChoicePatch(groq, 'groq')).toEqual({ enhancementProvider: 'groq' });
+    expect(providerChoicePatch(groq, 'local')).toEqual({ enhancementProvider: 'local' });
+    expect(providerChoicePatch(groq, 'login')).toEqual({ enhancementProvider: 'local' });
   });
 
   it('edits the Groq model name', async () => {

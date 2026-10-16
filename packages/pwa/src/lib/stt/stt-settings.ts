@@ -56,11 +56,26 @@ export const MAX_ENHANCEMENT_MODEL_CHARS = 120;
 
 export const ENHANCEMENT_PROVIDERS = [
   { id: 'local', label: 'On-device word correction' },
-  { id: 'groq', label: 'Groq correction' },
+  { id: 'groq', label: 'Groq clean-up' },
+  { id: 'cerebras', label: 'Cerebras clean-up' },
 ] as const;
 
 export type EnhancementProviderId = (typeof ENHANCEMENT_PROVIDERS)[number]['id'];
+
+/** The providers that clean up through the paired daemon, spending a key only it holds. */
+export type RemoteEnhancementProviderId = Exclude<EnhancementProviderId, 'local'>;
+
 export const DEFAULT_GROQ_ENHANCEMENT_MODEL = 'llama-3.1-8b-instant';
+export const DEFAULT_CEREBRAS_ENHANCEMENT_MODEL = 'gpt-oss-120b';
+
+/** Each hosted provider's default model — the daemon's own default, restated so the picker can show it. */
+export const DEFAULT_ENHANCEMENT_MODELS: Readonly<Record<RemoteEnhancementProviderId, string>> = {
+  groq: DEFAULT_GROQ_ENHANCEMENT_MODEL,
+  cerebras: DEFAULT_CEREBRAS_ENHANCEMENT_MODEL,
+};
+
+export const isRemoteEnhancementProvider = (id: EnhancementProviderId): id is RemoteEnhancementProviderId =>
+  id !== 'local';
 
 /**
  * The free-text context cap, re-exported so the settings textarea can carry
@@ -92,10 +107,11 @@ export interface SttSettings {
   readonly userContext: string;
   /**
    * Post-dictation correction provider. `local` is the deterministic enhancer;
-   * `groq` calls the session's daemon, whose environment owns the API key.
+   * `groq` and `cerebras` call the session's daemon, whose secret store holds
+   * the API key (Settings › This machine › Speed-ups).
    */
   readonly enhancementProvider: EnhancementProviderId;
-  /** Non-secret provider model id. The Groq API key is deliberately absent. */
+  /** Non-secret provider model id. No provider key is ever stored in the browser. */
   readonly enhancementModel: string;
   /**
    * Browser-local push-to-talk binding. Alt (either side) is the default, but
@@ -289,6 +305,22 @@ export class SttSettingsStore {
       return false;
     }
   }
+}
+
+/**
+ * The voice choices a settings screen reads and writes, as a seam rather than
+ * as this store.
+ *
+ * Voice clean-up is meant to be a MACHINE setting (`voice.yaml` under the
+ * daemon's config files). Until that file exists the choice lives here, in the
+ * browser's own settings, and the screen depends only on this interface — so
+ * moving the backing store to the daemon swaps the implementation, not the
+ * screen. `SttSettingsStore` satisfies it.
+ */
+export interface VoiceSettingsSource {
+  readonly get: () => SttSettings;
+  update(patch: SttSettingsPatch): SttSettings;
+  readonly subscribe: (listener: () => void) => () => void;
 }
 
 /**

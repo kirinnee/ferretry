@@ -6,10 +6,10 @@ import {
   classifyEnhancementOutcome,
   DEFAULT_ENHANCEMENT_PROVIDERS,
   ENHANCEMENT_LIMITS,
+  type AuthorizedOutcome,
   type EnhancementHttpRequest,
-  type EnhancementOutcome,
   type EnhancementProviderTable,
-  type EnhancementTransport,
+  type EnhancementAuthorizer,
   enhancementErrorStatus,
   enhancementErrorView,
   type SttMonotonicClockPort,
@@ -17,28 +17,25 @@ import {
   parseEnhancementRequest,
   type SttEnhancementError,
   SttEnhancementService,
-  type SttSecretReader,
 } from '../../../src/lib/index.ts';
 
-class FakeTransport implements EnhancementTransport {
+/** Stands in for the outbound holder: records what it was asked to send, and never holds a value. */
+class FakeAuthorizer implements EnhancementAuthorizer {
   readonly sent: EnhancementHttpRequest[] = [];
+  readonly secrets: string[] = [];
+  readonly hosts: (readonly string[])[] = [];
 
-  constructor(private readonly outcome: EnhancementOutcome) {}
+  constructor(private readonly outcome: AuthorizedOutcome) {}
 
-  async send(request: EnhancementHttpRequest): Promise<EnhancementOutcome> {
+  async send(
+    secretName: string,
+    hosts: readonly string[],
+    request: EnhancementHttpRequest,
+  ): Promise<AuthorizedOutcome> {
+    this.secrets.push(secretName);
+    this.hosts.push(hosts);
     this.sent.push(request);
     return this.outcome;
-  }
-}
-
-class FakeSecrets implements SttSecretReader {
-  readonly requested: string[] = [];
-
-  constructor(private readonly values: Readonly<Record<string, string>> = { GROQ_API_KEY: 'sk-test-secret' }) {}
-
-  read(name: string): string | undefined {
-    this.requested.push(name);
-    return this.values[name];
   }
 }
 
@@ -54,23 +51,21 @@ class FakeClock implements SttMonotonicClockPort {
   }
 }
 
-const completion = (content: unknown): EnhancementOutcome => ({
+const completion = (content: unknown): AuthorizedOutcome => ({
   kind: 'completion',
   payload: { choices: [{ message: { content } }] },
 });
 
 function service(
-  outcome: EnhancementOutcome,
+  outcome: AuthorizedOutcome,
   overrides: {
-    readonly secrets?: SttSecretReader;
     readonly providers?: EnhancementProviderTable;
     readonly clock?: SttMonotonicClockPort;
   } = {},
 ) {
-  const transport = new FakeTransport(outcome);
+  const transport = new FakeAuthorizer(outcome);
   const instance = new SttEnhancementService(
     transport,
-    overrides.secrets ?? new FakeSecrets(),
     overrides.clock ?? new FakeClock(),
     overrides.providers === undefined ? {} : { providers: overrides.providers },
   );
@@ -302,7 +297,7 @@ describe('chat completion parsing', () => {
 
 describe('enhancement outcome classification', () => {
   const parsed = parseEnhancementRequest(request(), DEFAULT_ENHANCEMENT_PROVIDERS);
-  const classify = (outcome: EnhancementOutcome) => {
+  const classify = (outcome: AuthorizedOutcome) => {
     try {
       return classifyEnhancementOutcome(outcome, parsed, 5);
     } catch (error) {
@@ -374,10 +369,9 @@ describe('enhancement outcome classification', () => {
 });
 
 describe('enhancement service', () => {
-  it('should authorize with the daemon secret, time the call, and never echo the secret', async () => {
+  it('should name the secret and its hosts, carry no credential itself, and time the call', async () => {
     // Arrange
-    const secrets = new FakeSecrets();
-    const { transport, instance } = service(completion('hello world'), { secrets });
+    const { transport, instance } = service(completion('hello world'));
 
     // Act
     const actual = await instance.enhance(request());
@@ -389,38 +383,46 @@ describe('enhancement service', () => {
       model: 'llama-3.1-8b-instant',
       latencyMs: 125,
     });
-    should(secrets.requested).deepEqual(['GROQ_API_KEY']);
+    should(transport.secrets).deepEqual(['GROQ_API_KEY']);
+    should(transport.hosts).deepEqual([['api.groq.com']]);
+    should(transport.sent[0]?.method).equal('POST');
     should(transport.sent[0]?.headers).deepEqual({
-      authorization: 'Bearer sk-test-secret',
       'content-type': 'application/json',
       accept: 'application/json',
     });
     should(transport.sent[0]?.url).equal('https://api.groq.com/openai/v1/chat/completions');
     should(transport.sent[0]?.timeoutMs).equal(2_000);
-    should(JSON.stringify(actual)).not.match(/sk-test-secret/u);
   });
 
-  it('should refuse to call the provider when the daemon has no credential', async () => {
-    // Arrange
-    const { transport, instance } = service(completion('hello'), { secrets: new FakeSecrets({}) });
-
+  it("should report the holder's three refusals as the codes a client already reads", async () => {
     // Act
-    const actual = await failureOf(() => instance.enhance(request()));
+    const actual = {
+      missing: await failureOf(() => service({ kind: 'secret_missing' }).instance.enhance(request())),
+      damaged: await failureOf(() => service({ kind: 'vault_damaged' }).instance.enhance(request())),
+      refused: await failureOf(() => service({ kind: 'refused' }).instance.enhance(request())),
+    };
 
     // Assert
-    should(actual).deepEqual({ code: 'secret_missing', message: 'enhancement provider is not configured' });
-    should(transport.sent).be.empty();
+    should(actual).deepEqual({
+      missing: { code: 'secret_missing', message: 'enhancement provider is not configured' },
+      damaged: { code: 'secret_missing', message: 'the secret store holding the enhancement key cannot be read' },
+      refused: { code: 'provider_error', message: 'enhancement provider endpoint is not allowed for its key' },
+    });
   });
 
-  it('should refuse a blank credential as firmly as a missing one', async () => {
+  it('should send a Cerebras request to Cerebras under its own key', async () => {
     // Arrange
-    const { instance } = service(completion('hello'), { secrets: new FakeSecrets({ GROQ_API_KEY: '   ' }) });
+    const { transport, instance } = service(completion('hello'));
 
     // Act
-    const actual = await failureOf(() => instance.enhance(request()));
+    const actual = await instance.enhance(request({ provider: 'cerebras' }));
 
     // Assert
-    should(actual.code).equal('secret_missing');
+    should(actual.provider).equal('cerebras');
+    should(actual.model).equal('gpt-oss-120b');
+    should(transport.secrets).deepEqual(['CEREBRAS_API_KEY']);
+    should(transport.hosts).deepEqual([['api.cerebras.ai']]);
+    should(transport.sent[0]?.url).equal('https://api.cerebras.ai/v1/chat/completions');
   });
 
   it('should never report a negative latency when the clock is not monotonic', async () => {
@@ -442,7 +444,10 @@ describe('enhancement service', () => {
     const actual = instance.availableProviders();
 
     // Assert
-    should(actual).deepEqual([{ id: 'groq', label: 'Groq', defaultModel: 'llama-3.1-8b-instant' }]);
+    should(actual).deepEqual([
+      { id: 'groq', label: 'Groq', defaultModel: 'llama-3.1-8b-instant' },
+      { id: 'cerebras', label: 'Cerebras', defaultModel: 'gpt-oss-120b' },
+    ]);
   });
 
   it('should serve an injected provider table', async () => {
@@ -452,14 +457,12 @@ describe('enhancement service', () => {
         id: 'groq' as const,
         label: 'Local stub',
         secretName: 'STUB_KEY',
+        hosts: ['stub.invalid'],
         endpoint: 'https://stub.invalid/v1/chat/completions',
         defaultModel: 'stub-model',
       },
     };
-    const { transport, instance } = service(completion('hello'), {
-      providers,
-      secrets: new FakeSecrets({ STUB_KEY: 'stub-secret' }),
-    });
+    const { transport, instance } = service(completion('hello'), { providers });
 
     // Act
     const actual = await instance.enhance(request());
@@ -467,18 +470,17 @@ describe('enhancement service', () => {
     // Assert
     should(actual.model).equal('stub-model');
     should(transport.sent[0]?.url).equal('https://stub.invalid/v1/chat/completions');
+    should(transport.secrets).deepEqual(['STUB_KEY']);
   });
 
   it('should reject a non-positive or non-finite timeout at construction', () => {
     // Arrange
     const build = (timeoutMs: number) =>
-      new SttEnhancementService(new FakeTransport({ kind: 'timeout' }), new FakeSecrets(), new FakeClock(), {
-        timeoutMs,
-      });
+      new SttEnhancementService(new FakeAuthorizer({ kind: 'timeout' }), new FakeClock(), { timeoutMs });
 
     // Act & Assert
     should(() => build(0)).throw(RangeError);
     should(() => build(Number.POSITIVE_INFINITY)).throw(RangeError);
-    should(build(50).availableProviders()).have.length(1);
+    should(build(50).availableProviders()).have.length(2);
   });
 });

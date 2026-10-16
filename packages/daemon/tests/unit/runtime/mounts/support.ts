@@ -15,6 +15,9 @@ import {
   type SessionView,
   type SignalSessionRequest,
   type StartSessionRequest,
+  type SpeedupProvider,
+  type SpeedupsView,
+  type SpeedupTestResult,
   type SttEnhancementResult,
   type SurfaceOpener,
   type TaskActionRequest,
@@ -92,6 +95,7 @@ import {
 } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src/lib/runtime/mounts/session-signal.ts';
 import { type SessionDirectorySubsystem, SessionReadError } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import type { SpeedupsSubsystem } from '../../../../src/lib/runtime/mounts/speedups.ts';
 import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
 import type {
   TaskBoardSubsystem,
@@ -1447,6 +1451,33 @@ export class FakeSttEnhancer implements SttEnhancementSubsystem {
     this.seen.push(input);
     if (this.answer instanceof SttEnhancementError) throw this.answer;
     return this.answer;
+  }
+}
+
+/**
+ * The Speed-ups surface, answering a fixed status and recording which provider each Test named.
+ *
+ * The real one spends a provider key over the network on every Test, so the mount is exercised against
+ * this and the service is exercised against fakes behind its own ports.
+ */
+export class FakeSpeedups implements SpeedupsSubsystem {
+  readonly tested: SpeedupProvider[] = [];
+
+  async view(): Promise<SpeedupsView> {
+    return { providers: [], vault: 'ok' };
+  }
+
+  async test(provider: SpeedupProvider): Promise<SpeedupTestResult> {
+    this.tested.push(provider);
+    return {
+      provider,
+      secretName: 'GROQ_API_KEY',
+      ok: true,
+      code: 'ok',
+      message: 'The key works.',
+      latencyMs: 12,
+      at: '2026-10-16T00:00:00.000Z',
+    };
   }
 }
 

@@ -27,6 +27,7 @@ export * from './relay/index.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';
 export * from './secrets/index.ts';
+export * from './speedups/index.ts';
 export * from './session/effects/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/lifecycle/index.ts';

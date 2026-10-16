@@ -72,6 +72,7 @@ import { NotificationSettingsView } from './features/settings/notification-setti
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
+import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
@@ -1242,6 +1243,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       pricingSettingsTab(createDaemonClient),
+      // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
+      speedupsSettingsTab(createDaemonClient),
       securityLogSettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
