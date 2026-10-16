@@ -860,15 +860,18 @@ export function SessionChatPage({
   );
 
   /**
-   * THE MODEL AND EFFORT PICKERS (#525), drawn in two places from one element: the composer's status
+   * THE MODEL AND EFFORT PICKERS (#525), drawn in two places by one builder: the composer's status
    * line, and Info › Runtime's "Change" row. Both are the same compact chips — a small menu at the chip
    * wherever there is a pointer and room, the thumb-reach sheet on a phone — sending through the same
    * runtime route, so Info never grows a second picker that could disagree with the composer's. A host
    * that hands Info its own (`infoRuntimeControls`) wins; a daemon without the runtime route gets none.
+   * Info's copy draws its popover or sheet at the document root: on a phone Info is itself a moving
+   * sheet, and a sheet opened inside it would be placed against Info instead of the screen.
    */
-  const runtimePickers =
+  const runtimePickers = (portalOverlays: boolean): ReactNode =>
     runtimeApi === null ? null : (
       <ComposerRuntime
+        portalOverlays={portalOverlays}
         busy={runtimeSwitchBusy}
         canControl={canControl}
         // A phone keeps the thumb-reach sheet; anything with a pointer and room
@@ -900,7 +903,7 @@ export function SessionChatPage({
         view={session}
       />
     );
-  const infoControls = infoRuntimeControls ?? runtimePickers ?? undefined;
+  const infoControls = infoRuntimeControls ?? runtimePickers(true) ?? undefined;
 
   /**
    * INFO — every LOOK for this ferret. The Folder tab is the old "This folder" rail (Files, Docs, Skills
@@ -1095,7 +1098,7 @@ export function SessionChatPage({
               {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
               // The model and effort chips ride the composer's own status line, so the
               // runtime costs no row of its own above the message box.
-              statusSlot={runtimePickers}
+              statusSlot={runtimePickers(false)}
             />
           )}
         </div>

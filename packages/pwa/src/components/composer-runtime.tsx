@@ -50,6 +50,7 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { Brain, ChevronsUpDown } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import {
   type ReactNode,
   type RefObject,
@@ -203,6 +204,12 @@ export interface ComposerRuntimeProps {
   readonly renderModelControls?: (lifecycle: RuntimeSwitchLifecycle) => ReactNode;
   /** The reasoning switcher's body. Not built here — see the file header. */
   readonly renderEffortControls?: (lifecycle: RuntimeSwitchLifecycle) => ReactNode;
+  /**
+   * Draw the popovers and sheets at the document's root instead of beside the chips. For a host that
+   * is itself inside a moving panel (Info's phone sheet is a transformed box): a fixed overlay inside
+   * one is placed against that panel rather than the screen, so a sheet would open half off-screen.
+   */
+  readonly portalOverlays?: boolean;
 }
 
 export interface ComposerRuntimeWithKeyboardProps extends ComposerRuntimeProps {
@@ -458,6 +465,7 @@ export function ComposerRuntimeWithKeyboard({
   presentation = 'sheet',
   renderModelControls,
   renderEffortControls,
+  portalOverlays = false,
   keyboardOpen,
 }: ComposerRuntimeWithKeyboardProps) {
   const { config, state } = view;
@@ -589,6 +597,64 @@ export function ComposerRuntimeWithKeyboard({
   };
   const modelBody = renderModelControls?.(modelLifecycle);
   const effortBody = renderEffortControls?.(effortLifecycle);
+  // The pickers' popovers or sheets: beside the chips, or at the document root when the host asks.
+  const overlays =
+    presentation === 'popover' ? (
+      <>
+        <RuntimePopover
+          anchorRef={modelChipRef}
+          harness={config.harness}
+          id={modelSheetId}
+          onClose={closeModel}
+          open={modelOpen}
+          title="Switch model"
+        >
+          {modelBody}
+        </RuntimePopover>
+        <RuntimePopover
+          anchorRef={effortChipRef}
+          harness={config.harness}
+          id={effortSheetId}
+          onClose={closeEffort}
+          open={effortOpen}
+          title="Reasoning effort"
+        >
+          {effortBody}
+        </RuntimePopover>
+      </>
+    ) : (
+      <>
+        <BottomSheet
+          ariaLabel="Switch model"
+          closeLabel="Close model switcher"
+          id={modelSheetId}
+          labelledBy={modelTriggerId}
+          onClose={closeModel}
+          open={modelOpen}
+          zIndexClass="z-50"
+        >
+          <SheetHead harness={config.harness} title="Switch model" />
+          <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
+            <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{modelBody}</div>
+          </div>
+        </BottomSheet>
+
+        <BottomSheet
+          ariaLabel="Change reasoning level"
+          closeLabel="Close reasoning switcher"
+          id={effortSheetId}
+          labelledBy={effortTriggerId}
+          onClose={closeEffort}
+          open={effortOpen}
+          zIndexClass="z-50"
+        >
+          <SheetHead harness={config.harness} title="Reasoning effort" />
+          <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
+            <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{effortBody}</div>
+          </div>
+        </BottomSheet>
+      </>
+    );
 
   return (
     <>
@@ -629,62 +695,7 @@ export function ComposerRuntimeWithKeyboard({
         </span>
       ) : null}
 
-      {presentation === 'popover' ? (
-        <>
-          <RuntimePopover
-            anchorRef={modelChipRef}
-            harness={config.harness}
-            id={modelSheetId}
-            onClose={closeModel}
-            open={modelOpen}
-            title="Switch model"
-          >
-            {modelBody}
-          </RuntimePopover>
-          <RuntimePopover
-            anchorRef={effortChipRef}
-            harness={config.harness}
-            id={effortSheetId}
-            onClose={closeEffort}
-            open={effortOpen}
-            title="Reasoning effort"
-          >
-            {effortBody}
-          </RuntimePopover>
-        </>
-      ) : (
-        <>
-          <BottomSheet
-            ariaLabel="Switch model"
-            closeLabel="Close model switcher"
-            id={modelSheetId}
-            labelledBy={modelTriggerId}
-            onClose={closeModel}
-            open={modelOpen}
-            zIndexClass="z-50"
-          >
-            <SheetHead harness={config.harness} title="Switch model" />
-            <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-              <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{modelBody}</div>
-            </div>
-          </BottomSheet>
-
-          <BottomSheet
-            ariaLabel="Change reasoning level"
-            closeLabel="Close reasoning switcher"
-            id={effortSheetId}
-            labelledBy={effortTriggerId}
-            onClose={closeEffort}
-            open={effortOpen}
-            zIndexClass="z-50"
-          >
-            <SheetHead harness={config.harness} title="Reasoning effort" />
-            <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-              <div className="mx-auto w-full max-w-2xl px-panel py-row-y">{effortBody}</div>
-            </div>
-          </BottomSheet>
-        </>
-      )}
+      {portalOverlays && typeof document !== 'undefined' ? createPortal(overlays, document.body) : overlays}
     </>
   );
 }
