@@ -14,6 +14,11 @@
  *
  * ctrl is sticky (see `terminal-keys.ts`) and its state is the caller's, because
  * the key it modifies may be typed on the phone keyboard rather than tapped here.
+ *
+ * ALL EIGHT CONTROLS FIT A 390px PHONE. They used to keep their own widths and the keyboard toggle — the
+ * one a reader needs most — ran off the right edge. Below `sm` every key now takes an equal share of the
+ * row (never under the 44px target floor), the gaps and padding tighten, and the toggle is its icon alone,
+ * named by its `aria-label`.
  */
 
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Keyboard, type LucideIcon } from 'lucide-react';
@@ -63,7 +68,7 @@ export interface TerminalKeyBarProps {
 }
 
 const KEY_CLASS =
-  'flex min-h-control min-w-[var(--control-h)] shrink-0 items-center justify-center gap-xs rounded-control border px-control-x font-mono text-ui transition-colors';
+  'flex min-h-control min-w-0 flex-1 items-center justify-center gap-xs rounded-control border px-0 font-mono text-ui transition-colors sm:min-w-[var(--control-h)] sm:flex-none sm:shrink-0 sm:px-control-x';
 
 const keepFocus = (event: { preventDefault: () => void }): void => event.preventDefault();
 
@@ -77,7 +82,7 @@ export function TerminalKeyBar({ onSend, ctrl, onCtrlChange, onKeyboard, keyboar
       role="toolbar"
       aria-label="Terminal keys"
       data-tab-swipe-ignore=""
-      className="flex items-center gap-xs overflow-x-auto border-t border-border-soft bg-surface px-panel py-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="flex items-center gap-0.5 overflow-x-auto border-t border-border-soft bg-surface px-1 py-xs [scrollbar-width:none] sm:gap-xs sm:px-panel [&::-webkit-scrollbar]:hidden"
     >
       <button
         type="button"
@@ -107,12 +112,15 @@ export function TerminalKeyBar({ onSend, ctrl, onCtrlChange, onKeyboard, keyboar
       <button
         type="button"
         aria-pressed={keyboardOpen}
+        aria-label="keyboard"
         onPointerDown={keepFocus}
         onClick={onKeyboard}
-        className={cn(KEY_CLASS, 'ml-auto border-border-soft bg-surface-2 text-fg')}
+        className={cn(KEY_CLASS, 'border-border-soft bg-surface-2 text-fg sm:ml-auto')}
       >
         <Keyboard size={15} aria-hidden="true" />
-        <span className="font-ui">keyboard</span>
+        <span aria-hidden="true" className="hidden font-ui sm:inline">
+          keyboard
+        </span>
       </button>
     </div>
   );

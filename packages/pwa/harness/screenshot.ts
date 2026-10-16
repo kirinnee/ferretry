@@ -2078,9 +2078,9 @@ try {
             const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
             await captureElement(page, page.getByLabel('Analytics raw query result'), analyticsResponseTarget);
             process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
-            const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel('Analytics time series'), analyticsSeriesTarget);
-            process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
+            const analyticsSeriesTarget = join(outDir, `analytics-cost-chart-${viewport.name}.png`);
+            await captureElement(page, page.getByLabel('Analytics cost chart'), analyticsSeriesTarget);
+            process.stdout.write(`📸 analytics cost chart -> ${analyticsSeriesTarget}\n`);
             const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
             const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
             // The production shell correctly locks html/body to one viewport and
@@ -2104,7 +2104,7 @@ try {
             await page.goto(server.url.toString());
             const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
             const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
-            await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
+            await sessionAnalytics.locator('[data-session-cost="ready"]').waitFor({ state: 'visible' });
             await captureElement(page, sessionAnalytics, sessionAnalyticsTarget);
             process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
             const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);

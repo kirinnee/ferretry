@@ -38,7 +38,8 @@ import {
   ShieldCheck,
   Users,
 } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
+import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
@@ -141,6 +142,13 @@ export type AppBarDestinationId = AppNavigationEntry['id'];
 const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'projects'];
 const TAB_BAR_TAIL: readonly AppBarDestinationId[] = ['settings'];
 export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
+
+/**
+ * The page title a phone shows in place of the breadcrumb, which it has no room for. Only the Insights
+ * views carry one: they sit under More, so without it nothing on screen said where the reader was.
+ */
+export const appBarTitle = (active: AppBarDestinationId | null): string | null =>
+  active !== null && MORE_PLACES.includes(active) ? 'Insights' : null;
 
 const entry = (id: AppBarDestinationId): AppNavigationEntry =>
   APP_NAVIGATION.find(candidate => candidate.id === id) ?? SESSIONS_ENTRY;
@@ -384,6 +392,7 @@ export function AppBar({
 }: AppBarProps) {
   const layout = useLayoutMode();
   const statusVisible = connectionStatus !== 'open' || updateReady !== null;
+  const title = appBarTitle(active);
 
   return (
     // Not sticky: the shell does not scroll, so the bar is simply the first row
@@ -398,6 +407,11 @@ export function AppBar({
         {/* Identity stays together at the start. */}
         <div className="flex min-w-0 items-center justify-self-start gap-md">
           {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} sessionCount={sessionCount} />}
+          {layout === 'drawer' && title !== null && (
+            <span className="truncate text-title font-semibold text-fg min-[480px]:hidden" data-app-bar-title="">
+              {title}
+            </span>
+          )}
           <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-md text-muted min-[480px]:flex">
             {crumbTrail(crumbs).map(({ crumb, trail, last }) => (
               // Keyed by the trail rather than the index: two crumbs on one
@@ -420,7 +434,15 @@ export function AppBar({
             keep this exact region centred in the viewport regardless of crumb,
             status, update, or theme widths. Item #6 only has to supply a node. */}
         <div className="flex min-h-control min-w-0 items-center justify-center" data-app-bar-session-search-slot="">
-          {currentSessionSearch && <div className="w-full max-w-[34rem]">{currentSessionSearch}</div>}
+          {currentSessionSearch ? (
+            <div className="w-full max-w-[34rem]">{currentSessionSearch}</div>
+          ) : crumbs.length > 0 ? (
+            // Below 480px the breadcrumb is hidden, which left a phone's bar saying nothing but the fleet
+            // count. The page's own name takes the empty centre there instead.
+            <span className="truncate font-semibold text-fg min-[480px]:hidden" data-app-bar-title="">
+              {crumbs[crumbs.length - 1]?.label}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex min-w-0 items-center justify-self-end gap-md">
@@ -513,10 +535,19 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
  * The phone's level one: a bottom bar with the four most-used places plus More (Analytics, Warden,
  * Learning), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
  * widths, and not inside a session ({@link showsTabBar}).
+ *
+ * WHILE THE KEYBOARD IS UP THE BAR IS GONE (`data-kb-hide`). It rode up above the keyboard and sat on top
+ * of the very field being typed into, in 55 of the ~430px a phone has left. Its More sheet is the one thing
+ * here that can be open, so it closes through its own dismissal path first, as the `data-kb-hide` contract
+ * in index.css requires.
  */
 export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette }: AppTabBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
+  const keyboardOpen = useKeyboardOpen();
+  useEffect(() => {
+    if (keyboardOpen) setMoreOpen(current => mobileDestinationMenuOpen(current, 'dismiss'));
+  }, [keyboardOpen]);
   const select = (): void => setMoreOpen(current => mobileDestinationMenuOpen(current, 'select'));
   const place = (id: AppBarDestinationId) => {
     const destination = entry(id);
@@ -537,7 +568,7 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette }: 
   const inMore = active !== null && MORE_PLACES.includes(active);
   return (
     <>
-      <nav aria-label="App" className="kt-tabbar" data-app-tab-bar="">
+      <nav aria-label="App" className="kt-tabbar" data-app-tab-bar="" data-kb-hide="">
         {TAB_BAR_PLACES.map(place)}
         <button
           type="button"

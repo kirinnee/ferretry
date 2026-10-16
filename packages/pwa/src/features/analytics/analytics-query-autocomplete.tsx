@@ -1,11 +1,12 @@
 /** Accessible, grammar-aware query input for daemon-scoped analytics surfaces. */
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+
 import { Loader2, Search, SearchX, ShieldAlert } from 'lucide-react';
+import { type KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  analyticsCompletions,
   type AnalyticsCompletion,
   type AnalyticsCompletionSources,
+  analyticsCompletions,
 } from './analytics-query-complete.ts';
 
 export type AnalyticsAutocompleteStatus = 'ready' | 'loading' | 'error';
@@ -322,7 +323,7 @@ export function AnalyticsQueryAutocomplete({
       <Search
         size={15}
         aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-[22px] -translate-y-1/2 text-faint"
+        className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-faint"
       />
       <input
         id={inputId}
@@ -336,7 +337,9 @@ export function AnalyticsQueryAutocomplete({
         autoComplete="off"
         spellCheck={false}
         disabled={disabled}
-        className="kt-input mono min-h-[44px] w-full pl-9 pr-3"
+        // `!` because `.kt-input` sets its padding after the utilities layer: a plain `pl-9` lost to it, and
+        // the search icon sat on top of the first letters of the query.
+        className="kt-input mono min-h-[44px] w-full !pl-9 !pr-3"
         value={value}
         placeholder={placeholder}
         onChange={event => {

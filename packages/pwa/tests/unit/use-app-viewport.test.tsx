@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import {
   installAppViewport,
   KEYBOARD_MIN_PX,
+  REVEAL_MARGIN_PX,
+  revealInScroller,
   type AppViewportEnvironment,
   useAppViewport,
 } from '../../src/hooks/use-app-viewport.ts';
@@ -38,6 +40,7 @@ const makeEnvironment = () => {
   const frames = new Map<number, () => void>();
   let nextFrame = 1;
   const root = document.documentElement.cloneNode(false) as HTMLElement;
+  const revealed: Element[] = [];
   const env: AppViewportEnvironment = {
     root,
     document: {
@@ -67,10 +70,12 @@ const makeEnvironment = () => {
     cancelFrame: id => frames.delete(id),
     addWindowListener: windowEvents.add.bind(windowEvents),
     removeWindowListener: windowEvents.remove.bind(windowEvents),
+    reveal: element => void revealed.push(element),
   };
   return {
     env,
     root,
+    revealed,
     viewportEvents,
     windowEvents,
     documentEvents,
@@ -120,6 +125,13 @@ describe('installAppViewport', () => {
     fixture.flush();
     expect(fixture.root.style.getPropertyValue('--kb-h')).toBe(`${844 - 500 - 10}px`);
     expect(fixture.root.getAttribute(KEYBOARD_ATTRIBUTE)).toBe('open');
+    // The keyboard came up over the focused field, so the field is brought back into view — once, on the
+    // opening frame, never again while the reader scrolls with the keyboard up.
+    expect(fixture.revealed).toEqual([input]);
+    fixture.set({ visualHeight: 480 });
+    fixture.viewportEvents.emit('resize');
+    fixture.flush();
+    expect(fixture.revealed).toEqual([input]);
 
     fixture.set({ coarse: false, visualHeight: 844, offsetTop: -4 });
     fixture.windowEvents.emit('orientationchange');
@@ -172,5 +184,54 @@ describe('installAppViewport', () => {
       if (previous) Object.defineProperty(window, 'visualViewport', previous);
       else Reflect.deleteProperty(window, 'visualViewport');
     }
+  });
+});
+
+describe('revealInScroller', () => {
+  const rect = (top: number, bottom: number) => () => ({ top, bottom }) as DOMRect;
+  const scene = (field: { top: number; bottom: number }) => {
+    const shell = document.createElement('div');
+    const scroller = document.createElement('div');
+    const wrapper = document.createElement('div');
+    const input = document.createElement('input');
+    wrapper.append(input);
+    scroller.append(wrapper);
+    shell.append(scroller);
+    scroller.getBoundingClientRect = rect(100, 300);
+    input.getBoundingClientRect = rect(field.top, field.bottom);
+    const overflow = new Map<Element, string>([
+      [shell, 'hidden'],
+      [scroller, 'auto'],
+    ]);
+    return { shell, scroller, input, overflowY: (node: Element) => overflow.get(node) ?? 'visible' };
+  };
+
+  it('scrolls a field below its scroller up into it, and never a box that only clips', () => {
+    const { shell, scroller, input, overflowY } = scene({ top: 340, bottom: 380 });
+    revealInScroller(input, overflowY);
+    expect(scroller.scrollTop).toBe(80 + REVEAL_MARGIN_PX);
+    expect(shell.scrollTop).toBe(0);
+  });
+
+  it('keeps the top of a field taller than its scroller in view', () => {
+    const { scroller, input, overflowY } = scene({ top: 200, bottom: 420 });
+    revealInScroller(input, overflowY);
+    expect(scroller.scrollTop).toBe(100 - REVEAL_MARGIN_PX);
+  });
+
+  it('scrolls a field above its scroller back down into it', () => {
+    const { scroller, input, overflowY } = scene({ top: 60, bottom: 100 });
+    scroller.scrollTop = 200;
+    revealInScroller(input, overflowY);
+    expect(scroller.scrollTop).toBe(200 - 40 - REVEAL_MARGIN_PX);
+  });
+
+  it('leaves a field that is already in view, and one with no scroller at all, where it is', () => {
+    const { scroller, input, overflowY } = scene({ top: 150, bottom: 190 });
+    revealInScroller(input, overflowY);
+    expect(scroller.scrollTop).toBe(0);
+    const loose = document.createElement('input');
+    document.createElement('div').append(loose);
+    revealInScroller(loose);
   });
 });

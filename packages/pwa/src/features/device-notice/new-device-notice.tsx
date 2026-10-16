@@ -20,11 +20,21 @@
  * This is a notice, not a panel: a machine that is unreachable, or that does not let this device read
  * its device list, simply has nothing to announce here. Settings › Add a device is where those reasons
  * are explained, and repeating every outage above every page would bury the one notice that matters.
+ *
+ * ## ON A PHONE IT IS ONE LINE
+ *
+ * The full notice is a sentence and two 44px buttons: about 170px, a fifth of a phone, pinned above every
+ * page and above the composer while the keyboard is up. At drawer widths each device is one row naming it
+ * with a Review button, and the same sentence and actions open in a bottom sheet. While the keyboard is up
+ * the row is hidden (`data-kb-hide`) and its sheet closed, so it never sits over what is being typed.
  */
 
 import { type PairedDevice, type PairedDevicesView, PairedDevicesViewSchema } from '@ferretry/protocol';
 import { Check, CircleAlert, ShieldAlert, Trash2, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from 'react';
+
+import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
+import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -42,6 +52,7 @@ import {
   readPairedDevices,
   revokePairedDevice,
 } from '../settings/add-device-api.ts';
+import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { daemonDisplayName } from '../settings/daemon-settings.tsx';
 import {
   browserDevicesLookedStorage,
@@ -86,12 +97,14 @@ function MachineNewDevices({
   storage,
   now,
   schedule,
+  compact,
 }: {
   readonly connection: DaemonConnectionRecord;
   readonly clients: NewDeviceNoticeClients;
   readonly storage: DevicesLookedStorage | undefined;
   readonly now: () => number;
   readonly schedule: NewDeviceSchedule;
+  readonly compact: boolean;
 }) {
   const daemonId = connection.daemonId;
   const machine = daemonDisplayName(connection);
@@ -102,6 +115,13 @@ function MachineNewDevices({
   const [removed, setRemoved] = useState<Removed | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The device whose notice is open in the phone's sheet. */
+  const [reviewing, setReviewing] = useState<string | null>(null);
+  const sheetId = useId();
+  const keyboardOpen = useKeyboardOpen();
+  useEffect(() => {
+    if (keyboardOpen) setReviewing(null);
+  }, [keyboardOpen]);
   /** The latest list, for a look announced by a panel that never read it. */
   const latest = useRef<PairedDevicesView | null>(null);
   /** The set as last remembered, so a look can add to it without waiting for a render. */
@@ -191,6 +211,51 @@ function MachineNewDevices({
     }
   };
 
+  /** The sentence, the two actions and a failed removal: the inline card's body and the phone sheet's. */
+  const details = (device: PairedDevice) => (
+    <>
+      <p className="m-0 flex min-w-0 items-start gap-2">
+        <ShieldAlert size={14} aria-hidden="true" className="mt-1 shrink-0" />
+        <span className="min-w-0">{newDeviceNoticeText(device, machine, now())}</span>
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="kt-btn min-h-[44px]"
+          data-new-device-mine=""
+          disabled={busy}
+          onClick={() => thatWasMe(device)}
+        >
+          <Check size={14} aria-hidden="true" />
+          That was me
+        </button>
+        <button
+          type="button"
+          className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
+          data-variant="danger"
+          data-new-device-remove=""
+          disabled={busy || client === null}
+          onClick={() => void removeIt(device)}
+        >
+          <Trash2 size={14} aria-hidden="true" />
+          Remove it
+        </button>
+      </div>
+      {failure?.deviceId === device.id ? (
+        <p
+          role="alert"
+          className="m-0 flex items-start gap-2 text-meta leading-base text-err"
+          data-new-device-failure=""
+        >
+          <CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="min-w-0">
+            {deviceLabel(device)} could not be removed: {failure.message}
+          </span>
+        </p>
+      ) : null}
+    </>
+  );
+
   if (fresh.length === 0 && removed === null) return null;
   return (
     <>
@@ -213,54 +278,56 @@ function MachineNewDevices({
           </button>
         </div>
       )}
-      {fresh.map(device => (
-        <div
-          key={device.id}
-          role="status"
-          data-new-device={device.id}
-          className="flex min-w-0 flex-col gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
-        >
-          <p className="m-0 flex min-w-0 items-start gap-2">
-            <ShieldAlert size={14} aria-hidden="true" className="mt-1 shrink-0" />
-            <span className="min-w-0">{newDeviceNoticeText(device, machine, now())}</span>
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="kt-btn min-h-[44px]"
-              data-new-device-mine=""
-              disabled={busy}
-              onClick={() => thatWasMe(device)}
+      {fresh.map(device =>
+        compact ? (
+          <Fragment key={device.id}>
+            <div
+              role="status"
+              data-new-device={device.id}
+              data-new-device-compact=""
+              data-kb-hide=""
+              className="flex min-w-0 items-center gap-2 rounded-control border border-warn-border bg-warn-bg py-0.5 pl-3 pr-0.5 text-meta leading-base text-warn"
             >
-              <Check size={14} aria-hidden="true" />
-              That was me
-            </button>
-            <button
-              type="button"
-              className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
-              data-variant="danger"
-              data-new-device-remove=""
-              disabled={busy || client === null}
-              onClick={() => void removeIt(device)}
+              <ShieldAlert size={14} aria-hidden="true" className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">New device paired: “{device.name}”</span>
+              <button
+                type="button"
+                className="kt-btn min-h-[44px] shrink-0"
+                data-new-device-review=""
+                aria-haspopup="dialog"
+                aria-controls={`${sheetId}-${device.id}`}
+                onClick={() => setReviewing(device.id)}
+              >
+                Review
+              </button>
+            </div>
+            <BottomSheet
+              id={`${sheetId}-${device.id}`}
+              open={reviewing === device.id}
+              onClose={() => setReviewing(null)}
+              labelledBy={`${sheetId}-${device.id}-title`}
+              closeLabel="Dismiss the new device notice"
+              panelClassName="px-panel pb-panel"
             >
-              <Trash2 size={14} aria-hidden="true" />
-              Remove it
-            </button>
+              <div className="flex min-w-0 flex-col gap-2 pb-md text-ui leading-base text-fg">
+                <h2 id={`${sheetId}-${device.id}-title`} className="m-0 text-title font-semibold text-warn">
+                  New device paired
+                </h2>
+                {details(device)}
+              </div>
+            </BottomSheet>
+          </Fragment>
+        ) : (
+          <div
+            key={device.id}
+            role="status"
+            data-new-device={device.id}
+            className="flex min-w-0 flex-col gap-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+          >
+            {details(device)}
           </div>
-          {failure?.deviceId === device.id ? (
-            <p
-              role="alert"
-              className="m-0 flex items-start gap-2 text-meta leading-base text-err"
-              data-new-device-failure=""
-            >
-              <CircleAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
-              <span className="min-w-0">
-                {deviceLabel(device)} could not be removed: {failure.message}
-              </span>
-            </p>
-          ) : null}
-        </div>
-      ))}
+        ),
+      )}
     </>
   );
 }
@@ -284,12 +351,13 @@ export function NewDeviceNotices({
   readonly now?: () => number;
   readonly schedule?: NewDeviceSchedule;
 }) {
+  const compact = useLayoutMode() === 'drawer';
   if (connections.length === 0) return null;
   return (
     <section
       aria-label="New devices"
       data-new-device-notices=""
-      className="flex min-w-0 flex-col gap-2 px-1 empty:hidden sm:px-3 [&:not(:empty)]:pt-2"
+      className="flex min-w-0 flex-col gap-2 px-4 empty:hidden sm:px-3 [&:not(:empty)]:pt-2"
     >
       {connections.map(connection => (
         <MachineNewDevices
@@ -299,6 +367,7 @@ export function NewDeviceNotices({
           storage={storage}
           now={now}
           schedule={schedule}
+          compact={compact}
         />
       ))}
     </section>

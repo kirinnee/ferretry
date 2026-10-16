@@ -65,7 +65,10 @@ function ProjectDetailView({
   const active = useMemo(() => activeProjectSessions(set), [set]);
   const boards = useMemo(() => projectBoardSessions(set), [set]);
   return (
-    <main className="grid min-h-0 gap-panel p-panel" data-project-detail={project.id}>
+    <main
+      className="grid h-full min-h-0 content-start gap-panel overflow-y-auto p-panel"
+      data-project-detail={project.id}
+    >
       <div className="flex flex-wrap items-start justify-between gap-md border-b border-border-strong pb-panel">
         <div className="grid min-w-0 gap-xs">
           <button

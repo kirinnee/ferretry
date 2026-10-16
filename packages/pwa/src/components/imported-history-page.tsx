@@ -34,7 +34,7 @@ export function ImportedHistoryPage({ connection, readHistory, readConversation 
 
   return (
     <section aria-labelledby="imported-history-heading" className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8">
-      <p className="fy-eyebrow">Archive · {connection.daemonId}</p>
+      <p className="fy-eyebrow [overflow-wrap:anywhere]">Archive · {connection.daemonId}</p>
       <div className="mt-2 border-l-4 border-accent pl-5">
         <h1 id="imported-history-heading" className="font-display text-3xl font-bold tracking-display">
           Imported history
