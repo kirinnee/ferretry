@@ -16,6 +16,8 @@ export type SettingId =
   | 'density'
   | 'theme'
   | 'chat-width'
+  | 'show-details'
+  | 'motion'
   | 'composer-markdown'
   | 'composer-enter-key'
   | 'composer-suggestions'
@@ -58,13 +60,15 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'chat-width',
     label: 'Conversation width',
     description:
-      'Full-bleed is the default. On a wide conversation, choose the available pane, a balanced 900px cap, or a readable 768px column; at 768px and below all three look the same.',
+      'Comfortable (about 75 characters a line) is the default. On a wide screen choose Wide (900px) or Full (the whole pane); at 768px and below all three look the same.',
     keywords: [
       'chat',
       'conversation',
       'width',
       'measure',
       'readable',
+      'comfortable',
+      'wide',
       'balanced',
       'middle',
       'medium',
@@ -197,6 +201,19 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'background',
     ],
   },
+  {
+    id: 'show-details',
+    label: 'Show details',
+    description:
+      'Whether the conversation opens its folded bookkeeping — reasoning, token usage, turn and daemon lines — or keeps it behind “Show details”. Hidden by default.',
+    keywords: ['details', 'system', 'reasoning', 'tokens', 'usage', 'notices', 'conversation', 'transcript', 'verbose'],
+  },
+  {
+    id: 'motion',
+    label: 'Motion',
+    description: 'Follow this device’s reduced-motion setting, or always keep spinners and transitions still here.',
+    keywords: ['motion', 'animation', 'reduced', 'reduce', 'spinner', 'accessibility', 'vestibular'],
+  },
 ] as const;
 
 /**
@@ -210,7 +227,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'appearance',
     label: 'Appearance',
     description: 'Text, colour, density, and conversation layout on this browser.',
-    settingIds: ['text-size', 'theme', 'density', 'chat-width'],
+    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'show-details'],
   },
   {
     id: 'behaviour',

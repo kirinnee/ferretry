@@ -13,11 +13,9 @@
  *   - `density` and `dashboardView` absent means `null`, not a written default,
  *     so the first-load pointer policy stays free to choose compact on a phone
  *     and full on a desktop.
- *   - `chatWidth` absent means `'full'`, which IS the behaviour that predates the
- *     field — which is why adding it needed no version bump. The four composer
- *     preferences follow that precedent exactly: absent means every suggestion
- *     family is offered and Vim keys are off, which is what this app did before
- *     they existed, so they add no version either.
+ *   - `chatWidth` absent means `'readable'` (Comfortable), the session redesign's
+ *     default; a stored choice is kept. Every later field follows the same rule:
+ *     absent reads as the shipped default, so none of them needs a version bump.
  *   - An empty `projectScope` is NO scope, not a folder named nothing.
  *   - A patch that changes nothing writes nothing and notifies nobody.
  *
@@ -147,7 +145,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   includeFinished: false,
   dashboardView: null,
   density: null,
-  chatWidth: 'full',
+  chatWidth: 'readable',
   composerEnterKey: null,
   composerPhoneEnterKey: null,
   showDetails: false,

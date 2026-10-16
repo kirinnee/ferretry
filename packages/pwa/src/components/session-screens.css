@@ -728,6 +728,17 @@
   min-height: 36px;
   min-width: 36px;
 }
+/* A finger gets the full 44px target on ＋, 🎙 and ↑. */
+@media (pointer: coarse) {
+  .fy-composer .fy-composer-row button,
+  .fy-composer-icon,
+  .fy-composer-send {
+    height: 44px;
+    min-height: 44px;
+    min-width: 44px;
+    width: 44px;
+  }
+}
 .fy-composer-row {
   align-items: flex-end;
   background: var(--bg, var(--fy-surface));
