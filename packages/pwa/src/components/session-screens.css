@@ -864,6 +864,14 @@
   background: var(--nav-sel-bg, var(--accent-soft, var(--fy-surface-2)));
   color: var(--nav-sel-fg, var(--fy-fg));
 }
+/* On the selected row the hint and badge take the selection's own ink, so an inverted selection
+   (Contrast, Wayfinding) keeps them readable. */
+.fy-ac-row[data-active] .fy-ac-detail,
+.fy-ac-row[data-active] .fy-ac-badge,
+.fy-ac-row[data-active] .fy-ac-icon {
+  color: inherit;
+  opacity: 0.85;
+}
 .fy-ac-row-refused {
   cursor: not-allowed;
   opacity: 0.7;
