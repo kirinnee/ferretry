@@ -123,3 +123,39 @@ export const notificationUrl = (raw: unknown, origin: string, machine: PushMachi
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };
+
+/** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
+export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';
+
+/**
+ * THE LEAST-BAD COMPLIANT ANSWER to a push the reader's own filter says to hide
+ * (`shouldShowNotification` in `notification-filter.ts`, read back from the mirror
+ * `notification-filter-mirror.ts` keeps for exactly this).
+ *
+ * A push that is received but shows NOTHING is a pattern browsers can revoke a subscription over —
+ * see the worker's own doc comment — so showing nothing is not available, whatever the reader asked
+ * for. This is the quietest answer that is still something:
+ *
+ * - NEVER THE SUPPRESSED CONTENT. A reader who muted `failed` does not want to learn the failure
+ *   reason through the back door of "well, SOMETHING had to be shown." The title and body here are
+ *   always this fixed sentence, whatever the real payload said.
+ * - `silent: true` — no sound, no vibration — because the payload earned no interruption.
+ * - ONE FIXED TAG PER MACHINE (`renotify: false`), so ten filtered pushes in a row collapse into one
+ *   persistent line rather than ten, in the SAME namespace a machine's ordinary pushes use
+ *   (`fy-quiet:<daemonId>`, never clashing with `fy-push:<daemonId>:<tag>`).
+ * - Opens that machine's own pages on a tap, same as any other push — `notificationUrl` with no
+ *   `raw` URL always falls through to the fallback, so this reuses it rather than re-deriving it.
+ */
+export const filteredPushNotification = (
+  machine: PushMachine | null,
+  origin: string,
+): { readonly title: string; readonly options: NotificationOptions & { readonly renotify: boolean } } => ({
+  title: `${machine === null ? UNVERIFIED : machine.label} · Notifications muted`,
+  options: {
+    body: 'This device’s notification settings hid an update. Open the app to see what happened.',
+    tag: `${FILTERED_PUSH_TAG_PREFIX}${machine === null ? 'app' : encodeURIComponent(machine.daemonId)}`,
+    silent: true,
+    renotify: false,
+    data: { url: notificationUrl(undefined, origin, machine) },
+  },
+});

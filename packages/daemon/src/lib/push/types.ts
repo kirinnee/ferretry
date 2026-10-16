@@ -1,9 +1,4 @@
-import type {
-  BrowserPushSubscription,
-  PushErrorCode,
-  PushNotificationPayload,
-  PushPreferences,
-} from '@ferretry/protocol';
+import type { BrowserPushSubscription, PushErrorCode, PushNotificationPayload } from '@ferretry/protocol';
 
 /**
  * WEB PUSH, AND WHY A SUBSCRIPTION IS NOT A SECOND KIND OF DEVICE.
@@ -37,8 +32,6 @@ export interface PushSubscriptionRecord {
   readonly deviceName: string;
   /** The endpoint and key halves the browser handed over. Never projected onto the wire. */
   readonly subscription: BrowserPushSubscription;
-  /** What this device has agreed to be told about. */
-  readonly prefs: PushPreferences;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -92,16 +85,15 @@ export interface WebPushTransport {
   deliver(delivery: PushDelivery): Promise<PushDeliveryOutcome>;
 }
 
-/** What a delivery is about, so a device's own preferences can refuse it. */
+/**
+ * What a delivery is about.
+ *
+ * Carries only the payload: every enrolled device is sent every event (see `PushService.notify`),
+ * and which ones a reader is shown is a decision their own browser makes locally, never one this
+ * daemon filters on their behalf.
+ */
 export interface PushDispatch {
   readonly payload: PushNotificationPayload;
-  /**
-   * Whether the session this is about is one a human is sitting with.
-   *
-   * Absent for a notification about no session — a device that asked for `interactiveOnly` is
-   * declining unattended session noise, not everything this daemon might ever say to it.
-   */
-  readonly interactive?: boolean;
 }
 
 export interface PushClock {

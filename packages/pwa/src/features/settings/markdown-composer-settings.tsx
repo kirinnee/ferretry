@@ -16,10 +16,16 @@
  * surface reads both and owns neither.
  */
 import { cn } from '../../lib/class-names.ts';
-import { MD_COMPOSE_DEFAULT, useMdComposePref, writeMdComposePref } from '../../lib/md-compose.ts';
+import { type MdComposePref, useMdComposePref, writeMdComposePref } from '../../lib/md-compose.ts';
 
 export const MARKDOWN_COMPOSER_EXPLANATION =
-  'Markdown markers stay visible in the native textarea. A separate bounded preview renders headings, lists, emphasis, code, links, and proven in-app references while you type.';
+  'Either way, what you send is exactly the markdown you typed. In Markdown style the line shapes itself as you type: # headings, - and 1. lists that continue on Enter, [ ] checklists, > quotes, ``` code and --- dividers, with **bold**, *italic*, `code` and ~~strike~~ coloured and their markers kept faintly visible. ⌘B, ⌘I and ⌘E wrap the selection.';
+
+/** The two editor styles this build offers, and what each is called on screen. */
+const EDITOR_STYLES: readonly { readonly pref: MdComposePref; readonly label: string; readonly detail: string }[] = [
+  { pref: 'on', label: 'Markdown, Notion-style', detail: '# headings and lists shape themselves as you type' },
+  { pref: 'off', label: 'Plain text box', detail: 'No colouring and no list continuation' },
+];
 
 export const VIM_COMPOSER_EXPLANATION =
   'Modal Vim keys — normal and insert — inside the same message textarea. Off by default. Leaving insert mode is Escape, which a phone’s on-screen keyboard does not offer, so this is only useful with a physical keyboard.';
@@ -76,24 +82,37 @@ export function MarkdownComposerSettings({
   readonly onChangeVim: (enabled: boolean) => void;
 }) {
   const pref = useMdComposePref();
-  const enabled = pref === 'on';
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <ComposerSwitch
-          checked={enabled}
-          label="Highlight Markdown syntax"
-          detail="Native textarea · no editor swap"
-          onChange={next => writeMdComposePref(next ? 'on' : 'off')}
-        />
+        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+          <legend className="mb-1 text-ui font-semibold text-fg">Editor style</legend>
+          {EDITOR_STYLES.map(style => (
+            <label
+              className={cn(
+                'flex min-h-[44px] cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
+                pref === style.pref ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
+              )}
+              data-editor-style={style.pref}
+              key={style.pref}
+            >
+              <input
+                checked={pref === style.pref}
+                className="mt-1"
+                name="composer-editor-style"
+                onChange={() => writeMdComposePref(style.pref)}
+                type="radio"
+                value={style.pref}
+              />
+              <span className="min-w-0">
+                <span className="block text-ui font-semibold text-fg">{style.label}</span>
+                <span className="mt-0.5 block text-meta leading-base text-muted">{style.detail}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
         <p className="m-0 text-cell leading-base text-muted">{MARKDOWN_COMPOSER_EXPLANATION}</p>
-        {MD_COMPOSE_DEFAULT === 'off' && (
-          <p className="m-0 text-meta leading-base text-faint">
-            Off by default while this experience receives a real-device mobile Safari pass. Enabling it changes
-            presentation only; the original textarea still owns input, selection, dictation, autocomplete and drafts.
-          </p>
-        )}
       </div>
       <div className="flex flex-col gap-2">
         <ComposerSwitch

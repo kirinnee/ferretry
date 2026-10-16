@@ -9,7 +9,8 @@ import { useSyncExternalStore } from 'react';
 
 export const MD_COMPOSE_KEY = 'fy-markdown-composer-v1';
 export type MdComposePref = 'on' | 'off';
-export const MD_COMPOSE_DEFAULT: MdComposePref = 'off';
+/** Markdown, Notion-style is the default editor style (Settings › Composer › Editor style). */
+export const MD_COMPOSE_DEFAULT: MdComposePref = 'on';
 
 /** Same-tab change signal; the browser storage event only reaches other tabs. */
 const CHANGE_EVENT = 'ferretry:markdown-composer-change';

@@ -3,17 +3,11 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
-import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
-import { FilesTab } from '../../components/files-tab.tsx';
 import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
-import {
-  type ReferenceSurface,
-  ReferenceSurfaceProvider,
-  sessionReferenceSurface,
-} from '../../components/reference-surface.tsx';
+import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
   type RuntimeControlApi,
@@ -22,32 +16,44 @@ import {
   RuntimeModelControls,
 } from '../../components/runtime-controls.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
+import { SessionSurfaceReferences } from '../../components/session-surface-references.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
-import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
-import { SessionTopBar } from '../../components/session-top-bar.tsx';
+import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
+import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
+import {
+  attentionSignalsPort,
+  fleetMcpLoader,
+  instructionDocsLoader,
+  sessionSkillsLoader,
+} from '../../features/context-rail/context-rail-ports.ts';
+import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
 import { LineageSurfaceContent } from '../../features/lineage/lineage-surface.tsx';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
-import { SessionSkillsSurface } from '../../features/skills/session-skills-surface.tsx';
-import type { SkillsCatalogLoader } from '../../features/skills/skills-api.ts';
+import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
+import type { WorkspaceFormFactor } from '../../features/workspace/phone/phone-tab.ts';
+import {
+  type SessionContextRailProps,
+  SessionWorkspace,
+  useContextPlacement,
+} from '../../features/workspace/session-workspace.tsx';
+import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
+import { useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
+import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import type { ContextMenuItem } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
-import { type SidePaneSurfaceProps, SidePaneWorkspace, useSidePane } from '../../shell/side-pane.tsx';
-import {
-  openSidePaneFileTab,
-  type SidePaneTabDefinition,
-  type SidePaneTabPresentation,
-} from '../../shell/side-pane-tab-model.ts';
+import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
+import type { DaemonAttentionClient } from '../attention-client.ts';
 import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
@@ -55,7 +61,7 @@ import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts'
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
-import { daemonSessionScope } from '../daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
@@ -63,6 +69,8 @@ import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonFetch } from '../store.tsx';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
+import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
+import { WorkspaceRailPreferenceStore } from '../workspace-rail-preferences.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -116,6 +124,10 @@ export interface SessionChatPageProps {
   readonly chatWidth?: ChatWidthPreference;
   /** Browser-local transcript composer key preference. */
   readonly composerEnterKey?: ComposerEnterKeyPreference | null;
+  /** Browser-local return-key preference on a phone. */
+  readonly composerPhoneEnterKey?: ComposerEnterKeyPreference | null;
+  /** Whether the transcript's folded bookkeeping starts open (Settings › Show details). */
+  readonly showDetails?: boolean;
   /** Browser-local dictation settings; supplied by the application store. */
   readonly dictationSettings?: SttSettings;
   /**
@@ -166,7 +178,44 @@ export interface SessionChatPageProps {
   readonly onOpenSessions?: () => void;
   /** Writes the session id to the clipboard. Absent: the browser's own clipboard. */
   readonly copyText?: (text: string) => Promise<void>;
+  /**
+   * Every agent's remembered split workspace. The app store owns it so an unpair forgets that
+   * machine's layouts; absent, a page-local default serves a harness or a test.
+   */
+  readonly workspaceLayouts?: WorkspaceLayoutStore;
+  /** The reader's rail widths. Absent: a page-local default. */
+  readonly workspaceRails?: WorkspaceRailPreferenceStore;
+  /** Phone, tablet split or desktop. Absent: measured from the window. */
+  readonly formFactor?: WorkspaceFormFactor;
+  /**
+   * What the "This folder" context reads through. Absent: the host has none to offer, so the page
+   * shows no rail and no ◧ rather than four sub-tabs that can only fail.
+   */
+  readonly context?: SessionContextDependencies;
+  /** The remote browser's engine, for a harness that scripts it. Absent: the real one. */
+  readonly browser?: UnifiedBrowserDependencies;
 }
+
+/** The app-store bindings the context rail needs, beyond what the page already holds. */
+interface SessionContextDependencies {
+  readonly attention: DaemonAttentionClient;
+  readonly createFleetClient: FleetClientFactory;
+  /** The machine's own name, as the MCP sign-in sheet says it. */
+  readonly machineName: string;
+}
+
+const defaultWorkspaceLayouts = new WorkspaceLayoutStore();
+const defaultWorkspaceRails = new WorkspaceRailPreferenceStore();
+
+/** The tools that used to live in the side pane and are not workspace tabs: each opens in a sheet. */
+type SessionUtility = 'tasks' | 'terminals' | 'lineage' | 'analytics';
+
+const UTILITY_LABEL: Readonly<Record<SessionUtility, string>> = {
+  tasks: 'Tasks',
+  terminals: 'Terminal references',
+  lineage: 'Lineage',
+  analytics: 'Analytics for this session',
+};
 
 /** The browser's clipboard, or a refusal a reader can be told about. */
 const browserCopyText = async (text: string): Promise<void> => {
@@ -177,183 +226,25 @@ const browserCopyText = async (text: string): Promise<void> => {
 
 const actionFailureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
-const sessionWorkspaceTab = (tab: SidePaneTabDefinition): boolean =>
-  tab.id !== 'browser' && tab.instance?.kind !== 'browser';
-
-/**
- * Codex's native model picker lives in the Terminal view, and the runtime sheet
- * can only offer it if something actually navigates there.
- *
- * This is a child component rather than a hook call in the page BECAUSE the page
- * renders `SidePaneWorkspace` — it is the context's parent, so its own body can
- * never read it. A `false` answer is honest: with no pane host mounted the sheet
- * keeps its own explanation on screen instead of closing over a navigation that
- * did not happen. `paneHost` below is the ref this capture writes into.
- */
-function SidePaneCapture({ onHost }: { readonly onHost: (host: ReturnType<typeof useSidePane>) => void }) {
-  const pane = useSidePane();
-  useEffect(() => {
-    onHost(pane);
-    return () => onHost(null);
-  }, [onHost, pane]);
-  return null;
-}
-
 /** Gives the app-bar search real current-workspace destinations without ever
  * retaining a callback across a daemon/session change. */
-function SessionSearchWorkspaceActions({ scope }: { readonly scope: ReturnType<typeof daemonSessionScope> }) {
-  const pane = useSidePane();
+function SessionSearchWorkspaceActions({
+  scope,
+  openFile,
+  openTasks,
+}: {
+  readonly scope: DaemonSessionScope;
+  readonly openFile: (path: string) => void;
+  readonly openTasks: () => void;
+}) {
   const search = useSessionSearch();
   useEffect(() => {
-    if (
-      pane === null ||
-      search.scope === null ||
-      search.scope.daemonId !== scope.daemonId ||
-      search.scope.sessionId !== scope.sessionId
-    )
+    if (search.scope === null || search.scope.daemonId !== scope.daemonId || search.scope.sessionId !== scope.sessionId)
       return;
-    search.setOpeners({
-      openFile: path => {
-        pane.open('files');
-        openSidePaneFileTab(scope, path);
-      },
-      openTasks: () => pane.open('tasks'),
-    });
+    search.setOpeners({ openFile, openTasks });
     return () => search.setOpeners(null);
-  }, [pane, scope, search]);
+  }, [openFile, openTasks, scope, search]);
   return null;
-}
-
-interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
-  readonly connection: DaemonConnection;
-  readonly session: SessionView;
-  readonly daemonSessions?: readonly SessionView[];
-  readonly onNavigate?: (to: string) => void;
-  readonly readSnapshot?: PaneSnapshotReader;
-  /**
-   * The terminal deck's dependencies, bound to this daemon's carrier by the composition root.
-   *
-   * Threaded rather than defaulted inside the deck because the carrier lives in the app store, and a
-   * component that reached for the store itself could not be mounted by a test without one. Absent
-   * here means the deck's own browser default — direct-only, which is what a suite wants.
-   */
-  readonly deck?: TerminalDeckDependencies;
-  /** The one reference surface this session reads with, files included. */
-  readonly references: ReferenceSurface;
-  /**
-   * The session's ONE skills catalog read, threaded down rather than started
-   * here: the page already holds it, because the reference surface proves an
-   * inserted `/floop` from the same names this pane lists.
-   */
-  readonly skills: SkillsCatalogLoader;
-}
-
-function WorkspaceSurface({
-  connection,
-  session,
-  daemonSessions,
-  onNavigate,
-  readSnapshot,
-  deck,
-  references,
-  skills,
-  scope,
-  tab,
-  presentation,
-  titleId,
-  onClose,
-  isActive,
-}: WorkspaceSurfaceProps) {
-  let body: ReactNode;
-  if (tab.instance?.kind === 'file') {
-    // ONE TAB PER FILE (#35): this tab renders ITS file, not the picker. Two
-    // open files are two tabs, each with its own raw/diff choice and its own
-    // reading position.
-    body = <FileInstanceSurface daemon={connection} scope={scope} instance={tab.instance} markdown={references} />;
-  } else if (tab.id === 'tasks') {
-    body = <SessionTasksSearchSurface />;
-  } else if (tab.id === 'skills') {
-    // #43. The loader comes from the page's own read, so opening this pane
-    // JOINS that read instead of asking the daemon a second time.
-    body = <SessionSkillsSurface connection={connection} loadCatalog={skills} scope={scope} />;
-  } else if (tab.id === 'lineage') {
-    body =
-      daemonSessions === undefined ? (
-        <p className="m-3 text-ui text-muted" role="status">
-          Loading lineage…
-        </p>
-      ) : (
-        <LineageSurfaceContent
-          daemonId={connection.daemonId}
-          sessionId={session.config.id}
-          sessions={daemonSessions}
-          {...(onNavigate === undefined ? {} : { onNavigate })}
-        />
-      );
-  } else if (tab.id === 'analytics') {
-    body = <SessionAnalyticsSurface connection={connection} scope={scope} />;
-  } else if (tab.id === 'files') {
-    // The picker: tree, listing, breadcrumbs. Every open it produces becomes a
-    // file tab in the pane's own strip, so this surface holds no second strip.
-    // Markdown a file preview renders is the SAME reference surface the
-    // transcript reads with, so a path in a README behaves like a path in a
-    // message rather than being inert text in a viewer.
-    body = (
-      <FilesTab
-        daemon={connection}
-        scope={scope}
-        cwd={session.config.cwd}
-        markdown={references}
-        onOpenFile={(path, selection) => openSidePaneFileTab(scope, path, selection)}
-      />
-    );
-  } else if (tab.id === 'terminals' || tab.instance?.kind === 'terminal') {
-    // The deck is still ONE surface (DESIGN-side-pane-tabs.md assigns its
-    // per-terminal split to the deck's own owner). A `terminal:<id>` tab is
-    // therefore addressable rather than separate: it selects ITS shell in the
-    // deck, and says nothing if that shell is not in the listing.
-    body = (
-      <SessionTerminalSurface
-        connection={connection}
-        scope={scope}
-        {...(readSnapshot === undefined ? {} : { readSnapshot })}
-        {...(deck === undefined ? {} : { deck })}
-        {...(tab.instance?.kind === 'terminal' ? { focusTerminalId: tab.instance.key } : {})}
-      />
-    );
-  } else if (tab.render !== undefined) {
-    body = tab.render({
-      scope,
-      presentation,
-      titleId,
-      onClose,
-      cwd: session.config.cwd,
-      isActive,
-      ...(tab.instance === undefined ? {} : { instance: tab.instance }),
-    });
-  } else {
-    body = (
-      <p className="m-3 text-ui text-muted" role="status">
-        {tab.unavailableReason ?? `${tab.label} is ported but is not connected to this session workspace yet.`}
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <h2 className="sr-only" id={titleId}>
-        {tab.label}
-      </h2>
-      {presentation === 'pane' ? (
-        <div className="flex shrink-0 items-center justify-end border-b border-border-soft px-2 py-1">
-          <Button aria-label={`Close ${tab.label}`} onClick={onClose} size="sm" type="button" variant="ghost">
-            Close
-          </Button>
-        </div>
-      ) : null}
-      <div className="flex min-h-0 flex-1 flex-col">{body}</div>
-    </div>
-  );
 }
 
 /**
@@ -371,8 +262,10 @@ export function SessionChatPage({
   presentation,
   canControl = true,
   refreshError = null,
-  chatWidth = 'full',
+  chatWidth = 'readable',
   composerEnterKey,
+  composerPhoneEnterKey = null,
+  showDetails = false,
   composerSuggestions,
   composerVimMode = false,
   composerFetch,
@@ -388,8 +281,22 @@ export function SessionChatPage({
   project = null,
   onOpenSessions,
   copyText = browserCopyText,
+  workspaceLayouts = defaultWorkspaceLayouts,
+  workspaceRails = defaultWorkspaceRails,
+  formFactor: formFactorOverride,
+  context: contextDependencies,
+  browser,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
+  const measuredFormFactor = useWorkspaceFormFactor();
+  // A drawer layout is a phone whatever the window measures: the app shell has already decided so.
+  const formFactor = formFactorOverride ?? (presentation === 'sheet' ? 'phone' : measuredFormFactor);
+  const workspace = useSessionWorkspace(workspaceLayouts, scope);
+  const placement = useContextPlacement(formFactor);
+  const driving = useSurfaceDriving(scope);
+  const terminals = useSessionTerminals(deck, connection, scope);
+  const [utility, setUtility] = useState<SessionUtility | null>(null);
+  const utilityId = useId();
   const search = useSessionSearch();
   const referenceTasks =
     search.scope?.daemonId === scope.daemonId &&
@@ -444,17 +351,26 @@ export function SessionChatPage({
     waitForSkills: skills.settled,
     ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
   });
-  /** Written by `SidePaneCapture`, which owns the explanation for why the host
-   *  can only be read from a child. */
-  const paneHost = useRef<ReturnType<typeof useSidePane>>(null);
-  const captureSidePane = useCallback((host: ReturnType<typeof useSidePane>) => {
-    paneHost.current = host;
-  }, []);
-  const openTerminalPane = useCallback(() => {
-    if (paneHost.current === null) return false;
-    paneHost.current.open('terminals');
+  /** Codex's native model picker is in the agent's own pane: the runtime sheet's way there is the Console. */
+  const { showAgentTab, openFile, openSurface } = workspace;
+  const openConsole = useCallback((): boolean => {
+    showAgentTab('console');
     return true;
-  }, []);
+  }, [showAgentTab]);
+  const openTasks = useCallback(() => setUtility('tasks'), []);
+  const { reveal } = placement;
+  // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
+  // behaviour still — Markdown calls the surface — with these as its destinations.
+  const referenceDestinations = useMemo(
+    () => ({
+      openFile: (path: string, selection?: Parameters<typeof openFile>[1]) => openFile(path, selection),
+      openSurface: (reference: { readonly surface: 'terminal' | 'browser'; readonly key: string }) =>
+        openSurface(reference.surface, reference.key),
+      openTasks,
+      openSkills: () => reveal('skills'),
+    }),
+    [openFile, openSurface, openTasks, reveal],
+  );
   // THE session's one reference surface. The memo key over the fleet is the
   // identity of the fields the resolver actually copies, so status and activity
   // churn cannot rebuild the surface and re-parse every rendered Markdown block
@@ -478,6 +394,8 @@ export function SessionChatPage({
           ? {}
           : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
+        ...(terminals === null ? {} : { terminals }),
+        destinations: referenceDestinations,
         // Both halves or neither. The ledger alone proves `!A3` without giving
         // it anywhere to go, and an opener alone would link an unproved id — so
         // a host that has not subscribed leaves the token as prose, which the
@@ -497,6 +415,8 @@ export function SessionChatPage({
       attention === undefined,
       attentionKey,
       openAttention,
+      terminals,
+      referenceDestinations,
     ],
   );
   const detailsId = useId();
@@ -719,9 +639,6 @@ export function SessionChatPage({
       {actionError === null ? '' : `Session action failed: ${actionError}`}
     </p>
   );
-  const openPane = (id: string): void => {
-    paneHost.current?.open(id);
-  };
   const copySessionId = (): void => {
     setActionError(null);
     copyText(session.config.id).catch((reason: unknown) =>
@@ -729,13 +646,18 @@ export function SessionChatPage({
     );
   };
   /**
-   * ⋯ — everything that used to sit on screen permanently. Files and the terminals open the side pane
-   * exactly as the old pane openers did; Stop is here on a phone only, where the bar keeps one button.
+   * ⋯ — everything that used to sit on screen permanently. Files opens the workspace's Files picker and
+   * Console shows the agent's own pane; the tools that are not workspace tabs (tasks, lineage,
+   * analytics) open in a sheet. Stop is here on a phone only, where the bar keeps one button.
    */
   const menuItems: readonly ContextMenuItem[] = [
-    { key: 'files', label: 'Files', onSelect: () => openPane('files') },
-    { key: 'terminals', label: 'Terminal', onSelect: () => openPane('terminals') },
-    { key: 'analytics', label: 'Analytics for this session', onSelect: () => openPane('analytics') },
+    { key: 'files', label: 'Files', onSelect: workspace.openFilePicker },
+    { key: 'console', label: 'Console', onSelect: () => showAgentTab('console') },
+    ...(['tasks', 'terminals', 'lineage', 'analytics'] as const).map(key => ({
+      key,
+      label: UTILITY_LABEL[key],
+      onSelect: () => setUtility(key),
+    })),
     ...(attention === undefined ? [] : [{ key: 'attention', label: 'Attention', onSelect: () => openAttention(null) }]),
     ...actions
       .filter(spec => spec.action === 'migrate')
@@ -773,210 +695,265 @@ export function SessionChatPage({
       </button>
     );
 
-  return (
-    <SidePaneWorkspace
-      active
-      presentation={presentation}
-      scope={scope}
-      shouldIncludeTab={sessionWorkspaceTab}
-      renderSurface={props => (
-        <WorkspaceSurface
-          {...props}
-          connection={connection}
-          references={references}
-          session={session}
-          skills={skills.load}
-          {...(daemonSessions === undefined ? {} : { daemonSessions })}
-          {...(onNavigate === undefined ? {} : { onNavigate })}
-          {...(readSnapshot === undefined ? {} : { readSnapshot })}
-          {...(deck === undefined ? {} : { deck })}
+  // Keyed on the session's NAME and RUNTIME rather than the view: a status tick rebuilds the view, and
+  // a fresh loader identity would re-read every sub-tab of the rail for nothing.
+  const agentName = sessionDisplayName(session);
+  const runtime = session.config.agent;
+  const rail = useMemo<SessionContextRailProps | undefined>(
+    () =>
+      contextDependencies === undefined
+        ? undefined
+        : {
+            agentName,
+            signals: attentionSignalsPort(contextDependencies.attention, connection, scope),
+            loadMcp: fleetMcpLoader(connection, contextDependencies.createFleetClient, runtime),
+            loadSkills: sessionSkillsLoader(skills.load, scope),
+            loadDocs: instructionDocsLoader(connection, scope, referenceFetch),
+            onInsertSkill: invocation => {
+              addSkillInvocationToComposer(invocation, scope);
+            },
+            onOpenFile: path => openFile(path),
+            mcpSignIn: {
+              connection,
+              createClient: contextDependencies.createFleetClient,
+              machineName: contextDependencies.machineName,
+            },
+          },
+    [contextDependencies, connection, scope, skills.load, referenceFetch, openFile, agentName, runtime],
+  );
+  const header = (contextButton: ReactNode): ReactNode => (
+    <>
+      <SessionTopBar
+        actions={
+          <>
+            {lifecycleActions}
+            {contextButton}
+          </>
+        }
+        compact={compact}
+        menuItems={menuItems}
+        project={project}
+        session={session}
+        status={
+          <>
+            {needsYou}
+            {/* THE LIVE FEED'S OWN STATE, folded into the status dot: nothing visible while it is
+                healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
+                lock or a Wi-Fi roam most often drops the socket. */}
+            {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} quiet />}
+          </>
+        }
+        {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
+      />
+      {/* NOT a live region. App.tsx owns the single announcement for a refresh
+        failure and hands down a finished sentence; a second `role=status`
+        here made assistive tech say it twice, and a prefix added here would
+        have made the two disagree. Rendered only when there is something to
+        render, precisely because it announces nothing. */}
+      {refreshError === null ? null : <p className="m-0 px-3 py-1 text-ui text-warn">{refreshError}</p>}
+      {actionAlert}
+    </>
+  );
+  const chat = (
+    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
+      <div className="grid min-h-0 flex-1">
+        <Transcript
+          activity={paneActivity}
+          activityFallback={session.state.activity ?? null}
+          agentName={agentName}
+          detailsShown={showDetails}
+          busy={busy}
+          daemonId={connection.daemonId}
+          entries={entries}
+          sessionId={session.config.id}
         />
-      )}
-    >
-      <SessionSearchWorkspaceActions scope={scope} />
-      {/* Every Markdown reader inside the conversation — transcript prose,
-          notices, and whatever a later item renders here — reads references
-          through this one surface. */}
-      <ReferenceSurfaceProvider surface={references}>
-        <main
-          className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
-          data-daemon={connection.daemonId}
-          data-session={session.config.id}
-        >
-          <SessionTopBar
-            actions={lifecycleActions}
+      </div>
+      <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
+        {question !== null && canControl ? (
+          <QuestionForm
+            api={questionApi}
             compact={compact}
-            menuItems={menuItems}
-            project={project}
-            session={session}
-            status={
-              <>
-                {needsYou}
-                {/* THE LIVE FEED'S OWN STATE, folded into the status dot: nothing visible while it is
-                    healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
-                    lock or a Wi-Fi roam most often drops the socket. */}
-                {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} quiet />}
-              </>
-            }
-            {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
+            daemon={connection}
+            key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
+            question={question}
+            sessionId={session.config.id}
           />
-          <SidePaneCapture onHost={captureSidePane} />
-          {/* NOT a live region. App.tsx owns the single announcement for a refresh
-            failure and hands down a finished sentence; a second `role=status`
-            here made assistive tech say it twice, and a prefix added here would
-            have made the two disagree. Rendered only when there is something to
-            render, precisely because it announces nothing. */}
-          {refreshError === null ? null : <p className="m-0 px-3 py-1 text-ui text-warn">{refreshError}</p>}
-          {actionAlert}
-          {/* THE CHAT MEASURE, applied to transcript and composer TOGETHER so the
-            two never disagree about where the column ends. `full` is the shipped
-            default and is deliberately uncapped, exactly as the source is; the
-            reader's `balanced`/`readable` choice now actually narrows this page,
-            which it could not do before because nothing here carried the
-            surface class. The side pane is a sibling of `<main>`, so a max-width
-            here cannot touch the split. */}
-          <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
-            <div className="grid min-h-0 flex-1">
-              <Transcript
-                activity={paneActivity}
-                activityFallback={session.state.activity ?? null}
-                busy={busy}
-                daemonId={connection.daemonId}
-                entries={entries}
-                sessionId={session.config.id}
-              />
-            </div>
-            <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
-              {question !== null && canControl ? (
-                <QuestionForm
-                  api={questionApi}
-                  compact={compact}
-                  daemon={connection}
-                  key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
-                  question={question}
-                  sessionId={session.config.id}
-                />
-              ) : awaitingAnswer ? (
-                /* Status without a validated payload is damaged or incomplete
-                 evidence, never an empty question. Keep the recovery action
-                 visible, but do not invent options or send an unbound answer. */
-                <section
-                  aria-label="Structured question"
-                  className="fy-question-form"
-                  data-question-unavailable=""
-                  role="status"
-                >
-                  <p className="m-0">
-                    This session reports a structured question, but its complete validated prompt is unavailable. No
-                    answer can be sent safely; refresh the session or interrupt the turn to abandon it.
-                  </p>
-                </section>
-              ) : (
-                <Composer
-                  api={client}
-                  {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
-                  {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
-                  {...(composerCatalogs.attention === undefined
-                    ? {}
-                    : { autocompleteAttention: composerCatalogs.attention })}
-                  {...(composerCatalogs.skills?.skills === undefined
-                    ? {}
-                    : { autocompleteSkills: composerCatalogs.skills })}
-                  // The in-flight owner reads: a menu opened before they settle waits
-                  // instead of inventing an empty family or fetching a fact twice.
-                  autocompleteReady={composerCatalogs.settled}
-                  busy={busy}
-                  compact={compact}
-                  {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
-                  vimMode={composerVimMode}
-                  {...(dictationSettings === undefined ? {} : { dictationSettings })}
-                  enterKeyPreference={composerEnterKey}
-                  daemon={connection}
-                  disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-                  onSent={onRefresh}
-                  quota={session.state.quota}
-                  sessionId={session.config.id}
-                  {...(session.state.contextPercent === undefined
-                    ? {}
-                    : { contextPercent: session.state.contextPercent })}
-                  // The model and effort chips ride the composer's own status line, so the
-                  // runtime costs no row of its own above the message box.
-                  statusSlot={
-                    runtimeApi === null ? null : (
-                      <ComposerRuntime
-                        busy={runtimeSwitchBusy}
-                        canControl={canControl}
-                        renderEffortControls={lifecycle => (
-                          <RuntimeEffortControls
-                            api={runtimeApi}
-                            canControl={canControl}
-                            catalogs={routedRuntimeCatalogs}
-                            daemon={connection}
-                            onOpenTerminal={openTerminalPane}
-                            view={session}
-                            {...lifecycle}
-                          />
-                        )}
-                        renderModelControls={lifecycle => (
-                          <RuntimeModelControls
-                            api={runtimeApi}
-                            canControl={canControl}
-                            catalogs={routedRuntimeCatalogs}
-                            daemon={connection}
-                            onOpenTerminal={openTerminalPane}
-                            view={session}
-                            {...lifecycle}
-                            open={lifecycle.open}
-                          />
-                        )}
-                        view={session}
-                      />
-                    )
-                  }
-                />
-              )}
-            </div>
-          </div>
-          <BottomSheet
-            ariaLabel="Session details"
-            closeLabel="Close session details"
-            id={detailsId}
-            onClose={() => setDetailsOpen(false)}
-            open={detailsOpen}
-            panelClassName="kt-details bg-surface"
+        ) : awaitingAnswer ? (
+          /* Status without a validated payload is damaged or incomplete
+           evidence, never an empty question. Keep the recovery action
+           visible, but do not invent options or send an unbound answer. */
+          <section
+            aria-label="Structured question"
+            className="fy-question-form"
+            data-question-unavailable=""
+            role="status"
           >
-            <SessionDetails daemonId={connection.daemonId} onClose={() => setDetailsOpen(false)} session={session} />
-          </BottomSheet>
-          {/* Inside the reference provider, so Attention prose reads the SAME
-              grammar the transcript does — including a `!A3` that re-targets
-              this very sheet. */}
-          {attention === undefined ? null : (
-            <AttentionActionModal
-              client={attention.client}
-              connection={connection}
-              id={attentionId}
-              onClose={closeAttention}
-              open={attentionOpen}
-              scope={scope}
-              snapshot={attention.snapshot}
-              status={attention.status}
-              swipeEnabled={compact}
-              targetId={attentionTarget}
-            />
-          )}
-          <MigrateSheet
-            {...(accountPicker === undefined ? {} : { accountPicker })}
-            canMutate={canControl}
-            connection={connection}
-            onClose={() => setMigrateOpen(false)}
-            onMigrated={(_daemon, _scope, view) => publish(view)}
-            open={migrateOpen}
-            scope={scope}
-            {...(usage === undefined ? {} : { usage })}
-            view={session}
+            <p className="m-0">
+              This session reports a structured question, but its complete validated prompt is unavailable. No answer
+              can be sent safely; refresh the session or interrupt the turn to abandon it.
+            </p>
+          </section>
+        ) : (
+          <Composer
+            api={client}
+            {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
+            {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
+            {...(composerCatalogs.attention === undefined ? {} : { autocompleteAttention: composerCatalogs.attention })}
+            {...(composerCatalogs.skills?.skills === undefined ? {} : { autocompleteSkills: composerCatalogs.skills })}
+            // The in-flight owner reads: a menu opened before they settle waits
+            // instead of inventing an empty family or fetching a fact twice.
+            autocompleteReady={composerCatalogs.settled}
+            busy={busy}
+            compact={compact}
+            {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
+            vimMode={composerVimMode}
+            {...(dictationSettings === undefined ? {} : { dictationSettings })}
+            enterKeyPreference={composerEnterKey}
+            phoneEnterKeyPreference={composerPhoneEnterKey}
+            daemon={connection}
+            disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
+            onSent={onRefresh}
+            quota={session.state.quota}
+            sessionId={session.config.id}
+            {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
+            // The model and effort chips ride the composer's own status line, so the
+            // runtime costs no row of its own above the message box.
+            statusSlot={
+              runtimeApi === null ? null : (
+                <ComposerRuntime
+                  busy={runtimeSwitchBusy}
+                  canControl={canControl}
+                  renderEffortControls={lifecycle => (
+                    <RuntimeEffortControls
+                      api={runtimeApi}
+                      canControl={canControl}
+                      catalogs={routedRuntimeCatalogs}
+                      daemon={connection}
+                      onOpenTerminal={openConsole}
+                      view={session}
+                      {...lifecycle}
+                    />
+                  )}
+                  renderModelControls={lifecycle => (
+                    <RuntimeModelControls
+                      api={runtimeApi}
+                      canControl={canControl}
+                      catalogs={routedRuntimeCatalogs}
+                      daemon={connection}
+                      onOpenTerminal={openConsole}
+                      view={session}
+                      {...lifecycle}
+                      open={lifecycle.open}
+                    />
+                  )}
+                  view={session}
+                />
+              )
+            }
           />
-        </main>
-      </ReferenceSurfaceProvider>
-    </SidePaneWorkspace>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
+    // workspace and whatever a later item renders here — reads references through this one surface.
+    <ReferenceSurfaceProvider surface={references}>
+      <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+      <main
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+        data-daemon={connection.daemonId}
+        data-session={session.config.id}
+      >
+        <SessionWorkspace
+          chat={chat}
+          connection={connection}
+          context={placement}
+          driving={driving}
+          formFactor={formFactor}
+          references={references}
+          renderHeader={header}
+          rails={workspaceRails}
+          session={session}
+          workspace={workspace}
+          {...(rail === undefined ? {} : { rail })}
+          {...(deck === undefined ? {} : { deck })}
+          {...(readSnapshot === undefined ? {} : { readSnapshot })}
+          {...(browser === undefined ? {} : { browser })}
+        />
+        <BottomSheet
+          ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
+          closeLabel="Close"
+          id={utilityId}
+          onClose={() => setUtility(null)}
+          open={utility !== null}
+          panelClassName="bg-surface"
+        >
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
+            {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
+            {/* Every shell this session holds, with the token that names it and Add to chat. */}
+            {utility === 'terminals' ? (
+              <div className="p-panel">
+                <SessionSurfaceReferences connection={connection} scope={scope} />
+              </div>
+            ) : null}
+            {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
+            {utility === 'lineage' ? (
+              daemonSessions === undefined ? (
+                <p className="m-3 text-ui text-muted" role="status">
+                  Loading lineage…
+                </p>
+              ) : (
+                <LineageSurfaceContent
+                  daemonId={connection.daemonId}
+                  sessionId={session.config.id}
+                  sessions={daemonSessions}
+                  {...(onNavigate === undefined ? {} : { onNavigate })}
+                />
+              )
+            ) : null}
+          </div>
+        </BottomSheet>
+        <BottomSheet
+          ariaLabel="Session details"
+          closeLabel="Close session details"
+          id={detailsId}
+          onClose={() => setDetailsOpen(false)}
+          open={detailsOpen}
+          panelClassName="kt-details bg-surface"
+        >
+          <SessionDetails daemonId={connection.daemonId} onClose={() => setDetailsOpen(false)} session={session} />
+        </BottomSheet>
+        {/* Inside the reference provider, so Attention prose reads the SAME
+            grammar the transcript does — including a `!A3` that re-targets
+            this very sheet. */}
+        {attention === undefined ? null : (
+          <AttentionActionModal
+            client={attention.client}
+            connection={connection}
+            id={attentionId}
+            onClose={closeAttention}
+            open={attentionOpen}
+            scope={scope}
+            snapshot={attention.snapshot}
+            status={attention.status}
+            swipeEnabled={compact}
+            targetId={attentionTarget}
+          />
+        )}
+        <MigrateSheet
+          {...(accountPicker === undefined ? {} : { accountPicker })}
+          canMutate={canControl}
+          connection={connection}
+          onClose={() => setMigrateOpen(false)}
+          onMigrated={(_daemon, _scope, view) => publish(view)}
+          open={migrateOpen}
+          scope={scope}
+          {...(usage === undefined ? {} : { usage })}
+          view={session}
+        />
+      </main>
+    </ReferenceSurfaceProvider>
   );
 }

@@ -3053,21 +3053,15 @@ try {
             fail(`the composer sits below the viewport at ${viewport.name}`);
           }
 
-          // THEN the companion pane, opened through the page's own launcher —
-          // the same `pane.open('terminals', …)` a reader clicks. Driving the
-          // real control is what makes this a capture of the desktop/sheet split
-          // rather than of a prop someone set. The terminal surface is chosen
-          // because it resolves entirely from the harness client and snapshot
-          // reader: the files tree would paint a network error over the layout.
+          // THEN the Console — the agent's own pane — shown through the page's own ⋯ › Console, the
+          // control a reader clicks. It resolves entirely from the harness snapshot reader, so the
+          // capture is the agent pane's second tab rather than a network error.
           const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
           await page.locator('[data-session-more]').click();
-          await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
-          await page.getByText('Session pane snapshot').waitFor({ state: 'visible' });
+          await page.getByRole('menuitem', { name: 'Console', exact: true }).click();
+          await page.locator('[data-workspace-console]').waitFor({ state: 'visible' });
           await page.screenshot({ path: workspacePaneTarget });
-          process.stdout.write(
-            `📸 ${viewport.name} session workspace, ${viewport.name === 'mobile' ? 'sheet' : 'pane'} open -> ` +
-              `${workspacePaneTarget}\n`,
-          );
+          process.stdout.write(`📸 ${viewport.name} session workspace, Console shown -> ${workspacePaneTarget}\n`);
 
           // The real remote browser gets this route of its own so this is the
           // production side-pane layout taking the whole screen, not a gallery

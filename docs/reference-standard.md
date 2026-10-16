@@ -101,15 +101,15 @@ never rewritten.
 
 ## 4. What each click opens
 
-| Reference    | Click opens                                                              |
-| ------------ | ------------------------------------------------------------------------ |
-| `:agent`     | That agent's session, **on the daemon the reference was proved against** |
-| `@file`      | A file tab in the side pane, scrolled to the referenced line or range    |
-| `&task`      | The Tasks pane for this session                                          |
-| `!attention` | The Attention pane for this session                                      |
-| `/skill`     | The Skills pane for this session                                         |
-| `%terminal:` | That exact terminal instance's tab                                       |
-| `%browser:`  | Nothing yet — no browser worker exists to prove a page, see section 7    |
+| Reference    | Click opens                                                                   |
+| ------------ | ----------------------------------------------------------------------------- |
+| `:agent`     | That agent's session, **on the daemon the reference was proved against**      |
+| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range |
+| `&task`      | The Tasks sheet for this session                                              |
+| `!attention` | The Attention pane for this session                                           |
+| `/skill`     | The Skills tab of this session's "This folder" context                        |
+| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
+| `%browser:`  | Nothing yet — no browser worker exists to prove a page, see section 7         |
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
 new tab.

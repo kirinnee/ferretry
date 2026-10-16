@@ -551,6 +551,7 @@ describe('session screen components', () => {
           daemon={daemonA}
           disabled
           enterKeyPreference="newline"
+          phoneEnterKeyPreference="newline"
           sessionId="disabled-id"
         />,
       );
@@ -578,6 +579,7 @@ describe('session screen components', () => {
           daemon={daemonA}
           disabled
           enterKeyPreference="send"
+          phoneEnterKeyPreference="send"
           sessionId="desktop-id"
         />,
       );
@@ -613,6 +615,7 @@ describe('session screen components', () => {
           daemon={daemonA}
           draftStore={drafts}
           enterKeyPreference={preference}
+          phoneEnterKeyPreference={preference}
           sessionId={sessionId}
         />,
       );

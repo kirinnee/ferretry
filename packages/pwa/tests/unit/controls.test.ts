@@ -65,8 +65,11 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   includeFinished: true,
   dashboardView: 'table',
   density: 'compact',
-  chatWidth: 'readable',
+  chatWidth: 'full',
   composerEnterKey: 'send',
+  composerPhoneEnterKey: 'send',
+  showDetails: true,
+  motion: 'reduced',
   sidebarCollapsed: true,
   suggestionKeys: 'both',
   skillSuggestions: false,
@@ -108,9 +111,12 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // A payload written before `chatWidth` existed degrades to 'full', which
       // IS the previous behaviour — so the field cannot change what an older
       // blob meant, which is why it needed no version bump.
-      chatWidth: 'full',
+      chatWidth: 'readable',
       // Enter follows the current device until the reader explicitly chooses.
       composerEnterKey: null,
+      composerPhoneEnterKey: null,
+      showDetails: false,
+      motion: 'system',
       sidebarCollapsed: true,
       // A payload written before the composer fields existed opens suggestions
       // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
@@ -148,7 +154,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       );
     }
     should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { chatWidth: 'wide' } })).device.chatWidth).equal(
-      'full',
+      'readable',
     );
   });
 
@@ -185,6 +191,18 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     ).device;
     should(legacy.suggestionKeys).equal('ladder');
     should(legacy).not.have.property('directReferenceSuggestions');
+  });
+
+  it('reads the phone send key, Show details and motion, defaulting anything unreadable', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device;
+    should(read({ composerPhoneEnterKey: 'send' }).composerPhoneEnterKey).equal('send');
+    should(read({ composerPhoneEnterKey: 'newline' }).composerPhoneEnterKey).equal('newline');
+    should(read({ composerPhoneEnterKey: 'toggle' }).composerPhoneEnterKey).be.null();
+    should(read({ showDetails: true }).showDetails).be.true();
+    should(read({ showDetails: 'yes' }).showDetails).be.false();
+    should(read({ motion: 'reduced' }).motion).equal('reduced');
+    should(read({ motion: 'none' }).motion).equal('system');
   });
 
   it('keeps Vim-style composer editing off unless it was explicitly turned on', () => {

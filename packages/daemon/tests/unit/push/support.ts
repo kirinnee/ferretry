@@ -1,4 +1,4 @@
-import type { BrowserPushSubscription, PushPreferences } from '@ferretry/protocol';
+import type { BrowserPushSubscription } from '@ferretry/protocol';
 import should from 'should';
 import { PushError, type PushSubscriptionRecord } from '../../../src/lib/push/index.ts';
 
@@ -31,18 +31,12 @@ export function subscription(endpoint: string, fill = 4): BrowserPushSubscriptio
   };
 }
 
-export const allEvents: PushPreferences = {
-  events: { attention: true, question: true, failed: true, completed: true },
-  interactiveOnly: false,
-};
-
 export function record(overrides: Partial<PushSubscriptionRecord> = {}): PushSubscriptionRecord {
   return {
     id: pushId('a'),
     deviceId: deviceId('a'),
     deviceName: 'Pixel 8',
     subscription: subscription('https://fcm.googleapis.com/send/one'),
-    prefs: allEvents,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
