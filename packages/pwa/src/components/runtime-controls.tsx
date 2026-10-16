@@ -38,8 +38,9 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { LoaderCircle, Terminal } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Check, LoaderCircle, Terminal } from 'lucide-react';
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
+import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../lib/daemon-scope.ts';
 import {
@@ -48,7 +49,7 @@ import {
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
-import type { RuntimeSwitchLifecycle } from './composer-runtime.tsx';
+import { launchedModel, type RuntimeSwitchLifecycle } from './composer-runtime.tsx';
 
 /**
  * The four persistable levels the installed Claude CLI accepts. `auto` (reset to
@@ -191,6 +192,14 @@ interface RuntimeControlBase extends RuntimeSwitchCallbacks {
 const defaultRequestId = (): string => crypto.randomUUID();
 
 /**
+ * The model a picker checks as in force: what the harness last reported, else —
+ * before it has said anything — the one the session was LAUNCHED on. The chip
+ * reads the same fallback, so the chip and the checked choice always agree.
+ */
+export const runtimeModelInForce = (view: SessionView): string | undefined =>
+  view.state.observedModel?.trim() || launchedModel(view.config);
+
+/**
  * Reads one session's catalog from the daemon-scoped store, and reports nothing
  * until the answer belongs to the scope currently on screen. The request key
  * carries the daemon id, so a daemon switch discards the previous daemon's
@@ -256,8 +265,10 @@ export function RuntimeModelControls({
   onSwitchSubmitted,
   onOpenTerminal,
   open,
+  presentation = 'sheet',
   view,
 }: RuntimeModelControlsProps) {
+  const popover = presentation === 'popover';
   const { config, state } = view;
   const terminal = TERMINAL_STATUSES.has(state.status);
   const promptRefused = isPromptKnownBusy(state);
@@ -357,12 +368,16 @@ export function RuntimeModelControls({
   }
 
   return (
-    <div className="border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
-      <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
-      <p className="mt-1 text-meta text-muted leading-base">
-        Changes the model inside this running session. It does not move accounts, relaunch the pane, or discard its
-        context.
-      </p>
+    <div className={popover ? undefined : 'border-border-soft border-t pt-3'} data-daemon-id={daemon.daemonId}>
+      {popover ? null : (
+        <>
+          <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
+          <p className="mt-1 text-meta text-muted leading-base">
+            Changes the model inside this running session. It does not move accounts, relaunch the pane, or discard its
+            context.
+          </p>
+        </>
+      )}
       {promptRefused ? (
         <p className="mt-2 text-meta text-warn leading-base">
           Wait for an idle prompt before switching model. The daemon refuses a busy pane instead of queueing this
@@ -382,12 +397,15 @@ export function RuntimeModelControls({
           model={selectedCodexModel}
           onBack={() => setSelectedCodexModel(null)}
           onChoose={effort => void runModelCommand(selectedCodexModel.value, effort)}
+          presentation={presentation}
           submittingEffort={submittingTarget?.effort}
         />
       ) : (
         <RuntimeModelChoices
           choices={catalog?.choices ?? null}
-          currentModel={state.observedModel}
+          // Before the harness has reported a model, the one it was LAUNCHED on is the
+          // one in force — the same fallback the chip reads, so the two agree.
+          currentModel={runtimeModelInForce(view)}
           disabled={submitting || promptRefused}
           error={catalogError}
           harness={config.harness}
@@ -395,6 +413,7 @@ export function RuntimeModelControls({
             if (config.harness === 'codex') setSelectedCodexModel(choice);
             else void runModelCommand(choice.value);
           }}
+          presentation={presentation}
           submittingModel={submittingTarget?.model}
         />
       )}
@@ -460,6 +479,155 @@ function RuntimeOutcome({ failure, notice }: { readonly failure: string | null; 
   );
 }
 
+/**
+ * WHERE A PICKER IS DRAWN. The composer opens these bodies in one of two shells:
+ * a bottom sheet on a phone, where the thumb is and a full-width list is the
+ * comfortable target, and a small popover anchored to the chip everywhere else,
+ * where a sheet rising from the bottom of a wide window was all chrome and no
+ * choice. The `popover` bodies drop the headings and the explanatory prose — the
+ * popover's own title says what it is — and keep every warning, refusal, notice
+ * and failure, because those are the facts a switch is honest about.
+ */
+export type RuntimePickerPresentation = 'sheet' | 'popover';
+
+/** One choice in a runtime picker: what it reads as, and what choosing it does. */
+export interface RuntimeChoiceItem {
+  readonly key: string;
+  readonly label: string;
+  /** The full spoken name; the consumers keep their established phrasing. */
+  readonly ariaLabel: string;
+  /** The value in force: drawn with a check and announced as checked. */
+  readonly checked: boolean;
+  readonly pending?: boolean;
+  /** A short tag beside the name, such as `Default`. */
+  readonly badge?: string;
+  /** The raw value, when it differs from the name a reader is shown. */
+  readonly detail?: string;
+  /** The catalog's own one-line description, when it has one. */
+  readonly description?: string;
+  readonly onSelect: () => void;
+}
+
+export interface RuntimeChoiceMenuProps {
+  readonly ariaLabel: string;
+  readonly items: readonly RuntimeChoiceItem[];
+  readonly disabled: boolean;
+  /** Rows sized for a pointer (popover) or for a thumb (sheet). */
+  readonly presentation?: RuntimePickerPresentation;
+}
+
+const MENU_ITEM = '[role="menuitemradio"]:not(:disabled)';
+
+/**
+ * The single-choice list both pickers draw, in both shells.
+ *
+ * A `menu` of `menuitemradio`s rather than a radiogroup, because choosing here is
+ * an ACTION — it sends a command to a running harness — and a radiogroup's arrow
+ * keys select as they move. Arrow keys and Home/End only move focus; Enter or
+ * Space chooses. The tab stop roves with focus and starts on the value in force,
+ * which is also where focus lands when the list appears, so a keyboard reader who
+ * opened the picker is standing on the current choice.
+ *
+ * A `div`, not the `<ul>` it replaced: a list element cannot take an interactive
+ * role, and the menu role is what carries the label and the single-choice group.
+ */
+export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = 'sheet' }: RuntimeChoiceMenuProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const initial = items.find(item => item.checked)?.key ?? items[0]?.key;
+  const [activeKey, setActiveKey] = useState(initial);
+  const stop = items.some(item => item.key === activeKey) ? activeKey : initial;
+
+  // Land on the value in force when the list first appears.
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[tabindex="0"]')?.focus();
+  }, []);
+
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const nodes = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(MENU_ITEM)];
+    const at = nodes.indexOf(document.activeElement as HTMLButtonElement);
+    const last = nodes.length - 1;
+    let next: number;
+    switch (event.key) {
+      case 'ArrowDown':
+        next = at < 0 || at === last ? 0 : at + 1;
+        break;
+      case 'ArrowUp':
+        next = at <= 0 ? last : at - 1;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = last;
+        break;
+      case 'Enter':
+      case ' ':
+        // Handled here rather than left to the button so one key press is one
+        // choice in every engine; a choice that was focused but became disabled
+        // (a submit in flight) is simply not in `nodes`.
+        event.preventDefault();
+        nodes[at]?.click();
+        return;
+      default:
+        return;
+    }
+    event.preventDefault();
+    nodes[next]?.focus();
+  };
+
+  const dense = presentation === 'popover';
+  return (
+    <div
+      aria-label={ariaLabel}
+      aria-orientation="vertical"
+      className={cn('grid gap-px', dense ? 'm-0' : 'mt-2')}
+      onKeyDown={onKeyDown}
+      ref={listRef}
+      role="menu"
+    >
+      {items.map(item => (
+        <button
+          aria-busy={item.pending || undefined}
+          aria-checked={item.checked}
+          aria-label={item.ariaLabel}
+          className={cn(
+            'flex w-full items-center gap-sm rounded-control px-cell-x text-left',
+            dense ? 'min-h-[34px] py-1' : 'min-h-[44px] py-1.5',
+            'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+            item.checked ? 'text-fg' : 'text-fg-soft',
+          )}
+          disabled={disabled}
+          key={item.key}
+          onClick={item.onSelect}
+          onFocus={() => setActiveKey(item.key)}
+          role="menuitemradio"
+          tabIndex={item.key === stop ? 0 : -1}
+          title={item.description}
+          type="button"
+        >
+          <span aria-hidden="true" className="flex w-4 shrink-0 justify-center text-accent">
+            {item.checked ? <Check size={14} /> : null}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-sm">
+              <span className="truncate font-semibold text-ui">{item.label}</span>
+              {item.badge ? <span className="kt-label shrink-0">{item.badge}</span> : null}
+              {item.detail ? (
+                <span className="mono ml-auto min-w-0 truncate text-meta text-muted">{item.detail}</span>
+              ) : null}
+            </span>
+            {item.description ? (
+              <span className="block truncate text-meta text-muted leading-base">{item.description}</span>
+            ) : null}
+          </span>
+          {item.pending ? <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} /> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export interface RuntimeModelChoicesProps {
   readonly harness: 'claude' | 'codex';
   readonly choices: readonly RuntimeModelChoice[] | null;
@@ -468,6 +636,7 @@ export interface RuntimeModelChoicesProps {
   readonly submittingModel?: string;
   readonly disabled: boolean;
   readonly onChoose: (model: RuntimeModelChoice) => void;
+  readonly presentation?: RuntimePickerPresentation;
 }
 
 /** Presentational: the parent owns submit, notices and the Codex second step. */
@@ -478,6 +647,7 @@ export function RuntimeModelChoices({
   error,
   harness,
   onChoose,
+  presentation = 'sheet',
   submittingModel,
 }: RuntimeModelChoicesProps) {
   if (error) {
@@ -506,48 +676,33 @@ export function RuntimeModelChoices({
     );
   }
   return (
-    <div className="mt-3">
-      <p aria-live="polite" className="m-0 text-meta text-muted leading-base" role="status">
-        {harness === 'codex'
-          ? 'Live choices from this account’s Codex model catalog. Choose a model, then one of its advertised reasoning levels.'
-          : 'Only this account’s advertised Claude choices are shown. Verification updates after the next model response.'}
-      </p>
-      {/* A real list, not a labelled div: `aria-label` needs a role, and the role
-          a choice list wants is the one `<ul>`/`<li>` already carry. */}
-      <ul aria-label={`Switch ${harness} model in place`} className="mt-2 grid list-none gap-2 p-0">
-        {choices.map(choice => {
+    <div className={presentation === 'popover' ? undefined : 'mt-3'}>
+      {presentation === 'popover' ? null : (
+        <p aria-live="polite" className="m-0 text-meta text-muted leading-base" role="status">
+          {harness === 'codex'
+            ? 'Live choices from this account’s Codex model catalog. Choose a model, then one of its advertised reasoning levels.'
+            : 'Only this account’s advertised Claude choices are shown. Verification updates after the next model response.'}
+        </p>
+      )}
+      <RuntimeChoiceMenu
+        ariaLabel={`Switch ${harness} model in place`}
+        disabled={disabled}
+        items={choices.map(choice => {
           const current = choice.value === currentModel;
-          const pending = choice.value === submittingModel;
-          return (
-            <li key={choice.value}>
-              <button
-                aria-busy={pending || undefined}
-                aria-current={current ? 'true' : undefined}
-                aria-label={`Switch model in place to ${choice.label}${current ? ', current' : ''}`}
-                className="kt-btn !h-auto !justify-between !whitespace-normal !text-left flex min-h-[44px] w-full min-w-[44px] items-center gap-sm py-2"
-                disabled={disabled}
-                onClick={() => onChoose(choice)}
-                type="button"
-              >
-                <span className="min-w-0">
-                  <span className="flex min-w-0 items-center gap-sm">
-                    <span className="truncate font-semibold text-ui">{choice.label}</span>
-                    {current ? <span className="kt-label shrink-0">Current</span> : null}
-                    {!current && choice.isDefault ? <span className="kt-label shrink-0">Default</span> : null}
-                  </span>
-                  {choice.label === choice.value ? null : (
-                    <span className="mono block truncate text-meta text-muted">{choice.value}</span>
-                  )}
-                  {choice.description ? (
-                    <span className="mt-1 block text-meta text-muted leading-base">{choice.description}</span>
-                  ) : null}
-                </span>
-                {pending ? <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} /> : null}
-              </button>
-            </li>
-          );
+          return {
+            key: choice.value,
+            label: choice.label,
+            ariaLabel: `Switch model in place to ${choice.label}${current ? ', current' : ''}`,
+            checked: current,
+            pending: choice.value === submittingModel,
+            ...(!current && choice.isDefault ? { badge: 'Default' } : {}),
+            ...(choice.label === choice.value ? {} : { detail: choice.value }),
+            ...(choice.description ? { description: choice.description } : {}),
+            onSelect: () => onChoose(choice),
+          };
         })}
-      </ul>
+        presentation={presentation}
+      />
     </div>
   );
 }
@@ -564,6 +719,7 @@ export interface RuntimeReasoningStepProps {
   readonly backDisabled: boolean;
   readonly onBack: () => void;
   readonly onChoose: (effort: string) => void;
+  readonly presentation?: RuntimePickerPresentation;
 }
 
 /**
@@ -578,6 +734,7 @@ export function RuntimeReasoningStep({
   model,
   onBack,
   onChoose,
+  presentation,
   submittingEffort,
 }: RuntimeReasoningStepProps) {
   const backRef = useRef<HTMLButtonElement | null>(null);
@@ -585,7 +742,7 @@ export function RuntimeReasoningStep({
     backRef.current?.focus();
   }, []);
   return (
-    <div className="mt-3">
+    <div className={presentation === 'popover' ? undefined : 'mt-3'}>
       <button
         className="kt-btn flex min-h-[44px] min-w-[44px] items-center px-3"
         disabled={backDisabled}
@@ -600,6 +757,7 @@ export function RuntimeReasoningStep({
         disabled={disabled}
         model={model}
         onChoose={onChoose}
+        presentation={presentation}
         submittingEffort={submittingEffort}
       />
     </div>
@@ -612,6 +770,7 @@ export interface RuntimeReasoningChoicesProps {
   readonly submittingEffort?: string;
   readonly disabled: boolean;
   readonly onChoose: (effort: string) => void;
+  readonly presentation?: RuntimePickerPresentation | undefined;
 }
 
 export function RuntimeReasoningChoices({
@@ -619,6 +778,7 @@ export function RuntimeReasoningChoices({
   disabled,
   model,
   onChoose,
+  presentation = 'sheet',
   submittingEffort,
 }: RuntimeReasoningChoicesProps) {
   if (model.reasoningEfforts.length === 0)
@@ -628,77 +788,74 @@ export function RuntimeReasoningChoices({
       </p>
     );
   return (
-    <div className="mt-3">
-      <p aria-live="polite" className="m-0 text-meta text-muted leading-base" role="status">
-        Reasoning for <span className="mono text-fg-soft">{model.value}</span>. The switch stays pending until Codex
-        reports this exact model and level.
-      </p>
-      <ul aria-label={`Set reasoning for ${model.label}`} className="mt-2 grid list-none gap-2 p-0">
-        {model.reasoningEfforts.map(effort => {
+    <div className={presentation === 'popover' ? undefined : 'mt-3'}>
+      {presentation === 'popover' ? null : (
+        <p aria-live="polite" className="m-0 text-meta text-muted leading-base" role="status">
+          Reasoning for <span className="mono text-fg-soft">{model.value}</span>. The switch stays pending until Codex
+          reports this exact model and level.
+        </p>
+      )}
+      <RuntimeChoiceMenu
+        ariaLabel={`Set reasoning for ${model.label}`}
+        disabled={disabled}
+        items={model.reasoningEfforts.map(effort => {
           const current = effort.value === currentEffort;
-          const pending = effort.value === submittingEffort;
-          const isDefault = effort.value === model.defaultReasoningEffort;
-          return (
-            <li key={effort.value}>
-              <button
-                aria-busy={pending || undefined}
-                aria-current={current ? 'true' : undefined}
-                aria-label={`Set ${model.label} reasoning to ${effortDisplayName(effort.value)}${current ? ', current' : ''}`}
-                className="kt-btn !h-auto !justify-between !whitespace-normal !text-left flex min-h-[44px] w-full min-w-[44px] items-center gap-sm py-2"
-                disabled={disabled}
-                onClick={() => onChoose(effort.value)}
-                type="button"
-              >
-                <span className="min-w-0">
-                  <span className="flex min-w-0 items-center gap-sm">
-                    <span className="truncate font-semibold text-ui">{effortDisplayName(effort.value)}</span>
-                    {current ? <span className="kt-label shrink-0">Current</span> : null}
-                    {!current && isDefault ? <span className="kt-label shrink-0">Default</span> : null}
-                  </span>
-                  {effort.description ? (
-                    <span className="mt-1 block text-meta text-muted leading-base">{effort.description}</span>
-                  ) : null}
-                </span>
-                {pending ? <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} /> : null}
-              </button>
-            </li>
-          );
+          return {
+            key: effort.value,
+            label: effortDisplayName(effort.value),
+            ariaLabel: `Set ${model.label} reasoning to ${effortDisplayName(effort.value)}${current ? ', current' : ''}`,
+            checked: current,
+            pending: effort.value === submittingEffort,
+            ...(!current && effort.value === model.defaultReasoningEffort ? { badge: 'Default' } : {}),
+            ...(effort.description ? { description: effort.description } : {}),
+            onSelect: () => onChoose(effort.value),
+          };
         })}
-      </ul>
+        presentation={presentation}
+      />
     </div>
   );
 }
 
-/** The four Claude levels as a 2-column grid of 44px targets, mirroring
- *  `RuntimeModelChoices`. Presentational: the parent owns submit + notices. */
+/** The four Claude levels, mirroring `RuntimeModelChoices`. Presentational: the
+ *  parent owns submit + notices. `current` is the level last SENT this session,
+ *  else the one the session launched with — Claude never echoes it back. */
 export function ClaudeEffortChoices({
+  current,
   disabled,
   onChoose,
+  presentation = 'sheet',
 }: {
+  readonly current?: string | undefined;
   readonly disabled: boolean;
   readonly onChoose: (level: ClaudeEffortLevel) => void;
+  readonly presentation?: RuntimePickerPresentation | undefined;
 }) {
   return (
-    <div className="mt-3">
-      <p className="m-0 text-meta text-muted leading-base">
-        Reasoning effort for new Claude turns. Persists to this account’s settings (saved as the default for new
-        sessions). Claude does not echo the level back, so it is shown as sent, not re-verified.
-      </p>
-      <ul aria-label="Set Claude reasoning effort" className="mt-2 grid list-none grid-cols-2 gap-2 p-0">
-        {CLAUDE_EFFORT_LEVELS.map(level => (
-          <li key={level}>
-            <button
-              aria-label={`Set reasoning effort to ${level}`}
-              className="kt-btn flex min-h-[44px] w-full items-center justify-center capitalize"
-              disabled={disabled}
-              onClick={() => onChoose(level)}
-              type="button"
-            >
-              {level}
-            </button>
-          </li>
-        ))}
-      </ul>
+    <div className={presentation === 'popover' ? undefined : 'mt-3'}>
+      {presentation === 'popover' ? null : (
+        <p className="m-0 text-meta text-muted leading-base">
+          Reasoning effort for new Claude turns. Persists to this account’s settings (saved as the default for new
+          sessions). Claude does not echo the level back, so it is shown as sent, not re-verified.
+        </p>
+      )}
+      <RuntimeChoiceMenu
+        ariaLabel="Set Claude reasoning effort"
+        disabled={disabled}
+        items={CLAUDE_EFFORT_LEVELS.map(level => ({
+          key: level,
+          label: effortDisplayName(level),
+          ariaLabel: `Set reasoning effort to ${level}`,
+          checked: level === current,
+          onSelect: () => onChoose(level),
+        }))}
+        presentation={presentation}
+      />
+      {presentation === 'popover' ? (
+        <p className="mt-1 mb-0 border-border-soft border-t px-cell-x pt-1.5 pb-0.5 text-meta text-muted leading-base">
+          Also saved as this account’s default for new sessions.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -714,6 +871,7 @@ export function RuntimeEffortControls({
   api,
   canControl,
   catalogs,
+  claudeEffort,
   daemon,
   newRequestId = defaultRequestId,
   onClaudeEffortSent,
@@ -721,8 +879,10 @@ export function RuntimeEffortControls({
   onSwitchFailed,
   onSwitchSubmitted,
   onOpenTerminal,
+  presentation = 'sheet',
   view,
 }: RuntimeEffortControlsProps) {
+  const popover = presentation === 'popover';
   const { config, state } = view;
   const terminal = TERMINAL_STATUSES.has(state.status);
   const promptRefused = isPromptKnownBusy(state);
@@ -749,7 +909,8 @@ export function RuntimeEffortControls({
     setCodexSubmittingEffort(null);
   }, [daemon.daemonId, config.id]);
 
-  const currentCodexModel = catalog?.choices.find(choice => choice.value === state.observedModel);
+  const runningModel = runtimeModelInForce(view);
+  const currentCodexModel = catalog?.choices.find(choice => choice.value === runningModel);
   const codexPickerFallback =
     config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, currentCodexModel, true);
 
@@ -845,8 +1006,8 @@ export function RuntimeEffortControls({
   }
 
   return (
-    <div className="mt-4 border-border-soft border-t pt-3" data-daemon-id={daemon.daemonId}>
-      <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>
+    <div className={popover ? undefined : 'mt-4 border-border-soft border-t pt-3'} data-daemon-id={daemon.daemonId}>
+      {popover ? null : <h3 className="m-0 font-semibold text-fg text-ui">{title}</h3>}
       {promptRefused ? (
         <p className="mt-2 text-meta text-warn leading-base">
           Wait for an idle prompt before changing the reasoning level. The daemon refuses a busy pane instead of
@@ -859,9 +1020,14 @@ export function RuntimeEffortControls({
           {runtimeControlUnavailableMessage('effort')}
         </p>
       ) : config.harness === 'claude' ? (
-        <ClaudeEffortChoices disabled={submitting || promptRefused} onChoose={level => void runEffortCommand(level)} />
+        <ClaudeEffortChoices
+          current={claudeEffort}
+          disabled={submitting || promptRefused}
+          onChoose={level => void runEffortCommand(level)}
+          presentation={presentation}
+        />
       ) : (
-        <div className="mt-3">
+        <div className={popover ? undefined : 'mt-3'}>
           {catalogError ? (
             <p
               className="m-0 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui leading-base"
@@ -876,16 +1042,17 @@ export function RuntimeEffortControls({
             </div>
           ) : currentCodexModel ? (
             <RuntimeReasoningChoices
-              currentEffort={state.observedReasoningEffort}
+              currentEffort={state.observedReasoningEffort?.trim() || config.launchReasoningEffort}
               disabled={submitting || promptRefused}
               model={currentCodexModel}
               onChoose={effort => void runCodexEffort(currentCodexModel, effort)}
+              presentation={presentation}
               submittingEffort={codexSubmittingEffort ?? undefined}
             />
           ) : (
             <p className="m-0 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui" role="alert">
-              The observed model ({state.observedModel || 'unknown'}) is not in this account’s current Codex catalog.
-              Refresh the session or use the native Terminal picker.
+              The running model ({runningModel ?? 'unknown'}) is not in this account’s current Codex catalog. Refresh
+              the session or use the native Terminal picker.
             </p>
           )}
           {codexPickerFallback && !runtimeControlUnavailable ? (

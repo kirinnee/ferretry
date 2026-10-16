@@ -2741,6 +2741,65 @@ const HARNESS_IDLE_PANES: Readonly<Record<'claude' | 'codex', string>> = {
   ].join('\n'),
 };
 
+/**
+ * The runtime-model catalog each harness's account advertises for the new session, so the composer's model
+ * and reasoning pickers open onto real choices — descriptions included — rather than a catalog failure.
+ */
+const NEW_SESSION_RUNTIME_MODELS: Readonly<Record<'claude' | 'codex', unknown>> = {
+  claude: {
+    harness: 'claude',
+    source: 'wrapper-inventory',
+    choices: [
+      {
+        value: 'claude-opus-5[1m]',
+        label: 'Opus 5 (1M context)',
+        description: 'The deepest model, with the long context window.',
+        isDefault: true,
+        reasoningEfforts: [],
+      },
+      {
+        value: 'claude-opus-5',
+        label: 'Opus 5',
+        description: 'The deepest model this account advertises.',
+        reasoningEfforts: [],
+      },
+      {
+        value: 'claude-sonnet-5',
+        label: 'Sonnet 5',
+        description: 'Fast and capable for everyday work.',
+        reasoningEfforts: [],
+      },
+      { value: 'claude-haiku-5', label: 'Haiku 5', reasoningEfforts: [] },
+    ],
+  },
+  codex: {
+    harness: 'codex',
+    source: 'codex-app-server',
+    choices: [
+      {
+        value: 'gpt-5.6-codex',
+        label: 'GPT-5.6 Codex',
+        description: 'Tuned for long agentic coding runs.',
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        reasoningEfforts: [
+          { value: 'low', description: 'Fast responses with lighter reasoning.' },
+          { value: 'medium', description: 'Balances speed and reasoning depth.' },
+          { value: 'high', description: 'Greater reasoning depth for complex problems.' },
+          { value: 'xhigh', description: 'Extra high reasoning depth for the hardest problems.' },
+        ],
+      },
+      {
+        value: 'gpt-5.6',
+        label: 'GPT-5.6',
+        description: 'The general model.',
+        defaultReasoningEffort: 'medium',
+        reasoningEfforts: [{ value: 'medium' }, { value: 'high' }],
+      },
+    ],
+  },
+};
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
@@ -2767,6 +2826,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
           : HARNESS_LIVE_PANE,
       { headers: { 'content-type': 'text/plain; charset=utf-8' } },
     );
+  if (method === 'GET' && sessionRoute?.sessionId === NEW_SESSION_ID && sessionRoute.rest === 'runtime-models')
+    return harnessJson(NEW_SESSION_RUNTIME_MODELS[NEW_SESSION_HARNESS]);
   // An attachment upload answers with the daemon's own view of the file it now holds.
   if (method === 'POST' && sessionRoute?.rest === 'attachments') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };

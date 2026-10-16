@@ -370,6 +370,8 @@ describe('SessionChatPage', () => {
     try {
       // Assert — a ready prompt is idle to every one of them.
       expect(page.root.findByType(ComposerRuntime).props.busy).toBe(false);
+      // A desktop gets the pickers as a small popover at the chip, not a sheet.
+      expect(page.root.findByType(ComposerRuntime).props.presentation).toBe('popover');
       expect(page.root.findByType(Transcript).props.busy).toBe(false);
       expect(page.root.findByType(Composer).props.busy).toBe(false);
 
@@ -382,12 +384,38 @@ describe('SessionChatPage', () => {
       // Assert — the sheet reached the catalog and rendered its labelled list.
       expect(catalogCalls).toEqual(['/v1/sessions/runtime-ready/runtime-models']);
       const choices = page.root.findAll(
-        node => node.type === 'ul' && node.props['aria-label'] === 'Switch claude model in place',
+        node =>
+          node.type === 'div' &&
+          node.props.role === 'menu' &&
+          node.props['aria-label'] === 'Switch claude model in place',
       );
       expect(choices).toHaveLength(1);
+      // The launched model is the one in force until the harness reports another.
       expect(
         (choices[0] as ReactTestInstance).findAllByType('button').map(button => button.props['aria-label']),
-      ).toEqual(['Switch model in place to Opus 5']);
+      ).toEqual(['Switch model in place to Opus 5, current']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('keeps the runtime pickers as bottom sheets on a phone', () => {
+    // Arrange
+    const ready = sessionView('runtime-phone', { state: { promptReady: true, status: 'running' } });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={{ ...client([], ready), runtime: async () => ready }}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="sheet"
+        session={ready}
+      />,
+    );
+
+    try {
+      // Assert
+      expect(page.root.findByType(ComposerRuntime).props.presentation).toBe('sheet');
     } finally {
       run(() => page.unmount());
     }

@@ -887,6 +887,9 @@ export function SessionChatPage({
                   <ComposerRuntime
                     busy={runtimeSwitchBusy}
                     canControl={canControl}
+                    // A phone keeps the thumb-reach sheet; anything with a pointer and room
+                    // gets a small menu at the chip instead of a window-wide panel.
+                    presentation={formFactor === 'phone' ? 'sheet' : 'popover'}
                     renderEffortControls={lifecycle => (
                       <RuntimeEffortControls
                         api={runtimeApi}
