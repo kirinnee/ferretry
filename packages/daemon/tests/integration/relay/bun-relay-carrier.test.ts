@@ -285,6 +285,133 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
     }
   });
 
+  it('should answer a fast relayed request while a slow one on the same link is still running', async () => {
+    // Arrange — THE DEFECT: the carrier's inbound chain waited for each request's ROUTE HANDLER, so one
+    // slow route held up every request and every keystroke behind it on the link. Here the slow route
+    // does not answer until the fast answer has crossed; a carrier that serialised would never get it.
+    const sessionId = session();
+    const host = { value: '' };
+    let channel: ChannelState | undefined;
+    let pending: Awaited<ReturnType<typeof startClientHandshake>> | undefined;
+    const answered: number[] = [];
+    let releaseSlow: (() => void) | undefined;
+    const slowStarted = Promise.withResolvers<void>();
+
+    const server = Bun.serve({
+      port: 0,
+      fetch: (request, host_) => (host_.upgrade(request) ? undefined : new Response('not a socket', { status: 400 })),
+      websocket: {
+        open: socket => {
+          const challenge = relayCrypto.randomBytes(NONCE_BYTES);
+          host.value = toBase64Url(challenge);
+          socket.send(
+            controlFrame({
+              t: 'challenge',
+              protocol: RELAY_PROTOCOL_ID,
+              nonce: toBase64Url(challenge),
+              host: `127.0.0.1:${server.port}`,
+              deadlineSeconds: 10,
+            }),
+          );
+        },
+        message: async (socket, message) => {
+          if (typeof message === 'string') return;
+          const decoded = decodeFrame(new Uint8Array(message));
+          if (!decoded.ok) throw new Error(decoded.reason);
+          const frame: RelayFrame = decoded.frame;
+          if (frame.kind === FRAME_KINDS.control) {
+            if (decodeControlMessage(frame.payload)?.t !== 'claim') return;
+            socket.send(
+              controlFrame({
+                t: 'claimed',
+                protocol: RELAY_PROTOCOL_ID,
+                limits: { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 },
+              }),
+            );
+            socket.send(controlFrame({ t: 'open' }, sessionId));
+            pending = await startClientHandshake(relayCrypto, sessionId, identity.daemonId);
+            socket.send(
+              encodeFrame({
+                kind: FRAME_KINDS.handshake,
+                sessionId,
+                sequence: HANDSHAKE_FRAME_SEQUENCE,
+                payload: encodeHandshakeMessage(pending.hello),
+              }),
+            );
+            return;
+          }
+          const seal = async (body: unknown): Promise<Uint8Array> => {
+            if (channel === undefined) throw new Error('no channel');
+            const sealed = await sealRecord(relayCrypto, channel, utf8Bytes(JSON.stringify(body)));
+            if (!sealed.ok) throw new Error(sealed.reason);
+            channel = sealed.state;
+            return encodeFrame(sealed.frame);
+          };
+          if (frame.kind === FRAME_KINDS.handshake) {
+            const hello = decodeDaemonHello(frame.payload);
+            if (hello === null || pending === undefined) throw new Error('no daemon hello');
+            const completed = await completeClientHandshake(relayCrypto, pending, hello);
+            if (!completed.ok) throw new Error(completed.reason);
+            channel = openChannel(sessionId, completed.keys, 'client');
+            socket.send(await seal(await claim('auth', completed.keys.transcriptHash)));
+            return;
+          }
+          if (frame.kind !== FRAME_KINDS.data || channel === undefined) return;
+          const opened = await openRecord(relayCrypto, channel, frame);
+          if (!opened.ok) throw new Error(opened.reason);
+          channel = opened.state;
+          const read = JSON.parse(utf8Text(opened.plaintext) ?? 'null') as { t?: string; id?: number } | null;
+          if (read?.t === 'authenticated') {
+            // Both sealed before either is sent, so the two frames leave back to back.
+            const slow = await seal({ t: 'req', id: 1, method: 'GET', path: '/slow' });
+            const fast = await seal({ t: 'req', id: 2, method: 'GET', path: '/fast' });
+            socket.send(slow);
+            socket.send(fast);
+            return;
+          }
+          if (read?.t === 'res' && read.id !== undefined) answered.push(read.id);
+        },
+      },
+    });
+
+    const carrier = new BunRelayCarrier({
+      config: config({ url: `http://127.0.0.1:${server.port}` }),
+      crypto: relayCrypto,
+      identity,
+      devices,
+      connections: new LiveDeviceConnections(),
+      sockets: relayStreams,
+      pairing: relayPairing,
+      dispatch: async request => {
+        if (request.path === '/slow') {
+          slowStarted.resolve();
+          await new Promise<void>(resolve => {
+            releaseSlow = resolve;
+          });
+        }
+        return ok({ path: request.path });
+      },
+    });
+
+    try {
+      // Act
+      carrier.start();
+      await slowStarted.promise;
+      const fastFirst = await until(() => (answered.length > 0 ? [...answered] : undefined), 'the fast answer');
+
+      // Assert — the fast answer crossed while the slow route was still running.
+      should(fastFirst).deepEqual([2]);
+
+      // Act + Assert — the slow one answers when its route does, under its own id.
+      releaseSlow?.();
+      await until(() => (answered.length > 1 ? true : undefined), 'the slow answer');
+      should(answered).deepEqual([2, 1]);
+    } finally {
+      carrier.stop();
+      server.stop(true);
+    }
+  });
+
   it('should report no carrier, and dial nothing, when none is configured', () => {
     // Arrange
     const dialled: string[] = [];

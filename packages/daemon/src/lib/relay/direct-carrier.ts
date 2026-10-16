@@ -192,9 +192,13 @@ export class DirectSession implements SocketHandler {
       return;
     }
     // In order, one at a time, for the reason the relay carrier serialises its inbox: a record's
-    // receive sequence advances inside the handler, so two decrypting at once would race it.
+    // receive sequence advances inside the handler, so two decrypting at once would race it. Only the
+    // HANDLING is serialised — an answer is written whenever its request finishes — and a failure
+    // while writing one ends this socket as an internal fault rather than going unobserved.
     this.#inbox = this.#inbox.then(async () => {
-      if (!this.#ended) await this.#link.receiveBinary(bytes);
+      if (this.#ended) return;
+      const receipt = await this.#link.accept(bytes);
+      receipt.settled.catch(() => this.#end(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame'));
     });
   }
 
