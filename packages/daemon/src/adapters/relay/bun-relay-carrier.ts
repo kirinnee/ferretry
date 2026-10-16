@@ -11,7 +11,9 @@
  * - **Order.** Handling a frame is asynchronous — records are sealed and opened with real crypto —
  *   and a WebSocket does not wait. Every inbound message is threaded through one promise chain, so
  *   frame `n+1` is never handled before frame `n`. Without that the sequence discipline would end
- *   sessions the carrier delivered perfectly.
+ *   sessions the carrier delivered perfectly. The chain waits for a frame to be HANDLED, never for
+ *   the request it completed to be answered: that runs beside the frames behind it, or one slow
+ *   route would hold up every session on the link.
  * - **Liveness.** A ping every `heartbeatSeconds`, and a socket with no evidence of life for the
  *   grace window is dropped and redialled. No evidence means dead: waiting for a close that a
  *   suspended laptop will never send is how a daemon believes it holds a rendezvous slot it lost.
@@ -222,20 +224,23 @@ export class BunRelayCarrier {
       socket.close(RELAY_CLOSE_CODES.protocolError, 'unsupported message type');
       return;
     }
+    // A handler that threw has left this link in a state nobody can describe, so the socket goes
+    // rather than carrying on: the redial below gets a fresh rendezvous slot and fresh keys. The same
+    // is true of a failure while writing an answer, which arrives after the chain has moved on.
+    const failed = (error: unknown): void => {
+      if (!this.#live(socket, link)) return;
+      this.#detail = `the relay link failed: ${error instanceof Error ? error.message : String(error)}`;
+      socket.close(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
+    };
     this.#inbox = this.#inbox
       .then(async () => {
         if (!this.#live(socket, link)) return;
-        await link.receiveBinary(bytes);
+        const receipt = await link.accept(bytes);
+        receipt.settled.catch(failed);
         if (!this.#live(socket, link)) return;
         if (link.report().claimed) this.#phase = 'carrying';
       })
-      // A handler that threw has left this link in a state nobody can describe, so the socket goes
-      // rather than carrying on: the redial below gets a fresh rendezvous slot and fresh keys.
-      .catch((error: unknown) => {
-        if (!this.#live(socket, link)) return;
-        this.#detail = `the relay link failed: ${error instanceof Error ? error.message : String(error)}`;
-        socket.close(RELAY_CLOSE_CODES.relayInternal, 'the daemon could not carry this frame');
-      });
+      .catch(failed);
   }
 
   #tick(socket: RelayWebSocket, link: RelayLink): void {

@@ -90,20 +90,25 @@ interface Downstream {
   readonly binary: RelayFrame[];
   readonly texts: string[];
   readonly closes: Array<{ readonly code: number; readonly reason: string }>;
+  /** Set to make every later binary send throw, as a transport that has lost its socket does. */
+  readonly failing: { on: boolean };
 }
 
 function downstream(): Downstream {
   const binary: RelayFrame[] = [];
   const texts: string[] = [];
   const closes: Array<{ readonly code: number; readonly reason: string }> = [];
+  const failing = { on: false };
   return {
     binary,
     texts,
     closes,
+    failing,
     port: {
       send: frame => {
         if (typeof frame === 'string') texts.push(frame);
         else {
+          if (failing.on) throw new Error('the socket is gone');
           const decoded = decodeFrame(frame);
           if (!decoded.ok) throw new Error(decoded.reason);
           binary.push(decoded.frame);
@@ -287,6 +292,35 @@ describe('the direct carrier', () => {
       clientAddress: '127.0.0.1',
     });
     handler.close();
+  });
+
+  it('should end the socket as an internal fault when writing an answer fails after the frame was handled', async () => {
+    // Arrange — an answer is written after its frame's handling has finished, so a failure there is
+    // the receipt's to report rather than the inbox chain's, and must not go unobserved.
+    const { route } = carrier();
+    const { handler, wire, sessionId } = await connect(route);
+    const { channel, transcript } = await handshake(handler, wire, sessionId);
+    const proof = await signDeviceProof(
+      crypto_,
+      deviceKey,
+      deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION),
+    );
+    const next = await send(handler, channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof,
+    });
+
+    // Act
+    wire.failing.on = true;
+    await send(handler, next, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+
+    // Assert
+    should(wire.closes).deepEqual([
+      { code: RELAY_CLOSE_CODES.relayInternal, reason: 'the daemon could not carry this frame' },
+    ]);
   });
 
   it('should redeem a pairing on the DIRECT budget, keyed by the socket’s own peer', async () => {
