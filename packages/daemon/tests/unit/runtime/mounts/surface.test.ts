@@ -140,6 +140,19 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  mcpOAuth: {
+    connections: async () => [],
+    start: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    complete: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    cancel: flowId => ({ flowId, cancelled: false }),
+    signOut: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   fleetCredentials: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -496,6 +509,7 @@ describe('the mounted daemon surface', () => {
     const operatorRoutes =
       108 + // the session table and everything that is not the account model (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
+      5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       2 + // the account model's credential list and its Check now
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
@@ -594,6 +608,14 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/login/:flowId',
       'POST /v1/fleet/login/:flowId',
       'DELETE /v1/fleet/login/:flowId',
+      // Signing in to a remote MCP server (docs/mcp-oauth.md). NOTE WHAT IS ABSENT: no route returns a
+      // token. The daemon is the OAuth client and files them in the secret store; an authorization URL goes
+      // out and one callback address comes in, in a body.
+      'GET /v1/fleet/mcp-auth',
+      'POST /v1/fleet/mcp-auth/:component',
+      'DELETE /v1/fleet/mcp-auth/:component',
+      'POST /v1/fleet/mcp-auth/flows/:flowId',
+      'DELETE /v1/fleet/mcp-auth/flows/:flowId',
       // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or
       // destroys a slice, because the units are transient and belong to the launches that made them.

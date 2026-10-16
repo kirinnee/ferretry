@@ -38,6 +38,7 @@ import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-hi
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
+import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
@@ -128,6 +129,10 @@ export interface MountedSubsystems {
    *  child's stdin, and lets the harness write its own credential into its own store. Every route here
    *  is `configure`, which a caller off this host passes only behind the passkey step-up. */
   readonly harnessLogin: HarnessLoginSubsystem;
+  /** Signing in to a remote MCP server from a browser, with the daemon as the OAuth client: tokens go
+   *  straight into the secret store and are used by launch variable name (docs/mcp-oauth.md). Every act
+   *  is `fleet.configure`. */
+  readonly mcpOAuth: McpOAuthSubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */
   readonly fleetCredentials: FleetCredentialsSubsystem;
@@ -353,6 +358,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // literal with a one-segment id beneath it, so it can neither shadow nor be shadowed by anything in
     // the fleet tables above.
     ...harnessLoginRoutes(subsystems.harnessLogin),
+    ...mcpOAuthRoutes(subsystems.mcpOAuth),
     // Resource limits register beside the fleet they bound, and are governed by the same capability
     // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
     // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this

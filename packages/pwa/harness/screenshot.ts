@@ -31,6 +31,7 @@
  *   bun harness/screenshot.ts --files-only   # just the Files/reload/preview frames
  *   bun harness/screenshot.ts --pairing-failures-only   # the two pairing failures that are one sentence
  *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
+ *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
 
@@ -82,6 +83,8 @@ const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
 const ATTENTION_ONLY = process.argv.includes('--attention-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
+/** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
+const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 
 /**
  * The Projects hub states, each on a page of its own.
@@ -116,7 +119,8 @@ const WALKS_SETTINGS = !(
   FILES_ONLY ||
   TASK_BOARD_ONLY ||
   PROJECTS_ONLY ||
-  PAIRING_FAILURES_ONLY
+  PAIRING_FAILURES_ONLY ||
+  MCP_SIGN_IN_ONLY
 );
 
 /**
@@ -423,6 +427,88 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
   await page.evaluate(() => {
     document.documentElement.dataset.theme = 'studio-dark';
   });
+};
+
+/**
+ * SIGNING IN TO A REMOTE MCP SERVER (docs/mcp-oauth.md): the real Components tab on an `auth: oauth`
+ * server — needing a sign-in, signed in, its sheet coming back by itself, and its sheet the paste way with
+ * the daemon's refusal on screen — then the static callback page in its three states.
+ *
+ * The callback page is served with the site's WHOLE app-wide policy, `script-src 'self'` included, so a
+ * capture of its words is also proof its one same-origin script ran. "Done" is answered by a second page
+ * in the same context listening on the channel, exactly as a Ferretry tab in the same browser would.
+ *
+ * A narrow mode, so it owes no Settings tally; its own sideways check runs on every frame instead.
+ */
+const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void> => {
+  const noSideways = async (where: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`${where} scrolls sideways by ${wide}px at ${viewportName}`);
+  };
+  const shot = async (name: string): Promise<void> => {
+    await noSideways(`mcp ${name}`);
+    const target = join(outDir, `mcp-${name}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 MCP sign-in ${name} ${viewportName} -> ${target}\n`);
+  };
+  const frame = async (name: string): Promise<void> => {
+    await page.goto(`${server.url}?mcp-sign-in=${name}`);
+    await page.locator('[data-mcp-sign-in-status]').waitFor({ state: 'visible' });
+  };
+
+  await frame('needs-sign-in');
+  await shot('needs-sign-in');
+  await frame('signed-in');
+  await page.locator('[data-mcp-sign-in-secrets]').waitFor({ state: 'visible' });
+  await shot('signed-in');
+
+  await frame('sheet-pwa');
+  await page.locator('[data-catalog-section="mcp-sign-in"] [data-change-submit]').click();
+  await page.locator('[data-mcp-sign-in="waiting"][data-mcp-sign-in-mode="pwa"]').waitFor({ state: 'visible' });
+  await shot('sheet-pwa');
+  await page.locator('[data-mcp-sign-in-paste-disclosure] summary').click();
+  await page.locator('textarea[name="mcp-sign-in-address"]').waitFor({ state: 'visible' });
+  await shot('sheet-pwa-paste-open');
+
+  await frame('sheet-paste');
+  await page.locator('[data-catalog-section="mcp-sign-in"] [data-change-submit]').click();
+  await page.locator('[data-mcp-sign-in-use-paste]').click();
+  await page.locator('[data-mcp-sign-in-mode="paste"]').waitFor({ state: 'visible' });
+  await page
+    .locator('textarea[name="mcp-sign-in-address"]')
+    .fill('http://127.0.0.1:51234/oauth/mcp-callback/0123456789abcdef?code=harness-preview&state=harness-stale');
+  await page.locator('[data-mcp-sign-in-paste] button[type="submit"]').click();
+  await page.locator('[data-mcp-sign-in-refusal]').waitFor({ state: 'visible' });
+  if ((await page.locator('textarea[name="mcp-sign-in-address"]').inputValue()) !== '')
+    fail('the MCP sign-in sheet kept a pasted address after sending it');
+  await shot('sheet-paste-refused');
+
+  const callback = `${server.url}oauth/mcp-callback/0123456789abcdef?code=harness-preview&state=harness-preview`;
+  await page.goto(callback);
+  await page.locator('#callback[data-state="waiting"]').waitFor({ state: 'attached' });
+  await shot('callback-waiting');
+  await page.locator('#callback[data-state="fallback"]').waitFor({ state: 'visible', timeout: 10_000 });
+  await shot('callback-fallback');
+
+  const ferretryTab = await page.context().newPage();
+  try {
+    await ferretryTab.goto(`${server.url}oauth/mcp-callback/0123456789abcdef`);
+    await ferretryTab.evaluate(() => {
+      const channel = new BroadcastChannel('ferretry-mcp-oauth');
+      channel.onmessage = event => {
+        const data = event.data as { type?: string; id?: string };
+        if (data.type !== 'callback' || data.id === undefined) return;
+        channel.postMessage({ type: 'received', id: data.id });
+        channel.postMessage({ type: 'finished', id: data.id, ok: true });
+      };
+    });
+    await page.goto(callback);
+    await page.locator('#callback[data-state="done"]').waitFor({ state: 'visible' });
+    if (new URL(page.url()).search !== '') fail('the MCP callback page kept its code after Ferretry took it');
+    await shot('callback-done');
+  } finally {
+    await ferretryTab.close();
+  }
 };
 
 /**
@@ -1477,6 +1563,14 @@ const TRUSTED_TYPES_POLICY = (() => {
     fail('public/_headers no longer names its Trusted Types rule; the harness cannot enforce it');
   return directives.join('; ');
 })();
+/** The site's whole app-wide policy, read out of `public/_headers`, for the static pages served beside the app. */
+const SITE_POLICY = (() => {
+  const policy = /Content-Security-Policy: ([^\n]+)/u.exec(
+    readFileSync(join(packageDir, 'public/_headers'), 'utf8'),
+  )?.[1];
+  if (policy === undefined) fail('public/_headers no longer names its app-wide policy');
+  return policy;
+})();
 const trustedTypesViolations: string[] = [];
 const watchTrustedTypes = (page: Page): void => {
   page.on('console', message => {
@@ -1504,6 +1598,17 @@ const server = Bun.serve({
       });
     // Served from `public/` rather than copied into `out/`: it is unbundled by design, so the shipped file IS the build.
     if (path === '/pre-paint.js') return new Response(Bun.file(join(packageDir, 'public/pre-paint.js')));
+    // The MCP sign-in callback page, served as Pages serves it: the rewrite `public/_redirects` names, under
+    // the site's whole app-wide policy, so its words on screen prove its same-origin script ran.
+    if (path.startsWith('/oauth/mcp-callback/'))
+      return new Response(Bun.file(join(packageDir, 'public/oauth/mcp-callback.html')), {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': SITE_POLICY },
+      });
+    if (path === '/icons/favicon.svg') return new Response(Bun.file(join(packageDir, 'public/icons/favicon.svg')));
+    if (path === '/oauth/mcp-callback.js')
+      return new Response(Bun.file(join(packageDir, 'public/oauth/mcp-callback.js')), {
+        headers: { 'content-type': 'text/javascript; charset=utf-8' },
+      });
     return new Response(Bun.file(join(outDir, path)));
   },
 });
@@ -1569,6 +1674,10 @@ try {
           }
           if (PAIRING_FAILURES_ONLY) {
             await capturePairingFailures(page, viewport.name);
+            continue;
+          }
+          if (MCP_SIGN_IN_ONLY) {
+            await captureMcpSignIn(page, viewport.name);
             continue;
           }
           if (TASK_BOARD_ONLY) {

@@ -230,6 +230,7 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
         ...text('command'),
         ...(Array.isArray(component.args) ? { args: [...(component.args as string[])] } : {}),
         ...text('url'),
+        ...(component.auth === 'oauth' ? { auth: 'oauth' as const } : {}),
         env: envEntries(env),
       };
     case 'skills':

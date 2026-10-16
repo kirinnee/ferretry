@@ -444,3 +444,67 @@ describe('ComponentsSurface — where a copy came from', () => {
     expect(root.textContent).toContain('Copied from Work laptop');
   });
 });
+
+describe('ComponentsTab — a server that signs in with OAuth', () => {
+  const linear = component({
+    reference: 'mcp/linear',
+    kind: 'mcp',
+    name: 'linear',
+    detail: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth', env: [] },
+  });
+  const withLinear = () =>
+    scriptedMachine({ catalog: studioCatalog({ components: componentCatalog({ mcp: [linear] }) }) });
+
+  it('shows its address and where its sign-in stands, and no sign-in for a command server', async () => {
+    const root = await open(withLinear());
+    await toDetail(root, 'mcp', 'mcp/linear');
+    expect(root.querySelector('[data-catalog-section="Address"]')).not.toBeNull();
+    expect(text(root, '[data-catalog-section="mcp-sign-in"]')).toContain('Needs sign-in');
+    await click(root, '[data-catalog-back]');
+    await click(root, '[data-component-row="mcp/github"]');
+    expect(root.querySelector('[data-catalog-section="Command"]')).not.toBeNull();
+    expect(root.querySelector('[data-catalog-section="mcp-sign-in"]')).toBeNull();
+  });
+
+  it('keeps auth: oauth through an edit, and drops it when the switch is turned off', async () => {
+    const machine = withLinear();
+    const root = await open(machine);
+    await toDetail(root, 'mcp', 'mcp/linear');
+    await click(root, '[data-component-edit]');
+    const toggle = () => root.querySelector('[data-component-field="oauth"]');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    await submit(root);
+    expect(stagedChanges(machine)[0]).toMatchObject({
+      component: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth' },
+    });
+
+    await click(root, '[data-component-edit]');
+    await click(root, '[data-component-field="oauth"]');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
+    await submit(root);
+    expect(stagedChanges(machine)[1]).toEqual({
+      kind: 'component.put',
+      name: 'linear',
+      component: { kind: 'mcp', url: 'https://mcp.linear.example/mcp' },
+      create: false,
+    });
+  });
+
+  it('offers the switch on a new server only once it is a web address', async () => {
+    const machine = scriptedMachine();
+    const root = await open(machine);
+    await click(root, '[data-component-kind="mcp"]');
+    await click(root, '[data-component-new="mcp"]');
+    await type(root, '[data-component-field="name"]', 'linear');
+    await type(root, '[data-component-field="body"]', 'npx linear-mcp');
+    expect(root.querySelector('[data-component-field="oauth"]')).toBeNull();
+    await type(root, '[data-component-field="body"]', 'https://mcp.linear.example/mcp');
+    expect(root.textContent).toContain('Signs in with OAuth');
+    await click(root, '[data-component-field="oauth"]');
+    await submit(root);
+    expect(stagedChanges(machine)[0]).toMatchObject({
+      component: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth' },
+      create: true,
+    });
+  });
+});

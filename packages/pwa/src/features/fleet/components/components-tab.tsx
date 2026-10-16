@@ -48,6 +48,8 @@ import {
   SECRET_REFERENCE,
 } from './component-model.ts';
 import { itemHref, useHashItem } from './machine-links.ts';
+import { signsInWithOAuth } from './mcp-sign-in-model.ts';
+import { McpSignInSection } from './mcp-sign-in-section.tsx';
 
 type Page =
   | { readonly kind: 'kinds' }
@@ -377,7 +379,7 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 function DetailPage(props: SharedProps & { component: FleetComponentView }) {
-  const { component, catalog, machineName, machineNames, open, onBack } = props;
+  const { component, catalog, machineName, machineNames, open, onBack, online, connection, createClient } = props;
   const [deleting, setDeleting] = useState(false);
   const layerIn = profilesWithLayer(component.reference, catalog.profiles.profiles);
   return (
@@ -424,9 +426,26 @@ function DetailPage(props: SharedProps & { component: FleetComponentView }) {
           </span>
         </CatalogNote>
       )}
-      <Section title={component.kind === 'mcp' ? 'Command' : 'Content'}>
+      <Section
+        title={
+          component.kind !== 'mcp'
+            ? 'Content'
+            : component.detail.kind === 'mcp' && component.detail.url !== undefined
+              ? 'Address'
+              : 'Command'
+        }
+      >
         <Content component={component} />
       </Section>
+      {signsInWithOAuth(component) ? (
+        <McpSignInSection
+          component={component}
+          machineName={machineName}
+          online={online}
+          connection={connection}
+          createClient={createClient}
+        />
+      ) : null}
       <Section title="Used by">
         <Prose>
           Used by {counted(component.usedBy.profiles.length, 'profile')} and{' '}

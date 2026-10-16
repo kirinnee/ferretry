@@ -262,6 +262,7 @@ function componentOf(
           ...(input.command === undefined ? {} : { command: input.command }),
           ...(input.args === undefined ? {} : { args: [...input.args] }),
           ...(input.url === undefined ? {} : { url: input.url }),
+          ...(input.auth === undefined ? {} : { auth: input.auth }),
           ...(env === undefined ? {} : { env }),
           ...harness,
         },

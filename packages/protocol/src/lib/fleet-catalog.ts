@@ -161,6 +161,8 @@ export const FleetComponentDetailSchema = z.discriminatedUnion('kind', [
     command: NonEmptyStringSchema.optional(),
     args: z.array(z.string()).readonly().optional(),
     url: NonEmptyStringSchema.optional(),
+    /** `oauth`: the server is signed in to from Ferretry (docs/mcp-oauth.md). */
+    auth: z.literal('oauth').optional(),
     env: z.array(FleetEnvEntrySchema).readonly(),
   }),
   z.strictObject({ kind: z.literal('skills'), items: z.array(NonEmptyStringSchema).readonly() }),
@@ -433,6 +435,8 @@ export const FleetComponentInputSchema = z.discriminatedUnion('kind', [
     command: NonEmptyStringSchema.optional(),
     args: z.array(z.string()).optional(),
     url: NonEmptyStringSchema.optional(),
+    /** `oauth` on a `url` server: signed in to from Ferretry (docs/mcp-oauth.md). */
+    auth: z.literal('oauth').optional(),
     env: FleetEnvInputSchema.optional(),
     harness: HarnessKindSchema.optional(),
   }),

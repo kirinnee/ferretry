@@ -7,6 +7,7 @@
 
 import { Lock } from 'lucide-react';
 import { useId } from 'react';
+import { cn } from '../../../lib/class-names.ts';
 import { Textarea } from '../../../shell/primitives.tsx';
 import {
   type ComponentDraft,
@@ -15,6 +16,7 @@ import {
   HARNESS_NAMES,
   type CatalogHarness,
   harnessBound,
+  mcpDraftIsUrl,
 } from './component-model.ts';
 
 const BODY_LABEL = {
@@ -100,6 +102,10 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
         </label>
       )}
 
+      {draft.kind === 'mcp' && mcpDraftIsUrl(draft) ? (
+        <OAuthSwitch checked={draft.oauth} onChange={oauth => set({ oauth })} />
+      ) : null}
+
       {draft.hiddenKeys.length > 0 ? (
         <ul className="m-0 flex list-none flex-col gap-1 p-0" data-component-hidden="">
           {draft.hiddenKeys.map(key => (
@@ -131,5 +137,45 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
         </label>
       ) : null}
     </div>
+  );
+}
+
+/** "Signs in with OAuth": the server is signed in to from Ferretry, on its page (docs/mcp-oauth.md). */
+function OAuthSwitch({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      data-component-field="oauth"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'flex min-h-[44px] w-full items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
+        checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
+      )}
+    >
+      <span className="min-w-0">
+        <span className={cn('block text-ui font-semibold', checked ? 'text-accent' : 'text-fg')}>
+          Signs in with OAuth
+        </span>
+        <span className="block text-meta leading-base text-muted">
+          Sign in to it from its page here. Ferretry keeps the tokens in its secret store.
+        </span>
+      </span>
+      <span
+        aria-hidden="true"
+        className={cn(
+          'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+          checked ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
+            checked ? 'translate-x-[18px]' : 'translate-x-[2px]',
+          )}
+        />
+      </span>
+    </button>
   );
 }

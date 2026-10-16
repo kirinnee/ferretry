@@ -145,6 +145,8 @@ credential. **No route, command or API returns a secret value** — that is enfo
 adding a getter would delete the feature. The threat model, the `${secret:NAME}` grammar and the
 declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
 against, because the useful property is narrower than people assume.
+A remote MCP server that needs OAuth is signed in to from the PWA with the daemon as the OAuth client,
+and its tokens land in that same store: [docs/mcp-oauth.md](docs/mcp-oauth.md).
 
 `packages/daemon` locates the harness commands (`claude`, `codex`) through **one** rule an operator can
 change: an explicit per-harness path, then declared search directories, then the inherited

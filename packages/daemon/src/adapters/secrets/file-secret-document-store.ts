@@ -18,6 +18,9 @@ const SECRET_MODE = 0o600;
 /** The sealed vault. */
 export const SECRETS_DOCUMENT = 'secrets.json';
 
+/** The daemon-internal sealed document the MCP sign-in keeps refresh tokens and client secrets in. */
+export const MCP_OAUTH_SECRETS_DOCUMENT = 'mcp-oauth-secrets.json';
+
 /** The key the vault is sealed under, in its own file. */
 export const SECRETS_KEY = 'secrets.key';
 
@@ -48,11 +51,17 @@ export class FileSecretDocumentStore implements SecretDocumentStore {
   private readonly documentPath: string;
   private readonly keyPath: string;
 
+  /**
+   * `document` names the sealed file. The default is THE secret store; the MCP sign-in keeps refresh
+   * tokens and client secrets in a second document under the same key ({@link MCP_OAUTH_SECRETS_DOCUMENT}),
+   * which no route lists, `use` cannot spend and `${secret:…}` cannot resolve (docs/mcp-oauth.md).
+   */
   constructor(
     paths: FoundationPaths,
     private readonly files: FileSystemPort,
+    document: string = SECRETS_DOCUMENT,
   ) {
-    this.documentPath = join(paths.state, SECRETS_DOCUMENT);
+    this.documentPath = join(paths.state, document);
     this.keyPath = join(paths.state, SECRETS_KEY);
   }
 
