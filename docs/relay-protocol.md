@@ -695,11 +695,28 @@ Initial limits are deliberately configuration, not protocol constants:
 | Encoded bytes per UTC day |      1 GiB | 16 GiB |
 
 At most 10,000 daemon metric rows are created. The operator can replace all limits through the same
-runtime configuration endpoint. A connection ceiling is checked before routing; a byte ceiling is
-checked before the frame's state transition is stored or sent. A refusal sends a typed `error`
-control frame and then closes with `4432` or `4433`, including the reason (and, for bandwidth, a
-reset timestamp in the control-plane decision). Failure to reach or parse the meter is `4500` and is
-also a refusal. Nothing degrades into an unmetered path.
+runtime configuration endpoint. A connection ceiling is checked before routing. **A byte ceiling is
+checked within one meter round trip of the bytes that crossed it, never on a frame's path.** A
+rendezvous forwards a frame first and then counts it; it keeps at most one report to the control
+object in flight, and every frame it forwards while that report travels goes into the next one, as
+one batch of `events` and `bytes`. The bytes a report names were relayed, so they are counted even
+when they cross a ceiling — the refusal stops what follows, not what already crossed. A refusal sends
+a typed `error` control frame to every socket the rendezvous holds and then closes them with `4432`
+or `4433`, including the reason (and, for bandwidth, a reset timestamp in the control-plane
+decision). Failure to reach or parse the meter is `4500` and is also a refusal. Nothing degrades into
+an unmetered path.
+
+**Why not per frame, and what it costs.** The meter is one globally named object, placed wherever it
+was first created, while a rendezvous is created near the daemon that first claimed it. Holding every
+frame for a transactional round trip to it — the original design — put that distance on every frame,
+serially, because a rendezvous handles its frames in order: a rendezvous in Tokyo with the meter in
+North America paid a Pacific round trip per frame, a page load's hundred-odd frames took seconds, and a
+terminal redrawing ten times a second produced frames faster than the queue could drain them. Batching
+makes the meter cost one round trip per round trip instead. The price is a bounded overshoot: a
+ceiling can be exceeded by what one rendezvous forwards during one meter round trip — a fraction of a
+second of its traffic — before the refusal lands. The ceilings are cost guards, not
+security boundaries, and the overshoot is counted, so the bill is never understated. A rendezvous
+evicted while a report is in flight loses at most that one batch of counts.
 
 ### How long per-daemon rows are kept
 
@@ -770,7 +787,8 @@ pairing crosses this relay, that includes the fact that a pre-auth session opene
 and when, from which IP — never the code, the key or the device name, and never the outcome as
 anything readable, but the outcome IS inferable from the size of the one sealed answer, because
 `paired` carries a whole redemption response and `pair-refused` carries one word (§10).
-When a terminal stream crosses it, frame timing is keystroke timing. The operator meter persists the
+When a terminal stream crosses it, frame timing is keystroke timing, and — because an unchanged redraw
+is not sent again (§14) — the timing of daemon-to-browser frames is when the screen changed. The operator meter persists the
 counts, sizes and timing fields described above. Neither party can observe frame payloads, device
 tokens, pairing codes, session content, stream content, commands, output, daemon names or device
 names. The same X25519/Ed25519/AES-256-GCM channel described in §§2, 6 and 7 terminates only at the
@@ -916,6 +934,11 @@ chosen by trying it, not by a health check.**
    prove the daemon did not apply it. Advancing on a status would send the client to another address
    for the same daemon to arrive at the answer it already had, and report "nothing was reachable" about
    a daemon that replied every time;
+   **a direct session not accepted within 4 seconds is a transport failure too.** A private direct
+   address seen from a cellular network drops packets rather than refusing them, so a socket to it
+   neither opens nor fails; waiting out the 45-second heartbeat grace for it put that wait in front of
+   the relay on every page load away from home. A reachable daemon keys a session in three round trips.
+   A rendezvous keeps the full grace, because it is the last resort;
 4. the winner is remembered **for the life of that connection**, so a browser on the network a
    rendezvous exists for does not pay a failed direct attempt per call. **A round in which nothing
    worked is not remembered** — it served no request, so there is no answer to keep, and a later
@@ -1561,7 +1584,11 @@ backpressure policy vacuous over a relay. What a full buffer means is the stream
 the two that exist differ on purpose:
 
 - a **terminal** frame is a complete redraw that the next one supersedes, so an overflowing frame is
-  **dropped**, never queued without bound and never fatal;
+  **dropped**, never queued without bound and never fatal. A redraw identical to the last one the
+  stream accepted is not sent at all — an idle pane polled ten times a second used to cost ten
+  identical records a second for as long as anyone watched — while one the stream dropped is sent again
+  on the next poll, because the viewer never had it. A stream reports a drop to its producer as
+  `0` ("not taken"), the transport convention every producer in the daemon reads;
 - an **event** frame is a unique journal record whose loss is silent data corruption, so the stream
   refuses to drop and instead **closes with `1013`**, exactly as it does on a direct socket.
 
