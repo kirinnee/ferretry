@@ -140,7 +140,7 @@ const ABNORMAL_CLOSURE = 1006;
 const CLOSE_EVENT_GRACE_MS = 250;
 
 /**
- * WHY A RENDEZVOUS SOCKET DID NOT WORK, SAID IN TERMS A READER CAN ACT ON.
+ * WHY A SOCKET DID NOT WORK — DIRECT OR RELAYED — SAID IN TERMS A READER CAN ACT ON.
  *
  * The browser withholds the cause of a WebSocket failure on purpose — a page that
  * could tell a refused TLS handshake from a 404 could port-scan the reader's
@@ -168,11 +168,12 @@ const socketFailureReason = (url: string, opened: boolean): string => {
   } catch {
     origin = 'the configured rendezvous';
   }
+  // The same sentence serves a direct dial and a relay one, so it names neither: "the relay protocol"
+  // and "rendezvous" told a phone dialling a daemon's own address about a carrier it never used.
   return opened
-    ? `the relay socket to ${origin} was carrying this session and ended without a close frame`
-    : `the browser could not open a socket to ${origin}: the handshake never completed, so nothing reached the relay ` +
-        'protocol. The address may not resolve, may refuse TLS, may be blocked on this network, or may not be a ' +
-        'rendezvous serving this daemon — a relay that does not carry a fingerprint answers the upgrade with a plain 404';
+    ? `the connection to ${origin} was carrying this session and ended without a close frame`
+    : `the browser could not open a connection to ${origin}. The address may not resolve, may refuse TLS, ` +
+        'may be blocked on this network, or may not be serving this machine';
 };
 
 /**
