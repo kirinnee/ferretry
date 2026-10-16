@@ -304,7 +304,7 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
     '# The Warden. Triage `rules` shows flags to you and spends nothing; `jev` and `llm` spend, under daily caps.\nenabled: true\ntriage: rules\n',
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
   voice:
-    '# Voice. Transcription is on-device; this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',
+    '# Voice. Transcription is chosen on each device (Settings › Voice); this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',
   preset:
     '# A provider preset: a template for environment logins (docs/provider-presets.md). Secrets are named, never written.\nlabel: My gateway\nharness: claude\nsummary: Claude Code through my gateway.\ndocs: https://example.com/docs\nverified: "2026-01-01"\nenv:\n  ANTHROPIC_BASE_URL:\n    value: https://gateway.example.com\n  ANTHROPIC_AUTH_TOKEN:\n    secretName: GATEWAY_API_KEY\ntest:\n  kind: none\n  reason: no test yet\nquota:\n  source: transcript-pricing\n  note: counted from the transcript\n',
 };

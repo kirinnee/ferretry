@@ -2,6 +2,7 @@
 label: Microsoft Foundry (Azure CLI)
 harness: claude
 summary: Claude Code through your Microsoft Foundry resource, signed in with the Azure CLI on this machine (Entra ID). Nothing is copied.
+group: cloud
 docs: https://code.claude.com/docs/en/microsoft-foundry
 verified: '2026-10-16'
 env:

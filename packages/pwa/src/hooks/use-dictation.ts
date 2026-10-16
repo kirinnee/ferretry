@@ -1,14 +1,25 @@
 /**
- * Browser-side dictation: one recognition session, one transcript, and exactly
- * one way for text to leave it.
+ * Dictation: one recognition session, one transcript, and exactly one way for
+ * text to leave it.
  *
  * There is no `onSubmit`, no `onSend`, and no path from recognised words to a
  * message being sent. `onDraft` is called once, after recognition finishes and
  * optional correction has run, with the COMPLETE next draft and caret.
  *
- * `start()` calls the browser's SpeechRecognition synchronously from the mic
- * button. The browser owns the microphone and returns words directly; no audio
- * buffer, recording, or recognition request is sent to a Ferretry daemon.
+ * TWO ENGINES, CHOSEN BY THE PERSON (`settings.engine`), neither a fallback for
+ * the other:
+ *
+ *   - `parakeet` records with this page's microphone and transcribes in the
+ *     speech worker (`lib/stt/parakeet-session.ts`). Audio never leaves the
+ *     device. It needs the model installed first, and says so rather than
+ *     downloading anything.
+ *   - `browser` hands the microphone to the browser's own SpeechRecognition
+ *     (`lib/stt/browser-recognition.ts`), which on Chrome, Android and Safari
+ *     sends the audio to the browser vendor's servers.
+ *
+ * Until one is chosen, the mic says so instead of picking for them. Either way
+ * `start()` runs synchronously from the mic button so the permission prompt is
+ * attributed to the gesture, and no audio is ever sent to a Ferretry daemon.
  *
  * Every async boundary checks a generation. A duration limit and Stop can race,
  * a cancelled browser can deliver a late result, and enhancement can resolve
@@ -23,16 +34,19 @@
 import type { IFyApiClient } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { useDaemonFetch, useParakeetVoice } from '../lib/store.tsx';
 import {
+  BrowserRecognitionError,
   type BrowserRecognitionProvider,
   BrowserRecognitionSession,
   type BrowserRecognitionSessionLike,
+  type BrowserRecognitionSessionOptions,
   browserRecognitionErrorFrom,
   browserRecognitionProvider,
 } from '../lib/stt/browser-recognition.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
-import { useDaemonFetch } from '../lib/store.tsx';
 import { enhance } from '../lib/stt/enhancement.ts';
+import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
@@ -138,6 +152,8 @@ export interface UseDictationOptions {
   readonly settings: SttSettings;
   /** Browser recognition and visibility surface; injected by tests/harness. */
   readonly recognition?: BrowserRecognitionProvider;
+  /** Parakeet on this device. Read from the app store when omitted; `null` means not available here. */
+  readonly parakeet?: ParakeetVoice | null;
   /** Optional text-only correction transport through the paired daemon. */
   readonly enhancementFetch?: RemoteEnhancementFetch;
   readonly disabled?: boolean;
@@ -146,6 +162,8 @@ export interface UseDictationOptions {
 export interface DictationHandle {
   /** False when recognition is unavailable here. The control still says so. */
   readonly supported: boolean;
+  /** The engine this dictation uses, or `null` until the person has chosen one. */
+  readonly engine: SttSettings['engine'];
   readonly phase: DictationPhase;
   readonly recording: boolean;
   /** Browser interim/final words. Read-only preview; never the output seam. */
@@ -163,7 +181,18 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const disabled = Boolean(options.disabled || !options.settings.enabled);
   const ambientRecognition = useMemo(() => browserRecognitionProvider(), []);
   const recognition = options.recognition ?? ambientRecognition;
-  const supported = recognition.support.available;
+  const contextVoice = useParakeetVoice();
+  const voice = options.parakeet === undefined ? contextVoice : options.parakeet;
+  const engine = options.settings.engine;
+  // Unchosen counts as supported: the mic stays live so pressing it can ask the person to choose.
+  const supported =
+    engine === 'parakeet'
+      ? voice?.support.available === true
+      : engine === 'browser'
+        ? recognition.support.available
+        : true;
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
 
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [error, setError] = useState<DictationError | null>(null);
@@ -350,7 +379,17 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     setError(null);
     setPhase('requesting');
 
-    if (!provider.support.available) {
+    if (engine === null) {
+      setError({
+        code: 'engine-not-chosen',
+        message:
+          'Choose how to dictate first, in Settings › Voice: Parakeet on this device (private, a one-time download) or phone/browser voice (no download; audio goes to your browser’s maker).',
+      });
+      setPhase('error');
+      return;
+    }
+
+    if (engine === 'browser' && !provider.support.available) {
       setError({
         code: 'recognition-unavailable',
         message: provider.support.reason ?? 'Dictation is unavailable in this browser.',
@@ -359,9 +398,9 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       return;
     }
 
-    let session: BrowserRecognitionSession | null = null;
+    let session: (BrowserRecognitionSessionLike & { start(): void }) | null = null;
     try {
-      session = new BrowserRecognitionSession(provider, {
+      const callbacks: BrowserRecognitionSessionOptions = {
         onStart: () => {
           if (isCurrent(token)) setPhase('recording');
         },
@@ -400,7 +439,16 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         onLimit: () => {
           if (session !== null) void finish(token, session);
         },
-      });
+      };
+      if (engine === 'parakeet') {
+        const parakeet = voiceRef.current;
+        if (parakeet === null)
+          throw new BrowserRecognitionError(
+            'recognition-unavailable',
+            'Parakeet is not available in this copy of Ferretry.',
+          );
+        session = parakeet.createSession(callbacks);
+      } else session = new BrowserRecognitionSession(provider, callbacks);
       liveSessionRef.current = session;
       // NO await above this call: permission stays attributable to the gesture.
       session.start();
@@ -411,7 +459,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       setError({ code: recognitionFailure.code, message: recognitionFailure.message });
       setPhase('error');
     }
-  }, [disabled, finish, invalidate, isCurrent, phase]);
+  }, [disabled, engine, finish, invalidate, isCurrent, phase]);
 
   const stop = useCallback(() => {
     const session = liveSessionRef.current;
@@ -433,6 +481,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   return {
     supported,
+    engine,
     phase,
     recording: phase === 'recording',
     liveText,

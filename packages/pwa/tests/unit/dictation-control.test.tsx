@@ -7,6 +7,8 @@ import {
 } from '../../src/components/dictation-control.tsx';
 import type { ShortcutHost } from '../../src/hooks/use-dictation-shortcut.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
+import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
   type FakeRecognitionProvider,
@@ -17,7 +19,11 @@ import { interact, mount, must } from '../support/dom.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'http://127.0.0.1:1', deviceId: 'token-a' });
 
-const settingsWith = (patch: Partial<SttSettings> = {}): SttSettings => ({ ...DEFAULT_STT_SETTINGS, ...patch });
+const settingsWith = (patch: Partial<SttSettings> = {}): SttSettings => ({
+  ...DEFAULT_STT_SETTINGS,
+  engine: 'browser',
+  ...patch,
+});
 
 /**
  * A browser that settles Stop promptly, so one click of Stop is one whole take.
@@ -67,6 +73,7 @@ describe('dictationStatusCopy', () => {
     expect(dictationStatusCopy('requesting')).toContain('permission');
     expect(dictationStatusCopy('recording')).toBe('Recording…');
     expect(dictationStatusCopy('transcribing')).toBe('Finishing in your browser…');
+    expect(dictationStatusCopy('transcribing', undefined, 'parakeet')).toBe('Transcribing on this device…');
     expect(dictationStatusCopy('idle')).toBe('');
   });
 
@@ -124,7 +131,7 @@ describe('<DictationControl>', () => {
     const button = micButton(view.container);
     expect(button.getAttribute('aria-keyshortcuts')).toBe('Control+Shift+D');
     expect(button.getAttribute('title')).toContain('Ctrl + Shift + D');
-    expect(button.getAttribute('title')).toContain('Recognition is handled by this browser');
+    expect(button.getAttribute('title')).toContain('Your browser’s speech service transcribes it');
     await view.unmount();
   });
 
@@ -349,5 +356,27 @@ describe('<DictationControl>', () => {
 
     await view.unmount();
     composer.remove();
+  });
+});
+
+describe('<DictationControl> names the engine that will listen', () => {
+  it('says Parakeet transcribes on this device when it is chosen and available', async () => {
+    const voice = { support: { available: true } } as unknown as ParakeetVoice;
+    const store = { voice, carrier: { fetch: async () => new Response() } } as unknown as AppStore;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <DictationControl {...controlProps({ settings: settingsWith({ engine: 'parakeet' }) })} />
+      </StoreProvider>,
+    );
+    expect(micButton(view.container).getAttribute('title')).toContain('Parakeet transcribes on this device');
+    await view.unmount();
+  });
+
+  it('asks for a choice before any engine is picked', async () => {
+    const view = await mount(<DictationControl {...controlProps({ settings: settingsWith({ engine: null }) })} />);
+    expect(micButton(view.container).getAttribute('title')).toContain(
+      'Choose a voice engine in Settings › Voice first',
+    );
+    await view.unmount();
   });
 });

@@ -95,7 +95,12 @@ const ReserveRequestSchema = z.strictObject({
   daemonId: DaemonIdSchema,
   reservationId: HostedRelayReservationSchema.shape.reservationId,
 });
-const MeterRequestSchema = z.strictObject({ daemonId: DaemonIdSchema, bytes: z.number().int().nonnegative() });
+/** One batch of frames a rendezvous already forwarded. `events` defaults to one: a single frame. */
+const MeterRequestSchema = z.strictObject({
+  daemonId: DaemonIdSchema,
+  bytes: z.number().int().nonnegative(),
+  events: z.number().int().positive().optional(),
+});
 const ReleaseRequestSchema = z.strictObject({ reservationId: HostedRelayReservationSchema.shape.reservationId });
 const InspectRequestSchema = z.strictObject({ daemonId: DaemonIdSchema });
 
@@ -358,6 +363,7 @@ export class HostedRelayControlDurableObject {
         daemonResult.value,
         input.bytes,
         now,
+        input.events ?? 1,
       );
       await transaction.put(GLOBAL_METRICS_KEY, transition.global);
       if (transition.daemon !== null) await transaction.put(daemonKey(input.daemonId), transition.daemon);

@@ -276,6 +276,7 @@ describe('terminal snapshot view', () => {
     };
     const restore = (): void => {
       if (width) Object.defineProperty(window, 'innerWidth', width);
+      else Reflect.deleteProperty(window, 'innerWidth');
       if (clientWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', clientWidth);
       else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth');
     };

@@ -53,6 +53,20 @@ export const UNLISTED_RELEASE_FILES: readonly string[] = [
   RELEASE_SIGNATURE_FILE,
 ];
 
+/**
+ * Files a release LISTS AND VERIFIES but does not download when it installs: the ONNX Runtime
+ * WebAssembly binary on-device dictation runs on (~12 MB), which only someone who installs Parakeet
+ * ever uses. Every other file is fetched by every installed copy of the app, so this one would cost
+ * every visitor 12 MB for a feature most never turn on. Deferring it changes WHEN it is fetched, never
+ * whether it is checked: the keeper still answers a request for it only with bytes that hash to the
+ * signed list, it just fetches them on that request instead of at install, and does not keep a second
+ * copy (`lib/stt/parakeet-store.ts` keeps the one the speech engine uses).
+ */
+const DEFERRED_RELEASE_FILE = /^assets\/ort-wasm-simd-threaded[A-Za-z0-9._-]*\.wasm$/u;
+
+/** Whether the keeper leaves this listed file to be fetched, verified, when something asks for it. */
+export const isDeferredReleaseFile = (path: string): boolean => DEFERRED_RELEASE_FILE.test(path);
+
 const SEGMENT = '[A-Za-z0-9_-][A-Za-z0-9._-]*';
 /** A relative site path: no leading slash, no `.`/`..` segment, nothing a URL would re-interpret. */
 const RELEASE_PATH_PATTERN = new RegExp(`^${SEGMENT}(?:/${SEGMENT})*$`, 'u');

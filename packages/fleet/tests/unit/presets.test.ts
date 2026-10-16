@@ -106,6 +106,34 @@ describe('the built-in preset catalogue', () => {
     }
   });
 
+  it('should file the presets under the grid’s headings, leaving the two nobody asked to group under none', () => {
+    const grouped = (group: string | undefined) =>
+      PRESETS.filter(entry => entry.group === group).map(entry => entry.id);
+    should(grouped('popular')).deepEqual([
+      'anthropic-api-key',
+      'zai-glm',
+      'kimi',
+      'minimax',
+      'deepseek',
+      'openrouter',
+      'openai-api-key',
+    ]);
+    should(grouped('cloud')).deepEqual([
+      'amazon-bedrock',
+      'amazon-bedrock-api-key',
+      'bedrock-mantle',
+      'google-vertex',
+      'microsoft-foundry-api-key',
+      'microsoft-foundry-azure-cli',
+      'azure-openai',
+    ]);
+    should(grouped('self-hosted')).deepEqual(['litellm', 'custom-gateway', 'ollama-codex']);
+    should(grouped(undefined)).deepEqual(['qwen-coding-plan', 'vercel-ai-gateway']);
+    should(ProviderPresetFileSchema.safeParse({ group: 'favourite' }).error?.issues.map(i => i.path[0])).containEql(
+      'group',
+    );
+  });
+
   it('should give the text to start a copy from, and nothing for an unknown id', () => {
     should(presetFileText('kimi')).equal(BUILT_IN_PRESET_TEXTS.kimi);
     should(presetFileText('nope')).be.undefined();

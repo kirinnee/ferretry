@@ -667,3 +667,39 @@ describe('the page ↔ worker messages', () => {
     should(actual).eql({ type: 'fy-release-worker-audit', signed: expected });
   });
 });
+
+/**
+ * The speech runtime is listed and verified like every other file, but it is fetched when asked
+ * for rather than by every installed copy of the app, and it is never kept in the release cache.
+ */
+describe('a deferred file', () => {
+  const RUNTIME = 'assets/ort-wasm-simd-threaded-AbC123.wasm';
+
+  it('is not downloaded at install, is served verified when asked for, and is not cached', async () => {
+    // Arrange
+    const signer = await releaseSigner();
+    const release = await buildRelease(signer, {
+      files: { [RELEASE_WORKER_FILE]: 'w', 'index.html': 'shell', [RUNTIME]: 'runtime bytes' },
+    });
+    const served = site(release);
+    const { subject, caches } = keeperFor(signer, served.network);
+
+    // Act
+    await subject.update();
+
+    // Assert: listed, yet neither fetched nor cached by the install.
+    should(Object.keys(release.manifest.files)).containEql(RUNTIME);
+    should(served.gets).not.containEql(RUNTIME);
+    should(caches.caches.get(cacheOf(release))?.has(RUNTIME)).be.false();
+
+    // Asked for: fetched, verified, answered — and still not cached.
+    const answer = await subject.respond({ pathname: `/${RUNTIME}`, navigate: false });
+    should(answer?.status).equal(200);
+    should(text(answer?.bytes)).equal('runtime bytes');
+    should(caches.caches.get(cacheOf(release))?.has(RUNTIME)).be.false();
+
+    // Tampered on the way: refused, never served.
+    served.serve(release, { [RUNTIME]: 'not the runtime' });
+    should((await subject.respond({ pathname: `/${RUNTIME}`, navigate: false }))?.status).equal(503);
+  });
+});

@@ -2,6 +2,7 @@
 label: Google Vertex AI
 harness: claude
 summary: Claude Code through Vertex AI in your Google Cloud project, using application-default credentials or a credentials file on this machine — named, never copied.
+group: cloud
 docs: https://code.claude.com/docs/en/google-vertex-ai
 verified: '2026-10-16'
 unverified:

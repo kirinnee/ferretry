@@ -90,7 +90,7 @@ already pick something that runs one CLI, so a dual login appears there once per
 A preset is a template: the variables and which are secrets, the cloud credential kinds it takes, the
 Codex provider, a cheap **Test**, the **quota source** the usage subsystem reads, the pricing table, the
 provider's documentation, every fact that could not be confirmed there (`unverified`, shown in the app
-before anyone relies on it), and the clues that **detect** it. A login made from one copies what it needs
+before anyone relies on it), the `group` it is listed under in the app (`popular`, `cloud`, `self-hosted`), and the clues that **detect** it. A login made from one copies what it needs
 into its own file, so a preset edited or removed later never changes what a login launches with.
 
 A provider that serves both CLIs has a `claude:` and a `codex:` half, each with its own `env`, `models`,
@@ -134,8 +134,14 @@ added, like any other.
 
 ## One-click add
 
-- **Settings › Logins › Add login › Environment** is a grid of provider tiles, one per preset, each with
-  its scope chip. One tap opens a minimal form: only the secret(s) the preset needs — one field per
+- **Settings › Logins › Add login › Environment** is a grid of compact provider tiles, one per preset,
+  each with its name and scope chip, filed under the heading its preset's `group` names — **Popular**,
+  **Cloud**, **Self-hosted**; a preset with no group (a machine's own file, Qwen, Vercel) is listed under
+  **More providers**, after the clouds. Two tiles to a row on a phone, three or four on a desktop. More
+  than eight tiles earn a search box, which matches every word against the name, the id and the summary.
+  The summary is each tile's one line on what it is: shown on hover, keyboard focus or a long press, and
+  always its accessible description. A tile that is not offered here stays focusable and a tap on it
+  says why. Nothing is picked until somebody taps. One tap opens a minimal form, its key field first: only the secret(s) the preset needs — one field per
   secret NAME, however many variables carry it, "set ✓" when the store already has it — plus a required
   value the preset cannot know (an Azure resource, a gateway's address) and a cloud reference where one
   is taken. Everything else comes from the preset. **Add** stores each secret through `POST /v1/secrets`,

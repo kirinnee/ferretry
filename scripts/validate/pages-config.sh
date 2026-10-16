@@ -68,8 +68,18 @@ require_in_block '/fy-render-sandbox.html' '^  Cache-Control: no-cache$'
 # The shell's CONTENT policy lives in the generated document, not here. Assert the
 # `/*` policy was not widened to accommodate it: the app still frames nothing, and
 # it never gained the `'unsafe-eval'` the sandbox deliberately does without.
+#
+# `'wasm-unsafe-eval'` is a DIFFERENT, narrower source and the app carries it on purpose: it lets
+# WebAssembly compile (on-device dictation's ONNX Runtime, docs/voice.md) and nothing else — no
+# `eval`, no `new Function`, no string timers. So the refusal matches the quoted keyword exactly,
+# and the narrow one is pinned to the place it belongs: `script-src`, right after `'self'`.
 require_in_block '/*' "^  Content-Security-Policy: default-src 'self';.*frame-ancestors 'none';"
-refuse_in_block '/*' "unsafe-eval" "gained 'unsafe-eval'"
+refuse_in_block '/*' "'unsafe-eval'" "gained 'unsafe-eval'"
+require_in_block '/*' "script-src 'self' 'wasm-unsafe-eval' 'sha256-"
+[[ "$(block_of '/*' | rg -o "wasm-unsafe-eval" | wc -l)" -eq 1 ]] || {
+  echo "❌ ${headers}: rule /* names 'wasm-unsafe-eval' somewhere other than once, in script-src" >&2
+  exit 1
+}
 
 # Fixed filenames, so each must revalidate on its own line. An immutable stale
 # bundle would fail the shell's hash pin and disable the feature with no way to

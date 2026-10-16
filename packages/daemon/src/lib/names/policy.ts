@@ -1,4 +1,5 @@
-import { CALLSIGN_WINDOW_MS, MAX_CALLSIGN_LENGTH, MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
+import { type AgentAddressCandidate, resolveAgentAddress } from '@ferretry/protocol';
+import { MAX_CALLSIGN_LENGTH, MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
 
 const CALLSIGN_PATTERN = /^[a-z][a-z0-9-]*$/;
 const POOL_CALLSIGN_PATTERN = /^[a-z]{2,32}$/;
@@ -58,25 +59,21 @@ export function suggestCallsigns(
   return availableCallsigns(pool, claims, nowMs, startIndex).slice(0, count);
 }
 
-export interface CallsignReference {
-  readonly id: string;
-  readonly callsign?: string;
-  readonly claimedAtMs: number;
-}
-
+/**
+ * The session an id-or-name reference addresses, or `undefined` when it addresses none.
+ *
+ * The rule is the protocol's (`resolveAgentAddress`) — the same one every `/v1/sessions/:sessionId`
+ * route applies — so a park declared on a name, the send that ends it, and the route the send arrived
+ * on can never disagree about which session a name means. An AMBIGUOUS name addresses none here: the
+ * callers are attribution and peer lookups, where guessing would pin a message or a wait on the wrong
+ * agent; the route that took the name has already refused it with the candidates.
+ */
 export function resolveSessionReference(
   reference: string,
-  sessions: readonly CallsignReference[],
-  nowMs: number,
-  windowMs = CALLSIGN_WINDOW_MS,
-): string {
-  if (sessions.some(session => session.id === reference)) return reference;
-  const callsign = reference.trim().toLowerCase();
-  const cutoff = nowMs - windowMs;
-  const match = sessions
-    .filter(session => session.callsign?.toLowerCase() === callsign && session.claimedAtMs >= cutoff)
-    .toSorted((left, right) => right.claimedAtMs - left.claimedAtMs)[0];
-  return match?.id ?? reference;
+  sessions: readonly AgentAddressCandidate[],
+): string | undefined {
+  const resolution = resolveAgentAddress(reference, sessions);
+  return resolution.kind === 'session' ? resolution.id : undefined;
 }
 
 export function isValidCallsignPool(pool: readonly string[]): boolean {

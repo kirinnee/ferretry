@@ -1654,11 +1654,12 @@ describe('a stream session', () => {
     const downstream = stream.downstream;
     if (downstream === undefined) throw new Error('the stream was never attached');
 
-    // Act + Assert — a redraw one byte over the derived budget is DROPPED and reported as sent: the
+    // Act + Assert — a redraw one byte over the derived budget is DROPPED and reported as not taken: the
     // next redraw supersedes it, so nothing is lost but latency.
     const before = harnessed.wire.frames.length;
     const huge = new Uint8Array(MAX_TUNNEL_DATA_BYTES + 1);
-    should(downstream.send(huge)).equal(huge.byteLength);
+    // `0` is "not taken": the transport convention a producer reads to know it must send again.
+    should(downstream.send(huge)).equal(0);
     should(harnessed.wire.frames.length).equal(before);
     should(harnessed.link.report().sessions).equal(1);
 

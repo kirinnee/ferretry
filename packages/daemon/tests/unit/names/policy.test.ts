@@ -93,24 +93,27 @@ describe('callsign policy', () => {
     should(actual).deepEqual(expected);
   });
 
-  it('should resolve an exact id before the newest recent callsign and preserve unknown references', () => {
+  it('should resolve an exact id, then the live holder of a name, and address nothing it cannot pin', () => {
     // Arrange
     const sessions = [
-      { id: 'exact', callsign: 'other', claimedAtMs: 1 },
-      { id: 'older', callsign: 'ada', claimedAtMs: 50 },
-      { id: 'newer', callsign: 'Ada', claimedAtMs: 80 },
-      { id: 'expired', callsign: 'cleo', claimedAtMs: 1 },
+      { id: 'exact', name: 'other', status: 'running' },
+      { id: 'older', name: 'ada', status: 'stopped' },
+      { id: 'newer', name: 'Ada', status: 'running' },
+      { id: 'cleo-1', name: 'cleo', status: 'stopped' },
+      { id: 'cleo-2', name: 'cleo', status: 'completed' },
     ];
 
     // Act
-    const exact = resolveSessionReference('exact', sessions, 100, 20);
-    const recent = resolveSessionReference(' ADA ', sessions, 100, 60);
-    const expired = resolveSessionReference('cleo', sessions, 100, 20);
+    const exact = resolveSessionReference('exact', sessions);
+    const live = resolveSessionReference(' ADA ', sessions);
+    const ambiguous = resolveSessionReference('cleo', sessions);
+    const unknown = resolveSessionReference('zelda', sessions);
 
-    // Assert
+    // Assert — an ambiguous name addresses none, so a peer lookup never pins a wait on a guess.
     should(exact).equal('exact');
-    should(recent).equal('newer');
-    should(expired).equal('cleo');
+    should(live).equal('newer');
+    should(ambiguous).be.undefined();
+    should(unknown).be.undefined();
   });
 
   it('should publish a frozen, sorted, unique pool without placeholder callsigns', () => {

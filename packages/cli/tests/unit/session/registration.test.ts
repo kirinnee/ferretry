@@ -420,10 +420,8 @@ describe('registerSessionCommands · the rest of the group', () => {
     await subject.run(['rename', 'hayden', 'Marin', '--title', 'Ship It', '--json']);
 
     // Assert
-    should(subject.api.calls).deepEqual([
-      { method: 'list', args: [] },
-      { method: 'rename', args: ['ses-1', 'Ship It', 'Marin'] },
-    ]);
+    // The name goes to the daemon as typed: it resolves names for every per-session route.
+    should(subject.api.calls).deepEqual([{ method: 'rename', args: ['hayden', 'Ship It', 'Marin'] }]);
     should(JSON.parse(subject.io.out[0] ?? '')).have.property('config');
   });
 
@@ -435,7 +433,7 @@ describe('registerSessionCommands · the rest of the group', () => {
     await subject.run(['rename', 'ses-1', '--title', 'Ship It']);
 
     // Assert
-    should(subject.api.calls[1]).deepEqual({ method: 'rename', args: ['ses-1', 'Ship It', undefined] });
+    should(subject.api.calls[0]).deepEqual({ method: 'rename', args: ['ses-1', 'Ship It', undefined] });
     should(subject.io.out).deepEqual(['renamed ses-1: Hayden — Fix Transcript Scrolling']);
   });
 });

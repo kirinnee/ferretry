@@ -148,7 +148,8 @@ still there.
 
 Settings › This machine › **Speed-ups** takes three optional keys, stored here like any other secret:
 `JEV_API_KEY` (the Warden's triage guard), and `GROQ_API_KEY` or `CEREBRAS_API_KEY` (cleaning up a
-dictated transcript after the browser has recognised it — audio never leaves the device). The daemon
+dictated transcript after it has been recognised — the provider gets text, never audio; see
+[`docs/voice.md`](voice.md) for where the audio itself goes). The daemon
 spends them itself, on the operator's account, through ONE holder:
 `OutboundProviderAuthorizer.send(secretName, hostAllowlist, request)` in `lib/speedups/authorizer.ts`.
 

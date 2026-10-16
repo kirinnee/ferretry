@@ -281,9 +281,9 @@ export function learningConfigFromFile(file: LearningFile): LearningConfig {
 // ── Voice ────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Who cleans up a dictated transcript. Transcription itself is always on-device in the browser
- * (Parakeet) and is not configured here: audio never leaves the device, and only the transcript text
- * reaches the post-processor chosen here, and only when the owner dictates.
+ * Who cleans up a dictated transcript. Transcription itself is chosen on each device (Parakeet in the
+ * browser, or the browser's own speech service — `docs/voice.md`) and is not configured here. Only the
+ * transcript TEXT reaches the post-processor chosen here, never audio, and only when the owner dictates.
  */
 export const VOICE_POST_PROCESSORS = ['off', 'groq', 'cerebras', 'login'] as const;
 export const VoicePostProcessorSchema = z.enum(VOICE_POST_PROCESSORS);
