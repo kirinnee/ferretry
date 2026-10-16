@@ -61,6 +61,7 @@ import { themePreferences } from '../../src/hooks/use-theme.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
@@ -1961,24 +1962,20 @@ describe('AppShell', () => {
     }
     const streamsOpened = (): { t: string; path?: string }[] =>
       (daemonNetwork?.requests('alpha.example.test') ?? []) as { t: string; path?: string }[];
-    const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
+    const { carrierRequests, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {
       await settle();
-      // The deck is not mounted yet, so nothing has asked the daemon about terminals at all.
-      expect(carrierRequests.some(url => url.includes('/terminals'))).toBe(false);
+      // No terminal tab is open yet, so no shell is attached — the page reads the LISTING only, to
+      // prove `%terminal:` chips in the transcript.
+      expect(streamsOpened().some(record => record.t === 'stream')).toBe(false);
 
-      // The terminals open from the session bar's ⋯ menu, which is where the pane openers live now.
-      await interact(() =>
-        must(view.container.querySelector<HTMLButtonElement>('button[data-session-more]'), 'the session menu').click(),
-      );
-      await interact(() =>
-        must(
-          [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-            item => item.textContent === 'Terminal',
-          ),
-          'the Terminal menu row',
-        ).click(),
-      );
+      // A terminal tab in this agent's workspace — as a chip click or a remembered layout opens it —
+      // attaches that one shell.
+      await interact(() => {
+        store.workspaceLayouts.update(daemonSessionScope(alpha, 'shared'), layout =>
+          openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL_ID, { label: 'dev' })),
+        );
+      });
       // ACROSS REAL TASK BOUNDARIES, not just microtasks. The chain is module load → listing →
       // stream session, with a task between the links; `settle` flushes two microtasks, which is
       // right for everything else in this file and is not enough for this. The socket is what the

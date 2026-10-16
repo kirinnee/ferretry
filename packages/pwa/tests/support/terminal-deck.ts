@@ -185,6 +185,8 @@ export interface XtermInstance {
   select(value: string): void;
   /** Asks the deck's own key handler whether it keeps a shortcut. */
   key(event: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; code: string }): boolean;
+  /** How many times something focused the pane — the phone key bar's ⌨. */
+  focused(): number;
 }
 
 /**
@@ -229,9 +231,11 @@ export function xtermSpy(
     #binary: (value: string) => void = () => {};
     #selection: () => void = () => {};
     #key: (event: never) => boolean = () => true;
+    #focused = 0;
 
     constructor() {
       instances.push({
+        focused: () => this.#focused,
         written: this.written,
         type: value => this.#data(value),
         binary: value => this.#binary(value),
@@ -241,6 +245,9 @@ export function xtermSpy(
     }
 
     loadAddon(): void {}
+    focus(): void {
+      this.#focused += 1;
+    }
     open(): void {
       options.onOpen?.();
     }

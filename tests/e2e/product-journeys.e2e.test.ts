@@ -653,17 +653,12 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   });
 
   await step(journey, 'open-terminal', async () => {
-    // The terminals open from the session bar's ⋯ menu.
-    await page.click('button[data-session-more]');
-    await page.click('[role="menuitem"]:has-text("Terminal")');
-    await expectScreen(page, '[data-terminal-deck]');
-    const create = await page.evaluate<boolean>(
-      `[...document.querySelectorAll('[data-terminal-deck] button')].some(b => /New terminal|Create terminal/.test(b.textContent + (b.getAttribute('aria-label') ?? '')))`,
-    );
-    if (create)
-      await page.click(
-        '[data-terminal-deck] button:has-text("New terminal"), [data-terminal-deck] [aria-label="Create terminal"]',
-      );
+    // A terminal is a tab in the workspace pane beside the chat: ⫼ shows that pane, and its ＋ opens a
+    // new shell in it.
+    await page.click('button[aria-label="Show workspace pane"]');
+    await page.click('button[aria-label="Open a tab or change the layout"]');
+    await page.click('[role="menuitem"]:has-text("New terminal")');
+    await expectScreen(page, '[data-workspace-terminal] [data-terminal-deck]');
     await expectScreen(page, '.kt-webterm__connection[data-state="live"]', 30_000);
     return { value: undefined, evidence: `a shell terminal opened and went live at ${sessionUrl}` };
   });

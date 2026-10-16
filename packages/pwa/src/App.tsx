@@ -781,6 +781,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const { navigate } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
+  // The "This folder" rail reads through the app's own clients: the ONE attention client, a fleet
+  // client per machine, and the machine's display name for the MCP sign-in sheet.
+  const sessionContext = useMemo(
+    () => ({
+      attention: store.attention,
+      createFleetClient: async (daemon: DaemonConnection) => await store.clients.client(daemon),
+      machineName: daemonDisplayName(connection),
+    }),
+    [store.attention, store.clients, connection],
+  );
   const { daemonId, sessionId } = scope;
   // The session's Attention, read through the ONE daemon-scoped client the app
   // store owns — same carrier as every generated call, and invalidated with the
@@ -1060,6 +1070,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
+          context={sessionContext}
+          workspaceLayouts={store.workspaceLayouts}
           // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,
           // rename, close, and the ticket purchase — defaulted to the raw network, so on a
           // relay-only network a reader opening a shell got a bare `Failed to fetch` from an

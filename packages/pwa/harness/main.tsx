@@ -198,6 +198,9 @@ import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/l
 import { type DaemonSessionScope, daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DeviceKeyUnsupportedError } from '../src/lib/device-keys.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import { DaemonAttentionClient } from '../src/lib/attention-client.ts';
+import { openWorkspaceTab, activateWorkspaceTab, workspaceTab } from '../src/lib/workspace-layout.ts';
+import { WorkspaceLayoutStore } from '../src/lib/workspace-layout-store.ts';
 import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.ts';
 import { buildLineage } from '../src/lib/lineage.ts';
@@ -2229,6 +2232,7 @@ const HARNESS_PREVIEW_CSV = [
 const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
   'CLAUDE.md': {
     path: 'CLAUDE.md',
+    size: 4_812,
     lang: 'markdown',
     content: [
       '# Workspace agent guide',
@@ -2245,6 +2249,7 @@ const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
   },
   'Taskfile.yaml': {
     path: 'Taskfile.yaml',
+    size: 9_233,
     lang: 'yaml',
     content: ['version: "3"', '', 'tasks:', '  test:', '    desc: Run unit, integration and SIT suites'].join('\n'),
   },
@@ -2445,6 +2450,38 @@ const HARNESS_SEARCH_SESSION_IDS: readonly string[] = ['harness-session', HARNES
 
 const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
+  // The session workspace's "This folder" rail: one open signal and one answered, and its skills.
+  '/v1/sessions/harness-workspace/attention': {
+    v: 1,
+    sessionId: 'harness-workspace',
+    items: [
+      {
+        id: 'A3',
+        source: 'question',
+        sourceRef: null,
+        subject: 'Use the seeded test account?',
+        why: 'The login page needs a user to sign in with.',
+        waitingSince: '2026-07-31T11:58:00.000Z',
+        howToResolve: 'Pick one.',
+        ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+        raisedBy: 'agent',
+        raisedBySession: 'harness-workspace',
+        raisedByName: 'Hadi',
+      },
+    ],
+    resolved: [],
+    count: 1,
+    parseErrors: 0,
+    updatedAt: '2026-07-31T12:00:00.000Z',
+  },
+  '/v1/sessions/harness-workspace/skills': {
+    harness: 'claude',
+    skills: [
+      { name: 'summary', description: 'Summarise this session for the human.', scope: 'global', origin: 'claude' },
+      { name: 'babysit-pr', description: 'Drive a PR to green.', scope: 'global', origin: 'both' },
+      { name: 'floop', description: 'Review, fix, repeat until satisfied.', scope: 'project', origin: 'both' },
+    ],
+  },
 };
 
 /** Which pairing a request is addressed to, taken from the fixtures themselves. */
@@ -6668,6 +6705,18 @@ const WORKSPACE_SESSION = {
  */
 const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
   {
+    id: 'workspace-user-0',
+    kind: 'user',
+    text: 'Run the dev server and check @CLAUDE.md before you touch the login page.',
+    label: 'You',
+  },
+  {
+    id: 'workspace-assistant-0',
+    kind: 'assistant',
+    text: 'Started `bun dev` in %terminal:a1b2c3d4e5f6 and read @CLAUDE.md — tap either to open it beside the chat.',
+    label: 'hadi',
+  },
+  {
     id: 'workspace-user-1',
     kind: 'user',
     text: 'Assemble the session workspace: header, transcript, composer and the side pane, on one page.',
@@ -6856,6 +6905,63 @@ const WORKSPACE_MACHINES = [
   { daemonId: 'harness-other-daemon' as DaemonId, name: 'kirin-box' },
 ];
 
+/** The workspace session's own shells, listed under ITS id so the deck accepts the listing. */
+const WORKSPACE_TERMINAL_LISTING: TerminalListView = {
+  ...HARNESS_TERMINAL_LISTING,
+  sessionId: 'harness-workspace',
+  terminals: HARNESS_TERMINAL_LISTING.terminals.map(terminal => ({ ...terminal, sessionId: 'harness-workspace' })),
+};
+const WORKSPACE_TERMINAL_OUTPUT = [
+  '$ bun dev',
+  '',
+  '  VITE v6.2  ready in 412 ms',
+  '',
+  '  \u279c  Local:   http://localhost:5173/',
+  '  \u279c  press h + enter to show help',
+  'GET /login 200 18ms',
+  '',
+].join('\r\n');
+/**
+ * The real deck and the real emulator, over a scripted stream: each shell opens and paints a dev
+ * server's output, so a capture shows a terminal tab as a reader sees one. No socket is opened.
+ */
+const WORKSPACE_TERMINAL_DECK: TerminalDeckDependencies = {
+  ...HARNESS_TERMINAL_DECK,
+  list: async () => WORKSPACE_TERMINAL_LISTING,
+  loadXterm: async () => {
+    const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
+    return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };
+  },
+  attach: async (_daemon, _scope, _id, handlers) => {
+    setTimeout(() => {
+      handlers.onOpen();
+      handlers.onBytes(new TextEncoder().encode(WORKSPACE_TERMINAL_OUTPUT));
+    }, 0);
+    return { write() {}, control() {}, close() {} };
+  },
+};
+/**
+ * The page's layout, kept in memory: `?split` opens the workspace pane with a terminal, the browser
+ * and a file beside the chat — the arrangement the split-workspace captures are of.
+ */
+const WORKSPACE_LAYOUTS = (() => {
+  const store = new WorkspaceLayoutStore({ getItem: () => null, setItem: () => undefined });
+  if (window.location.search.includes('split'))
+    store.update(WORKSPACE_SCOPE, layout =>
+      activateWorkspaceTab(
+        [
+          workspaceTab('terminal', 'a1b2c3d4e5f6', { label: 'dev' }),
+          workspaceTab('browser', 'b1', { label: 'app' }),
+          workspaceTab('file', 'CLAUDE.md'),
+          workspaceTab('terminal', '0f0e0d0c0b0a', { label: 'shell' }),
+        ].reduce((next, tab) => openWorkspaceTab(next, tab), layout),
+        'terminal:a1b2c3d4e5f6',
+      ),
+    );
+  return store;
+})();
+const WORKSPACE_ATTENTION = new DaemonAttentionClient();
+
 function SessionWorkspaceHarness() {
   useAppViewport();
   const layout = useLayoutMode();
@@ -6903,6 +7009,14 @@ function SessionWorkspaceHarness() {
           project="ferretry"
           readSnapshot={HARNESS_PANE_SNAPSHOT}
           session={session}
+          deck={WORKSPACE_TERMINAL_DECK}
+          browser={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}
+          workspaceLayouts={WORKSPACE_LAYOUTS}
+          context={{
+            attention: WORKSPACE_ATTENTION,
+            createFleetClient: harnessDaemonClient,
+            machineName: 'AMER-D22HXVF42W',
+          }}
         />
       </div>
       {layout === 'drawer' && drawer ? bar('drawer') : null}

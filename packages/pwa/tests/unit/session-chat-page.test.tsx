@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { matchesSessionSearchQuery, type SessionView, sessionSearchTaskHaystack } from '@ferretry/protocol';
-import type { ComponentProps, ReactElement } from 'react';
+import { type ComponentProps, cloneElement, type ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../src/components/composer-runtime.tsx';
@@ -11,14 +11,17 @@ import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
-import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
-import { SessionTopBar } from '../../src/components/session-top-bar.tsx';
+import { SessionSurfaceReferences } from '../../src/components/session-surface-references.tsx';
+import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { LineageSurfaceContent } from '../../src/features/lineage/lineage-surface.tsx';
-import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
-import { SessionSkillsSurface } from '../../src/features/skills/session-skills-surface.tsx';
+import { ContextRail } from '../../src/features/context-rail/context-rail.tsx';
+import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
+import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
+import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
+import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -29,8 +32,10 @@ import {
 } from '../../src/lib/pages/session-chat-page.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
+import { WorkspaceLayoutStore } from '../../src/lib/workspace-layout-store.ts';
+import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
-import { openSidePaneTab, registerSidePaneTab, resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
+import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -42,6 +47,9 @@ const alpha = daemonConnection({
   baseUrl: 'https://alpha.example.test',
   deviceId: 'alpha-token',
 });
+
+/** No browser storage behind a store: `undefined` would fall back to the shared localStorage. */
+const NO_STORAGE = { getItem: () => null, setItem: () => undefined };
 
 const originalFetch = globalThis.fetch;
 
@@ -81,8 +89,21 @@ const withSessionSearch = (page: ReactElement<ComponentProps<typeof SessionChatP
   </SessionSearchProvider>
 );
 
+/**
+ * Every mount gets its OWN layout and rail stores with no storage behind them, so one case's open tabs
+ * can never leak into the next, and a desktop form factor unless the case asks for another — the
+ * window size a test runner reports is not a screen anybody chose.
+ */
 const renderSessionChatPage = (page: ReactElement<ComponentProps<typeof SessionChatPage>>) =>
-  render(withSessionSearch(page));
+  render(
+    withSessionSearch(
+      cloneElement(page, {
+        workspaceLayouts: page.props.workspaceLayouts ?? new WorkspaceLayoutStore(NO_STORAGE),
+        workspaceRails: page.props.workspaceRails ?? new WorkspaceRailPreferenceStore(NO_STORAGE),
+        formFactor: page.props.formFactor ?? (page.props.presentation === 'sheet' ? 'phone' : 'desktop'),
+      }),
+    ),
+  );
 
 beforeEach(() => {
   globalThis.fetch = (async (input: string | URL | Request) => route(input)) as typeof fetch;
@@ -128,6 +149,10 @@ const selectMenu = (root: ReactTestInstance, label: string): void => {
   if (item === undefined) throw new Error(`missing ${label} in the session menu`);
   run(() => item.onSelect());
 };
+
+/** The text a node renders, read from the tree rather than by serialising props that may hold elements. */
+const textOf = (node: ReactTestInstance): string =>
+  node.children.map(child => (typeof child === 'string' ? child : textOf(child))).join('');
 
 /** The "needs you" button the status carries while the session has unanswered Attention. */
 const needsYouButtons = (root: ReactTestInstance): readonly ReactTestInstance[] =>
@@ -242,7 +267,10 @@ describe('SessionChatPage', () => {
     expect(page.root.findByProps({ className: 'fy-composer' })).toBeDefined();
     expect(menuLabels(page.root)).toEqual([
       'Files',
-      'Terminal',
+      'Console',
+      'Tasks',
+      'Terminal references',
+      'Lineage',
       'Analytics for this session',
       'Move to another login…',
       'Copy session id',
@@ -842,7 +870,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('opens the native Codex picker through the mounted runtime sheet and navigates to Terminal', async () => {
+  test('opens the native Codex picker through the mounted runtime sheet and shows the Console', async () => {
     const calls: Array<{ id: string; command: unknown; requestId: string | undefined }> = [];
     const codex = sessionView('shared', {
       config: { harness: 'codex' },
@@ -867,7 +895,7 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(0);
+      expect(page.root.findAllByProps({ 'data-workspace-console': '' })).toHaveLength(0);
       const modelChip = buttonWithLabelSpan(page.root, 'model unavailable');
       expect(modelChip.props.disabled).toBe(false);
       run(() => modelChip.props.onClick());
@@ -883,7 +911,7 @@ describe('SessionChatPage', () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({ id: 'shared', command: { action: 'model' } });
       expect(typeof calls[0]?.requestId).toBe('string');
-      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(1);
+      expect(page.root.findAllByProps({ 'data-workspace-console': '' })).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }
@@ -1072,19 +1100,18 @@ describe('SessionChatPage', () => {
       expect(page.root.findAllByType(FilesTab)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
 
-      selectMenu(page.root, 'Terminal');
-      expect(page.root.findAllByType(SessionTerminalSurface)).toHaveLength(1);
+      selectMenu(page.root, 'Console');
+      expect(page.root.findAllByProps({ 'data-workspace-console': '' })).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
       expect(JSON.stringify(page.toJSON())).toContain('paired snapshot');
 
-      run(() => openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'tasks'));
+      selectMenu(page.root, 'Tasks');
+      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
       await runAsync(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
       expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
-      const input = page.root.findAll(node => node.type === 'input' && node.props.type !== 'file')[0] as NonNullable<
-        ReturnType<typeof page.root.find>
-      >;
+      const input = page.root.findByProps({ 'data-session-utility': 'tasks' }).findByType('input');
       run(() => input.props.onChange({ target: { value: 'needle' } }));
       // The task half is network-bound now. Reading the popup on the very next
       // line would see the file row alone and count 1 — a failure that looks
@@ -1127,7 +1154,6 @@ describe('SessionChatPage', () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const current = sessionView('shared');
     const sessions: readonly SessionView[] = [current, sessionView('child')];
-    openSidePaneTab(scope, 'lineage');
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], current)}
@@ -1141,12 +1167,17 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
+      expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
+      selectMenu(page.root, 'Lineage');
       const lineage = page.root.findByType(LineageSurfaceContent);
       expect(lineage.props.daemonId).toBe('alpha');
       expect(lineage.props.sessionId).toBe('shared');
       expect(lineage.props.sessions).toBe(sessions);
 
-      run(() => openSidePaneTab(scope, 'analytics'));
+      selectMenu(page.root, 'Terminal references');
+      expect(page.root.findAllByType(SessionSurfaceReferences)).toHaveLength(1);
+      selectMenu(page.root, 'Analytics for this session');
+      expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
       const analytics = page.root.findByType(SessionAnalyticsSurface);
       expect(analytics.props.connection).toBe(alpha);
       expect(analytics.props.scope).toEqual(scope);
@@ -1155,7 +1186,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('mounts Skills on ONE catalog read and proves that catalog in the transcript', async () => {
+  test('shows Skills in the context rail on ONE catalog read and proves that catalog in the transcript', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const asked: string[] = [];
     const requested: string[] = [];
@@ -1185,11 +1216,15 @@ describe('SessionChatPage', () => {
       }
       return route(input);
     }) as typeof fetch;
-    openSidePaneTab(scope, 'skills');
     const page = renderSessionChatPage(
       <SessionChatPage
         client={sharedClient}
         connection={alpha}
+        context={{
+          attention: new DaemonAttentionClient(undefined, async () => Response.json({}, { status: 503 })),
+          createFleetClient: async () => ({ request: async () => Promise.reject(new Error('no fleet here')) }),
+          machineName: 'alpha box',
+        }}
         entries={[]}
         onSessionChange={() => undefined}
         presentation="pane"
@@ -1201,16 +1236,28 @@ describe('SessionChatPage', () => {
         for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
       });
 
-      const surface = page.root.findByType(SessionSkillsSurface);
-      expect(surface.props.connection).toBe(alpha);
-      expect(surface.props.scope).toEqual(scope);
+      // A `/skill` reference opens the rail on its Skills tab, listing the page's own catalog.
+      const rail = () => page.root.findByType(ContextRail);
+      expect(rail().props.tab).toBe('signals');
+      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onSkillOpen?.('floop'));
+      await runAsync(async () => {
+        for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+      });
+      expect(rail().props.tab).toBe('skills');
+      expect(rail().props.agentName).toBe(sessionDisplayName(sessionView('shared')));
+      expect(JSON.stringify(page.toJSON())).toContain('floop');
+      expect(scope.sessionId).toBe('shared');
+      // Insert puts the invocation into this agent's composer draft; a Docs row opens a Files tab.
+      run(() => rail().props.onInsertSkill('/floop'));
+      run(() => rail().props.onOpenFile('CLAUDE.md'));
+      expect(page.root.findByType(FileInstanceSurface).props.instance.key).toBe('CLAUDE.md');
       // ONE read. The pane joins the page's, so the daemon is asked once even
       // though two things in this workspace need the answer.
       expect(asked).toEqual(['https://alpha.example.test/v1/sessions/shared/skills']);
       // The composer bundle owns only Attention here. Tasks and skills come
       // from the workspace owners above, so a fully capable client still does
       // not issue duplicate reads for either family.
-      expect(requested).toEqual(['/v1/sessions/shared/attention']);
+      expect(requested.filter(path => path !== '/v1/sessions/shared/attention')).toEqual([]);
       // …and the names it returned are what the transcript proves against, so a
       // `/floop` this pane just inserted is a live reference rather than prose.
       const provider = page.root.findByType(ReferenceSurfaceProvider);
@@ -1222,7 +1269,6 @@ describe('SessionChatPage', () => {
   });
 
   test('keeps unread lineage distinct from an empty daemon slice', () => {
-    openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'lineage');
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
@@ -1234,6 +1280,7 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
+      selectMenu(page.root, 'Lineage');
       expect(page.root.findAllByType(LineageSurfaceContent)).toHaveLength(0);
       expect(JSON.stringify(page.toJSON())).toContain('Loading lineage');
     } finally {
@@ -1241,26 +1288,28 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('dispatches registered pane renderers with the visible daemon scope', () => {
-    const unregister = registerSidePaneTab({
-      id: 'workspace-proof',
-      label: 'Workspace proof',
-      shortLabel: 'Proof',
-      closeLabel: 'Close proof',
-      icon: 'tasks',
-      order: 75,
-      render: ({ scope, cwd }) => <p data-workspace-proof="">{`${scope.daemonId}:${scope.sessionId}:${cwd}`}</p>,
-    });
-    const unregisterUnwired = registerSidePaneTab({
-      id: 'unwired-proof',
-      label: 'Unwired proof',
-      shortLabel: 'Unwired',
-      closeLabel: 'Close unwired proof',
-      icon: 'tasks',
-      order: 76,
-    });
-    openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'workspace-proof');
-    const page = renderSessionChatPage(
+  test('lays the page out as the split workspace on a desktop and one tab at a time on a phone', () => {
+    const desktop = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(desktop.root.findByType(SessionWorkspace).props.formFactor).toBe('desktop');
+      expect(desktop.root.findAllByType(WorkspaceView)).toHaveLength(1);
+      // The chat is the agent pane's first tab, rendered as it always was.
+      expect(desktop.root.findByType(WorkspaceView).findAllByType(Transcript)).toHaveLength(1);
+      // No context dependencies: no rail, and no ◧ that could only open an empty sheet.
+      expect(desktop.root.findAllByType(ContextRail)).toHaveLength(0);
+    } finally {
+      run(() => desktop.unmount());
+    }
+    const phone = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -1271,13 +1320,53 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      expect(page.root.findByProps({ 'data-workspace-proof': '' }).children.join('')).toBe('alpha:shared:/work/shared');
-      run(() => openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'unwired-proof'));
-      expect(JSON.stringify(page.toJSON())).toContain('Unwired proof is ported but is not connected');
+      expect(phone.root.findByType(SessionWorkspace).props.formFactor).toBe('phone');
+      expect(phone.root.findAllByType(WorkspaceView)).toHaveLength(0);
+      expect(phone.root.findAllByProps({ 'data-phone-workspace': '' })).toHaveLength(1);
+    } finally {
+      run(() => phone.unmount());
+    }
+  });
+
+  test('opens a proved file, terminal and task reference in the workspace, not the old side pane', async () => {
+    const layouts = new WorkspaceLayoutStore(NO_STORAGE);
+    const scope = daemonSessionScope(alpha, 'shared');
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+        workspaceLayouts={layouts}
+      />,
+    );
+    try {
+      const surface = () => page.root.findByType(ReferenceSurfaceProvider).props.surface;
+      run(() => surface().onCodeReferenceOpen?.({ path: 'src/app.ts', line: 4 }));
+      expect(layouts.snapshot(scope).tabs['file:src/app.ts']?.label).toBe('app.ts');
+      const file = page.root.findByType(FileInstanceSurface);
+      expect(file.props.instance).toMatchObject({ key: 'src/app.ts', selection: { line: 4 }, revision: 1 });
+
+      run(() =>
+        surface().onSurfaceOpen?.({
+          kind: 'surface',
+          surface: 'terminal',
+          key: 'a1b2c3d4e5f6',
+          daemonId: alpha.daemonId,
+          sessionId: 'shared',
+        }),
+      );
+      expect(layouts.snapshot(scope).tabs['terminal:a1b2c3d4e5f6']).toBeDefined();
+      // No deck on this page: the terminal tab says so rather than showing a dead shell.
+      expect(JSON.stringify(page.toJSON())).toContain('Terminals are not available on this page.');
+
+      run(() => surface().onTaskOpen?.('F1'));
+      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
+      await runAsync(async () => await Promise.resolve());
     } finally {
       run(() => page.unmount());
-      unregister();
-      unregisterUnwired();
     }
   });
 
@@ -1389,11 +1478,7 @@ describe('SessionChatPage', () => {
       // already does.
       const statuses = page.root
         .findAllByProps({ role: 'status' })
-        .filter(node =>
-          [node.props.children]
-            .flat()
-            .some(child => typeof child === 'string' && child.includes('daemon did not answer')),
-        );
+        .filter(node => textOf(node).includes('daemon did not answer'));
       expect(statuses).toHaveLength(0);
     } finally {
       run(() => page.unmount());

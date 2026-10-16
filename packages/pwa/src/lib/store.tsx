@@ -69,6 +69,7 @@ import {
 import { StepUpGate } from './step-up-gate.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
+import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
 
 const CONNECTION_DATABASE = 'ferretry-pwa';
 const CONNECTION_OBJECT_STORE = 'connections';
@@ -331,6 +332,8 @@ export interface AppStore {
   readonly pins: DaemonPinClient;
   readonly browserLogin: DaemonBrowserLoginStore;
   readonly stt: SttSettingsStore;
+  /** Every agent's remembered split workspace, forgotten with the machine it belongs to. */
+  readonly workspaceLayouts: WorkspaceLayoutStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
   readonly pushDevices: DaemonPushDevices;
   /**
@@ -549,6 +552,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   }));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
+  const workspaceLayouts = new WorkspaceLayoutStore();
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
   const pushDevices = new DaemonPushDevices(browserStorage);
   const pushService = daemonPushService(carried);
@@ -573,6 +577,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       notificationPreferences,
       pushDevices,
       documentDraftStore,
+      workspaceLayouts,
       carrier,
     ],
     // The key goes with the pairing it proved, and only when the pairing goes for good — a re-pair in
@@ -617,6 +622,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pins,
     browserLogin,
     stt,
+    workspaceLayouts,
     notificationPreferences,
     pushDevices,
     pushService,
