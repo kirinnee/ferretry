@@ -8,6 +8,7 @@ import {
   AppTabBar,
   type AppTabBarProps,
   appBarDestinationForRoute,
+  appBarTitle,
   crumbTrail,
   MORE_PLACES,
   mobileDestinationMenuOpen,
@@ -671,5 +672,27 @@ describe('SidebarDrawerTrigger', () => {
     expect(mounted.container.textContent).toContain('0');
 
     await mounted.unmount();
+  });
+});
+
+describe('AppBar phone title', () => {
+  it('names Insights for the three views under More, and nothing elsewhere', () => {
+    expect(MORE_PLACES.map(appBarTitle)).toEqual(['Insights', 'Insights', 'Insights']);
+    expect(appBarTitle('settings')).toBeNull();
+    expect(appBarTitle(null)).toBeNull();
+  });
+
+  it('shows the title beside the sidebar opener on a phone, and not on a desktop', async () => {
+    setViewport(PHONE);
+    const phone = await mount(bar({ active: 'warden', onOpenSidebar: () => {}, sessionCount: 7, tabBarShown: true }));
+    expect(phone.container.querySelector('[data-app-bar-title]')?.textContent).toBe('Insights');
+    await phone.unmount();
+    const elsewhere = await mount(bar({ active: 'settings', tabBarShown: true }));
+    expect(elsewhere.container.querySelector('[data-app-bar-title]')).toBeNull();
+    await elsewhere.unmount();
+    setViewport(DESKTOP);
+    const desktop = await mount(bar({ active: 'analytics' }));
+    expect(desktop.container.querySelector('[data-app-bar-title]')).toBeNull();
+    await desktop.unmount();
   });
 });
