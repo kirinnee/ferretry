@@ -24,8 +24,9 @@ import {
   type TerminalDeckDependencies,
   type TerminalInputPort,
 } from '../../components/session-terminal-deck.tsx';
-import { type PaneSnapshotReader, TerminalSnapshotView } from '../../components/terminal-snapshot.tsx';
+import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
+import { displayCallsign } from '../../lib/callsign.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   activateWorkspaceTab,
@@ -42,6 +43,7 @@ import { ContextRail } from '../context-rail/context-rail.tsx';
 import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
 import type { ContextRailTab } from '../context-rail/context-rail-model.ts';
 import { AgentControlMarker } from './agent-control-marker.tsx';
+import { ConsoleSurface, type ConsoleTyper } from './console-surface.tsx';
 import { ContextSheet, ContextSheetButton } from './phone/context-sheet.tsx';
 import { PhoneWorkspace } from './phone/phone-workspace.tsx';
 import type { PhoneTab, WorkspaceFormFactor } from './phone/phone-tab.ts';
@@ -104,6 +106,8 @@ export interface SessionWorkspaceProps {
   /** The co-controlled terminals. Absent: terminal tabs say so, and ＋ offers none. */
   readonly deck?: TerminalDeckDependencies;
   readonly readSnapshot?: PaneSnapshotReader;
+  /** Typing into the Console; absent, it types through the daemon's own route. */
+  readonly typeIntoConsole?: ConsoleTyper;
   readonly browser?: UnifiedBrowserDependencies;
   readonly onOpenLoginWindow?: () => Promise<BrowserLoginSnapshot>;
 }
@@ -122,37 +126,6 @@ const nextBrowserKey = (tabs: readonly WorkspaceTab[]): string => {
   return `b${next}`;
 };
 
-/**
- * The Console: the agent's own Claude / Codex pane.
- *
- * READ-ONLY TODAY, AND IT SAYS SO. The only daemon route onto the agent's managed pane is its live
- * snapshot (`/snapshot?live=true`); nothing types into it from a paired device yet, so this shows the
- * pane as it is, refreshed while visible, and points at Chat for talking to the agent.
- */
-function ConsoleSurface({
-  connection,
-  workspace,
-  readSnapshot,
-}: {
-  readonly connection: DaemonConnection;
-  readonly workspace: SessionWorkspaceController;
-  readonly readSnapshot?: PaneSnapshotReader;
-}) {
-  return (
-    <section aria-label="Console" className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-workspace-console="">
-      <p className="m-0 text-ui text-muted">
-        The agent’s own CLI pane, as it is right now. Typing straight into it is not available yet — talk to the agent
-        in Chat.
-      </p>
-      <TerminalSnapshotView
-        daemon={connection}
-        scope={workspace.scope}
-        {...(readSnapshot === undefined ? {} : { readSnapshot })}
-      />
-    </section>
-  );
-}
-
 export function SessionWorkspace({
   connection,
   session,
@@ -167,6 +140,7 @@ export function SessionWorkspace({
   rails,
   deck,
   readSnapshot,
+  typeIntoConsole,
   browser,
   onOpenLoginWindow,
 }: SessionWorkspaceProps) {
@@ -177,6 +151,8 @@ export function SessionWorkspace({
   const [railPreview, setRailPreview] = useState<number | null>(null);
   const railWidths = useSyncExternalStore(rails.subscribe, rails.snapshot, rails.snapshot);
   const tabs = visibleTabsInOrder(layout);
+  // The agent's first name (#497 names every agent), for the Console's words and the agent tabs' titles.
+  const agentName = displayCallsign(session.config.teammate);
 
   // A new tab lands in the focused workspace pane — the layout's own rule — and pressing a pane's ＋
   // focuses that pane first, so it lands where it was asked for.
@@ -200,6 +176,14 @@ export function SessionWorkspace({
       .catch((reason: unknown) => setNotice(`Could not open a terminal: ${failure(reason)}`));
   };
 
+  // One registration per typeable tab — a terminal or the Console — for the phone key bar to write through.
+  const registerPort =
+    (tabId: string) =>
+    (port: TerminalInputPort | null): void => {
+      if (port === null) ports.current.delete(tabId);
+      else ports.current.set(tabId, port);
+    };
+
   const marker = (tab: WorkspaceTab): ReactNode => (
     <AgentControlMarker
       driver={driving.driverFor(tab.id)}
@@ -220,9 +204,13 @@ export function SessionWorkspace({
     if (tab.kind === 'console')
       return (
         <ConsoleSurface
+          agentName={agentName}
           connection={connection}
-          workspace={workspace}
+          onInputPort={registerPort(tab.id)}
+          scope={scope}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
+          {...(typeIntoConsole === undefined ? {} : { typeInto: typeIntoConsole })}
+          {...(options.interceptInput === undefined ? {} : { interceptInput: options.interceptInput })}
         />
       );
     if (tab.kind === 'terminal') {
@@ -239,10 +227,7 @@ export function SessionWorkspace({
             connection={connection}
             dependencies={deck}
             focusTerminalId={tab.key}
-            onInputPort={port => {
-              if (port === null) ports.current.delete(tab.id);
-              else ports.current.set(tab.id, port);
-            }}
+            onInputPort={registerPort(tab.id)}
             scope={scope}
             solo
             {...(options.interceptInput === undefined ? {} : { interceptInput: options.interceptInput })}
@@ -322,7 +307,6 @@ export function SessionWorkspace({
       <div className="flex h-full min-h-0 min-w-0 flex-col" data-session-workspace="phone">
         <PhoneWorkspace
           activeId={focusedWorkspaceTab(layout)}
-          consoleTakesKeys={false}
           header={
             <>
               {renderHeader(sheetButton)}
@@ -348,11 +332,24 @@ export function SessionWorkspace({
 
   const view = (
     <WorkspaceView
+      agentName={agentName}
       drivenTabIds={driving.drivenTabIds}
       layout={layout}
       onLayoutChange={setLayout}
       onNewTab={kind => newTab(kind)}
       renderTab={tab => renderBody(tab, { active: isTabShown(layout, tab.id) })}
+      {...(deck === undefined
+        ? {}
+        : {
+            // "End shell" from a terminal tab's close: the deck's own delete, so it ends exactly the
+            // way the deck's trash control does.
+            onEndTerminal: (tab: WorkspaceTab) => {
+              setNotice(null);
+              deck
+                .close(connection, scope, tab.key)
+                .catch((reason: unknown) => setNotice(`Could not end the shell: ${failure(reason)}`));
+            },
+          })}
     />
   );
   const railWidth = railPreview ?? railWidths.right;

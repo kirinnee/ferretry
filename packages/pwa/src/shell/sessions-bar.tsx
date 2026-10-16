@@ -19,7 +19,8 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, Search, Settings, X } from 'lucide-react';
-import { type ReactNode, useRef, useState } from 'react';
+import { type ReactNode, useRef, useState, useSyncExternalStore } from 'react';
+import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -38,6 +39,7 @@ import { RouteLink } from './route-link.tsx';
 import { needsYou, type SessionsBarFilter, sessionsBarSubline, sessionsBarView } from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
+import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 
 /** The places at the foot of the bar. Insights is Analytics, Warden and Learning together. */
 export type SessionsBarPlace = 'sessions' | 'projects' | 'insights' | 'settings';
@@ -101,6 +103,8 @@ export interface SessionsBarProps {
   readonly onAddMachine: () => void;
   /** Injected clock, so "finished in the last day" is testable. */
   readonly now?: () => number;
+  /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
+  readonly rails?: WorkspaceRailPreferenceStore;
 }
 
 function SessionRow({
@@ -457,13 +461,45 @@ function SessionsDrawer(props: SessionsBarProps) {
   );
 }
 
+/**
+ * The full column, at the width the reader dragged it to.
+ *
+ * The edge is the workspace's own `RailDivider` — drag, arrow keys (Shift for larger steps), and a
+ * double-click back to the default — and the width lives in the same remembered store as the context
+ * rail's, under `left`, so it survives a reload and is the same on every machine's pages. A drag
+ * previews locally and commits once, at the end, so the store is written once per gesture.
+ */
+function SessionsColumn(props: SessionsBarProps) {
+  const rails = props.rails ?? workspaceRailPreferences;
+  const widths = useSyncExternalStore(rails.subscribe, rails.snapshot, rails.snapshot);
+  const [preview, setPreview] = useState<number | null>(null);
+  const width = preview ?? widths.left;
+  return (
+    <>
+      <nav
+        aria-label="Sessions"
+        className={cn('fy-sbar', 'fy-sbar--column')}
+        data-sessions-bar="column"
+        style={{ width: `${width}px` }}
+      >
+        <SessionsBarTop {...props} navigate={props.onNavigate} />
+        <SessionsBarBody {...props} navigate={props.onNavigate} />
+      </nav>
+      <RailDivider
+        onCommit={next => {
+          setPreview(null);
+          rails.setWidth('left', next);
+        }}
+        onPreview={setPreview}
+        side="left"
+        width={width}
+      />
+    </>
+  );
+}
+
 export function SessionsBar(props: SessionsBarProps) {
   if (props.presentation === 'drawer') return <SessionsDrawer {...props} />;
   if (props.presentation === 'rail') return <SessionsRail {...props} />;
-  return (
-    <nav aria-label="Sessions" className={cn('fy-sbar', 'fy-sbar--column')} data-sessions-bar="column">
-      <SessionsBarTop {...props} navigate={props.onNavigate} />
-      <SessionsBarBody {...props} navigate={props.onNavigate} />
-    </nav>
-  );
+  return <SessionsColumn {...props} />;
 }

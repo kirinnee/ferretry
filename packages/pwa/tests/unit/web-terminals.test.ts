@@ -4,10 +4,12 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   closeSessionTerminal,
+  consoleInputChunks,
   createSessionTerminal,
   listSessionTerminals,
   renameSessionTerminal,
   terminalLimitLabel,
+  typeIntoSessionConsole,
 } from '../../src/lib/web-terminals.ts';
 
 const daemonA = daemonConnection({
@@ -148,5 +150,40 @@ describe('web terminal transport', () => {
 
   it('reports the session and box counts in the original wording', () => {
     expect(terminalLimitLabel(list)).toBe('1/6 in this session · 3/24 on this box');
+  });
+});
+
+describe('typing into the Console', () => {
+  it('posts the keys to the session’s own pane on its own daemon, as a mutation', async () => {
+    const { calls, fetcher } = recorder({ written: 3 });
+    expect(await typeIntoSessionConsole(daemonA, scopeA, 'ls\r', fetcher)).toBe(3);
+    expect(calls[0]?.url).toBe('https://a.example.test/v1/sessions/shared%2Fsession/console/input');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ data: 'ls\r' });
+    expect(new Headers(calls[0]?.init?.headers).get(FY_REQUEST_ID_HEADER)).not.toBeNull();
+  });
+
+  it('sends a long paste as ordered writes and refuses another daemon’s scope', async () => {
+    const { calls, fetcher } = recorder({ written: 4_096 }, { written: 1 });
+    expect(await typeIntoSessionConsole(daemonA, scopeA, 'x'.repeat(4_097), fetcher)).toBe(4_097);
+    expect(calls.map(call => (JSON.parse(String(call.init?.body)) as { data: string }).data.length)).toEqual([
+      4_096, 1,
+    ]);
+    await expect(typeIntoSessionConsole(daemonA, scopeB, 'x', fetcher)).rejects.toThrow(
+      'terminal scope must belong to the requested daemon',
+    );
+  });
+
+  it('keeps a grant refusal as the daemon said it', async () => {
+    const refused = async () => response({ error: 'unlock this machine first', code: 'unlock_required' }, 401);
+    await expect(typeIntoSessionConsole(daemonA, scopeA, 'x', refused)).rejects.toMatchObject({
+      status: 401,
+      code: 'unlock_required',
+    });
+  });
+
+  it('never splits a surrogate pair across two writes', () => {
+    expect(consoleInputChunks('ab😀c', 3)).toEqual(['ab', '😀c']);
+    expect(consoleInputChunks('')).toEqual([]);
   });
 });

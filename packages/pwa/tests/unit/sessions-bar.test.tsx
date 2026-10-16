@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ComponentProps } from 'react';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { WORKSPACE_RAIL_BOUNDS, WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
 import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
@@ -166,6 +167,74 @@ describe('SessionsBar as a column', () => {
     await click(machine, 'the machine switcher');
     await interact(() => pressKey(document, 'Escape'));
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+});
+
+describe('SessionsBar column width', () => {
+  /** A remembered store over memory, so a commit is observable and no test touches localStorage. */
+  const rails = () => {
+    const saved = new Map<string, string>();
+    return {
+      saved,
+      store: new WorkspaceRailPreferenceStore({
+        getItem: key => saved.get(key) ?? null,
+        setItem: (key, value) => void saved.set(key, value),
+      }),
+    };
+  };
+  const column = () => must(view?.container.querySelector<HTMLElement>('[data-sessions-bar="column"]'), 'the column');
+  const edge = () =>
+    must(view?.container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize agents rail"]'), 'the edge');
+
+  test('is resizable from its edge by keyboard, remembered, and reset by a double-click', async () => {
+    const { saved, store } = rails();
+    view = await mount(bar({ rails: store }).element);
+    expect(column().style.width).toBe(`${WORKSPACE_RAIL_BOUNDS.left.initial}px`);
+
+    await interact(() => pressKey(edge(), 'ArrowRight'));
+    expect(column().style.width).toBe(`${WORKSPACE_RAIL_BOUNDS.left.initial + 16}px`);
+    expect(JSON.parse(saved.get('fy-workspace-rails-v1') ?? '{}').left).toBe(WORKSPACE_RAIL_BOUNDS.left.initial + 16);
+
+    // Remembered: a fresh bar over the same store opens at the width the reader left it.
+    await view.unmount();
+    view = await mount(
+      bar({
+        rails: new WorkspaceRailPreferenceStore({ getItem: key => saved.get(key) ?? null, setItem: () => undefined }),
+      }).element,
+    );
+    expect(column().style.width).toBe(`${WORKSPACE_RAIL_BOUNDS.left.initial + 16}px`);
+    await view.unmount();
+
+    view = await mount(bar({ rails: store }).element);
+    await interact(() => edge().dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    expect(column().style.width).toBe(`${WORKSPACE_RAIL_BOUNDS.left.initial}px`);
+  });
+
+  test('previews a drag without writing, and commits once when the pointer lets go', async () => {
+    const { saved, store } = rails();
+    view = await mount(bar({ rails: store }).element);
+    const handle = edge();
+    handle.setPointerCapture = () => undefined;
+    const pointer = (type: string, clientX: number) =>
+      handle.dispatchEvent(
+        new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, button: 0, clientX }),
+      );
+    const parent = handle.parentElement as HTMLElement;
+    parent.getBoundingClientRect = () => ({ width: 1200, height: 800 }) as DOMRect;
+
+    await interact(() => pointer('pointerdown', 264));
+    await interact(() => pointer('pointermove', 330));
+    await interact(() => pointer('pointerup', 330));
+    expect(column().style.width).toBe('330px');
+    expect(JSON.parse(saved.get('fy-workspace-rails-v1') ?? '{}').left).toBe(330);
+  });
+
+  test('uses the page-wide store when none is handed in, and keeps the rail and drawer as they were', async () => {
+    view = await mount(bar().element);
+    expect(edge()).not.toBeNull();
+    await view.unmount();
+    view = await mount(bar({ presentation: 'rail', onExpand: () => undefined }).element);
+    expect(view.container.querySelector('[aria-label="Resize agents rail"]')).toBeNull();
   });
 });
 

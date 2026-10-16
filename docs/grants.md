@@ -84,12 +84,22 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | capability   | what it covers                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------- |
 | `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them |
-| `terminal`   | opening, writing to and streaming session terminals                                                 |
+| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console) |
 | `browser`    | the human login window and per-session browser control                                              |
 | `filesystem` | reading session working trees and registering projects on the host                                  |
 | `warden`     | supervision status, sweeps and the warden configuration                                             |
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
+
+**The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
+Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed
+identically: ungoverned from loopback; for a paired device, a browser across the network or a relayed session,
+the `terminal` grant plus a current step-up, which the unlock holds by default; an undetermined grant
+document refuses. It is not `/attach`: that route is `privilegedOnly` because it hands back a host tmux
+address, while the Console's answer is a byte count. The pane it writes to is the one the attach proof
+names — the session's single registration, matched on pane id, pid and process start — never a session
+name. The security log records each write as `terminal.input` on the session (`detail.mode: 'console'`),
+folded per window, and never what was typed.
 
 Each has two axes, and they are different questions:
 
