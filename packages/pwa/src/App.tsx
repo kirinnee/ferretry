@@ -84,6 +84,7 @@ import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
+import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
@@ -798,6 +799,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const { navigate } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
+  // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
+  const wardenActions = useAskWardenActions(connection);
   // The "This folder" rail reads through the app's own clients: the ONE attention client, a fleet
   // client per machine, and the machine's display name for the MCP sign-in sheet.
   const sessionContext = useMemo(
@@ -1104,6 +1107,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
+          actionContributions={wardenActions}
           browserLogin={store.browserLogin}
           attention={attention}
           chatWidth={controls.chatWidth}

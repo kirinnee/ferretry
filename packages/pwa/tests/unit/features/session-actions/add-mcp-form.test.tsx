@@ -152,7 +152,7 @@ const HOST_CLOSES = (): {
   const closes: number[] = [];
   const opens: string[] = [];
   return {
-    host: { close: () => closes.push(1), open: id => opens.push(id), compact: false },
+    host: { close: () => closes.push(1), open: id => opens.push(id), notify: () => undefined, compact: false },
     closes,
     opens,
   };

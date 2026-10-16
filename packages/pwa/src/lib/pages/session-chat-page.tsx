@@ -33,6 +33,7 @@ import {
 import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
 import { FilesTab } from '../../components/files-tab.tsx';
+import { ActionToast } from '../../features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../features/session-actions/actions-menu.tsx';
 import { AddMcpForm, type AddMcpPorts } from '../../features/session-actions/add-mcp-form.tsx';
 import {
@@ -497,6 +498,8 @@ export function SessionChatPage({
   const [confirmStop, setConfirmStop] = useState(false);
   const [pendingAction, setPendingAction] = useState<SessionAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const dismissActionNotice = useCallback(() => setActionNotice(null), []);
   const live = useRef({ connection, sessionId: session.config.id });
   live.current = { connection, sessionId: session.config.id };
 
@@ -509,6 +512,7 @@ export function SessionChatPage({
     setConfirmStop(false);
     setPendingAction(null);
     setActionError(null);
+    setActionNotice(null);
     // Attention belongs to the session that raised it. Carrying an open modal —
     // or worse, a requested `!A3` — across a navigation would offer one
     // session's ask over another session's board, so the whole trio resets with
@@ -849,10 +853,54 @@ export function SessionChatPage({
       form={actionForm}
       name={agentName}
       onFailure={sentence => setActionError(sentence)}
+      onNotice={setActionNotice}
       onFormChange={setActionForm}
       sections={actionSections}
     />
   );
+
+  /**
+   * THE MODEL AND EFFORT PICKERS (#525), drawn in two places from one element: the composer's status
+   * line, and Info › Runtime's "Change" row. Both are the same compact chips — a small menu at the chip
+   * wherever there is a pointer and room, the thumb-reach sheet on a phone — sending through the same
+   * runtime route, so Info never grows a second picker that could disagree with the composer's. A host
+   * that hands Info its own (`infoRuntimeControls`) wins; a daemon without the runtime route gets none.
+   */
+  const runtimePickers =
+    runtimeApi === null ? null : (
+      <ComposerRuntime
+        busy={runtimeSwitchBusy}
+        canControl={canControl}
+        // A phone keeps the thumb-reach sheet; anything with a pointer and room
+        // gets a small menu at the chip instead of a window-wide panel.
+        presentation={formFactor === 'phone' ? 'sheet' : 'popover'}
+        renderEffortControls={lifecycle => (
+          <RuntimeEffortControls
+            api={runtimeApi}
+            canControl={canControl}
+            catalogs={routedRuntimeCatalogs}
+            daemon={connection}
+            onOpenTerminal={openConsole}
+            view={session}
+            {...lifecycle}
+          />
+        )}
+        renderModelControls={lifecycle => (
+          <RuntimeModelControls
+            api={runtimeApi}
+            canControl={canControl}
+            catalogs={routedRuntimeCatalogs}
+            daemon={connection}
+            onOpenTerminal={openConsole}
+            view={session}
+            {...lifecycle}
+            open={lifecycle.open}
+          />
+        )}
+        view={session}
+      />
+    );
+  const infoControls = infoRuntimeControls ?? runtimePickers ?? undefined;
 
   /**
    * INFO — every LOOK for this ferret. The Folder tab is the old "This folder" rail (Files, Docs, Skills
@@ -939,7 +987,7 @@ export function SessionChatPage({
               {...(onNavigate === undefined
                 ? {}
                 : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
-              {...(infoRuntimeControls === undefined ? {} : { runtimeControls: infoRuntimeControls })}
+              {...(infoControls === undefined ? {} : { runtimeControls: infoControls })}
             />
           ),
         };
@@ -1047,41 +1095,7 @@ export function SessionChatPage({
               {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
               // The model and effort chips ride the composer's own status line, so the
               // runtime costs no row of its own above the message box.
-              statusSlot={
-                runtimeApi === null ? null : (
-                  <ComposerRuntime
-                    busy={runtimeSwitchBusy}
-                    canControl={canControl}
-                    // A phone keeps the thumb-reach sheet; anything with a pointer and room
-                    // gets a small menu at the chip instead of a window-wide panel.
-                    presentation={formFactor === 'phone' ? 'sheet' : 'popover'}
-                    renderEffortControls={lifecycle => (
-                      <RuntimeEffortControls
-                        api={runtimeApi}
-                        canControl={canControl}
-                        catalogs={routedRuntimeCatalogs}
-                        daemon={connection}
-                        onOpenTerminal={openConsole}
-                        view={session}
-                        {...lifecycle}
-                      />
-                    )}
-                    renderModelControls={lifecycle => (
-                      <RuntimeModelControls
-                        api={runtimeApi}
-                        canControl={canControl}
-                        catalogs={routedRuntimeCatalogs}
-                        daemon={connection}
-                        onOpenTerminal={openConsole}
-                        view={session}
-                        {...lifecycle}
-                        open={lifecycle.open}
-                      />
-                    )}
-                    view={session}
-                  />
-                )
-              }
+              statusSlot={runtimePickers}
             />
           )}
         </div>
@@ -1118,6 +1132,7 @@ export function SessionChatPage({
           {...(browser === undefined ? {} : { browser })}
           browserPages={browserPages}
         />
+        <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
         <BottomSheet
           ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
           closeLabel="Close"
