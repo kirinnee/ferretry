@@ -112,11 +112,9 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // Enter follows the current device until the reader explicitly chooses.
       composerEnterKey: null,
       sidebarCollapsed: true,
-      // Same precedent as chatWidth: a payload written before the composer
-      // fields existed means every suggestion family is offered and Vim keys
-      // are off, which is exactly what the app did then — so no version bump.
-      mentionSuggestions: true,
-      directReferenceSuggestions: true,
+      // A payload written before the composer fields existed opens suggestions
+      // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
+      suggestionKeys: 'ladder',
       skillSuggestions: true,
       composerVimMode: false,
     });

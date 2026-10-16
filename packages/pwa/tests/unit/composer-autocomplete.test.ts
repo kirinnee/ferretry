@@ -38,18 +38,18 @@ const candidate = (
 ): ComposerAutocompleteCandidate => ({ id, label, kind: 'skill', replacement: `/${id}`, ...patch });
 
 describe('COMPOSER_REFERENCE_TIERS', () => {
-  test('should list the four families in frequency order, sigil run matching tier', () => {
+  test('should list the three families in frequency order, sigil run matching tier', () => {
     // Assert — kept as data so provider routing, UI teaching and tests cannot drift.
-    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Tasks', 'Attention']);
+    should(COMPOSER_REFERENCE_TIERS.map(item => item.label)).deepEqual(['Files', 'Agents', 'Attention']);
     should(COMPOSER_REFERENCE_TIERS.every(item => item.trigger === '@'.repeat(item.tier))).equal(true);
   });
 
-  test('should admit no fifth tier, for pins, templates or anything else', () => {
+  test('should admit no further tier, for tasks, pins, templates or anything else', () => {
     // Assert — the ladder is a closed set. Pins are a link strip (#63) and no
     // build of this app has ever had a template library; both have arrived as
     // proposed `@` tiers before, and this list is the guard.
-    should(COMPOSER_REFERENCE_TIERS).have.length(4);
-    should(COMPOSER_REFERENCE_TIERS.some(item => /pin|template/iu.test(item.label))).equal(false);
+    should(COMPOSER_REFERENCE_TIERS).have.length(3);
+    should(COMPOSER_REFERENCE_TIERS.some(item => /task|pin|template/iu.test(item.label))).equal(false);
     should(detect('line\n@@@@@pin')).match({ referenceTier: 5 });
   });
 
