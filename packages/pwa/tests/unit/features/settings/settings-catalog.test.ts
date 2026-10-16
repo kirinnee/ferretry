@@ -13,6 +13,7 @@ import {
   settingsSectionForSetting,
 } from '../../../../src/features/settings/settings-catalog.ts';
 import { daemonId } from '../../../../src/lib/daemon-connection.ts';
+import { daemonMachineSetupPath } from '../../../../src/lib/pages/routes.ts';
 
 const alpha = daemonId('daemon-alpha');
 const beta = daemonId('daemon-beta');
@@ -169,6 +170,37 @@ describe('shared settings catalog', () => {
       files: '/d/daemon-beta/settings#files',
     });
     for (const href of Object.values(hrefs)) expect(href).not.toContain('#daemons');
+  });
+
+  test('opens New machine setup on its own route and the other three on the Machine tab', () => {
+    const hrefs = Object.fromEntries(SETTINGS_LINKS.map(link => [link.id, link.href(beta)]));
+    expect(hrefs).toMatchObject({
+      'machine-setup': daemonMachineSetupPath(beta),
+      'copy-settings': '/d/daemon-beta/settings#clone',
+      'export-settings': '/d/daemon-beta/settings#export',
+      speedups: '/d/daemon-beta/settings#speedups',
+    });
+  });
+
+  test('makes each setup link findable by what a person types for it', () => {
+    const found = (query: string, id: string) =>
+      settingsPaletteEntries(alpha, query).some(item => item.id === `setting-link-${id}`);
+    for (const query of ['onboarding', 'wizard', 'first run', 'new machine'])
+      expect(found(query, 'machine-setup')).toBe(true);
+    for (const query of ['clone', 'migrate', 'another machine']) expect(found(query, 'copy-settings')).toBe(true);
+    for (const query of ['export', 'zip', 'backup']) expect(found(query, 'export-settings')).toBe(true);
+    for (const query of ['groq', 'cerebras', 'jev', 'cheaper']) expect(found(query, 'speedups')).toBe(true);
+    expect(settingsPaletteEntries(alpha, 'wizard').find(item => item.id === 'setting-link-machine-setup')?.href).toBe(
+      daemonMachineSetupPath(alpha),
+    );
+  });
+
+  test('says "on this device" for the two device sections, and that the links are on this machine', () => {
+    expect(settingsSectionDefinition('appearance').description).toContain('on this device');
+    expect(settingsSectionDefinition('behaviour').description).toContain('on this device');
+    for (const id of ['machine-setup', 'copy-settings', 'export-settings', 'speedups']) {
+      expect(SETTINGS_LINKS.find(link => link.id === id)?.description).toContain('On this machine');
+    }
   });
 
   test('makes the resource-limit panel findable by the symptoms rather than the kernel word', () => {

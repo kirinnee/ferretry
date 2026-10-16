@@ -58,6 +58,7 @@ describe('settingsFlowFromHash', () => {
     ['#machines/studio/machine/setup', 'setup'],
     ['#machines/studio/machine/import', 'import'],
     ['#machines/studio/machine/clone', 'clone'],
+    ['#machines/studio/machine/export', 'export'],
     ['#machines/studio/machine/install-claude', 'install-claude'],
     ['#machines/studio/machine/install-codex', 'install-codex'],
   ])('reads %s as the %s flow', (hash, flow) => {

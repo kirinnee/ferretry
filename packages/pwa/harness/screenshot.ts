@@ -1169,10 +1169,9 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
 };
 
 /**
- * THE FULL-SCREEN SETUP'S CONTRACT, measured (the approved usability proposal): no app chrome at all;
- * a real stepper — the numbered rail on a desktop, segments with names on a phone — with exactly one
- * current step and every step before it done; and ‹ Back with the step's actions in ONE footer pinned
- * inside the viewport, above a phone's home indicator, on every step. Counted with the Machines frames.
+ * NEW MACHINE SETUP'S CONTRACT, measured: no app chrome at all; a progress rail — a column on a desktop,
+ * a strip on a phone — marking exactly the step on screen; and ‹ Back with Skip and Continue in ONE footer
+ * pinned inside the viewport, above a phone's home indicator, on every step. Counted with the Machines frames.
  */
 const assertSetupGeometry = async (page: Page, where: string): Promise<void> => {
   await settleTransitions(page);
@@ -1180,26 +1179,21 @@ const assertSetupGeometry = async (page: Page, where: string): Promise<void> => 
     const found: string[] = [];
     if (document.querySelector('[data-density-region="app-bar"], [data-app-tab-bar]') !== null)
       found.push('app chrome is on screen around the setup');
-    const stepper = document.querySelector<HTMLElement>('[data-machine-stepper][data-presentation="screen"]');
-    if (stepper === null) return [...found, 'the full-screen stepper is not on screen'];
-    const final = stepper.getAttribute('data-step') === 'done';
-    const steps = [...stepper.querySelectorAll('[data-stepper-steps] [data-stepper-step]')];
-    const current = steps.findIndex(step => step.getAttribute('aria-current') === 'step');
-    if (final ? current !== -1 : current === -1)
-      found.push(`the stepper marks ${current === -1 ? 'no' : 'a'} current step`);
-    steps.forEach((step, index) => {
-      const expected = final || index < current ? 'done' : index === current ? 'now' : 'todo';
-      if (step.getAttribute('data-state') !== expected)
-        found.push(`step ${index + 1} reads ${step.getAttribute('data-state')} instead of ${expected}`);
-    });
-    const shown = (selector: string): boolean => {
-      const element = stepper.querySelector<HTMLElement>(selector);
-      return element !== null && element.getBoundingClientRect().width > 0;
-    };
+    // New machine setup (P9): a progress rail — a column on a desktop, a strip on a phone — with the open
+    // step marked, and Back / Skip / Continue pinned to the bottom of the screen.
+    const setup = document.querySelector<HTMLElement>('[data-machine-onboarding]');
+    if (setup === null) return [...found, 'New machine setup is not on screen'];
     const wide = window.innerWidth >= 768;
-    if (wide && !shown('[data-stepper-rail]')) found.push('the numbered step rail is not shown on a desktop');
-    if (!wide && !shown('[data-stepper-progress]')) found.push('the step segments are not shown on a phone');
-    const foot = stepper.querySelector<HTMLElement>('[data-stepper-foot]');
+    const rail = setup.querySelector<HTMLElement>(`[data-onboarding-rail="${wide ? 'column' : 'row'}"]`);
+    if (rail === null || rail.getBoundingClientRect().width === 0)
+      return [...found, `the ${wide ? 'step rail' : 'step strip'} is not shown`];
+    const current = [...rail.querySelectorAll('[data-onboarding-go]')].filter(
+      step => step.getAttribute('aria-current') === 'step',
+    );
+    if (current.length !== 1) found.push(`the rail marks ${current.length} current steps instead of 1`);
+    else if (current[0]?.getAttribute('data-onboarding-go') !== setup.getAttribute('data-onboarding-at'))
+      found.push('the rail marks a different step from the one on screen');
+    const foot = setup.querySelector<HTMLElement>('[data-onboarding-foot]');
     if (foot === null) return [...found, 'there is no pinned footer'];
     const box = foot.getBoundingClientRect();
     if (box.top < 0 || box.bottom > window.innerHeight + 0.5)
@@ -1217,7 +1211,7 @@ const assertSetupGeometry = async (page: Page, where: string): Promise<void> => 
   });
   if (problems.length > 0) fail(`${where}: the setup layout is off\n${problems.map(p => `   ${p}`).join('\n')}`);
   machinesGeometryChecks += 1;
-  process.stdout.write(`📐 full-screen setup, stepper and pinned footer: ${where}\n`);
+  process.stdout.write(`📐 New machine setup, rail and pinned footer: ${where}\n`);
 };
 
 function run(command: string, args: readonly string[]): void {
@@ -2820,29 +2814,28 @@ try {
           await newMachine.locator('[data-machine-finish-setup]').waitFor({ state: 'visible' });
           await accountShot('not-set-up', 'machine not set up');
           await newMachine.locator('[data-machine-finish-setup-open]').click();
-          // One question per screen — the tools, then each tool's "Use your login and setup?", a tool
-          // that is installed but not signed in with Sign in now in place, and the "nothing set up yet"
-          // ending — with the named stepper beside (or, on a phone, above) every one of them.
-          const setupScreen = page.locator('#harness-machine-setup [data-machine-stepper="first-run"]');
+          // New machine setup (P9): a progress rail, every step skippable. Five frames — Start from, the
+          // Logins step with the Claude Code and Codex check inside it, Speed-ups, the Warden, and Done
+          // listing what was skipped with its "Set up later" link — each measured for the rail and footer.
+          const setupScreen = page.locator('#harness-machine-setup [data-machine-onboarding]');
+          await setupScreen.locator('[data-onboarding-step-body="start"]').waitFor({ state: 'visible' });
+          await setupShot('first-run', 'Start from');
+          await setupScreen.locator('[data-onboarding-skip]').click();
           await setupScreen.locator('[data-first-run-step="tools"]').waitFor({ state: 'visible' });
-          await setupShot('first-run', 'first run');
-          await setupScreen.locator('[data-step-next]').click();
-          await setupScreen.locator('[data-first-run-step="claude"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-claude', 'first run Claude Code question');
-          await setupScreen.locator('[data-harness-skip]').click();
-          await setupScreen.locator('[data-first-run-step="codex"] [data-setup-note="sign-in-now"]').waitFor({
-            state: 'visible',
-          });
-          await setupShot('first-run-codex', 'first run Codex not signed in');
-          await setupScreen.locator('[data-harness-sign-in]').click();
-          await setupScreen.locator('[data-first-run-sign-in="codex"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-sign-in', 'first run Sign in now');
-          await setupScreen.locator('[data-first-run-sign-in-close]').click();
-          await setupScreen.locator('[data-harness-skip]').click();
-          await setupScreen.locator('[data-first-run-result="nothing"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-nothing', 'first run with nothing set up');
+          await setupShot('first-run-claude', 'Logins with the Claude Code and Codex check');
+          await setupScreen.locator('[data-onboarding-skip]').click();
+          await setupScreen.locator('[data-onboarding-step-body="speedups"]').waitFor({ state: 'visible' });
+          await setupShot('first-run-codex', 'Speed-ups');
+          await setupScreen.locator('[data-onboarding-skip]').click();
+          await setupScreen.locator('[data-onboarding-skip]').click();
+          await setupScreen.locator('[data-onboarding-step-body="warden"]').waitFor({ state: 'visible' });
+          await setupShot('first-run-sign-in', 'Warden');
+          await setupScreen.locator('[data-onboarding-go="done"]:visible').first().click();
+          await setupScreen.locator('[data-onboarding-step-body="done"]').waitFor({ state: 'visible' });
+          await setupShot('first-run-nothing', 'Done with skipped steps');
           // Leaving lands back on the machine in Settings, banner and all.
-          await setupScreen.locator('[data-first-run-finish]').click();
+          await setupScreen.locator('[data-onboarding-restart]').click();
+          await setupScreen.locator('[data-onboarding-later-all]').click();
           await page
             .locator('[data-machines-surface="checking-daemon"] [data-machine-finish-setup]')
             .waitFor({ state: 'visible' });

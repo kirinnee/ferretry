@@ -159,6 +159,26 @@ and the blessing, joins the queue ahead of the sweep's own flags, and still wait
 against today's cap. `GET /v1/warden/attention` is the Needs-you feed: the session attention boards, the
 verdicts that ask for you, the flags nothing has judged and the acts held for you.
 
+## Copy and Export
+
+Because the files are the settings, moving settings between machines is moving files — minus secrets, which
+no file holds and no route returns.
+
+- **Copy settings from another machine** (Settings › a machine › Machine › Setup, and New machine setup's
+  _Start from_ step) runs in the browser, which holds both pairings. It reads `warden.yaml`, `learning.yaml`
+  and `voice.yaml` from the source with `GET /v1/config/file` and writes each here with `PUT /v1/config/file`
+  against this machine's current etag, so the loosening rule applies exactly as to any other editor: a copied
+  file that loosens (a Warden that turns on the Jev guard) is written and **held** until the owner confirms
+  it. Profiles, components, runtimes and logins travel as the reviewed `clone.import` change, and agent
+  controls and the default runtime as one `machine.settings` change — `machine.yaml` is not copied whole,
+  because its `advanced` block names this machine's own paths. Before anything is written the preview lists
+  every secret and sign-in the copied settings need (`${secret:NAME}` references, the Jev, Groq or Cerebras key
+  a copied Warden or voice setting spends, a login that arrives empty), each marked when this machine already
+  holds it, with a field to store it through `POST /v1/secrets`.
+- **Export settings** zips every file `GET /v1/config/status` lists, read one by one, under `config/`. A file
+  the daemon refused is **left out and named**: a pasted key is exactly what makes a file invalid, and an
+  invalid file is still on disk as typed.
+
 ## Agents
 
 "What agents may control › **Ferretry settings**" decides whether an agent may use the `config.*` tools. It

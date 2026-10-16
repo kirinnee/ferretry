@@ -5,8 +5,8 @@
  * - **Pair** — this device is already paired (the screen is only reachable through a pairing); a
  *   phone can be paired too, with Settings › Add a device's own surface.
  * - **Start from** — fresh, or Copy settings from another machine (`clone.tsx`), inline.
- * - **Logins** — the Claude Code and Codex check (`first-run.tsx`), inline; environment logins are
- *   added on the Credentials tab.
+ * - **Logins** — the Claude Code and Codex check (`first-run.tsx`) while the machine has no runtime, then
+ *   Settings › Logins itself (`credentials-tab.tsx`), whose Add login is the one-tap provider grid.
  * - **Speed-ups** — Settings › Speed-ups (`speedups-surface.tsx`): paste → Test → "set ✓".
  * - **Voice** — the engine choice is a SLOT the Parakeet engine fills; clean-up is this device's.
  * - **Warden** — Settings › Warden's card, with the Jev guard preselected only when a Jev key was added.
@@ -35,8 +35,8 @@ import { SpeedupsSurface } from '../../speedups/speedups-surface.tsx';
 import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
 import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
 import { AgentControlSection, DefaultRuntimeSection } from '../machine/settings-tab.tsx';
+import { CredentialsTab } from '../credentials/credentials-tab.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
-import { machineHash } from '../shell/machine-route.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { CloneMachine } from './clone.tsx';
 import { MachineFirstRun } from './first-run.tsx';
@@ -158,32 +158,30 @@ export function OnboardingLoginsStep({
 }) {
   const setUp = tab.machine?.setUp === true;
   return (
-    <div className="flex min-w-0 flex-col gap-4" data-onboarding-step-body="logins">
+    <div className="flex min-w-0 flex-col gap-5" data-onboarding-step-body="logins">
       <Lead>
-        Sign in to the CLIs your ferrets will use. Ferretry looks for Claude Code and Codex on {tab.machineName} and
-        brings in your login and setup.
+        Sign in to the CLIs your ferrets will use, or add a provider with its key: GLM, DeepSeek, Kimi, OpenRouter,
+        Bedrock and more, one tap each.
       </Lead>
-      <MachineFirstRun
-        {...tab}
-        mode={setUp ? 'import' : 'setup'}
-        presentation="inline"
-        {...(progress === undefined ? {} : { progress })}
-        onDone={onDone}
-        onLeave={onLeave}
-      />
-      <SetupNote name="env-logins" title="Another provider?">
-        <span>
-          GLM, DeepSeek, Bedrock, OpenRouter and others run through environment logins: a base URL and a key from the
-          secret store.{' '}
-          <a
-            className="font-semibold text-accent underline"
-            href={machineHash(tab.machineName, 'credentials')}
-            data-onboarding-env-login=""
-          >
-            Add an environment login
-          </a>
-        </span>
-      </SetupNote>
+      {setUp ? null : (
+        // A machine that is not set up has no runtime yet: the Claude Code and Codex check brings in the
+        // logins it finds AND names the runtimes that use them, which a login added below does not.
+        <SetupSection title={`Claude Code and Codex on ${tab.machineName}`} name="logins-import">
+          <MachineFirstRun
+            {...tab}
+            mode="setup"
+            presentation="inline"
+            {...(progress === undefined ? {} : { progress })}
+            onDone={onDone}
+            onLeave={onLeave}
+          />
+        </SetupSection>
+      )}
+      {/* Settings › Logins itself — its list, and Add login's provider grid — so this step and its
+          "Set up later" panel are one surface. */}
+      <SetupSection title={`Logins on ${tab.machineName}`} name="logins-list">
+        <CredentialsTab {...tab} />
+      </SetupSection>
     </div>
   );
 }

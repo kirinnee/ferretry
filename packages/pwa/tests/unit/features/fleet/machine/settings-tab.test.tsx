@@ -392,30 +392,69 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-  it('offers Set up before the machine is set up, with Clone beside it', async () => {
+  it('offers Set up before the machine is set up, with Copy and Export beside it', async () => {
     await withTab({ machine: FRESH_MACHINE }, async ({ q, browser }) => {
       const setup = must(q('[data-setup-section="setup"]'), 'setup section');
       expect(setup.querySelector('[data-settings-action="setup"]')?.textContent).toContain('Set up studio-mac');
       expect(setup.querySelector('[data-settings-action="import"]')).toBeNull();
       expect(setup.querySelector('[data-settings-action="clone"]')?.textContent).toContain(
-        'Clone from another machine',
+        'Copy settings from another machine…',
       );
       expect(setup.querySelector('[data-settings-action="clone"]')?.textContent).toContain(
-        'Logins and history stay behind.',
+        'Secrets and logins never travel.',
       );
+      expect(setup.querySelector('[data-settings-action="export"]')?.textContent).toContain('Export settings');
       await click(setup.querySelector('[data-settings-action="clone"]'), 'clone');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/clone');
     });
   });
 
-  it('offers Import again once the machine is set up', async () => {
+  it('keeps New machine setup one tap away, and Import again, once the machine is set up', async () => {
     await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
       const setup = must(q('[data-setup-section="setup"]'), 'setup section');
-      expect(setup.querySelector('[data-settings-action="setup"]')).toBeNull();
+      expect(setup.querySelector('[data-settings-action="setup"]')?.textContent).toContain('New machine setup');
+      expect(setup.querySelector('[data-settings-action="setup"]')?.textContent).not.toContain('Set up studio-mac');
       expect(setup.querySelector('[data-settings-action="import"]')?.textContent).toContain('Import again');
       await click(setup.querySelector('[data-settings-action="import"]'), 'import');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/import');
       expect(q('[data-first-run-step]')).not.toBeNull();
+    });
+  });
+
+  it('New machine setup on a set-up machine calls the shell’s full-screen setup', async () => {
+    let opened = 0;
+    await withTab(
+      {
+        onSetUp: () => {
+          opened += 1;
+        },
+      },
+      async ({ q, browser }) => {
+        await click(q('[data-settings-action="setup"]'), 'new machine setup');
+        expect(opened).toBe(1);
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+      },
+    );
+  });
+
+  it('New machine setup opens the in-tab setup flow when the shell offers no full screen', async () => {
+    await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
+      await click(q('[data-settings-action="setup"]'), 'new machine setup');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
+      expect(q('[data-first-run-step]')).not.toBeNull();
+    });
+  });
+
+  it('Export settings opens the export flow, and its back button returns to the tab', async () => {
+    await withTab({}, async ({ q, browser }) => {
+      await click(q('[data-settings-action="export"]'), 'export');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine/export');
+      expect(q('[data-export-settings]')).not.toBeNull();
+      expect(q('[data-machine-settings]')).toBeNull();
+      await click(q('[data-export-back]'), 'back');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+      expect(q('[data-machine-settings]')).not.toBeNull();
+      expect(q('[data-export-settings]')).toBeNull();
     });
   });
 

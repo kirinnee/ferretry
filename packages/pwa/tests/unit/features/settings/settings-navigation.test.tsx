@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  type SettingsMachineEntry,
   SettingsHome,
+  type SettingsMachineEntry,
   SettingsSidebar,
 } from '../../../../src/features/settings/settings-navigation.tsx';
 import { type DaemonId, daemonId } from '../../../../src/lib/daemon-connection.ts';
@@ -41,7 +41,7 @@ describe('SettingsSidebar', () => {
     try {
       const nav = must(view.container.querySelector<HTMLElement>('nav[data-settings-sidebar]'), 'the sidebar');
       expect(nav.getAttribute('aria-label')).toBe('Settings');
-      expect(view.container.querySelector('#settings-group-browser')?.textContent).toBe('This browser');
+      expect(view.container.querySelector('#settings-group-browser')?.textContent).toBe('This device');
       expect(view.container.querySelector('#settings-group-machines')?.textContent).toBe('Machines');
       const browserList = must(
         view.container.querySelector('[aria-labelledby="settings-group-browser"]'),
@@ -138,9 +138,9 @@ describe('SettingsHome', () => {
     try {
       const nav = must(view.container.querySelector<HTMLElement>('nav[data-settings-home]'), 'the home');
       expect(nav.getAttribute('aria-label')).toBe('Settings');
-      expect(view.container.querySelector('#settings-home-browser')?.textContent).toBe('This phone');
+      expect(view.container.querySelector('#settings-home-browser')?.textContent).toBe('This device');
       expect(view.container.querySelector('#settings-home-machines')?.textContent).toBe('Machines · 2');
-      expect(view.container.textContent).toContain('Only this phone. Your machines aren’t affected.');
+      expect(view.container.textContent).toContain('Stored on this device only, never copied to a machine.');
       expect(
         [...view.container.querySelectorAll('[data-settings-section-choice]')].map(row => row.textContent),
       ).toEqual(['Appearance', 'Behaviour']);
