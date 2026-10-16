@@ -28,6 +28,7 @@ const settings = component({
   kind: 'settings',
   name: 'agent',
   harness: 'claude',
+  scope: 'claude',
   detail: {
     kind: 'settings',
     file: 'components/settings/agent.json',
@@ -46,12 +47,14 @@ const hooks = component({
   kind: 'hooks',
   name: 'fmt',
   harness: 'claude',
+  scope: 'claude',
   detail: { kind: 'hooks', file: 'h.json', directory: 'hooks/' },
 });
 const models = component({
   reference: 'modelSets/heavy',
   kind: 'modelSets',
   name: 'heavy',
+  scope: 'claude',
   detail: { kind: 'modelSets', models: ['opus', 'sonnet'], default: 'opus' },
 });
 
@@ -140,7 +143,7 @@ describe('component renderings', () => {
   it('should show what each kind holds, its notes and why it cannot be removed', () => {
     const text = renderComponent(mcp);
     should(text)
-      .match(/mcp\/github {2}\(both tools\)/)
+      .match(/mcp\/github {2}\(Generic\)/)
       .and.match(/Runs: npx -y server/)
       .and.match(/Address: https:\/\/mcp\.example\.com/);
     should(text)
@@ -151,7 +154,7 @@ describe('component renderings', () => {
       .and.match(/Note: Command not found: npx/);
     should(text).match(/Cannot remove yet: default uses it\./);
     should(renderComponent(settings))
-      .match(/\(Claude Code\)/)
+      .match(/\(Claude only\)/)
       .and.match(/Flags: --verbose/)
       .and.match(/Env: A=1/);
     should(renderComponent(skills)).match(/Skills: a, b/);
@@ -159,7 +162,8 @@ describe('component renderings', () => {
       .match(/File: h\.json/)
       .and.match(/Folder: hooks\//);
     should(renderComponent(models))
-      .match(/Models: opus, sonnet/)
+      .match(/modelSets\/heavy {2}\(Claude only\)/)
+      .and.match(/Models: opus, sonnet/)
       .and.match(/Starts with: opus/);
     should(renderComponent(component())).match(/File: components\/instructions\/main\.md/);
     should(renderComponent(component({ detail: { kind: 'mcp', env: [] } }))).not.match(/Runs|Address/);
@@ -169,7 +173,7 @@ describe('component renderings', () => {
 
   it('should list every kind, saying when one has none', () => {
     const text = renderComponentCatalog(catalog().kinds, 'fz');
-    should(text).match(/MCP — Servers\n {2}github {2}\(both tools\) {2}used by 1 profile\(s\) {2}· 1 note\(s\)/);
+    should(text).match(/MCP — Servers\n {2}github {2}\(Generic\) {2}used by 1 profile\(s\) {2}· 1 note\(s\)/);
     should(text)
       .match(/Hooks — Hooks\n {2}none yet/)
       .and.match(/fz component show/);

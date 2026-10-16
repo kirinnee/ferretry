@@ -1610,7 +1610,7 @@ describe('profileDraftView', () => {
     const saved = profileNamed(profileCatalog(model, facts), 'agent');
 
     // Assert
-    should(draft).deepEqual({ harnesses: saved.harnesses });
+    should(draft).deepEqual({ harnesses: saved.harnesses, scope: saved.scope });
     FleetProfileDraftViewSchema.parse(draft);
   });
 
@@ -1648,5 +1648,73 @@ describe('profileDraftView', () => {
     should(loop.harnesses.map(stack => stack.available.available)).deepEqual([false, false]);
     should(ghost.refusal).equal('no MCP server ghost exists on this machine');
     FleetProfileDraftViewSchema.parse(loop);
+  });
+});
+
+describe('harness scope (P7)', () => {
+  const scoped = (): AccountModel =>
+    parseAccountModel({
+      version: 2,
+      components: {
+        instructions: { main: { file: 'main.md' } },
+        settings: {
+          'claude-settings': { harness: 'claude', flags: ['--x'] },
+          'codex-settings': { harness: 'codex', flags: ['--y'] },
+        },
+        modelSets: { 'codex-models': { models: ['gpt-6'], default: 'gpt-6' } },
+      },
+      profiles: {
+        shared: { layers: ['instructions/main'] },
+        claude: { layers: ['profile/shared', 'settings/claude-settings'] },
+        legacy: { layers: ['settings/claude-settings', 'settings/codex-settings'] },
+      },
+    });
+
+  it('should give each component its scope, a model set its ids’ harness', () => {
+    // Act
+    const catalog = componentCatalog(scoped(), factsOf());
+
+    // Assert
+    const scopes = catalog.kinds.flatMap(group => group.components.map(entry => [entry.reference, entry.scope]));
+    should(scopes).deepEqual([
+      ['instructions/main', 'generic'],
+      ['settings/claude-settings', 'claude'],
+      ['settings/codex-settings', 'codex'],
+      ['modelSets/codex-models', 'codex'],
+    ]);
+    FleetComponentCatalogSchema.parse(catalog);
+  });
+
+  it('should derive each profile’s scope, and say why a mixed one is', () => {
+    // Act
+    const catalog = profileCatalog(scoped(), factsOf());
+
+    // Assert
+    should(profileNamed(catalog, 'shared').scope).deepEqual({ kind: 'scoped', scope: 'generic' });
+    should(profileNamed(catalog, 'claude').scope).deepEqual({ kind: 'scoped', scope: 'claude' });
+    should(profileNamed(catalog, 'legacy').scope).deepEqual({
+      kind: 'mixed',
+      sentence:
+        "Profile legacy can't be both Claude only and Codex only: settings claude-settings is Claude only and settings codex-settings is Codex only.",
+    });
+    FleetLayeredProfileCatalogSchema.parse(catalog);
+  });
+
+  it('should refuse a mixed draft with the same sentence, naming an edited profile but not a new one', () => {
+    // Act
+    const fresh = profileDraftView(scoped(), { layers: ['profile/claude', 'modelSets/codex-models'] }, factsOf());
+    const edited = profileDraftView(
+      scoped(),
+      { layers: ['profile/claude', 'modelSets/codex-models'], editing: 'legacy' },
+      factsOf(),
+    );
+
+    // Assert
+    const sentence =
+      "can't be both Claude only and Codex only: profile claude is Claude only and model set codex-models is Codex only.";
+    should(fresh.refusal).equal(`A profile ${sentence}`);
+    should(fresh.scope).deepEqual({ kind: 'mixed', sentence: `A profile ${sentence}` });
+    should(edited.refusal).equal(`Profile legacy ${sentence}`);
+    FleetProfileDraftViewSchema.parse(fresh);
   });
 });

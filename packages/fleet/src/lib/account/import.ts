@@ -4,8 +4,9 @@
  * A machine that already runs Claude Code or Codex has a setup: a login, an instructions document,
  * settings, MCP servers, skills and hooks. This module turns what the host scan read
  * (`../../adapters/host-harness-scan.ts`) into the account model's words — one credential per harness
- * kept `store: host`, one component per thing found, and a **Default** profile that layers them — so
- * the person's own setup is what their first runtimes run.
+ * kept `store: host`, one component per thing found, and a **Default** profile PER HARNESS that layers
+ * the generic parts and that harness's own (`claude-default`, `codex-default`) — so the person's own setup
+ * is what their first runtimes run, and no profile is both Claude only and Codex only (P7).
  *
  * THE RULES IT APPLIES, each one the design's:
  *
@@ -14,7 +15,7 @@
  *   file to link, so the credential is an empty `store: ferretry` slot that needs sign-in.
  * - **Not signed in still imports (E4).** The credential lands, the components land, and the preview
  *   says sign-in comes later. A login that needs a refresh imports too (E6): the harness renews it.
- * - **Nothing found is a plain Starter profile (E5)** holding only a model set.
+ * - **Nothing found is a plain Starter profile (E5)** per harness, holding only its model set.
  * - **Secret-looking values never sit in a component (E7, K4).** They are moved into
  *   {@link ImportPlan.secrets} — the only field anywhere in this module that carries a value — and
  *   the component holds a `${secret:NAME}` reference. The preview names the keys and nothing else.
@@ -38,6 +39,7 @@ import { FLEET_STARTER_MODELS } from '../defaults.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
+import { componentScope, scopeFits } from './scope.ts';
 import {
   type AccountModel,
   type AccountModelDocument,
@@ -51,6 +53,7 @@ import {
   type McpComponent,
   type ModelSetComponent,
   parseAccountModel,
+  parseLayerReference,
   type Runtime,
   type SettingsComponent,
   type SkillsComponent,
@@ -163,8 +166,13 @@ export interface ImportRecordEntry {
 export interface ImportRecord {
   readonly version: 1;
   readonly components: Readonly<Record<string, ImportRecordEntry>>;
-  /** The profile the first import created, which later imports extend with what is new. */
+  /**
+   * The ONE profile an import made before P7, shared by both harnesses, which later imports still
+   * extend. A record written since names {@link ImportRecord.profiles} instead.
+   */
   readonly profile?: string;
+  /** The profile an import made for each harness, which later imports extend with what is new. */
+  readonly profiles?: Readonly<Partial<Record<HarnessKind, string>>>;
 }
 
 export const EMPTY_IMPORT_RECORD: ImportRecord = { version: 1, components: {} };
@@ -1127,7 +1135,10 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     if (candidate.warnings.length > 0) warnings[freeReference] = candidate.warnings;
   }
 
-  // The profile: extend the one an earlier import made, or make Default / Starter.
+  // The profiles: ONE PER IMPORTED HARNESS (P7 — a profile is Generic, Claude only or Codex only,
+  // never both), each holding the generic parts and that harness's own. Import again extends the
+  // profile an earlier import made for a harness, or makes one for a harness imported for the first
+  // time. A record written before P7 names one shared profile, which is extended as it always was.
   const anyFound = harvests.some(entry => entry.found);
   const profiles: Record<string, LayeredProfile> = {};
   const ordered = (layers: readonly LayerReferenceText[]): LayerReferenceText[] =>
@@ -1136,23 +1147,53 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
         LAYER_ORDER.indexOf(left.slice(0, left.indexOf('/')) as ComponentKind) -
         LAYER_ORDER.indexOf(right.slice(0, right.indexOf('/')) as ComponentKind),
     );
-  let profileName: string | undefined;
-  const recorded = record.profile === undefined ? undefined : existing?.profiles[record.profile];
-  if (record.profile !== undefined && recorded !== undefined) {
-    profileName = record.profile;
-    if (added.length > 0) profiles[profileName] = { layers: [...recorded.layers, ...ordered(added)] };
-  } else if (imported.length > 0) {
-    const wanted = anyFound ? IMPORT_NAMES.defaultProfile : IMPORT_NAMES.starterProfile;
-    profileName = freeName(wanted, candidate => existing?.profiles[candidate] !== undefined);
-    const layers = anyFound ? added : added.filter(reference => reference.startsWith('modelSets/'));
-    profiles[profileName] = { layers: ordered(layers) };
-    if (!anyFound) {
-      for (const harness of imported) {
-        notes.push({
-          harness,
-          text: 'Nothing found. A plain Starter profile with only a model set. You can add to it later.',
-        });
-      }
+  const componentAt = (reference: string): unknown => {
+    const parsed = parseLayerReference(reference);
+    if (parsed?.kind !== 'component') return undefined;
+    const made = components.find(item => item.kind === parsed.componentKind && item.name === parsed.name);
+    return made === undefined ? existing?.components[parsed.componentKind][parsed.name] : made.value;
+  };
+  const fitsOn = (harness: HarnessKind) => (reference: LayerReferenceText) =>
+    scopeFits(
+      componentScope(reference.slice(0, reference.indexOf('/')) as ComponentKind, componentAt(reference)),
+      harness,
+    );
+  const profileOf: Partial<Record<HarnessKind, string>> = {};
+  for (const harness of imported) {
+    const known = record.profiles?.[harness] ?? record.profile;
+    if (known !== undefined && existing?.profiles[known] !== undefined) profileOf[harness] = known;
+  }
+  for (const known of new Set(Object.values(profileOf))) {
+    const on = imported.filter(harness => profileOf[harness] === known);
+    const before = (existing as AccountModel).profiles[known]?.layers ?? [];
+    const fresh = added.filter(
+      reference => !before.includes(reference) && on.some(harness => fitsOn(harness)(reference)),
+    );
+    if (fresh.length > 0) profiles[known] = { layers: [...before, ...ordered(fresh)] };
+  }
+  for (const harness of imported) {
+    if (profileOf[harness] !== undefined) continue;
+    // A harness imported for the first time: what an earlier import made that fits it, then what is new.
+    const earlier = Object.keys(record.components).filter(
+      reference => !added.includes(reference as LayerReferenceText) && componentAt(reference) !== undefined,
+    ) as LayerReferenceText[];
+    const fitting = [...earlier, ...added].filter(fitsOn(harness));
+    // Something found now, or something an earlier import found, is a Default; only model sets is a
+    // Starter. Never empty: the harness's model set is always new or recorded.
+    const found = anyFound || fitting.some(reference => !reference.startsWith('modelSets/'));
+    const layers = ordered(fitting);
+    const wanted = importedRuntimeName(harness, found ? IMPORT_NAMES.defaultProfile : IMPORT_NAMES.starterProfile);
+    const name = freeName(
+      wanted,
+      candidate => existing?.profiles[candidate] !== undefined || profiles[candidate] !== undefined,
+    );
+    profiles[name] = { layers };
+    profileOf[harness] = name;
+    if (!found) {
+      notes.push({
+        harness,
+        text: 'Nothing found. A plain Starter profile with only a model set. You can add to it later.',
+      });
     }
   }
 
@@ -1172,9 +1213,10 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const credentialId =
       reuse ?? freeName(harnessNamed(harness, 'you'), candidate => existing?.credentials[candidate] !== undefined);
     if (reuse === undefined) credentials[credentialId] = wanted;
+    const profileName = profileOf[harness];
     if (profileName === undefined) continue;
     const suggested = freeName(
-      importedRuntimeName(harness, profileName),
+      profileName.startsWith(`${harness}-`) ? profileName : importedRuntimeName(harness, profileName),
       candidate => existing?.runtimes[candidate] !== undefined || runtimes[candidate] !== undefined,
     );
     const twin = Object.entries(existing?.runtimes ?? {}).find(
@@ -1187,6 +1229,8 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     if (!isRuntimeName(suggested)) continue;
     runtimes[suggested] = { credential: credentialId, profile: profileName, agent: true };
   }
+
+  const recordedProfiles: Partial<Record<HarnessKind, string>> = { ...record.profiles, ...profileOf };
 
   const preview: ImportPreview = {
     harnesses: scans.map(scan => previewOf(scan, harvestOf(scan.harness))),
@@ -1209,7 +1253,8 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     record: {
       version: 1,
       components: recordEntries,
-      ...(profileName === undefined ? {} : { profile: profileName }),
+      ...(record.profile === undefined ? {} : { profile: record.profile }),
+      ...(Object.keys(recordedProfiles).length === 0 ? {} : { profiles: recordedProfiles }),
     },
   };
 }

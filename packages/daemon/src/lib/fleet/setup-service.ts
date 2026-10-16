@@ -200,10 +200,19 @@ export function parseImportRecord(text: string | undefined): ImportRecord | unde
       digest: entry.digest,
     };
   }
+  const profiles = isRecord(raw.profiles)
+    ? Object.fromEntries(
+        (['claude', 'codex'] as const).flatMap(harness => {
+          const name = (raw.profiles as Readonly<Record<string, unknown>>)[harness];
+          return typeof name === 'string' ? [[harness, name]] : [];
+        }),
+      )
+    : {};
   return {
     version: 1,
     components,
     ...(typeof raw.profile === 'string' ? { profile: raw.profile } : {}),
+    ...(Object.keys(profiles).length === 0 ? {} : { profiles }),
   };
 }
 

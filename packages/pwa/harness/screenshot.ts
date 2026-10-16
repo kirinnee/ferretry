@@ -122,17 +122,18 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and thirty-three: forty-five MACHINES frames at each viewport, plus twenty-three other frames
- * at `mobile` and twenty at `desktop` (45 + 45 + 23 + 20). Of the extras at each viewport, one is the
+ * One hundred and forty-eight: fifty-four MACHINES frames at each viewport, plus forty other frames
+ * across the two viewports (54 + 54 + 40). Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, and two are the Security settings block's loosening sentence and out-of-bounds sentence.
  *
- * MACHINES, forty-eight per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * MACHINES, fifty-four per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, ten Runtimes and
  * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
  * its callback port held by another program, finishing), the old pairing a reset left, two Add a login steps,
- * twelve Profiles and Components pages (a layer stack, a delete card, two stepper steps, a component with
- * every badge, two edit forms), and seven other-machine states (offline; the first run that opens by
+ * eighteen Profiles and Components pages (a profile page, its Advanced part open, a mixed profile, a
+ * delete card, three stepper steps including a refused mixed draft, a component with every badge, a
+ * Settings list with scope badges, instructions as Markdown and as source, two edit forms), and seven other-machine states (offline; the first run that opens by
  * itself — tools, the Claude Code question, Codex not signed in, Sign in now in place, nothing set up —
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
@@ -157,17 +158,21 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 136;
+const SETTINGS_SIDEWAYS_CHECKS = 148;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — forty-eight frames (the section itself is measured once
+ * Machines frame, at each viewport — fifty-four frames (the section itself is measured once
  * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
- * machine: 48 + 47. Same tripwire as the number above, for the same reason — a check
+ * machine: 54 + 53. Profile scope (P7) added six: a profile's Advanced part open, a mixed profile, a refused
+ * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Same tripwire as the number above, for the same reason — a check
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 95;
+const MACHINES_GEOMETRY_CHECKS = 107;
+
+/** The theme families the profile-scope frames are also captured in, beside the run's own scheme. */
+const PROFILE_SCOPE_THEMES = ['blueprint-dark', 'phosphor-light', 'broadsheet-light'] as const;
 
 /**
  * The Files evidence for handover #37 and #62, at whatever viewport is current.
@@ -596,6 +601,16 @@ const settleTabStrip = async (page: Page): Promise<void> => {
   );
 };
 
+/**
+ * Move the pointer off every control. A ghost button paints its hover fill, so one left under the pointer
+ * by the click that opened a page (a disclosure, a row that moved under it) reads as a painted box whose
+ * edge sits in the gutter, though a person looking at the page sees no fill. The corner is padding.
+ */
+const parkPointer = async (page: Page): Promise<void> => {
+  await page.mouse.move(1, 1);
+  await settleTransitions(page);
+};
+
 const assertMachinesGeometry = async (page: Page, where: string): Promise<void> => {
   await settleTransitions(page);
   await settleTabStrip(page);
@@ -619,7 +634,11 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
       hovered = target.id;
       await page.mouse.move(target.x, target.y);
       await settleTransitions(page);
+    } else {
+      await parkPointer(page);
     }
+  } else {
+    await parkPointer(page);
   }
   const problems = await page.evaluate(hoveredTab => {
     const found: string[] = [];
@@ -2208,6 +2227,24 @@ try {
             await settledShot(target);
             process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
           };
+          // PROFILE SCOPE (P7) IN OTHER THEME FAMILIES: the list's scope badges and the Add runtime picker
+          // below are the frames a new badge tone could make illegible, so they are also captured in two
+          // more families. Evidence only: the geometry gate above already measured this layout.
+          const themedShot = async (name: string): Promise<void> => {
+            const initial = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
+            for (const theme of PROFILE_SCOPE_THEMES) {
+              await page.evaluate(next => {
+                document.documentElement.dataset.theme = next;
+              }, theme);
+              const target = join(outDir, `settings-machines-${name}-${theme}-${viewport.name}.png`);
+              await settledShot(target);
+              process.stdout.write(`📸 Settings Machines ${name} ${theme} ${viewport.name} -> ${target}\n`);
+            }
+            await page.evaluate(next => {
+              if (next === '') delete document.documentElement.dataset.theme;
+              else document.documentElement.dataset.theme = next;
+            }, initial);
+          };
           await openMachine('harness-daemon');
           await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
           const runtimesPanel = machinesSurface.locator('[data-machine-tab-panel="runtimes"]');
@@ -2228,6 +2265,7 @@ try {
           await runtimesPanel.locator('[data-add-runtime-profile="Default"]').click();
           await runtimesPanel.locator('[data-add-runtime-duplicate]').waitFor({ state: 'visible' });
           await accountShot('add-runtime-profile', 'Add a runtime profile step');
+          await themedShot('add-runtime-profile');
           await runtimesPanel.locator('[data-duplicate-ok]').click();
           await runtimesPanel.locator('[data-step-next]').click();
           await runtimesPanel.locator('#add-runtime-name').fill('claude-default');
@@ -2325,9 +2363,14 @@ try {
           const profilesPanel = machinesSurface.locator('[data-machine-tab-panel="profiles"]');
           await profilesPanel.locator('[data-profile-row="Default"]').waitFor({ state: 'visible' });
           await accountShot('profiles', 'Profiles list');
+          await themedShot('profiles');
           await profilesPanel.locator('[data-profile-row="Default"]').click();
-          await profilesPanel.locator('[data-layer-stack]').waitFor({ state: 'visible' });
+          await profilesPanel.locator('[data-profile-summary]').waitFor({ state: 'visible' });
           await accountShot('profile', 'profile page');
+          await themedShot('profile');
+          await profilesPanel.locator('[data-disclosure-toggle="layers"]').click();
+          await profilesPanel.locator('[data-layer-stack]').waitFor({ state: 'visible' });
+          await accountShot('profile-layers', 'profile page with Advanced open');
           await profilesPanel.locator('[data-profile-delete]').click();
           await profilesPanel.locator('[data-catalog-note="delete"]').scrollIntoViewIfNeeded();
           await accountShot('profile-delete', 'profile delete card');
@@ -2338,14 +2381,28 @@ try {
           await profilesPanel.locator('[data-stepper-cancel]').click();
           await profilesPanel.locator('[data-stepper-stop]').click();
           await profilesPanel.locator('[data-catalog-back]').click();
+          await profilesPanel.locator('[data-profile-row="Old mix"]').click();
+          await profilesPanel.locator('[data-catalog-note="mixed"]').waitFor({ state: 'visible' });
+          await accountShot('profile-mixed', 'mixed profile page');
+          await profilesPanel.locator('[data-catalog-back]').click();
           await profilesPanel.locator('[data-profile-build]').click();
           await profilesPanel.locator('[data-build-base="Default"]').click();
           await profilesPanel.locator('[data-build-base="Agent"]').click();
+          await profilesPanel.locator('[data-disclosure-toggle="order"]').click();
           await profilesPanel.locator('[data-build-order]').waitFor({ state: 'visible' });
           await accountShot('build-start', 'Build a profile start');
           for (let step = 0; step < 6; step += 1) await profilesPanel.locator('[data-build-next]').click();
-          await profilesPanel.locator('[data-conflicts]').waitFor({ state: 'visible' });
+          await profilesPanel.locator('[data-profile-summary]').waitFor({ state: 'visible' });
           await accountShot('build-review', 'Build a profile review');
+          await profilesPanel.locator('[data-stepper-cancel]').click();
+          await profilesPanel.locator('[data-stepper-stop]').click();
+          // A draft that layers a Claude-only and a Codex-only base is refused in one sentence (P7).
+          await profilesPanel.locator('[data-profile-build]').click();
+          await profilesPanel.locator('[data-build-base="Default"]').click();
+          await profilesPanel.locator('[data-build-base="Codex"]').click();
+          for (let step = 0; step < 6; step += 1) await profilesPanel.locator('[data-build-next]').click();
+          await profilesPanel.locator('[data-catalog-note="refused"]').waitFor({ state: 'visible' });
+          await accountShot('build-mixed', 'Build a profile refusing a mixed draft');
           await profilesPanel.locator('[data-stepper-cancel]').click();
           await profilesPanel.locator('[data-stepper-stop]').click();
 
@@ -2361,8 +2418,18 @@ try {
           await accountShot('component', 'component page with warnings');
           await componentsPanel.locator('[data-catalog-back]').click();
           await componentsPanel.locator('[data-catalog-back]').click();
+          await componentsPanel.locator('[data-component-kind="settings"]').click();
+          await componentsPanel.locator('[data-component-row="settings/Codex settings"]').waitFor({ state: 'visible' });
+          await accountShot('component-list-settings', 'Settings list with scope badges');
+          await componentsPanel.locator('[data-catalog-back]').click();
           await componentsPanel.locator('[data-component-kind="instructions"]').click();
           await componentsPanel.locator('[data-component-row="instructions/Main instructions"]').click();
+          await componentsPanel.locator('[data-component-rendered] h1').waitFor({ state: 'visible' });
+          await accountShot('component-markdown', 'instructions rendered as Markdown');
+          await themedShot('component-markdown');
+          await componentsPanel.locator('[data-component-view-source]').click();
+          await componentsPanel.locator('[data-component-source]').waitFor({ state: 'visible' });
+          await accountShot('component-markdown-source', 'instructions as source');
           await componentsPanel.locator('[data-component-edit]').click();
           await componentsPanel.locator('[data-catalog-note="used"]').waitFor({ state: 'visible' });
           await accountShot('component-edit', 'component edit used everywhere');

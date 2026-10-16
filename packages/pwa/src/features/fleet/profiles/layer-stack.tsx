@@ -4,10 +4,16 @@
  * highest number wins.
  */
 
-import type { FleetComponentView, FleetLayerConflict, FleetLayeredProfileView } from '@ferretry/protocol';
+import type {
+  FleetComponentView,
+  FleetLayerConflict,
+  FleetLayeredProfileView,
+  FleetProfileScope,
+  FleetStackView,
+} from '@ferretry/protocol';
 import { ComponentBadges, Hint } from '../components/catalog-ui.tsx';
-import { componentBadges, counted, KIND_ONE } from '../components/component-model.ts';
-import { parseLayer, partCount } from './profile-model.ts';
+import { componentBadges, counted, KIND_ONE, profileScopeBadge } from '../components/component-model.ts';
+import { builtFrom, parseLayer, partCount, profileGives } from './profile-model.ts';
 
 export interface LayerStackProps {
   /** Oldest first, as written. */
@@ -84,5 +90,34 @@ export function ConflictList({ conflicts }: { conflicts: readonly FleetLayerConf
         </li>
       ))}
     </ul>
+  );
+}
+
+export interface ProfileSummaryProps {
+  readonly scope: FleetProfileScope;
+  /** Each harness's resolved stack, as the catalogue or the draft preview answered it. */
+  readonly stacks: readonly FleetStackView[];
+  /** The profile's own layers, oldest first. */
+  readonly layers: readonly string[];
+  readonly components: readonly FleetComponentView[];
+}
+
+/**
+ * What a profile GIVES the agent, first, in one card: its scope, then "Instructions: Main
+ * instructions · 28 skills · 3 MCP servers · 11 settings · 1 hook", then what it is built from by
+ * name. How the layers combine is for the Advanced part below it.
+ */
+export function ProfileSummary({ scope, stacks, layers, components }: ProfileSummaryProps) {
+  const gives = profileGives(scope, stacks, components);
+  return (
+    <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" data-profile-summary="">
+      <ComponentBadges badges={[profileScopeBadge(scope)]} />
+      <p className="m-0 break-words text-row leading-base text-fg" data-profile-gives="">
+        {gives.length === 0 ? 'Nothing for the agent yet.' : gives.join(' · ')}
+      </p>
+      <p className="m-0 break-words text-cell leading-base text-muted" data-profile-built-from="">
+        Built from {builtFrom(layers, components).join(' + ')}
+      </p>
+    </section>
   );
 }

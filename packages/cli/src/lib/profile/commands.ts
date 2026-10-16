@@ -1,10 +1,15 @@
-import type { FleetLayeredProfileCatalog, FleetLayeredProfileView } from '@ferretry/protocol';
+import { HARNESS_SCOPE_WORDS } from '@ferretry/fleet';
+import type { FleetLayeredProfileCatalog, FleetLayeredProfileView, FleetProfileScope } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import { runChange } from '../fleet/account-change.ts';
 import { collect, readOptions, writeFlags, writeOptions } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError } from '../fleet/account-ports.ts';
 import { HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 import { renderStack } from '../runtime/render.ts';
+
+/** A profile's scope badge: "Generic", "Claude only", "Codex only", or "Mixed" for one written before P7. */
+const scopeBadge = (scope: FleetProfileScope): string =>
+  scope.kind === 'mixed' ? 'Mixed' : HARNESS_SCOPE_WORDS[scope.scope];
 
 /** The Profiles tab in a terminal. */
 export function renderProfileList(catalog: FleetLayeredProfileCatalog, binaryName: string): string {
@@ -15,8 +20,11 @@ export function renderProfileList(catalog: FleetLayeredProfileCatalog, binaryNam
     .map(profile => {
       const conflicts = profile.harnesses.reduce((total, stack) => total + stack.conflicts.length, 0);
       return [
-        `${profile.name}  ${profile.layers.length} layer${profile.layers.length === 1 ? '' : 's'}${conflicts > 0 ? ` · ${conflicts} override${conflicts === 1 ? '' : 's'}` : ''}`,
-        ...indent([`Used by: ${listOrNone(profile.usedBy, 'no runtime')}`]),
+        `${profile.name}  ${scopeBadge(profile.scope)} · ${profile.layers.length} layer${profile.layers.length === 1 ? '' : 's'}${conflicts > 0 ? ` · ${conflicts} override${conflicts === 1 ? '' : 's'}` : ''}`,
+        ...indent([
+          `Used by: ${listOrNone(profile.usedBy, 'no runtime')}`,
+          ...(profile.scope.kind === 'mixed' ? [profile.scope.sentence] : []),
+        ]),
       ].join('\n');
     })
     .join('\n');
@@ -25,8 +33,9 @@ export function renderProfileList(catalog: FleetLayeredProfileCatalog, binaryNam
 /** One profile: its layers newest last, each harness's stack, and where it is used. */
 export function renderProfile(profile: FleetLayeredProfileView): string {
   const lines = [
-    profile.name,
+    `${profile.name}  (${scopeBadge(profile.scope)})`,
     ...indent([
+      ...(profile.scope.kind === 'mixed' ? [profile.scope.sentence] : []),
       'Layers, oldest first (a later layer wins):',
       ...profile.layers.map(layer => `  ${layer}`),
       `Used by: ${listOrNone(profile.usedBy, 'no runtime')}`,
@@ -59,14 +68,24 @@ const layersOf = (options: ProfileFlags, bin: string): string[] => {
 /** Mounts `profiles` and `profile …` (docs/design/account-model.md §6.2). */
 export function registerProfileCommands(program: Command, deps: AccountCommandDeps): void {
   const bin = deps.binaryName;
-  readOptions(
-    program.command('profiles').description('the profiles on this machine: layers, overrides and where each is used'),
-  ).action(async (options: { json?: boolean }) => {
+  const list = async (options: { json?: boolean }): Promise<void> => {
     const catalog = await deps.gateway.profiles();
     deps.out.report(options.json ? JSON.stringify(catalog, null, 2) : renderProfileList(catalog, bin));
-  });
+  };
+  readOptions(
+    program
+      .command('profiles')
+      .description('the profiles on this machine: scope, layers, overrides and where each is used'),
+  ).action(list);
 
-  const profile = program.command('profile').description('build, show, edit or delete one profile');
+  const profile = program.command('profile').description('list, build, show, edit or delete profiles');
+
+  readOptions(
+    profile
+      .command('ls')
+      .alias('list')
+      .description('the profiles on this machine, each with its scope: Generic, Claude only or Codex only'),
+  ).action(list);
 
   readOptions(
     profile

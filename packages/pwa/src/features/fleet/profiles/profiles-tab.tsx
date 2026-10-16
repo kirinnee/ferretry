@@ -14,6 +14,8 @@ import { Button } from '../../../shell/primitives.tsx';
 import { type AccountCatalog, allComponents, useAccountCatalog } from '../components/account-catalog.ts';
 import {
   CatalogNote,
+  ComponentBadges,
+  Disclosure,
   Hint,
   LinkRow,
   OpenRow,
@@ -22,15 +24,21 @@ import {
   RowList,
   Section,
 } from '../components/catalog-ui.tsx';
-import { counted, listed } from '../components/component-model.ts';
+import { counted, listed, profileScopeBadge, profileScopeWord } from '../components/component-model.ts';
 import { itemHref, useHashItem } from '../components/machine-links.ts';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { type StepperState, startStepper } from '../shell/stepper-model.ts';
 import { BuildProfileStep } from './build-profile-step.tsx';
-import { ConflictList, LayerStack } from './layer-stack.tsx';
-import { buildProfileFlowInput, includedBy, runtimesReaching, stackConflicts } from './profile-model.ts';
+import { ConflictList, LayerStack, ProfileSummary } from './layer-stack.tsx';
+import {
+  buildProfileFlowInput,
+  includedBy,
+  profileUseLine,
+  runtimesReaching,
+  stackConflicts,
+} from './profile-model.ts';
 
 type Page = { readonly kind: 'list' } | { readonly kind: 'detail'; readonly name: string };
 
@@ -109,6 +117,7 @@ export function ProfilesTab(props: MachineTabProps) {
         <ListPage catalog={catalog} open={open} build={() => build()} />
       ) : (
         <DetailPage
+          key={profile.name}
           {...props}
           catalog={catalog}
           profile={profile}
@@ -158,12 +167,12 @@ function ListPage({
       <RowList label="Profiles">
         {profiles.map(profile => {
           const runtimes = runtimesReaching(profile, catalog.runtimes.runtimes).length;
-          const bases = includedBy(profile).length;
           return (
             <OpenRow
               key={profile.name}
               title={profile.name}
-              sub={`${counted(profile.layers.length, 'layer')} · used by ${counted(runtimes, 'runtime')}${bases > 0 ? ` · base for ${counted(bases, 'profile')}` : ''}`}
+              badges={<ComponentBadges badges={[profileScopeBadge(profile.scope)]} />}
+              sub={profileUseLine(profile, runtimes)}
               onOpen={() => open({ kind: 'detail', name: profile.name })}
               data={{ 'data-profile-row': profile.name }}
             />
@@ -188,25 +197,41 @@ function DetailPage(props: DetailProps) {
   const [deleting, setDeleting] = useState(false);
   const includers = includedBy(profile);
   const runtimes = runtimesReaching(profile, catalog.runtimes.runtimes);
+  const components = allComponents(catalog);
   return (
     <>
-      <PageHead title={profile.name} sub={`Profile · ${counted(profile.layers.length, 'layer')}`} onBack={onBack} />
-      <Section title="Layers">
-        <LayerStack
-          layers={profile.layers}
-          components={allComponents(catalog)}
-          profiles={catalog.profiles.profiles}
-          machineName={machineName}
-        />
-        {profile.harnesses.flatMap(stack =>
-          stack.skipped.length === 0
-            ? []
-            : [<Hint key={stack.harness}>{stack.skipped.map(skip => skip.sentence).join(' ')}</Hint>],
-        )}
-      </Section>
-      <Section title="Conflicts" spot="conflicts">
-        <ConflictList conflicts={stackConflicts(profile.harnesses)} />
-      </Section>
+      <PageHead title={profile.name} sub="Profile" onBack={onBack} />
+      <ProfileSummary
+        scope={profile.scope}
+        stacks={profile.harnesses}
+        layers={profile.layers}
+        components={components}
+      />
+      {profile.scope.kind === 'mixed' ? (
+        <CatalogNote tone="warn" spot="mixed" title={profile.scope.sentence}>
+          <span>
+            It still runs, skipping the other tool’s layers. Edit its layers so it is Claude only or Codex only.
+          </span>
+        </CatalogNote>
+      ) : null}
+      <Disclosure label="Advanced: how these combine" spot="layers">
+        <Section title="Layers">
+          <LayerStack
+            layers={profile.layers}
+            components={components}
+            profiles={catalog.profiles.profiles}
+            machineName={machineName}
+          />
+          {profile.harnesses.flatMap(stack =>
+            stack.skipped.length === 0
+              ? []
+              : [<Hint key={stack.harness}>{stack.skipped.map(skip => skip.sentence).join(' ')}</Hint>],
+          )}
+        </Section>
+        <Section title="Conflicts" spot="conflicts">
+          <ConflictList conflicts={stackConflicts(profile.harnesses)} />
+        </Section>
+      </Disclosure>
       <Section title="Where it is used">
         {includers.length === 0 && runtimes.length === 0 ? (
           <Hint>Nothing uses this profile yet.</Hint>
@@ -333,7 +358,7 @@ function DeletePanel(props: DetailProps & { onKeep: () => void }) {
             >
               {others.map(other => (
                 <option key={other.name} value={other.name}>
-                  {other.name}
+                  {other.name} · {profileScopeWord(other.scope)}
                 </option>
               ))}
             </select>

@@ -4,6 +4,7 @@ import {
   BUILD_PROFILE_FLOW_KIND,
   BUILD_STEPS,
   buildProfileFlowInput,
+  builtFrom,
   draftFromProfile,
   draftLayers,
   emptyProfileDraft,
@@ -12,13 +13,29 @@ import {
   parseLayer,
   partCount,
   profileChange,
+  profileGives,
   profileNameProblem,
+  profileUseLine,
   runtimesReaching,
   stackConflicts,
   toggleBase,
   togglePick,
 } from '../../../../../src/features/fleet/profiles/profile-model.ts';
-import { CONFLICT, profile, profileCatalog, runtimeCatalog, stack } from '../components/catalog-fixture.ts';
+import {
+  CONFLICT,
+  claudeSettings,
+  component,
+  github,
+  hooks,
+  instructions,
+  models,
+  notes,
+  profile,
+  profileCatalog,
+  runtimeCatalog,
+  skills,
+  stack,
+} from '../components/catalog-fixture.ts';
 
 const [agentWork, base, review] = profileCatalog().profiles as [
   ReturnType<typeof profile>,
@@ -48,6 +65,9 @@ describe('reading profiles', () => {
   it('counts the parts a profile flattens to', () => {
     expect(partCount(base)).toBe(4);
     expect(partCount({ ...base, harnesses: [] })).toBe(0);
+    expect(profileUseLine(base, 3)).toBe('4 parts · used by 3 runtimes');
+    expect(profileUseLine(base, 1)).toBe('4 parts · used by 1 runtime');
+    expect(profileUseLine({ ...base, harnesses: [] }, 0)).toBe('0 parts · not used yet');
   });
 
   it('lists each conflict once across both harnesses', () => {
@@ -129,5 +149,69 @@ describe('the Build a profile flow', () => {
       create: true,
     });
     expect(profileChange(draft, 'Review')).toMatchObject({ name: 'Review', create: false });
+  });
+});
+
+describe('what a profile gives', () => {
+  const all = [instructions, github, notes, skills, claudeSettings, hooks, models];
+  const bareSettings = component({
+    reference: 'settings/Bare',
+    kind: 'settings',
+    name: 'Bare',
+    harness: 'codex',
+    detail: { kind: 'settings', env: [] },
+  });
+  const moreSkills = component({
+    reference: 'skills/More',
+    kind: 'skills',
+    name: 'More',
+    detail: { kind: 'skills', items: ['pr-review', 'db-migrate'] },
+  });
+
+  it('reads the one harness a profile is for, and says each kind it has in words', () => {
+    const claude = stack('claude', {
+      applied: [
+        'instructions/Main instructions',
+        'mcp/github',
+        'mcp/notes',
+        'skills/My skills',
+        'skills/More',
+        'settings/Claude settings',
+        'hooks/Format on save',
+        'modelSets/Claude models',
+        'mcp/vanished',
+      ],
+    });
+    const codex = stack('codex', { applied: ['settings/Bare'] });
+    expect(
+      profileGives({ kind: 'scoped', scope: 'claude' }, [claude, codex], [...all, moreSkills, bareSettings]),
+    ).toEqual([
+      'Instructions: Main instructions',
+      '3 skills',
+      '2 MCP servers',
+      '4 settings',
+      '1 hook',
+      'Models: Claude models',
+    ]);
+    expect(profileGives({ kind: 'scoped', scope: 'codex' }, [claude, codex], [bareSettings])).toEqual(['1 setting']);
+  });
+
+  it('reads both harnesses for a Generic or mixed profile, each part once, and nothing when it has nothing', () => {
+    const both = [
+      stack('claude', { applied: ['mcp/github'] }),
+      stack('codex', { applied: ['mcp/github', 'mcp/notes'] }),
+    ];
+    expect(profileGives({ kind: 'scoped', scope: 'generic' }, both, all)).toEqual(['2 MCP servers']);
+    expect(profileGives({ kind: 'mixed', sentence: 'x' }, both, all)).toEqual(['2 MCP servers']);
+    expect(profileGives({ kind: 'scoped', scope: 'generic' }, [], all)).toEqual([]);
+  });
+
+  it('names what it is built from: a base as a profile, a part by its name, the unreadable as written', () => {
+    expect(builtFrom(['profile/Default', 'skills/My skills', 'mcp/gone', 'nonsense'], all)).toEqual([
+      'Default profile',
+      'My skills',
+      'gone',
+      'nonsense',
+    ]);
   });
 });
