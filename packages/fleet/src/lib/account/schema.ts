@@ -26,6 +26,13 @@ import { CONFIG_COMPONENT_KINDS, isLoopbackHost } from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
+import {
+  CloudCredentialSchema,
+  CodexProviderSchema,
+  cloudCredentialVariable,
+  parseCloudCredential,
+  templatePlaceholders,
+} from './environment.ts';
 
 /** A URL a bearer token may be sent to: HTTPS, or plain HTTP only to this machine. */
 const secureMcpUrl = (url: string): boolean => {
@@ -167,6 +174,12 @@ const CLONE_ORIGIN_SHAPE = {
 /**
  * One login to one harness on this machine (C1, C2). Stored exactly once; every runtime that names it
  * reads that one store.
+ *
+ * An ENVIRONMENT login (`store: environment`) is no sign-in at all: its `env` is injected into every
+ * runtime on it at launch, a secret as a `${secret:NAME}` reference and never a value
+ * (docs/provider-presets.md). It may also name the preset it was made from, a cloud credential this
+ * machine already has (`cloudCredential`, kept as a reference) and — Codex only — the model provider
+ * Codex is pointed at (`codexProvider`).
  */
 export const CredentialSchema = z
   .strictObject({
@@ -177,27 +190,73 @@ export const CredentialSchema = z
     ...CLONE_ORIGIN_SHAPE,
     /** `store: environment` only. A secret travels as a `${secret:NAME}` reference, never a value. */
     env: EnvSchema.optional(),
+    /** `store: environment` only: the provider preset it was made from. Display, Test and quota. */
+    preset: SafeNameSchema.optional(),
+    /** `store: environment` only: a cloud credential this machine has, by reference (`./environment.ts`). */
+    cloudCredential: CloudCredentialSchema.optional(),
+    /** `store: environment`, Codex only: the model provider the runtime is pointed at (`./environment.ts`). */
+    codexProvider: CodexProviderSchema.optional(),
   })
   .check(ctx => {
     const credential = ctx.value;
-    if (credential.store === 'environment') {
-      if (credential.env === undefined || Object.keys(credential.env).length === 0) {
-        ctx.issues.push({
-          code: 'custom',
-          message: 'a credential kept in the environment must say which variables authenticate it, in "env"',
-          input: credential.env,
-          path: ['env'],
-        });
+    const push = (message: string, path: string, input: unknown): void => {
+      ctx.issues.push({ code: 'custom', message, input, path: [path] });
+    };
+    if (credential.store !== 'environment') {
+      for (const field of ['env', 'preset', 'cloudCredential', 'codexProvider'] as const) {
+        if (credential[field] === undefined) continue;
+        push(
+          `"${field}" belongs only to a credential with store: environment — this one is store: ${credential.store}`,
+          field,
+          credential[field],
+        );
       }
       return;
     }
-    if (credential.env !== undefined) {
-      ctx.issues.push({
-        code: 'custom',
-        message: `"env" belongs only to a credential with store: environment — this one is store: ${credential.store}`,
-        input: credential.env,
-        path: ['env'],
-      });
+    const env = credential.env ?? {};
+    if (
+      Object.keys(env).length === 0 &&
+      credential.codexProvider === undefined &&
+      credential.cloudCredential === undefined
+    ) {
+      push(
+        'a credential kept in the environment must say which variables authenticate it, in "env"',
+        'env',
+        credential.env,
+      );
+    }
+    if (credential.codexProvider !== undefined) {
+      if (credential.harness !== 'codex') {
+        push(
+          '"codexProvider" points Codex at a model provider — this login is for Claude Code',
+          'codexProvider',
+          credential.codexProvider,
+        );
+      } else {
+        const { keyVariable, baseUrl } = credential.codexProvider;
+        if (keyVariable !== undefined && env[keyVariable] === undefined) {
+          push(
+            `the Codex provider sends its key from ${keyVariable}, so "env" must set ${keyVariable} (as \${secret:NAME})`,
+            'codexProvider',
+            keyVariable,
+          );
+        }
+        for (const name of templatePlaceholders(baseUrl ?? '')) {
+          if (env[name] === undefined) {
+            push(`the Codex provider's base URL names {${name}}, so "env" must set ${name}`, 'codexProvider', name);
+          }
+        }
+      }
+    }
+    const reference =
+      credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
+    const variable = reference === undefined ? undefined : cloudCredentialVariable(reference);
+    if (variable !== undefined && env[variable] !== undefined) {
+      push(
+        `${variable} comes from "cloudCredential" (${credential.cloudCredential}) — leave it out of "env"`,
+        'env',
+        variable,
+      );
     }
   });
 export type Credential = z.infer<typeof CredentialSchema>;

@@ -23,6 +23,7 @@ import { HARNESS_NAMES, profileScopeBadge } from '../components/component-model.
 import { ADD_LOGIN_FLOW_KIND, AddLoginStep, addLoginFlowInput } from '../credentials/add-login.tsx';
 import { CredentialSignIn } from '../credentials/credential-sign-in.tsx';
 import { credentialEmail, HARNESSES, type HarnessKind, plural } from '../credentials/credentials-model.ts';
+import { LoginScopeChip } from '../credentials/login-scope-chip.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
@@ -38,8 +39,8 @@ import {
 import type { MachineData } from './machine-data.ts';
 import {
   harnessInstalled,
-  profilesFitFirst,
   profileSummary,
+  profilesFitFirst,
   runtimeNameProblem,
   sameLoginAndProfile,
   suggestedRuntimeName,
@@ -334,6 +335,7 @@ export function AddRuntime({
                 title={
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="font-mono">{credentialEmail(item)}</span>
+                    <LoginScopeChip harness={item.harness} />
                     {item.label === undefined ? null : <Badge tone="accent">{item.label}</Badge>}
                   </span>
                 }

@@ -5,9 +5,11 @@ import type {
   FleetCloneBundle,
   FleetComponentCatalog,
   FleetCredentialList,
+  FleetCredentialTestResult,
   FleetCredentialView,
   FleetLayeredProfileCatalog,
   FleetMachineView,
+  FleetProviderPresetCatalog,
   FleetRuntimeCatalog,
   FleetSetupScan,
   FleetToolInstallResult,
@@ -37,6 +39,10 @@ export interface IAccountGateway {
   runtimes(): Promise<FleetRuntimeCatalog>;
   credentials(): Promise<FleetCredentialList>;
   check(credentialId: string): Promise<FleetCredentialView>;
+  /** An environment login's Test (docs/provider-presets.md). `allowInference` is the consent to one token. */
+  test(credentialId: string, allowInference: boolean): Promise<FleetCredentialTestResult>;
+  /** The provider presets an environment login is made from. */
+  presets(): Promise<FleetProviderPresetCatalog>;
   stage(change: FleetAccountChange): Promise<FleetAccountChangeView>;
   apply(changeId: string): Promise<FleetAccountChangeOutcome>;
   scan(): Promise<FleetSetupScan>;

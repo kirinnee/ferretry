@@ -37,12 +37,14 @@ import {
   FLEET_CLONE_BUNDLE_FORMAT,
   type FleetCloneBundle,
   FleetCloneBundleSchema,
+  type FleetCloneCredential,
   type FleetCloneFile,
   secretReferencesIn,
 } from '@ferretry/protocol';
 import type { HarnessKind } from '../manifest.ts';
 import { canonicalAssetReference } from '../paths.ts';
 import { skillSourceReference } from './adapt.ts';
+import { cloudCredentialSentence, parseCloudCredential } from './environment.ts';
 import { freeName } from './import.ts';
 import { HARNESS_DISPLAY_NAMES } from './layering.ts';
 import {
@@ -139,6 +141,8 @@ export function buildCloneBundle(input: CloneBundleInput): FleetCloneBundle {
         harness: credential.harness,
         ...(credential.label === undefined ? {} : { label: credential.label }),
         ...(email === undefined ? {} : { email }),
+        // An environment login travels as its file does: plain values, secret NAMES, its references.
+        ...(credential.store === 'environment' ? environmentDescriptor(credential) : {}),
       };
     });
   // ONE SPELLING ON THE WIRE. A target refuses a bundle whose paths could be read two ways
@@ -222,6 +226,8 @@ export interface ClonePlan {
   readonly missingHarnesses: readonly HarnessKind[];
   /** `${secret:NAME}` references the target's store does not hold (G7). */
   readonly missingSecrets: readonly string[];
+  /** Cloud credential references a copied environment login names: the target must have each one. */
+  readonly references: readonly { readonly login: string; readonly reference: string; readonly sentence: string }[];
   /** Skill items the target already had, kept as they were. */
   readonly keptSkillItems: readonly string[];
   readonly copied: {
@@ -388,12 +394,15 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     if (id !== credential.id) renamed.push({ what: 'login', from: credential.id, to: id });
     credentialIds.set(credential.id, id);
     const label = credential.label ?? credential.email;
-    credentials[id] = {
-      harness: credential.harness,
-      store: 'ferretry',
-      ...(label === undefined ? {} : { label }),
-      ...origin,
-    };
+    credentials[id] =
+      credential.store === 'environment'
+        ? ({ ...environmentCredential(credential), ...origin } as Credential)
+        : {
+            harness: credential.harness,
+            store: 'ferretry',
+            ...(label === undefined ? {} : { label }),
+            ...origin,
+          };
   }
 
   // Components: a clashing name takes `-2`, and its document moves with it.
@@ -491,18 +500,40 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
   }
 
   const held = new Set(options.existingSecrets);
-  const missingSecrets = secretReferencesIn(JSON.stringify(source.components)).filter(name => !held.has(name));
-  const descriptors = new Map(bundle.credentials.map(credential => [credentialIds.get(credential.id), credential]));
-  const slots: CloneSlot[] = [...credentialIds.values()].map(id => {
-    const descriptor = descriptors.get(id);
-    return {
-      id,
-      harness: (credentials[id] as Credential).harness,
-      ...(descriptor?.label === undefined ? {} : { label: descriptor.label }),
-      ...(descriptor?.email === undefined ? {} : { email: descriptor.email }),
-      runtimes: slotRuntimes.get(id) ?? [],
-    };
+  // An environment login is copied whole, so what it needs is said rather than left as an empty slot.
+  const environmentLogins = bundle.credentials.filter(credential => credential.store === 'environment');
+  const missingSecrets = [
+    ...new Set([
+      ...secretReferencesIn(JSON.stringify(source.components)),
+      ...environmentLogins.flatMap(credential => secretReferencesIn(JSON.stringify(credential.env ?? {}))),
+    ]),
+  ].filter(name => !held.has(name));
+  const references = environmentLogins.flatMap(credential => {
+    const reference =
+      credential.cloudCredential === undefined ? undefined : parseCloudCredential(credential.cloudCredential);
+    if (reference === undefined || credential.cloudCredential === undefined) return [];
+    return [
+      {
+        login: credentialIds.get(credential.id) as string,
+        reference: credential.cloudCredential,
+        sentence: cloudCredentialSentence(reference),
+      },
+    ];
   });
+  const environmentIds = new Set(environmentLogins.map(credential => credentialIds.get(credential.id)));
+  const descriptors = new Map(bundle.credentials.map(credential => [credentialIds.get(credential.id), credential]));
+  const slots: CloneSlot[] = [...credentialIds.values()]
+    .filter(id => !environmentIds.has(id))
+    .map(id => {
+      const descriptor = descriptors.get(id);
+      return {
+        id,
+        harness: (credentials[id] as Credential).harness,
+        ...(descriptor?.label === undefined ? {} : { label: descriptor.label }),
+        ...(descriptor?.email === undefined ? {} : { email: descriptor.email }),
+        runtimes: slotRuntimes.get(id) ?? [],
+      };
+    });
 
   return {
     model,
@@ -511,7 +542,8 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     slots,
     checkPaths,
     missingHarnesses: [...missingHarnesses].toSorted(),
-    missingSecrets: [...missingSecrets],
+    missingSecrets,
+    references,
     keptSkillItems: [...keptSkillItems].toSorted(),
     copied: {
       components: countComponents(source.components, NON_MODEL_KINDS),
@@ -593,8 +625,40 @@ export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine
       `${machine}'s secret store has no ${plan.missingSecrets.join(', ')}: add ${plan.missingSecrets.length === 1 ? 'it' : 'them'} before those runtimes launch.`,
     );
   }
+  for (const reference of plan.references) {
+    lines.push(
+      `Login ${reference.login} uses ${reference.sentence.replace('this machine', machine)} (${reference.reference}). A reference is never copied: set it up on ${machine} before its runtimes launch.`,
+    );
+  }
   for (const item of plan.keptSkillItems)
     lines.push(`Skill ${item} is already on ${machine}, so its copy there was kept.`);
   for (const entry of plan.notCopied) lines.push(`Not copied: ${entry.path} (${entry.reason}).`);
   return lines;
+}
+
+/**
+ * An environment login as the bundle carries it (docs/provider-presets.md): exactly what its file holds.
+ * No file may hold a raw key, so `env` is plain values and `${secret:NAME}` references only.
+ */
+function environmentDescriptor(credential: Credential): Partial<FleetCloneCredential> {
+  return {
+    store: 'environment',
+    ...(credential.env === undefined ? {} : { env: { ...credential.env } }),
+    ...(credential.preset === undefined ? {} : { preset: credential.preset }),
+    ...(credential.cloudCredential === undefined ? {} : { cloudCredential: credential.cloudCredential }),
+    ...(credential.codexProvider === undefined ? {} : { codexProvider: { ...credential.codexProvider } }),
+  };
+}
+
+/** An environment login on the target, from its descriptor. The model's own parse checks every field. */
+function environmentCredential(descriptor: FleetCloneCredential): Record<string, unknown> {
+  return {
+    harness: descriptor.harness,
+    store: 'environment',
+    ...(descriptor.label === undefined ? {} : { label: descriptor.label }),
+    ...(descriptor.env === undefined ? {} : { env: { ...descriptor.env } }),
+    ...(descriptor.preset === undefined ? {} : { preset: descriptor.preset }),
+    ...(descriptor.cloudCredential === undefined ? {} : { cloudCredential: descriptor.cloudCredential }),
+    ...(descriptor.codexProvider === undefined ? {} : { codexProvider: { ...descriptor.codexProvider } }),
+  };
 }

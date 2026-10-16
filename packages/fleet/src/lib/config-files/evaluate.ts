@@ -36,6 +36,7 @@ import {
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { AccountModel } from '../account/schema.ts';
+import type { ProviderPreset, ProviderPresetFile } from '../presets/schema.ts';
 import { type CheckedConfigFile, checkConfigFile, schemaIssues } from './check.ts';
 import { configLoosening, SINGLETON_DEFAULTS, type SingletonKind } from './kinds.ts';
 import { assembleAccountModel, type FleetFileValue, isFleetFile, modelIssueSite } from './model.ts';
@@ -81,6 +82,8 @@ export interface EffectiveConfig {
   readonly warden: WardenConfig;
   readonly learning: LearningConfig;
   readonly voice: VoiceConfig;
+  /** This machine's own provider presets (`presets/<id>.yaml`), by id. The built-ins are not here. */
+  readonly presets: Readonly<Record<string, ProviderPreset>>;
 }
 
 export interface ConfigEvaluation {
@@ -220,6 +223,14 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
       warden: singleton('warden'),
       learning: singleton('learning'),
       voice: singleton('voice'),
+      presets: Object.fromEntries(
+        [...effective.values()].flatMap(candidate => {
+          const address = candidate.checked.address;
+          if (address.kind !== 'preset') return [];
+          const preset = candidate.checked.value as ProviderPresetFile;
+          return [[address.name, { ...preset, id: address.name, origin: 'file' as const }]];
+        }),
+      ),
     },
     fleetFiles: fleetPaths.length,
     fleetRevision: fleetPaths.length === 0 ? ABSENT_CONFIG_ETAG : input.digest(fleetPaths.join('\n')),

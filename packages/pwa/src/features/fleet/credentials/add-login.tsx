@@ -1,5 +1,6 @@
 /**
- * Add a login (docs/design/account-model.md §4.6): **Choose tool** (skipped when opened for a known
+ * Add a login (docs/design/account-model.md §4.6, docs/provider-presets.md): first its TYPE — **Sign in**
+ * or **Environment** — then, for a sign-in, **Choose tool** (skipped when opened for a known
  * harness) → **Sign in** → **Label** (only when the same email already has a login of that harness,
  * E26).
  *
@@ -40,11 +41,59 @@ import {
   plural,
   sameEmailLogin,
 } from './credentials-model.ts';
+import { EnvironmentLogin } from './environment-login.tsx';
 
 export const ADD_LOGIN_FLOW_KIND = 'add-login';
 
+/** A login is a sign-in, or a named set of environment variables (docs/provider-presets.md). */
+export type AddLoginKind = 'signin' | 'environment';
+
+/** The Sign in | Environment choice every first screen of the flow opens with. */
+function LoginKindChoice({
+  kind,
+  onChoose,
+}: {
+  readonly kind: AddLoginKind;
+  readonly onChoose: (kind: AddLoginKind) => void;
+}) {
+  return (
+    <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-add-login-kind={kind}>
+      <legend className="mb-1 text-ui font-semibold text-fg">Type</legend>
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ['signin', 'Sign in', 'OAuth or a device code; the CLI keeps the login.'],
+            ['environment', 'Environment', 'A provider preset: base URL, key, models — GLM, DeepSeek, Bedrock…'],
+          ] as const
+        ).map(([value, title, sub]) => (
+          <label
+            key={value}
+            className="kt-panel flex min-h-control min-w-0 flex-1 basis-56 cursor-pointer items-start gap-3 p-panel"
+            data-add-login-kind-option={value}
+          >
+            <input
+              type="radio"
+              name="add-login-kind"
+              className="mt-1"
+              checked={kind === value}
+              onChange={() => onChoose(value)}
+            />
+            <span className="flex min-w-0 flex-col">
+              <span className="text-row font-semibold text-fg">{title}</span>
+              <span className="text-cell text-muted">{sub}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 const TOOL = { id: 'tool', label: 'Choose tool' } as const;
 const SIGN_IN = { id: 'signin', label: 'Sign in' } as const;
+/** An environment login's own two steps: fill it in, then Test the saved login (docs/provider-presets.md). */
+const ENVIRONMENT = { id: 'environment', label: 'Environment' } as const;
+const TEST = { id: 'test', label: 'Test' } as const;
 const LABEL = { id: 'label', label: 'Label' } as const;
 
 /** The flow, for `startStepper` or `openSubStepper`. A known harness skips Choose tool. */
@@ -106,6 +155,15 @@ export function AddLoginStep({
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const flow = currentFlow(state);
+  // The type is the flow's own steps, so the stepper always says which path this is.
+  const kind: AddLoginKind = flow.at === ENVIRONMENT.id || flow.at === TEST.id ? 'environment' : 'signin';
+  const setKind = (next: AddLoginKind): void => {
+    onChange(
+      next === 'environment'
+        ? withSteps(state, [ENVIRONMENT, TEST])
+        : withSteps(state, fixedHarness === undefined ? [TOOL, SIGN_IN] : [SIGN_IN]),
+    );
+  };
 
   const credential = data?.credentials.credentials.find(candidate => candidate.id === credentialId);
   const twin = credential === undefined || data === null ? undefined : sameEmailLogin(data.credentials, credential);
@@ -159,9 +217,29 @@ export function AddLoginStep({
     finish(state);
   };
 
+  // An environment login has no sign-in and no tool step of its own: its preset says which CLI it drives.
+  if (kind === 'environment' && credentialId === null)
+    return (
+      <div className="flex flex-col gap-3" data-add-login-step={flow.at}>
+        {flow.at === TEST.id ? null : <LoginKindChoice kind={kind} onChoose={setKind} />}
+        <EnvironmentLogin
+          {...(fixedHarness === undefined ? {} : { harness: fixedHarness })}
+          machineName={machineName}
+          connection={connection}
+          createClient={createClient}
+          data={data}
+          reload={reload}
+          changes={changes}
+          onSaved={() => onChange(goToStep(state, TEST.id))}
+          onAdded={id => onAdded(id, returnToParent(state))}
+        />
+      </div>
+    );
+
   if (flow.at === TOOL.id)
     return (
       <div className="flex flex-col gap-3" data-add-login-step="tool">
+        <LoginKindChoice kind={kind} onChoose={setKind} />
         <p className="m-0 text-ui leading-base text-fg">Which tool do you want to sign in to on {machineName}?</p>
         <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
           <legend className="sr-only">Tool</legend>
@@ -307,6 +385,7 @@ export function AddLoginStep({
     );
   return (
     <div className="flex flex-col gap-3" data-add-login-step="start">
+      {fixedHarness === undefined ? null : <LoginKindChoice kind={kind} onChoose={setKind} />}
       <p className="m-0 text-ui leading-base text-fg">
         Sign in to {name}. The login is kept on {machineName}.
       </p>

@@ -1,0 +1,28 @@
+# Claude Code through OpenRouter's Anthropic-compatible endpoint.
+label: OpenRouter
+harness: claude
+summary: Claude Code through OpenRouter, on Anthropic models or any other it routes to.
+docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
+verified: '2026-10-16'
+env:
+  ANTHROPIC_BASE_URL:
+    value: https://openrouter.ai/api
+  ANTHROPIC_AUTH_TOKEN:
+    secretName: OPENROUTER_API_KEY
+  ANTHROPIC_API_KEY:
+    value: ''
+    allowEmpty: true
+    description: deliberately empty, so the OpenRouter key is the one sent
+  ANTHROPIC_DEFAULT_OPUS_MODEL:
+    value: ~anthropic/claude-opus-latest[1m]
+    required: false
+models: [~anthropic/claude-opus-latest, ~anthropic/claude-sonnet-latest]
+test:
+  kind: request
+  url: https://openrouter.ai/api/v1/key
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Reads the key's limit and what it has used. Spends nothing.
+quota:
+  source: openrouter-key
+  note: The key's credit limit and what it has used.
+pricing: openrouter

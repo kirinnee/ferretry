@@ -1,0 +1,23 @@
+# Codex on Z.ai GLM — documented by Z.ai, but not offered here (see `unavailable`).
+label: GLM / Z.ai
+harness: codex
+summary: Codex on GLM models with a Z.ai Coding Plan key.
+docs: https://docs.z.ai/devpack/tool/codex
+verified: '2026-10-16'
+env:
+  ZAI_API_KEY:
+    secretName: ZAI_API_KEY
+codexProvider:
+  id: zai
+  name: Z.ai
+  baseUrl: https://api.z.ai/api/v1
+  keyVariable: ZAI_API_KEY
+  model: glm-5.3
+models: [glm-5.3]
+test:
+  kind: none
+  reason: Not offered on Codex.
+quota:
+  source: zai-coding-plan
+  note: Z.ai's Coding Plan quota — a 5-hour and a weekly window.
+unavailable: Z.ai serves the Responses API, but Codex only runs GLM with a model catalogue file (model_catalog_json) that Ferretry would have to write into a Codex home. Use the GLM / Z.ai preset for Claude Code instead.

@@ -11,17 +11,21 @@ import {
   AccountModelSchema,
   type ComponentKind,
   componentFilePath,
+  credentialFromPreset,
   describeScopeConflict,
   freeName,
   HARNESS_DISPLAY_NAMES,
   HARNESS_SCOPE_WORDS,
   type HarnessKind,
   isRuntimeName,
+  looksLikeRawSecret,
   looksSecret,
   newlyMisfitRuntimes,
   newlyMixedProfiles,
   type ProfileScope,
+  type ProviderPreset,
   parseSettings,
+  presetLoginRefusal,
   profileScope,
   resolveProfile,
   type SettingsFormat,
@@ -104,6 +108,8 @@ export interface AccountChangeFacts {
   readonly runningSessions: number;
   /** Each settings component's parsed file, by name: what an edit by entry keeps a hidden value from. */
   readonly settingsBodies?: Readonly<Record<string, SettingsObject>>;
+  /** The provider presets this machine offers (docs/provider-presets.md), for a login made from one. */
+  readonly presets?: readonly ProviderPreset[];
 }
 
 /** The document format each harness's settings file is in. */
@@ -379,6 +385,10 @@ function applyAccountChange(
       assertFreeRuntimeName(change.id, id => model.credentials[id] !== undefined, 'login', facts.machineName);
       assertLabelFree(model, change.id, change.harness, change.label);
       const store = change.store ?? 'ferretry';
+      if (store === 'environment') return addEnvironmentLogin(draft, change, facts, consequences);
+      if (change.preset !== undefined || change.env !== undefined || change.cloudCredential !== undefined) {
+        refuse('a preset, variables and a cloud credential belong only to an environment login');
+      }
       if (store === 'host') {
         // One pointer at the person's own login is all there is to point at: the import reuses it.
         const existing = Object.entries(model.credentials).find(
@@ -413,6 +423,8 @@ function applyAccountChange(
       target.label = change.label;
       return `Label login ${change.id} ${change.label}`;
     }
+    case 'credential.env':
+      return putEnvironmentLogin(model, draft, change, facts, consequences);
     case 'credential.remove': {
       const credential = model.credentials[change.id];
       if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
@@ -719,4 +731,110 @@ function removeComponent(
   }
   delete draft.components[kind][change.name];
   return `Delete ${word} ${change.name}`;
+}
+
+// ── Environment logins (docs/provider-presets.md) ────────────────────────────────────────────────
+
+type AddLoginChange = Extract<AccountPlanChange, { kind: 'credential.add' }>;
+
+/** Every variable of an environment login, refused if one holds what looks like a raw key (E7). */
+function assertNoRawSecrets(env: Readonly<Record<string, string>>, owner: string): void {
+  for (const [name, value] of Object.entries(env)) {
+    if (looksSecret(name, value) || looksLikeRawSecret(name, value)) {
+      refuse(
+        `${name} in ${owner} looks like a secret, and a secret never sits in a login file. Save it in this machine's secret store and write \${secret:NAME} here instead.`,
+      );
+    }
+  }
+}
+
+/** The sentence every new or changed environment login carries: what launches with what. */
+const ENVIRONMENT_CONSEQUENCE =
+  'Runtimes on it launch with these variables. A secret is put in from the secret store at launch and never written anywhere.';
+
+/** `credential.add` with `store: environment`: from a preset when one is named, else from the variables given. */
+function addEnvironmentLogin(
+  draft: Draft,
+  change: AddLoginChange,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const env = change.env ?? {};
+  const owner = `login ${change.id}`;
+  assertNoRawSecrets(env, owner);
+  const input = {
+    env,
+    ...(change.cloudCredential === undefined ? {} : { cloudCredential: change.cloudCredential }),
+    ...(change.label === undefined ? {} : { label: change.label }),
+  };
+  if (change.preset === undefined) {
+    draft.credentials[change.id] = {
+      harness: change.harness,
+      store: 'environment',
+      ...(change.label === undefined ? {} : { label: change.label }),
+      ...(Object.keys(env).length === 0 ? {} : { env: { ...env } }),
+      ...(change.cloudCredential === undefined ? {} : { cloudCredential: change.cloudCredential }),
+    };
+    consequences.push(ENVIRONMENT_CONSEQUENCE);
+    return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id} from its environment`;
+  }
+  const preset = facts.presets?.find(candidate => candidate.id === change.preset);
+  if (preset === undefined) return refuse(`there is no preset ${change.preset} on ${facts.machineName}`);
+  if (preset.harness !== change.harness) {
+    refuse(
+      `${preset.label} is a ${HARNESS_DISPLAY_NAMES[preset.harness]} preset, not ${HARNESS_DISPLAY_NAMES[change.harness]}`,
+    );
+  }
+  const refusal = presetLoginRefusal(preset, input);
+  if (refusal !== undefined) refuse(refusal);
+  draft.credentials[change.id] = { ...credentialFromPreset(preset, input) };
+  consequences.push(ENVIRONMENT_CONSEQUENCE);
+  return `Add a ${HARNESS_DISPLAY_NAMES[change.harness]} login ${change.id} from ${preset.label}`;
+}
+
+/** `credential.env`: an environment login's variables and cloud credential reference, changed. */
+function putEnvironmentLogin(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'credential.env' }>,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const credential = model.credentials[change.id];
+  if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
+  if (credential.store !== 'environment') {
+    refuse(`login ${change.id} is signed in, not made from environment variables — it has no variables to change`);
+  }
+  const owner = `login ${change.id}`;
+  const env = resolvedEnv(change.env, credential.env, owner) ?? {};
+  assertNoRawSecrets(
+    Object.fromEntries(Object.entries(change.env).filter(([, value]) => typeof value === 'string')) as Record<
+      string,
+      string
+    >,
+    owner,
+  );
+  const cloudCredential =
+    change.cloudCredential === undefined ? credential.cloudCredential : (change.cloudCredential ?? undefined);
+  const preset =
+    credential.preset === undefined ? undefined : facts.presets?.find(candidate => candidate.id === credential.preset);
+  if (preset !== undefined) {
+    const refusal = presetLoginRefusal(preset, {
+      env,
+      ...(cloudCredential === undefined ? {} : { cloudCredential }),
+    });
+    if (refusal !== undefined) refuse(refusal);
+  }
+  const target = draft.credentials[change.id] as Record<string, unknown>;
+  if (Object.keys(env).length === 0) delete target.env;
+  else target.env = env;
+  if (cloudCredential === undefined) delete target.cloudCredential;
+  else target.cloudCredential = cloudCredential;
+  const users = runtimesUsingCredential(model, change.id);
+  consequences.push(
+    users.length === 0
+      ? ENVIRONMENT_CONSEQUENCE
+      : `${listed(users)} ${users.length === 1 ? 'starts' : 'start'} with the new variables next launch. Running sessions keep the old ones until restarted.`,
+  );
+  return `Change the variables of login ${change.id}`;
 }

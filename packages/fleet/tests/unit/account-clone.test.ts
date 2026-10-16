@@ -158,7 +158,7 @@ describe('buildCloneBundle', () => {
     should(bundle.notCopied).deepEqual([{ path: '/etc/ferretry/rules.md', reason: 'outside the asset tree' }]);
   });
 
-  it('should carry no credential value, no store and no history anywhere in the bundle', () => {
+  it('should carry an environment login as plain values and secret NAMES, never a value or a store', () => {
     // Arrange
     const model = parseAccountModel({
       version: 2,
@@ -166,22 +166,43 @@ describe('buildCloneBundle', () => {
         keyed: {
           harness: 'claude',
           store: 'environment',
-          env: { ANTHROPIC_API_KEY: secretReference('ANTHROPIC_API_KEY') },
+          preset: 'zai-glm',
+          env: {
+            ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+            ANTHROPIC_AUTH_TOKEN: secretReference('ZAI_API_KEY'),
+          },
         },
+        signed: { harness: 'claude', store: 'ferretry' },
       },
       profiles: { default: { layers: [] } },
-      runtimes: { keyed: { credential: 'keyed', profile: 'default' } },
+      runtimes: {
+        keyed: { credential: 'keyed', profile: 'default' },
+        signed: { credential: 'signed', profile: 'default' },
+      },
     });
 
     // Act
-    const text = JSON.stringify(
-      buildCloneBundle({ model, machine: 'studio-mac', exportedAt: EXPORTED_AT, emails: {}, files: [], notCopied: [] }),
-    );
+    const bundle = buildCloneBundle({
+      model,
+      machine: 'studio-mac',
+      exportedAt: EXPORTED_AT,
+      emails: {},
+      files: [],
+      notCopied: [],
+    });
 
     // Assert
-    should(text).not.containEql('ANTHROPIC_API_KEY');
-    should(text).not.containEql('environment');
-    should(text).not.containEql('"store"');
+    should(bundle.credentials).deepEqual([
+      {
+        id: 'keyed',
+        harness: 'claude',
+        store: 'environment',
+        env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
+        preset: 'zai-glm',
+      },
+      { id: 'signed', harness: 'claude' },
+    ]);
+    should(JSON.stringify(bundle)).not.containEql('"ferretry"');
   });
 
   it('should round-trip through parseCloneBundle', () => {
@@ -546,6 +567,71 @@ describe('planClone alongside', () => {
     // Assert
     should(plan.missingSecrets).deepEqual(['ANTHROPIC_API_KEY']);
     should(plan.model.components.settings.keyed?.env?.ANTHROPIC_API_KEY).equal(secretReference('ANTHROPIC_API_KEY'));
+  });
+
+  it('should copy an environment login whole and say which secrets and references it needs', () => {
+    // Arrange
+    const bundle = bundleWith({
+      credentials: [
+        {
+          id: 'glm',
+          harness: 'claude',
+          label: 'glm',
+          store: 'environment',
+          preset: 'zai-glm',
+          env: {
+            ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+            ANTHROPIC_AUTH_TOKEN: secretReference('ZAI_API_KEY'),
+          },
+        },
+        {
+          id: 'bedrock',
+          harness: 'claude',
+          store: 'environment',
+          env: { CLAUDE_CODE_USE_BEDROCK: '1' },
+          cloudCredential: 'aws-profile:acme',
+        },
+        {
+          id: 'kimi-codex',
+          harness: 'codex',
+          store: 'environment',
+          env: { KIMI_API_KEY: secretReference('MOONSHOT_API_KEY') },
+          codexProvider: {
+            id: 'kimi',
+            name: 'Kimi',
+            baseUrl: 'https://api.moonshot.ai/v1',
+            keyVariable: 'KIMI_API_KEY',
+          },
+        },
+      ],
+      runtimes: {
+        'claude-glm': { credential: 'glm', profile: 'default', agent: false },
+        'claude-bedrock': { credential: 'bedrock', profile: 'default', agent: false },
+        'codex-kimi': { credential: 'kimi-codex', profile: 'default', agent: false },
+      },
+    });
+
+    // Act
+    const plan = planClone(emptyTarget(), bundle, options({ existingSecrets: ['MOONSHOT_API_KEY'] }));
+    const lines = describeClone(plan, bundle, 'work-linux');
+
+    // Assert — copied, not emptied: no slot needs sign-in, and the needs are said by name
+    should(plan.slots).deepEqual([]);
+    should(plan.model.credentials.glm).containDeep({
+      store: 'environment',
+      preset: 'zai-glm',
+      env: { ANTHROPIC_AUTH_TOKEN: secretReference('ZAI_API_KEY') },
+      clonedFrom: 'studio-mac',
+    });
+    should(plan.model.credentials['kimi-codex']?.codexProvider?.id).equal('kimi');
+    should(plan.missingSecrets).deepEqual(['ZAI_API_KEY']);
+    should(plan.references).deepEqual([
+      { login: 'bedrock', reference: 'aws-profile:acme', sentence: 'your AWS profile acme on this machine' },
+    ]);
+    should(lines).matchAny(/^work-linux's secret store has no ZAI_API_KEY/u);
+    should(lines).containEql(
+      'Login bedrock uses your AWS profile acme on work-linux (aws-profile:acme). A reference is never copied: set it up on work-linux before its runtimes launch.',
+    );
   });
 
   it('should give a runtime a free name when a command wrapper already holds its name', () => {

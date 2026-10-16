@@ -70,6 +70,10 @@ function recording(check: FleetCredentialsSubsystem['check']): {
         calls.push({ id, governance });
         return await check(id, governance);
       },
+      test: async () => {
+        throw new Error('not exercised here');
+      },
+      presets: async () => ({ presets: [] }),
     },
   };
 }
@@ -175,6 +179,10 @@ describe('the fleet credentials mount', () => {
         throw new Error('the disk went away');
       },
       check: async () => VIEW,
+      test: async () => {
+        throw new Error('not exercised here');
+      },
+      presets: async () => ({ presets: [] }),
     };
 
     // Act
@@ -197,5 +205,71 @@ describe('the fleet credentials mount', () => {
     // Assert
     should(response.status).equal(400);
     should(calls).have.length(0);
+  });
+});
+
+describe('the fleet credentials mount: environment logins (docs/provider-presets.md)', () => {
+  const RESULT = {
+    credentialId: 'glm',
+    ok: true,
+    code: 'ok',
+    message: 'The provider accepted this login.',
+    spent: 'nothing',
+    at: '2026-10-16T09:00:00.000Z',
+  } as const;
+
+  const subsystemWith = (tests: { id: string; allowInference: boolean; governance: CallerGovernance | undefined }[]) =>
+    ({
+      list: async () => LIST,
+      check: async () => VIEW,
+      test: async (id, consent, governance) => {
+        tests.push({ id, allowInference: consent.allowInference, governance });
+        return { ...RESULT, credentialId: id };
+      },
+      presets: async () => ({ presets: [] }),
+    }) satisfies FleetCredentialsSubsystem;
+
+  it('should Test the named login with the consent the body gives, and never cache the answer', async () => {
+    // Arrange
+    const tests: { id: string; allowInference: boolean; governance: CallerGovernance | undefined }[] = [];
+
+    // Act
+    const consented = await dispatcher(subsystemWith(tests)).dispatch(
+      post('/v1/fleet/credentials/glm/test', JSON.stringify({ allowInference: true })),
+    );
+    const plain = await dispatcher(subsystemWith(tests)).dispatch(post('/v1/fleet/credentials/glm/test'));
+
+    // Assert
+    should(consented.status).equal(200);
+    should(jsonBody(consented)).deepEqual(RESULT);
+    should(consented.headers.get('cache-control')).equal('no-store');
+    should(plain.status).equal(200);
+    should(tests.map(call => call.allowInference)).deepEqual([true, false]);
+    should(tests[0]?.governance).containDeep({ governed: false });
+  });
+
+  it('should refuse a Test body that carries anything else, before the service runs', async () => {
+    // Arrange
+    const tests: { id: string; allowInference: boolean; governance: CallerGovernance | undefined }[] = [];
+
+    // Act
+    const response = await dispatcher(subsystemWith(tests)).dispatch(
+      post('/v1/fleet/credentials/glm/test', JSON.stringify({ key: 'pasted' })),
+    );
+
+    // Assert
+    should(response.status).equal(400);
+    should(tests).be.empty();
+  });
+
+  it('should read the preset catalogue through the shared schema', async () => {
+    // Act
+    const response = await dispatcher(subsystemWith([])).dispatch(
+      request({ path: '/v1/fleet/presets', headers: human }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({ presets: [] });
   });
 });

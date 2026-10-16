@@ -1,0 +1,24 @@
+# Claude Code on an Anthropic API key, billed per token on the Claude Platform.
+label: Anthropic API key
+harness: claude
+summary: Claude Code with an API key from the Claude Platform console, billed per token.
+docs: https://code.claude.com/docs/en/model-config
+verified: '2026-10-16'
+env:
+  ANTHROPIC_API_KEY:
+    secretName: ANTHROPIC_API_KEY
+    description: the API key, sent as x-api-key
+models: [opus, sonnet, haiku]
+test:
+  kind: request
+  url: https://api.anthropic.com/v1/models
+  keyVariable: ANTHROPIC_API_KEY
+  header: x-api-key
+  scheme: ''
+  headers:
+    anthropic-version: '2023-06-01'
+  note: Lists the models the key can use. Spends nothing.
+quota:
+  source: transcript-pricing
+  note: An API key has no usage endpoint of its own, so cost is counted from the transcript at Anthropic's prices.
+pricing: anthropic

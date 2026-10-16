@@ -541,7 +541,29 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
      * `host` is the person's OWN login, shared in place with `claude` or `codex` in their terminal — what
      * the first run's "Sign in now" makes before it signs in, so the import that follows reuses it.
      */
-    store: z.enum(['ferretry', 'host']).optional(),
+    store: z.enum(['ferretry', 'host', 'environment']).optional(),
+    /**
+     * `store: environment` only: the preset it is made from (docs/provider-presets.md). The daemon fills
+     * in what the preset decides — the Codex model provider — and checks `env` against it.
+     */
+    preset: NonEmptyStringSchema.max(64).optional(),
+    /**
+     * `store: environment` only: every variable, as a plain value or a `${secret:NAME}` reference. A value
+     * that looks like a raw key is refused: a secret goes in through `POST /v1/secrets`.
+     */
+    env: z.record(z.string().max(128), z.string().max(4096)).optional(),
+    /** `store: environment` only: `aws-profile:<name>`, `gcloud-adc[:<path>]` or `azure-cli`, kept as a reference. */
+    cloudCredential: NonEmptyStringSchema.max(512).optional(),
+  }),
+  z.strictObject({
+    /**
+     * Change an environment login's variables. A secret variable the catalogue reported as hidden is
+     * kept with `{ keep: true }`. `cloudCredential: null` removes the reference.
+     */
+    kind: z.literal('credential.env'),
+    id: NonEmptyStringSchema,
+    env: FleetEnvInputSchema,
+    cloudCredential: NonEmptyStringSchema.max(512).nullable().optional(),
   }),
   z.strictObject({
     kind: z.literal('credential.label'),
