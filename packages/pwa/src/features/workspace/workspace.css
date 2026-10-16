@@ -260,6 +260,8 @@
 
 /* ---- agent-control marker ---------------------------------------------- */
 .fy-ws-marker {
+  max-width: calc(100% - 2 * var(--gap-sm));
+  white-space: nowrap;
   position: absolute;
   top: var(--gap-sm);
   right: var(--gap-sm);
@@ -296,4 +298,11 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+/* A class `display` beats the user-agent `[hidden]` rule; retained bodies and a
+   parked workspace must really disappear. */
+.fy-ws-panel[hidden],
+.fy-ws-split-child[hidden] {
+  display: none;
 }
