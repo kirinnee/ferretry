@@ -186,4 +186,15 @@ describe('SheetTabs', () => {
 
     await mounted.unmount();
   });
+
+  it('renders a supplied badge after the label', async () => {
+    const mounted = await mount(
+      strip({ current: 'identity', tabs: [{ key: 'identity', label: 'Identity', badge: <b data-badge="">3</b> }] }),
+    );
+
+    expect(buttonsOf(mounted.container)[0]?.textContent).toBe('Identity3');
+    expect(mounted.container.querySelector('[data-badge]')?.previousSibling?.textContent).toBe('Identity');
+
+    await mounted.unmount();
+  });
 });
