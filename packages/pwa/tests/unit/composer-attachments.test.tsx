@@ -138,12 +138,10 @@ describe('composer attachments', () => {
       },
     });
     run(() =>
-      composer.root
-        .findByType('textarea')
-        .props.onPaste({
-          clipboardData: { files: [new File([], 'empty.txt', { type: 'text/plain' }), png()] },
-          preventDefault() {},
-        }),
+      composer.root.findByType('textarea').props.onPaste({
+        clipboardData: { files: [new File([], 'empty.txt', { type: 'text/plain' }), png()] },
+        preventDefault() {},
+      }),
     );
     expect(strip()?.props.entries[0]).toMatchObject({ status: 'failed', error: 'That file is empty' });
     await settleUntil(() => strip()?.props.entries[1]?.status === 'failed', 'the upload to fail', runAsync);
