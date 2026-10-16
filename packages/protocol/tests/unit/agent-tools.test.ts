@@ -1,0 +1,148 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import * as tools from '../../src/lib/agent-tools.ts';
+import type { AgentToolCall, SurfaceControlView } from '../../src/lib/index.ts';
+import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
+import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
+
+const driving = {
+  surface: 'terminal',
+  id: 'a1b2c3d4e5f6',
+  name: 'dev',
+  agentSessionId: 'mse7wwti-2a75bd9c',
+  agentName: 'Hadi',
+  since: INSTANT,
+  until: LATER_INSTANT,
+} as const;
+
+const takeover = {
+  surface: 'browser',
+  id: 'page-1',
+  name: 'app',
+  by: { by: 'human', deviceId: 'device-7f3a' },
+  since: INSTANT,
+} as const;
+
+const view = {
+  sessionId: 's1',
+  driving: [driving],
+  takeovers: [takeover],
+  handed: [{ surface: 'terminal', id: 'a1b2c3d4e5f6', by: { by: 'local' }, at: INSTANT }],
+} satisfies SurfaceControlView;
+
+const cases: SchemaCase[] = [
+  { name: 'name', schema: tools.SurfaceNameSchema, value: 'dev-server' },
+  { name: 'key', schema: tools.SurfaceKeySchema, value: 'a1b2c3d4e5f6' },
+  { name: 'kind', schema: tools.SurfaceKindSchema, value: 'browser' },
+  { name: 'key press', schema: tools.TerminalKeySchema, value: 'ctrl-c' },
+  { name: 'url', schema: tools.AgentUrlSchema, value: 'https://example.test/login' },
+  { name: 'call', schema: tools.AgentToolCallSchema, value: { tool: 'terminal.send', name: 'dev', text: 'ls' } },
+  { name: 'surface', schema: tools.AgentSurfaceSchema, value: { id: 'page-1', name: 'app', title: 'x', url: 'a' } },
+  {
+    name: 'result',
+    schema: tools.AgentToolResultSchema,
+    value: { summary: 'ok', output: 'x', matched: true, screenshotBase64: 'AAAA', surfaces: [] },
+  },
+  { name: 'driving', schema: tools.SurfaceDrivingSchema, value: driving },
+  { name: 'controller', schema: tools.SurfaceControllerSchema, value: { by: 'local' } },
+  { name: 'takeover', schema: tools.SurfaceTakeoverSchema, value: takeover },
+  { name: 'control view', schema: tools.SurfaceControlViewSchema, value: view },
+  { name: 'handed', schema: tools.SurfaceHandedSchema, value: view.handed[0] },
+  {
+    name: 'control request',
+    schema: tools.SurfaceControlRequestSchema,
+    value: { action: 'handover', key: '%terminal:dev' },
+  },
+  {
+    name: 'handback',
+    schema: tools.SurfaceHandbackSchema,
+    value: { surface: 'terminal', id: 'a1b2c3d4e5f6', at: INSTANT },
+  },
+];
+
+describe('agent tool schemas', () => {
+  it('should round-trip every public agent-tool schema', () => {
+    assertRoundTrips(cases);
+    assertCoversEverySchema(tools, cases);
+  });
+
+  it('should accept every tool the agent is shown, each in its smallest valid form', () => {
+    // Arrange
+    const calls: AgentToolCall[] = [
+      { tool: 'terminal.list' },
+      { tool: 'terminal.open', name: 'dev', folder: 'web', command: 'bun dev' },
+      { tool: 'terminal.send', name: 'dev', keys: ['ctrl-c', 'enter'] },
+      { tool: 'terminal.read', name: 'dev', lines: 50 },
+      { tool: 'terminal.wait', name: 'dev', text: 'ready', timeoutMs: 5_000 },
+      { tool: 'terminal.wait', name: 'dev', exit: true },
+      { tool: 'terminal.close', name: 'dev' },
+      { tool: 'browser.list' },
+      { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true },
+      { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' },
+      { tool: 'browser.click', name: 'app', selector: 'button' },
+      { tool: 'browser.type', name: 'app', selector: '#email', text: '' },
+      { tool: 'browser.read', name: 'app', mode: 'a11y' },
+      { tool: 'browser.screenshot', name: 'app' },
+      { tool: 'browser.close', name: 'app' },
+    ];
+
+    // Act
+    const parsed = calls.map(call => tools.AgentToolCallSchema.parse(call).tool);
+
+    // Assert
+    should(parsed).deepEqual([
+      ...tools.AGENT_TOOL_NAMES.slice(0, 5),
+      'terminal.wait',
+      ...tools.AGENT_TOOL_NAMES.slice(5),
+    ]);
+  });
+
+  it('should take a reference exactly as a person wrote it, and keep the old id form working', () => {
+    should(tools.SurfaceKeySchema.parse('%terminal:dev')).equal('dev');
+    should(tools.SurfaceKeySchema.parse('%browser:app')).equal('app');
+    should(tools.SurfaceKeySchema.parse(' a1b2c3d4e5f6 ')).equal('a1b2c3d4e5f6');
+  });
+
+  it('should refuse a name that is not lowercase, too long, or shaped like a terminal id', () => {
+    assertRejects([
+      { name: 'upper', schema: tools.SurfaceNameSchema, value: 'Dev' },
+      { name: 'digit first', schema: tools.SurfaceNameSchema, value: '1dev' },
+      { name: 'too long', schema: tools.SurfaceNameSchema, value: `a${'b'.repeat(32)}` },
+      { name: 'space', schema: tools.SurfaceNameSchema, value: 'my dev' },
+      { name: 'terminal id', schema: tools.SurfaceNameSchema, value: 'deadbeefcafe' },
+      { name: 'key with a dot', schema: tools.SurfaceKeySchema, value: 'dev.' },
+    ]);
+  });
+
+  it('should bound every input an agent controls', () => {
+    const call = (value: Record<string, unknown>): SchemaCase => ({
+      name: JSON.stringify(value).slice(0, 40),
+      schema: tools.AgentToolCallSchema,
+      value,
+    });
+    assertRejects([
+      call({ tool: 'terminal.send', name: 'dev', text: 'x'.repeat(tools.AGENT_TOOL_MAX_TEXT_CHARS + 1) }),
+      call({ tool: 'terminal.send', name: 'dev' }),
+      call({ tool: 'terminal.send', name: 'dev', keys: ['f13'] }),
+      call({ tool: 'terminal.send', name: 'dev', keys: Array(tools.AGENT_TOOL_MAX_KEYS + 1).fill('enter') }),
+      call({ tool: 'terminal.read', name: 'dev', lines: tools.AGENT_TOOL_MAX_READ_LINES + 1 }),
+      call({ tool: 'terminal.wait', name: 'dev', text: 'x', timeoutMs: tools.AGENT_TOOL_MAX_WAIT_MS + 1 }),
+      call({ tool: 'terminal.wait', name: 'dev' }),
+      call({ tool: 'terminal.wait', name: 'dev', text: 'x', exit: true }),
+      call({ tool: 'browser.type', name: 'app', selector: 'x', text: 'y'.repeat(tools.AGENT_TOOL_MAX_TEXT_CHARS + 1) }),
+      call({ tool: 'browser.click', name: 'app', selector: 's'.repeat(tools.AGENT_TOOL_MAX_SELECTOR_CHARS + 1) }),
+      call({ tool: 'terminal.list', sessionId: 'someone-else' }),
+    ]);
+  });
+
+  it('should open only web pages', () => {
+    assertRejects([
+      { name: 'file', schema: tools.AgentUrlSchema, value: 'file:///etc/passwd' },
+      { name: 'script', schema: tools.AgentUrlSchema, value: 'javascript:alert(1)' },
+      { name: 'not a url', schema: tools.AgentUrlSchema, value: 'localhost:3000' },
+      { name: 'not even a scheme', schema: tools.AgentUrlSchema, value: '::nonsense' },
+      { name: 'too long', schema: tools.AgentUrlSchema, value: `https://e.test/${'a'.repeat(2_048)}` },
+    ]);
+    should(tools.AgentUrlSchema.parse('http://127.0.0.1:3000/')).equal('http://127.0.0.1:3000/');
+  });
+});

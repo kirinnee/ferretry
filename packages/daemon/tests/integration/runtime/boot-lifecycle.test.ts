@@ -346,6 +346,7 @@ class RecordingTerminalRuntime implements TerminalRuntimePort {
       createdAtMs: 1_700_000_000_000,
       lastActivityAtMs: 1_700_000_000_000,
       ...input.size,
+      ...(input.name === undefined ? {} : { name: input.name }),
     };
     this.records.set(record.id, record);
     this.opened.push(record);
@@ -371,6 +372,18 @@ class RecordingTerminalRuntime implements TerminalRuntimePort {
 
   async capture(): Promise<Uint8Array> {
     return new TextEncoder().encode(this.screen);
+  }
+
+  /** The screen, followed by everything typed into it — enough for an agent's read to see its own input. */
+  async text(): Promise<string> {
+    return [this.screen, ...this.written].join('');
+  }
+
+  /** What is running in the pane: the shell, unless a case says otherwise. */
+  foregroundCommand = 'sh';
+
+  async foreground(): Promise<string> {
+    return this.foregroundCommand;
   }
 
   async kill(record: TerminalRecord): Promise<void> {

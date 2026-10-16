@@ -106,7 +106,7 @@ describe('terminal schemas', () => {
 
   it('should resolve every terminal error-code member', () => {
     // Arrange
-    const members = ['bad_request', 'not_found', 'forbidden', 'capacity', 'unavailable', 'upstream_failed'];
+    const members = ['bad_request', 'not_found', 'forbidden', 'capacity', 'conflict', 'unavailable', 'upstream_failed'];
 
     // Act + Assert
     for (const member of members) should(terminal.TerminalErrorCodeSchema.parse(member)).equal(member);

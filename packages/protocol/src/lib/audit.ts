@@ -31,7 +31,9 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * the warden reconfigured or run, a browser opened or attached, a worktree removed. `session.opened` is
  * an agent session started or forked, and `agent.prompted` a message or an answer handed to one: an
  * agent in auto mode runs commands, so "which device told it what to do" belongs to this history. Both
- * are activity, folded per device and session per window.
+ * are activity, folded per device and session per window. `agent.tool` is one agent tool call on a
+ * terminal or browser page, named by tool and surface name with lengths only — never the typed text —
+ * and `surface.control` a person taking a surface over from an agent or handing it back.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -58,6 +60,8 @@ export const AUDIT_EVENTS = [
   'browser.opened',
   'worktree.removed',
   'agent.prompted',
+  'agent.tool',
+  'surface.control',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;

@@ -110,7 +110,7 @@ describe('NodeSessionBrowserLauncher', () => {
         return worker as never;
       },
     );
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     // Registered before the first assertion: a case that fails here must still not leave Chrome up.
     opened.push(browser);
     should(calls[0]).match(/^worker:http:\/\/127\.0\.0\.1:/);
@@ -137,9 +137,9 @@ describe('NodeSessionBrowserLauncher', () => {
     });
 
     // Act — a real worker process, spawned and handshaken by the launcher's own client.
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
-    const snapshot = await browser.navigate('https://example.test/');
+    const snapshot = await browser.navigate('p1', 'https://example.test/');
 
     // Assert — the answer came back through the worker's own protocol, so the whole chain is live.
     should(snapshot).have.property('activePageId', 'p1');
@@ -162,14 +162,14 @@ describe('NodeSessionBrowserLauncher', () => {
     );
 
     // Act
-    const launched = launcher.launch('s1', { width: 800, height: 600 });
+    const launched = launcher.launch({ width: 800, height: 600 });
 
     // Assert — the refusal is the plain sentence, and nothing was leased on the way to it.
     await should(launched).be.rejectedWith(message);
     should(await new BrowserProfileStore(root).acquire({ sessionId: 'next' })).have.property('sessionId', 'next');
   });
 
-  it('should run a compiled worker directly and a Linux Chrome headless when the daemon has no display', async () => {
+  it('should run a compiled worker directly, and Chrome headless on every platform — even with a display', async () => {
     // Arrange — a Chrome stand-in that records the arguments it was started with.
     const chrome = await fakeChrome({ recordArguments: true });
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
@@ -180,7 +180,8 @@ describe('NodeSessionBrowserLauncher', () => {
       new BrowserProfileStore(root),
       { kind: 'executable', path: '/opt/ferretry/fyd-browser-worker' },
       process.execPath,
-      { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
+      // A display IS available: the agent browser is headless anyway, so every window keeps painting.
+      { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
       async options => {
         connected.push({ workerEntry: options.workerEntry, workerExecutable: options.workerExecutable });
         return worker as never;
@@ -188,16 +189,16 @@ describe('NodeSessionBrowserLauncher', () => {
     );
 
     // Act
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
 
     // Assert
     should(connected).deepEqual([{ workerEntry: '/opt/ferretry/fyd-browser-worker', workerExecutable: true }]);
     const started = await readFile(`${chrome}.args`, 'utf8');
-    if (process.platform === 'linux') {
-      should(started).containEql('--headless=new');
-      should(started).not.containEql('--ozone-platform=x11');
-    }
+    should(started).containEql('--headless=new');
+    should(started).not.containEql('--ozone-platform=x11');
+    // The debugging port takes no cross-origin WebSocket: only the worker, which sends no Origin.
+    should(started).not.containEql('--remote-allow-origins');
   });
 
   it('should carry a screencast frame from the worker to the viewer that asked for one', async () => {
@@ -214,14 +215,15 @@ describe('NodeSessionBrowserLauncher', () => {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
     });
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const frames: BrowserScreencastFrame[] = [];
 
     // Act — `emit-frames` is the fixture's instruction to publish frames while replying.
-    await browser.startScreencast({ width: 800, height: 600 }, frame => frames.push(frame));
-    await browser.navigate('emit-frames');
-    await browser.stopScreencast();
+    const listener = (frame: BrowserScreencastFrame): number => frames.push(frame);
+    await browser.startScreencast('p1', { width: 800, height: 600 }, listener);
+    await browser.navigate('p1', 'emit-frames');
+    await browser.stopScreencast('p1', listener);
 
     // Assert — a frame the worker produced reached the listener the caller registered, carrying the
     // page identity a viewer needs. Only the first arrives: composition names no frame interval, so
@@ -256,7 +258,7 @@ describe('NodeSessionBrowserLauncher', () => {
         return worker;
       },
     );
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const chromePid = await leasedChromePid(root);
     should(alive(chromePid)).be.true();
@@ -264,7 +266,7 @@ describe('NodeSessionBrowserLauncher', () => {
     // Act — `crashes` is the fixture's instruction to exit mid-request. The worker dies with Chrome
     // still up: the case a race between the two children silently loses, because the worker settling
     // first was treated as the whole browser being gone.
-    await browser.navigate('crashes').catch(() => undefined);
+    await browser.navigate('p1', 'crashes').catch(() => undefined);
     const code = await browser.unexpectedExit;
 
     // Assert — the exit is observable only once its peer has been reaped and the lease released, so a
@@ -293,7 +295,7 @@ describe('NodeSessionBrowserLauncher', () => {
         return worker;
       },
     );
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const chromePid = await leasedChromePid(root);
 
@@ -326,7 +328,7 @@ describe('NodeSessionBrowserLauncher', () => {
         return worker;
       },
     );
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const chromePid = await leasedChromePid(root);
 
@@ -364,7 +366,7 @@ describe('NodeSessionBrowserLauncher', () => {
     );
 
     // Act
-    await should(launcher.launch('s1', { width: 800, height: 600 })).be.rejectedWith(/the worker refused to connect/u);
+    await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(/the worker refused to connect/u);
 
     // Assert
     should(alive(chromePid)).be.false();
@@ -394,7 +396,7 @@ describe('NodeSessionBrowserLauncher', () => {
       environment(chrome),
       async () => worker as never,
     );
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const chromePid = await leasedChromePid(root);
 
@@ -405,7 +407,7 @@ describe('NodeSessionBrowserLauncher', () => {
     // up, and the profile stays leased to the session whose worker could not be accounted for.
     should(alive(chromePid)).be.false();
     await should(new BrowserProfileStore(root).acquire({ sessionId: 'again' })).be.rejectedWith(
-      /leased by session s1/u,
+      /leased by session agent-browser/u,
     );
   });
 
@@ -433,19 +435,19 @@ describe('NodeSessionBrowserLauncher', () => {
       environment(chrome),
       async () => worker as never,
     );
-    const browser = await launcher.launch('s1', { width: 800, height: 600 });
+    const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
     const first = await leasedChromePid(root);
     await browser.close();
 
     // Act — the same launcher, the same external session id, exactly as `ensure()` would retry it.
-    const retry = launcher.launch('s1', { width: 800, height: 600 });
+    const retry = launcher.launch({ width: 800, height: 600 });
     // Registered BEFORE it is judged: a red run must not leak the Chrome an unexpected success starts.
     await retry.then(opened.push.bind(opened), () => undefined);
 
     // Assert — refused, and the retained record still names the ORIGINAL Chrome. A retry that got
     // through would report a different, live pid here even where the refusal assertion was loosened.
-    await should(retry).be.rejectedWith(/leased by session s1/u);
+    await should(retry).be.rejectedWith(/leased by session agent-browser/u);
     should(await leasedChromePid(root)).equal(first);
   });
 });

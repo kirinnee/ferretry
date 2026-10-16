@@ -173,9 +173,7 @@ export function chromeLaunchArguments(
     executable,
     ...(headless ? ['--headless=new'] : []),
     `--user-data-dir=${profile}`,
-    ...(cdp
-      ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*']
-      : []),
+    ...(cdp ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${cdpPort}`] : []),
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-mode',

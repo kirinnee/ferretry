@@ -18,6 +18,7 @@ import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
+import { agentToolWorld } from '../../agent-tools/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
@@ -441,9 +442,23 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     dispatchHumanInput: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    openPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    actOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    closePage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    releaseSession: async () => undefined,
     closeAll: async () => undefined,
     stream: async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined }),
   },
+  agentTools: (() => {
+    const world = agentToolWorld();
+    return { service: world.service, identities: world.identities };
+  })(),
   names: nameSubsystem(),
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
@@ -513,7 +528,8 @@ describe('the mounted daemon surface', () => {
 
     // `admin-token` is declared by exactly ONE route: the owner's re-opened passkey window (review L3),
     // so a paired device is refused at the boundary before the service's own at-the-machine check. The
-    // fleet's old approval-code route used it once too, and is gone.
+    // fleet's old approval-code route used it once too, and is gone. The agent tools route is `none` and
+    // privileged: it carries no host authority, only the session credential it checks itself.
     // Written as a LABELLED sum, one term per line, and that is the anti-merge device rather than
     // style: a bare `129 + 5 + 1 + 1` invited two changes to each append `+ 1` and produce the same
     // total, which git merges without a conflict — exactly how a route goes missing with this test
@@ -532,12 +548,13 @@ describe('the mounted daemon surface', () => {
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
-      1; // an agent's rename: a new first name or task title
+      1 + // an agent's rename: a new first name or task title
+      6; // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
-    should(minima).deepEqual({ none: 4, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 5, authenticated: 7, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
-    ).deepEqual(['GET /v1/sessions/:sessionId/attach']);
+    ).deepEqual(['POST /v1/agent/tools', 'GET /v1/sessions/:sessionId/attach']);
   });
 
   it('should serve the base feeds and every mounted subsystem from one table', () => {
@@ -706,6 +723,15 @@ describe('the mounted daemon surface', () => {
       'PATCH /v1/analytics/pricing',
       'POST /v1/analytics/pricing/sync/preview',
       'POST /v1/analytics/pricing/sync/apply',
+      // The agent tools. The agent's own route names no session: its session is the credential it
+      // presents. A person's live under `…/surfaces`, where nothing else can shadow them.
+      'POST /v1/agent/tools',
+      'POST /v1/sessions/:sessionId/surfaces/terminals/tools',
+      'POST /v1/sessions/:sessionId/surfaces/terminals/control',
+      'GET /v1/sessions/:sessionId/surfaces/terminals/control',
+      'POST /v1/sessions/:sessionId/surfaces/browser/tools',
+      'POST /v1/sessions/:sessionId/surfaces/browser/control',
+      'GET /v1/sessions/:sessionId/surfaces/browser/control',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',

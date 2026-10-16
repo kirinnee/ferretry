@@ -43,6 +43,8 @@ describe('TmuxTerminalRuntime', () => {
       terminal.root,
       // A pane that predates the opener option answers with the empty string.
       '',
+      // No name either: a terminal opened without one, or before names existed.
+      '',
       '2',
       '100',
       '30',
@@ -85,6 +87,7 @@ describe('TmuxTerminalRuntime', () => {
         createdAt,
         terminal.root,
         '',
+        '',
         String(activitySeconds),
         '100',
         '30',
@@ -121,6 +124,7 @@ describe('TmuxTerminalRuntime', () => {
         '1970-01-01T00:00:01.000Z',
         terminal.root,
         openedBy,
+        'dev',
         '2',
         '100',
         '30',
@@ -142,6 +146,7 @@ describe('TmuxTerminalRuntime', () => {
 
     // Assert
     should(owned[0]?.openedBy).deepEqual({ by: 'agent', sessionId: 'mse7wwti' });
+    should(owned[0]?.name).equal('dev');
     should(unknown[0]).not.have.property('openedBy');
     should(created.openedBy).deepEqual({ by: 'agent', sessionId: 'mse7wwti' });
     // Written in the SAME tmux invocation as the pane, so no list can observe a
@@ -241,6 +246,39 @@ describe('TmuxTerminalRuntime', () => {
     await should(failed.write(terminal, Uint8Array.of(1))).be.rejectedWith(/terminal no longer exists/u);
     await should(failed.capture(terminal)).be.rejectedWith(/terminal no longer exists/u);
     await should(failed.kill(terminal)).be.fulfilled();
+  });
+
+  it('should name a terminal on its pane, and read it as plain text and by its foreground program', async () => {
+    // Arrange
+    const fake = new FakeTmux([ok(), ok('$ bun dev\nready\n\n\n'), ok('node\n')]);
+    const subject = new TmuxTerminalRuntime(fake, () => 1_000);
+
+    // Act
+    const created = await subject.create({
+      ownerId: terminal.ownerId,
+      id: terminal.id,
+      title: terminal.title,
+      cwd: terminal.root,
+      size: { cols: 100, rows: 30 },
+      name: 'dev',
+    });
+    const text = await subject.text(created, 50);
+    const foreground = await subject.foreground(created);
+
+    // Assert
+    should(created.name).equal('dev');
+    should(fake.received[0]).containDeepOrdered(['set-option', '-t', created.tmuxSession, '@fy_terminal_name', 'dev']);
+    // Plain text, wrapped lines joined, and the blank bottom of the screen dropped.
+    should(fake.received[1]).deepEqual(['capture-pane', '-p', '-J', '-S', '-50', '-t', `${created.tmuxSession}:0.0`]);
+    should(text).equal('$ bun dev\nready');
+    should(foreground).equal('node');
+  });
+
+  it('should report a terminal that is gone when it is read or asked what is running', async () => {
+    const gone = { code: 1, stdout: '', stderr: "can't find pane" };
+    const subject = new TmuxTerminalRuntime(new FakeTmux([gone, gone]));
+    await should(subject.text(terminal, 10)).be.rejectedWith(/terminal no longer exists/u);
+    await should(subject.foreground(terminal)).be.rejectedWith(/terminal no longer exists/u);
   });
 
   it('should surface a real kill failure but accept a terminal already gone', async () => {

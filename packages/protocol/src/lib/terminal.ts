@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { SurfaceNameSchema } from './agent-tools.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
 
 export const TERMINAL_MAX_PER_SESSION = 6;
@@ -32,6 +33,12 @@ export const TerminalViewSchema = z
     id: TerminalIdSchema,
     sessionId: z.string().min(1),
     title: TerminalTitleSchema,
+    /**
+     * The terminal's human name — `dev` in `%terminal:dev` — shared by the person and the agent.
+     * Unique within the session. ABSENT for a terminal opened without one, which is still addressable
+     * by its id.
+     */
+    name: SurfaceNameSchema.optional(),
     state: z.literal('running'),
     cols: z.number().int().min(TERMINAL_MIN_COLUMNS).max(TERMINAL_MAX_COLUMNS),
     rows: z.number().int().min(TERMINAL_MIN_ROWS).max(TERMINAL_MAX_ROWS),
@@ -95,6 +102,8 @@ export type TerminalListView = z.infer<typeof TerminalListViewSchema>;
 
 export const CreateTerminalRequestSchema = z.strictObject({
   title: TerminalTitleSchema.optional(),
+  /** A human name for the terminal, unique within the session — see `SurfaceNameSchema`. */
+  name: SurfaceNameSchema.optional(),
   cols: z.number().int().min(TERMINAL_MIN_COLUMNS).max(TERMINAL_MAX_COLUMNS).optional(),
   rows: z.number().int().min(TERMINAL_MIN_ROWS).max(TERMINAL_MAX_ROWS).optional(),
   /**
@@ -135,6 +144,7 @@ export const TerminalErrorCodeSchema = z.enum([
   'not_found',
   'forbidden',
   'capacity',
+  'conflict',
   'unavailable',
   'upstream_failed',
 ]);

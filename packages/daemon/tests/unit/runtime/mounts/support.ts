@@ -453,11 +453,17 @@ export class FakeTerminals implements TerminalSubsystem {
     };
   }
 
-  async create(sessionId: string, input: CreateTerminalRequest, openedBy?: SurfaceOpener): Promise<TerminalView> {
+  async create(
+    sessionId: string,
+    input: CreateTerminalRequest & { readonly folder?: string },
+    openedBy?: SurfaceOpener,
+  ): Promise<TerminalView> {
     const session = this.session(sessionId);
     const owned = this.owned(session);
     if (owned.length >= this.perSession)
       throw new TerminalMountError('capacity', 'terminal capacity reached for this session');
+    if (input.name !== undefined && owned.some(terminal => terminal.name === input.name))
+      throw new TerminalMountError('conflict', `this session already has a terminal named ${input.name}`);
     this.minted += 1;
     const size = normalizeTerminalSize(
       input.cols ?? DEFAULT_TERMINAL_SIZE.cols,
@@ -479,11 +485,13 @@ export class FakeTerminals implements TerminalSubsystem {
       // Recorded exactly as the mount derived it: an absent opener stays absent,
       // which is how a terminal reports "unrecorded" on the wire.
       ...(openedBy === undefined ? {} : { openedBy }),
+      ...(input.name === undefined ? {} : { name: input.name }),
       createdAt: AT,
       lastActivityAt: AT,
       idleDeadline: '2024-05-01T11:00:00.000Z',
     };
     this.records.set(view.id, view);
+    if (input.folder !== undefined) this.folders.set(view.id, input.folder);
     return view;
   }
 
@@ -500,6 +508,31 @@ export class FakeTerminals implements TerminalSubsystem {
 
   async close(sessionId: string, terminalId: string): Promise<void> {
     this.records.delete(this.require(this.session(sessionId), terminalId).id);
+  }
+
+  /** The folder each terminal was opened in, when it was given one. */
+  readonly folders = new Map<string, string>();
+  /** Everything typed into each terminal, decoded. */
+  readonly typed = new Map<string, string>();
+  /** What each terminal's screen reads; its typed input follows. */
+  readonly screens = new Map<string, string>();
+  /** The foreground program each terminal reports in turn; the last one sticks. */
+  readonly foregrounds = new Map<string, string[]>();
+
+  async write(sessionId: string, terminalId: string, bytes: Uint8Array): Promise<void> {
+    const id = this.require(this.session(sessionId), terminalId).id;
+    this.typed.set(id, `${this.typed.get(id) ?? ''}${new TextDecoder().decode(bytes)}`);
+  }
+
+  async text(sessionId: string, terminalId: string, _lines: number): Promise<string> {
+    const id = this.require(this.session(sessionId), terminalId).id;
+    return `${this.screens.get(id) ?? '$ '}${this.typed.get(id) ?? ''}`;
+  }
+
+  async foreground(sessionId: string, terminalId: string): Promise<string> {
+    const id = this.require(this.session(sessionId), terminalId).id;
+    const queue = this.foregrounds.get(id) ?? ['sh'];
+    return (queue.length > 1 ? queue.shift() : queue[0]) as string;
   }
 
   /**

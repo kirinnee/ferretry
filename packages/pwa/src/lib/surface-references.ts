@@ -26,6 +26,12 @@
  * enumeration, not a page of one — so an id that is missing from it is missing,
  * full stop.
  *
+ * A TERMINAL IS ADDRESSED BY ITS NAME WHEN IT HAS ONE. `%terminal:dev` is the handle a person and an
+ * agent share (docs/reference-standard.md §2): the picker offers the name, and a name is proved
+ * against the same complete listing an id is. The id form keeps working, for terminals opened without
+ * a name and for every reference written before names existed. A name can never look like an id —
+ * the protocol refuses twelve hex characters as a name — so one key can never mean two terminals.
+ *
  * BROWSER PAGES ARE DELIBERATELY UNPROVABLE HERE. The daemon serves
  * `/v1/sessions/:id/browser` for real now and its status carries a page list, but
  * nothing hands that list to this module. So a `%browser:…` token resolves to
@@ -88,7 +94,7 @@ export const describeSurfaceOwnership = (ownership: SurfaceOwnership): SurfaceOw
  *  it: the canonical token, plus the live facts that help a reader choose. */
 export interface SessionSurface {
   readonly surface: SurfaceKind;
-  /** The owner's identity for it — a daemon terminal id today. */
+  /** How a reference addresses it: the terminal's name when it has one, else the daemon's terminal id. */
   readonly key: string;
   /** The canonical authored token, e.g. `%terminal:ab12cd34ef56`. */
   readonly token: string;
@@ -124,8 +130,8 @@ export const sessionSurfaces = (
   (evidenceFor(scope, terminals)?.terminals ?? []).map(
     (terminal: TerminalView): SessionSurface => ({
       surface: 'terminal',
-      key: terminal.id,
-      token: surfaceToken('terminal', terminal.id),
+      key: terminal.name ?? terminal.id,
+      token: surfaceToken('terminal', terminal.name ?? terminal.id),
       title: terminal.title,
       // An absent opener is the daemon saying it cannot speak for this pane, and
       // it stays absent here rather than becoming a default.
@@ -147,7 +153,11 @@ export const createSurfaceReferenceResolver = (
   terminals: TerminalListView | null | undefined,
 ): SurfaceReferenceResolver => {
   const evidence = evidenceFor(scope, terminals);
-  const open = new Set(evidence?.terminals.map(terminal => terminal.id) ?? []);
+  const open = new Set(
+    evidence?.terminals.flatMap(terminal =>
+      terminal.name === undefined ? [terminal.id] : [terminal.id, terminal.name],
+    ) ?? [],
+  );
 
   return lookup => {
     // No authoritative listing means no answer, in either direction.
@@ -184,6 +194,16 @@ export const surfaceReferenceIdentityKey = (
   return [
     daemonSessionKey(scope),
     evidence === null ? 'unlisted' : 'listed',
-    ...(evidence?.terminals.map(terminal => terminal.id) ?? []),
+    ...(evidence?.terminals.map(terminal => `${terminal.id}=${terminal.name ?? ''}`) ?? []),
   ].join('\u0001');
 };
+
+/**
+ * The terminal id a reference key names — itself when it is an id, the named terminal's id when it is
+ * a name — or nothing when this listing holds no such terminal. A tab is keyed by id, so a `%terminal:dev`
+ * link must find the id before it can focus one.
+ */
+export const terminalIdForSurfaceKey = (
+  terminals: TerminalListView | null | undefined,
+  key: string,
+): string | undefined => terminals?.terminals.find(terminal => terminal.id === key || terminal.name === key)?.id;
