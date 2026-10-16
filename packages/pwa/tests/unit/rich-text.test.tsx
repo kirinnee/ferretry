@@ -231,7 +231,9 @@ describe('RichTextEditor', () => {
         preventDefault: () => (prevented += 1),
       }),
     );
-    run(() => editor.props.onPaste({ clipboardData: null, currentTarget: target, preventDefault: () => (prevented += 1) }));
+    run(() =>
+      editor.props.onPaste({ clipboardData: null, currentTarget: target, preventDefault: () => (prevented += 1) }),
+    );
     expect(files).toEqual([[file]]);
     expect(prevented).toBe(3);
   });
@@ -277,7 +279,9 @@ describe('the composer in rich text style', () => {
     await runAsync(async () => editor.props.onSubmit());
     expect((sent[0] as { message: string }).message).toBe('# Hello');
     // A pasted file joins the same attachment strip the other editor styles use.
-    run(() => view.root.findByType(RichTextEditor).props.onPasteFiles([new File([], 'empty.txt', { type: 'text/plain' })]));
+    run(() =>
+      view.root.findByType(RichTextEditor).props.onPasteFiles([new File([], 'empty.txt', { type: 'text/plain' })]),
+    );
     expect(view.root.findAll(node => node.props['aria-label'] === 'Attached files')).not.toHaveLength(0);
     writeMdComposePref('on');
   });

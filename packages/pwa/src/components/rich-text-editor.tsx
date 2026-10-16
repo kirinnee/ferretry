@@ -113,7 +113,11 @@ export interface RichTextEditorProps {
   readonly value: string;
   readonly onChange: (markdown: string) => void;
   /** The composer's own Enter policy: answers true when this key press should send the message. */
-  readonly sendsOnEnter: (event: { readonly shiftKey: boolean; readonly metaKey: boolean; readonly ctrlKey: boolean }) => boolean;
+  readonly sendsOnEnter: (event: {
+    readonly shiftKey: boolean;
+    readonly metaKey: boolean;
+    readonly ctrlKey: boolean;
+  }) => boolean;
   /** `true` only for ⌘/Ctrl+⇧+↵, the explicit "send now" that interrupts the running turn. */
   readonly onSubmit: (interrupt: boolean) => void;
   readonly onPasteFiles: (files: readonly File[]) => void;
