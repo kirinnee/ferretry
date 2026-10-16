@@ -65,6 +65,7 @@ import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
 import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
+import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
@@ -200,6 +201,9 @@ export interface MountedSubsystems {
    *  The only path that can write `completed`, and the only one that can declare the wait the warden
    *  detector was already built to read. */
   readonly sessionSignal: SessionSignalSubsystem;
+  /** Renaming an agent: a new first name, claimed through the same allocator a start uses, and a new
+   *  task title. */
+  readonly sessionRename: SessionRenameSubsystem;
   /** The declared-wait watcher: the tick that makes `signal waiting` end. It serves no route — a park
    *  is ended by a timer, not by a request — and it is a mounted subsystem for exactly that reason.
    *  A background loop nothing constructs is the same absent capability as an unserved route, and
@@ -437,6 +441,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
       // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above
       // the deeper per-session subsystems.
       ...sessionSignalRoutes(subsystems.sessionSignal),
+      // Same shape and depth as the signal: a one-segment pattern whose final literal (`rename`) no other
+      // route uses, so it can neither shadow nor be shadowed.
+      ...sessionRenameRoutes(subsystems.sessionRename),
       // The send and the interrupt register with the rest of the write surface, for the reason the
       // revive, the migration and the signal all do: each is a one-segment pattern under
       // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be

@@ -116,6 +116,7 @@ import {
   AnswerQuestionController,
   InterruptSessionController,
   ListSessionsController,
+  RenameSessionController,
   ResumeSessionController,
   registerSessionCommands,
   SendMessageController,
@@ -858,6 +859,7 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
     interrupt: new InterruptSessionController(api, presenter),
     resume: new ResumeSessionController(api, presenter),
     signal: new SignalSessionController(api, presenter, environment),
+    rename: new RenameSessionController(api, presenter),
   };
 }
 

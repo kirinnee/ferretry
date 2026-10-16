@@ -69,6 +69,10 @@ export class FySessionApi implements ISessionApi {
     return (await this.client()).resume(id, message);
   }
 
+  async rename(id: string, name?: string, teammate?: string): ReturnType<ISessionApi['rename']> {
+    return (await this.client()).rename(id, name, teammate);
+  }
+
   async signal(
     id: string,
     kind: SignalKind,

@@ -39,6 +39,8 @@ export interface ISessionApi {
   interrupt(id: string): Promise<SessionView>;
   resume(id: string, message?: string): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
+  /** Renames an agent: a new task title, a new first name, or both. */
+  rename(id: string, name?: string, teammate?: string): Promise<SessionView>;
   upload(id: string, file: string): Promise<AttachmentView>;
 }
 
