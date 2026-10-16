@@ -145,6 +145,23 @@ describe('the machine setup wire contract', () => {
     assertRoundTrips(values);
   });
 
+  it('should carry a dual login’s halves, and parse without them for a login that drives one CLI', () => {
+    // Act
+    const dual = setup.FleetCloneCredentialSchema.parse({
+      ...bundle.credentials[0],
+      store: 'environment',
+      claude: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } },
+      codex: { env: { OPENROUTER_API_KEY: '${secret:S}' }, codexProvider: { id: 'openrouter' } },
+    });
+    const single = setup.FleetCloneCredentialSchema.parse(bundle.credentials[0]);
+
+    // Assert
+    should(dual.claude).deepEqual({ env: { ANTHROPIC_AUTH_TOKEN: '${secret:S}' } });
+    should(dual.codex).deepEqual({ env: { OPENROUTER_API_KEY: '${secret:S}' }, codexProvider: { id: 'openrouter' } });
+    should(single).not.have.property('claude');
+    should(single).not.have.property('codex');
+  });
+
   it('should name the bundle format and every refusal code', () => {
     // Act & Assert
     should(setup.FLEET_CLONE_BUNDLE_FORMAT).equal('ferretry-clone');

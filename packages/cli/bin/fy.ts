@@ -564,6 +564,11 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
     readText: path => Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
     sleep: milliseconds => Bun.sleep(milliseconds),
     now: () => Date.now(),
+    // `fy login add --from-env` reads this shell's own variables (docs/provider-presets.md).
+    env: process.env,
+    // Off a terminal, a one-click add with exactly one secret still missing reads it from stdin —
+    // the same path `fy secret set` uses.
+    readSecretValue: () => new StdinSecretValue(BINARY_NAME).read(),
   };
 }
 

@@ -31,6 +31,7 @@ const usage = {
 const view = {
   id: 'claude-work',
   harness: 'claude',
+  harnesses: ['claude', 'codex'],
   store: 'host',
   email: 'kirin@example.com',
   label: 'work',
@@ -58,7 +59,7 @@ const testAct = {
 const environment = {
   preset: { id: 'zai-glm', label: 'GLM / Z.ai', docs: 'https://docs.z.ai/devpack/tool/claude' },
   variables: [
-    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic' },
+    { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.z.ai/api/anthropic', harness: 'claude' },
     { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['ZAI_API_KEY'], set: true },
     { name: 'PASTED', kind: 'hidden' },
   ],
@@ -74,6 +75,12 @@ const environment = {
   test: testAct,
 } as const;
 
+const detect = {
+  hosts: ['api.z.ai', 'open.bigmodel.cn'],
+  variables: ['ZAI_*', 'ZHIPUAI_*'],
+  keyPrefixes: [] as string[],
+};
+
 const preset = {
   id: 'zai-glm',
   label: 'GLM / Z.ai',
@@ -88,6 +95,7 @@ const preset = {
       value: 'https://api.z.ai/api/anthropic',
       required: true,
       allowEmpty: false,
+      harnesses: ['claude'],
     },
     { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'ZAI_API_KEY', required: true, allowEmpty: false },
   ],
@@ -98,6 +106,16 @@ const preset = {
   unverified: ['The quota endpoint is described by community tools.'],
   verified: '2026-10-16',
   offered: { available: true },
+  halves: [
+    { harness: 'claude', offered: { available: true }, models: ['glm-5.3'] },
+    {
+      harness: 'codex',
+      offered: { available: false, reason: 'Z.ai serves the Responses API, but Codex has no model catalogue file.' },
+      docs: 'https://docs.z.ai/devpack/tool/codex',
+      models: ['glm-5.3'],
+    },
+  ],
+  detect,
 } as const;
 
 const testResult = {
@@ -141,6 +159,7 @@ const ENVIRONMENT_CASES: readonly SchemaCase[] = [
   { name: 'FleetCredentialTestCodeSchema', schema: credentials.FleetCredentialTestCodeSchema, value: 'not_testable' },
   { name: 'FleetCredentialTestResultSchema', schema: credentials.FleetCredentialTestResultSchema, value: testResult },
   { name: 'FleetPresetVariableSchema', schema: credentials.FleetPresetVariableSchema, value: preset.variables[0] },
+  { name: 'FleetPresetDetectSchema', schema: credentials.FleetPresetDetectSchema, value: detect },
   { name: 'FleetProviderPresetViewSchema', schema: credentials.FleetProviderPresetViewSchema, value: preset },
   {
     name: 'FleetProviderPresetCatalogSchema',
@@ -280,5 +299,42 @@ describe('the environment-login wire contract (docs/provider-presets.md)', () =>
 
   it('should name the presets route', () => {
     should(credentials.FLEET_PRESETS_PATH).equal('/v1/fleet/presets');
+  });
+
+  it('should carry a credential’s every driven CLI, Claude Code first, and parse without it from an older daemon', () => {
+    // Act
+    const dual = credentials.FleetCredentialViewSchema.parse({ ...view, harnesses: ['claude', 'codex'] });
+    const legacy = credentials.FleetCredentialViewSchema.parse({ ...view, harnesses: undefined });
+
+    // Assert
+    should(dual.harnesses).deepEqual(['claude', 'codex']);
+    should(legacy.harnesses).be.undefined();
+  });
+
+  it('should carry a dual preset’s halves and its detection clues, and parse without either from an older daemon', () => {
+    // Act
+    const parsed = credentials.FleetProviderPresetViewSchema.parse(preset);
+    const legacy = credentials.FleetProviderPresetViewSchema.parse({ ...preset, halves: undefined, detect: undefined });
+
+    // Assert
+    should(parsed.halves).deepEqual(preset.halves);
+    should(parsed.detect).deepEqual(detect);
+    should(legacy.halves).be.undefined();
+    should(legacy.detect).be.undefined();
+  });
+
+  it('should name which half a variable belongs to, absent meaning shared by every half', () => {
+    // Act
+    const halved = credentials.FleetEnvironmentVariableSchema.parse({
+      name: 'ANTHROPIC_BASE_URL',
+      kind: 'plain',
+      value: 'https://api.openrouter.ai',
+      harness: 'claude',
+    });
+    const shared = credentials.FleetEnvironmentVariableSchema.parse({ name: 'SHARED', kind: 'plain', value: 'x' });
+
+    // Assert
+    should(halved).containDeep({ harness: 'claude' });
+    should(shared).not.have.property('harness');
   });
 });

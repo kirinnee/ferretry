@@ -22,3 +22,6 @@ quota:
   source: transcript-pricing
   note: An API key has no usage endpoint of its own, so cost is counted from the transcript at Anthropic's prices.
 pricing: anthropic
+detect:
+  hosts: [api.anthropic.com]
+  keyPrefixes: [sk-ant-api]

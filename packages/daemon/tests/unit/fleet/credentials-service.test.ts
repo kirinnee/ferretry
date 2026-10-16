@@ -448,6 +448,7 @@ describe('the credential list', () => {
       {
         id: 'work',
         harness: 'claude',
+        harnesses: ['claude'],
         store: 'ferretry',
         needsLabel: false,
         clonedFrom: 'laptop',

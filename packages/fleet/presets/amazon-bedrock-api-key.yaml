@@ -32,3 +32,5 @@ quota:
   source: transcript-pricing
   note: AWS Service Quotas reports limits, not what is used, so cost is counted from the transcript at Bedrock's prices.
 pricing: anthropic
+detect:
+  variables: [CLAUDE_CODE_USE_BEDROCK, AWS_BEARER_TOKEN_BEDROCK]

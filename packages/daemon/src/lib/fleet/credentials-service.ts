@@ -45,6 +45,7 @@ import {
   type CredentialStoreResolution,
   type CredentialSubject,
   type CredentialUsage,
+  credentialHarnesses,
   type FleetUsageWindow,
   type HarnessKind,
   HOST_CLAUDE_SECURE_STORAGE,
@@ -617,6 +618,7 @@ export class FleetCredentialsService {
     return FleetCredentialViewSchema.parse({
       id: entry.id,
       harness: entry.credential.harness,
+      harnesses: [...credentialHarnesses(entry.credential)],
       store: entry.credential.store,
       ...(email === undefined ? {} : { email }),
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),

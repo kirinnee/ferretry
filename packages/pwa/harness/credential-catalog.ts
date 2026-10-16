@@ -158,6 +158,53 @@ const CREDENTIALS = {
         test: { available: true, spends: 'nothing', note: 'Reads your Coding Plan quota. Spends nothing.' },
       },
     }),
+    // ONE provider key for BOTH CLIs (docs/provider-presets.md): DeepSeek's `claude:` and `codex:` halves.
+    // It is listed once, in its own "Claude Code + Codex" group, and offered for either CLI.
+    login({
+      id: 'deepseek',
+      word: 'ready',
+      store: 'environment',
+      harnesses: ['claude', 'codex'],
+      email: undefined,
+      usedBy: [],
+      status: {
+        word: 'ready',
+        label: 'Ready',
+        reason: 'from_environment',
+        explanation: 'This login comes from environment variables, so there is no sign-in to check.',
+        lastCheckInconclusive: false,
+      },
+      signIn: {
+        available: false,
+        reason: '"deepseek" is authenticated by its environment variables, so there is nothing to sign in to.',
+      },
+      checkNow: {
+        available: false,
+        reason: 'This login comes from environment variables, so there is nothing to check.',
+      },
+      signOut: {
+        available: false,
+        sentence: 'Sign out of deepseek? No runtime uses it.',
+        runtimesAffected: 0,
+        signsOutTerminal: false,
+      },
+      environment: {
+        preset: {
+          id: 'deepseek',
+          label: 'DeepSeek',
+          docs: 'https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code',
+        },
+        variables: [
+          { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: 'https://api.deepseek.com/anthropic', harness: 'claude' },
+          { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: true, harness: 'claude' },
+          { name: 'DEEPSEEK_API_KEY', kind: 'secret', secrets: ['DEEPSEEK_API_KEY'], set: true, harness: 'codex' },
+        ],
+        codexProvider: { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/' },
+        quotaSource: 'deepseek-balance',
+        missingSecrets: [],
+        test: { available: true, spends: 'nothing', note: 'Lists the models the key can use. Spends nothing.' },
+      },
+    }),
   ],
 };
 
@@ -186,9 +233,152 @@ const preset = (fields: Record<string, unknown> & { readonly id: string; readonl
   ...fields,
 });
 
-/** A slice of the built-in provider presets, as `GET /v1/fleet/presets` answers them. */
+/** Both halves offered: a login from it drives Claude Code and Codex with one key. */
+const BOTH = [
+  { harness: 'claude', offered: { available: true }, models: [] },
+  { harness: 'codex', offered: { available: true }, models: [] },
+];
+
+/** A slice of the built-in provider presets, as `GET /v1/fleet/presets` answers them, in the catalogue's order. */
 const PRESETS = {
   presets: [
+    preset({
+      id: 'amazon-bedrock',
+      label: 'Amazon Bedrock (AWS profile)',
+      summary: 'Claude Code on Amazon Bedrock with an AWS profile this machine already has.',
+      cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
+      variables: [
+        presetVariable({ name: 'CLAUDE_CODE_USE_BEDROCK', value: '1' }),
+        presetVariable({ name: 'AWS_REGION', value: 'us-east-1' }),
+      ],
+      test: { available: false, reason: 'Bedrock needs AWS request signing, which Ferretry does not do.' },
+      detect: { hosts: ['bedrock-runtime.amazonaws.com'], variables: ['CLAUDE_CODE_USE_BEDROCK'], keyPrefixes: [] },
+    }),
+    preset({
+      id: 'azure-openai',
+      label: 'Azure OpenAI',
+      harness: 'codex',
+      summary: 'Codex on your Azure OpenAI resource with its API key. The model is your deployment name.',
+      variables: [
+        presetVariable({
+          name: 'AZURE_OPENAI_RESOURCE',
+          value: '',
+          description: 'the resource name, as in <name>.openai.azure.com',
+        }),
+        presetVariable({ name: 'AZURE_OPENAI_API_KEY', kind: 'secret', secret: 'AZURE_OPENAI_API_KEY' }),
+      ],
+      detect: { hosts: ['openai.azure.com'], variables: ['AZURE_OPENAI_*'], keyPrefixes: [] },
+    }),
+    preset({
+      id: 'custom-gateway',
+      label: 'Custom gateway',
+      summary: 'Claude Code through any gateway that speaks the Anthropic Messages API.',
+      variables: [
+        presetVariable({ name: 'ANTHROPIC_BASE_URL', value: '', description: "the gateway's address, https://…" }),
+        presetVariable({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'GATEWAY_API_KEY' }),
+        presetVariable({ name: 'ANTHROPIC_API_KEY', value: '', allowEmpty: true }),
+        presetVariable({ name: 'ANTHROPIC_MODEL', value: '', required: false }),
+      ],
+    }),
+    preset({
+      id: 'deepseek',
+      label: 'DeepSeek',
+      summary: 'Claude Code and Codex on DeepSeek models with one DeepSeek platform key.',
+      docs: 'https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code',
+      halves: BOTH,
+      variables: [
+        presetVariable({
+          name: 'ANTHROPIC_BASE_URL',
+          value: 'https://api.deepseek.com/anthropic',
+          harnesses: ['claude'],
+        }),
+        presetVariable({
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'DEEPSEEK_API_KEY',
+          harnesses: ['claude'],
+        }),
+        presetVariable({ name: 'ANTHROPIC_MODEL', value: 'deepseek-flash[1m]', harnesses: ['claude'] }),
+        presetVariable({ name: 'DEEPSEEK_API_KEY', kind: 'secret', secret: 'DEEPSEEK_API_KEY', harnesses: ['codex'] }),
+      ],
+      models: ['deepseek-flash', 'deepseek-v4-pro'],
+      quota: { source: 'deepseek-balance', note: 'Your DeepSeek balance, in the currency you topped up in.' },
+      detect: { hosts: ['api.deepseek.com'], variables: ['DEEPSEEK_*'], keyPrefixes: [] },
+    }),
+    preset({
+      id: 'kimi',
+      label: 'Kimi (Moonshot)',
+      summary: 'Claude Code and Codex on Kimi models with one Moonshot platform key.',
+      halves: BOTH,
+      variables: [
+        presetVariable({
+          name: 'ANTHROPIC_BASE_URL',
+          value: 'https://api.moonshot.ai/anthropic',
+          harnesses: ['claude'],
+        }),
+        presetVariable({
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'MOONSHOT_API_KEY',
+          harnesses: ['claude'],
+        }),
+        presetVariable({ name: 'MOONSHOT_API_KEY', kind: 'secret', secret: 'MOONSHOT_API_KEY', harnesses: ['codex'] }),
+      ],
+      detect: { hosts: ['api.moonshot.ai'], variables: ['MOONSHOT_*'], keyPrefixes: [] },
+    }),
+    preset({
+      id: 'minimax',
+      label: 'MiniMax',
+      summary: 'Claude Code and Codex on MiniMax models with one MiniMax key.',
+      halves: BOTH,
+      variables: [
+        presetVariable({
+          name: 'ANTHROPIC_BASE_URL',
+          value: 'https://api.minimax.io/anthropic',
+          harnesses: ['claude'],
+        }),
+        presetVariable({
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'MINIMAX_API_KEY',
+          harnesses: ['claude'],
+        }),
+        presetVariable({ name: 'MINIMAX_API_KEY', kind: 'secret', secret: 'MINIMAX_API_KEY', harnesses: ['codex'] }),
+      ],
+      detect: { hosts: ['api.minimax.io'], variables: ['MINIMAX_*'], keyPrefixes: [] },
+    }),
+    preset({
+      id: 'ollama-codex',
+      label: 'Ollama (local)',
+      harness: 'codex',
+      summary: 'Codex on a model served by Ollama on this machine. No key.',
+      variables: [],
+      quota: { source: 'none', note: 'A local model has no quota.' },
+      detect: { hosts: ['localhost:11434'], variables: ['OLLAMA_*'], keyPrefixes: [] },
+    }),
+    preset({
+      id: 'openrouter',
+      label: 'OpenRouter',
+      summary: 'Claude Code and Codex through OpenRouter with one OpenRouter key.',
+      halves: BOTH,
+      variables: [
+        presetVariable({ name: 'ANTHROPIC_BASE_URL', value: 'https://openrouter.ai/api', harnesses: ['claude'] }),
+        presetVariable({
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'OPENROUTER_API_KEY',
+          harnesses: ['claude'],
+        }),
+        presetVariable({ name: 'ANTHROPIC_API_KEY', value: '', allowEmpty: true, harnesses: ['claude'] }),
+        presetVariable({
+          name: 'OPENROUTER_API_KEY',
+          kind: 'secret',
+          secret: 'OPENROUTER_API_KEY',
+          harnesses: ['codex'],
+        }),
+      ],
+      detect: { hosts: ['openrouter.ai'], variables: ['OPENROUTER_*'], keyPrefixes: ['sk-or-'] },
+    }),
     preset({
       id: 'zai-glm',
       label: 'GLM / Z.ai',
@@ -196,6 +386,18 @@ const PRESETS = {
       docs: 'https://docs.z.ai/devpack/tool/claude',
       unverified: [
         'The quota endpoint the Test and usage read is described by community tools, not by Z.ai’s own documentation.',
+      ],
+      // Its Codex half exists and is NOT offered, so the login it makes is Claude only.
+      halves: [
+        { harness: 'claude', offered: { available: true }, models: ['glm-5.3', 'glm-5.3-flash'] },
+        {
+          harness: 'codex',
+          offered: {
+            available: false,
+            reason: 'Codex only runs GLM with a model catalogue file Ferretry would have to write.',
+          },
+          models: [],
+        },
       ],
       variables: [
         presetVariable({ name: 'ANTHROPIC_BASE_URL', value: 'https://api.z.ai/api/anthropic' }),
@@ -215,35 +417,14 @@ const PRESETS = {
       models: ['glm-5.3', 'glm-5.3-flash'],
       test: { available: true, spends: 'nothing', note: 'Reads your Coding Plan quota. Spends nothing.' },
       quota: { source: 'zai-coding-plan', note: 'Z.ai’s Coding Plan quota — a 5-hour and a weekly window.' },
+      detect: { hosts: ['api.z.ai', 'open.bigmodel.cn'], variables: ['ZAI_*', 'GLM_*'], keyPrefixes: [] },
     }),
     preset({
-      id: 'amazon-bedrock',
-      label: 'Amazon Bedrock (AWS profile)',
-      cloudCredential: { kinds: ['aws-profile'], suggested: 'aws-profile:default' },
-      variables: [
-        presetVariable({ name: 'CLAUDE_CODE_USE_BEDROCK', value: '1' }),
-        presetVariable({ name: 'AWS_REGION', value: 'us-east-1' }),
-      ],
-      test: { available: false, reason: 'Bedrock needs AWS request signing, which Ferretry does not do.' },
-    }),
-    preset({
-      id: 'openrouter',
-      label: 'OpenRouter',
-      variables: [
-        presetVariable({ name: 'ANTHROPIC_BASE_URL', value: 'https://openrouter.ai/api' }),
-        presetVariable({ name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'OPENROUTER_API_KEY' }),
-        presetVariable({ name: 'ANTHROPIC_API_KEY', value: '', allowEmpty: true }),
-      ],
-    }),
-    preset({ id: 'deepseek-codex', label: 'DeepSeek', harness: 'codex' }),
-    preset({
-      id: 'zai-glm-codex',
-      label: 'GLM / Z.ai',
-      harness: 'codex',
-      offered: {
-        available: false,
-        reason: 'Codex only runs GLM with a model catalogue file Ferretry would have to write.',
-      },
+      id: 'google-vertex',
+      label: 'Google Vertex AI',
+      summary: 'Claude Code on Vertex AI with this machine’s gcloud application-default credentials.',
+      offered: { available: false, reason: 'gcloud is not installed on this machine.' },
+      cloudCredential: { kinds: ['gcloud-adc'], suggested: 'gcloud-adc' },
     }),
   ],
 };
