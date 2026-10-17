@@ -58,6 +58,10 @@ export const DICTATION_SAFETY_NOTE =
 export const DICTATION_DISABLED_EXPLANATION =
   'Off means off: the microphone cannot open for dictation. Your engine, dictionary and shortcut are kept, so turning dictation back on needs no reload.';
 
+/** Under Parakeet's "Live words" switch: what it shows, what it costs, and when. */
+export const LIVE_WORDS_EXPLANATION =
+  'Shows your words while you speak: Parakeet re-reads the last few seconds about once a second, greyed until two reads agree. It uses this device’s processor and battery only while the microphone is open. Stop still transcribes the rest in one final pass, and a device too slow to keep up pauses live words rather than lagging behind.';
+
 /**
  * Said plainly next to the enhancement toggle. The capitalised phrase is the
  * promise: a separate verifier compares the before and after and throws the
@@ -180,6 +184,28 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
           <section aria-label="Voice engine" className="flex flex-col gap-2">
             <VoiceEngineChoice value={settings.engine} onChange={choose} voice={parakeet} browserSupport={support} />
           </section>
+
+          {/* ---- Parakeet's near-live words ---- */}
+          {settings.engine === 'parakeet' && (
+            <section aria-label="Live words" className="flex flex-col gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.liveWords}
+                onClick={() => update({ liveWords: !settings.liveWords })}
+                className={cn(
+                  'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
+                  settings.liveWords
+                    ? 'border-accent bg-accent-soft text-accent'
+                    : 'border-border bg-surface-2 text-fg',
+                )}
+              >
+                <span className="text-ui font-semibold">Live words</span>
+                <span className="text-meta">{settings.liveWords ? 'On' : 'Off'}</span>
+              </button>
+              <p className="text-meta leading-base text-muted">{LIVE_WORDS_EXPLANATION}</p>
+            </section>
+          )}
 
           {/* ---- push-to-talk shortcut ---- */}
           <DictationShortcutPicker binding={settings.shortcut} onChange={shortcut => update({ shortcut })} />

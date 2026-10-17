@@ -136,6 +136,12 @@ export interface SttSettings {
    * their audio or need a download they did not ask for.
    */
   readonly engine: DictationEngineId | null;
+  /**
+   * Near-live words while dictating with Parakeet (`near-live.ts`): a rolling window is
+   * re-transcribed about once a second and shown greyed until two passes agree. On by default; it
+   * costs CPU and battery only while the microphone is open. Browser voice is always live.
+   */
+  readonly liveWords: boolean;
 }
 
 export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
@@ -148,6 +154,7 @@ export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
   enhancementModel: DEFAULT_GROQ_ENHANCEMENT_MODEL,
   shortcut: DEFAULT_DICTATION_SHORTCUT,
   engine: null,
+  liveWords: true,
 });
 
 const SHORTCUT_MODIFIERS = ['Meta', 'Control', 'Alt', 'Shift'] as const;
@@ -220,6 +227,7 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
     enhancementModel: parseModel(parsed.enhancementModel),
     shortcut: parseDictationShortcut(parsed.shortcut),
     engine: parseEngine(parsed.engine),
+    liveWords: typeof parsed.liveWords === 'boolean' ? parsed.liveWords : DEFAULT_STT_SETTINGS.liveWords,
   };
 };
 

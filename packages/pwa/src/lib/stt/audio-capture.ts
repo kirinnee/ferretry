@@ -33,6 +33,8 @@ export interface MediaRecorderLike {
   onerror: ((event: unknown) => void) | null;
   start(): void;
   stop(): void;
+  /** Flush what is recorded so far to `ondataavailable` without stopping. */
+  requestData(): void;
 }
 
 interface AudioBufferLike {
@@ -56,6 +58,12 @@ export interface AudioCaptureGlobalLike {
 
 /** One recording in progress. */
 export interface AudioRecording {
+  /**
+   * Everything recorded so far, decoded to 16 kHz mono, while recording carries on. Near-live words
+   * (`near-live.ts`) read it about once a second; it decodes the whole take each time, which costs
+   * far less than the speech model it feeds.
+   */
+  peek(): Promise<Float32Array>;
   /** Stop, release the microphone, and decode to 16 kHz mono. */
   stop(): Promise<Float32Array>;
   /** Release the microphone and drop what was recorded. Safe to call more than once. */
@@ -111,8 +119,18 @@ export function browserAudioCapture(global: AudioCaptureGlobalLike): AudioCaptur
       }
       const chunks: Blob[] = [];
       let settle: { resolve(blob: Blob): void; reject(error: unknown): void } | null = null;
+      /** Peeks waiting for the flush they asked for. */
+      let flushed: (() => void)[] = [];
       recorder.ondataavailable = event => {
         if (event.data.size > 0) chunks.push(event.data);
+        const waiting = flushed;
+        flushed = [];
+        for (const resolve of waiting) resolve();
+      };
+      const decode = async (blob: Blob): Promise<Float32Array> => {
+        if (blob.size === 0) return new Float32Array();
+        const context = new Offline(1, PARAKEET_SAMPLE_RATE, PARAKEET_SAMPLE_RATE);
+        return mixToMono(await context.decodeAudioData(await blob.arrayBuffer()));
       };
       recorder.onstop = () => {
         release();
@@ -125,6 +143,15 @@ export function browserAudioCapture(global: AudioCaptureGlobalLike): AudioCaptur
       recorder.start();
       let done = false;
       return {
+        peek: async () => {
+          if (done) return new Float32Array();
+          await new Promise<void>(resolve => {
+            flushed.push(resolve);
+            recorder.requestData();
+          });
+          // The first part carries the container header, so every prefix of the parts decodes.
+          return await decode(new Blob(chunks, { type: recorder.mimeType }));
+        },
         stop: async () => {
           if (done) return new Float32Array();
           done = true;
@@ -132,9 +159,7 @@ export function browserAudioCapture(global: AudioCaptureGlobalLike): AudioCaptur
             settle = { resolve, reject };
             recorder.stop();
           });
-          if (blob.size === 0) return new Float32Array();
-          const context = new Offline(1, PARAKEET_SAMPLE_RATE, PARAKEET_SAMPLE_RATE);
-          return mixToMono(await context.decodeAudioData(await blob.arrayBuffer()));
+          return await decode(blob);
         },
         cancel: () => {
           if (done) return;

@@ -7,6 +7,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { AudioCapturePort, AudioRecording } from '../../../src/lib/stt/audio-capture.ts';
 import { BrowserRecognitionError } from '../../../src/lib/stt/browser-recognition.ts';
+import type { NearLiveState, TimedTranscript } from '../../../src/lib/stt/near-live.ts';
 import { ParakeetEngineError } from '../../../src/lib/stt/parakeet-engine.ts';
 import {
   ParakeetRecognitionSession,
@@ -54,6 +55,14 @@ class FakeRecording implements AudioRecording {
   cancels = 0;
   samples: Float32Array = new Float32Array(ENOUGH);
   stopDeferred: Deferred<Float32Array> | null = null;
+  /** A second of audio: enough new sound for a near-live pass. */
+  peeked: Float32Array = new Float32Array(16_000);
+  peeks = 0;
+
+  peek(): Promise<Float32Array> {
+    this.peeks += 1;
+    return Promise.resolve(this.peeked);
+  }
 
   stop(): Promise<Float32Array> {
     this.stops += 1;
@@ -76,17 +85,22 @@ interface World {
   readonly preloads: () => number;
   readonly unwatched: () => number;
   hide(): void;
-  engine: { transcribe: (samples: Float32Array, signal?: AbortSignal) => Promise<string> };
+  engine: {
+    transcribe: (samples: Float32Array, signal?: AbortSignal) => Promise<string>;
+    transcribeTimed: (samples: Float32Array, signal?: AbortSignal) => Promise<TimedTranscript>;
+  };
+  readonly live: NearLiveState[];
   preloadThrows: boolean;
 }
 
-const world = (options: { maxDurationMs?: number } = {}): World => {
+const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): World => {
   const recording = new FakeRecording();
   const open = deferred<AudioRecording>();
   const events: string[] = [];
   const failures: BrowserRecognitionError[] = [];
   const transcribed: World['transcribed'] = [];
   const timers: World['timers'] = [];
+  const live: NearLiveState[] = [];
   let preloads = 0;
   let unwatched = 0;
   let hidden: () => void = () => undefined;
@@ -96,6 +110,10 @@ const world = (options: { maxDurationMs?: number } = {}): World => {
       transcribe: async (samples: Float32Array, signal?: AbortSignal): Promise<string> => {
         transcribed.push({ samples, signal });
         return 'hello world';
+      },
+      transcribeTimed: async (samples: Float32Array, signal?: AbortSignal): Promise<TimedTranscript> => {
+        transcribed.push({ samples, signal });
+        return { text: 'hello', words: [{ text: 'hello', start: 0, end: 0.1 }] };
       },
     },
   } as World;
@@ -108,6 +126,7 @@ const world = (options: { maxDurationMs?: number } = {}): World => {
         if (w.preloadThrows) throw new Error('worker blocked');
       },
       transcribe: (samples, signal) => w.engine.transcribe(samples, signal),
+      transcribeTimed: (samples, signal) => w.engine.transcribeTimed(samples, signal),
     },
     watchHidden: onHidden => {
       hidden = onHidden;
@@ -123,6 +142,7 @@ const world = (options: { maxDurationMs?: number } = {}): World => {
       const timer = timers[handle as number];
       if (timer !== undefined) timer.cleared = true;
     },
+    now: () => 0,
   };
   const session = new ParakeetRecognitionSession(ports, {
     ...options,
@@ -134,9 +154,11 @@ const world = (options: { maxDurationMs?: number } = {}): World => {
     },
     onAbort: () => events.push('abort'),
     onLimit: () => events.push('limit'),
+    onLive: state => live.push(state),
   });
   return Object.assign(w, {
     session,
+    live,
     recording,
     open,
     events,
@@ -150,7 +172,7 @@ const world = (options: { maxDurationMs?: number } = {}): World => {
 };
 
 /** Start the session and let the microphone open. */
-const recordingWorld = async (options: { maxDurationMs?: number } = {}): Promise<World> => {
+const recordingWorld = async (options: { maxDurationMs?: number; liveWords?: boolean } = {}): Promise<World> => {
   const w = world(options);
   w.session.start();
   w.open.resolve(w.recording);
@@ -438,5 +460,61 @@ describe('ParakeetRecognitionSession', () => {
     gate.resolve('x');
     await tick();
     should(outcome.value).equal('x');
+  });
+});
+
+describe('ParakeetRecognitionSession — near-live words', () => {
+  it('without Live words, schedules no pass and never peeks', async () => {
+    const w = await recordingWorld();
+    should(w.timers).have.length(1);
+    should(w.recording.peeks).equal(0);
+  });
+
+  it('with Live words, runs passes over the open recording and reports them', async () => {
+    const w = await recordingWorld({ liveWords: true });
+    // The duration limit, then the first pass.
+    should(w.timers).have.length(2);
+    w.timers[1]?.callback();
+    await tick();
+    should(w.recording.peeks).equal(1);
+    should(w.live).eql([{ committed: '', interim: 'hello', paused: false }]);
+    should(w.transcribed[0]?.signal?.aborted).be.false();
+  });
+
+  it('Stop transcribes only the uncommitted tail and joins it to the committed words', async () => {
+    const w = await recordingWorld({ liveWords: true });
+    // Two agreeing passes commit "hello" at the pause the silent take ends in (2 s), cut a pre-roll
+    // before its end.
+    w.timers[1]?.callback();
+    await tick();
+    w.recording.peeked = new Float32Array(32_000);
+    w.timers[2]?.callback();
+    await tick();
+    should(w.live.at(-1)).eql({ committed: 'hello', interim: '', paused: false });
+    w.recording.samples = new Float32Array(48_000);
+    w.engine.transcribeTimed = async (samples, signal) => {
+      w.transcribed.push({ samples, signal });
+      return { text: 'world', words: [{ text: 'world', start: 0.2, end: 0.5 }] };
+    };
+    should(await w.session.finish()).equal('hello world');
+    const final = w.transcribed.at(-1);
+    should(final?.samples.length).equal(48_000 - (32_000 - 2_880));
+  });
+
+  it('cancel stops the passes, and nothing is reported once Stop is pressed', async () => {
+    const cancelled = await recordingWorld({ liveWords: true });
+    cancelled.session.cancel();
+    should(cancelled.timers[1]?.cleared).be.true();
+
+    const stopped = await recordingWorld({ liveWords: true });
+    const gate = deferred<TimedTranscript>();
+    stopped.engine.transcribeTimed = () => gate.promise;
+    stopped.timers[1]?.callback();
+    await tick();
+    const outcome = settle(stopped.session.finish());
+    gate.resolve({ text: 'late', words: [{ text: 'late', start: 0, end: 0.1 }] });
+    await tick();
+    should(stopped.live).eql([]);
+    should(outcome.value).equal('hello world');
   });
 });

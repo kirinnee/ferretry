@@ -84,6 +84,20 @@ const core = new ParakeetWorkerCore({
             ? (await model.transcribe(samples, 16_000, { returnTimestamps: false, returnConfidences: false }))
                 .utterance_text
             : (await model.transcribeLongAudio(samples, 16_000)).text,
+        // Near-live passes: word times let the page commit words and move its window past them.
+        transcribeTimed: async samples => {
+          const heard =
+            samples.length <= ONE_PASS_SAMPLES
+              ? await model.transcribe(samples, 16_000, { returnTimestamps: true, returnConfidences: false })
+              : await model.transcribeLongAudio(samples, 16_000, { returnTimestamps: true });
+          const text = 'utterance_text' in heard ? heard.utterance_text : heard.text;
+          const words = (heard.words ?? []).map(word => ({
+            text: word.text,
+            start: word.start_time,
+            end: word.end_time,
+          }));
+          return { text, words };
+        },
       };
       return loaded;
     },

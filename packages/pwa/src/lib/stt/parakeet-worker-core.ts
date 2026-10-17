@@ -11,21 +11,24 @@
  *     again — the worker has no network path and never downloads;
  *   - one decode at a time: `ParakeetModel` has no concurrency contract, so messages are handled in
  *     arrival order on one queue.
+ *   - a `timed` transcribe (near-live words, `near-live.ts`) also answers where each word sits, so the
+ *     page can commit words and move its window past them.
  */
 
+import type { TimedWord } from './near-live.ts';
 import type { ParakeetModelBytes } from './parakeet-store.ts';
 
 /** Messages the page sends the worker. */
 export type ParakeetWorkerRequest =
   | { readonly type: 'load' }
-  | { readonly type: 'transcribe'; readonly id: number; readonly samples: Float32Array };
+  | { readonly type: 'transcribe'; readonly id: number; readonly samples: Float32Array; readonly timed?: true };
 
 export type ParakeetWorkerFailure = 'not-installed' | 'integrity' | 'load-failed' | 'transcribe-failed';
 
 /** Messages the worker sends back. */
 export type ParakeetWorkerReply =
   | { readonly type: 'ready' }
-  | { readonly type: 'result'; readonly id: number; readonly text: string }
+  | { readonly type: 'result'; readonly id: number; readonly text: string; readonly words?: readonly TimedWord[] }
   | {
       readonly type: 'failed';
       /** The utterance that failed, or `null` for a `load` nobody is waiting on. */
@@ -37,6 +40,8 @@ export type ParakeetWorkerReply =
 /** A loaded model: decode 16 kHz mono samples to text. */
 export interface ParakeetLoadedModel {
   transcribe(samples: Float32Array): Promise<string>;
+  /** The same decode, with each word's start and end in seconds. */
+  transcribeTimed(samples: Float32Array): Promise<{ readonly text: string; readonly words: readonly TimedWord[] }>;
 }
 
 /** Turns verified bytes into a model. The worker entry implements it over ONNX Runtime. */
@@ -57,7 +62,12 @@ export const parseWorkerRequest = (data: unknown): ParakeetWorkerRequest | null 
   const message = data as Record<string, unknown>;
   if (message.type === 'load') return { type: 'load' };
   if (message.type === 'transcribe' && Number.isSafeInteger(message.id) && message.samples instanceof Float32Array)
-    return { type: 'transcribe', id: message.id as number, samples: message.samples };
+    return {
+      type: 'transcribe',
+      id: message.id as number,
+      samples: message.samples,
+      ...(message.timed === true ? { timed: true as const } : {}),
+    };
   return null;
 };
 
@@ -107,8 +117,13 @@ export class ParakeetWorkerCore {
       return;
     }
     try {
-      const text = (await model.transcribe(request.samples)).trim();
-      this.#options.post({ type: 'result', id: request.id, text });
+      if (request.timed === true) {
+        const heard = await model.transcribeTimed(request.samples);
+        this.#options.post({ type: 'result', id: request.id, text: heard.text.trim(), words: heard.words });
+      } else {
+        const text = (await model.transcribe(request.samples)).trim();
+        this.#options.post({ type: 'result', id: request.id, text });
+      }
     } catch (error) {
       this.#options.post({
         type: 'failed',

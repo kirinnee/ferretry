@@ -10,6 +10,7 @@ import {
   CEREBRAS_ENHANCEMENT_EXPLANATION,
   GROQ_ENHANCEMENT_EXPLANATION,
   LOGIN_CLEANUP_UNAVAILABLE,
+  LIVE_WORDS_EXPLANATION,
   providerChoicePatch,
   SPEEDUP_KEY_HINT,
   LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
@@ -196,6 +197,39 @@ describe('<DictationSettings>', () => {
     await interact(() => switchNamed(view.container, 'Dictation').click());
     await interact(() => switchNamed(view.container, 'Fix names and jargon').click());
     expect(patches).toEqual([{ enabled: false }, { enhancement: false }]);
+    await view.unmount();
+  });
+
+  it('offers Live words only while Parakeet is the engine, on by default, through the one update port', async () => {
+    const patches: SttSettingsPatch[] = [];
+    const view = await mount(
+      <DictationSettings
+        {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'browser' }, voice: null })}
+      />,
+    );
+    expect(view.container.querySelector('section[aria-label="Live words"]')).toBeNull();
+    await view.render(
+      <DictationSettings
+        {...settingsProps({
+          settings: { ...DEFAULT_STT_SETTINGS, engine: 'parakeet' },
+          voice: null,
+          update: patch => patches.push(patch),
+        })}
+      />,
+    );
+    const live = switchNamed(view.container, 'Live words');
+    expect(live.getAttribute('aria-checked')).toBe('true');
+    expect(live.textContent).toContain('On');
+    expect(view.container.textContent).toContain(LIVE_WORDS_EXPLANATION);
+    await interact(() => live.click());
+    expect(patches).toEqual([{ liveWords: false }]);
+    await view.render(
+      <DictationSettings
+        {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'parakeet', liveWords: false }, voice: null })}
+      />,
+    );
+    expect(switchNamed(view.container, 'Live words').getAttribute('aria-checked')).toBe('false');
+    expect(switchNamed(view.container, 'Live words').textContent).toContain('Off');
     await view.unmount();
   });
 

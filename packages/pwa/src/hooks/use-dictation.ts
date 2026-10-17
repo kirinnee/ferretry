@@ -46,6 +46,7 @@ import {
 } from '../lib/stt/browser-recognition.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
 import { enhance } from '../lib/stt/enhancement.ts';
+import { joinWords, type NearLiveState } from '../lib/stt/near-live.ts';
 import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
@@ -166,8 +167,15 @@ export interface DictationHandle {
   readonly engine: SttSettings['engine'];
   readonly phase: DictationPhase;
   readonly recording: boolean;
-  /** Browser interim/final words. Read-only preview; never the output seam. */
+  /**
+   * Everything heard so far — browser interim/final words, or Parakeet's near-live committed then
+   * interim words. Read-only preview; never the output seam.
+   */
   readonly liveText: string;
+  /** The provisional tail of `liveText` (Parakeet near-live), shown greyed. Empty for browser voice. */
+  readonly liveInterim: string;
+  /** Parakeet near-live words stopped for this take: the device could not keep up. */
+  readonly livePaused: boolean;
   readonly error: DictationError | null;
   readonly busy: boolean;
   /** Call synchronously from the reader gesture. */
@@ -176,6 +184,22 @@ export interface DictationHandle {
   cancel(): void;
   dismissError(): void;
 }
+
+/** The preview state: the whole line, its provisional tail, and whether near-live words paused. */
+interface LiveWords {
+  readonly text: string;
+  readonly interim: string;
+  readonly paused: boolean;
+}
+
+const NO_LIVE_WORDS: LiveWords = Object.freeze({ text: '', interim: '', paused: false });
+
+/** Near-live committed + interim words → the preview line and its greyed tail. */
+export const liveWordsFrom = (state: NearLiveState): LiveWords => ({
+  text: joinWords(state.committed, state.interim),
+  interim: state.interim.trim(),
+  paused: state.paused,
+});
 
 export function useDictation(options: UseDictationOptions): DictationHandle {
   const disabled = Boolean(options.disabled || !options.settings.enabled);
@@ -196,7 +220,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [error, setError] = useState<DictationError | null>(null);
-  const [liveText, setLiveText] = useState('');
+  const [live, setLive] = useState<LiveWords>(NO_LIVE_WORDS);
 
   // Refs, not state: recognition and enhancement continuations outlive the
   // render that started them.
@@ -247,7 +271,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   useEffect(() => {
     if (!disabled) return;
     invalidate();
-    setLiveText('');
+    setLive(NO_LIVE_WORDS);
     setError(null);
     setPhase('idle');
   }, [disabled, invalidate]);
@@ -329,7 +353,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         const raw = await session.finish();
         if (!isCurrent(token)) return;
         if (raw.trim().length === 0) {
-          setLiveText('');
+          setLive(NO_LIVE_WORDS);
           setPhase('idle');
           return;
         }
@@ -344,14 +368,14 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           setError(enhancementFailure);
           setPhase('error');
         } else {
-          setLiveText('');
+          setLive(NO_LIVE_WORDS);
           setPhase('idle');
         }
       } catch (failure) {
         if (!isCurrent(token)) return;
         const recognitionFailure = browserRecognitionErrorFrom(failure);
         if (recognitionFailure.code === 'aborted') {
-          setLiveText('');
+          setLive(NO_LIVE_WORDS);
           // The recognition session also reports its terminal error through
           // `onFailure` before rejecting `finish()`. Cancellation is not a
           // failed take, so clear that earlier write as part of the same
@@ -375,7 +399,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
     const provider = recognitionRef.current;
     const token = invalidate();
-    setLiveText('');
+    setLive(NO_LIVE_WORDS);
     setError(null);
     setPhase('requesting');
 
@@ -405,7 +429,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           if (isCurrent(token)) setPhase('recording');
         },
         onTranscript: text => {
-          if (isCurrent(token)) setLiveText(text);
+          if (isCurrent(token)) setLive({ text, interim: '', paused: false });
         },
         onFailure: failure => {
           if (!isCurrent(token)) return;
@@ -421,7 +445,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           // failed" for a take nobody failed. This coupling is also why
           // `dictationFailureCopy` deliberately has no `aborted` case.
           if (failure.code === 'aborted') {
-            setLiveText('');
+            setLive(NO_LIVE_WORDS);
             setError(null);
             setPhase('idle');
             return;
@@ -432,7 +456,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         onAbort: () => {
           if (!isCurrent(token)) return;
           invalidate();
-          setLiveText('');
+          setLive(NO_LIVE_WORDS);
           setError(null);
           setPhase('idle');
         },
@@ -447,7 +471,13 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
             'recognition-unavailable',
             'Parakeet is not available in this copy of Ferretry.',
           );
-        session = parakeet.createSession(callbacks);
+        session = parakeet.createSession({
+          ...callbacks,
+          liveWords: optionsRef.current.settings.liveWords,
+          onLive: state => {
+            if (isCurrent(token)) setLive(liveWordsFrom(state));
+          },
+        });
       } else session = new BrowserRecognitionSession(provider, callbacks);
       liveSessionRef.current = session;
       // NO await above this call: permission stays attributable to the gesture.
@@ -469,7 +499,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   const cancel = useCallback(() => {
     invalidate();
-    setLiveText('');
+    setLive(NO_LIVE_WORDS);
     setError(null);
     setPhase('idle');
   }, [invalidate]);
@@ -484,7 +514,9 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     engine,
     phase,
     recording: phase === 'recording',
-    liveText,
+    liveText: live.text,
+    liveInterim: live.interim,
+    livePaused: live.paused,
     busy: phase === 'transcribing',
     error,
     start,

@@ -354,6 +354,8 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
       stage={stage}
       elapsedMs={elapsedMs}
       liveText={dictation.liveText}
+      liveInterim={dictation.liveInterim}
+      livePaused={dictation.livePaused}
       engine={dictation.engine}
       {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
       {...(visibleError?.code ? { errorCode: visibleError.code } : {})}

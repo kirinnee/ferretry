@@ -99,6 +99,33 @@ describe('ParakeetEngine', () => {
     should(outcome.value).equal('hello');
   });
 
+  it('a timed transcribe asks for word times and keeps only well-formed words', async () => {
+    const { engine, workers } = setup();
+    const samples = new Float32Array([1, 2]);
+    const outcome = settle(engine.transcribeTimed(samples));
+    const worker = workers[0] as FakeWorker;
+    should(worker.posts[0]?.message).eql({ type: 'transcribe', id: 1, samples, timed: true });
+    worker.emit({
+      type: 'result',
+      id: 1,
+      text: 'one two',
+      words: [
+        { text: 'one', start: 0, end: 0.4 },
+        { text: 'two', start: 0.5, end: Number.NaN },
+        { text: 3, start: 0, end: 1 },
+        null,
+        'two',
+      ],
+    });
+    await tick();
+    should(outcome.value).eql({ text: 'one two', words: [{ text: 'one', start: 0, end: 0.4 }] });
+
+    const bare = settle(engine.transcribeTimed(new Float32Array(1)));
+    worker.emit({ type: 'result', id: 2, text: 'no times', words: 'not a list' });
+    await tick();
+    should(bare.value).eql({ text: 'no times', words: [] });
+  });
+
   it('gives each utterance its own id and routes replies independently', async () => {
     const { engine, workers } = setup();
     const a = settle(engine.transcribe(new Float32Array(1)));
