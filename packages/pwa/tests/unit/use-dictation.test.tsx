@@ -15,10 +15,8 @@ import {
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
-import {
-  BrowserRecognitionError,
-  type BrowserRecognitionSessionOptions,
-} from '../../src/lib/stt/browser-recognition.ts';
+import { BrowserRecognitionError } from '../../src/lib/stt/browser-recognition.ts';
+import type { ParakeetSessionOptions } from '../../src/lib/stt/parakeet-session.ts';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { RemoteEnhancementError } from '../../src/lib/stt/remote-enhancement.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
@@ -616,7 +614,7 @@ describe('useDictation over a relay-only daemon', () => {
  */
 describe('useDictation with the engine the person chose', () => {
   interface FakeSession {
-    options: BrowserRecognitionSessionOptions;
+    options: ParakeetSessionOptions;
     started: number;
     resolve(text: string): void;
     reject(error: unknown): void;
@@ -626,7 +624,7 @@ describe('useDictation with the engine the person chose', () => {
     const sessions: FakeSession[] = [];
     const voice = {
       support: available ? { available: true } : { available: false, reason: 'No WebAssembly here.' },
-      createSession(options: BrowserRecognitionSessionOptions) {
+      createSession(options: ParakeetSessionOptions) {
         let settle: { resolve(text: string): void; reject(error: unknown): void } = {
           resolve: () => undefined,
           reject: () => undefined,
@@ -691,6 +689,48 @@ describe('useDictation with the engine the person chose', () => {
       await Promise.resolve();
     });
     expect(view.drafts.map(draft => draft.text)).toEqual(['words from this device']);
+    await view.unmount();
+  });
+
+  it('shows Parakeet’s near-live words, then replaces them with the final text on Stop', async () => {
+    const { voice, sessions } = fakeVoice();
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
+    await interact(() => view.handle().start());
+    const session = sessions[0] as FakeSession;
+    expect(session.options.liveWords).toBe(true);
+    await interact(() => session.options.onStart());
+    await interact(() => session.options.onLive?.({ committed: 'the quick', interim: 'brow', paused: false }));
+    expect(view.handle().liveText).toBe('the quick brow');
+    expect(view.handle().liveInterim).toBe('brow');
+    expect(view.handle().livePaused).toBe(false);
+    await interact(() => session.options.onLive?.({ committed: 'the quick', interim: '', paused: true }));
+    expect(view.handle().liveText).toBe('the quick');
+    expect(view.handle().liveInterim).toBe('');
+    expect(view.handle().livePaused).toBe(true);
+
+    await interact(() => view.handle().stop());
+    // The preview stays while the final pass runs…
+    expect(view.handle().liveText).toBe('the quick');
+    await interact(async () => {
+      session.resolve('the quick brown fox');
+      await Promise.resolve();
+    });
+    // …and the final text, not the interim words, is what lands.
+    expect(view.drafts.map(draft => draft.text)).toEqual(['the quick brown fox']);
+    expect(view.handle().liveText).toBe('');
+    expect(view.handle().livePaused).toBe(false);
+    await view.unmount();
+  });
+
+  it('passes the Live words setting through, and ignores words from a cancelled take', async () => {
+    const { voice, sessions } = fakeVoice();
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet', liveWords: false }) });
+    await interact(() => view.handle().start());
+    const session = sessions[0] as FakeSession;
+    expect(session.options.liveWords).toBe(false);
+    await interact(() => view.handle().cancel());
+    await interact(() => session.options.onLive?.({ committed: 'late', interim: '', paused: false }));
+    expect(view.handle().liveText).toBe('');
     await view.unmount();
   });
 

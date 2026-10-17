@@ -5830,6 +5830,41 @@ function Shell() {
       ),
     },
     {
+      // Parakeet's near-live words: committed words, the greyed interim tail, and the pause notice.
+      label: 'Dictation near-live words',
+      render: () => (
+        <Card aria-label="Dictation near-live words" className="min-w-0" id="harness-dictation-near-live">
+          <PanelBody className="flex flex-col gap-4">
+            {(
+              [
+                ['recording', 'He hoped there would be stew for dinner, turnips and', 'carrots and bruised', false],
+                ['recording', 'Stuff it into you, his belly', 'counselled him', true],
+                ['transcribing', 'After early nightfall the yellow lamps would light up', '', false],
+              ] as ReadonlyArray<readonly [DictationStage, string, string, boolean]>
+            ).map(([stage, committed, interim, paused]) => (
+              <div key={`${stage}-${committed}`} className="relative h-[120px] min-w-0">
+                <div className="absolute inset-x-0 top-[120px]">
+                  <DictationSheet
+                    open
+                    stage={stage}
+                    engine="parakeet"
+                    elapsedMs={14_000}
+                    liveText={[committed, interim].filter(Boolean).join(' ')}
+                    liveInterim={interim}
+                    livePaused={paused}
+                    onDismiss={() => {}}
+                    onStop={() => {}}
+                    onCancel={() => {}}
+                    onRetry={() => {}}
+                  />
+                </div>
+              </div>
+            ))}
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
       label: 'Dictation mic button',
       render: () => (
         <Card aria-label="Dictation mic button" className="min-w-0" id="harness-dictation-mic">

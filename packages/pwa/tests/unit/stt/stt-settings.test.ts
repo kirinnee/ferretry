@@ -110,6 +110,7 @@ describe('parseSttSettings', () => {
         enhancementModel: ' llama-3.3 ',
         shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
         engine: 'parakeet',
+        liveWords: false,
       }),
     );
 
@@ -123,6 +124,7 @@ describe('parseSttSettings', () => {
       enhancementModel: 'llama-3.3',
       shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
       engine: 'parakeet',
+      liveWords: false,
     });
   });
 

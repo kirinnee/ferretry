@@ -21,10 +21,13 @@
  *      Ferretry never uploads microphone audio to its daemon. With Parakeet the
  *      audio never leaves the device, and the strip says so; with phone/browser
  *      voice the browser sends it to its vendor, and the strip says THAT instead.
- *   2. LIVE WORDS COME FROM THE BROWSER ENGINE ONLY. Interim SpeechRecognition
- *      results fill `liveText`; Parakeet is not a streaming model, so its words
- *      arrive when Stop transcribes the take. Either way the completed result,
- *      not a provisional caption, is what the controller inserts.
+ *   2. LIVE WORDS FROM BOTH ENGINES. Interim SpeechRecognition results fill
+ *      `liveText`; Parakeet is not a streaming model, so with "Live words" on it
+ *      re-transcribes a rolling window (`lib/stt/near-live.ts`): words two passes
+ *      agreed on read normally, the provisional tail (`liveInterim`) is greyed, and
+ *      a device too slow to keep up says "live words paused — device too slow".
+ *      The caption shows its last two lines, where the new words land. Either way the
+ *      completed result, not a provisional caption, is what the controller inserts.
  *   3. THE INPUT METER REMAINS AN OPTIONAL VISUAL SEAM. kteam's sheet declared an
  *      `inputMonitor` prop, never destructured it, and `InputWaveform` was
  *      imported by nothing except its own test. It is still usable by isolated
@@ -39,6 +42,7 @@ import { cn } from '../lib/class-names.ts';
 import type { DictationEngineId } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import { type CaptureMonitor, InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
+import { NEAR_LIVE_PAUSED_COPY } from '../lib/stt/near-live.ts';
 
 /**
  * The visible step, derived from the capture phase plus whether the mic ever
@@ -157,6 +161,10 @@ export interface DictationSheetProps {
    * what gets inserted is the finished transcript, not this provisional text.
    */
   readonly liveText?: string;
+  /** The provisional tail of `liveText` (Parakeet near-live), greyed. Always a suffix of it. */
+  readonly liveInterim?: string;
+  /** Parakeet near-live words paused for this take: the device could not keep up. */
+  readonly livePaused?: boolean;
   /** A read-only analyser branch off the recorder's own stream and audio graph. */
   readonly inputMonitor?: CaptureMonitor | null;
   /** Injected by tests and the visual harness; the browser runtime otherwise. */
@@ -208,17 +216,22 @@ export function dictationStripStatus(
   errorMessage: string | undefined,
   failure: DictationFailureCopy,
   engine: StripEngine = 'browser',
+  livePaused = false,
 ): string {
   const preview = liveText.trim();
   const onDevice = engine === 'parakeet';
+  const paused = onDevice && livePaused;
   switch (stage) {
     case 'recording':
-      if (preview) return preview;
+      if (preview) return paused ? `${preview} · ${NEAR_LIVE_PAUSED_COPY}` : preview;
       return onDevice
         ? 'Speak, then press Stop. Parakeet transcribes on this device; audio never leaves it.'
         : 'Speak, then press Stop. Your browser sends this audio to its vendor’s servers; Ferretry only updates your draft.';
     case 'transcribing':
-      if (onDevice) return 'Transcribing on this device and correcting once… The result will be added to your draft.';
+      if (onDevice)
+        return preview
+          ? `Finishing on this device and correcting once… Last heard: ${preview}`
+          : 'Transcribing on this device and correcting once… The result will be added to your draft.';
       return `Finishing in your browser and correcting once… ${
         preview ? `Last heard: ${preview}` : 'The result will be added to your draft.'
       }`;
@@ -233,11 +246,47 @@ export function dictationStripStatus(
   }
 }
 
+const capitalise = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
+/**
+ * Split the caption into the words that will not change and the greyed tail that may. A tail that
+ * is not a suffix of the line is ignored rather than trusted: the whole line then reads as settled.
+ */
+export function splitLiveCaption(liveText: string, liveInterim: string): { settled: string; interim: string } {
+  const line = liveText.trim();
+  const interim = liveInterim.trim();
+  if (interim === '' || !line.endsWith(interim)) return { settled: line, interim: '' };
+  return { settled: line.slice(0, line.length - interim.length).trim(), interim };
+}
+
+/**
+ * The recording caption: settled words, then the greyed provisional tail.
+ * It is at most two lines, pinned to its END — older words scroll off the top — so the newest words
+ * stay in view as the caption grows, even on a phone.
+ */
+function LiveCaption({ settled, interim }: { settled: string; interim: string }) {
+  return (
+    <span className="flex max-h-[2lh] min-w-0 flex-col justify-end overflow-hidden">
+      <span className="shrink-0 whitespace-normal break-words">
+        {settled && <span data-live-words="committed">{settled}</span>}
+        {settled && interim ? ' ' : null}
+        {interim && (
+          <span data-live-words="interim" className="text-muted">
+            {interim}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+}
+
 export function DictationSheet({
   open,
   stage,
   elapsedMs,
   liveText = '',
+  liveInterim = '',
+  livePaused = false,
   inputMonitor = null,
   waveformRuntime,
   errorCode,
@@ -267,7 +316,9 @@ export function DictationSheet({
           : stage === 'empty'
             ? "Didn't catch that"
             : 'Opening microphone';
-  const status = dictationStripStatus(stage, liveText, errorMessage, failure, engine);
+  const status = dictationStripStatus(stage, liveText, errorMessage, failure, engine, livePaused);
+  const caption = splitLiveCaption(liveText, liveInterim);
+  const showCaption = stage === 'recording' && caption.settled + caption.interim !== '';
 
   if (!open) return null;
 
@@ -321,7 +372,7 @@ export function DictationSheet({
             stage === 'error' ? 'whitespace-normal break-words text-meta' : 'truncate text-ui',
           )}
         >
-          {status}
+          {showCaption ? <LiveCaption settled={caption.settled} interim={caption.interim} /> : status}
         </p>
 
         {stage === 'recording' && (
@@ -373,6 +424,13 @@ export function DictationSheet({
           <EyeOff size={15} aria-hidden="true" />
         </Button>
       </div>
+
+      {/* Parakeet could not keep up: its own full-width row, so a phone shows it beside the words. */}
+      {stage === 'recording' && onDevice && livePaused && (
+        <p role="status" data-live-words="paused" className="m-0 px-2 pb-1.5 text-meta leading-base text-warn">
+          {`${capitalise(NEAR_LIVE_PAUSED_COPY)}. Stop still transcribes everything you said.`}
+        </p>
+      )}
 
       {/* The live input meter, only while the microphone is actually open. */}
       {stage === 'recording' && inputMonitor !== null && (

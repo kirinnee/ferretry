@@ -10,6 +10,7 @@
  * moment the microphone opens, so the load overlaps with the person speaking.
  */
 
+import type { TimedTranscript, TimedWord } from './near-live.ts';
 import type { ParakeetWorkerFailure, ParakeetWorkerReply, ParakeetWorkerRequest } from './parakeet-worker-core.ts';
 
 /** The slice of `Worker` this module uses. */
@@ -31,9 +32,22 @@ export class ParakeetEngineError extends Error {
 }
 
 interface Pending {
-  resolve(text: string): void;
+  resolve(heard: TimedTranscript): void;
   reject(error: ParakeetEngineError): void;
 }
+
+/** Word times from the worker, kept only where they are what they claim to be. */
+const timedWords = (words: unknown): TimedWord[] =>
+  Array.isArray(words)
+    ? words.filter(
+        (word): word is TimedWord =>
+          typeof word === 'object' &&
+          word !== null &&
+          typeof (word as TimedWord).text === 'string' &&
+          Number.isFinite((word as TimedWord).start) &&
+          Number.isFinite((word as TimedWord).end),
+      )
+    : [];
 
 const isReply = (data: unknown): data is ParakeetWorkerReply =>
   typeof data === 'object' &&
@@ -56,11 +70,20 @@ export class ParakeetEngine {
   }
 
   /** Decode one utterance. The samples are transferred to the worker, not copied. */
-  transcribe(samples: Float32Array, signal?: AbortSignal): Promise<string> {
+  async transcribe(samples: Float32Array, signal?: AbortSignal): Promise<string> {
+    return (await this.#request(samples, false, signal)).text;
+  }
+
+  /** Decode one near-live window, with each word's place in it (`near-live.ts`). */
+  transcribeTimed(samples: Float32Array, signal?: AbortSignal): Promise<TimedTranscript> {
+    return this.#request(samples, true, signal);
+  }
+
+  #request(samples: Float32Array, timed: boolean, signal: AbortSignal | undefined): Promise<TimedTranscript> {
     const id = this.#nextId;
     this.#nextId += 1;
     const worker = this.#ensure();
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<TimedTranscript>((resolve, reject) => {
       const onAbort = (): void => {
         // ONNX cannot interrupt a decode in flight; the answer is simply not waited for.
         this.#pending.delete(id);
@@ -72,16 +95,18 @@ export class ParakeetEngine {
       }
       signal?.addEventListener('abort', onAbort, { once: true });
       this.#pending.set(id, {
-        resolve: text => {
+        resolve: heard => {
           signal?.removeEventListener('abort', onAbort);
-          resolve(text);
+          resolve(heard);
         },
         reject: error => {
           signal?.removeEventListener('abort', onAbort);
           reject(error);
         },
       });
-      worker.postMessage({ type: 'transcribe', id, samples }, [samples.buffer]);
+      worker.postMessage({ type: 'transcribe', id, samples, ...(timed ? { timed: true as const } : {}) }, [
+        samples.buffer,
+      ]);
     });
   }
 
@@ -118,7 +143,7 @@ export class ParakeetEngine {
     if (data.type === 'result') {
       const pending = this.#pending.get(data.id);
       this.#pending.delete(data.id);
-      pending?.resolve(data.text);
+      pending?.resolve({ text: data.text, words: timedWords(data.words) });
       return;
     }
     if (data.id === null) return;

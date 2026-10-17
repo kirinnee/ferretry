@@ -23,10 +23,10 @@ import {
   browserAudioCapture,
   canCaptureAudio,
 } from './audio-capture.ts';
-import { BrowserRecognitionError, type BrowserRecognitionSessionOptions } from './browser-recognition.ts';
+import { BrowserRecognitionError } from './browser-recognition.ts';
 import { ParakeetEngine, type ParakeetWorkerLike } from './parakeet-engine.ts';
 import { formatMegabytes, PARAKEET_TOTAL_BYTES } from './parakeet-model.ts';
-import { ParakeetRecognitionSession } from './parakeet-session.ts';
+import { ParakeetRecognitionSession, type ParakeetSessionOptions } from './parakeet-session.ts';
 import {
   type ParakeetCacheStorage,
   ParakeetInstallError,
@@ -70,13 +70,14 @@ interface ParakeetSessionHost {
   watchHidden(onHidden: () => void): () => void;
   setTimeout(callback: () => void, milliseconds: number): unknown;
   clearTimeout(handle: unknown): void;
+  now(): number;
 }
 
 export interface ParakeetVoiceOptions {
   readonly support: ParakeetSupport;
   /** `null` exactly when unsupported. */
   readonly store: Pick<ParakeetModelStore, 'status' | 'install' | 'remove' | 'totalBytes'> | null;
-  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe' | 'unload'> | null;
+  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe' | 'transcribeTimed' | 'unload'> | null;
   readonly host: ParakeetSessionHost | null;
 }
 
@@ -205,7 +206,7 @@ export class ParakeetVoice {
    * One dictation over the installed model. Throws, before the microphone opens, when this device
    * cannot or has not installed it — dictation never downloads.
    */
-  createSession(options: BrowserRecognitionSessionOptions): ParakeetRecognitionSession {
+  createSession(options: ParakeetSessionOptions): ParakeetRecognitionSession {
     const { engine, host } = this.#options;
     if (!this.support.available || engine === null || host === null)
       throw new BrowserRecognitionError(
@@ -244,6 +245,7 @@ export interface ParakeetGlobalLike extends AudioCaptureGlobalLike {
     addEventListener(type: 'visibilitychange', listener: () => void): void;
     removeEventListener(type: 'visibilitychange', listener: () => void): void;
   };
+  readonly performance?: { now(): number };
   setTimeout(callback: () => void, milliseconds: number): unknown;
   clearTimeout(handle: unknown): void;
 }
@@ -295,6 +297,7 @@ export function browserParakeetVoice(global: ParakeetGlobalLike, assets: Parakee
     },
     setTimeout: (callback, milliseconds) => global.setTimeout(callback, milliseconds),
     clearTimeout: handle => global.clearTimeout(handle),
+    now: () => global.performance?.now() ?? Date.now(),
   };
   return new ParakeetVoice({ support, store, engine, host });
 }

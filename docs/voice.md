@@ -54,9 +54,43 @@ lands on, which Hugging Face may change.
   fp32 one is a 2.5 GB download), and the app sends no cross-origin-isolation headers, so there is no
   `SharedArrayBuffer` for threads. Expect transcription to take a few seconds on a laptop and longer on a
   phone. The model loads when the microphone opens, so loading overlaps with speaking.
-- **No live caption.** Parakeet is not a streaming model: words land when Stop transcribes the take.
 - The recording is `MediaRecorder` audio decoded and resampled to 16 kHz mono by `decodeAudioData`
   (`lib/stt/audio-capture.ts`) — no AudioWorklet, so no second script for the page policy to allow.
+
+### Live words (near-live)
+
+Parakeet is not a streaming model, so live words are **near-live** (`lib/stt/near-live.ts`). The
+per-device **Live words** switch (Settings › Voice, shown while Parakeet is the engine) is on by
+default.
+
+- **While recording**, about every 1.2 s the recording so far is decoded (`AudioRecording.peek`) and
+  the audio since the last committed point is transcribed again, with word times. Words two passes
+  in a row agree on (LocalAgreement-2) are **committed** and never change; the rest are **interim**,
+  shown greyed in the dictation strip where browser voice shows its words.
+- **A window only ever starts in a pause.** Parakeet (int8, through parakeet.js) answers _nothing_,
+  or stops part-way, for many windows cut at an arbitrary point in speech — measured: cutting at the
+  model's own word boundaries, most windows came back empty, and moving a cut by 10 ms flips the
+  answer. Windows that open in real silence, 180 ms before the voice resumes, are the reliable ones.
+  So agreed words commit only up to a pause in the audio, and the window then moves past them, which
+  keeps every pass short however long the dictation runs. Past 6 s uncommitted it cuts at any pause
+  that leaves 2.5 s; past 16 s with no pause at all, live words stop for the take.
+- **A miss is not silence.** An empty answer for a window that holds speech keeps the words on screen
+  and the next pass tries again with more audio.
+- **Never two inferences at once.** The next pass is scheduled only after the last one answered. A
+  pass that takes most of its interval doubles the interval (up to 4.8 s); one that takes longer
+  than that, or longer than the audio it covered, pauses live words for the take and the strip says
+  **live words paused — device too slow**.
+- **Stop** transcribes only the uncommitted tail and replaces the interim words with it; with nothing
+  committed that is exactly the single pass over the whole take. A tail the model misses falls back to
+  that single pass, so the final text is never less accurate than it. Clean-up (Groq, Cerebras, local
+  word correction) still runs once, on the final text only.
+- **Cost:** passes run only while the microphone is open; the worker idles otherwise. Off, the take is
+  transcribed once on Stop, as before.
+
+`packages/pwa/harness/parakeet-near-live-smoke.ts` measures it in a real browser (manual, like the
+smoke below): it plays LibriSpeech dev-clean clips into the shipped transcriber in real time and
+reports pass times, how far live words trail the speech, Stop-to-final time and the word error rate
+next to the single pass. `PARAKEET_SMOKE_SLOWDOWN=3` stands in for a phone.
 
 ### Self-hosted runtime, and what the page policy allows
 

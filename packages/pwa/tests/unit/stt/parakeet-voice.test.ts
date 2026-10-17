@@ -70,6 +70,9 @@ class FakeEngine {
   transcribe(): Promise<string> {
     return Promise.resolve('');
   }
+  transcribeTimed(): Promise<{ text: string; words: [] }> {
+    return Promise.resolve({ text: '', words: [] });
+  }
   unload(): void {
     this.unloads += 1;
   }
@@ -80,6 +83,7 @@ const fakeHost = () => ({
   watchHidden: () => () => undefined,
   setTimeout: () => 0,
   clearTimeout: () => undefined,
+  now: () => 0,
 });
 
 const AVAILABLE = { available: true } as const;
@@ -490,6 +494,9 @@ describe('browserParakeetVoice', () => {
     stop(): void {
       this.onstop?.();
     }
+    requestData(): void {
+      this.ondataavailable?.({ data: new Blob([]) });
+    }
   }
 
   interface PageDouble {
@@ -609,6 +616,38 @@ describe('browserParakeetVoice', () => {
     should(double.listeners.size).equal(1);
     await session.finish();
     should(double.listeners.size).equal(0);
+  });
+
+  it('paces near-live words on the page clock, falling back to the wall clock', async () => {
+    for (const performance of [{ now: () => 42 }, undefined]) {
+      const callbacks: (() => void)[] = [];
+      let read = 0;
+      const double = page({
+        ...(performance === undefined
+          ? {}
+          : {
+              performance: {
+                now: () => {
+                  read += 1;
+                  return performance.now();
+                },
+              },
+            }),
+        setTimeout: callback => callbacks.push(callback),
+      });
+      const session = browserParakeetVoice(double.global, ASSETS).createSession({
+        ...sessionOptions(),
+        liveWords: true,
+      });
+      session.start();
+      await flush();
+      // The duration limit, then the first near-live pass.
+      should(callbacks).have.length(2);
+      callbacks[1]?.();
+      await flush();
+      should(read).equal(performance === undefined ? 0 : 1);
+      session.cancel();
+    }
   });
 
   it('watches nothing when the page has no document', async () => {

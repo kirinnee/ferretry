@@ -23,10 +23,15 @@ interface Harness {
   readonly loads: () => number;
 }
 
+const DEFAULT_MODEL: ParakeetLoadedModel = {
+  transcribe: async () => 'text',
+  transcribeTimed: async () => ({ text: 'timed text', words: [{ text: 'timed', start: 0, end: 0.4 }] }),
+};
+
 const harness = (options: {
   read?: () => Promise<ParakeetModelBytes>;
   load?: (bytes: ParakeetModelBytes) => Promise<ParakeetLoadedModel>;
-  model?: ParakeetLoadedModel;
+  model?: Partial<ParakeetLoadedModel>;
 }): Harness => {
   const replies: ParakeetWorkerReply[] = [];
   let reads = 0;
@@ -35,7 +40,7 @@ const harness = (options: {
     load: async bytes => {
       loads += 1;
       if (options.load !== undefined) return await options.load(bytes);
-      return options.model ?? { transcribe: async () => 'text' };
+      return { ...DEFAULT_MODEL, ...options.model };
     },
   };
   const core = new ParakeetWorkerCore({
@@ -60,6 +65,21 @@ describe('parseWorkerRequest', () => {
     const data = samples();
     const parsed = parseWorkerRequest({ type: 'transcribe', id: 3, samples: data });
     should(parsed).eql({ type: 'transcribe', id: 3, samples: data });
+  });
+
+  it('keeps `timed` only when it is exactly true', () => {
+    const data = samples();
+    should(parseWorkerRequest({ type: 'transcribe', id: 3, samples: data, timed: true })).eql({
+      type: 'transcribe',
+      id: 3,
+      samples: data,
+      timed: true,
+    });
+    should(parseWorkerRequest({ type: 'transcribe', id: 3, samples: data, timed: 'yes' })).eql({
+      type: 'transcribe',
+      id: 3,
+      samples: data,
+    });
   });
 
   it('rejects a bad id, non-Float32Array samples, junk and null', () => {
@@ -95,6 +115,16 @@ describe('ParakeetWorkerCore', () => {
     const h = harness({ model: { transcribe: async () => '  hello there \n' } });
     await h.core.handle({ type: 'transcribe', id: 7, samples: samples() });
     should(h.replies).eql([{ type: 'result', id: 7, text: 'hello there' }]);
+  });
+
+  it('answers a timed transcribe with the trimmed text and each word’s place', async () => {
+    const h = harness({
+      model: {
+        transcribeTimed: async () => ({ text: ' hi there ', words: [{ text: 'hi', start: 0.1, end: 0.3 }] }),
+      },
+    });
+    await h.core.handle({ type: 'transcribe', id: 4, samples: samples(), timed: true });
+    should(h.replies).eql([{ type: 'result', id: 4, text: 'hi there', words: [{ text: 'hi', start: 0.1, end: 0.3 }] }]);
   });
 
   it('hands the decoded samples to the model', async () => {

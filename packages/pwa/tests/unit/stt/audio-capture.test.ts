@@ -66,12 +66,14 @@ class FakeRecorder implements MediaRecorderLike {
   static throwOnConstruct: unknown = undefined;
   static throwOnStop: unknown = undefined;
   static emitOnStop: Blob[] | null = [];
+  static emitOnRequest: Blob[] = [];
   mimeType = 'audio/webm';
   ondataavailable: ((event: { readonly data: Blob }) => void) | null = null;
   onstop: (() => void) | null = null;
   onerror: ((event: unknown) => void) | null = null;
   started = 0;
   stops = 0;
+  requests = 0;
 
   constructor(readonly stream: MediaStreamLike) {
     if (FakeRecorder.throwOnConstruct !== undefined) throw FakeRecorder.throwOnConstruct;
@@ -87,6 +89,12 @@ class FakeRecorder implements MediaRecorderLike {
     if (FakeRecorder.throwOnStop !== undefined) throw FakeRecorder.throwOnStop;
     for (const blob of FakeRecorder.emitOnStop ?? []) this.ondataavailable?.({ data: blob });
     this.onstop?.();
+  }
+
+  requestData(): void {
+    this.requests += 1;
+    for (const blob of FakeRecorder.emitOnRequest.splice(0)) this.ondataavailable?.({ data: blob });
+    this.ondataavailable?.({ data: new Blob([]) });
   }
 }
 
@@ -110,6 +118,7 @@ const reset = (): void => {
   FakeRecorder.throwOnConstruct = undefined;
   FakeRecorder.throwOnStop = undefined;
   FakeRecorder.emitOnStop = [];
+  FakeRecorder.emitOnRequest = [];
   FakeOffline.args = [];
   FakeOffline.decoded = [];
   FakeOffline.channels = [[0.5, 0.5]];
@@ -221,6 +230,32 @@ describe('browserAudioCapture', () => {
     should(FakeOffline.args).eql([[1, PARAKEET_SAMPLE_RATE, PARAKEET_SAMPLE_RATE]]);
     should(FakeOffline.args[0]).eql([1, 16_000, 16_000]);
     should(Array.from(new Uint8Array(FakeOffline.decoded[0] as ArrayBuffer))).eql([1, 2, 3, 4, 5]);
+  });
+
+  it('peek flushes the recorder and decodes everything so far, while recording carries on', async () => {
+    reset();
+    const stream = new FakeStream();
+    const recording = await browserAudioCapture(fakeGlobal(stream)).start();
+    const recorder = FakeRecorder.last as FakeRecorder;
+    FakeRecorder.emitOnRequest = [new Blob([new Uint8Array([1, 2])])];
+    should(Array.from(await recording.peek())).eql([0.5, 0.5]);
+    FakeRecorder.emitOnRequest = [new Blob([new Uint8Array([3])])];
+    await recording.peek();
+    should(recorder.requests).equal(2);
+    should(recorder.stops).equal(0);
+    should(stream.stopped).equal(0);
+    // The second peek decodes the whole take, header part included.
+    should(Array.from(new Uint8Array(FakeOffline.decoded[1] as ArrayBuffer))).eql([1, 2, 3]);
+  });
+
+  it('peek before anything was recorded is empty, and after stop is empty without asking', async () => {
+    reset();
+    const recording = await browserAudioCapture(fakeGlobal(new FakeStream())).start();
+    should((await recording.peek()).length).equal(0);
+    await recording.stop();
+    should((await recording.peek()).length).equal(0);
+    should(FakeRecorder.last?.requests).equal(1);
+    should(FakeOffline.args).have.length(0);
   });
 
   it('returns an empty array for an empty recording without decoding', async () => {

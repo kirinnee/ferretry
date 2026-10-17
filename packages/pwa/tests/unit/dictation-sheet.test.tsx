@@ -7,6 +7,7 @@ import {
   dictationStage,
   dictationStripStatus,
   formatElapsed,
+  splitLiveCaption,
 } from '../../src/components/dictation-sheet.tsx';
 import type { CaptureMonitor } from '../../src/components/input-waveform.tsx';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
@@ -131,7 +132,7 @@ describe('dictationStripStatus', () => {
   it('promises the audio stays on this device only for Parakeet', () => {
     expect(dictationStripStatus('recording', '', undefined, failure, 'parakeet')).toContain('audio never leaves it');
     expect(dictationStripStatus('starting', '', undefined, failure, 'parakeet')).toBe('Opening the microphone…');
-    expect(dictationStripStatus('transcribing', 'ignored', undefined, failure, 'parakeet')).toContain(
+    expect(dictationStripStatus('transcribing', '', undefined, failure, 'parakeet')).toContain(
       'Transcribing on this device',
     );
     // Unchosen reads like the browser engine: no privacy promise is made for it.
@@ -353,5 +354,75 @@ describe('every stage renders', () => {
       expect(view.container.querySelector('[data-dictation-panel]')).not.toBeNull();
       await view.unmount();
     }
+  });
+});
+
+describe('Parakeet near-live words in the strip', () => {
+  const failure = { title: 'Dictation failed' };
+
+  it('splits the caption into settled words and the greyed provisional tail', () => {
+    expect(splitLiveCaption(' the quick brow ', 'brow')).toEqual({ settled: 'the quick', interim: 'brow' });
+    expect(splitLiveCaption('brow', 'brow')).toEqual({ settled: '', interim: 'brow' });
+    expect(splitLiveCaption('the quick', '')).toEqual({ settled: 'the quick', interim: '' });
+    // A tail that is not a suffix is not trusted: the whole line reads as settled.
+    expect(splitLiveCaption('the quick', 'fox')).toEqual({ settled: 'the quick', interim: '' });
+  });
+
+  it('names the pause in the strip’s full text only for Parakeet', () => {
+    expect(dictationStripStatus('recording', 'the quick', undefined, failure, 'parakeet', true)).toBe(
+      'the quick · live words paused — device too slow',
+    );
+    expect(dictationStripStatus('recording', '', undefined, failure, 'parakeet', true)).toContain(
+      'audio never leaves it',
+    );
+    expect(dictationStripStatus('recording', 'hello', undefined, failure, 'browser', true)).toBe('hello');
+  });
+
+  it('keeps the words in view while Parakeet finishes the tail', () => {
+    expect(dictationStripStatus('transcribing', 'the quick', undefined, failure, 'parakeet')).toBe(
+      'Finishing on this device and correcting once… Last heard: the quick',
+    );
+  });
+
+  it('renders committed words, then the greyed interim tail, and the pause on a row of its own', async () => {
+    const view = await mount(
+      <DictationSheet
+        {...sheetProps({ engine: 'parakeet', liveText: 'the quick brow', liveInterim: 'brow', livePaused: true })}
+      />,
+    );
+    const part = (name: string): HTMLElement =>
+      must(view.container.querySelector(`[data-live-words="${name}"]`), name) as HTMLElement;
+    expect(part('committed').textContent).toBe('the quick');
+    expect(part('interim').textContent).toBe('brow');
+    expect(part('interim').className).toContain('text-muted');
+    expect(part('paused').textContent).toBe(
+      'Live words paused — device too slow. Stop still transcribes everything you said.',
+    );
+    expect(part('paused').getAttribute('role')).toBe('status');
+    const caption = must(view.container.querySelector('[data-live-transcript]'), 'the caption');
+    expect(caption.textContent).toBe('the quick brow');
+    expect(caption.getAttribute('title')).toBe('the quick brow · live words paused — device too slow');
+    await view.unmount();
+  });
+
+  it('renders only what there is: interim alone, committed alone, and no pause notice for browser voice', async () => {
+    const view = await mount(
+      <DictationSheet {...sheetProps({ engine: 'parakeet', liveText: 'brow', liveInterim: 'brow' })} />,
+    );
+    expect(view.container.querySelector('[data-live-words="committed"]')).toBeNull();
+    expect(view.container.querySelector('[data-live-words="interim"]')?.textContent).toBe('brow');
+    expect(view.container.querySelector('[data-live-words="paused"]')).toBeNull();
+    await view.render(<DictationSheet {...sheetProps({ liveText: 'hello there', livePaused: true })} />);
+    expect(view.container.querySelector('[data-live-words="committed"]')?.textContent).toBe('hello there');
+    expect(view.container.querySelector('[data-live-words="interim"]')).toBeNull();
+    expect(view.container.querySelector('[data-live-words="paused"]')).toBeNull();
+    // Outside recording the caption is the status line again, and the pause row goes with it.
+    await view.render(
+      <DictationSheet
+        {...sheetProps({ stage: 'transcribing', engine: 'parakeet', liveText: 'the quick', livePaused: true })}
+      />,
+    );
+    expect(view.container.querySelector('[data-live-words]')).toBeNull();
+    await view.unmount();
   });
 });

@@ -2142,6 +2142,9 @@ try {
             const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
             await captureElement(page, page.locator('#harness-dictation-panel'), dictationPanelTarget);
             process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
+            const nearLiveTarget = join(outDir, `dictation-near-live-${viewport.name}.png`);
+            await captureElement(page, page.locator('#harness-dictation-near-live'), nearLiveTarget);
+            process.stdout.write(`📸 Dictation near-live words -> ${nearLiveTarget}\n`);
             // The dictation settings surface is several viewports tall; growing the
             // viewport to fit it is `captureElement`'s job now, and it measures the
             // card rather than guessing a number.
