@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { WardenAccount, WardenConfig } from '@ferretry/protocol';
+import type { WardenAccount, WardenConfig, WardenLogin } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 
@@ -12,6 +12,8 @@ interface HarnessProps {
   readonly initial: WardenConfig;
   readonly jevKey?: JevKeyStatus;
   readonly loginOptions?: readonly WardenAccount[];
+  readonly login?: WardenLogin;
+  readonly machineDefault?: string;
   readonly speedupsHref?: string;
   readonly onNavigate?: (to: string) => void;
   readonly changes: WardenConfig[];
@@ -22,6 +24,8 @@ function Harness({
   initial,
   jevKey = { state: 'set' },
   loginOptions,
+  login,
+  machineDefault,
   speedupsHref,
   onNavigate,
   changes,
@@ -37,6 +41,8 @@ function Harness({
       jevKey={jevKey}
       errors={wardenFormErrors(value)}
       {...(loginOptions === undefined ? {} : { loginOptions })}
+      {...(login === undefined ? {} : { login })}
+      {...(machineDefault === undefined ? {} : { machineDefault })}
       {...(speedupsHref === undefined ? {} : { speedupsHref })}
       {...(onNavigate === undefined ? {} : { onNavigate })}
     />
@@ -279,5 +285,104 @@ describe('wardenPrivacyNote', () => {
       'What leaves this machine: Investigations run on your own login (claude-auto-a) and read the transcript, pane, diffs and CI.',
     );
     expect(wardenPrivacyNote('jev', 'claude-auto-a')).toContain('with every stored secret masked');
+  });
+});
+
+describe('WardenSettingsForm, when the owner chose no login', () => {
+  const unset = wardenConfig({ triage: 'llm', accounts: [] });
+  const options = (renderer: ReactTestRenderer): string[] =>
+    control(renderer, 'Login', 'select')
+      .findAllByType('option')
+      .map(node => String(node.children.join('')));
+
+  it('should run on the machine default, and let a model be pinned on it', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(
+      <Harness
+        initial={unset}
+        machineDefault="claude-default"
+        login={{ source: 'machine_default', unknown: [], available: ['claude-default'] }}
+        loginOptions={[{ agent: 'claude-default' }]}
+        changes={changes}
+      />,
+    );
+
+    // Assert
+    expect(options(renderer)[0]).toBe('Machine default — claude-default');
+    expect(text(renderer)).toContain('None chosen: investigations run on this machine’s default runtime');
+    expect(text(renderer)).toContain('Investigations run on your own login (claude-default)');
+
+    // Act: a model pinned on the stand-in makes it the owner's choice.
+    run(() => control(renderer, 'Model', 'input').props.onChange({ target: { value: 'haiku' } }));
+
+    // Assert
+    expect(last(changes).accounts).toEqual([{ agent: 'claude-default', model: 'haiku' }]);
+    run(() => renderer.unmount());
+  });
+
+  it('should say not set, keep the model closed and say LLM triage is unavailable', () => {
+    // Arrange
+    const renderer = render(
+      <Harness initial={unset} login={{ source: 'not_set', unknown: [], available: [] }} changes={[]} />,
+    );
+
+    // Act / Assert
+    expect(options(renderer)).toEqual(['Not set — choose a login']);
+    expect(control(renderer, 'Model', 'input').props.disabled).toBe(true);
+    expect(text(renderer)).toContain('LLM triage is unavailable');
+    run(() => control(renderer, 'Model', 'input').props.onChange({ target: { value: 'x' } }));
+    run(() => renderer.unmount());
+  });
+
+  it('should fall back to plain words for a daemon that predates the login facts', () => {
+    // Arrange
+    const renderer = render(<Harness initial={unset} changes={[]} />);
+
+    // Act / Assert
+    expect(options(renderer)).toEqual(['The machine’s default runtime']);
+    run(() => renderer.unmount());
+  });
+
+  it('should hand the choice back to the machine default from the empty option', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(
+      <Harness initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-spare' }] })} changes={changes} />,
+    );
+
+    // Act
+    run(() => control(renderer, 'Login', 'select').props.onChange({ target: { value: '' } }));
+
+    // Assert
+    expect(last(changes).accounts).toEqual([]);
+    run(() => renderer.unmount());
+  });
+
+  it('should name every unknown login — the chosen ones, or the machine default — and keep it in place', () => {
+    // Arrange
+    const chosen = render(
+      <Harness
+        initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'legacy-wrapper' }, { agent: 'claude-default' }] })}
+        login={{ source: 'configured', unknown: ['legacy-wrapper'], available: ['claude-default'] }}
+        changes={[]}
+      />,
+    );
+    const standIn = render(
+      <Harness
+        initial={unset}
+        machineDefault="gone-runtime"
+        login={{ source: 'machine_default', unknown: ['gone-runtime'], available: ['claude-default'] }}
+        changes={[]}
+      />,
+    );
+
+    // Act / Assert
+    expect(chosen.root.findAll(node => node.props['data-warden-unknown-login'] === '')).toHaveLength(1);
+    expect(text(chosen)).toContain('legacy-wrapper');
+    expect(control(chosen, 'Login', 'select').props.value).toBe('legacy-wrapper');
+    expect(standIn.root.findAll(node => node.props['data-warden-unknown-login'] === '')).toHaveLength(1);
+    expect(text(standIn)).toContain('gone-runtime');
+    for (const renderer of [chosen, standIn]) run(() => renderer.unmount());
   });
 });

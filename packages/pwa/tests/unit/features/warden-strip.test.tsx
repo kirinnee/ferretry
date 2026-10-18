@@ -106,10 +106,10 @@ describe('WardenStrip', () => {
     // Arrange
     const failover = wardenFailover({
       accounts: [
-        wardenAccount({ agent: 'claude-auto-loge' }),
-        wardenAccount({ agent: 'codex-auto-terra', eligible: false, reason: 'at limit' }),
+        wardenAccount({ agent: 'claude-default' }),
+        wardenAccount({ agent: 'codex-default', eligible: false, reason: 'at limit' }),
       ],
-      lastSelection: { agent: 'claude-auto-loge', policy: 'fallback', at: SWEPT, reason: 'first eligible' },
+      lastSelection: { agent: 'claude-default', policy: 'fallback', at: SWEPT, reason: 'first eligible' },
     });
     const view = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
     try {
@@ -117,7 +117,7 @@ describe('WardenStrip', () => {
       const chips = [...view.container.querySelectorAll('[aria-label="Warden accounts"] li')];
 
       // Assert
-      expect(chips.map(chip => chip.textContent)).toEqual(['loge · in use', 'terra']);
+      expect(chips.map(chip => chip.textContent)).toEqual(['claude-default · in use', 'codex-default']);
       expect(chips[0]?.className).toContain('text-ok');
       expect(chips[1]?.className).toContain('text-warn');
       expect(chips[1]?.getAttribute('title')).toBe('at limit');

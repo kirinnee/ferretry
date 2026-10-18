@@ -193,9 +193,6 @@ export function configFileCapability(address: ConfigFileAddress): 'fleet' | 'war
 
 // ── Warden ───────────────────────────────────────────────────────────────────────────────────────
 
-/** The account a warden runs on when nothing is configured: the cheap mechanical tier. */
-export const DEFAULT_WARDEN_ACCOUNT = 'claude-auto-glm52a';
-
 /**
  * The Warden settings a state home with no `warden.yaml` behaves as.
  *
@@ -211,7 +208,8 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   mayActAlone: { nudge: true, resume: true, failover: true, stop: false },
   events: { turnEnd: true, question: true, paneDied: true },
   investigation: { effort: 'low' },
-  accounts: [{ agent: DEFAULT_WARDEN_ACCOUNT }],
+  // None: the machine's default runtime, resolved when it is read. No login name is compiled in.
+  accounts: [],
   failover: { policy: 'fallback', failureThreshold: 2, cooldownMinutes: 30 },
   providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 24 },
   intervalMinutes: 2,
@@ -236,7 +234,7 @@ export const WardenFileSchema = z.strictObject({
   mayActAlone: WardenMayActAloneSchema.strict().partial().optional(),
   events: WardenEventTriggersSchema.strict().partial().optional(),
   investigation: WardenInvestigationConfigSchema.strict().partial().optional(),
-  accounts: z.array(WardenAccountSchema.strict()).min(1).optional(),
+  accounts: z.array(WardenAccountSchema.strict()).optional(),
   failover: WardenFailoverConfigSchema.strict().partial().optional(),
   providerOutage: ProviderOutageConfigSchema.strict().partial().optional(),
   intervalMinutes: WardenSweepIntervalSchema.optional(),

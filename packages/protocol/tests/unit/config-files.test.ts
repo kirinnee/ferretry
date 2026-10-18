@@ -230,7 +230,7 @@ describe('warden.yaml', () => {
     ['an unknown key', { warden: true }],
     ['an unknown key inside failover', { failover: { policy: 'fallback', extra: 1 } }],
     ['an unknown key inside an account', { accounts: [{ agent: 'a', extra: 1 }] }],
-    ['no accounts', { accounts: [] }],
+    ['an account with no name', { accounts: [{ agent: '' }] }],
     ['an interval of zero', { intervalMinutes: 0 }],
     ['a negative gap', { minSpawnGapMinutes: -1 }],
     ['a distinct-session floor below two', { providerOutage: { minDistinctSessions: 1 } }],
@@ -245,6 +245,15 @@ describe('warden.yaml', () => {
 
     // Assert
     should(actual.success).be.false();
+  });
+
+  it('should accept an empty failover order, which hands the login to the machine default', () => {
+    // Act
+    const actual = config.WardenFileSchema.safeParse({ accounts: [] });
+
+    // Assert
+    should(actual.success).be.true();
+    should(config.DEFAULT_WARDEN_CONFIG.accounts).deepEqual([]);
   });
 
   it('should accept a gap of zero, which turns the spacing off', () => {

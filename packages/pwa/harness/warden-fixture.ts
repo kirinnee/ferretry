@@ -22,7 +22,7 @@ const config = {
   ...DEFAULT_WARDEN_CONFIG,
   triage: 'jev' as const,
   caps: { ...DEFAULT_WARDEN_CONFIG.caps, jevUsdPerDay: 0.5, investigationUsdPerDay: 2 },
-  accounts: [{ agent: 'claude-auto-loge', model: 'claude-sonnet-5-5' }, { agent: 'claude-auto-loge2' }],
+  accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }, { agent: 'claude-spare' }],
 };
 
 export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
@@ -61,11 +61,11 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
     failureThreshold: 2,
     cooldownMinutes: 30,
     accounts: [
-      { agent: 'claude-auto-loge', eligible: true },
-      { agent: 'claude-auto-loge2', eligible: true },
-      { agent: 'codex-auto-terra', eligible: false, reason: 'at limit' },
+      { agent: 'claude-default', eligible: true },
+      { agent: 'claude-spare', eligible: true },
+      { agent: 'codex-default', eligible: false, reason: 'at limit' },
     ],
-    lastSelection: { agent: 'claude-auto-loge', policy: 'fallback', at: at(30), reason: 'first eligible' },
+    lastSelection: { agent: 'claude-default', policy: 'fallback', at: at(30), reason: 'first eligible' },
   },
   triage: { configured: 'jev', effective: 'jev', reason: 'configured' },
   spend: {
@@ -96,7 +96,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       targetSession: 'harness-jaylynn',
       anomalyKind: 'dead_monitor',
       startedAt: at(3),
-      agent: 'claude-auto-loge',
+      agent: 'claude-default',
       model: 'claude-sonnet-5-5',
     },
     {
@@ -111,7 +111,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       reportPath: 'warden/reports/harness-kamila.md',
       verdict: 'killed',
       costUsd: 0.31,
-      agent: 'claude-auto-loge',
+      agent: 'claude-default',
       model: 'claude-sonnet-5-5',
     },
   ],
@@ -168,7 +168,7 @@ export const WARDEN_FIXTURE_ATTENTION: WardenAttentionView = {
         state: 'judged',
         verdict: 'needs_human',
         reason: 'Only you can choose the fallback.',
-        judgedBy: { agent: 'claude-auto-loge', model: 'claude-sonnet-5-5' },
+        judgedBy: { agent: 'claude-default', model: 'claude-sonnet-5-5' },
       },
     },
     {
@@ -185,7 +185,7 @@ export const WARDEN_FIXTURE_ATTENTION: WardenAttentionView = {
         verdict: 'killed',
         reason: 'Looping on a failing hook.',
         reportPath: 'warden/reports/harness-kamila.md',
-        judgedBy: { agent: 'claude-auto-loge', model: 'claude-sonnet-5-5' },
+        judgedBy: { agent: 'claude-default', model: 'claude-sonnet-5-5' },
       },
     },
   ],
@@ -193,10 +193,34 @@ export const WARDEN_FIXTURE_ATTENTION: WardenAttentionView = {
   verdictCoverage: { limit: 50, truncated: false },
 };
 
+const HARNESS_LOGINS = ['claude-default', 'claude-spare', 'codex-default'];
+
 export const WARDEN_FIXTURE_CONFIG: WardenConfigView = {
   config,
   accounts: config.accounts,
   warnings: [],
+  login: { source: 'configured', unknown: [], available: HARNESS_LOGINS },
+};
+
+/** A `warden.yaml` written on another machine: its login does not exist here, and nothing rewrites it. */
+export const WARDEN_FIXTURE_CONFIG_UNKNOWN_LOGIN: WardenConfigView = {
+  config: { ...config, triage: 'llm', accounts: [{ agent: 'legacy-wrapper' }] },
+  accounts: [{ agent: 'legacy-wrapper' }],
+  warnings: [
+    "unknown login 'legacy-wrapper' — choose one in Settings › Warden (it is skipped until it exists here)",
+    'no investigation login exists on this machine, so LLM triage is unavailable',
+  ],
+  login: { source: 'configured', unknown: ['legacy-wrapper'], available: HARNESS_LOGINS },
+};
+
+/** No login chosen and no default runtime: LLM triage is unavailable, and says so. */
+export const WARDEN_FIXTURE_CONFIG_NO_LOGIN: WardenConfigView = {
+  config: { ...config, triage: 'llm', accounts: [] },
+  accounts: [],
+  warnings: [
+    'no investigation login is set and this machine has no default runtime, so LLM triage is unavailable — choose a login in Settings › Warden',
+  ],
+  login: { source: 'not_set', unknown: [], available: HARNESS_LOGINS },
 };
 
 const WARDEN_FIXTURE_SPEEDUPS: SpeedupsView = {

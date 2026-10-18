@@ -153,7 +153,7 @@ describe('wardenStatusLine', () => {
 
     // Assert
     expect(line.lead).toBe('LLM only');
-    expect(line.parts).toContain('loge investigations');
+    expect(line.parts).toContain('claude-default investigations');
     expect(line.parts).toContain('$0.00 of $2.00 today');
   });
 
@@ -212,12 +212,27 @@ describe('wardenStatusLine', () => {
 
   it('should name the investigator by login when no model is pinned', () => {
     // Arrange
-    const status = wardenStatus({ config: wardenConfig({ accounts: [{ agent: 'codex-auto-terra' }] }) });
+    const status = wardenStatus({ config: wardenConfig({ accounts: [{ agent: 'codex-default' }] }) });
     const empty = { config: { ...wardenConfig(), accounts: [] } };
 
     // Act / Assert
-    expect(investigatorLabel(status)).toBe('terra');
+    expect(investigatorLabel(status)).toBe('codex-default');
     expect(investigatorLabel(empty)).toBe('no login');
+  });
+
+  it('should say why AI triage fell back to rules for want of a login, and where to choose one', () => {
+    // Arrange
+    const noLogin = { configured: 'llm', effective: 'rules', reason: 'no_login' } as const;
+    const unset = wardenStatus({ triage: noLogin, login: { source: 'not_set', unknown: [], available: [] } });
+    const older = wardenStatus({ triage: noLogin });
+
+    // Act / Assert
+    expect(wardenStatusLine(unset, NOW).warning).toBe(
+      'No investigation login is set — rules only until you choose one in Settings › Warden',
+    );
+    expect(wardenStatusLine(older, NOW).warning).toBe(
+      'No investigation login — rules only until you choose one in Settings › Warden',
+    );
   });
 });
 
@@ -308,7 +323,7 @@ describe('needsYouRows', () => {
             state: 'judged',
             verdict: 'needs_human',
             reason: 'Only you can choose.',
-            judgedBy: { agent: 'claude-auto-loge', model: 'sonnet' },
+            judgedBy: { agent: 'claude-default', model: 'sonnet' },
           },
         }),
         attentionItem({
@@ -334,7 +349,7 @@ describe('needsYouRows', () => {
       teammate: 'marin',
       label: 'Flaky test',
       reason: 'Which relay? — Waiting for your answer.',
-      detail: 'Judged by claude-auto-loge · sonnet',
+      detail: 'Judged by claude-default · sonnet',
       chips: [
         { label: 'question', tone: 'warn' },
         { label: 'long think', tone: 'warn' },
@@ -559,7 +574,7 @@ describe('investigationRows', () => {
           anomalyKind: 'sus_thinking',
           finishedAt: ago(2),
           reportPath: 'r/done.md',
-          agent: 'claude-auto-loge',
+          agent: 'claude-default',
           model: 'sonnet',
           costUsd: 0.31,
         }),
@@ -598,7 +613,7 @@ describe('investigationRows', () => {
       key: 'investigation:done',
       sessionId: 'sess-1',
       reason: 'Jev sent it for a closer look: long think',
-      detail: 'claude-auto-loge · sonnet · $0.31',
+      detail: 'claude-default · sonnet · $0.31',
       chips: [{ label: 'leave', tone: 'ok' }],
       at: ago(2),
       reportPath: 'r/done.md',
@@ -621,7 +636,7 @@ describe('actionRows', () => {
     const actions = [
       wardenAction({
         action: 'failover',
-        agent: 'claude-auto-loge2',
+        agent: 'claude-spare',
         anomalyKind: 'quota_reset_passed',
         reportPath: 'r.md',
       }),
@@ -642,7 +657,7 @@ describe('actionRows', () => {
       chips: [
         { label: 'failed over', tone: 'accent' },
         { label: 'quota reset', tone: 'pend' },
-        { label: '→ claude-auto-loge2', tone: 'pend' },
+        { label: '→ claude-spare', tone: 'pend' },
       ],
       at: actions[0]?.at,
       reportPath: 'r.md',
@@ -654,19 +669,19 @@ describe('actionRows', () => {
 describe('accountChip', () => {
   it('should mark the login in use and say why one cannot be used', () => {
     // Arrange / Act / Assert
-    expect(accountChip(wardenAccount(), 'claude-auto-loge')).toEqual({ label: 'loge · in use', tone: 'ok' });
-    expect(accountChip(wardenAccount({ agent: 'claude-auto-loge2' }), 'claude-auto-loge')).toEqual({
-      label: 'loge2',
+    expect(accountChip(wardenAccount(), 'claude-default')).toEqual({ label: 'claude-default · in use', tone: 'ok' });
+    expect(accountChip(wardenAccount({ agent: 'claude-spare' }), 'claude-default')).toEqual({
+      label: 'claude-spare',
       tone: 'ok',
     });
     expect(
-      accountChip(wardenAccount({ agent: 'codex-auto-terra', eligible: false, reason: 'at limit' }), undefined),
+      accountChip(wardenAccount({ agent: 'codex-default', eligible: false, reason: 'at limit' }), undefined),
     ).toEqual({
-      label: 'terra · at limit',
+      label: 'codex-default · at limit',
       tone: 'warn',
     });
     expect(accountChip(wardenAccount({ eligible: false }), undefined)).toEqual({
-      label: 'loge · unavailable',
+      label: 'claude-default · unavailable',
       tone: 'warn',
     });
   });

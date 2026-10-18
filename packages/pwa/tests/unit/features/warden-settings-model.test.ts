@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import type { WardenConfig } from '@ferretry/protocol';
+import type { WardenConfig, WardenConfigView } from '@ferretry/protocol';
 import {
   hasWardenFormErrors,
   movedAccount,
   WARDEN_FORM_LIMITS,
   wardenConfigPatchFrom,
   wardenFormErrors,
+  wardenMachineDefaultLogin,
   wardenSummary,
   withLogin,
 } from '../../../src/features/warden/warden-settings-model.ts';
@@ -87,7 +88,7 @@ describe('wardenSummary', () => {
     // Arrange
     const config = wardenConfig({
       triage: 'llm',
-      accounts: [{ agent: 'claude-auto-loge', model: 'claude-sonnet-5-5' }, { agent: 'claude-auto-loge2' }],
+      accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }, { agent: 'claude-spare' }],
       mayActAlone: { nudge: true, resume: false, failover: false, stop: true },
     });
 
@@ -96,7 +97,7 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toBe(
-      'Every 2 min the sweep flags anomalies, and every flag gets a read-only claude-sonnet-5-5 investigation on claude-auto-loge (low effort, 1 at a time; failover claude-auto-loge → claude-auto-loge2), as kteam does. Cap: $2.00/day. When an investigation’s verdict says so, it may nudge and stop on its own.',
+      'Every 2 min the sweep flags anomalies, and every flag gets a read-only claude-sonnet-5-5 investigation on claude-default (low effort, 1 at a time; failover claude-default → claude-spare), as kteam does. Cap: $2.00/day. When an investigation’s verdict says so, it may nudge and stop on its own.',
     );
   });
 
@@ -120,7 +121,7 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toBe(
-      'Every 2 min the sweep flags anomalies. Jev only guards: it skips a flag (healthy, then blesses that anomaly for 15 min) when it is at least 85% sure. Anything else, including when it is unsure, goes to a read-only investigation on claude-auto-loge (low effort, 1 at a time; failover claude-auto-loge). Caps: $0.50/day for Jev and $2.00/day for investigations. When an investigation’s verdict says so, it may nudge, resume or revive and fail over to the next login on its own; stopping always asks you first.',
+      'Every 2 min the sweep flags anomalies. Jev only guards: it skips a flag (healthy, then blesses that anomaly for 15 min) when it is at least 85% sure. Anything else, including when it is unsure, goes to a read-only investigation on claude-default (low effort, 1 at a time; failover claude-default). Caps: $0.50/day for Jev and $2.00/day for investigations. When an investigation’s verdict says so, it may nudge, resume or revive and fail over to the next login on its own; stopping always asks you first.',
     );
   });
 
@@ -138,9 +139,36 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toContain('blesses that anomaly for (fix)');
-    expect(summary).toContain('investigation on no login (low effort, (fix) at a time; failover )');
+    expect(summary).toContain('investigation on no login (low effort, (fix) at a time; failover no login)');
     expect(summary).toContain('Caps: (fix)/day for Jev and (fix)/day for investigations.');
     expect(summary.endsWith(' Needs a Jev key: until one is added, every flag is investigated.')).toBe(true);
+  });
+});
+
+describe('the machine default login', () => {
+  it('should name the default runtime only when the daemon stood it in', () => {
+    // Arrange
+    const standIn: Pick<WardenConfigView, 'accounts' | 'login'> = {
+      accounts: [{ agent: 'claude-default' }],
+      login: { source: 'machine_default', unknown: [], available: [] },
+    };
+    const chosen: Pick<WardenConfigView, 'accounts' | 'login'> = {
+      accounts: [{ agent: 'claude-spare' }],
+      login: { source: 'configured', unknown: [], available: [] },
+    };
+
+    // Act / Assert
+    expect(wardenMachineDefaultLogin(standIn)).toBe('claude-default');
+    expect(wardenMachineDefaultLogin(chosen)).toBeUndefined();
+    expect(wardenMachineDefaultLogin({ accounts: [] })).toBeUndefined();
+  });
+
+  it('should summarise an empty order as running on the machine default', () => {
+    // Act
+    const summary = wardenSummary(wardenConfig({ triage: 'llm', accounts: [] }), true, 'claude-default');
+
+    // Assert
+    expect(summary).toContain('investigation on claude-default (low effort, 1 at a time; failover claude-default)');
   });
 });
 
