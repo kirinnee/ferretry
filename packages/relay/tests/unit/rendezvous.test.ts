@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import {
   CLAIM_DEADLINE_SECONDS,
   CONNECTION_RATE_LIMIT,
+  CONNECTION_RATE_WINDOW_SECONDS,
   type ControlMessage,
   CREDIT_WINDOW_FRAMES,
   decodeControlMessage,
@@ -279,6 +280,8 @@ describe('rendezvous: claiming the slot', () => {
     });
     should(closures(rateLimited.effects)[0]?.reason).match(/too many connections/u);
 
+    // Clients retrying against an absent daemon spend THEIR window, never the daemon's: the returning
+    // daemon is the one socket that ends the outage, and it used to be refused `4429` until they stopped.
     const laterDaemon = reduceRendezvous(flooded, {
       kind: 'daemon-arrived',
       socketId: 'late',
@@ -286,7 +289,46 @@ describe('rendezvous: claiming the slot', () => {
       host,
       at: 1_100,
     });
-    should(closures(laterDaemon.effects)[0]?.reason).match(/too many connections/u);
+    should(closures(laterDaemon.effects)).deepEqual([]);
+    should(messagesTo(laterDaemon.effects, 'late')[0]).match({ t: 'challenge' });
+  });
+
+  it('should bound daemon arrivals in a window of their own, and read stored state that has none', () => {
+    // State an earlier deploy stored has no daemon window; it reads as empty.
+    let state: RendezvousState = { daemonId, daemon: null, pending: [], sessions: [], arrivals: [] };
+    for (let index = 0; index < CONNECTION_RATE_LIMIT; index += 1) {
+      const step = reduceRendezvous(state, {
+        kind: 'daemon-arrived',
+        socketId: `redial-`,
+        challenge: new Uint8Array(32),
+        host,
+        at: 1_000 + index,
+      });
+      // Refused for want of a pending slot after the first few, and every refusal still counts.
+      state = { ...step.state, pending: [] };
+    }
+    const flooding = reduceRendezvous(state, {
+      kind: 'daemon-arrived',
+      socketId: 'one-more',
+      challenge: new Uint8Array(32),
+      host,
+      at: 1_100,
+    });
+    should(closures(flooding.effects)[0]).match({
+      code: RELAY_CLOSE_CODES.rendezvousBusy,
+      reason: /too many connections/u,
+    });
+    should(flooding.state.arrivals).deepEqual([]);
+
+    // The window slides: a minute later the daemon is admitted again.
+    const later = reduceRendezvous(state, {
+      kind: 'daemon-arrived',
+      socketId: 'a-minute-later',
+      challenge: new Uint8Array(32),
+      host,
+      at: 1_100 + CONNECTION_RATE_WINDOW_SECONDS * 1000,
+    });
+    should(messagesTo(later.effects, 'a-minute-later')[0]).match({ t: 'challenge' });
   });
 });
 

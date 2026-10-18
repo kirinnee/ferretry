@@ -489,8 +489,11 @@ never re-sent blind — the send ledger decides, from evidence, whether it arriv
 refused by a self-hosted deployment's stateless Worker before any Durable Object exists. The hosted
 deployment deliberately accepts any valid fingerprint, reserves account-wide capacity before
 routing it, and explains a refusal over an accepted WebSocket before closing so a browser can show
-the real reason. Beyond that: at most 4 unproved daemon sockets, at most 30 socket arrivals per
-rendezvous per minute, and every limit above.
+the real reason. Beyond that: at most 4 unproved daemon sockets, at most 30 client socket arrivals per
+rendezvous per minute, a separate 30 for the daemon, and every limit above. Refused arrivals count.
+The two windows are separate so that clients retrying against an absent daemon — every phone after a
+relay restart — can never spend the budget the returning daemon needs to end the outage; they once
+shared one, and the daemon was refused `4429` for as long as the clients kept trying.
 
 ### Close codes
 
@@ -1301,9 +1304,8 @@ ended (`4400`). At most **6** sessions per link may be pre-credential at once, c
 `awaiting-hello` and `awaiting-credential`; a further arrival is refused (`4429`) until a slot frees.
 Six admits two ordinary three-session device bursts. Keeping all six slots occupied continuously
 would cost 36 arrivals per minute against the rendezvous's sliding 30-per-minute admission cap, but
-that is a cost rather than a proof against a maximal attacker. The cap is shared by the daemon and
-every client; an attacker spending all 30 arrivals can hold five slots and deny honest arrivals at
-the rendezvous instead of at this link. The pre-credential bound prices a squat and does not prevent
+that is a cost rather than a proof against a maximal attacker. The client cap is shared by every client (the daemon has its own); an attacker spending all 30 client
+arrivals can hold five slots and deny honest clients at the rendezvous instead of at this link. The pre-credential bound prices a squat and does not prevent
 one. A client that opens several sessions at once must therefore treat `4429` as retryable rather
 than fatal. **That is a requirement, and the reference client meets it only by accident**: nothing
 in it reads `4429`, and what recovers does so because it retries every
