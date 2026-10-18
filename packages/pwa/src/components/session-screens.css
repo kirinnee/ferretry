@@ -785,7 +785,7 @@ button.fy-receipt {
   line-height: 1.35;
   margin: 0;
 }
-/* THE LIVE ACTIVITY LINE: the harness's own verb with a ring spinner, its clock and tokens. */
+/* THE LIVE ACTIVITY LINE: the harness's own verb beside the theme's busy mark (spinner.css), its live clock and tokens. */
 .fy-live-activity {
   align-items: center;
   color: var(--fy-muted);
@@ -801,25 +801,6 @@ button.fy-receipt {
 }
 .fy-live-activity-detail {
   font-variant-numeric: tabular-nums;
-}
-.fy-live-activity-spinner {
-  animation: fy-live-activity-spin 1s linear infinite;
-  border: 2px solid var(--fy-border);
-  border-radius: 50%;
-  border-top-color: var(--fy-accent);
-  flex: 0 0 auto;
-  height: 14px;
-  width: 14px;
-}
-@keyframes fy-live-activity-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .fy-live-activity-spinner {
-    animation: none;
-  }
 }
 /* A SLASH COMMAND the human ran: one compact line and no card, like a tool run beside it.
    The command and its arguments are mono because they are what was typed; the output is muted

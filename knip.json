@@ -33,6 +33,7 @@
         "harness/screenshot.ts",
         "harness/release-notice-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
+        "harness/live-activity-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
         "harness/app-screenshot.ts",
         "harness/main.tsx",

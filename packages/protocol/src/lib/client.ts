@@ -30,6 +30,7 @@ import type {
   StructuredQuestionAnswer,
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
+import type { SessionLiveActivity } from './session-live.ts';
 import type { SessionTranscriptPage } from './session-transcript.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
@@ -199,6 +200,11 @@ export interface IFyApiClient {
     onEvent: (event: FyEvent) => void,
     signal?: AbortSignal,
     onIdle?: (idle: FyEventStreamIdle) => void,
+    /**
+     * Asks a per-session stream for its working turn's live readout (`?live=1`) and receives each
+     * sample. Ignored for a fleet stream, which has no one turn to read.
+     */
+    onLive?: (live: SessionLiveActivity) => void,
   ): Promise<void>;
   /**
    * The configuration stream (`/v1/events?topic=config`): the revision in effect first, then every

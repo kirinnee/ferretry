@@ -293,6 +293,7 @@ import {
   sessionMessageTokenKeyFile,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
+import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
@@ -6924,6 +6925,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       adoptLearning = async id => {
         await learning.transaction(async () => await learning.lessons.adopt(id));
       };
+      // Whose turn it is, from the transcript and the live pane — read through the SAME tmux server
+      // the launch path addresses, and the same proved transcript file every other read uses. The
+      // live readout (`?live=1` on a session's event stream) reads through these same ports, so the
+      // turn it times and the turn the watcher reports are one boundary.
+      const transcriptFileOf = (() => {
+        const resolver = createTranscriptFileResolver(storage);
+        return async (id: SessionId) => await resolver.file(id);
+      })();
+      const turnPorts = new StorageTurnPorts(
+        storage,
+        createSessionTranscriptTail(storage),
+        transcriptFileOf,
+        launchTmux,
+        clock,
+      );
+      const liveActivity = new StorageLiveActivitySource(
+        {
+          readState: async id => await storage.readState(id),
+          paneState: async id => await turnPorts.paneState(id),
+          transcriptFile: transcriptFileOf,
+        },
+        createSessionTranscriptTail(storage),
+        clock,
+      );
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -7155,20 +7180,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
-        // Whose turn it is, from the transcript and the live pane — read through the SAME tmux server
-        // the launch path addresses, and the same proved transcript file every other read uses.
-        turns: new SessionTurnWatcher(
-          new StorageTurnPorts(
-            storage,
-            createSessionTranscriptTail(storage),
-            (() => {
-              const resolver = createTranscriptFileResolver(storage);
-              return async (id: SessionId) => await resolver.file(id);
-            })(),
-            launchTmux,
-            clock,
-          ),
-        ),
+        turns: new SessionTurnWatcher(turnPorts),
         sessionMigrate,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
@@ -7295,6 +7307,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               return { cancel: () => clearTimeout(timer) };
             },
           },
+          liveActivity,
         ),
         // Built above, and the same instance the fleet mount confirms a change through. See its
         // definition for why one instance rather than two.

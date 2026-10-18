@@ -1,4 +1,4 @@
-import type { FyEvent, IFyApiClient } from '@ferretry/protocol';
+import type { FyEvent, IFyApiClient, SessionLiveActivity } from '@ferretry/protocol';
 
 /**
  * What a reader is allowed to be told about the live feed, and nothing finer.
@@ -127,6 +127,12 @@ export interface SessionEventStreamInput {
   readonly after?: number;
   readonly environment: SessionEventStreamEnvironment;
   readonly onEvent: (event: FyEvent) => void;
+  /**
+   * Asks the daemon for the working turn's live readout (`?live=1`) and receives each sample. A
+   * sample is traffic like any frame — it proves the feed is live — but it is never an event: it
+   * advances no cursor and triggers no re-read.
+   */
+  readonly onLive?: (live: SessionLiveActivity) => void;
   /** Called on every CHANGE of state, never on a repeat, so a host can hand it straight to `setState`. */
   readonly onStatus?: (status: SessionEventStreamStatus) => void;
   /** Overridable only so a test can exhaust the schedule; production uses the shipped budget. */
@@ -320,6 +326,13 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
           declaredIdleSeconds = idle.idleSeconds;
           watch();
         },
+        input.onLive === undefined
+          ? undefined
+          : live => {
+              if (!proved(currentAttempt)) return;
+              watch();
+              input.onLive?.(live);
+            },
       )
       .then(finish, finish);
   }

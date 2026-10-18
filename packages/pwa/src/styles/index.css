@@ -1,6 +1,7 @@
 @import './themes.css';
 @import './highlight.css';
 @import '../components/session-screens.css';
+@import '../components/spinner.css';
 @import '../components/files.css';
 @import '../components/fy-render.css';
 @import '../components/web-terminals.css';

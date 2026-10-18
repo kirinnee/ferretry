@@ -104,6 +104,7 @@ import {
   StartSessionRequestSchema,
   StopSessionRequestSchema,
 } from '../lib/session.ts';
+import { SESSION_LIVE_STREAM_FLAG, type SessionLiveActivity } from '../lib/session-live.ts';
 import {
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
@@ -858,11 +859,13 @@ export class FyApiClient implements IFyApiClient {
     onEvent: (event: FyEvent) => void,
     signal?: AbortSignal,
     onIdle?: (idle: FyEventStreamIdle) => void,
+    onLive?: (live: SessionLiveActivity) => void,
   ): Promise<void> {
     const url = new URL(`${this.#baseUrl}/v1/events`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('after', String(NonNegativeIntegerSchema.parse(after)));
     if (sessionId !== undefined) url.searchParams.set('sessionId', NonEmptyValueSchema.parse(sessionId));
+    if (sessionId !== undefined && onLive !== undefined) url.searchParams.set('live', SESSION_LIVE_STREAM_FLAG);
     return this.#eventTransport.stream({
       url: url.toString(),
       token: this.#token,
@@ -870,6 +873,7 @@ export class FyApiClient implements IFyApiClient {
       onMessage: value => {
         const frame = FyEventStreamFrameSchema.parse(value);
         if (frame.kind === 'event') onEvent(frame.event);
+        else if (frame.kind === 'live') onLive?.(frame.live);
         else onIdle?.(frame);
       },
     });

@@ -122,6 +122,7 @@ import { daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
+import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import type { NotificationCategory, QuietHours } from './lib/notification-filter.ts';
 import type {
   NotificationPermissionState,
@@ -922,6 +923,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: the session id is the hub's identity
   const surfaceEvents = useMemo(() => createSurfaceEventHub(), [daemonId, sessionId]);
+  // The working turn's live readout rides the same socket (`?live=1`); one hub per session, like the above.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the session id is the hub's identity
+  const liveActivity = useMemo(() => createLiveActivityHub(), [daemonId, sessionId]);
   /**
    * The carrier this daemon's traffic is MEASURED on, subscribed rather than read once.
    *
@@ -1071,6 +1075,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         surfaceEvents.publish(event);
         void refreshControl.current?.refresh(true);
       },
+      onLive: live => liveActivity.publish(live),
       // Stamped with the owner, so a report can never be read by a later one. The model publishes
       // nothing after `stop()`, and even if it did, a report from a replaced owner is discarded at
       // render rather than believed.
@@ -1082,7 +1087,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       stream.stop();
       if (streamControl.current === stream) streamControl.current = null;
     };
-  }, [daemonId, store.connectionHealth, streamOwner, surfaceEvents]);
+  }, [daemonId, liveActivity, store.connectionHealth, streamOwner, surfaceEvents]);
 
   /**
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
@@ -1216,6 +1221,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           refreshError={sessionIssue}
           session={session}
           surfaceEvents={surfaceEvents}
+          liveActivity={liveActivity}
           usage={store.usage}
         />
       ) : (

@@ -19,7 +19,8 @@
  * outage that prompted this was seen. The shell mounts this once in its content column instead.
  */
 
-import { CircleAlert, CloudOff, LoaderCircle, PowerOff, RefreshCw, WifiOff } from 'lucide-react';
+import { CircleAlert, CloudOff, PowerOff, RefreshCw, WifiOff } from 'lucide-react';
+import { Spinner } from '../../components/spinner.tsx';
 import { type ReactNode, useId, useState } from 'react';
 import { useConnectionHealth } from '../../hooks/use-connection-health.ts';
 import { useLiveClock } from '../../hooks/use-live-clock.ts';
@@ -53,7 +54,7 @@ interface ConnectionPillProps {
   readonly onOpen: () => void;
 }
 
-/** The small one-line pill. A real button; the spinner stops under reduced motion. */
+/** The small one-line pill. A real button; under reduced motion the spinner pulses instead of turning. */
 function ConnectionPill({ state, now, sheetId, sheetOpen, onOpen }: ConnectionPillProps) {
   const detail = pillDetail(state, now);
   return (
@@ -67,7 +68,7 @@ function ConnectionPill({ state, now, sheetId, sheetOpen, onOpen }: ConnectionPi
       data-connection-pill=""
       className="kt-btn kt-btn--sm min-h-control max-w-full items-center gap-xs rounded-full text-muted"
     >
-      <LoaderCircle size={13} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />
+      <Spinner size={13} />
       <span className="truncate text-fg">{RECONNECTING_LABEL}</span>
       {detail === null ? null : (
         <span className="truncate text-meta" data-connection-pill-detail="">

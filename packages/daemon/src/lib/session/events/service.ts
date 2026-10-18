@@ -1,6 +1,12 @@
-import { type FyEventStreamFrame, FyEventStreamFrameSchema, type FyEventStreamIdleScope } from '@ferretry/protocol';
+import {
+  type FyEventStreamFrame,
+  FyEventStreamFrameSchema,
+  type FyEventStreamIdleScope,
+  type SessionLiveActivity,
+} from '@ferretry/protocol';
 import type { SocketDownstream, SocketFrame, SocketHandler } from '../../api/socket.ts';
 import { journalEventToFyEvent, type StoredSessionEvent } from '../reads/service.ts';
+import { sameLiveReading } from '../live/policy.ts';
 
 /** The source-compatible fleet backfill bound: recent tail, then live. */
 export const FLEET_EVENT_BACKLOG_LIMIT = 5_000;
@@ -10,6 +16,12 @@ export const EVENT_STREAM_IDLE_MS = 30_000;
 export const EVENT_STREAM_MAX_PENDING = 4_096;
 /** A slow reader may hold at most one MiB in the host socket. */
 export const EVENT_STREAM_MAX_BUFFER_BYTES = 1_024 * 1_024;
+/**
+ * How often a `?live=1` stream samples its working turn: twice a second. Fast enough that the
+ * reader's count-up always has a fresh target, slow enough that a watched session costs one pane
+ * capture per half second. A sample that says nothing new sends nothing.
+ */
+export const LIVE_SAMPLE_MS = 500;
 
 export const FLEET_EVENT_STREAM_CLOSES = {
   clientFrame: { code: 1008, reason: 'event stream is server-only' },
@@ -18,7 +30,7 @@ export const FLEET_EVENT_STREAM_CLOSES = {
 } as const;
 
 export type FleetEventStreamScope =
-  | { readonly kind: 'session'; readonly sessionId: string; readonly after: number }
+  | { readonly kind: 'session'; readonly sessionId: string; readonly after: number; readonly live?: boolean }
   | { readonly kind: 'fleet' };
 
 export interface FleetEventBacklog {
@@ -38,6 +50,14 @@ export interface FleetEventSource {
   ): Promise<readonly StoredSessionEvent[]>;
   fleetBacklog(limit: number, signal: AbortSignal): Promise<FleetEventBacklog>;
   subscribe(listener: (event: StoredSessionEvent) => void): () => void;
+}
+
+/**
+ * A working turn's live readout, read on demand. `undefined` when the session cannot be read right
+ * now; a throw is treated the same, because a readout is a courtesy and never a reason to end a feed.
+ */
+export interface LiveActivitySource {
+  sample(sessionId: string, signal: AbortSignal): Promise<SessionLiveActivity | undefined>;
 }
 
 export interface EventStreamTimer {
@@ -96,6 +116,8 @@ class FleetEventSocketHandler implements SocketHandler {
   private pending: StoredSessionEvent[] = [];
   private unsubscribe: (() => void) | undefined;
   private idle: EventStreamTimer | undefined;
+  private live: EventStreamTimer | undefined;
+  private lastLive: SessionLiveActivity | undefined;
   private replaying = true;
   private closed = false;
 
@@ -104,6 +126,7 @@ class FleetEventSocketHandler implements SocketHandler {
     private readonly source: FleetEventSource,
     private readonly scheduler: EventStreamScheduler,
     private readonly downstream: SocketDownstream,
+    private readonly liveSource?: LiveActivitySource,
   ) {
     if (scope.kind === 'session') {
       this.cursors.set(scope.sessionId, scope.after);
@@ -130,6 +153,7 @@ class FleetEventSocketHandler implements SocketHandler {
         if (!this.deliver(event, true, false)) return;
       }
       this.armIdle();
+      this.armLive(0);
     } catch {
       if (!this.closed && !this.abort.signal.aborted) this.fail(FLEET_EVENT_STREAM_CLOSES.evidence);
     }
@@ -260,6 +284,44 @@ class FleetEventSocketHandler implements SocketHandler {
     });
   }
 
+  /**
+   * Sample the working turn, send what changed, and come back in {@link LIVE_SAMPLE_MS}.
+   *
+   * Only a per-session stream that asked (`?live=1`) runs this, and only after its replay: a reader is
+   * told the durable history before the present. One sample is in flight at a time — the next is
+   * scheduled when this one settles — so a slow read slows the readout rather than stacking reads.
+   * A failed or unparseable sample is skipped, never fatal: the feed is the record, the readout is not.
+   */
+  private armLive(delayMs: number): void {
+    const source = this.liveSource;
+    if (this.closed || source === undefined || this.scope.kind !== 'session' || this.scope.live !== true) return;
+    const sessionId = this.scope.sessionId;
+    this.live = this.scheduler.after(delayMs, () => {
+      this.live = undefined;
+      void this.sampleLive(source, sessionId);
+    });
+  }
+
+  private async sampleLive(source: LiveActivitySource, sessionId: string): Promise<void> {
+    const sample = await source.sample(sessionId, this.abort.signal).catch(() => undefined);
+    if (this.closed) return;
+    if (sample !== undefined && !sameLiveReading(this.lastLive, sample)) {
+      // `send` parses the frame first; a sample the schema refuses is dropped, not sent and not remembered.
+      let sent: boolean | undefined;
+      try {
+        sent = this.send({ kind: 'live', live: sample });
+      } catch {
+        sent = undefined;
+      }
+      if (sent === false) return;
+      if (sent === true) {
+        this.lastLive = sample;
+        this.armIdle();
+      }
+    }
+    this.armLive(LIVE_SAMPLE_MS);
+  }
+
   private fail(close: { readonly code: number; readonly reason: string }): void {
     if (this.closed) return;
     this.close();
@@ -276,6 +338,8 @@ class FleetEventSocketHandler implements SocketHandler {
     this.abort.abort(new Error('event stream closed'));
     this.idle?.cancel();
     this.idle = undefined;
+    this.live?.cancel();
+    this.live = undefined;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.pending = [];
@@ -287,9 +351,11 @@ export class FleetEventStreamService {
   constructor(
     private readonly source: FleetEventSource,
     private readonly scheduler: EventStreamScheduler,
+    /** The live readout behind `?live=1`. Absent, such a stream simply carries no `live` frames. */
+    private readonly liveSource?: LiveActivitySource,
   ) {}
 
   handler(scope: FleetEventStreamScope, downstream: SocketDownstream): SocketHandler {
-    return new FleetEventSocketHandler(scope, this.source, this.scheduler, downstream);
+    return new FleetEventSocketHandler(scope, this.source, this.scheduler, downstream, this.liveSource);
   }
 }
