@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { WebSocketEventTransport } from '../../src/adapters/fy-api-client.ts';
 import type { IFyFileLoader } from '../../src/lib/client.ts';
 import type { FyEvent } from '../../src/lib/session.ts';
-import { attachmentView, fyEvent, INSTANT } from '../fixtures.ts';
+import { attachmentView, fyEvent, INSTANT, liveFrame } from '../fixtures.ts';
 import { BASE_URL, connectClient } from './client-harness.ts';
 import { captureError, jsonResponse, QueuedEventTransport, QueuedHttpTransport } from './fakes.ts';
 
@@ -260,6 +260,88 @@ describe('FyApiClient event streaming', () => {
 
     // Assert
     should(received).deepEqual([eventAt(4)]);
+  });
+
+  it('should ask a session stream for live samples only when a handler is supplied, and route them there', async () => {
+    // Arrange — a sample between two events, as a `?live=1` stream interleaves them.
+    const eventTransport = new QueuedEventTransport(eventFrame(4), liveFrame, eventFrame(5));
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const received: FyEvent[] = [];
+    const samples: unknown[] = [];
+
+    // Act
+    await client.stream(
+      SESSION_ID,
+      3,
+      event => received.push(event),
+      undefined,
+      undefined,
+      live => samples.push(live),
+    );
+
+    // Assert — the flag is on the wire, and the sample never reached the event handler.
+    should(eventTransport.calls[0]?.url).equal('ws://daemon.test/api/v1/events?after=3&sessionId=session-1&live=1');
+    should(received).deepEqual([eventAt(4), eventAt(5)]);
+    should(samples).deepEqual([liveFrame.live]);
+  });
+
+  it('should request no live samples from a stream that has no handler, and still validate one that arrives', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport(liveFrame, eventFrame(4));
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const received: FyEvent[] = [];
+
+    // Act — no `onLive`: the flag is not sent, and a sample that came anyway is dropped, not an event.
+    await client.stream(SESSION_ID, 3, event => received.push(event));
+
+    // Assert
+    should(eventTransport.calls[0]?.url).equal('ws://daemon.test/api/v1/events?after=3&sessionId=session-1');
+    should(received).deepEqual([eventAt(4)]);
+  });
+
+  it('should never ask a fleet-wide stream for live samples, whatever handler is supplied', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport();
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+
+    // Act
+    await client.stream(
+      undefined,
+      0,
+      () => undefined,
+      undefined,
+      undefined,
+      () => undefined,
+    );
+
+    // Assert — a fleet has no one turn to read.
+    should(eventTransport.calls[0]?.url).equal('ws://daemon.test/api/v1/events?after=0');
+  });
+
+  it('should refuse a malformed live frame instead of handing the caller a bad sample', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport({
+      kind: 'live',
+      live: { ...liveFrame.live, outputTokens: -1 },
+    });
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const samples: unknown[] = [];
+
+    // Act
+    const actual = await captureError(() =>
+      client.stream(
+        SESSION_ID,
+        3,
+        () => undefined,
+        undefined,
+        undefined,
+        live => samples.push(live),
+      ),
+    );
+
+    // Assert
+    should(actual instanceof z.ZodError).be.true();
+    should(samples).be.empty();
   });
 
   it('should hand the caller cancellation straight to the socket transport', async () => {

@@ -332,6 +332,19 @@ describe('the turn watcher over real panes and transcripts', () => {
     should(await unreadable.transcript(subject.id)).be.undefined();
   }, 30_000);
 
+  it('should hand back the live pane as captured, for readers that parse it themselves', async () => {
+    // Arrange — the live readout reads the harness's own counter off the same capture the watcher uses.
+    const subject = await fixture('claude', CLAUDE_WORKING);
+    await subject.settle();
+
+    // Act
+    const pane = await subject.ports.paneState(subject.id);
+
+    // Assert
+    should(pane?.alive).be.true();
+    should(pane?.visible).containEql('Pontificating… (3s · ↓ 1.2k tokens');
+  }, 30_000);
+
   it('should read no pane and no transcript for a session without either', async () => {
     const subject = await fixture('claude', CLAUDE_IDLE);
     const bare = new StorageTurnPorts(
@@ -352,5 +365,7 @@ describe('the turn watcher over real panes and transcripts', () => {
     );
     should(await missing.transcript(subject.id)).be.undefined();
     should(await missing.pane(subject.id)).be.undefined();
+    should(await missing.paneState(subject.id)).be.undefined();
+    should(await bare.paneState(subject.id)).be.undefined();
   }, 30_000);
 });

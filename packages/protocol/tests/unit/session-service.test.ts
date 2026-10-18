@@ -15,6 +15,7 @@ import {
   scratchPlanView,
   scratchSweepView,
   sessionAttachTarget,
+  liveFrame,
   sessionIdleFrame,
   sessionView,
   usageFeedView,
@@ -185,6 +186,7 @@ const sessionCases: SchemaCase[] = [
   { name: 'event frame', schema: session.FyEventStreamFrameSchema, value: fyEventFrame },
   { name: 'session idle frame', schema: session.FyEventStreamFrameSchema, value: sessionIdleFrame },
   { name: 'fleet idle frame', schema: session.FyEventStreamFrameSchema, value: fleetIdleFrame },
+  { name: 'live frame', schema: session.FyEventStreamFrameSchema, value: liveFrame },
   {
     name: 'start request',
     schema: session.StartSessionRequestSchema,
@@ -591,6 +593,23 @@ describe('session schemas', () => {
         name: 'an idle frame that also smuggles an event',
         schema: session.FyEventStreamFrameSchema,
         value: { ...sessionIdleFrame, event: fyEvent },
+      },
+      {
+        // The sample is not an event and not a proof: it rides in a wrapper of its own, or a reader
+        // that never asked for one could not tell it from a journal entry.
+        name: 'a live sample outside the wrapper',
+        schema: session.FyEventStreamFrameSchema,
+        value: liveFrame.live,
+      },
+      {
+        name: 'a live frame carrying a malformed sample',
+        schema: session.FyEventStreamFrameSchema,
+        value: { kind: 'live', live: { ...liveFrame.live, outputTokens: -1 } },
+      },
+      {
+        name: 'a live frame that also smuggles an event',
+        schema: session.FyEventStreamFrameSchema,
+        value: { ...liveFrame, event: fyEvent },
       },
       {
         name: 'a fleet scope inventing a session id',

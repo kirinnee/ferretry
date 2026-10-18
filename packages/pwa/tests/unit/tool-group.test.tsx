@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, jest, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { CodeBlock } from '../../src/components/code-block.tsx';
 import { bodyLanguage, elapsedLabel, summarizeToolRun, ToolGroup } from '../../src/components/tool-group.tsx';
@@ -379,5 +379,42 @@ describe('useLiveClock', () => {
 
     expect(Number(frozen.root.findByType('span').children[0])).toBe(held);
     frozen.unmount();
+  });
+});
+
+describe('a running tool’s clock', () => {
+  test('ticks on the call’s own seconds under a fake clock, formatting minutes and hours', () => {
+    const started = Date.parse('2026-10-18T07:00:00.000Z');
+    jest.useFakeTimers({ now: started + 4_400 });
+    try {
+      const group = render(
+        <ToolGroup
+          calls={[call('a', 'Bash', { command: 'bun test' }, { ts: '2026-10-18T07:00:00.000Z' })]}
+          isLast
+          live
+        />,
+      );
+      expect(textOf(group)).toContain('— 4s');
+
+      run(() => jest.advanceTimersByTime(599));
+      expect(textOf(group)).toContain('— 4s');
+      run(() => jest.advanceTimersByTime(1));
+      expect(textOf(group)).toContain('— 5s');
+
+      run(() => jest.advanceTimersByTime(60_000));
+      expect(textOf(group)).toContain('— 1m 5s');
+      run(() => jest.advanceTimersByTime(3_600_000));
+      expect(textOf(group)).toContain('— 1h 01m');
+      run(() => group.unmount());
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('carries the one spinner mark instead of a bespoke icon', () => {
+    const group = render(<ToolGroup calls={[call('a', 'Bash', { command: 'bun test' })]} isLast live />);
+    expect(group.root.findAllByProps({ 'data-spinner': '' })).toHaveLength(1);
+    expect(iconsOf(group)).not.toContain('lucide-loader-circle');
+    run(() => group.unmount());
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FyEvent, FyEventStreamIdle } from '@ferretry/protocol';
+import type { FyEvent, FyEventStreamIdle, SessionLiveActivity } from '@ferretry/protocol';
 import {
   SESSION_EVENT_STREAM_BACKOFF,
   SESSION_EVENT_STREAM_SILENCE,
@@ -36,6 +36,9 @@ interface Attempt {
   readonly signal: AbortSignal | undefined;
   readonly emit: (event: FyEvent) => void;
   readonly idle: (idle: FyEventStreamIdle) => void;
+  /** Whether the model asked for the live readout at all: a handler was supplied, which is what sets `?live=1`. */
+  readonly asksForLive: boolean;
+  readonly live: (live: SessionLiveActivity) => void;
   /** The daemon closed cleanly. The transport resolves. */
   readonly end: () => void;
   /** The socket died. The transport rejects. */
@@ -58,6 +61,7 @@ class ScriptedStream {
     onEvent: (event: FyEvent) => void,
     signal?: AbortSignal,
     onIdle?: (idle: FyEventStreamIdle) => void,
+    onLive?: (live: SessionLiveActivity) => void,
   ): Promise<void> =>
     await new Promise<void>((resolve, reject) => {
       this.attempts.push({
@@ -66,6 +70,8 @@ class ScriptedStream {
         signal,
         emit: onEvent,
         idle: frame => onIdle?.(frame),
+        asksForLive: onLive !== undefined,
+        live: sample => onLive?.(sample),
         end: resolve,
         fail: () => reject(new Error('WebSocket stream closed unexpectedly: code 1006')),
       });
@@ -130,6 +136,13 @@ const idleFrame = (idleSeconds: number): FyEventStreamIdle => ({
   kind: 'idle',
   idleSeconds,
   scope: { kind: 'session', sessionId: 's1', after: 0 },
+});
+
+const liveSample = (outputTokens: number): SessionLiveActivity => ({
+  sessionId: 's1',
+  at: '2026-08-24T00:00:00.000Z',
+  turnStartedAt: '2026-08-24T00:00:00.000Z',
+  outputTokens,
 });
 
 interface Harness {
@@ -290,6 +303,82 @@ describe('the live feed subscription', () => {
     // daemon's recurring proof would be traffic no reader was any better off for.
     expect(harness.statuses).toEqual(['live']);
     expect(harness.events).toEqual([]);
+    harness.control.stop();
+  });
+
+  test('asks for no live readout, and so requests none, when nobody is listening for one', () => {
+    // Arrange / Act
+    const harness = subject();
+
+    // Assert — the client sets `?live=1` only when it is handed a handler, so none is handed over.
+    expect(harness.transport.last.asksForLive).toBe(false);
+    harness.transport.last.live(liveSample(1));
+    expect(harness.statuses).toEqual([]);
+    harness.control.stop();
+  });
+
+  test('delivers a live sample, proves the feed, and never moves the cursor', async () => {
+    // Arrange
+    const samples: SessionLiveActivity[] = [];
+    const harness = subject({ onLive: sample => samples.push(sample) });
+    expect(harness.transport.last.asksForLive).toBe(true);
+    harness.transport.last.emit(event(7));
+
+    // Act
+    harness.transport.last.live(liveSample(900));
+    harness.transport.last.fail();
+    await settle();
+    harness.clock.fire(500);
+
+    // Assert — the sample arrived whole, and the retry resumes after the last EVENT, not the sample.
+    expect(samples).toEqual([liveSample(900)]);
+    expect(harness.events.map(value => value.sequence)).toEqual([7]);
+    expect(harness.transport.last.after).toBe(7);
+    harness.control.stop();
+  });
+
+  test('a live sample alone takes the feed live, which is all a quiet working session sends', () => {
+    // Arrange
+    const harness = subject({ onLive: () => undefined });
+
+    // Act
+    harness.transport.last.live(liveSample(1));
+
+    // Assert
+    expect(harness.statuses).toEqual(['live']);
+    expect(harness.events).toEqual([]);
+    harness.control.stop();
+  });
+
+  test('a live sample re-arms the silence watch, so a feed that only sends samples is not declared dead', () => {
+    // Arrange
+    const harness = subject({ onLive: () => undefined });
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    const before = harness.clock.armed[0];
+
+    // Act
+    harness.transport.last.live(liveSample(1));
+
+    // Assert — the old deadline was replaced by a fresh one, not left to fire.
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    expect(harness.clock.armed[0]).not.toBe(before);
+    harness.control.stop();
+  });
+
+  test('a late live sample from an ended attempt is discarded', async () => {
+    // Arrange
+    const samples: SessionLiveActivity[] = [];
+    const harness = subject({ onLive: sample => samples.push(sample) });
+    const abandoned = harness.transport.last;
+    abandoned.end();
+    await settle();
+
+    // Act — the settled transport still has a frame in flight.
+    abandoned.live(liveSample(5));
+
+    // Assert
+    expect(samples).toEqual([]);
+    expect(harness.statuses).toEqual(['reconnecting']);
     harness.control.stop();
   });
 

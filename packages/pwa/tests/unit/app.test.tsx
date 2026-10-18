@@ -32,7 +32,9 @@ import {
   type FyEventStreamIdle,
   HealthViewSchema,
   type ProjectInfo,
+  type SessionLiveActivity,
   type SessionStatus,
+  type SessionView,
   type WardenAttentionView,
   type WardenStatusView,
 } from '@ferretry/protocol';
@@ -381,6 +383,8 @@ interface ShellOptions {
    * silent on first sight, so a transition is the only thing that delivers.
    */
   readonly sessionStatus?: () => SessionStatus;
+  /** Overrides on the opened session's state, e.g. a working turn and when it began. */
+  readonly sessionState?: Partial<SessionView['state']>;
   /** Daemon-owned normalized transcript tail returned by `logs`. */
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
   /** Complete Attention board returned by this daemon/session route. */
@@ -425,6 +429,10 @@ interface LiveFeed {
   readonly emit: (event: FyEvent) => void;
   /** The daemon's quiet-but-alive proof, so a late one can be delivered to an abandoned feed. */
   readonly idle: (frame: FyEventStreamIdle) => void;
+  /** Whether the route asked for the working turn's live readout (`?live=1` on the wire). */
+  readonly asksForLive: boolean;
+  /** One live sample, the daemon's half of the same subscription. */
+  readonly live: (sample: SessionLiveActivity) => void;
   /**
    * Ends this subscription the way a daemon going away does.
    *
@@ -523,6 +531,7 @@ const appStore = async (
               teammate: connection.daemonId === alpha.daemonId ? 'Alpha Agent' : 'Beta Agent',
               name: `${connection.daemonId} session`,
             },
+            ...(options.sessionState === undefined ? {} : { state: options.sessionState }),
           });
         },
         list: async () =>
@@ -555,6 +564,7 @@ const appStore = async (
           onEvent: (event: FyEvent) => void,
           signal?: AbortSignal,
           onIdle?: (frame: FyEventStreamIdle) => void,
+          onLive?: (sample: SessionLiveActivity) => void,
         ) => {
           let settled = false;
           const finish = (resolve: () => void) => () => {
@@ -571,6 +581,8 @@ const appStore = async (
               client,
               emit: onEvent,
               idle: frame => onIdle?.(frame),
+              asksForLive: onLive !== undefined,
+              live: sample => onLive?.(sample),
               end: finish(resolve),
               aborted: () => signal?.aborted === true,
               settled: () => settled,
@@ -2490,6 +2502,28 @@ describe('the session route live regions', () => {
     expect(status.textContent).toContain('This session is connected');
     expect(view.container.querySelector('[data-session-error]')).toBe(alert);
     expect(alert.textContent).toBe('');
+
+    await view.unmount();
+  });
+
+  it('carries the stream’s live samples to the working line of the session it belongs to', async () => {
+    const turn = '2026-08-01T09:59:00.000Z';
+    const { liveFeeds, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      sessionState: { status: 'running', turn: 2, turnState: 'working', turnStateAt: turn },
+    });
+    await settle();
+    const feed = must(liveFeeds[0], 'the live event subscription');
+    expect(feed.asksForLive).toBe(true);
+    const figures = () => view.container.querySelector('.fy-live-activity-detail');
+    expect(figures()?.getAttribute('data-live-input')).toBeNull();
+
+    await interact(() =>
+      feed.live({ sessionId: 'shared', at: '2026-08-01T10:00:00.000Z', turnStartedAt: turn, inputTokens: 48_000 }),
+    );
+    await settle();
+
+    expect(figures()?.getAttribute('data-live-input')).toBe('48000');
+    expect(figures()?.textContent).toContain('↑ 48k');
 
     await view.unmount();
   });

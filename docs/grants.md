@@ -549,6 +549,9 @@ command says so at the moment somebody might be tempted to do that instead.
   the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
   would make revoking `fleet` break the session list. If a future event kind carries fleet
   configuration, it needs its own decision.
+  Its `live` frames (`?live=1`, a working turn's verb, clock start and token counts) are read off
+  the same pane and transcript `GET /v1/sessions/:id/snapshot` and `/logs` already return at the same
+  `operator` minimum, so they widen nothing.
 - ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
   the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
   because it grants nothing: it lets this daemon reach the device that asked, and only it. A default

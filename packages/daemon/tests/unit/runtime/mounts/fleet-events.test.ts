@@ -279,6 +279,89 @@ describe('the mounted fleet event feed', () => {
     should(refusedCode(decision)).equal('invalid_query');
   });
 
+  it('should hand a live readout request to the one session it follows', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const decision = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['sessionId', 's1'],
+          ['live', '1'],
+        ],
+        headers: human,
+      }),
+    );
+    await attach(decision);
+
+    // Assert — the flag reaches the handler, and a stream that did not ask carries no `live` key at all.
+    should(decision.outcome).equal('accepted');
+    should(events.scopes).deepEqual([{ kind: 'session', sessionId: 's1', after: 0, live: true }]);
+  });
+
+  it('should refuse a live value other than the flag, rather than guess what was meant', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const decisions = [];
+    for (const value of ['0', 'true', '', '2'])
+      decisions.push(
+        await dispatcher.upgrade(
+          request({
+            path: '/v1/events',
+            query: [
+              ['sessionId', 's1'],
+              ['live', value],
+            ],
+            headers: human,
+          }),
+        ),
+      );
+
+    // Assert
+    should(decisions.map(refusedStatus)).deepEqual([400, 400, 400, 400]);
+    should(new Set(decisions.map(refusedCode))).deepEqual(new Set(['invalid_query']));
+    should(events.scopes).be.empty();
+  });
+
+  it('should refuse a live readout on the fleet stream, which has no one turn to read', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const decision = await dispatcher.upgrade(request({ path: '/v1/events', query: [['live', '1']], headers: human }));
+
+    // Assert — named distinctly from a malformed query, so a client can tell which mistake it made.
+    should(refusedStatus(decision)).equal(400);
+    should(refusedCode(decision)).equal('live_needs_session');
+    should(events.scopes).be.empty();
+  });
+
+  it('should refuse a live flag given twice', async () => {
+    // Arrange
+    const { dispatcher } = fixture();
+
+    // Act
+    const decision = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['sessionId', 's1'],
+          ['live', '1'],
+          ['live', '1'],
+        ],
+        headers: human,
+      }),
+    );
+
+    // Assert
+    should(refusedStatus(decision)).equal(400);
+    should(refusedCode(decision)).equal('invalid_query');
+  });
+
   it('should refuse a query parameter it does not understand', async () => {
     // Arrange
     const { dispatcher } = fixture();
