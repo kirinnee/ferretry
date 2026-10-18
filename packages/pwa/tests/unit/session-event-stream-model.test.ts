@@ -732,3 +732,71 @@ describe('the live feed teardown', () => {
     control.stop();
   });
 });
+
+describe('the daemon coming back', () => {
+  /** A recovery signal the test fires, recording whether anybody still listens. */
+  const recovery = () => {
+    const listeners = new Set<() => void>();
+    return {
+      listeners,
+      onRecovered: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      fire: () => {
+        for (const listener of [...listeners]) listener();
+      },
+    };
+  };
+
+  test('reopens a feed waiting out its backoff at once, from its cursor', async () => {
+    // Arrange — a feed that delivered sequence 7, then lost its socket and is waiting to retry.
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered });
+    harness.transport.last.emit(event(7));
+    harness.transport.last.fail();
+    await settle();
+    expect(harness.control.status()).toBe('reconnecting');
+
+    // Act
+    signal.fire();
+
+    // Assert — no backoff waited out: a second subscription, resuming after 7, and nothing else armed.
+    expect(harness.transport.attempts).toHaveLength(2);
+    expect(harness.transport.last.after).toBe(7);
+    expect(harness.control.status()).toBe('connecting');
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    harness.control.stop();
+  });
+
+  test('reopens a feed that had given up', async () => {
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered, attemptBudget: 0 });
+    harness.transport.last.fail();
+    await settle();
+    expect(harness.control.status()).toBe('disconnected');
+    signal.fire();
+    expect(harness.transport.attempts).toHaveLength(2);
+    harness.control.stop();
+  });
+
+  test('leaves a live feed, and one already connecting, alone', () => {
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered });
+    signal.fire();
+    expect(harness.transport.attempts).toHaveLength(1);
+    harness.transport.last.idle(idleFrame(30));
+    expect(harness.control.status()).toBe('live');
+    signal.fire();
+    expect(harness.transport.attempts).toHaveLength(1);
+    harness.control.stop();
+  });
+
+  test('stops listening when the owner stops it', () => {
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered });
+    expect(signal.listeners.size).toBe(1);
+    harness.control.stop();
+    expect(signal.listeners.size).toBe(0);
+  });
+});
