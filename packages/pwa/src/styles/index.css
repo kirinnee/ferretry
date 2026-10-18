@@ -10,6 +10,7 @@
 @import '../shell/sessions-bar.css';
 @import '../features/session-info/session-info.css';
 @import '../features/session-actions/session-actions.css';
+@import '../features/permission-request/approval-card.css';
 
 /* ============================================================================
    Ferretry UI design system — base elements, shell/layout and component classes.

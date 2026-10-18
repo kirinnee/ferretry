@@ -432,6 +432,64 @@ describe('turn-boundary notifications', () => {
     should(asked[0]?.body).equal('Blocked by a prompt on screen: Make auto mode your default permission mode?');
   });
 
+  describe('a permission prompt', () => {
+    const prompt = (id: string, what: string, teammate?: string): SessionView =>
+      sessionView('s1', {
+        ...(teammate === undefined ? {} : { config: { teammate } }),
+        state: {
+          status: 'running',
+          turn: 4,
+          turnState: 'needs-input',
+          turnStateAt: 't2',
+          permissionRequest: {
+            id,
+            harness: 'claude',
+            tool: 'Read',
+            action: 'read',
+            what,
+            question: 'Do you want to proceed?',
+            options: [
+              { number: 1, label: 'Yes', kind: 'allow' },
+              { number: 2, label: 'No', kind: 'deny' },
+            ],
+            selected: 1,
+          },
+        },
+      });
+    const FIRST = '0123456789abcdef';
+    const SECOND = 'fedcba9876543210';
+
+    it('carries its request id on the boundary, and a new id on the same boundary is a new ask', () => {
+      should(turnBoundary(prompt(FIRST, '/etc/hostname'))).deepEqual({
+        state: 'needs-input',
+        at: 't2',
+        permission: FIRST,
+      });
+      const at = { state: 'needs-input', at: 't2' } as const;
+      should(classifyTurnTransition({ ...at, permission: FIRST }, { ...at, permission: FIRST })).be.null();
+      should(classifyTurnTransition({ ...at, permission: FIRST }, { ...at, permission: SECOND })).equal('question');
+      should(classifyTurnTransition(at, { ...at, permission: FIRST })).equal('question');
+      // A prompt that went away is no new ask.
+      should(classifyTurnTransition({ ...at, permission: FIRST }, at)).be.null();
+    });
+
+    it('notifies each request once, in plain words, keyed by its id', () => {
+      const ledger = new DaemonNotificationLedger();
+      poll(ledger, [turnView('working', 't1')]);
+      const path = '~/.ferretry/sessions/s1/turns/some/deeper/folder/turn-008.md';
+      const asked = poll(ledger, [prompt(FIRST, path, 'hadi')]);
+      should(kinds(asked)).deepEqual(['question']);
+      should(asked[0]?.body).equal('Hadi wants to read ~/…/turn-008.md — Allow?');
+      should(asked[0]?.eventKey).containEql(FIRST);
+      should(poll(ledger, [prompt(FIRST, path, 'hadi')], 2_000)).have.length(0);
+      // Allowed, and parked on the next prompt without the boundary moving.
+      const next = poll(ledger, [prompt(SECOND, '/etc/hosts')], 3_000);
+      should(next[0]?.body).equal('The agent wants to read /etc/hosts — Allow?');
+      should(next[0]?.eventKey).containEql(SECOND);
+      should(poll(ledger, [prompt(SECOND, '/etc/hosts')], 4_000)).have.length(0);
+    });
+  });
+
   it("does not notify the status word a second time beside the turn fact, but keeps a session's ending", () => {
     const ledger = new DaemonNotificationLedger();
     poll(ledger, [turnView('working', 't1')]);

@@ -72,7 +72,8 @@ export function statusMark(view: SessionView): StatusMarkInfo {
   // request for a human, exactly as an unanswered question is. Only a working one breathes.
   const turn = TERMINAL_STATUSES.has(status) || parked ? undefined : view.state.turnState;
   if (turn === 'your-turn') return YOUR_TURN_MARK;
-  if (turn === 'needs-input') return NEEDS_INPUT_MARK;
+  if (turn === 'needs-input')
+    return view.state.permissionRequest === undefined ? NEEDS_INPUT_MARK : NEEDS_APPROVAL_MARK;
 
   if (TERMINAL_STATUSES.has(status)) {
     const ok = status === 'completed';
@@ -141,6 +142,15 @@ export const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
   klass: 'waiting',
   tone: 'accent',
   label: 'waiting — needs your input',
+  live: false,
+});
+
+/** Blocked on a tool-permission prompt: the same mark as any other needs-input, named for what it needs. */
+export const NEEDS_APPROVAL_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'diamond',
+  klass: 'waiting',
+  tone: 'accent',
+  label: 'waiting — needs approval',
   live: false,
 });
 

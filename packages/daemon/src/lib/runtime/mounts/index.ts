@@ -1,4 +1,6 @@
 import type { DaemonCarrier } from '@ferretry/protocol';
+import type { AgentToolService } from '../../agent-tools/service.ts';
+import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
@@ -9,8 +11,8 @@ import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
 import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
-import { type ConfigChangeSink, configAnnouncedRoutes } from '../../config-files/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
+import { type ConfigChangeSink, configAnnouncedRoutes } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
@@ -19,19 +21,17 @@ import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
-import type { TurnWatchLoop } from '../../session/turn/service.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
+import type { TurnWatchLoop } from '../../session/turn/service.ts';
 import type { StepUpService } from '../../step-up/index.ts';
+import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
+import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { attentionRoutes, type DirectNotificationSubsystem } from './attention.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
-import type { AgentToolService } from '../../agent-tools/service.ts';
-import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
-import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
-import { agentToolRoutes } from './agent-tools.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
@@ -60,26 +60,27 @@ import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { securityRoutes } from './security.ts';
+import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
-import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
+import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
+import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
+import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { sessionReadRoutes } from './session-reads.ts';
+import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
 import { sessionRuntimeRoutes } from './session-runtime.ts';
-import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
-import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
-import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
-import { stepUpRoutes } from './step-up.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
+import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
@@ -335,6 +336,8 @@ export interface MountedSubsystems {
   readonly sessionAttach: SessionAttachSubsystem;
   /** Typing into a session's own pane — the Console — governed as a session terminal is. */
   readonly sessionConsole: SessionConsoleSubsystem;
+  /** Answering the harness's permission prompt on a session's own pane, governed as the Console is. */
+  readonly sessionPermission: SessionPermissionSubsystem;
   /** This daemon's bounded recent event tail followed by its own live journal appends. */
   readonly fleetEvents: FleetEventStreamSubsystem;
   /**
@@ -548,6 +551,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
         // `console/input` no other route uses, so it can neither shadow nor be shadowed.
         ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
+        // A permission answer: one segment under `/v1/sessions/:sessionId`, ending in the literal
+        // `permission` no other route uses, so it can neither shadow nor be shadowed.
+        ...sessionPermissionRoutes(subsystems.sessionPermission, subsystems.sessions),
         // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
         // only the request/response table carries — the socket table's `/v1/events` matches GET on one
         // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
