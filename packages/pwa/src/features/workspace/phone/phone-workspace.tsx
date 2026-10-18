@@ -2,7 +2,7 @@
  * THE PHONE WORKSPACE: one thing at a time, with the same model as desktop.
  *
  *   header slot   the session header (the caller's — this file never draws it)
- *   chip row      Chat, Console, every workspace tab, ＋
+ *   chip row      Chat, Console, every workspace tab (✕ or a long-press closes one), ＋
  *   body          the active tab, swipe left/right for the neighbours
  *   key bar       esc / tab / ctrl / arrows, on terminal and console tabs only
  *
@@ -16,7 +16,13 @@
 
 import { type ReactNode, useCallback, useId, useRef } from 'react';
 import { useKeyboardOpen } from '../../../hooks/use-keyboard-open.ts';
-import { PhoneChipRow, type PhoneNewTabActions, phoneChipId, phonePanelId } from './phone-chip-row.tsx';
+import {
+  type PhoneCloseTabActions,
+  PhoneChipRow,
+  type PhoneNewTabActions,
+  phoneChipId,
+  phonePanelId,
+} from './phone-chip-row.tsx';
 import { adjacentPhoneTab, PHONE_CHAT_TAB, type PhoneTab, phoneTabOrder, phoneTabTakesKeys } from './phone-tab.ts';
 import { TerminalKeyBar, useStickyCtrl } from './terminal-key-bar.tsx';
 import { useTabSwipe } from './use-tab-swipe.ts';
@@ -27,7 +33,7 @@ export interface PhoneTabRenderContext {
   readonly interceptInput: (data: string) => string;
 }
 
-export interface PhoneWorkspaceProps extends PhoneNewTabActions {
+export interface PhoneWorkspaceProps extends PhoneNewTabActions, PhoneCloseTabActions {
   /** The header, drawn above the chip row. */
   readonly header?: ReactNode;
   /** Workspace tabs only — Chat and Console are always added in front. */

@@ -49,6 +49,8 @@ describe('row gesture policy', () => {
     expect(suppressesRowClick(1_000, 1_000)).toBe(true);
     expect(suppressesRowClick(1_000, 1_000 + CLICK_SUPPRESS_MS - 1)).toBe(true);
     expect(suppressesRowClick(1_000, 1_000 + CLICK_SUPPRESS_MS)).toBe(false);
+    // Nothing fired yet: a click in the first moments of a page, when the clock itself reads near zero.
+    expect(suppressesRowClick(0, 1)).toBe(false);
   });
 });
 
