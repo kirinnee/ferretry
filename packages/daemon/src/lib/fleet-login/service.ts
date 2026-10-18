@@ -174,6 +174,16 @@ export const HARNESS_LOGIN_WINDOW_MINUTES = 10;
  */
 export const HARNESS_LOGIN_IDLE_MINUTES = 5;
 
+/**
+ * How long Claude Code may run before it prints the sign-in link a browser needs.
+ *
+ * Claude prints its link within a second or two of starting. One that has printed nothing for a minute
+ * is waiting on something a browser cannot give it — a terminal, a browser on the host — and a person
+ * on a phone would otherwise watch "Starting sign-in…" until the ten-minute window closed. So it ends
+ * here, saying that, and the child goes with it.
+ */
+export const HARNESS_LOGIN_LINK_SECONDS = 60;
+
 /** How many settled flows are kept so a poller can still read its own outcome. */
 const RETAINED_FLOWS = 8;
 
@@ -198,6 +208,8 @@ interface FlowRecord {
   /** When anybody last read or acted on this flow. A flow that needs a reader ends once this goes stale. */
   readAt: number;
   disarmIdle: (() => void) | undefined;
+  /** Claude only: ends a flow that never printed its link. */
+  disarmLink: (() => void) | undefined;
 }
 
 const settled = (stage: FlowStage): boolean => stage.stage.stage === 'complete' || stage.stage.stage === 'failed';
@@ -483,12 +495,22 @@ export class HarnessLoginService {
       relaunch: false,
       readAt: startedAt,
       disarmIdle: undefined,
+      disarmLink: undefined,
     };
     this.#flows.set(record.flowId, record);
     record.disarm = this.options.timer.after(window, () => {
       this.#expire(record);
     });
     this.#armIdle(record);
+    if (harness === 'claude')
+      record.disarmLink = this.options.timer.after(HARNESS_LOGIN_LINK_SECONDS * 1_000, () => {
+        record.disarmLink = undefined;
+        if (record.stage.harness !== 'claude' || record.stage.stage.stage !== 'starting') return;
+        this.#end(
+          record,
+          `Claude Code started but printed no sign-in link within ${String(HARNESS_LOGIN_LINK_SECONDS)} seconds, so this sign-in cannot be finished from a browser`,
+        );
+      });
     return record;
   }
 
@@ -610,6 +632,8 @@ export class HarnessLoginService {
     record.disarm = undefined;
     record.disarmIdle?.();
     record.disarmIdle = undefined;
+    record.disarmLink?.();
+    record.disarmLink = undefined;
     record.stage =
       record.stage.harness === 'claude'
         ? { harness: 'claude', stage: { stage: 'complete' } }
@@ -632,6 +656,8 @@ export class HarnessLoginService {
     record.disarm = undefined;
     record.disarmIdle?.();
     record.disarmIdle = undefined;
+    record.disarmLink?.();
+    record.disarmLink = undefined;
     record.child?.kill();
     record.child = undefined;
     record.stage =

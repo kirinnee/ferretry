@@ -14,7 +14,6 @@ import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { CREDENTIALS, DATA, READS, STUDIO, scripted } from '../account-support.ts';
 
-const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
 const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 
 const settle = async (): Promise<void> => {
@@ -190,7 +189,9 @@ describe('useMachineData', () => {
       throw new Error('offline');
     });
     expect(host.attr('data-state')).toBe('failed');
-    expect(host.view.container.querySelector('p')?.textContent).toBe(NO_ANSWER);
+    expect(host.view.container.querySelector('p')?.textContent).toBe(
+      'This machine didn’t answer (offline). Check it is awake and try again.',
+    );
     expect(host.hooks().data).toBeNull();
     const state = host.hooks().state;
     expect(state.kind === 'failed' ? state.last : 'ready').toBeNull();

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -929,24 +929,7 @@ describe('signing a harness in from the first run', () => {
       const page = browser.page;
       const daemonId = await pair(product, journey);
       await registerPasskeyAndUnlock(product, daemonId, journey);
-      const landed = await waitUntil(
-        page,
-        `document.querySelector('[data-machine-stepper="first-run"]') !== null`,
-        3_000,
-      ).then(
-        () => true,
-        () => false,
-      );
-      if (landed) {
-        // The one-tap setup (#470) already landed on the stepper.
-      } else if (await page.evaluate<boolean>(`document.querySelector('[data-onboarding-open-fleet]') !== null`))
-        await page.click('[data-onboarding-open-fleet]');
-      else
-        await page.goto(`${product.origin.origin}/d/${daemonId}/setup`, {
-          waitUntil: 'load',
-          timeout: 30_000,
-        });
-      await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
+      await openFirstRun(product, daemonId);
       await reachClaudeQuestion(page, journey);
       await page.click('[data-harness-import]');
 
@@ -1039,6 +1022,130 @@ describe('signing a harness in from the first run', () => {
       );
       assertNoSoftFailures(journey);
     });
+  }, 600_000);
+});
+
+/**
+ * From an unlocked device to the first run's stepper, wherever the unlock left it.
+ *
+ * The one-tap first passkey can land on the stepper by itself; otherwise the machine's setup is opened.
+ * That opens the setup guide on its first page, whose "Start fresh" leads to the Logins step the first
+ * run lives in.
+ */
+async function openFirstRun(product: Product, daemonId: string): Promise<void> {
+  const page = product.browser.page;
+  const landed = await waitUntil(
+    page,
+    `document.querySelector('[data-machine-stepper="first-run"]') !== null`,
+    3_000,
+  ).then(
+    () => true,
+    () => false,
+  );
+  if (!landed) await page.goto(`${product.origin.origin}/d/${daemonId}/setup`, { waitUntil: 'load', timeout: 30_000 });
+  await waitUntil(
+    page,
+    `document.querySelector('[data-machine-stepper="first-run"]') !== null || document.querySelector('[data-setup-choice="fresh"]') !== null`,
+    30_000,
+    'the setup guide or the first run',
+  );
+  if (await page.evaluate<boolean>(`document.querySelector('[data-setup-choice="fresh"]') !== null`)) {
+    await page.click('[data-setup-choice="fresh"]');
+    await page.click('[data-onboarding-next]');
+  }
+  await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
+}
+
+/**
+ * Claude Code's own sign-in from the first run, the way a phone does it: Sign in now, open the link the
+ * harness printed, paste the code back, and the step reads Signed in.
+ *
+ * The fake `claude` prints what claude-code 2.1.281 prints on Linux (an OSC 8 hyperlink, then a prompt
+ * with no newline), and the host's `~/.claude/.credentials.json` is removed first so the machine really
+ * is installed-but-not-signed-in. Run once direct and once with the direct address a sinkhole, so the
+ * same clicks are carried by the rendezvous.
+ */
+async function claudeSignInJourney(product: Product, journey: string): Promise<void> {
+  // Arrange — paired, unlocked, on the first run's Claude step, with nothing signed in.
+  const { environment, browser } = product;
+  const page = browser.page;
+  await rm(join(environment.paths.home, '.claude', '.credentials.json'), { force: true });
+  const daemonId = await pair(product, journey);
+  await registerPasskeyAndUnlock(product, daemonId, journey);
+  await openFirstRun(product, daemonId);
+  await reachClaudeQuestion(page, journey);
+
+  // Act — Sign in now → the link → paste the code.
+  await step(journey, 'claude-sign-in-link', async () => {
+    await expectScreen(page, '[data-machine-stepper][data-step="claude"] [data-harness-sign-in]');
+    await page.click('[data-harness-sign-in]');
+    await expectScreen(page, '[data-first-run-sign-in="claude"]');
+    await captureScreens(page, journey, '60-claude-sign-in-start', '[data-first-run-sign-in="claude"]');
+    await answerPasswordIfAsked(page);
+    await page.click('[data-first-run-sign-in="claude"] [data-change-submit]');
+    await expectScreen(page, '[data-claude-login="awaiting-code"]', 30_000).catch(async (error: unknown) => {
+      await page.screenshot({ path: join(EVIDENCE_ROOT, journey, 'fail-claude-start.png') });
+      throw new Error(
+        `${String((error as Error).message)}. Card: ${String(await textNow(page, '[data-first-run-sign-in="claude"]'))}`,
+      );
+    });
+    const link = await textNow(page, '[data-claude-login] code');
+    if (link === null || !link.startsWith('https://claude.com/cai/oauth/authorize'))
+      throw new Error(`the sign-in link shown is ${String(link)}`);
+    return { value: undefined, evidence: `the panel shows the link the fake claude printed: ${link.slice(0, 60)}…` };
+  });
+  await captureScreens(page, journey, '61-claude-link', '[data-first-run-sign-in="claude"]');
+  await step(journey, 'claude-paste-code', async () => {
+    await page.fill('textarea[name="claude-login-code"]', 'fake-e2e-code#fake-e2e-state');
+    await page.click('[data-claude-login] button[type="submit"]');
+    await waitUntil(
+      page,
+      `document.querySelector('[data-claude-login="complete"]') !== null || (document.querySelector('[data-first-run-sign-in="claude"]') === null && /Signed in/.test(document.querySelector('[data-machine-stepper][data-step="claude"]')?.textContent ?? ''))`,
+      45_000,
+      'the Claude sign-in to complete',
+    ).catch(async (error: unknown) => {
+      await page.screenshot({ path: join(EVIDENCE_ROOT, journey, 'fail-claude-paste.png') });
+      throw new Error(
+        `${String((error as Error).message)}. Card: ${String(await textNow(page, '[data-first-run-sign-in="claude"]'))}`,
+      );
+    });
+    return { value: undefined, evidence: 'pasted the code; the sign-in completed and the step reads Signed in' };
+  });
+  await captureScreens(page, journey, '62-claude-signed-in');
+
+  // Assert — the fake ran `auth login`, and the host login it wrote is what the machine now reports.
+  await step(journey, 'claude-credential-recorded', async () => {
+    const invocations = await readFile(product.tools.claudeLog, 'utf8').catch(() => '');
+    if (!invocations.includes('auth login --claudeai'))
+      throw new Error(`the fake claude never ran auth login: ${invocations.slice(0, 300)}`);
+    const credentials = await asOwner(environment, 'GET', '/v1/fleet/credentials');
+    const text = JSON.stringify(credentials.body);
+    if (!/"store":"host"/u.test(text)) throw new Error(`no host Claude login after signing in: ${text.slice(0, 400)}`);
+    if (text.includes('fake-e2e-access') || text.includes('fake-e2e-refresh'))
+      throw new Error('the credentials route returned a token value');
+    return { value: undefined, evidence: '/v1/fleet/credentials lists the host Claude login and no token value' };
+  });
+}
+
+describe('signing Claude Code in from the first run', () => {
+  it('should sign the host Claude login in from the first run, link out and code back', async () => {
+    const journey = 'j04-claude-sign-in';
+    await withProduct(journey, async product => {
+      await claudeSignInJourney(product, journey);
+      assertNoSoftFailures(journey);
+    });
+  }, 600_000);
+
+  it('should do the same over the local rendezvous when the direct address is unreachable', async () => {
+    const journey = 'j04-claude-sign-in-relay';
+    await withProduct(
+      journey,
+      async product => {
+        await claudeSignInJourney(product, journey);
+        assertNoSoftFailures(journey);
+      },
+      { relay: true },
+    );
   }, 600_000);
 });
 

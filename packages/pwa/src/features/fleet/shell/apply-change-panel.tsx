@@ -18,6 +18,7 @@ import {
   applyAccountChange,
   applyStagedChange,
   type ChangeResult,
+  changeRefusalSentence,
   type FleetApplyAuthority,
   readChangeAuthority,
   type StageResult,
@@ -78,8 +79,10 @@ export function useAccountChanges({ connection, createClient }: UseAccountChange
         const result = await work(await createClient(connection));
         if (result.kind === 'refused') setRefusal(result.sentence);
         return result;
-      } catch {
-        const sentence = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
+      } catch (error) {
+        // Only a client that could not be made lands here (a change's own failure is already a result),
+        // and that says why rather than claiming the machine was silent.
+        const sentence = changeRefusalSentence(error);
         setRefusal(sentence);
         return { kind: 'refused', sentence };
       } finally {

@@ -22,7 +22,8 @@ import type {
   FleetMachineView,
   GrantRefusal,
 } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
+import { z } from 'zod';
 import { applyFleetChange, readFleetMachine, stageFleetChange } from '../catalog-api.ts';
 import type { FleetClient } from '../fleet-client.ts';
 
@@ -80,11 +81,47 @@ export type StageResult =
 
 const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
 
-/** One readable sentence for whatever went wrong. */
+/**
+ * Errors whose own message is already the sentence a person needs — a revoked device, an app or a
+ * machine that is out of date, a device key this browser cannot use. Matched by name, which each sets,
+ * so this module does not import the carrier to recognise its refusals.
+ */
+const SELF_WORDED: ReadonlySet<string> = new Set([
+  'DeviceNotAcceptedError',
+  'DaemonOutdatedError',
+  'AppOutdatedError',
+  'DeviceKeyMissingError',
+  'DeviceKeyUnreadableError',
+  'DeviceKeyUnsupportedError',
+]);
+
+const detail = (value: unknown): string => {
+  const text = value instanceof Error ? value.message.trim() : '';
+  return text === '' ? '' : ` (${text.replace(/[.\s]+$/u, '')})`;
+};
+
+/**
+ * One readable sentence for whatever went wrong — and it says WHAT went wrong.
+ *
+ * Every failure used to read "didn’t answer, so nothing was changed", which was wrong twice over: a
+ * request that timed out may well have been applied, and a machine that answered in a shape this app
+ * cannot read DID answer. An owner whose machine was up and whose log was clean could do nothing with
+ * it. So each cause says its own sentence, and an unrecognised one carries its own message.
+ */
 export const changeRefusalSentence = (error: unknown): string => {
   if (error instanceof FyHttpError)
     return error.message.trim() === '' ? `This machine refused the change (${String(error.status)}).` : error.message;
-  return NO_ANSWER;
+  if (error instanceof FyTransportError)
+    return error.timedOut
+      ? 'This machine didn’t answer in time, so this browser stopped waiting. It may still have made the change — check before trying again.'
+      : `This browser couldn’t reach this machine${detail(error.cause)}. Check it is awake and online, then try again.`;
+  if (error instanceof z.ZodError)
+    return 'This machine answered in a form this copy of the app doesn’t understand, so the two are probably on different versions. Reload the app, and update Ferretry on the machine if it still happens.';
+  if (!(error instanceof Error)) return NO_ANSWER;
+  if (SELF_WORDED.has(error.name) && error.message.trim() !== '') return error.message;
+  if (error.name === 'RelaySessionError')
+    return `The connection to this machine broke before it answered${detail(error)}. It may still have made the change — check before trying again.`;
+  return `This machine didn’t answer${detail(error)}. Check it is awake and try again.`;
 };
 
 const refused = (error: unknown): Extract<ChangeResult, { kind: 'refused' }> => {

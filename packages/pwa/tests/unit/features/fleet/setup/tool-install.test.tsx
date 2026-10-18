@@ -445,7 +445,9 @@ describe('ToolInstall', () => {
       await settle();
       await click(view.container.querySelector('[data-change-submit]'), 'install');
       expect(seen.phases.map(phase => phase.kind)).toEqual(['running', 'choose']);
-      expect(text(view, '[data-change-refusal]')).toContain('This machine didn’t answer, so nothing was changed.');
+      expect(text(view, '[data-change-refusal]')).toContain(
+        'This machine didn’t answer (no route /v1/fleet/machine/tools/install).',
+      );
     } finally {
       await view.unmount();
     }
