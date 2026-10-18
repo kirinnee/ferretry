@@ -121,6 +121,8 @@ export function harness(
     readonly fleet?: readonly WardenFleetSession[];
     readonly settings?: Partial<WardenSweepSettings>;
     readonly installed?: () => Promise<readonly string[]>;
+    /** The machine's default runtime; `claude-default`, which is installed, unless a test says otherwise. */
+    readonly defaultRuntime?: () => Promise<string | undefined>;
     readonly usage?: () => Promise<readonly { readonly agent: string; readonly atLimit?: boolean }[]>;
     readonly spawn?: (request: WardenSpawnRequest, call: number) => Promise<WardenSpawnFacts>;
     readonly reports?: Readonly<Record<string, string | undefined>>;
@@ -233,7 +235,10 @@ export function harness(
         configDocument = JSON.parse(JSON.stringify(value));
       },
     },
-    agents: { installed: async () => await (options.installed?.() ?? Promise.resolve(['claude-auto-glm52a'])) },
+    agents: {
+      installed: async () => await (options.installed?.() ?? Promise.resolve(['claude-default'])),
+      defaultRuntime: async () => await (options.defaultRuntime ?? (async () => 'claude-default'))(),
+    },
     usage: { accounts: async () => await (options.usage?.() ?? Promise.resolve([])) },
     verdicts: { recent: async () => await (options.verdicts?.() ?? Promise.resolve([])) },
     attention: {

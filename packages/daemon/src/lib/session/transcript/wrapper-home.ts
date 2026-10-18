@@ -1,7 +1,7 @@
 /**
  * Where a fleet wrapper puts its harness's private home.
  *
- * A wrapper IS the declaration: `claude-auto-loge` is a shell script whose whole purpose is to
+ * A wrapper IS the declaration: `claude-default` is a shell script whose whole purpose is to
  * export `CLAUDE_CONFIG_DIR` and exec the harness, so the exported value is not a heuristic about
  * the account — it is the literal directory the launched process will write its transcript under.
  * Reading it is evidence; guessing it from the account name would not be.

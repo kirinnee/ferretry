@@ -56,7 +56,7 @@ export function ProjectLaunch({ project, onLaunch }: ProjectLaunchProps) {
               className="kt-input min-h-control w-full mono"
               id="project-launch-agent-name"
               value={agent}
-              placeholder="claude-auto-loge"
+              placeholder="claude-default"
               onChange={event => setAgent(event.target.value)}
             />
           </label>

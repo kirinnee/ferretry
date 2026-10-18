@@ -114,6 +114,7 @@ const REQUEST_REFUSALS: Readonly<Record<WardenRequestFailure, { readonly status:
   not_found: { status: 404, code: 'not-found' },
   finished: { status: 409, code: 'session_finished' },
   cap: { status: 409, code: 'warden_cap_reached' },
+  no_login: { status: 409, code: 'warden_no_login' },
 };
 
 /** Restates a warden refusal in the HTTP vocabulary. */

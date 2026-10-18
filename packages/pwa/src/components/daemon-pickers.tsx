@@ -324,7 +324,7 @@ function AccountHealthMark({ health, now }: { readonly health: PickerAccountHeal
  * At 390px they cannot both have the width. The rail is `shrink-0` — quota and
  * health must never be squeezed into ellipses, because a half-printed percentage
  * is worse than none — so the identity column gets whatever is left, and the
- * harness capture showed exactly what that costs: `claude-auto-atelie…` and
+ * harness capture showed exactly what that costs: `claude-atelier-revi…` and
  * `/home/pilot/.config/home-…`. Both of those are the SUBMITTED VALUE. Truncating
  * the display name would be a cosmetic loss; truncating the wrapper or the path
  * means two rows can look identical at the moment somebody is choosing between
@@ -508,7 +508,7 @@ export const namedAccount = (source: PickerSource<AccountFieldOption>, value: st
 /**
  * THE CLOSED BOX, BY THE NAME ITS FLEET GAVE IT.
  *
- * The box's text is the wrapper id — `claude-auto-default` — because that is the
+ * The box's text is the wrapper id — `claude-default` — because that is the
  * value a session is started with, and this control's typed value is its output.
  * But the id is plumbing, and a phone reader shown it in large type above the
  * real name in small type is being shown the machine's view of their fleet. So

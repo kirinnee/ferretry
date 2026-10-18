@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import type { WardenLogin } from '@ferretry/protocol';
 import {
   wardenAccountLabel,
   wardenAccountTitle,
   wardenAnomalyDigest,
   wardenExhaustionLabel,
+  wardenInvestigationHead,
+  wardenLoginProblem,
   wardenNeedsYouCount,
   wardenTriageLabel,
 } from '../../../src/features/warden/warden-status-model.ts';
@@ -67,9 +70,10 @@ describe('wardenExhaustionLabel', () => {
 });
 
 describe('wardenAccountLabel and wardenAccountTitle', () => {
-  it('strips the wrapper prefix that every chip would otherwise repeat', () => {
-    expect(wardenAccountLabel({ agent: 'claude-auto-loge' })).toBe('loge');
-    expect(wardenAccountLabel({ agent: 'codex-auto-terra' })).toBe('terra');
+  it('names the login as its owner wrote it, never trimming a prefix off', () => {
+    expect(wardenAccountLabel({ agent: 'claude-default' })).toBe('claude-default');
+    expect(wardenAccountLabel({ agent: 'claude-auto-review' })).toBe('claude-auto-review');
+    expect(wardenAccountLabel({ agent: 'codex-default' })).toBe('codex-default');
     expect(wardenAccountLabel({ agent: 'gemini-sol' })).toBe('gemini-sol');
   });
 
@@ -178,5 +182,43 @@ describe('wardenTriageLabel', () => {
 
     // Assert
     expect(labels).toEqual(['Jev guard', 'Rules only (cap hit)', 'Rules only (cap hit)', 'Off', 'Off']);
+  });
+});
+
+describe('the investigation login', () => {
+  it('should read the resolved head off the failover status, else the stored order', () => {
+    // Arrange
+    const resolved = wardenStatus({
+      config: wardenConfig({ accounts: [] }),
+      failover: wardenFailover({ accounts: [wardenAccount({ agent: 'claude-default' })] }),
+    });
+    const older = wardenStatus({ config: wardenConfig({ accounts: [{ agent: 'claude-spare' }] }) });
+
+    // Act / Assert
+    expect(wardenInvestigationHead(resolved)?.agent).toBe('claude-default');
+    expect(wardenInvestigationHead(older)?.agent).toBe('claude-spare');
+  });
+
+  it('should say why no investigation can run, and nothing when one can', () => {
+    // Arrange
+    const known: WardenLogin = { source: 'configured', unknown: [], available: ['a'] };
+    const lost: WardenLogin = { source: 'configured', unknown: ['legacy-wrapper'], available: ['a'] };
+
+    // Act / Assert
+    expect(wardenLoginProblem(undefined, [])).toBeNull();
+    expect(wardenLoginProblem({ source: 'not_set', unknown: [], available: [] }, [])).toBe(
+      'No investigation login is set',
+    );
+    expect(wardenLoginProblem(known, [{ agent: 'a' }])).toBeNull();
+    expect(wardenLoginProblem(known, [])).toBeNull();
+    expect(wardenLoginProblem(lost, [{ agent: 'legacy-wrapper' }, { agent: 'a' }])).toBeNull();
+    expect(wardenLoginProblem(lost, [{ agent: 'legacy-wrapper' }])).toBe("Unknown login 'legacy-wrapper'");
+  });
+
+  it('should label a rules fallback for want of a login', () => {
+    // Act / Assert
+    expect(
+      wardenTriageLabel(wardenStatus({ triage: { configured: 'llm', effective: 'rules', reason: 'no_login' } })),
+    ).toBe('Rules only (no login)');
   });
 });
