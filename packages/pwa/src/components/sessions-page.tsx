@@ -6,7 +6,7 @@
  * the legacy single-daemon state seam this page must not recreate.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
 import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
@@ -17,6 +17,7 @@ import {
   browserScopeNavigation,
   enterProjectScope,
   exitProjectScope,
+  projectScopePath,
   type ScopeNavigation,
   useProjectScope,
 } from '../hooks/use-project-scope.ts';
@@ -24,12 +25,14 @@ import { useProjects } from '../hooks/use-projects.ts';
 import { useUsage } from '../hooks/use-usage.ts';
 import { useWardenStatus, type WardenStatusReader } from '../hooks/use-warden-status.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
+import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
 import type { DaemonControlsStore } from '../lib/controls.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { projectKeyFor } from '../lib/fleet-grouping.ts';
+import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
+import { filterSessions, projectKeyFor } from '../lib/fleet-grouping.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageStore } from '../lib/usage-store.ts';
+import type { NewSessionMachine } from '../shell/new-session-menu.tsx';
 import { SessionDashboard, type SessionDashboardProps } from './session-dashboard.tsx';
 
 export interface SessionsPageProps {
@@ -50,6 +53,13 @@ export interface SessionsPageProps {
   readonly scopeNavigation?: ScopeNavigation;
   readonly clock?: LiveClockOptions;
   readonly narrow?: boolean;
+  /**
+   * Every paired machine, when Settings › Behaviour › Sessions list is All machines: the page then lists
+   * Needs you and every machine. A focused folder is still one machine's page.
+   */
+  readonly machineSources?: readonly MachineSource[];
+  /** The machines "+ New" may start on. */
+  readonly newSessionMachines?: readonly NewSessionMachine[];
 }
 
 interface DashboardContentProps extends Omit<SessionsPageProps, 'scopeNavigation' | 'clock' | 'narrow'> {
@@ -98,11 +108,21 @@ function DashboardContent({
   now,
   navigation,
   narrow,
+  machineSources,
+  newSessionMachines,
 }: DashboardContentProps) {
   const projectList = useProjects(projects, connection);
   const view = useFleetView({ fleet, controls, daemonId: connection.daemonId, projects: projectList });
   const { density } = useDensity(controls);
   const status = useWardenStatus(connection, wardenStatus);
+  // The page's own search and mode filters narrow every machine's list alike.
+  const allMachines = useMemo(
+    () =>
+      machineSources === undefined || view.scope !== null
+        ? undefined
+        : allMachinesView(machineSources, { select: sessions => filterSessions(sessions, view.controls) }),
+    [machineSources, view.scope, view.controls],
+  );
 
   useProjectScope({
     controls,
@@ -131,6 +151,10 @@ function DashboardContent({
     wardenStatus: status,
     // Verdicts have no protocol schema/client feed yet; do not invent one here.
     wardenVerdicts: [],
+    ...(allMachines === undefined ? {} : { allMachines }),
+    ...(newSessionMachines === undefined ? {} : { newSessionMachines }),
+    // Another machine's folder is that machine's page, at that folder.
+    onFocusMachine: (daemonId: DaemonId, path: string) => onNavigate?.(projectScopePath(daemonId, path)),
   } as const;
 
   return density === 'full' ? (
