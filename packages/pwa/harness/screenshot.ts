@@ -30,7 +30,7 @@
  *   bun harness/screenshot.ts --serve    # leave it running to look at by hand
  *   bun harness/screenshot.ts --files-only   # just the Files/reload/preview frames
  *   bun harness/screenshot.ts --pairing-failures-only   # the two pairing failures that are one sentence
- *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
+ *   bun harness/screenshot.ts --landing-only # capture the built landing and /get-started/ at both viewports and schemes
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
@@ -1738,7 +1738,8 @@ if (process.argv.includes('--landing-only')) {
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname;
-      return new Response(Bun.file(path === '/' ? join(landingDir, 'index.html') : join(landingDir, path)));
+      // A directory is its `index.html`, the way Pages and the release worker resolve `/get-started/`.
+      return new Response(Bun.file(join(landingDir, path.endsWith('/') ? `${path}index.html` : path)));
     },
   });
   const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
@@ -1748,8 +1749,20 @@ if (process.argv.includes('--landing-only')) {
   }
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of VIEWPORTS) {
-      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+    // Both static pages, at both widths, in both colour schemes: they follow `prefers-color-scheme`
+    // alone, so the emulated scheme IS the theme.
+    const pages = [
+      { name: 'landing', path: '/' },
+      { name: 'get-started', path: '/get-started/' },
+    ] as const;
+    const shots = VIEWPORTS.flatMap(viewport =>
+      (['light', 'dark'] as const).flatMap(scheme => pages.map(shot => ({ viewport, scheme, shot }))),
+    );
+    for (const { viewport, scheme, shot } of shots) {
+      const context = await browser.newContext({
+        viewport: { width: viewport.width, height: viewport.height },
+        colorScheme: scheme,
+      });
       try {
         await context.route('**/*', async route => {
           if (new URL(route.request().url()).origin !== landingServer.url.origin) {
@@ -1759,10 +1772,10 @@ if (process.argv.includes('--landing-only')) {
           await route.continue();
         });
         const page = await context.newPage();
-        await page.goto(landingServer.url.toString());
-        const target = join(outDir, `landing-${viewport.name}.png`);
+        await page.goto(new URL(shot.path, landingServer.url).toString());
+        const target = join(outDir, `${shot.name}-${viewport.name}-${scheme}.png`);
         await page.screenshot({ path: target, fullPage: true });
-        process.stdout.write(`📸 landing ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+        process.stdout.write(`📸 ${shot.name} ${viewport.name} ${scheme} -> ${target}\n`);
       } finally {
         await context.close();
       }

@@ -37,6 +37,7 @@
 
 import autoprefixer from 'autoprefixer';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
@@ -67,7 +68,26 @@ import tailwindConfig from './tailwind.config.ts';
  */
 const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 
+/**
+ * The release the static pages name, read from the repository's `VERSION` at build time.
+ *
+ * `VERSION` is the one owner of "which release is this" (cli-contracts' `released-version` pins both
+ * shipped manifests to it), and Pages builds from `main`, where the release commit has already written
+ * it. So `/get-started` shows the release a newcomer will actually install, without a request.
+ * `%FY_RELEASE_VERSION%` is replaced in every HTML entry before Vite's own `%ENV%` pass sees it.
+ */
+const releaseVersion = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim();
+
 export default defineConfig({
+  plugins: [
+    {
+      name: 'fy-release-version',
+      transformIndexHtml: {
+        order: 'pre',
+        handler: html => html.replaceAll('%FY_RELEASE_VERSION%', releaseVersion),
+      },
+    },
+  ],
   define: {
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
@@ -101,6 +121,7 @@ export default defineConfig({
       input: {
         landing: fileURLToPath(new URL('./index.html', import.meta.url)),
         app: fileURLToPath(new URL('./app/index.html', import.meta.url)),
+        'get-started': fileURLToPath(new URL('./get-started/index.html', import.meta.url)),
       },
     },
   },
