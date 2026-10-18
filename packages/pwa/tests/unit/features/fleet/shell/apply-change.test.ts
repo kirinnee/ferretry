@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
+import { z } from 'zod';
 import {
   applyAccountChange,
   applyStagedChange,
@@ -100,7 +101,7 @@ describe('stage then apply, separately', () => {
   it('an unreachable machine is a sentence too', async () => {
     expect(await stageAccountChange(scriptedClient({}), CHANGE)).toMatchObject({
       kind: 'refused',
-      sentence: 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.',
+      sentence: 'This machine didn’t answer (no route /v1/fleet/proposals). Check it is awake and try again.',
     });
   });
 });
@@ -110,5 +111,45 @@ describe('changeRefusalSentence', () => {
     expect(changeRefusalSentence(new FyHttpError('No.', 409, 'fleet_change_refused'))).toBe('No.');
     expect(changeRefusalSentence(new FyHttpError(' ', 500, undefined))).toBe('This machine refused the change (500).');
     expect(changeRefusalSentence('boom')).toContain('didn’t answer');
+  });
+
+  /** A named error, as the carrier and the device-key store throw them. */
+  const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
+
+  it('says a request that timed out may still have been applied', () => {
+    const late = new FyTransportError('fyd did not answer', '/v1/fleet/login', true, new Error('TimeoutError'));
+    expect(changeRefusalSentence(late)).toBe(
+      'This machine didn’t answer in time, so this browser stopped waiting. It may still have made the change — check before trying again.',
+    );
+  });
+
+  it('names why a machine could not be reached, and says less when nothing says why', () => {
+    const refused = new FyTransportError('could not reach fyd', '/v1/fleet/login', false, new Error('Load failed.'));
+    expect(changeRefusalSentence(refused)).toBe(
+      'This browser couldn’t reach this machine (Load failed). Check it is awake and online, then try again.',
+    );
+    expect(changeRefusalSentence(new FyTransportError('x', '/p', false, 'opaque'))).toBe(
+      'This browser couldn’t reach this machine. Check it is awake and online, then try again.',
+    );
+  });
+
+  it('calls an answer this app cannot read a version mismatch, not silence', () => {
+    const unreadable = z.object({ state: z.literal('starting') }).safeParse({ state: 'later' });
+    if (unreadable.success) throw new Error('the probe value parsed');
+    expect(changeRefusalSentence(unreadable.error)).toContain('different versions');
+  });
+
+  it('passes a carrier refusal that is already worded for a person through unchanged', () => {
+    const revoked = named('DeviceNotAcceptedError', 'This machine no longer accepts this browser.');
+    expect(changeRefusalSentence(revoked)).toBe('This machine no longer accepts this browser.');
+    expect(changeRefusalSentence(named('AppOutdatedError', ' '))).toBe(
+      'This machine didn’t answer. Check it is awake and try again.',
+    );
+  });
+
+  it('says a relay connection that broke mid-request may have carried the change', () => {
+    expect(changeRefusalSentence(named('RelaySessionError', 'the rendezvous closed.'))).toBe(
+      'The connection to this machine broke before it answered (the rendezvous closed). It may still have made the change — check before trying again.',
+    );
   });
 });

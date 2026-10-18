@@ -25,6 +25,7 @@ import type {
 } from '../../../src/lib/fleet-login/ports.ts';
 import {
   HARNESS_LOGIN_IDLE_MINUTES,
+  HARNESS_LOGIN_LINK_SECONDS,
   HARNESS_LOGIN_SHUTDOWN_GRACE_MS,
   HARNESS_LOGIN_WINDOW_MINUTES,
   HarnessLoginRefusal,
@@ -592,6 +593,56 @@ describe('the Claude leg', () => {
       state: 'awaiting-code',
       verificationUrl: CLAUDE_URL,
     });
+  });
+
+  it('should end a Claude sign-in that printed no link in time, and say so', async () => {
+    // Arrange — a child that started and never printed its link, as one waiting on a terminal does.
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    const child = await subject.child();
+    const deadline = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_LINK_SECONDS * 1_000);
+    if (deadline === undefined) throw new Error('no link deadline was armed');
+
+    // Act
+    deadline.run();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).have.property('state', 'failed');
+    should(actual).have.property(
+      'reason',
+      'Claude Code started but printed no sign-in link within 60 seconds, so this sign-in cannot be finished from a browser',
+    );
+    should(child.killed).be.true();
+  });
+
+  it('should leave a Claude sign-in that printed its link alone when the link deadline passes', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    (await subject.child()).emit(CLAUDE_URL_LINE);
+    const deadline = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_LINK_SECONDS * 1_000);
+
+    // Act — a timer can fire after its disarm raced it, so it is run whether or not it was disarmed.
+    deadline?.run();
+    const actual = await subject.service.status(started.flowId);
+
+    // Assert
+    should(actual).have.property('state', 'awaiting-code');
+  });
+
+  it('should disarm the link deadline once a Claude sign-in has ended', async () => {
+    // Arrange
+    const subject = fixture();
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, BROWSER);
+    await subject.child();
+
+    // Act
+    await subject.service.cancel(started.flowId);
+
+    // Assert
+    const deadline = subject.timers.find(timer => timer.milliseconds === HARNESS_LOGIN_LINK_SECONDS * 1_000);
+    should(deadline).have.property('disarmed', true);
   });
 
   it('should write the pasted value to the child’s stdin, exactly once and with a newline', async () => {

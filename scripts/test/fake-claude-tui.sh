@@ -18,6 +18,33 @@ case "${1:-}" in
   ;;
 esac
 
+# `claude auth login --claudeai`, as claude-code 2.1.281 prints it on Linux: the link wrapped in an
+# OSC 8 hyperlink, then a prompt with no newline. A code shaped `<code>#<state>` writes a fake login
+# where the real CLI writes it — `.credentials.json` in the config directory — and anything else gets
+# the real CLI's refusal and keeps waiting.
+if [ "${1:-}" = "auth" ] && [ "${2:-}" = "login" ]; then
+  [ -n "${FY_E2E_FAKE_CLAUDE_LOG:-}" ] && printf '%s\t-\t%s\n' "$(pwd)" "$*" >>"${FY_E2E_FAKE_CLAUDE_LOG}"
+  link='https://claude.com/cai/oauth/authorize?code=true&client_id=fake-e2e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=fake&code_challenge_method=S256&state=fake-e2e-state'
+  printf 'Opening browser to sign in\342\200\246\n'
+  printf 'If the browser didn'"'"'t open, visit: \033]8;;%s\007%s\033]8;;\007\n' "${link}" "${link}"
+  printf 'Paste code here if prompted > '
+  while IFS= read -r pasted; do
+    case "${pasted}" in
+    ?*'#'?*)
+      config="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
+      mkdir -p "${config}"
+      expires=$((($(date +%s) + 3600) * 1000))
+      printf '{"claudeAiOauth":{"accessToken":"fake-e2e-access","refreshToken":"fake-e2e-refresh","expiresAt":%s,"scopes":["user:inference"]}}' \
+        "${expires}" >"${config}/.credentials.json"
+      printf 'Login successful.\n'
+      exit 0
+      ;;
+    *) printf 'Invalid code. Please make sure the full code was copied.\n' >&2 ;;
+    esac
+  done
+  exit 1
+fi
+
 sid=""
 prev=""
 for arg in "$@"; do
