@@ -31,6 +31,7 @@ import { displayCallsign } from '../../lib/callsign.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   activateWorkspaceTab,
+  closeWorkspaceTab,
   focusedWorkspaceTab,
   isAgentTabId,
   visibleTabsInOrder,
@@ -330,6 +331,26 @@ export function SessionWorkspace({
     );
   };
 
+  // Closing a tab closes its VIEW. A browser tab showing one of the session's pages closes that page
+  // too, as closing a browser's own tab does; a file tab is only ever a view, and a terminal's shell
+  // ends only when "End shell" is chosen.
+  const disposeTab = (tab: WorkspaceTab): void => {
+    if (tab.kind !== 'browser' || browserPages === undefined) return;
+    const page = browserPageForKey(browserPages.status, tab.key);
+    if (page !== undefined) void browserPages.act({ action: 'close-page', pageId: page.id });
+  };
+  // "End shell" from a terminal tab's close: the deck's own delete, so it ends exactly the way the
+  // deck's trash control does.
+  const endTerminal =
+    deck === undefined
+      ? undefined
+      : (tab: WorkspaceTab): void => {
+          setNotice(null);
+          deck
+            .close(connection, scope, tab.key)
+            .catch((reason: unknown) => setNotice(`Could not end the shell: ${failure(reason)}`));
+        };
+
   // A refused Take over / Hand back is said where every other workspace failure is.
   const shownNotice = notice ?? driving.failure;
   const noticeLine =
@@ -363,8 +384,15 @@ export function SessionWorkspace({
         kind: tab.kind,
         label: tab.label,
         driver: driving.driverFor(tab.id),
+        closable: true,
       }));
     const byId = new Map(tabs.map(tab => [tab.id, tab]));
+    const closeTabs = (ids: readonly string[]): void => {
+      const next = ids.reduce(closeWorkspaceTab, layout);
+      if (next === layout) return;
+      setLayout(next);
+      for (const id of ids) disposeTab(byId.get(id) as WorkspaceTab);
+    };
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-col" data-session-workspace="phone">
         <PhoneWorkspace
@@ -375,6 +403,8 @@ export function SessionWorkspace({
               {noticeLine}
             </>
           }
+          onCloseOthers={tabId => closeTabs(phoneTabs.filter(tab => tab.id !== tabId).map(tab => tab.id))}
+          onCloseTab={tabId => closeTabs([tabId])}
           onFocusTerminal={tabId => ports.current.get(tabId)?.focus()}
           onNewBrowser={() => newTab('browser')}
           onOpenFile={() => newTab('file')}
@@ -386,6 +416,14 @@ export function SessionWorkspace({
           }}
           tabs={phoneTabs}
           {...(deck === undefined ? {} : { onNewTerminal: () => newTab('terminal') })}
+          {...(endTerminal === undefined
+            ? {}
+            : {
+                onEndTerminal: (tabId: string) => {
+                  closeTabs([tabId]);
+                  endTerminal(byId.get(tabId) as WorkspaceTab);
+                },
+              })}
         />
         {sheet}
       </div>
@@ -399,19 +437,9 @@ export function SessionWorkspace({
       layout={layout}
       onLayoutChange={setLayout}
       onNewTab={kind => newTab(kind)}
+      onTabClosed={disposeTab}
       renderTab={tab => renderBody(tab, { active: isTabShown(layout, tab.id) })}
-      {...(deck === undefined
-        ? {}
-        : {
-            // "End shell" from a terminal tab's close: the deck's own delete, so it ends exactly the
-            // way the deck's trash control does.
-            onEndTerminal: (tab: WorkspaceTab) => {
-              setNotice(null);
-              deck
-                .close(connection, scope, tab.key)
-                .catch((reason: unknown) => setNotice(`Could not end the shell: ${failure(reason)}`));
-            },
-          })}
+      {...(endTerminal === undefined ? {} : { onEndTerminal: endTerminal })}
     />
   );
   // Info needs room for its six tabs: it never draws narrower than INFO_MIN_WIDTH, whatever the rail was.

@@ -40,9 +40,10 @@ export interface RowContextGesture {
   readonly onClickCapture: (event: MouseEvent<HTMLElement>) => void;
 }
 
-export function useRowContextGesture(
-  open: OpenSessionMenu | undefined,
-  view: SessionView,
+/** Generic over what was pressed: a session row here, a workspace tab chip on the phone. */
+export function useRowContextGesture<Subject = SessionView>(
+  open: ((subject: Subject, x: number, y: number, trigger: HTMLElement) => void) | undefined,
+  view: Subject,
 ): RowContextGesture | undefined {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startAt = useRef<{ x: number; y: number } | null>(null);
