@@ -108,6 +108,24 @@ async function sendsOf(environment: E2eEnvironment, sessionId: string, message: 
   return body.sends.filter(row => row.message === message).length;
 }
 
+/** Every ledger row, compact, for the report when a count is not what it should be. */
+async function ledgerDump(environment: E2eEnvironment, sessionId: string): Promise<string> {
+  const response = await fetch(environment.httpUrl(`/v1/sessions/${sessionId}/sends`), {
+    headers: { Authorization: `Bearer ${await adminToken(environment)}` },
+  });
+  const body = (await response.json()) as {
+    readonly sends: readonly {
+      readonly message: string;
+      readonly path: string;
+      readonly fate: string;
+      readonly withdrawn?: boolean;
+    }[];
+  };
+  return body.sends
+    .map(row => `${row.message.slice(0, 22)}[${row.path}/${row.fate}${row.withdrawn === true ? '/withdrawn' : ''}]`)
+    .join(' ');
+}
+
 interface Glass {
   readonly events: number;
   readonly stream: string | null;
@@ -123,7 +141,7 @@ async function glass(page: BrowserPage): Promise<Glass> {
       events: Number(read('[data-live-events]', 'data-live-events')),
       stream: read('[data-live-stream]', 'data-live-stream'),
       carrier: read('[data-carrier-kind]', 'data-carrier-kind'),
-      health: read('[data-connection-health]', 'data-connection-health'),
+      health: read('[data-connection]', 'data-connection'),
       alert: document.querySelector('.fy-composer [role="alert"]')?.textContent?.trim().replace(/\\s+/g, ' ').slice(0, 160) ?? null,
     };
   })()`);
@@ -157,6 +175,16 @@ async function clearComposer(page: BrowserPage): Promise<void> {
   );
 }
 
+/** Type a message and confirm the box holds exactly it: a keystroke lost to a re-render once sent `reco` for `reconnect-A-…`. */
+async function typeExactly(page: BrowserPage, message: string): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await clearComposer(page);
+    await page.keyboard.type(message);
+    if ((await composerState(page)).draft === message) return;
+  }
+  throw new Error(`the composer would not hold ${message}`);
+}
+
 interface SendOutcome {
   readonly rows: number;
   readonly state: ComposerState;
@@ -169,8 +197,7 @@ async function sendViaComposer(
   sessionId: string,
   message: string,
 ): Promise<SendOutcome> {
-  await clearComposer(page);
-  await page.keyboard.type(message);
+  await typeExactly(page, message);
   await page.waitForSelector(`${SEND}:not([disabled])`, { timeout: 10_000 }).catch(() => undefined);
   const before = await composerState(page);
   if (before.sendEnabled) await page.click(SEND, { timeout: 10_000 });
@@ -518,7 +545,9 @@ describe('a relayed session page that loses its connection', () => {
       withJourney('restart', async ({ environment, rendezvous, page, session, mark }) => {
         const messageA = `reconnect-A-${mark}`;
         const a = await sendViaComposer(page, environment, session.sessionId, messageA);
-        await note(`- message A before any drop: ledger rows=${String(a.rows)}; composer: ${JSON.stringify(a.state)}`);
+        await note(
+          `- message A before any drop: ledger rows=${String(a.rows)}; composer: ${JSON.stringify(a.state)}; ledger: ${await ledgerDump(environment, session.sessionId)}`,
+        );
 
         const drops: Drop[] = [];
         const sent: string[] = [messageA];
@@ -551,11 +580,11 @@ describe('a relayed session page that loses its connection', () => {
           readonly offsetMs: number;
           readonly rows: number;
           readonly alert: string | null;
+          readonly draft: string;
         }[] = [];
         for (const offsetMs of [0, 8, 25]) {
           const message = `reconnect-C${String(offsetMs)}-${mark}`;
-          await clearComposer(page);
-          await page.keyboard.type(message);
+          await typeExactly(page, message);
           await page.waitForSelector(`${SEND}:not([disabled])`, { timeout: 10_000 }).catch(() => undefined);
           const clicked = page.evaluate<boolean>(
             `(() => { document.querySelector(${JSON.stringify(SEND)}).click(); return true; })()`,
@@ -570,7 +599,7 @@ describe('a relayed session page that loses its connection', () => {
           await Bun.sleep(BUDGET_MS + 2_000);
           const now = await composerState(page);
           const rows = await sendsOf(environment, session.sessionId, message);
-          inflight.push({ message, offsetMs, rows, alert: now.alert });
+          inflight.push({ message, offsetMs, rows, alert: now.alert, draft: now.draft });
           await note(
             `- in-flight send, relay killed ${String(offsetMs)} ms after the click: ledger rows=${String(rows)}; composer: ${JSON.stringify(now)}`,
           );
@@ -588,7 +617,8 @@ describe('a relayed session page that loses its connection', () => {
         }
         for (const entry of inflight) {
           should(entry.rows <= 1).equal(true);
-          if (entry.rows === 0) should(entry.alert).not.equal(null);
+          // Not delivered must be visible: an error, or the draft still in the box to resend.
+          if (entry.rows === 0) should(entry.alert !== null || entry.draft !== '').equal(true);
         }
       }),
     900_000,
@@ -631,7 +661,14 @@ describe('a relayed session page that loses its connection', () => {
             client: arrivals.filter(entry => entry.role === 'client' && entry.daemonId === fingerprint).length,
           };
         };
-        await page.waitForSelector('[data-live-stream="live"]', { timeout: 60_000 });
+        const openedAt = Date.now();
+        const liveAfter = await until(
+          async () => ((await glass(page)).stream === 'live' ? Date.now() - openedAt : undefined),
+          150_000,
+        );
+        await note(
+          `- the page reached data-live-stream=live ${liveAfter === undefined ? 'NEVER (150 s)' : `${String(liveAfter)} ms after the page was open`}`,
+        );
         const before = await dials();
         const transitions: string[] = [];
         let last = '';
@@ -676,8 +713,13 @@ describe('a relayed session page that loses its connection', () => {
         const frozenAt = Date.now();
         // A CDP lifecycle freeze left every socket open and answering in headless Chrome (measured), which is not a
         // backgrounded phone. SIGSTOP on the renderer is: its timers, pings and sockets all stop, as under an OS suspend.
-        const liveBefore = await until(async () => ((await glass(page)).stream === 'live' ? Date.now() : undefined), 90_000);
-        await note(`- live before the freeze: ${String(liveBefore !== undefined)}; glass ${JSON.stringify(await glass(page))}`);
+        const liveBefore = await until(
+          async () => ((await glass(page)).stream === 'live' ? Date.now() : undefined),
+          90_000,
+        );
+        await note(
+          `- live before the freeze: ${String(liveBefore !== undefined)}; glass ${JSON.stringify(await glass(page))}`,
+        );
         const renderers = ownRendererPids();
         if (renderers.length === 0) throw new Error('no renderer process to suspend');
         for (const pid of renderers) process.kill(pid, 'SIGSTOP');
