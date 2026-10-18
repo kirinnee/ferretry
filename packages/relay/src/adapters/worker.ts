@@ -143,6 +143,25 @@ const NOT_FOUND = 'not found';
 const RESERVATION_HEADER = 'x-ferretry-relay-reservation';
 
 /**
+ * How long live sessions outlast a hosted control object that cannot be REACHED.
+ *
+ * Unreachable is not a refusal. The control object is one global Durable Object, and a call to it can
+ * fail for reasons that say nothing about any ceiling — it restarted, it was briefly overloaded, the
+ * request was lost between colos. Treating every such blip as "refuse" closed every socket on the
+ * rendezvous, the daemon's and every phone's, at a random moment with no deploy and no ceiling
+ * crossed: exactly the "keeps disconnecting" the owner reported. So a live rendezvous keeps carrying
+ * while the meter is unreachable, re-queues the bytes it could not report, and asks again at the next
+ * frame or sweep. A definitive answer — the kill switch, a ceiling — still closes at once, and an
+ * outage longer than this still fails closed, so nothing degrades into an unmetered path for long:
+ * at most this window of traffic, which the credit window already bounds per session.
+ *
+ * In memory, deliberately: an evicted object forgets an outage it was tolerating and starts the window
+ * again, which can only extend tolerance by one window per eviction, and a hibernating object carries
+ * no traffic to meter.
+ */
+export const HOSTED_CONTROL_OUTAGE_GRACE_MS = 120_000;
+
+/**
  * Route a socket to its rendezvous, or refuse it cheaply.
  *
  * An unknown fingerprint and a malformed path get the same 404. Distinguishing them would tell a
@@ -377,6 +396,8 @@ export class RendezvousDurableObject {
    */
   private unmetered: UnmeteredBatch | undefined;
   private metering: Promise<void> | undefined;
+  /** When the hosted control object first stopped answering, or nothing while it answers. */
+  private controlUnreachableSince: number | undefined;
 
   constructor(
     private readonly objectState: RelayObjectState,
@@ -476,29 +497,44 @@ export class RendezvousDurableObject {
     this.startMeterReport();
   }
 
-  /** One report in flight at most; a batch that arrived as the last one settled starts the next. */
+  /**
+   * One report in flight at most; a batch that arrived as the last one settled starts the next. A report
+   * the meter could not take is NOT restarted from here — that would ask an unreachable object in a
+   * tight loop — but by the next forwarded frame or the next sweep.
+   */
   private startMeterReport(): void {
     if (this.metering !== undefined || this.unmetered === undefined) return;
-    this.metering = this.reportMeter().finally(() => {
+    this.metering = this.reportMeter().then(reported => {
       this.metering = undefined;
-      this.startMeterReport();
+      if (reported) this.startMeterReport();
     });
   }
 
   /**
    * Report batches until nothing is left unreported. A refusal — a ceiling crossed, the switch off, or a
-   * meter that could not be reached — closes every socket this rendezvous holds, each told why first:
-   * a ceiling is per daemon and this object serves exactly one, and nothing degrades into an unmetered
-   * path. It never throws; a failure here has no caller left to hear it.
+   * meter unreachable for longer than {@link HOSTED_CONTROL_OUTAGE_GRACE_MS} — closes every socket this
+   * rendezvous holds, each told why first: a ceiling is per daemon and this object serves exactly one.
+   * A meter that is merely unreachable gets the batch back, folded into whatever arrives next, and is
+   * asked again by the next frame or sweep rather than in a loop. It never throws; a failure here has
+   * no caller left to hear it.
    */
-  private async reportMeter(): Promise<void> {
+  private async reportMeter(): Promise<boolean> {
     for (let batch = this.unmetered; batch !== undefined; batch = this.unmetered) {
       this.unmetered = undefined;
-      const decision = await this.hostedDecision('meter', {
+      const decision = await this.hostedVerdict('meter', {
         daemonId: batch.daemonId,
         bytes: batch.bytes,
         ...(batch.events === 1 ? {} : { events: batch.events }),
       });
+      if (decision === 'tolerated') {
+        const later = this.unmetered as UnmeteredBatch | undefined;
+        this.unmetered = {
+          daemonId: batch.daemonId,
+          bytes: batch.bytes + (later?.bytes ?? 0),
+          events: batch.events + (later?.events ?? 0),
+        };
+        return false;
+      }
       if (decision.ok) continue;
       this.unmetered = undefined;
       this.enqueue(async () => {
@@ -511,8 +547,9 @@ export class RendezvousDurableObject {
         }
       });
       await this.queue.catch(() => undefined);
-      return;
+      return false;
     }
+    return true;
   }
 
   async webSocketClose(socket: RelaySocket): Promise<void> {
@@ -527,8 +564,13 @@ export class RendezvousDurableObject {
     this.enqueue(async () => {
       const state = await this.load();
       if (state === null) return;
-      const decision = await this.hostedDecision('inspect', { daemonId: state.daemonId });
-      if (!decision.ok) {
+      // A batch the meter could not take is offered again on every sweep, so an idle rendezvous that
+      // stopped forwarding still settles its count — or reaches the outage bound — on schedule.
+      this.startMeterReport();
+      const decision = await this.hostedVerdict('inspect', { daemonId: state.daemonId });
+      // Unreachable inside the grace window: no verdict to apply, so the heartbeat sweep below runs as
+      // if the control object had answered yes. Skipping it would let dead sockets outlive the outage.
+      if (decision !== 'tolerated' && !decision.ok) {
         const failures: unknown[] = [];
         for (const socket of this.objectState.getWebSockets()) {
           try {
@@ -649,14 +691,29 @@ export class RendezvousDurableObject {
     return this.environment.RELAY_MODE === 'hosted';
   }
 
-  private async hostedDecision(path: 'meter' | 'inspect', input: unknown): Promise<HostedRelayDecision> {
+  /**
+   * The control object's verdict on a live rendezvous, or `tolerated` while it cannot be reached.
+   *
+   * A missing or unusable answer is asked for once more, as §13 does for every control operation, and
+   * only then counts as unreachable. Unreachable is tolerated for {@link HOSTED_CONTROL_OUTAGE_GRACE_MS}
+   * from the first failure and becomes a refusal after it; any real answer ends the outage. A missing
+   * binding is not an outage — it is a deployment that can never meter — so it refuses at once.
+   */
+  private async hostedVerdict(path: 'meter' | 'inspect', input: unknown): Promise<HostedRelayDecision | 'tolerated'> {
     if (!this.isHosted()) return { ok: true };
     const control = this.environment.RELAY_CONTROL;
     if (control === undefined) return internalDecision('hosted relay accounting is unavailable');
-    return (
+    const answer =
       (await requestHostedRelayDecision(control, path, input)) ??
-      internalDecision('hosted relay accounting is unavailable')
-    );
+      (await requestHostedRelayDecision(control, path, input));
+    if (answer !== null) {
+      this.controlUnreachableSince = undefined;
+      return answer;
+    }
+    const now = this.runtime.now();
+    this.controlUnreachableSince ??= now;
+    if (now - this.controlUnreachableSince < HOSTED_CONTROL_OUTAGE_GRACE_MS) return 'tolerated';
+    return internalDecision('hosted relay accounting is unavailable');
   }
 
   private async releaseReservation(reservationId: string | undefined): Promise<void> {
