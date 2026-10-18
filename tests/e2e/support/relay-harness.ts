@@ -123,6 +123,14 @@ export interface RendezvousProcess {
   dialled(): Promise<readonly string[]>;
   /** Every frame this rendezvous handled, in both directions, in order. */
   observations(): Promise<readonly ObservedFrame[]>;
+  /**
+   * Kill the rendezvous without ceremony and start it again on the SAME port — a Worker redeploy: every
+   * socket on both sides drops at once, the allowlist survives, in-memory sessions do not. `downMs` keeps it
+   * down for a while first. Answers when the drop happened and when the new process was accepting.
+   */
+  /** Everything the rendezvous process has written to stderr, across restarts — its own account of refusals and failures. */
+  stderr(): string;
+  restart(options?: { readonly downMs?: number }): Promise<{ readonly droppedAt: number; readonly backAt: number }>;
   stop(): Promise<void>;
 }
 
@@ -135,22 +143,48 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
   // that directory an entry point for exactly that reason. A spawned script under
   // `tests/e2e/support/` (imported modules) has no importer and is correctly reported as dead.
   const script = join(REPOSITORY_ROOT, 'scripts', 'test', 'rendezvous-process.ts');
-  const child = spawn(process.execPath, [script, '--observations', observationsPath], {
-    cwd: REPOSITORY_ROOT,
-    // The rendezvous inherits nothing from the isolated home: it is a THIRD PARTY to this journey
-    // and giving it `FY_HOME` would let a defect there look like a relay that could read state.
-    env: { PATH: process.env.PATH ?? '', NO_COLOR: '1' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }) as ChildProcessByStdio<null, Readable, Readable>;
 
-  let stderr = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => {
-    stderr += String(chunk);
-  });
+  let processStderr = '';
+  const launch = async (port: number): Promise<RunningRendezvous> => {
+    const child = spawn(
+      process.execPath,
+      [script, '--observations', observationsPath, '--port', String(port), '--allow', [...allowed].join(',')],
+      {
+        cwd: REPOSITORY_ROOT,
+        // The rendezvous inherits nothing from the isolated home: it is a THIRD PARTY to this journey
+        // and giving it `FY_HOME` would let a defect there look like a relay that could read state.
+        env: { PATH: process.env.PATH ?? '', NO_COLOR: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    ) as ChildProcessByStdio<null, Readable, Readable>;
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => {
+      stderr += String(chunk);
+      processStderr += String(chunk);
+    });
+    const ready = await new Promise<{ readonly port: number; readonly origin: string }>((settle, fail) => {
+      let stdout = '';
+      const timer = setTimeout(() => fail(new Error(`rendezvous process never reported ready\n${stderr}`)), 20_000);
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', chunk => {
+        stdout += String(chunk);
+        const line = stdout.split('\n').find(candidate => candidate.trim().startsWith('{'));
+        if (line === undefined) return;
+        clearTimeout(timer);
+        settle(JSON.parse(line) as { port: number; origin: string });
+      });
+      child.once('close', code => {
+        clearTimeout(timer);
+        fail(new Error(`rendezvous process exited early (code ${String(code)})\n${stderr}`));
+      });
+    });
+    return { child, port: ready.port };
+  };
 
-  const stop = async (): Promise<void> => {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  const endChild = async (child: ChildProcess, signal: NodeJS.Signals): Promise<void> => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill(signal);
     await new Promise<void>(settle => {
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
@@ -162,32 +196,33 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
       });
     });
   };
+
+  // A real Worker redeploy keeps its configuration (the allowlist) and loses its sockets and its
+  // in-memory arrival record; this harness process keeps neither, so both are carried across here.
+  const allowed = new Set<string>();
+  let running: RunningRendezvous | undefined = await launch(0);
+  const port = running.port;
+  const archivedArrivals: { role: 'daemon' | 'client'; daemonId: string }[] = [];
+
+  const stop = async (): Promise<void> => {
+    const current = running;
+    running = undefined;
+    if (current !== undefined) await endChild(current.child, 'SIGTERM');
+  };
   teardown.add('rendezvous process', stop);
 
-  const ready = await new Promise<{ readonly port: number; readonly origin: string }>((settle, fail) => {
-    let stdout = '';
-    const timer = setTimeout(() => fail(new Error(`rendezvous process never reported ready\n${stderr}`)), 20_000);
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', chunk => {
-      stdout += String(chunk);
-      const line = stdout.split('\n').find(candidate => candidate.trim().startsWith('{'));
-      if (line === undefined) return;
-      clearTimeout(timer);
-      settle(JSON.parse(line) as { port: number; origin: string });
-    });
-    child.once('close', code => {
-      clearTimeout(timer);
-      fail(new Error(`rendezvous process exited early (code ${String(code)})\n${stderr}`));
-    });
-  });
-
-  const httpOrigin = `http://127.0.0.1:${String(ready.port)}`;
+  const httpOrigin = `http://127.0.0.1:${String(port)}`;
+  const liveArrivals = async (): Promise<{ role: 'daemon' | 'client'; daemonId: string }[]> => {
+    const response = await fetch(`${httpOrigin}/__harness/arrivals`);
+    return ((await response.json()) as { arrivals: { role: 'daemon' | 'client'; daemonId: string }[] }).arrivals;
+  };
   return {
-    relayUrl: `ws://127.0.0.1:${String(ready.port)}`,
+    relayUrl: `ws://127.0.0.1:${String(port)}`,
     httpOrigin,
     observationsPath,
     allow: async daemonId => {
-      const response = await fetch(`${httpOrigin}/__harness/allow`, { method: 'POST', body: daemonId });
+      allowed.add(daemonId);
+      const response = await fetch(`${httpOrigin}/__harness/allow`, { method: 'POST', body: [...allowed].join(',') });
       if (!response.ok) throw new Error(`rendezvous refused the fingerprint allowlist: ${String(response.status)}`);
     },
     sockets: async () => {
@@ -197,15 +232,11 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
       };
       return body.rendezvous;
     },
-    arrivals: async () => {
-      const response = await fetch(`${httpOrigin}/__harness/arrivals`);
-      return ((await response.json()) as { arrivals: { role: 'daemon' | 'client'; daemonId: string }[] }).arrivals;
-    },
-    dialled: async () => {
-      const response = await fetch(`${httpOrigin}/__harness/arrivals`);
-      const body = (await response.json()) as { arrivals: { role: 'daemon' | 'client'; daemonId: string }[] };
-      return body.arrivals.filter(entry => entry.role === 'daemon').map(entry => entry.daemonId);
-    },
+    arrivals: async () => [...archivedArrivals, ...(await liveArrivals())],
+    dialled: async () =>
+      [...archivedArrivals, ...(await liveArrivals())]
+        .filter(entry => entry.role === 'daemon')
+        .map(entry => entry.daemonId),
     observations: async () => {
       const content = await readFile(observationsPath, 'utf8');
       if (content.trim() === '') return [];
@@ -214,8 +245,40 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
         .split('\n')
         .map(line => JSON.parse(line) as ObservedFrame);
     },
+    stderr: () => processStderr,
+    restart: async ({ downMs = 0 } = {}) => {
+      const current = running;
+      if (current === undefined) throw new Error('the rendezvous is already stopped');
+      archivedArrivals.push(...(await liveArrivals().catch(() => [])));
+      running = undefined;
+      // SIGKILL, not SIGTERM: a redeploy does not say goodbye. SIGTERM would close every socket with
+      // 1001 and a reason, which is a politer outage than the one the owner's phone actually saw.
+      const droppedAt = Date.now();
+      await endChild(current.child, 'SIGKILL');
+      if (downMs > 0) await Bun.sleep(downMs);
+      let lastError: unknown;
+      // The port may linger for a moment after the kill; the same port is the point (the directory
+      // advertisement and the daemon's dial target are fixed), so wait for it rather than take another.
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        try {
+          running = await launch(port);
+          break;
+        } catch (error) {
+          lastError = error;
+          await Bun.sleep(100);
+        }
+      }
+      if (running === undefined)
+        throw new Error(`the rendezvous could not rebind port ${String(port)}`, { cause: lastError });
+      return { droppedAt, backAt: Date.now() };
+    },
     stop,
   };
+}
+
+interface RunningRendezvous {
+  readonly child: ChildProcessByStdio<null, Readable, Readable>;
+  readonly port: number;
 }
 
 /**

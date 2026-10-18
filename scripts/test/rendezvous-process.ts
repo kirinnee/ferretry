@@ -124,13 +124,20 @@ interface SocketData {
 }
 
 function usage(message: string): never {
-  process.stderr.write(`${message}\nusage: bun rendezvous-process.ts --observations <path> [--port <n>]\n`);
+  process.stderr.write(
+    `${message}\nusage: bun rendezvous-process.ts --observations <path> [--port <n>] [--allow <ids>]\n`,
+  );
   process.exit(2);
 }
 
-function parseArguments(argv: readonly string[]): { readonly observations: string; readonly port: number } {
+function parseArguments(argv: readonly string[]): {
+  readonly observations: string;
+  readonly port: number;
+  readonly allow: string;
+} {
   let observations: string | undefined;
   let port = 0;
+  let allow = '';
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -143,12 +150,16 @@ function parseArguments(argv: readonly string[]): { readonly observations: strin
       port = Number(value);
       if (!Number.isInteger(port) || port < 0 || port > 65_535) usage('--port must be a TCP port');
       index += 1;
+    } else if (flag === '--allow') {
+      if (value === undefined) usage('--allow needs a fingerprint list');
+      allow = value;
+      index += 1;
     } else {
       usage(`unknown argument: ${String(flag)}`);
     }
   }
   if (observations === undefined) usage('--observations is required');
-  return { observations, port };
+  return { observations, port, allow };
 }
 
 const options = parseArguments(process.argv.slice(2));
@@ -326,7 +337,9 @@ const runtime: RelayRuntime = {
  * fingerprint its operator never listed, and the fingerprint of a daemon whose state home was
  * created five seconds ago cannot have been listed before this process started.
  */
-let allowedDaemonIds = '';
+// Seeded by `--allow` so a RESTARTED rendezvous admits the daemon the instant it listens, like a redeployed
+// Worker whose allowlist is configuration rather than runtime state.
+let allowedDaemonIds = options.allow;
 
 const environment: RelayEnvironment = {
   get RELAY_DAEMON_IDS() {
@@ -451,7 +464,10 @@ const server = Bun.serve({
         await rendezvousFor(live.data.daemonId).object.webSocketMessage(live.data.socket, payload);
       });
     },
-    close: (live: ServerWebSocket<SocketData>) => {
+    close: (live: ServerWebSocket<SocketData>, code: number, reason: string) => {
+      // One line per application-level close, so a journey can tell WHY a dial ended (4409 held, 4429 busy, ...).
+      if (code >= 4000)
+        process.stderr.write(`rendezvous close role=${live.data.role} code=${String(code)} reason=${reason}\n`);
       void serialise(async () => {
         if (live.data.daemonId === '') return;
         const rendezvous = rendezvousFor(live.data.daemonId);

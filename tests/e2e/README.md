@@ -144,3 +144,12 @@ older than `packages/relay/wrangler.jsonc` pins, so `wrangler dev` refuses the
 Worker. Running it would mean overriding the deployment's compatibility date,
 and it would cost the frame observation log unless a recording proxy went in
 front. Reconsider if the toolchain moves.
+
+## Relay recovery
+
+`relay-reconnect.e2e.test.ts` kills the rendezvous process mid-session (`RendezvousProcess.restart()`
+restarts it on the same port, allowlist kept) and measures, with nothing clicked, how long the real
+Chrome PWA takes to come back and whether composer sends land exactly once in the daemon's send
+ledger. Also: an idle case (`FY_E2E_IDLE_MINUTES`, default 3) and a frozen-renderer case
+(`FY_E2E_FREEZE_SECONDS`, default 75; `SIGSTOP` on the renderer). Numbers go to
+`$FY_E2E_RECONNECT_REPORT`; recovery budget is `FY_E2E_RECONNECT_BUDGET_MS` (default 10000).
