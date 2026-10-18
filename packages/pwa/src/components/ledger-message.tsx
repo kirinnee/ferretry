@@ -19,7 +19,7 @@ import { displayCallsign } from '../lib/callsign.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { peerFrom } from '../lib/peer-message.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import { clockOfInstant } from '../lib/send-receipt.ts';
+import { clockOfInstant } from '../lib/message-clock.ts';
 import { MessageFooter } from './send-receipt.tsx';
 
 export const RESEND_RISK_COPY =

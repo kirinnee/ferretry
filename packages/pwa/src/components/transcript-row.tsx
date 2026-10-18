@@ -1,4 +1,4 @@
-import { clockOfInstant, clockOfLabel } from '../lib/send-receipt.ts';
+import { clockOfInstant } from '../lib/message-clock.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
@@ -69,8 +69,8 @@ export function TranscriptRow({
 
 /**
  * The reader's own message: no "You · 14:02:55" header — the bubble's alignment already says who — and
- * its time and receipt as one small faded line at its foot (`send-receipt.tsx`). The clock is the
- * row's own instant when it has one, else the time the daemon printed in its label.
+ * its time and receipt as one small faded line at its foot (`send-receipt.tsx`), on the reader's own
+ * clock (`message-clock.ts`).
  */
 function OwnMessageRow({
   entry,
@@ -85,11 +85,7 @@ function OwnMessageRow({
     <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
       <span className="sr-only">You said:</span>
       <p>{entry.text}</p>
-      <MessageFooter
-        answered={answered}
-        clock={clockOfInstant(entry.at) ?? clockOfLabel(entry.label)}
-        record={entry.send}
-      />
+      <MessageFooter answered={answered} clock={clockOfInstant(entry.at)} record={entry.send} side="own" />
     </article>
   );
 }
@@ -102,8 +98,6 @@ function TranscriptTextRow({
   readonly rhythm: Record<string, string | undefined>;
 }) {
   const label = entry.label ?? defaultLabel(entry.kind);
-  const timestamp = entry.at === undefined ? undefined : new Date(entry.at);
-  const validTimestamp = timestamp !== undefined && Number.isFinite(timestamp.getTime());
   const chrome = entry.kind === 'tool' || entry.kind === 'command' || entry.kind === 'notice';
 
   return (
@@ -114,9 +108,9 @@ function TranscriptTextRow({
     >
       <header>
         <span>{label}</span>
-        {validTimestamp ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleTimeString()}</time> : null}
       </header>
       {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
+      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
     </article>
   );
 }
