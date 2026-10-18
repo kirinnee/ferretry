@@ -79,6 +79,7 @@ const userEntryFor = (record: LogRecord, index: number, at: number | undefined):
   const entry = entryFor(record, index, at);
   const message = readUserMessage(entry.text);
   if (message.kind === 'human') return { ...entry, text: message.text };
+  if (message.kind === 'handoff') return { ...entry, text: message.text, handoff: message.pointer };
   const instant = at === undefined ? {} : { at };
   return message.kind === 'notice'
     ? { id: entry.id, kind: 'system', text: message.text, ...instant }

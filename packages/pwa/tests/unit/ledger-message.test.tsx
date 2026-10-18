@@ -109,6 +109,40 @@ describe('placeLedgerRows', () => {
     expect(placed.map(entry => entry.send?.sendId)).toEqual(['old', undefined, 'new', 'peer']);
   });
 
+  test('chips a message handed over through a file by the turn or send its pointer names', () => {
+    const placed = placeLedgerRows(
+      [
+        {
+          id: 't',
+          kind: 'user',
+          text: 'Read the file …',
+          handoff: { kind: 'turn', name: 'turn-008', turn: 8, path: '/t' },
+        },
+        {
+          id: 'q',
+          kind: 'user',
+          text: 'Read the queued message file …',
+          handoff: { kind: 'queued', name: 'queued-send-q', sendId: 'send-q', path: '/q' },
+        },
+        {
+          id: 'x',
+          kind: 'user',
+          text: 'look at this',
+          handoff: { kind: 'turn', name: 'turn-009', turn: 9, path: '/x' },
+        },
+      ],
+      [
+        // The text matches the third row, but a hand-off row is matched by identity, never by text.
+        record({ sendId: 'by-text', fate: 'delivered', message: 'look at this' }),
+        record({ sendId: 'turn', fate: 'delivered', message: 'a long message', turn: 8 }),
+        record({ sendId: 'send-q', fate: 'delivered', message: 'a queued one' }),
+      ],
+      now,
+    );
+
+    expect(placed.map(entry => entry.send?.sendId)).toEqual(['turn', 'send-q', undefined]);
+  });
+
   test('puts every send not yet in the conversation after it, oldest first, and retires old failures', () => {
     const placed = placeLedgerRows(
       [],

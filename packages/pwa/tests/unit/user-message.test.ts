@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { peerEnvelopePreamble } from '@ferretry/protocol';
+import { peerEnvelopePreamble, queuedMessageInstruction, turnFileInstruction } from '@ferretry/protocol';
 import { peerFrom } from '../../src/lib/peer-message.ts';
 import { readUserMessage, unwrapPastedContent } from '../../src/lib/user-message.ts';
 
@@ -64,6 +64,26 @@ describe('readUserMessage', () => {
       text: 'Your message to aniya (send s-1) did not reach it.',
     });
     expect(readUserMessage(`<pasted_content id="n">\n${notice}\n</pasted_content>`)).toMatchObject({ kind: 'notice' });
+  });
+
+  test("reads Ferretry's own turn pointer as a hand-off, never as the person's words", () => {
+    const pointer = turnFileInstruction('/home/kirin/.ferretry/state/sessions/s1/turns/turn-008.md');
+    expect(readUserMessage(pointer)).toEqual({
+      kind: 'handoff',
+      pointer: {
+        kind: 'turn',
+        name: 'turn-008',
+        turn: 8,
+        path: '/home/kirin/.ferretry/state/sessions/s1/turns/turn-008.md',
+      },
+      text: pointer,
+    });
+    const queued = queuedMessageInstruction('/fy/state/sessions/s1/channel/queued-send-1.md');
+    expect(readUserMessage(`<pasted_content id="q">\n${queued}\n</pasted_content>`)).toMatchObject({
+      kind: 'handoff',
+      pointer: { kind: 'queued', sendId: 'send-1' },
+    });
+    expect(readUserMessage(`is this legit? ${pointer}`)).toMatchObject({ kind: 'human' });
   });
 
   test("reads anything else as the person's own words, with a paste unwrapped", () => {

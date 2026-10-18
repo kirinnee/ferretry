@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { turnFileInstruction } from '@ferretry/protocol';
 import {
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
@@ -218,5 +219,5 @@ export function resumeTurnDocument(prompt: string, settings: SessionResumeSettin
 
 /** What is typed into the replacement terminal so the agent picks the new turn up. */
 export function resumeTurnInstruction(turnFile: string): string {
-  return `Read the file ${turnFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
+  return turnFileInstruction(turnFile);
 }

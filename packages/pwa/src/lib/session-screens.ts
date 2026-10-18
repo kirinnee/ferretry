@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@ferretry/protocol';
+import type { HandoffPointer, SessionStatus } from '@ferretry/protocol';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
 import type { PeerFrom } from './peer-message.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
@@ -45,6 +45,9 @@ export interface TranscriptEntry {
   readonly send?: LedgerSendRecord;
   /** The agent a `user` row came from, when another session sent it rather than the person. */
   readonly peer?: PeerFrom;
+  /** The hand-off document a `user` row points at: the person's message is in that file, and `text`
+   *  is only the pointer the agent was typed. */
+  readonly handoff?: HandoffPointer;
   /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }

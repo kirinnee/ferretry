@@ -31,6 +31,7 @@ import type {
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionTranscriptPage } from './session-transcript.ts';
+import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
 import type {
   WardenAttentionView,
@@ -187,6 +188,8 @@ export interface IFyApiClient {
    * the default page size, so an omitted `limit` stays absent rather than gaining a client-side default.
    */
   messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage>;
+  /** What the person sent in one hand-off (`turn-008`, `queued-<send id>`): the message behind the pointer a transcript records. */
+  handoff(id: string, name: string): Promise<SessionHandoff>;
   events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]>;
   history(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
   upload(id: string, file: string | Blob, filename?: string): Promise<AttachmentView>;

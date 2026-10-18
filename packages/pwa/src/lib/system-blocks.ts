@@ -26,8 +26,10 @@
  * to a muted system row.
  *
  * Ported from kteam's `src/lib/system-blocks.ts`. The only behavioural change is
- * the turn-prompt path — see TURN_PROMPT.
+ * the turn-prompt path, which reads the protocol's own pointer format.
  */
+
+import { parseHandoffPointer } from '@ferretry/protocol';
 
 /** Chip tone derived from a notification status or an interrupt notice. */
 export type SystemBlockTone = 'ok' | 'warn' | 'err';
@@ -81,26 +83,10 @@ function toneForStatus(status: string | undefined): SystemBlockTone | undefined 
   return 'warn';
 }
 
-// The daemon's own turn prompt. Anchored and path-shaped — a human sentence that
-// merely mentions a `.md` file cannot match, because the whole prefix INCLUDING
-// the fixed instruction clause ("now, then carefully follow every instruction
-// inside it.") must be present at the start.
-//
-// The path is home-, layout- and platform-AGNOSTIC. Only the invariant
-// `…<sep>turns<sep>turn-NNN.md` tail is matched, with `<sep>` accepting `/` or
-// `\`. kteam's original anchored the state-home directory name as well, which
-// this port deliberately drops: the leading directory varies by OS and user
-// (`/home/<user>`, `/Users/<user>`, a Windows `C:\Users\<user>`), the state home
-// is relocatable via the daemon's home input, and the segments before `turns`
-// differ between Ferretry's layout (`<home>/state/sessions/<id>/turns`) and the
-// shallower one migrated history carries. The fixed instruction clause, not the
-// path prefix, is what keeps this rule off human prose — so pinning the directory
-// name bought nothing and cost every non-default home.
-const SEP = '[\\\\/]';
-const TURN_PROMPT = new RegExp(
-  `^Read the file .*${SEP}turns${SEP}(turn-\\d+)\\.md now, then carefully follow every instruction inside it\\.`,
-  'u',
-);
+// The daemon's own turn prompt is the protocol's (`parseHandoffPointer`): one owner for the sentence the
+// daemon types and every reader of it, matched only as the WHOLE message and on the path's invariant
+// `…/turns/turn-NNN.md` tail, so it is home-, layout- and platform-agnostic and a human sentence that
+// merely mentions a `.md` file cannot match.
 
 // Harness interrupt notices. The raw IS the summary.
 const INTERRUPTED = /^\[Request interrupted by user( for tool use)?\]/u;
@@ -228,8 +214,8 @@ export function classifySystemText(text: string): SystemBlockInfo | null {
   }
 
   // 3. daemon turn prompt.
-  const turn = TURN_PROMPT.exec(text);
-  if (turn) return { label: 'turn prompt', summary: `${turn[1]}.md`, raw: text };
+  const turn = parseHandoffPointer(text);
+  if (turn?.kind === 'turn') return { label: 'turn prompt', summary: `${turn.name}.md`, raw: text };
 
   // 4. interrupt notice.
   if (INTERRUPTED.test(text)) {

@@ -12,6 +12,7 @@ import { Composer } from '../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../src/components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../src/components/files-tab.tsx';
+import { HandoffSourceProvider } from '../../src/components/handoff-message.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
@@ -386,6 +387,36 @@ describe('SessionChatPage', () => {
     expect(page.root.findByType(SessionTopBar).props.onToggleInfo).toBeUndefined();
     expect(barAction(page.root, 'Interrupt turn').children.join('')).toBe('Interrupt');
     expect(barAction(page.root, 'Stop session').children.join('')).toBe('Stop');
+    run(() => page.unmount());
+  });
+
+  test('reads a message handed over through a file from this session, through the paired client', async () => {
+    const asked: [string, string][] = [];
+    const handoff = { name: 'turn-008', message: 'look at this', attachments: [] };
+    const daemon = async () =>
+      ({
+        handoff: async (id: string, name: string) => {
+          asked.push([id, name]);
+          return handoff;
+        },
+      }) as unknown as FyApiClient;
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+      daemon,
+    );
+    const source = page.root.findByType(HandoffSourceProvider).props.source;
+
+    expect(source.daemon).toBe(alpha);
+    expect(source.sessionId).toBe('shared');
+    expect(await source.read('turn-008')).toEqual(handoff);
+    expect(asked).toEqual([['shared', 'turn-008']]);
     run(() => page.unmount());
   });
 

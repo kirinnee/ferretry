@@ -13,6 +13,7 @@ import {
   type IFyHttpTransport,
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
+import { type SessionHandoff, SessionHandoffNameSchema, SessionHandoffSchema } from '../lib/turn-handoff.ts';
 import {
   type ForeignHistoryListing,
   ForeignHistoryListingSchema,
@@ -768,6 +769,13 @@ export class FyApiClient implements IFyApiClient {
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/logs${suffix}`,
       TextResponseSchema,
+    );
+  }
+
+  handoff(id: string, name: string): Promise<SessionHandoff> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/handoffs/${SessionHandoffNameSchema.parse(name)}`,
+      SessionHandoffSchema,
     );
   }
 

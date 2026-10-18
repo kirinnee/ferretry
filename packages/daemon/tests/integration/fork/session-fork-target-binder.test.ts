@@ -288,6 +288,7 @@ async function harness(
     },
     view: async id => await view(opened.storage, opened.sessionDirectory, id).catch(() => undefined),
     sessionDirectory: id => opened.sessionDirectory(id),
+    readableHandoffs: id => [`${opened.sessionDirectory(id)}/turns`],
     clock: { now: () => AT },
   };
 
@@ -427,6 +428,8 @@ describe('SessionForkTargetBinder', () => {
       '--rc',
       '--remote-control-session-name-prefix',
       `fyrc-${TARGET_ID}`,
+      // Its own turn documents, readable without a permission prompt, ahead of the operator's flags.
+      `--allowedTools=Read(/${subject.sessionDirectory(TARGET_ID)}/turns/**)`,
       '--dangerously-skip-permissions',
       ...startupModelArguments('claude-opus-5'),
       ...LAUNCH_ARGUMENTS,
