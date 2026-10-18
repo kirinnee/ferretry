@@ -636,16 +636,39 @@ export class DeviceNotAcceptedError extends Error {
  * absent, under the ORIGINAL id.
  */
 export class CarrierUnavailableError extends Error {
+  /**
+   * `true` when nothing was dialled at all because the daemon is reconnecting and the connection
+   * model's loop is the only thing allowed to dial (see `ConnectionHealthReporter.dialAllowed`). Not a
+   * new measurement, so it is not reported as one.
+   */
+  readonly deferred: boolean;
+
   constructor(
     message: string,
     readonly outage: CarrierOutage,
     readonly delivery: CarrierDelivery,
-    options?: { readonly cause?: unknown },
+    options?: { readonly cause?: unknown; readonly deferred?: boolean },
   ) {
     super(message, options);
     this.name = 'CarrierUnavailableError';
+    this.deferred = options?.deferred === true;
   }
 }
+
+/** Said when a caller's request finds its daemon reconnecting and is not dialled. */
+export const DIAL_DEFERRED_REASON =
+  'this machine is reconnecting, so nothing was dialled for this request; the connection retries on its own schedule';
+
+/** Thrown where a session would have been dialled, and turned into a deferred outage by the caller. */
+class RelayDialDeferred extends Error {
+  constructor() {
+    super(DIAL_DEFERRED_REASON);
+    this.name = 'RelayDialDeferred';
+  }
+}
+
+/** Who a dial is for: any caller, held to the connection model's gate, or the model's own attempt. */
+type DialPolicy = 'gated' | 'probe';
 
 /** Whether a request no carrier carried could have reached the daemon. See {@link CarrierUnavailableError}. */
 export type CarrierDelivery = 'unsent' | 'unknown';
@@ -1160,6 +1183,7 @@ export class DaemonCarrierRouter {
       try {
         return await this.#streamOn(entry, chosen.method, request);
       } catch (reason) {
+        if (reason instanceof RelayDialDeferred) throw this.#deferred(null);
         if (deviceRefusal(reason)) throw this.#refuse(entry);
         if (!transportLike(reason)) throw reason;
         // Said as an outage so the connection model retries, and left as the remembered winner: the
@@ -1178,6 +1202,7 @@ export class DaemonCarrierRouter {
         this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: 101 })]);
         return session;
       } catch (reason) {
+        if (reason instanceof RelayDialDeferred) throw this.#deferred(null);
         if (
           reason instanceof RelayStaleEntryError ||
           reason instanceof DeviceKeyMissingError ||
@@ -1320,9 +1345,24 @@ export class DaemonCarrierRouter {
     return await this.#sendOnce(daemon, url, init);
   }
 
-  async #sendOnce(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
+  /**
+   * THE CONNECTION MODEL'S OWN ATTEMPT: one request that may dial while the daemon is reconnecting.
+   *
+   * Everything else waits for it — see {@link CarrierUnavailableError.deferred}. It asks no passkey
+   * prompt of anybody, because nobody pressed anything: a `401`/`403` is simply an answer.
+   */
+  async probe(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
+    return await this.#sendOnce(daemon, url, init, 'probe');
+  }
+
+  async #sendOnce(
+    daemon: DaemonConnection,
+    url: string,
+    init: RequestInit,
+    dial: DialPolicy = 'gated',
+  ): Promise<Response> {
     try {
-      const response = await this.#walk(daemon, url, init);
+      const response = await this.#walk(daemon, url, init, dial);
       this.#health?.answered(daemon.daemonId);
       return response;
     } catch (reason) {
@@ -1334,7 +1374,7 @@ export class DaemonCarrierRouter {
   /** Tells the connection model what a failure was: an outage, a final refusal, or neither. */
   #reportFailure(daemonId: DaemonId, reason: unknown): void {
     if (reason instanceof CarrierUnavailableError) {
-      this.#health?.outage(daemonId, reason.outage);
+      if (!reason.deferred) this.#health?.outage(daemonId, reason.outage);
       return;
     }
     if (
@@ -1343,6 +1383,17 @@ export class DaemonCarrierRouter {
       reason instanceof AppOutdatedError
     )
       this.#health?.settled(daemonId);
+  }
+
+  /** A request that was not dialled for: proven unsent, unless its id is already in doubt. */
+  #deferred(requestId: string | null): CarrierUnavailableError {
+    const doubted = requestId !== null && this.#unknownFates.has(requestId);
+    return new CarrierUnavailableError(
+      DIAL_DEFERRED_REASON,
+      { failures: [], daemonAbsent: false, relaysNeverOpened: false },
+      doubted ? 'unknown' : 'unsent',
+      { deferred: true },
+    );
   }
 
   /**
@@ -1385,7 +1436,7 @@ export class DaemonCarrierRouter {
     );
   }
 
-  async #walk(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
+  async #walk(daemon: DaemonConnection, url: string, init: RequestInit, dial: DialPolicy): Promise<Response> {
     const entry = this.#entry(daemon);
     // A REFUSED DEVICE DIALS NOTHING. Every panel of an open page retries its own reads, and each try
     // was a fresh socket the daemon admitted and refused — enough of them spent the per-address upgrade
@@ -1397,11 +1448,17 @@ export class DaemonCarrierRouter {
     const chosen = entry.choice;
     if (chosen?.ok === true) {
       try {
-        return await this.#over(entry, chosen.method, url, init);
+        return await this.#over(entry, chosen.method, url, init, dial);
       } catch (thrown) {
         if (thrown instanceof RelayAnswerError) throw thrown.cause;
         const unsent = thrown instanceof RelayUnsentError;
         const reason = unsent ? thrown.cause : thrown;
+        if (reason instanceof RelayDialDeferred) {
+          // The winner's session is gone and this caller may not replace it: the model's attempt will.
+          entry.choice = undefined;
+          this.#announce();
+          throw this.#deferred(requestId);
+        }
         // The remembered carrier stopped carrying. Forget it — the next request walks
         // the set again — and report this failure rather than re-sending a request
         // whose fate on the daemon is unknown.
@@ -1428,7 +1485,7 @@ export class DaemonCarrierRouter {
       // the withdrawn rendezvous — which is the one thing a cleared pairing must never do again.
       this.#assertCurrent(entry);
       try {
-        const response = await this.#over(entry, method, url, init);
+        const response = await this.#over(entry, method, url, init, dial);
         // WHETHER AN ATTEMPT ADVANCES THE WALK IS THE PROTOCOL'S RULE, not this
         // class's: `carrierProbe` reads an ANSWER — any status, `503` included — as
         // this carrier working, and only a transport failure as a reason to try the
@@ -1441,6 +1498,7 @@ export class DaemonCarrierRouter {
         // A session that never opened sent nothing, so even a write may try the next carrier.
         const unsent = thrown instanceof RelayUnsentError;
         const reason = unsent ? thrown.cause : thrown;
+        if (reason instanceof RelayDialDeferred) throw this.#deferred(requestId);
         // A STALE ENTRY IS NOT A TRANSPORT FAILURE AND MUST NOT ADVANCE THE WALK. It says nothing about
         // whether this address works; it says this walk no longer describes a pairing that exists, so
         // every remaining candidate would be dialled with a credential and a set that were replaced.
@@ -1590,8 +1648,14 @@ export class DaemonCarrierRouter {
     }
   }
 
-  async #over(entry: CarrierEntry, method: ConnectionMethod, url: string, init: RequestInit): Promise<Response> {
-    const session = await this.#session(entry, method).catch((reason: unknown) => {
+  async #over(
+    entry: CarrierEntry,
+    method: ConnectionMethod,
+    url: string,
+    init: RequestInit,
+    dial: DialPolicy,
+  ): Promise<Response> {
+    const session = await this.#session(entry, method, dial).catch((reason: unknown) => {
       throw new RelayUnsentError(reason);
     });
     // AMENDED HERE, on the session that will carry the request, because the rotation proof signs THAT
@@ -1617,7 +1681,7 @@ export class DaemonCarrierRouter {
         reason.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE &&
         replaySafe(init)
       ) {
-        const fresh = await this.#session(entry, method);
+        const fresh = await this.#session(entry, method, dial);
         return relayResponse(await fresh.request(record));
       }
       // The carrier failed under this request, so another carrier may be tried — and
@@ -1647,10 +1711,14 @@ export class DaemonCarrierRouter {
    * ever close. A refresh that carried this exact opening promise across is the one case
    * where the entry moved and the session did not, and that session is tracked and fine.
    */
-  async #session(entry: CarrierEntry, method: ConnectionMethod): Promise<RelayClientSession> {
+  async #session(entry: CarrierEntry, method: ConnectionMethod, dial: DialPolicy): Promise<RelayClientSession> {
     const address = carrierAddress(method);
-    return await this.#hold(entry, requestSessionKey(address), address, async () =>
-      this.#openKeyed(entry, method, device => ({ kind: 'auth', device })),
+    return await this.#hold(
+      entry,
+      requestSessionKey(address),
+      address,
+      async () => this.#openKeyed(entry, method, device => ({ kind: 'auth', device })),
+      dial,
     );
   }
 
@@ -1664,18 +1732,23 @@ export class DaemonCarrierRouter {
     const query = request.query ?? [];
     this.#streams += 1;
     const key = streamSessionKey(address, request.path, query, this.#streams);
-    const session = await this.#hold(entry, key, address, async () =>
-      this.#openKeyed(
-        entry,
-        method,
-        device => ({
-          kind: 'stream',
-          device,
-          path: request.path,
-          ...(query.length === 0 ? {} : { query }),
-        }),
-        request.onData,
-      ),
+    const session = await this.#hold(
+      entry,
+      key,
+      address,
+      async () =>
+        this.#openKeyed(
+          entry,
+          method,
+          device => ({
+            kind: 'stream',
+            device,
+            path: request.path,
+            ...(query.length === 0 ? {} : { query }),
+          }),
+          request.onData,
+        ),
+      'gated',
     );
     // EVICTED WHEN IT CONCLUDES, not when something happens to ask for the same key again — and with
     // a per-call key nothing ever does, so without this the map would gain one dead entry for every
@@ -1779,6 +1852,7 @@ export class DaemonCarrierRouter {
     key: string,
     address: string,
     open: () => Promise<RelayClientSession>,
+    dial: DialPolicy,
   ): Promise<RelayClientSession> {
     const existing = entry.sessions.get(key);
     if (existing !== undefined) {
@@ -1786,6 +1860,10 @@ export class DaemonCarrierRouter {
       if (current?.live() === true || current?.streaming() === true) return current;
       entry.sessions.delete(key);
     }
+    // THE ONE PLACE A SESSION IS DIALLED, so the one place the reconnect gate stands. A session that is
+    // already live is used above whatever the gate says; only a NEW dial waits for the model's attempt.
+    if (dial === 'gated' && this.#health?.dialAllowed(entry.connection.daemonId) === false)
+      throw new RelayDialDeferred();
     const opening = open();
     entry.sessions.set(key, { address, session: opening });
     let session: RelayClientSession;

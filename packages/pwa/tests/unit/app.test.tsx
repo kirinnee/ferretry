@@ -1535,8 +1535,9 @@ describe('AppShell', () => {
       await interact(async () => {
         // The request itself rejects — every carrier failed, which is the point. What matters is the
         // choice the router publishes on its way out. A WRITE, because a read whose winner dies walks
-        // again inside the same call, and this test is about the moment between the two.
-        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`, { method: 'POST' }).catch(() => undefined);
+        // again inside the same call, and this test is about the moment between the two. A PROBE, because
+        // after the first failure only the connection model's own attempt may dial (this suite never runs one).
+        await store.carrier.probe(alpha, `${alpha.baseUrl}/v1/health`, { method: 'POST' }).catch(() => undefined);
       });
       await settle();
     };
@@ -1613,8 +1614,9 @@ describe('AppShell', () => {
     const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
     const walk = async (): Promise<void> => {
       await interact(async () => {
-        // A write, so the dead winner is forgotten without a second walk inside the same call.
-        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`, { method: 'POST' }).catch(() => undefined);
+        // A write, so the dead winner is forgotten without a second walk inside the same call; a probe,
+        // because once the daemon is reconnecting only the model's attempt may dial.
+        await store.carrier.probe(alpha, `${alpha.baseUrl}/v1/health`, { method: 'POST' }).catch(() => undefined);
       });
       await settle();
     };

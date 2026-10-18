@@ -109,6 +109,13 @@ export interface ConnectionHealthReporter {
    * an outage: the screen that owns that refusal says it, and the loop stops.
    */
   settled(daemonId: DaemonId): void;
+  /**
+   * Whether the router may DIAL a new session for this daemon on a caller's behalf. `false` while it
+   * is reconnecting: then only the loop's own attempt dials, so every panel, stream and terminal
+   * retrying on its own schedule cannot turn one outage into a storm of rendezvous arrivals — the
+   * storm that used up a relay's per-rendezvous arrival budget and kept the daemon itself out.
+   */
+  dialAllowed(daemonId: DaemonId): boolean;
 }
 
 /** Everything the model reads from the world. Injected so no suite waits on a real clock. */
@@ -269,6 +276,10 @@ export class DaemonConnectionHealth implements ConnectionHealth, ConnectionHealt
     // A report that arrived from the loop's OWN attempt is followed by that attempt settling, which
     // schedules the next one; anything else starts the loop here.
     if (!health.inFlight) this.#scheduleNext(daemonId, health);
+  }
+
+  dialAllowed(daemonId: DaemonId): boolean {
+    return this.state(daemonId).kind !== 'reconnecting';
   }
 
   settled(daemonId: DaemonId): void {

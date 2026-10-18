@@ -536,7 +536,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       const daemon = connections.list().find(record => record.daemonId === daemonId);
       if (daemon === undefined) return;
       const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
-      await carrier.send(daemon, request.url, request.init);
+      await carrier.probe(daemon, request.url, request.init);
     },
   );
   const carrier = new DaemonCarrierRouter({

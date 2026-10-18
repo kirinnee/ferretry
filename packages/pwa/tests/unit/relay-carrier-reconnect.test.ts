@@ -19,6 +19,7 @@ import {
   type DaemonCarrierRouterOptions,
   DaemonOutdatedError,
   DeviceNotAcceptedError,
+  DIAL_DEFERRED_REASON,
   isCarrierOutage,
   KEEPALIVE_DEADLINE_MS,
   KEEPALIVE_INTERVAL_MS,
@@ -95,8 +96,9 @@ const carriersFor = (
   return { dial, dialled, live };
 };
 
-/** A connection-health reporter that writes down what it was told. */
+/** A connection-health reporter that writes down what it was told; `gate.open = false` is "reconnecting". */
 const recordingHealth = () => {
+  const gate = { open: true };
   const calls: (
     | { kind: 'answered'; daemonId: DaemonId }
     | { kind: 'outage'; daemonId: DaemonId; outage: CarrierOutage }
@@ -106,8 +108,9 @@ const recordingHealth = () => {
     answered: daemonId => calls.push({ kind: 'answered', daemonId }),
     outage: (daemonId, outage) => calls.push({ kind: 'outage', daemonId, outage }),
     settled: daemonId => calls.push({ kind: 'settled', daemonId }),
+    dialAllowed: () => gate.open,
   };
-  return { calls, reporter, kinds: () => calls.map(call => call.kind) };
+  return { calls, gate, reporter, kinds: () => calls.map(call => call.kind) };
 };
 
 const routerFor = async (
@@ -486,5 +489,88 @@ describe('reading an outage out of a wrapped error', () => {
     expect(isCarrierOutage(deep)).toBe(false);
     expect(carrierDelivery('not an error')).toBeUndefined();
     expect(provenUnsent(new Error('a daemon answer'))).toBe(false);
+  });
+});
+
+describe('while the daemon is reconnecting', () => {
+  it('should dial nothing for a caller and say so as a proven-unsent, unreported outage', async () => {
+    const { router, daemon, carriers, health } = await routerFor({ reach: () => 'refuse' });
+    health.gate.open = false;
+    const read = await rejection(router.send(daemon, `${DAEMON_URL}/v1/projects`));
+    const write = await rejection(router.send(daemon, `${DAEMON_URL}/v1/sessions`, { method: 'POST', body: '{}' }));
+    const stream = await rejection(router.openStream(daemon, { path: '/v1/events', onData: () => undefined }));
+    for (const failure of [read, write, stream]) {
+      expect(failure).toBeInstanceOf(CarrierUnavailableError);
+      expect((failure as CarrierUnavailableError).deferred).toBe(true);
+      expect(provenUnsent(failure)).toBe(true);
+    }
+    expect((read as Error).message).toBe(DIAL_DEFERRED_REASON);
+    // Not a socket opened, and nothing told to the model: it is the one doing the dialling.
+    expect(carriers.dialled).toEqual([]);
+    expect(health.calls).toEqual([]);
+  });
+
+  it('should let the model’s own attempt dial, and report what it found', async () => {
+    const { router, daemon, carriers, health } = await routerFor();
+    health.gate.open = false;
+    expect((await router.probe(daemon, `${DAEMON_URL}/v1/carriers`)).status).toBe(200);
+    expect(carriers.dialled).toEqual([DIRECT_HOST]);
+    expect(health.kinds()).toEqual(['answered']);
+  });
+
+  it('should keep using a session that is already live', async () => {
+    const { router, daemon, carriers, health } = await routerFor();
+    await router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    health.gate.open = false;
+    expect((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).toBe(200);
+    expect(carriers.dialled).toEqual([DIRECT_HOST]);
+  });
+
+  it('should forget a dead winner without replacing it, and keep a write in doubt in doubt', async () => {
+    const { router, daemon, carriers, health } = await routerFor({
+      answer: { closeOnRequest: index => (index === 1 ? { code: 1006, reason: 'dropped' } : undefined) },
+    });
+    await router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    const post = () =>
+      rejection(
+        router.send(daemon, `${DAEMON_URL}/v1/sessions`, {
+          method: 'POST',
+          body: '{}',
+          headers: { [FY_REQUEST_ID_HEADER]: 'send-9' },
+        }),
+      );
+    expect(carrierDelivery(await post())).toBe('unknown');
+    health.gate.open = false;
+    // The winner was already forgotten by the failure above; a read now walks into the gate.
+    const read = await rejection(router.send(daemon, `${DAEMON_URL}/v1/projects`));
+    expect((read as CarrierUnavailableError).deferred).toBe(true);
+    const again = await post();
+    expect((again as CarrierUnavailableError).deferred).toBe(true);
+    expect(carrierDelivery(again)).toBe('unknown');
+    expect(carriers.dialled).toEqual([DIRECT_HOST]);
+  });
+
+  it('should forget a remembered winner whose session died rather than redial it', async () => {
+    const { router, daemon, carriers, health } = await routerFor();
+    await router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    await router.openStream(daemon, { path: '/v1/events', onData: () => undefined });
+    carriers.live.sockets[0]?.onClose?.(1006, 'the relay was redeployed');
+    health.gate.open = false;
+    const read = await rejection(router.send(daemon, `${DAEMON_URL}/v1/projects`));
+    expect((read as CarrierUnavailableError).deferred).toBe(true);
+    expect(router.choice(daemon.daemonId)).toBeUndefined();
+    const stream = await rejection(router.openStream(daemon, { path: '/v1/events', onData: () => undefined }));
+    expect((stream as CarrierUnavailableError).deferred).toBe(true);
+    expect(carriers.dialled).toEqual([DIRECT_HOST, DIRECT_HOST]);
+  });
+
+  it('should gate a stream on a remembered winner too', async () => {
+    const { router, daemon, carriers, health } = await routerFor();
+    await router.send(daemon, `${DAEMON_URL}/v1/projects`);
+    health.gate.open = false;
+    const stream = await rejection(router.openStream(daemon, { path: '/v1/events', onData: () => undefined }));
+    expect((stream as CarrierUnavailableError).deferred).toBe(true);
+    expect(carriers.dialled).toEqual([DIRECT_HOST]);
+    expect(router.choice(daemon.daemonId)?.ok).toBe(true);
   });
 });
