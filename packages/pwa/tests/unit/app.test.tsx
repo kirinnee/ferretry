@@ -76,6 +76,14 @@ import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
 import { attentionItem, wardenAttention, wardenInvestigation, wardenStatus } from '../support/warden.ts';
 
+/** A connection-health clock whose timers never fire: a suite drives recovery by sending requests. */
+const idleConnectionHealth = {
+  now: () => Date.now(),
+  schedule: () => () => undefined,
+  random: () => 0,
+  isOnline: () => true,
+};
+
 /*
  * REAL FINGERPRINTS, because every daemon request rides a session now and a session is checked
  * against the fingerprint before anything is sent. `ALPHA` and `BETA` are those fingerprints, used
@@ -500,6 +508,9 @@ const appStore = async (
   daemonNetwork = network;
   return await createAppStore({
     repository: new MemoryRepository(),
+    // The reconnect loop never arms a real timer here: a suite drives recovery by sending requests.
+    connectionHealthEnvironment: idleConnectionHealth,
+    connectionSignals: { listen: () => () => undefined },
     connectClient: async connection => {
       if (options.clientFailure !== undefined) throw new Error(options.clientFailure);
       const client = {
@@ -1523,8 +1534,9 @@ describe('AppShell', () => {
     const walk = async (): Promise<void> => {
       await interact(async () => {
         // The request itself rejects — every carrier failed, which is the point. What matters is the
-        // choice the router publishes on its way out.
-        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`).catch(() => undefined);
+        // choice the router publishes on its way out. A WRITE, because a read whose winner dies walks
+        // again inside the same call, and this test is about the moment between the two.
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`, { method: 'POST' }).catch(() => undefined);
       });
       await settle();
     };
@@ -1601,7 +1613,8 @@ describe('AppShell', () => {
     const region = () => must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
     const walk = async (): Promise<void> => {
       await interact(async () => {
-        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`).catch(() => undefined);
+        // A write, so the dead winner is forgotten without a second walk inside the same call.
+        await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`, { method: 'POST' }).catch(() => undefined);
       });
       await settle();
     };

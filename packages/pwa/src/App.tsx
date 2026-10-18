@@ -93,6 +93,7 @@ import { WardenOverviewSurface } from './features/warden/warden-overview-surface
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useFleetPoll } from './hooks/use-fleet-poll.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
@@ -158,6 +159,7 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
+import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
@@ -931,6 +933,26 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const carrierKind = measuredCarrier?.ok === true ? measuredCarrier.method.kind : 'none';
   const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
   /**
+   * HOW WELL THIS DAEMON IS REACHED, said once by the connection model rather than by this route.
+   *
+   * A LOST CARRIER IS NOT A SESSION ISSUE. It used to arrive here as each read's own failure, so one
+   * dropped relay socket painted the whole walk's sentence — once for the transcript, once for the
+   * session — over a workspace that was fine. Now an outage leaves the last good transcript, session
+   * and client exactly where they are, the poll keeps running, and the first answer after it refreshes
+   * at once; only an error the daemon actually returned is said here.
+   */
+  const connectionHealth = useConnectionHealth(store.connectionHealth, daemonId);
+  /** Bumped when the daemon comes back after the CLIENT itself could not be opened, so it is opened again. */
+  const [clientAttempt, setClientAttempt] = useState(0);
+  useEffect(
+    () =>
+      store.connectionHealth.onRecovered(daemonId, () => {
+        void refreshControl.current?.refresh(true);
+        if (refreshControl.current === null) setClientAttempt(attempt => attempt + 1);
+      }),
+    [daemonId, store.connectionHealth],
+  );
+  /**
    * WHO a live subscription would belong to, as one identity — `null` when none may exist.
    *
    * NOT UNTIL A CARRIER HAS BEEN MEASURED, and that is a fix rather than a guard. A carrier is
@@ -956,6 +978,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     [client, measuredCarrier, sessionId],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `clientAttempt` is a re-open trigger, read by nothing
   useEffect(() => {
     let current = true;
     let control: SessionWorkspaceRefreshControl | null = null;
@@ -989,18 +1012,20 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,
           onError: setError,
+          quiet: isCarrierOutage,
         });
         refreshControl.current = control;
       })
       .catch(reason => {
-        if (current) setError(reason instanceof Error ? reason.message : String(reason));
+        // An outage here is retried by the connection model, and its recovery bumps `clientAttempt`.
+        if (current && !isCarrierOutage(reason)) setError(reason instanceof Error ? reason.message : String(reason));
       });
     return () => {
       current = false;
       control?.stop();
       if (refreshControl.current === control) refreshControl.current = null;
     };
-  }, [connection, daemonId, sessionId, store.attention, store.clients, store.fleet]);
+  }, [clientAttempt, connection, daemonId, sessionId, store.attention, store.clients, store.fleet]);
 
   /**
    * THE LIVE FEED, AND THE FIRST THING IN THIS APP THAT CONSUMES ONE.
@@ -1037,6 +1062,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       sessionId: streamOwner.sessionId,
       after: liveCursorRef.current,
       environment: browserEventStreamEnvironment,
+      onRecovered: listener => store.connectionHealth.onRecovered(daemonId, listener),
       onEvent: event => {
         liveCursorRef.current = Math.max(liveCursorRef.current, event.sequence);
         setLiveCursor(current => Math.max(current, event.sequence));
@@ -1054,7 +1080,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       stream.stop();
       if (streamControl.current === stream) streamControl.current = null;
     };
-  }, [streamOwner, surfaceEvents]);
+  }, [daemonId, store.connectionHealth, streamOwner, surfaceEvents]);
 
   /**
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
@@ -1129,6 +1155,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       // which changes for reasons that have nothing to do with the carrier.
       data-live-events={String(liveCursor)}
       data-carrier-kind={carrierKind}
+      data-connection={connectionHealth.kind}
     >
       {/* These live regions outlive every loading/error/content swap. */}
       <p className="sr-only" role="status" aria-live="polite" data-session-state={sessionState}>

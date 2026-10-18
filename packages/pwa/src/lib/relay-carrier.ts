@@ -39,6 +39,7 @@
  */
 
 import {
+  FY_REQUEST_ID_HEADER,
   OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
   UNLOCK_REQUIRED_CODE,
@@ -55,14 +56,15 @@ import {
   carrierProbe,
   chooseConnection,
   connectionSocketUrl,
+  describeConnectionMethod,
   HEARTBEAT_GRACE_SECONDS,
-  HEARTBEAT_SECONDS,
   type PrivateKeyHandle,
   parseDaemonId,
   RELAY_CLOSE_CODES,
   SESSION_PROTOCOL_ID,
   toBase64Url,
 } from '@ferretry/relay';
+import type { CarrierOutage, ConnectionHealthReporter } from './connection-health.ts';
 import {
   type DaemonConnection,
   type DaemonId,
@@ -369,6 +371,47 @@ export const DIRECT_SESSION_DEADLINE_MS = 4_000;
  * pairing session has stated its outcome and is about to be closed by the daemon, so leaving a
  * thirty-second interval armed behind it would keep a timer alive for a conversation that is over.
  */
+/**
+ * How often this side pings a live session: inside `heartbeatSeconds`, which §8 makes a ceiling
+ * ("at least every"), so sending more often conforms.
+ */
+export const KEEPALIVE_INTERVAL_MS = 20_000;
+
+/**
+ * How long a ping may go unanswered before the socket is treated as dead.
+ *
+ * WHY THIS SIDE CHECKS AT ALL: a phone that sleeps, or a network that changes under it, can leave a
+ * socket the browser still calls open while nothing reaches it. Nothing ever closes such a socket —
+ * the far end evicts it, but the eviction cannot reach this tab — so without a deadline of its own
+ * this browser kept sending requests into a socket that could never answer them. ANY inbound
+ * message counts as life, not only the `fy-pong`.
+ */
+export const KEEPALIVE_DEADLINE_MS = 10_000;
+
+/** The shorter deadline a liveness check uses when the browser says the network may have changed. */
+export const LIVENESS_CHECK_DEADLINE_MS = 4_000;
+
+/**
+ * Asks one held session to prove it is alive within `deadlineMs`, or end. Registered by
+ * {@link driveRelaySession} for every session it keeps alive; absent for one it does not.
+ */
+const livenessChecks = new WeakMap<RelayClientSession, (deadlineMs: number) => void>();
+
+/**
+ * Failures of a socket that never OPENED — the one fact about a carrier the browser does not withhold
+ * (see {@link socketFailureReason}). Kept beside the error rather than read back out of its sentence,
+ * so "no relay could even be reached" is decided from what happened and not from wording.
+ */
+const unopened = new WeakSet<object>();
+
+/** Whether this failure came from a socket that never completed its handshake. */
+export const socketNeverOpened = (reason: unknown): boolean =>
+  typeof reason === 'object' && reason !== null && unopened.has(reason);
+
+/** Run an immediate liveness check on one session: a ping now, and a close if nothing comes back. */
+export const checkSessionLiveness = (session: RelayClientSession, deadlineMs = LIVENESS_CHECK_DEADLINE_MS): void =>
+  livenessChecks.get(session)?.(deadlineMs);
+
 export const driveRelaySession = async <T>({
   socket,
   session,
@@ -385,10 +428,48 @@ export const driveRelaySession = async <T>({
   /** How long the session may take to settle. The heartbeat grace by default; shorter for a probe. */
   readonly deadlineMs?: number;
 }): Promise<T> => {
+  let opened = false;
   const timers = new Set<() => void>();
   const stop = (): void => {
     for (const cancel of timers) cancel();
     timers.clear();
+    livenessChecks.delete(session);
+  };
+  // The one unanswered ping, if any. Any inbound message disarms it — that is the evidence of life —
+  // so a deadline that fires has, by construction, heard nothing since it was armed.
+  let pongDeadline: { readonly within: number; readonly cancel: () => void } | undefined;
+  const armDeadline = (withinMs: number): void => {
+    // A shorter wait replaces a longer one — a liveness check under the regular ping — and a longer
+    // one never relaxes a shorter one already armed.
+    if (pongDeadline !== undefined && pongDeadline.within <= withinMs) return;
+    if (pongDeadline !== undefined) {
+      pongDeadline.cancel();
+      timers.delete(pongDeadline.cancel);
+    }
+    const cancel = heartbeat(() => {
+      // A repeating schedule used once: the first tick is the deadline.
+      cancel();
+      timers.delete(cancel);
+      pongDeadline = undefined;
+      stop();
+      session.carrierClosed(
+        RELAY_CLOSE_CODES.heartbeatTimeout,
+        `the carrier showed no sign of life for ${String(withinMs / 1_000)} s after a heartbeat`,
+      );
+      socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no heartbeat');
+    }, withinMs);
+    timers.add(cancel);
+    pongDeadline = { within: withinMs, cancel };
+  };
+  const ping = (withinMs: number): void => {
+    session.heartbeat();
+    armDeadline(withinMs);
+  };
+  const alive = (): void => {
+    if (pongDeadline === undefined) return;
+    pongDeadline.cancel();
+    timers.delete(pongDeadline.cancel);
+    pongDeadline = undefined;
   };
   const deadline = heartbeat(() => {
     session.carrierClosed(RELAY_CLOSE_CODES.heartbeatTimeout, 'the rendezvous did not open a session in time');
@@ -396,10 +477,18 @@ export const driveRelaySession = async <T>({
   }, deadlineMs);
   timers.add(deadline);
   socket.onOpen = () => {
-    timers.add(heartbeat(() => session.heartbeat(), HEARTBEAT_SECONDS * 1_000));
+    opened = true;
+    timers.add(heartbeat(() => ping(KEEPALIVE_DEADLINE_MS), KEEPALIVE_INTERVAL_MS));
+    livenessChecks.set(session, ping);
   };
-  socket.onText = text => session.receiveText(text);
-  socket.onBinary = bytes => void session.receiveBinary(bytes);
+  socket.onText = text => {
+    alive();
+    session.receiveText(text);
+  };
+  socket.onBinary = bytes => {
+    alive();
+    void session.receiveBinary(bytes);
+  };
   socket.onClose = (code, reason) => {
     stop();
     session.carrierClosed(code, reason);
@@ -417,6 +506,7 @@ export const driveRelaySession = async <T>({
     return value;
   } catch (reason) {
     stop();
+    if (!opened && typeof reason === 'object' && reason !== null) unopened.add(reason);
     throw reason;
   }
 };
@@ -530,6 +620,93 @@ export class DeviceNotAcceptedError extends Error {
     this.name = 'DeviceNotAcceptedError';
   }
 }
+
+/**
+ * NO CARRIER CARRIED THIS REQUEST — a transport outage, not anything the daemon said.
+ *
+ * Its own class so a caller can tell the two apart: a screen keeps its last good content through
+ * one of these (the connection model is already retrying), while an answer — any status — is news.
+ * The message is the walk's own sentence, unchanged, and `outage` is what the walk observed.
+ *
+ * `delivery` IS WHAT A WRITE'S CALLER NEEDS, and the two values are not symmetric. `unsent` is a
+ * PROOF: no session carrying this request ever opened, on any attempt under its request id, so nothing
+ * of it reached a daemon and sending it again cannot double it. `unknown` is the absence of that
+ * proof: a session died AFTER the request left, and the daemon may hold it — a resend under a NEW id
+ * could apply it twice, so a caller leaves it to the send ledger, which retries only what it proves
+ * absent, under the ORIGINAL id.
+ */
+export class CarrierUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly outage: CarrierOutage,
+    readonly delivery: CarrierDelivery,
+    options?: { readonly cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = 'CarrierUnavailableError';
+  }
+}
+
+/** Whether a request no carrier carried could have reached the daemon. See {@link CarrierUnavailableError}. */
+export type CarrierDelivery = 'unsent' | 'unknown';
+
+/**
+ * How many request ids whose fate is unknown are remembered. The typed client retries one request
+ * under one id a few times within a second, so this needs to outlive a retry burst, not a page.
+ */
+const UNKNOWN_FATES_REMEMBERED = 256;
+
+/**
+ * Whether a failure — or anything it wraps — is a carrier outage.
+ *
+ * Read through `cause` because the typed client wraps whatever its transport threw (`FyTransportError`
+ * keeps the router's error as its cause), and a screen holding the client's error is exactly the one
+ * that must tell an outage from an answer. Bounded, because a cause chain is data, not a promise.
+ */
+export const isCarrierOutage = (reason: unknown): boolean => carrierDelivery(reason) !== undefined;
+
+/**
+ * For a carrier outage — however deeply wrapped — whether the request may have reached the daemon;
+ * `undefined` for anything that is not an outage. A composer reads this to decide between "not sent,
+ * send it again" (`unsent`, proven) and "checking whether it arrived" (`unknown`).
+ */
+export const carrierDelivery = (reason: unknown): CarrierDelivery | undefined => {
+  let current = reason;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    if (current instanceof CarrierUnavailableError) return current.delivery;
+    current = current.cause;
+  }
+  return undefined;
+};
+
+/**
+ * True only when nothing of this request left the browser: no session that could carry it opened, on
+ * any attempt under its request id. The one case a composer may say "not sent — send it again".
+ */
+export const provenUnsent = (reason: unknown): boolean => carrierDelivery(reason) === 'unsent';
+
+/** One carrier a walk tried, and the failure it met. */
+interface CarrierFailureSeen {
+  readonly method: ConnectionMethod;
+  readonly reason: unknown;
+  /** The session had opened, so the request may have left this browser. */
+  readonly sent: boolean;
+}
+
+/** What a walk observed, in the terms the connection model reads. */
+const carrierOutage = (seen: readonly CarrierFailureSeen[]): CarrierOutage => {
+  const relays = seen.filter(failure => failure.method.kind === 'relay');
+  return {
+    failures: seen.map(failure => ({
+      label: describeConnectionMethod(failure.method).label,
+      detail: transportFailure(failure.reason),
+    })),
+    daemonAbsent: seen.some(
+      failure => failure.reason instanceof RelaySessionError && failure.reason.code === RELAY_CLOSE_CODES.daemonAbsent,
+    ),
+    relaysNeverOpened: relays.length > 0 && relays.every(failure => socketNeverOpened(failure.reason)),
+  };
+};
 
 /** A session the daemon closed with `4403`: this device is not accepted. */
 const deviceRefusal = (reason: unknown): boolean =>
@@ -650,6 +827,11 @@ export interface DaemonCarrierRouterOptions {
    * nobody can tell, and nothing is marked.
    */
   readonly presence?: () => boolean;
+  /**
+   * Told the outcome of every request and stream open: answered, no carrier, or a final refusal.
+   * Absent means nobody is keeping score, which is every router built before it existed.
+   */
+  readonly health?: ConnectionHealthReporter;
 }
 
 /**
@@ -776,6 +958,21 @@ class RelayStaleEntryError extends Error {
   }
 }
 
+/**
+ * Whether a failure on a carrier is about the CARRIER — and so an outage a retry may cure.
+ *
+ * A stale walk and an unreadable device key are facts about this browser's pairing, and the daemon's
+ * refusal of a stream is an answer; none of them is a carrier that stopped carrying.
+ */
+const transportLike = (reason: unknown): boolean =>
+  !(
+    reason instanceof RelayStaleEntryError ||
+    reason instanceof DeviceKeyMissingError ||
+    reason instanceof DeviceKeyUnreadableError ||
+    reason instanceof RelayStreamRefusedError ||
+    (reason instanceof RelaySessionError && reason.code === RELAY_CLOSE_CODES.rendezvousBusy)
+  );
+
 const transportFailure = (reason: unknown): string => {
   if (reason instanceof RelaySessionError) return `${reason.message} (${reason.code})`;
   return reason instanceof Error ? reason.message : String(reason);
@@ -824,6 +1021,9 @@ export class DaemonCarrierRouter {
   readonly #unlockRequired: DaemonCarrierRouterOptions['unlockRequired'];
   readonly #presence: () => boolean;
   readonly #rotation: KeyRotation | undefined;
+  readonly #health: ConnectionHealthReporter | undefined;
+  /** Request ids a session died under after they left — see {@link CarrierUnavailableError}'s `delivery`. */
+  readonly #unknownFates = new Set<string>();
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
@@ -861,6 +1061,7 @@ export class DaemonCarrierRouter {
     this.#unlockRequired = options.unlockRequired;
     this.#presence = options.presence ?? (() => false);
     this.#rotation = options.rotation;
+    this.#health = options.health;
   }
 
   /**
@@ -939,6 +1140,19 @@ export class DaemonCarrierRouter {
    * the `id` the caller minted, so two callers on one request session cannot receive each other's.
    */
   async openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession> {
+    try {
+      const session = await this.#openStream(daemon, request);
+      this.#health?.answered(daemon.daemonId);
+      return session;
+    } catch (reason) {
+      // The daemon's own refusal of a stream is an answer: it is reachable and said no.
+      if (reason instanceof RelayStreamRefusedError) this.#health?.answered(daemon.daemonId);
+      else this.#reportFailure(daemon.daemonId, reason);
+      throw reason;
+    }
+  }
+
+  async #openStream(daemon: DaemonConnection, request: RelayStreamRequest): Promise<RelayClientSession> {
     const entry = this.#entry(daemon);
     if (entry.refused) throw new DeviceNotAcceptedError();
     const chosen = entry.choice;
@@ -946,10 +1160,15 @@ export class DaemonCarrierRouter {
       try {
         return await this.#streamOn(entry, chosen.method, request);
       } catch (reason) {
-        throw deviceRefusal(reason) ? this.#refuse(entry) : reason;
+        if (deviceRefusal(reason)) throw this.#refuse(entry);
+        if (!transportLike(reason)) throw reason;
+        // Said as an outage so the connection model retries, and left as the remembered winner: the
+        // next REQUEST is what walks again, and streams follow whatever it measures.
+        throw this.#unavailable(entry, [{ method: chosen.method, reason, sent: false }], null, reason);
       }
     }
     const probes: ConnectionProbe[] = [];
+    const seen: CarrierFailureSeen[] = [];
     let outdated: OutdatedSide | undefined;
     let refused = false;
     for await (const method of this.#candidates(daemon)) {
@@ -968,6 +1187,8 @@ export class DaemonCarrierRouter {
         )
           throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
+        // A stream open carries no request a daemon could apply twice, so it is never "sent".
+        seen.push({ method, reason, sent: false });
         refused ||= deviceRefusal(reason);
         outdated ??= await this.#looksOutdated(method, reason);
       }
@@ -975,7 +1196,26 @@ export class DaemonCarrierRouter {
     this.#decide(entry, probes);
     if (refused) throw this.#refuse(entry);
     if (outdated !== undefined) throw outdatedError(outdated);
-    throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
+    throw this.#unavailable(entry, seen, null);
+  }
+
+  /**
+   * PROVE EVERY HELD SESSION IS ALIVE, NOW: a ping on each, and a short deadline.
+   *
+   * For the moments the browser says the network may have changed under it — back online, back in
+   * the foreground, a different network. A phone that wakes holding a socket the far end evicted
+   * minutes ago would otherwise find out only at its next regular ping, up to half a minute later;
+   * this makes it a few seconds, and a dead session ends the way any other dead session does.
+   */
+  checkLiveness(): void {
+    for (const entry of this.#entries.values()) {
+      for (const held of entry.sessions.values()) {
+        void held.session.then(
+          session => checkSessionLiveness(session),
+          () => undefined,
+        );
+      }
+    }
   }
 
   /** Unpair and re-pair invalidation: a carrier is live state, never durable. */
@@ -1015,16 +1255,21 @@ export class DaemonCarrierRouter {
    * is what stops a browser on the network the relay exists for paying a failed
    * direct connection on every single call.
    *
-   * A REMEMBERED WINNER THAT STOPS CARRYING IS FORGOTTEN AND THE FAILURE IS REPORTED
-   * — this request is not replayed over another carrier inside the same call. The
-   * walk cannot know whether the daemon received the attempt that just died: §9 says
-   * frames in flight are gone, and a transport failure on a direct carrier says
-   * nothing at all about whether the daemon applied the request. Re-sending it at the
-   * next address would turn one `POST /v1/sessions` into two sessions on a daemon
-   * that took the first. So the remembered choice is dropped and the caller is told;
-   * the NEXT request begins the deterministic direct-then-relay walk with nothing
-   * remembered, which is the recovery. Retrying is the caller's decision, exactly as
-   * it already is for a relayed request whose session went away mid-flight.
+   * A REMEMBERED WINNER THAT STOPS CARRYING IS FORGOTTEN, and what happens next depends
+   * on whether asking twice is safe. A READ (`GET`, `HEAD`) walks the set again inside
+   * the same call: it changes nothing on the daemon, and a relay redeployed under a
+   * live page is exactly the failure a second walk cures. A WRITE is reported and not
+   * replayed: the walk cannot know whether the daemon received the attempt that just
+   * died — §9 says frames in flight are gone, and a transport failure on a direct
+   * carrier says nothing at all about whether the daemon applied the request — and
+   * re-sending it would turn one `POST /v1/sessions` into two sessions on a daemon
+   * that took the first. Retrying a write is the caller's decision (the send ledger
+   * proves where a send went), exactly as it is for a relayed request whose session
+   * went away mid-flight.
+   *
+   * NOTHING CARRYING IS A {@link CarrierUnavailableError}, never a plain `Error`, so a
+   * caller can tell a transport outage from a daemon answer, and every outcome is told to
+   * the connection model (`health`), which is what retries an outage on its own.
    *
    * A ROUND OF FAILURES IS NOT REMEMBERED, and this used to be two bugs at once. The
    * refused carriers were accumulated on the shared entry rather than kept to the
@@ -1076,26 +1321,100 @@ export class DaemonCarrierRouter {
   }
 
   async #sendOnce(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
+    try {
+      const response = await this.#walk(daemon, url, init);
+      this.#health?.answered(daemon.daemonId);
+      return response;
+    } catch (reason) {
+      this.#reportFailure(daemon.daemonId, reason);
+      throw reason;
+    }
+  }
+
+  /** Tells the connection model what a failure was: an outage, a final refusal, or neither. */
+  #reportFailure(daemonId: DaemonId, reason: unknown): void {
+    if (reason instanceof CarrierUnavailableError) {
+      this.#health?.outage(daemonId, reason.outage);
+      return;
+    }
+    if (
+      reason instanceof DeviceNotAcceptedError ||
+      reason instanceof DaemonOutdatedError ||
+      reason instanceof AppOutdatedError
+    )
+      this.#health?.settled(daemonId);
+  }
+
+  /**
+   * The error a request no carrier carried throws: in the failure's own words when one failure ended
+   * it (`cause`), in the walk's sentence when the walk ran out.
+   *
+   * DELIVERY IS DECIDED ACROSS ATTEMPTS, NOT ONE. The typed client retries a request under the SAME
+   * request id and keeps only the last failure, so an attempt that died after leaving, followed by one
+   * that never opened, would otherwise read as proven unsent. Any id that has ever been in doubt stays
+   * in doubt.
+   */
+  #unavailable(
+    entry: CarrierEntry,
+    seen: readonly CarrierFailureSeen[],
+    requestId: string | null,
+    ...cause: [unknown?]
+  ): CarrierUnavailableError {
+    const doubted = seen.some(failure => failure.sent) || (requestId !== null && this.#unknownFates.has(requestId));
+    if (doubted && requestId !== null) {
+      this.#unknownFates.delete(requestId);
+      this.#unknownFates.add(requestId);
+      if (this.#unknownFates.size > UNKNOWN_FATES_REMEMBERED) {
+        const [oldest] = this.#unknownFates;
+        this.#unknownFates.delete(oldest as string);
+      }
+    }
+    const delivery: CarrierDelivery = doubted ? 'unknown' : 'unsent';
+    if (cause.length === 0)
+      return new CarrierUnavailableError(
+        entry.choice?.reason ?? 'no carrier is configured for this daemon',
+        carrierOutage(seen),
+        delivery,
+      );
+    const [reason] = cause;
+    return new CarrierUnavailableError(
+      reason instanceof Error ? reason.message : String(reason),
+      carrierOutage(seen),
+      delivery,
+      { cause: reason },
+    );
+  }
+
+  async #walk(daemon: DaemonConnection, url: string, init: RequestInit): Promise<Response> {
     const entry = this.#entry(daemon);
     // A REFUSED DEVICE DIALS NOTHING. Every panel of an open page retries its own reads, and each try
     // was a fresh socket the daemon admitted and refused — enough of them spent the per-address upgrade
     // budget, so the person's own attempt to pair again failed at the upgrade. Nothing a socket could
     // carry would change the answer; re-pairing replaces this entry and is the way out.
     if (entry.refused) throw new DeviceNotAcceptedError();
+    const requestId = new Headers(init.headers).get(FY_REQUEST_ID_HEADER);
+    const seen: CarrierFailureSeen[] = [];
     const chosen = entry.choice;
     if (chosen?.ok === true) {
       try {
         return await this.#over(entry, chosen.method, url, init);
       } catch (thrown) {
         if (thrown instanceof RelayAnswerError) throw thrown.cause;
-        const reason = thrown instanceof RelayUnsentError ? thrown.cause : thrown;
+        const unsent = thrown instanceof RelayUnsentError;
+        const reason = unsent ? thrown.cause : thrown;
         // The remembered carrier stopped carrying. Forget it — the next request walks
         // the set again — and report this failure rather than re-sending a request
         // whose fate on the daemon is unknown.
         if (deviceRefusal(reason)) throw this.#refuse(entry);
         entry.choice = undefined;
         this.#announce();
-        throw reason;
+        // A READ IS ASKED AGAIN, AT ONCE, BY A FRESH WALK. Asking twice cannot change anything on the
+        // daemon, and the alternative is the caller's panel painting an error for a relay that was
+        // redeployed under it while direct, or the relay's next socket, would have answered.
+        // A WRITE IS NOT: its fate on the daemon is unknown, so it is reported, never re-sent.
+        if (!transportLike(reason)) throw reason;
+        seen.push({ method: chosen.method, reason, sent: !unsent });
+        if (!replaySafe(init)) throw this.#unavailable(entry, seen, requestId, reason);
       }
     }
 
@@ -1128,6 +1447,7 @@ export class DaemonCarrierRouter {
         if (reason instanceof RelayStaleEntryError) throw reason;
         if (reason instanceof DeviceKeyMissingError || reason instanceof DeviceKeyUnreadableError) throw reason;
         probes.push(carrierProbe(method, { kind: 'transport-failure', detail: transportFailure(reason) }));
+        seen.push({ method, reason, sent: !unsent });
         refused ||= deviceRefusal(reason);
         outdated ??= await this.#looksOutdated(method, reason);
         // A session that died AFTER the request left can follow receipt of a POST/PUT/etc. Record
@@ -1136,14 +1456,14 @@ export class DaemonCarrierRouter {
         // sent anywhere, and walking on with it is the whole point of a fallback.
         if (!unsent && !replaySafe(init)) {
           this.#decide(entry, probes);
-          throw reason;
+          throw this.#unavailable(entry, seen, requestId, reason);
         }
       }
     }
     this.#decide(entry, probes);
     if (refused) throw this.#refuse(entry);
     if (outdated !== undefined) throw outdatedError(outdated);
-    throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
+    throw this.#unavailable(entry, seen, requestId);
   }
 
   /**

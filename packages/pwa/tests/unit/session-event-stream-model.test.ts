@@ -164,8 +164,9 @@ const settle = async (): Promise<void> => {
 
 describe('the live feed retry schedule', () => {
   test('doubles to a ceiling and never exceeds it, jitter included', () => {
-    // Arrange — the two ends of the jitter range and the middle, at every attempt the budget allows.
-    const attempts = Array.from({ length: SESSION_EVENT_STREAM_BACKOFF.attemptBudget }, (_, index) => index);
+    // Arrange — the two ends of the jitter range and the middle, well past the attempt that reaches the
+    // ceiling. The budget is unbounded now, so the range is chosen rather than read from it.
+    const attempts = Array.from({ length: 8 }, (_, index) => index);
 
     // Act
     const floors = attempts.map(attempt => sessionEventStreamDelayMs(attempt, 0));
@@ -174,8 +175,8 @@ describe('the live feed retry schedule', () => {
 
     // Assert — equal jitter: each delay lands in the UPPER HALF of its window, so the schedule can
     // neither collapse back to hammering a daemon that is still down nor run past the ceiling.
-    expect(floors).toEqual([500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000, 15_000]);
-    expect(ceilings).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
+    expect(floors).toEqual([500, 1_000, 2_000, 4_000, 5_000, 5_000, 5_000, 5_000]);
+    expect(ceilings).toEqual([1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000, 10_000]);
     for (const [index, middle] of middles.entries()) {
       expect(middle).toBeGreaterThanOrEqual(floors[index] ?? 0);
       expect(middle).toBeLessThanOrEqual(ceilings[index] ?? 0);
