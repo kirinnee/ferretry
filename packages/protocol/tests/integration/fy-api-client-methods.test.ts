@@ -366,6 +366,15 @@ const CASES: readonly MethodCase[] = [
     expected: sendRecord,
   },
   {
+    name: 'hand-off document behind a pointer',
+    invoke: client => client.handoff(SESSION_ID, 'turn-008'),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/handoffs/turn-008',
+    response: () =>
+      jsonResponse({ name: 'turn-008', message: 'hi', attachments: [{ filename: 'a.png', mime: 'image/png' }] }),
+    expected: { name: 'turn-008', message: 'hi', attachments: [{ filename: 'a.png', mime: 'image/png' }] },
+  },
+  {
     name: 'retry send',
     invoke: client => client.retrySend(SESSION_ID, 'send-1'),
     verb: 'POST',

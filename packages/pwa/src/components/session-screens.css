@@ -561,6 +561,107 @@
 .fy-message-user > p {
   margin-top: 0;
 }
+/* A message handed to the agent through a file (`handoff-message.tsx`): the file's text as Markdown,
+   its attachments under it, and a small faded "via turn file" line that explains on hover or tap. */
+.fy-handoff {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.fy-handoff-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-handoff-text > :first-child {
+  margin-top: 0;
+}
+.fy-handoff-text > :last-child {
+  margin-bottom: 0;
+}
+.fy-handoff .fy-handoff-pending,
+.fy-handoff .fy-handoff-pointer {
+  color: var(--fy-muted);
+  margin: 0;
+}
+/* The pointer is never the message: when the file is gone it is shown faded, under its explanation. */
+.fy-handoff .fy-handoff-pointer {
+  font-size: 12px;
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+.fy-handoff-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-handoff-chip {
+  align-items: center;
+  border: 1px solid var(--fy-border);
+  border-radius: 6px;
+  color: var(--fy-muted);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+}
+.fy-handoff-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-handoff-via {
+  display: flex;
+  justify-content: flex-end;
+}
+.fy-handoff-via .fy-handoff-via-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--faint, var(--fy-muted));
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--font-ui, inherit);
+  font-size: 11px;
+  gap: 3px;
+  line-height: 16px;
+  margin: 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+.fy-handoff .fy-handoff-note {
+  align-items: flex-start;
+  color: var(--fy-muted);
+  display: flex;
+  font-size: 11px;
+  gap: 4px;
+  margin: 0;
+  white-space: normal;
+}
+.fy-handoff .fy-handoff-note > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.fy-handoff-note[data-handoff-note='explained'] {
+  justify-content: flex-end;
+  text-align: right;
+}
+@media (pointer: coarse) {
+  .fy-handoff-via .fy-handoff-via-button::after {
+    content: '';
+    height: var(--target-floor, 44px);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, var(--target-floor, 44px));
+  }
+}
 /* THE RECEIPT LINE: the time and the receipt mark, small and faded at the foot of the reader's own
    bubble, right-aligned the way a messaging app draws it (`send-receipt.tsx`). The mark carries the
    state's shape; colour only adds to it — grey ticks, accent ticks once the agent has replied, red only

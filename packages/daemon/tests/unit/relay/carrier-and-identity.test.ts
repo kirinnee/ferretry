@@ -8,7 +8,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { FileInformation, FileSystemPort } from '../../../src/lib/ports.ts';
-import { decideRelayCarrier, relaySocketIsStale } from '../../../src/lib/relay/carrier.ts';
+import { decideRelayCarrier, relayRedialDelayMs, relaySocketIsStale } from '../../../src/lib/relay/carrier.ts';
 import { DAEMON_IDENTITY_FILE_MODE, readDaemonRelayIdentity } from '../../../src/lib/relay/identity.ts';
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
 
@@ -76,6 +76,8 @@ describe('the relay carrier decision', () => {
       socketUrl: `wss://relay.example:8443/v1/rendezvous/${DAEMON_ID}/daemon`,
       // The host as the configured URL spells it, port included: it is inside the signature.
       relayHost: 'relay.example:8443',
+      // The origin only: the path carries the daemon's fingerprint and a log line must not.
+      relayOrigin: 'https://relay.example:8443',
       reconnectMs: 45_000,
     });
   });
@@ -84,6 +86,52 @@ describe('the relay carrier decision', () => {
     // Assert
     should(relaySocketIsStale(0, 44_999)).be.false();
     should(relaySocketIsStale(0, 45_000)).be.true();
+  });
+});
+
+describe('the redial schedule', () => {
+  it('should redial the first time immediately, whatever the jitter draw', () => {
+    // Assert
+    for (const random of [0, 0.5, 1]) should(relayRedialDelayMs(0, random, 5_000)).equal(0);
+  });
+
+  it('should double the window from 500 ms and keep the delay in its upper half', () => {
+    // Assert — attempt n has window 500 × 2^(n−1): the bottom of the range at random 0, the top at 1.
+    should([1, 2, 3, 4].map(attempt => relayRedialDelayMs(attempt, 0, 10_000))).deepEqual([250, 500, 1_000, 2_000]);
+    should([1, 2, 3, 4].map(attempt => relayRedialDelayMs(attempt, 1, 10_000))).deepEqual([500, 1_000, 2_000, 4_000]);
+    should(relayRedialDelayMs(3, 0.5, 10_000)).equal(1_500);
+  });
+
+  it('should never exceed the ceiling, however long the outage runs', () => {
+    // Assert
+    should(relayRedialDelayMs(10, 1, 5_000)).equal(5_000);
+    should(relayRedialDelayMs(10, 0, 5_000)).equal(2_500);
+    should(relayRedialDelayMs(1_000_000, 1, 5_000)).equal(5_000);
+  });
+
+  it('should read the configured seconds as a ceiling clamped to one through ten seconds', () => {
+    // Assert — a ceiling of an hour is ten seconds; of a millisecond is one second.
+    should(relayRedialDelayMs(20, 1, 3_600_000)).equal(10_000);
+    should(relayRedialDelayMs(20, 1, 1)).equal(1_000);
+    should(relayRedialDelayMs(20, 1, -5)).equal(1_000);
+    should(relayRedialDelayMs(20, 1, Number.POSITIVE_INFINITY)).equal(10_000);
+    should(relayRedialDelayMs(20, 1, Number.NEGATIVE_INFINITY)).equal(1_000);
+  });
+
+  it('should be total: unusable inputs normalise rather than become a zero-length timer', () => {
+    // Assert — an unusable attempt is the first redial and an infinite one the longest window.
+    should(relayRedialDelayMs(Number.NaN, 1, 5_000)).equal(0);
+    should(relayRedialDelayMs(-3, 1, 5_000)).equal(0);
+    should(relayRedialDelayMs(Number.NEGATIVE_INFINITY, 1, 5_000)).equal(0);
+    should(relayRedialDelayMs(Number.POSITIVE_INFINITY, 1, 5_000)).equal(5_000);
+    should(relayRedialDelayMs(2.9, 0, 5_000)).equal(relayRedialDelayMs(2, 0, 5_000));
+    // An unusable draw is the bottom of the range, never a shorter wait than the schedule allows.
+    should(relayRedialDelayMs(3, Number.NaN, 10_000)).equal(1_000);
+    should(relayRedialDelayMs(3, Number.POSITIVE_INFINITY, 10_000)).equal(1_000);
+    should(relayRedialDelayMs(3, -1, 10_000)).equal(1_000);
+    should(relayRedialDelayMs(3, 7, 10_000)).equal(2_000);
+    // An unusable ceiling is the five-second default.
+    should(relayRedialDelayMs(20, 1, Number.NaN)).equal(5_000);
   });
 });
 

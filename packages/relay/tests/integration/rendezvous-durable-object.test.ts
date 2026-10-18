@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  HOSTED_CONTROL_OUTAGE_GRACE_MS,
   type RelayEnvironment,
   type RelayRuntime,
   RendezvousDurableObject,
@@ -417,42 +418,106 @@ describe('hosted rendezvous enforcement', () => {
     ]);
   });
 
-  it('should send a control refusal before closing when metering denies or disappears', async () => {
-    for (const answer of [
-      () => ({ ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth, reason: 'daily cap reached' }),
-      () => ({ invalid: true }),
-    ]) {
-      const hosted = hostedEnvironment(answer);
-      const harness = makeObject({}, hosted.environment);
-      const daemonId = `fy_daemon_${'a'.repeat(43)}`;
-      const client = new FakeSocket();
-      client.serializeAttachment({ socketId: 'client', reservationId: 'client_reservation' });
-      harness.objectState.sockets.push(client);
-      const sessionId = sessionIdFromBytes(new Uint8Array(16).fill(1));
-      if (sessionId === null) throw new Error('session fixture is invalid');
-      harness.objectState.storage.values.set('rendezvous', {
-        ...initialRendezvousState(daemonId),
-        daemon: { socketId: 'daemon', since: 1 },
-        sessions: [
-          {
-            sessionId,
-            clientSocketId: 'client',
-            since: 1,
-            fromClient: { allowed: 1, sent: 0 },
-            fromDaemon: { allowed: 1, sent: 0 },
-          },
-        ],
-      });
-      await harness.object.webSocketMessage(
-        client,
-        bytesOf({ kind: FRAME_KINDS.data, sessionId, sequence: 1, payload: new Uint8Array([1]) }),
-      );
+  it('should send a control refusal before closing when metering denies', async () => {
+    const hosted = hostedEnvironment(() => ({
+      ok: false,
+      code: RELAY_CLOSE_CODES.hostedBandwidth,
+      reason: 'daily cap reached',
+    }));
+    const harness = makeObject({}, hosted.environment);
+    const client = new FakeSocket();
+    client.serializeAttachment({ socketId: 'client', reservationId: 'client_reservation' });
+    harness.objectState.sockets.push(client);
+    await harness.object.webSocketMessage(client, liveSessionFrame(harness, 'client'));
+    await harness.object.metered();
+    should(controlOf(client.frames()[0])).match({ t: 'error', code: RELAY_CLOSE_CODES.hostedBandwidth });
+    should(client.closed?.code).equal(RELAY_CLOSE_CODES.hostedBandwidth);
+    // A refusal that closes the socket and keeps the slot spends it for the deployment's lifetime.
+    should(releasedBy(hosted.calls)).containEql('client_reservation');
+  });
+
+  it('should carry live sessions through a meter outage, re-report the bytes, and fail closed only past the grace', async () => {
+    // An unreachable control object is not a refusal: one blip used to close every socket on the
+    // rendezvous — the daemon's and every phone's — with no deploy and no ceiling anywhere.
+    let reachable = false;
+    const hosted = hostedEnvironment(() => (reachable ? { ok: true } : { invalid: true }));
+    const harness = makeObject({}, hosted.environment);
+    const client = new FakeSocket();
+    client.serializeAttachment({ socketId: 'client', reservationId: 'client_reservation' });
+    harness.objectState.sockets.push(client);
+    const sessionId = sessionIdFromBytes(new Uint8Array(16).fill(1));
+    if (sessionId === null) throw new Error('session fixture is invalid');
+    harness.objectState.storage.values.set('rendezvous', {
+      ...initialRendezvousState(`fy_daemon_${'a'.repeat(43)}`),
+      daemon: { socketId: 'daemon', since: 1 },
+      sessions: [
+        {
+          sessionId,
+          clientSocketId: 'client',
+          since: 1,
+          fromClient: { allowed: 32, sent: 0 },
+          fromDaemon: { allowed: 32, sent: 0 },
+        },
+      ],
+    });
+    let sequence = 0;
+    const send = async (): Promise<number> => {
+      sequence += 1;
+      const frame = bytesOf({ kind: FRAME_KINDS.data, sessionId, sequence, payload: new Uint8Array([1]) });
+      await harness.object.webSocketMessage(client, frame);
       await harness.object.metered();
-      should(controlOf(client.frames()[0])).match({ t: 'error' });
-      should(client.closed?.code).be.oneOf(RELAY_CLOSE_CODES.hostedBandwidth, RELAY_CLOSE_CODES.relayInternal);
-      // A refusal that closes the socket and keeps the slot spends it for the deployment's lifetime.
-      should(releasedBy(hosted.calls)).containEql('client_reservation');
-    }
+      return frame.byteLength;
+    };
+    const meterCalls = () => hosted.calls.filter(call => call.path === '/internal/meter');
+
+    const first = await send();
+    should(client.closed).be.null();
+    // Asked twice — once more when the answer is unusable, as §13 does — and then not again in a loop.
+    should(meterCalls()).have.length(2);
+
+    harness.runtime.clock += HOSTED_CONTROL_OUTAGE_GRACE_MS - 1;
+    const second = await send();
+    should(client.closed).be.null();
+
+    reachable = true;
+    const third = await send();
+    // Nothing forwarded during the outage went uncounted: it is folded into the first report that lands.
+    should(meterCalls().at(-1)?.input).match({ bytes: first + second + third, events: 3 });
+
+    // An answer ended the outage, so a new one gets a whole window of its own …
+    reachable = false;
+    await send();
+    should(client.closed).be.null();
+    // … and an outage that outlasts it fails closed, told why first, slot returned.
+    harness.runtime.clock += HOSTED_CONTROL_OUTAGE_GRACE_MS;
+    await send();
+    should(controlOf(client.frames().at(-1))).match({ t: 'error', code: RELAY_CLOSE_CODES.relayInternal });
+    should(client.closed?.code).equal(RELAY_CLOSE_CODES.relayInternal);
+    should(releasedBy(hosted.calls)).containEql('client_reservation');
+  });
+
+  it('should keep sweeping heartbeats while inspection is unreachable, and refuse only past the grace', async () => {
+    let reachable = true;
+    const hosted = hostedEnvironment(() => (reachable ? { ok: true } : { invalid: true }));
+    const harness = makeObject({}, hosted.environment);
+    const { identity, daemonSocket } = await claimRendezvous(harness, 'daemon_reservation');
+    const { clientSocket } = await joinClient(harness, identity.daemonId, 'client_reservation');
+    daemonSocket.drain();
+    reachable = false;
+
+    // The outage starts: the daemon is still answering, the client has gone quiet. The sweep must still
+    // evict the quiet one — skipping it would let dead sockets outlive the outage — and keep the daemon.
+    harness.runtime.clock += HEARTBEAT_GRACE_SECONDS * 1_000 + 1;
+    harness.objectState.lastSeen.set(daemonSocket, new Date(harness.runtime.clock));
+    await harness.object.alarm();
+    should(clientSocket.closed?.code).equal(RELAY_CLOSE_CODES.heartbeatTimeout);
+    should(daemonSocket.closed).be.null();
+
+    harness.runtime.clock += HOSTED_CONTROL_OUTAGE_GRACE_MS;
+    harness.objectState.lastSeen.set(daemonSocket, new Date(harness.runtime.clock));
+    await harness.object.alarm();
+    should(controlOf(daemonSocket.frames().at(-1))).match({ t: 'error', code: RELAY_CLOSE_CODES.relayInternal });
+    should(daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.relayInternal);
   });
 
   it('should release the reservation when the state machine refuses an arriving socket', async () => {

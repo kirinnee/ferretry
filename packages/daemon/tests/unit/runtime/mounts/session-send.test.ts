@@ -5,6 +5,7 @@ import {
   type SendRecord,
   SendRecordSchema,
   SendResultSchema,
+  SessionHandoffSchema,
   SessionViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -301,5 +302,39 @@ describe('the session send ledger routes', () => {
       ['s1', 'send-1', false],
       ['s1', 'send-1', true],
     ]);
+  });
+});
+
+describe('the hand-off read', () => {
+  const handoff = {
+    name: 'turn-008',
+    message: 'look at this',
+    attachments: [{ attachmentId: 'att_1', filename: 'shot.png', mime: 'image/png' }],
+  };
+
+  it("should serve the person's message behind a pointer, and refuse what it cannot name", async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    sessions.handoffs = { 'turn-008': handoff };
+    const subject = dispatcher(sessions);
+    const read = (path: string, headers: Readonly<Record<string, string>> = human) =>
+      subject.dispatch(request({ method: 'GET', path, headers }));
+
+    // Act
+    const found = await read('/v1/sessions/s1/handoffs/turn-008');
+    const gone = await read('/v1/sessions/s1/handoffs/turn-009');
+    const traversal = await read('/v1/sessions/s1/handoffs/..%2Fconfig');
+    const unnamed = await read('/v1/sessions/s1/handoffs/state');
+    const elsewhere = await read('/v1/sessions/nope/handoffs/turn-008');
+    const anonymous = await read('/v1/sessions/s1/handoffs/turn-008', {});
+
+    // Assert
+    should(found.status).equal(200);
+    should(SessionHandoffSchema.parse(JSON.parse(found.body))).deepEqual(handoff);
+    should(gone.status).equal(404);
+    should(traversal.status).equal(400);
+    should(unnamed.status).equal(400);
+    should(elsewhere.status).equal(404);
+    should(anonymous.status).equal(401);
   });
 });

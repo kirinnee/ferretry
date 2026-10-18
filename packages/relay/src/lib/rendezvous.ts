@@ -84,8 +84,20 @@ export interface RendezvousState {
   readonly daemon: DaemonSlot | null;
   readonly pending: readonly PendingDaemonSocket[];
   readonly sessions: readonly RendezvousSession[];
-  /** Arrival timestamps still inside the rate window. */
+  /** CLIENT arrival timestamps still inside the rate window. */
   readonly arrivals: readonly number[];
+  /**
+   * DAEMON arrival timestamps still inside the rate window — a budget of its own.
+   *
+   * THE TWO USED TO SHARE ONE WINDOW, and refused arrivals count. So while a daemon was away — a relay
+   * restart, a dropped network — every client retrying got `4404` and still spent the window, and the
+   * returning daemon's own redials were refused `4429` for as long as the clients kept trying: the
+   * one socket that could end the outage was the one locked out of it. Clients still bound each
+   * other; they can no longer bound the daemon.
+   *
+   * Optional because a Durable Object reloads state an earlier deploy stored; absent reads as empty.
+   */
+  readonly daemonArrivals?: readonly number[];
   /**
    * Sessions THIS rendezvous ended while the daemon may still have frames in flight for them.
    *
@@ -200,13 +212,21 @@ function nextAlarm(state: RendezvousState, at: number): readonly RendezvousEffec
   return live ? [{ kind: 'schedule-alarm', at: at + HEARTBEAT_SECONDS * 1000 }] : [];
 }
 
+/** Counts one arrival against its role's window — refused arrivals included, which is what bounds the cost. */
 function withinRateLimit(
   state: RendezvousState,
   at: number,
+  role: 'daemon' | 'client',
 ): { readonly state: RendezvousState; readonly allowed: boolean } {
   const cutoff = at - CONNECTION_RATE_WINDOW_SECONDS * 1000;
-  const arrivals = [...state.arrivals.filter(stamp => stamp > cutoff), at];
-  return { state: { ...state, arrivals }, allowed: arrivals.length <= CONNECTION_RATE_LIMIT };
+  const recent = [
+    ...(role === 'daemon' ? (state.daemonArrivals ?? []) : state.arrivals).filter(stamp => stamp > cutoff),
+    at,
+  ];
+  return {
+    state: role === 'daemon' ? { ...state, daemonArrivals: recent } : { ...state, arrivals: recent },
+    allowed: recent.length <= CONNECTION_RATE_LIMIT,
+  };
 }
 
 function sessionFor(state: RendezvousState, sessionId: SessionId): RendezvousSession | undefined {
@@ -254,7 +274,7 @@ function onDaemonArrived(
   state: RendezvousState,
   event: Extract<RendezvousEvent, { kind: 'daemon-arrived' }>,
 ): RendezvousStep {
-  const limited = withinRateLimit(state, event.at);
+  const limited = withinRateLimit(state, event.at, 'daemon');
   if (!limited.allowed) {
     return {
       state: limited.state,
@@ -300,7 +320,7 @@ function onClientArrived(
   state: RendezvousState,
   event: Extract<RendezvousEvent, { kind: 'client-arrived' }>,
 ): RendezvousStep {
-  const limited = withinRateLimit(state, event.at);
+  const limited = withinRateLimit(state, event.at, 'client');
   if (!limited.allowed) {
     return {
       state: limited.state,

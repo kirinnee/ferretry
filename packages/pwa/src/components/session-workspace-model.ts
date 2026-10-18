@@ -79,6 +79,7 @@ const userEntryFor = (record: LogRecord, index: number, at: number | undefined):
   const entry = entryFor(record, index, at);
   const message = readUserMessage(entry.text);
   if (message.kind === 'human') return { ...entry, text: message.text };
+  if (message.kind === 'handoff') return { ...entry, text: message.text, handoff: message.pointer };
   const instant = at === undefined ? {} : { at };
   return message.kind === 'notice'
     ? { id: entry.id, kind: 'system', text: message.text, ...instant }
@@ -285,6 +286,12 @@ export interface SessionWorkspaceRefreshInput {
   /** Every refresh's send ledger, when the api reads one. A failed read keeps the previous rows. */
   readonly onSends?: (sends: readonly SendRecord[]) => void;
   readonly onError: (message: string | null) => void;
+  /**
+   * Failures somebody else already says — a lost carrier, which the connection model reports once and
+   * retries on its own. A quiet failure neither sets the message nor clears it, and leaves the last good
+   * transcript where it is: the screen goes stale, not blank. Absent means every failure is said here.
+   */
+  readonly quiet?: (reason: unknown) => boolean;
 }
 
 export interface SessionWorkspaceRefreshControl {
@@ -322,13 +329,19 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
         if (stopped) return;
         if (sends.status === 'fulfilled' && sends.value !== undefined) input.onSends?.(sends.value);
         const errors: string[] = [];
+        const quiet = input.quiet ?? (() => false);
+        let silenced = false;
         if (logs.status === 'fulfilled') input.onTranscript(transcriptEntriesFromLog(logs.value));
+        else if (quiet(logs.reason)) silenced = true;
         else errors.push(`Transcript: ${errorMessage(logs.reason)}`);
 
         if (session.status === 'fulfilled') {
           if (session.value.config.id === input.sessionId) input.onSession(session.value);
           else errors.push('Session: daemon returned another session');
-        } else errors.push(`Session: ${errorMessage(session.reason)}`);
+        } else if (quiet(session.reason)) silenced = true;
+        else errors.push(`Session: ${errorMessage(session.reason)}`);
+        // Nothing to say but an outage said elsewhere: the message stays exactly as it was.
+        if (errors.length === 0 && silenced) return;
         input.onError(errors.length === 0 ? null : errors.join(' · '));
       })
       .finally(() => {

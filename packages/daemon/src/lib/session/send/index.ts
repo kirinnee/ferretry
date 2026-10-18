@@ -1,3 +1,4 @@
+export * from './handoff.ts';
 export * from './notifier.ts';
 export * from './policy.ts';
 export * from './service.ts';

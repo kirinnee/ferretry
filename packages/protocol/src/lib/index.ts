@@ -53,6 +53,7 @@ export * from './stt.ts';
 export * from './surface.ts';
 export * from './task-boards.ts';
 export * from './tasks.ts';
+export * from './turn-handoff.ts';
 export * from './terminal.ts';
 export * from './version-skew.ts';
 export * from './warden.ts';

@@ -13,12 +13,9 @@
  */
 
 import { basename } from 'node:path';
+import { type DeliveredAttachment, messageWithAttachments as protocolMessageWithAttachments } from '@ferretry/protocol';
 
-/** One file as the agent is told about it. */
-export interface DeliveredAttachment {
-  readonly path: string;
-  readonly mime: string;
-}
+export type { DeliveredAttachment };
 
 /**
  * The name a delivered copy is written under: the uploaded file's own basename, reduced to characters
@@ -32,9 +29,10 @@ export function deliveredFilename(filename: string): string {
   return bare;
 }
 
-/** The person's message, followed by the files the agent should open. */
+/**
+ * The person's message, followed by the files the agent should open. The wording is the protocol's
+ * (`turn-handoff.ts`), because the app reads the list back out to show the files as attachments.
+ */
 export function messageWithAttachments(message: string, files: readonly DeliveredAttachment[]): string {
-  if (files.length === 0) return message;
-  const lines = files.map(file => `- ${file.path} (${file.mime})`);
-  return `${message}\n\nAttached files — open them from these paths:\n${lines.join('\n')}`;
+  return protocolMessageWithAttachments(message, files);
 }

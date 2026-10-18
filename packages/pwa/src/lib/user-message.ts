@@ -13,6 +13,10 @@
  *     wrapped in a paste block, which is why the banner used to go unrecognised.
  *   * FERRETRY ITSELF, telling an agent a message it sent did not arrive (`ferretryNotice`). Shown as
  *     a compact system notice.
+ *   * THE PERSON, BY WAY OF A FILE. A long, multi-line or attached message is written to a turn document
+ *     and the agent is typed one line pointing at it (`turnFileInstruction`), so the record holds that
+ *     pointer rather than the person's words. It is read as a hand-off, and the row shows what the file
+ *     holds — never the instruction, which reads exactly like something injected.
  *
  * The formats are the protocol's, so the daemon that writes them and this reader cannot drift apart.
  *
@@ -24,7 +28,13 @@
  * re-attributed to an agent.
  */
 
-import { type PeerEnvelope, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
+import {
+  type HandoffPointer,
+  type PeerEnvelope,
+  parseFerretryNotice,
+  parseHandoffPointer,
+  parsePeerEnvelope,
+} from '@ferretry/protocol';
 
 /**
  * One paste block. The closing tag is matched with or without attributes — transcripts have been seen
@@ -40,12 +50,15 @@ export const unwrapPastedContent = (text: string): string =>
 export type UserMessage =
   | { readonly kind: 'human'; readonly text: string }
   | { readonly kind: 'peer'; readonly from: PeerEnvelope; readonly body: string }
-  | { readonly kind: 'notice'; readonly text: string };
+  | { readonly kind: 'notice'; readonly text: string }
+  | { readonly kind: 'handoff'; readonly pointer: HandoffPointer; readonly text: string };
 
 export const readUserMessage = (raw: string): UserMessage => {
   const text = unwrapPastedContent(raw);
   const notice = parseFerretryNotice(text);
   if (notice !== null) return { kind: 'notice', text: notice };
+  const pointer = parseHandoffPointer(text);
+  if (pointer !== null) return { kind: 'handoff', pointer, text };
   const peer = parsePeerEnvelope(text.trimStart());
   if (peer !== null) return { kind: 'peer', from: peer.envelope, body: peer.body };
   return { kind: 'human', text };
