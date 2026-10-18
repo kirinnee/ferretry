@@ -384,7 +384,7 @@ export const LeanSessionCard = memo(function LeanSessionCard({
     <RouteLink
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
-      className="fy-session-row group"
+      className="fy-dashboard-row group"
       data-session-row={cfg.id}
     >
       <span className="flex min-w-0 items-center gap-sm">
@@ -407,9 +407,9 @@ export const LeanSessionCard = memo(function LeanSessionCard({
         </span>
       </span>
       {task !== '' ? (
-        <TaskName name={task} teammate={cfg.teammate} size="sm" className="fy-session-row__task" />
+        <TaskName name={task} teammate={cfg.teammate} size="sm" className="fy-dashboard-row__task" />
       ) : preview ? (
-        <span className="fy-session-row__task truncate text-ui text-muted" title={preview}>
+        <span className="fy-dashboard-row__task truncate text-ui text-muted" title={preview}>
           {preview}
         </span>
       ) : null}

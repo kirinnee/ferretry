@@ -243,7 +243,7 @@ describe('session dashboard row leaves', () => {
         view={view('lean-crowded', { state: { needsHuman: 'Approve production deploy' } })}
       />,
     ).root;
-    expect(String(card.findByType('a').props.className)).toContain('fy-session-row');
+    expect(String(card.findByType('a').props.className)).toContain('fy-dashboard-row');
     const age = card.findByProps({ 'data-session-age': '' });
     expect(text(age)).toBe('12s');
     expect(String(age.props.className)).toContain('ml-auto shrink-0');
@@ -313,13 +313,13 @@ describe('session dashboard row leaves', () => {
     expect(text(doing)).not.toContain('interactive');
     const preview = doing.findByProps({ title: 'Reading logs' });
     expect(text(preview)).toBe('Reading logs');
-    expect(String(preview.props.className)).toContain('fy-session-row__task');
+    expect(String(preview.props.className)).toContain('fy-dashboard-row__task');
 
     const idle = render(
       <LeanSessionCard daemonId={DAEMON} density="compact" now={NOW} view={unnamed({ activity: undefined })} />,
     ).root;
     expect(text(idle)).not.toContain('interactive');
-    expect(idle.findAll(node => String(node.props.className ?? '').includes('fy-session-row__task'))).toHaveLength(0);
+    expect(idle.findAll(node => String(node.props.className ?? '').includes('fy-dashboard-row__task'))).toHaveLength(0);
 
     const card = render(<SessionCard {...fullProps({ view: unnamed({}) })} />).root;
     expect(text(card)).not.toContain('interactive');
