@@ -23,6 +23,8 @@ export interface PhoneTab {
   readonly kind: PhoneTabKind;
   readonly label: string;
   readonly driver?: PhoneTabDriver | null;
+  /** A workspace tab the person may close. Chat and Console never are: they are the agent. */
+  readonly closable?: boolean;
 }
 
 export const PHONE_CHAT_TAB: PhoneTab = { id: 'chat', kind: 'chat', label: 'Chat' };

@@ -31,6 +31,7 @@ describe('shared settings catalog', () => {
       'dictation',
       'notifications',
       'install-app',
+      'sessions-list',
       'motion',
       'message-marks',
     ]);
@@ -52,7 +53,14 @@ describe('shared settings catalog', () => {
     ]);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
       ['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks'],
-      ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
+      [
+        'sessions-list',
+        'composer-markdown',
+        'composer-enter-key',
+        'composer-suggestions',
+        'dictation',
+        'notifications',
+      ],
       ['install-app'],
       [],
     ]);

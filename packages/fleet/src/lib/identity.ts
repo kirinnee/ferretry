@@ -1,8 +1,8 @@
 /**
  * Identity — which accounts share one provider login, and how one credential reaches all of them.
  *
- * This is the shape the whole fleet rests on. Every lane of one account (`kirin`, `auto-kirin`,
- * `f5-kirin`, …) is the **same provider account**, but each home keeps its own credential copy: a
+ * This is the shape the whole fleet rests on. Every lane of one account (`alex`, `auto-alex`,
+ * `f5-alex`, …) is the **same provider account**, but each home keeps its own credential copy: a
  * per-home keychain item for Claude, a per-home `auth.json` for Codex. So a fleet of thirty wrappers
  * on six provider accounts needs **six** browser approvals, not thirty — the other twenty-four are
  * copies.
@@ -280,7 +280,7 @@ export function pickDonor(members: readonly FleetIdentityMemberStatus[]): FleetI
  *
  * This was `chooseLoginMember`, and it answered one question that was really two: it returned the
  * identity's **interactive** lane whatever the caller asked for, and that one member was then treated
- * as the account being signed in. So signing `claude-auto-default` in ran the approval through
+ * as the account being signed in. So signing `claude-review` in ran the approval through
  * `claude-default`'s wrapper and left the credential in `claude-default`'s home. The account somebody
  * was trying to fix stayed signed out, and nothing said so.
  *

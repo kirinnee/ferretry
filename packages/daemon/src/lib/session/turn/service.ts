@@ -1,10 +1,11 @@
-import type { SessionState, SessionTurnState } from '@ferretry/protocol';
+import type { PermissionRequest, SessionState, SessionTurnState } from '@ferretry/protocol';
 import type { ClockPort } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import {
   isTurnStatus,
   observeTurn,
+  settlePermissionRequest,
   settleTurnPrompt,
   settleTurnState,
   type TurnObservation,
@@ -18,7 +19,10 @@ export const TURN_WATCH_INTERVAL_MS = 2_000;
 /** One session as the watcher needs it. */
 export interface TurnWatchSession {
   readonly id: SessionId;
-  readonly state: Pick<SessionState, 'status' | 'turn' | 'pendingQuestion' | 'turnState' | 'turnPrompt'>;
+  readonly state: Pick<
+    SessionState,
+    'status' | 'turn' | 'pendingQuestion' | 'turnState' | 'turnPrompt' | 'permissionRequest'
+  >;
 }
 
 /** A recorded change, as the journal and the event stream carry it. */
@@ -27,6 +31,8 @@ export interface TurnStateChange {
   readonly to: SessionTurnState | undefined;
   /** The harness dialog behind `to`, recorded as `turnPrompt`; absent clears it. */
   readonly prompt?: string | undefined;
+  /** The tool-permission prompt behind `to`, recorded as `permissionRequest`; absent clears it. */
+  readonly request?: PermissionRequest | undefined;
 }
 
 export interface SessionTurnPorts {
@@ -123,9 +129,22 @@ export class SessionTurnWatcher implements TurnWatchLoop {
     }
     const next = settleTurnState(session.state.turnState, observation, this.previous.get(session.id), live);
     const prompt = settleTurnPrompt(session.state.turnPrompt, next, observation);
+    const request = settlePermissionRequest(session.state.permissionRequest, next, observation);
     this.previous.set(session.id, observation);
-    if (next === session.state.turnState && prompt === session.state.turnPrompt) return undefined;
-    const change = { from: session.state.turnState, to: next, ...(prompt === undefined ? {} : { prompt }) };
+    // A request is compared by its id, a digest of everything a person decides on: somebody at the
+    // terminal moving the cursor between rows is not a new request and records nothing.
+    if (
+      next === session.state.turnState &&
+      prompt === session.state.turnPrompt &&
+      request?.id === session.state.permissionRequest?.id
+    )
+      return undefined;
+    const change = {
+      from: session.state.turnState,
+      to: next,
+      ...(prompt === undefined ? {} : { prompt }),
+      ...(request === undefined ? {} : { request }),
+    };
     return (await this.ports.record(session.id, change, this.ports.clock.now())) ? change : undefined;
   }
 }

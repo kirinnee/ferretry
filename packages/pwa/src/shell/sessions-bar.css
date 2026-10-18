@@ -485,3 +485,115 @@
 [data-density-region='app-bar'] .kt-btn.fy-drawer-trigger:hover {
   background: var(--nav-hover, var(--surface-2));
 }
+
+/* ── ALL MACHINES (Settings › Behaviour › Sessions list) ─────────────────────────────────────────
+   One list across every paired machine: Needs you pinned, then a heading per machine. The machine
+   heading is a step louder than a project heading (the body's ink, not muted), so the two levels read
+   apart without a box around either. */
+.fy-sbar__machine-group + .fy-sbar__machine-group,
+.fy-sbar__needs + .fy-sbar__machine-group {
+  margin-top: var(--gap-sm);
+  border-top: var(--divider-width) solid var(--border);
+}
+.fy-sbar__machine-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 8px 2px;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__machine-label {
+  min-width: 0;
+}
+.fy-sbar__machine-reach {
+  min-width: 0;
+  color: var(--muted);
+  font-family: var(--font-ui, inherit);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+}
+.fy-sbar__machine-head .fy-sbar__count {
+  margin-left: auto;
+  color: var(--muted);
+}
+.fy-sbar__needs .fy-sbar__project {
+  color: var(--warn);
+}
+/* A machine that is not answering keeps its last rows, greyed: still readable and still openable,
+   but plainly not live. Opacity rather than a second palette, so every theme family greys alike. */
+[data-machine-reach='offline'] .fy-sbar__group,
+[data-machine-reach='locked'] .fy-sbar__group,
+[data-machine-reach='offline'] .fy-session-group,
+[data-machine-reach='offline'] .fy-machine-groups,
+[data-machine-reach='locked'] .fy-machine-groups {
+  opacity: 0.55;
+  filter: saturate(0.4);
+}
+
+/* The machine's name on a row that nothing else names it on (inside Needs you). Quiet on purpose:
+   the agent is the subject, the machine is where. */
+.fy-machine-chip {
+  display: inline-block;
+  max-width: 9rem;
+  overflow: hidden;
+  padding: 0 6px;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A machine's reach: filled when it answered, hollow when it did not. The words beside it say the same. */
+.fy-machine-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--faint, var(--muted));
+  border-radius: 999px;
+}
+.fy-machine-dot[data-reach='online'] {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+.fy-machine-dot[data-reach='locked'] {
+  border-color: var(--warn);
+}
+
+/* The Sessions page, across every machine: a machine is a heading on the page over its own project
+   groups, spaced like the groups themselves, so a machine reads as a chapter and a project as a
+   section — no box around a machine, which would put a frame around Neo's frames. */
+.fy-machine-section {
+  display: grid;
+  gap: calc(var(--flow-3) + var(--fy-shadow-reach));
+}
+.fy-machine-groups {
+  display: grid;
+  gap: calc(var(--flow-4) + var(--fy-shadow-reach));
+}
+.fy-machine-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+}
+.fy-machine-section__empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-needs-you__head {
+  color: var(--warn);
+}

@@ -97,6 +97,12 @@ const wardenCases: SchemaCase[] = [
     value: { policy: 'fallback', failureThreshold: 2, cooldownMinutes: 5, accounts: [] },
   },
   { name: 'config view', schema: warden.WardenConfigViewSchema, value: wardenConfigView },
+  { name: 'login source', schema: warden.WardenLoginSourceSchema, value: 'machine_default' },
+  {
+    name: 'login',
+    schema: warden.WardenLoginSchema,
+    value: { source: 'configured', unknown: ['legacy-wrapper'], available: ['claude-default'] },
+  },
   { name: 'verdict kind', schema: warden.WardenVerdictKindSchema, value: 'needs_human' },
   { name: 'recommended action', schema: warden.WardenRecommendedActionSchema, value: 'nudge' },
   { name: 'recommendation', schema: warden.WardenRecommendationSchema, value: wardenVerdict.recommendation },

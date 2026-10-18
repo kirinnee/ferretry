@@ -128,6 +128,14 @@ Investigations run on your own login and read the transcript, pane, diffs and CI
 do alone is held and listed under Needs you for you to decide. Every act and every Jev skip is listed under
 Recent actions with who decided it.
 
+**Which login investigates.** `accounts` is the failover order, head first. Ferretry compiles no login in:
+a file that leaves `accounts` out (or sets it to `[]`) runs investigations on this machine's **default runtime**
+— whatever `machine.yaml` names when the investigation starts — and never writes that name back, so changing
+the default moves the Warden with it. A machine with neither has **no investigation login**: LLM and Jev triage
+fall back to `rules`, the status says `no_login`, and Settings › Warden asks you to choose one. A login named
+here that this machine does not have — a `warden.yaml` copied from another machine — is shown as
+**unknown login '‹name›' — choose one** and is skipped; the file is never rewritten to hide it.
+
 **Caps, per UTC day.** `caps.jevUsdPerDay` (default $0.50) and `caps.investigationUsdPerDay` (default $2)
 are separate; `caps.maxInvestigationsPerHour` (default 6) spaces investigations. When a cap is reached the
 Warden falls back to `rules` until midnight UTC and the Warden page says so. Jev is priced at

@@ -161,14 +161,18 @@ export function wardenSpend(input: WardenSpendInput): WardenSpend {
  * A Jev cap matters only to a Jev triage — an LLM triage never asks Jev — while the investigation cap
  * stops both, because both end in investigations. Either way the fallback is `rules`, never a cheaper
  * AI tier: a cap is the owner's ceiling, and the only tier certain to stay under it is the free one.
+ * With no usable investigation login there is nothing an AI triage could end in, so it is `rules` too,
+ * said as `no_login` rather than spent on a name this machine does not have.
  */
 export function effectiveTriage(
   configured: WardenTriage,
   enabled: boolean,
   spend: Pick<WardenSpend, 'capHit'>,
+  hasLogin = true,
 ): { readonly effective: WardenTriage; readonly reason: WardenTriageReason } {
   if (!enabled) return { effective: 'rules', reason: 'disabled' };
   if (configured === 'rules') return { effective: 'rules', reason: 'configured' };
+  if (!hasLogin) return { effective: 'rules', reason: 'no_login' };
   if (spend.capHit === 'investigation') return { effective: 'rules', reason: 'investigation_cap' };
   if (spend.capHit === 'jev' && configured === 'jev') return { effective: 'rules', reason: 'jev_cap' };
   return { effective: configured, reason: 'configured' };

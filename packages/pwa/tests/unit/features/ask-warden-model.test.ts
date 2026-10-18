@@ -93,7 +93,7 @@ describe('who would investigate', () => {
 
   it('leaves the model out when the login names none', () => {
     expect(askWardenInvestigatorLine(wardenStatus())).toStartWith(
-      'A read-only assigned warden on claude-auto-loge reads',
+      'A read-only assigned warden on claude-default reads',
     );
   });
 
@@ -122,6 +122,25 @@ describe('what the status already refuses', () => {
       'Today’s $2.00 investigation cap is reached. Raise it in Settings › Warden.',
     );
     expect(askWardenBlocker({ ...status, spend: { ...status.spend, capHit: 'jev' } })).toBeNull();
+  });
+
+  it('refuses when this machine has no investigation login, naming an unknown one', () => {
+    const status = wardenStatus();
+    expect(askWardenBlocker({ ...status, login: { source: 'not_set', unknown: [], available: [] } })).toBe(
+      'No investigation login is set. Choose one in Settings › Warden.',
+    );
+    expect(
+      askWardenBlocker({
+        ...status,
+        failover: {
+          policy: 'fallback',
+          failureThreshold: 2,
+          cooldownMinutes: 30,
+          accounts: [{ agent: 'legacy-wrapper', eligible: false }],
+        },
+        login: { source: 'configured', unknown: ['legacy-wrapper'], available: ['claude-default'] },
+      }),
+    ).toBe("Unknown login 'legacy-wrapper'. Choose one in Settings › Warden.");
   });
 });
 

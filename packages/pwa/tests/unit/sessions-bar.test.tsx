@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ComponentProps } from 'react';
+import type { MachineSource } from '../../src/lib/all-machines.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { WORKSPACE_RAIL_BOUNDS, WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
 import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
@@ -358,5 +359,125 @@ describe('SessionsBar as a phone drawer', () => {
     view = await mount(element);
     await click(view.container.querySelector('[data-sbar-place="projects"]'), 'Projects');
     expect(view.container.querySelector('[data-sessions-bar="drawer"]')).not.toBeNull();
+  });
+});
+
+describe('SessionsBar across every machine', () => {
+  const BETA = 'beta' as DaemonId;
+  const source = (
+    daemonId: DaemonId,
+    name: string,
+    sessions: MachineSource['slice']['sessions'],
+    reach: MachineSource['reach'],
+    readAt?: number,
+  ): MachineSource => ({
+    daemonId,
+    name,
+    reach,
+    projects: [],
+    slice: {
+      sessions,
+      byId: new Map(),
+      status: 'ready',
+      error: null,
+      ...(readAt === undefined ? {} : { readAt }),
+    },
+  });
+  const BETA_SESSIONS = [
+    sessionView('hadi-1', { config: { teammate: 'pim', label: 'Same id, other machine', cwd: '/work/site' } }),
+    sessionView('ask-1', {
+      config: { teammate: 'ora', label: 'A question', cwd: '/work/site' },
+      state: { status: 'awaiting_question' },
+    }),
+  ];
+  const sources = (betaReach: MachineSource['reach'] = 'offline'): readonly MachineSource[] => [
+    source(DAEMON, 'work-mac', SESSIONS, 'online'),
+    source(BETA, 'kirin-box', BETA_SESSIONS, betaReach, NOW - 5 * 60_000),
+  ];
+
+  test('pins what needs the reader with its machine, then lists each machine and greys an offline one', async () => {
+    const { element, calls } = bar({ machineSources: sources(), now: NOW, learningPassive: new Set(['hadi-1']) });
+    view = await mount(element);
+    const pinned = must(view.container.querySelector('[data-sbar-needs-you-group]'), 'Needs you');
+    expect(
+      [...pinned.querySelectorAll('[data-sbar-session]')].map(node => node.getAttribute('data-sbar-session')),
+    ).toEqual(['maryah-1']);
+    expect(pinned.querySelector('[data-machine-chip]')?.textContent).toBe('work-mac');
+    expect(pinned.querySelector('[data-sbar-needs-you]')).toBeNull();
+    const heads = [...view.container.querySelectorAll('.fy-sbar__machine-label')].map(node => node.textContent);
+    expect(heads).toEqual(['work-mac', 'kirin-box']);
+    const offline = must(view.container.querySelector('[data-machine-reach="offline"]'), 'the offline machine');
+    expect(offline.querySelector('.fy-sbar__machine-reach')?.textContent).toBe('offline · last seen 5m');
+    // The waiting session on the offline machine stays home with its badge.
+    expect(offline.querySelector('[data-sbar-session="ask-1"] [data-sbar-needs-you]')).not.toBeNull();
+    // An online machine is said to be online without a word on screen.
+    expect(view.container.querySelector('[data-sbar-machine-group="alpha"] .sr-only')?.textContent).toBe('online');
+    // The same id on two machines: only this machine's is open, and only it reads this machine's learners.
+    const twins = [...view.container.querySelectorAll('[data-sbar-session="hadi-1"]')];
+    expect(twins.map(node => node.getAttribute('aria-current'))).toEqual(['page', null]);
+    expect(twins.map(node => node.querySelector('[data-learning-passive]') !== null)).toEqual([true, false]);
+    // A row opens its own machine.
+    await click(offline.querySelector('[data-sbar-session="hadi-1"]'), 'the other machine’s row');
+    expect(calls.at(-1)).toBe('navigate:/d/beta/session/hadi-1');
+    expect(view.container.querySelector('[data-sbar-filter="needs-you"] .fy-sbar__count')?.textContent).toBe('2');
+  });
+
+  test('an online machine pins its own question, and a machine whose sessions all moved says so', async () => {
+    const { element } = bar({ machineSources: [source(BETA, 'kirin-box', [BETA_SESSIONS[1]!], 'online')], now: NOW });
+    view = await mount(element);
+    expect(view.container.querySelector('[data-sbar-needs-you-group] [data-sbar-session="ask-1"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-sbar-machine-group="beta"] .fy-sbar__empty')?.textContent).toBe(
+      'Everything here is in Needs you.',
+    );
+  });
+
+  test('says reading until a machine answers, no sessions on an empty one, and nothing matching a chip', async () => {
+    view = await mount(bar({ machineSources: [source(DAEMON, 'work-mac', null, 'reading')] }).element);
+    expect(view.container.querySelector('.fy-sbar__list [role="status"]')?.textContent).toBe('Reading sessions…');
+    await view.render(bar({ machineSources: [source(DAEMON, 'work-mac', [], 'online')] }).element);
+    expect(view.container.querySelector('[data-sbar-machine-group] .fy-sbar__empty')?.textContent).toBe('No sessions.');
+    await click(view.container.querySelector('[data-sbar-filter="running"]'), 'Running');
+    expect(view.container.querySelector('.fy-sbar__list .fy-sbar__empty')?.textContent).toBe(
+      'No sessions match Running.',
+    );
+  });
+
+  test('"+ New" asks which machine, this one first', async () => {
+    const { element, calls } = bar({ machineSources: sources('online') });
+    view = await mount(element);
+    await click(view.container.querySelector('[data-new-session-menu]'), '+ New');
+    const items = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="New session on"] [role="menuitem"]'),
+    ];
+    expect(items.map(item => item.textContent)).toEqual(['work-macthis one', 'kirin-box']);
+    await interact(() => items[1]?.click());
+    expect(calls.at(-1)).toBe('navigate:/d/beta/new');
+  });
+
+  test('one machine keeps the plain link', async () => {
+    view = await mount(bar({ machineSources: sources(), machines: [{ daemonId: DAEMON, name: 'work-mac' }] }).element);
+    expect(view.container.querySelector('[data-new-session-menu]')).toBeNull();
+    expect(view.container.querySelector('[data-sbar-new]')).not.toBeNull();
+  });
+
+  test('the rail draws every machine’s dots, Needs you first, each naming its machine', async () => {
+    const { element, calls } = bar({
+      presentation: 'rail',
+      machineSources: sources('online'),
+      onExpand: () => undefined,
+    });
+    view = await mount(element);
+    const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
+    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
+      'Ora on kirin-box',
+      'Maryah on work-mac',
+      'Hadi on work-mac',
+      'nameless on work-mac',
+      'Pim on kirin-box',
+    ]);
+    expect(dots.map(dot => dot.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
+    expect(view.container.querySelector('[data-new-session-menu]')).not.toBeNull();
+    await click(dots[0] ?? null, 'a dot');
+    expect(calls.at(-1)).toBe('navigate:/d/beta/session/ask-1');
   });
 });

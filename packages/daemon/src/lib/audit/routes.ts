@@ -194,6 +194,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { mode: 'console' },
   },
+  // Answering a permission prompt is keys into the same pane: counted the same way, never with the choice.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/permission',
+    event: 'terminal.input',
+    subject: 'sessionId',
+    detail: { mode: 'permission' },
+  },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
   // A speed-up Test spends one provider key on the operator's account; the secret's NAME is the subject.
   {

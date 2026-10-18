@@ -30,7 +30,7 @@ import type {
   WardenTriage,
   WardenVerdictKind,
 } from '@ferretry/protocol';
-import { wardenAccountLabel } from './warden-status-model.ts';
+import { wardenAccountLabel, wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
 import { ANOMALY_CHIPS, chip, TRIAGE_LABEL, type WardenChip } from './warden-vocabulary.ts';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────────────────────────
@@ -118,8 +118,8 @@ export interface WardenStatusLine {
 }
 
 /** Who runs investigations: the head of the account list, by model when one is pinned. */
-export const investigatorLabel = (status: Pick<WardenStatusView, 'config'>): string => {
-  const head = status.config.accounts[0];
+export const investigatorLabel = (status: Pick<WardenStatusView, 'config' | 'failover'>): string => {
+  const head = wardenInvestigationHead(status);
   return head?.model ?? (head === undefined ? 'no login' : wardenAccountLabel(head));
 };
 
@@ -127,6 +127,8 @@ const guardWarning = (status: WardenStatusView, now: number): string | undefined
   const { triage } = status;
   if (triage.reason === 'jev_cap' || triage.reason === 'investigation_cap')
     return 'Cap hit — rules only until midnight UTC';
+  if (triage.reason === 'no_login')
+    return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — rules only until you choose one in Settings › Warden`;
   if (triage.configured !== 'jev') return undefined;
   if (triage.guardFailure?.code === 'not_set') return 'No Jev key — every flag is investigated';
   const backoff = Date.parse(triage.guardBackoffUntil ?? '');

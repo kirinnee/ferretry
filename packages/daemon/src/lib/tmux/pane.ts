@@ -1,4 +1,5 @@
 import type { PaneMetadata } from './contracts.ts';
+import { parsePermissionPrompt } from './permission-prompt.ts';
 
 /**
  * Screens a harness shows BEFORE it will accept any input.
@@ -170,6 +171,8 @@ export function paneBlockingPrompt(pane: string): string | undefined {
 export function promptIsReady(pane: string, cursorY?: number, cursorX?: number): boolean {
   const lower = pane.toLowerCase();
   if (STARTUP_BLOCKERS.some(marker => lower.includes(marker)) || paneShowsActiveWork(pane)) return false;
+  // A permission prompt's cursor row reads as a prompt line, and a message typed into it picks a row.
+  if (parsePermissionPrompt(pane) !== undefined) return false;
   if (lower.includes(INTERRUPTED_BANNER)) return true;
   const lines = pane.split('\n');
   if (cursorY !== undefined && cursorY >= 0 && cursorY < lines.length) {

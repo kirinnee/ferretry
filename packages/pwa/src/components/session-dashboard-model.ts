@@ -169,3 +169,13 @@ export function activityLine(view: SessionView): ActivityLine {
     live: false,
   };
 }
+
+/**
+ * THE NAME A SESSION WAS GIVEN, or `''` when it was given none. The daemon titles an unnamed interactive
+ * session "interactive" (`session/lifecycle/policy.ts`), so a list that printed the title said the mode
+ * again after every agent: the "interactive" #551 removed as a badge came back as the task. Only that
+ * exact placeholder on an interactive session is dropped; an auto session always has a real task.
+ */
+export function sessionTaskName(config: Pick<SessionView['config'], 'mode' | 'name'>): string {
+  return config.mode === 'interactive' && config.name.trim().toLowerCase() === 'interactive' ? '' : config.name;
+}

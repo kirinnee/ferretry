@@ -6,6 +6,9 @@
  * is what wedged the two-file integration run (see `build-fy-render-integration-fixture.ts`).
  *
  * Prints one JSON line naming the two files.
+ *
+ * `--entry <path>` (relative to the package) builds another scene against the same stylesheet — the
+ * all-machines list's (`tests/integration/fixtures/all-machines-scene.tsx`) uses it.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
@@ -34,7 +37,10 @@ const imported = await bundle('src/styles/index.css', 'the app stylesheet');
 const css = (
   await postcss([tailwindcss(tailwindConfig)]).process(imported, { from: resolve(packageRoot, 'src/styles/index.css') })
 ).css;
-const js = await bundle('tests/integration/fixtures/composer-editor-scene.tsx', 'the composer scene');
+const entryAt = Bun.argv.indexOf('--entry');
+const entry = entryAt === -1 ? 'tests/integration/fixtures/composer-editor-scene.tsx' : Bun.argv[entryAt + 1];
+if (entry === undefined) throw new Error('❌ --entry needs a path');
+const js = await bundle(entry, `the scene ${entry}`);
 const manifest = { css: resolve(out, 'app.css'), js: resolve(out, 'app.js') };
 await writeFile(manifest.css, css, 'utf8');
 await writeFile(manifest.js, js, 'utf8');

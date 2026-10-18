@@ -26,6 +26,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
+import { permissionPhrase } from '../lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
@@ -86,8 +87,11 @@ export function SessionTopBar({
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
-  // The harness dialog a needs-input session is parked on: the one thing it is waiting for.
-  const blockedBy = turn === 'needs-input' ? session.state.turnPrompt : undefined;
+  // The harness dialog a needs-input session is parked on: the one thing it is waiting for. A permission
+  // prompt is said as the request itself, which is what the person is being asked to decide.
+  const permission = turn === 'needs-input' ? session.state.permissionRequest : undefined;
+  const approval = permission === undefined ? undefined : `Waiting for approval: ${permissionPhrase(permission)}`;
+  const blockedBy = approval ?? (turn === 'needs-input' ? session.state.turnPrompt : undefined);
 
   return (
     <header className="fy-session-bar" data-compact={compact ? '' : undefined} data-session-bar="">
@@ -109,7 +113,7 @@ export function SessionTopBar({
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}
           data-session-status={session.state.status}
-          title={blockedBy === undefined ? undefined : `On screen: ${blockedBy}`}
+          title={approval ?? (blockedBy === undefined ? undefined : `On screen: ${blockedBy}`)}
         >
           <StatusMark ready={turn === 'your-turn' && session.state.turnState === undefined} view={session} />
           <span className={compact ? 'sr-only' : 'fy-session-bar__word'}>
@@ -117,7 +121,7 @@ export function SessionTopBar({
           </span>
           {blockedBy === undefined ? null : (
             <span className={compact ? 'sr-only' : 'fy-session-bar__blocked'} data-session-blocked-by="">
-              <span className="sr-only">, on screen: </span>
+              <span className="sr-only">{approval === undefined ? ', on screen: ' : ', '}</span>
               {blockedBy}
             </span>
           )}

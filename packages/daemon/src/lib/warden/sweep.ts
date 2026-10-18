@@ -108,7 +108,8 @@ import {
   parseStoredWardenConfig,
   spawnGapMs,
   sweepIntervalMs,
-  wardenAccountsOf,
+  type ResolvedWardenLogin,
+  resolveWardenLogin,
   wardenConfigWarnings,
   wardenDetectOptions,
   type WardenConfig,
@@ -222,6 +223,8 @@ export interface WardenConfigStore {
  *  is unreadable — evidence about the host, never about an account. */
 export interface WardenAgentInventory {
   installed(): Promise<readonly string[]>;
+  /** The machine's default runtime, read fresh: the investigation login when the owner chose none. */
+  defaultRuntime(): Promise<string | undefined>;
 }
 
 export interface WardenUsageReader {
@@ -379,7 +382,9 @@ export type WardenRequestFailure =
   /** The ferret has finished; there is nothing left to investigate. */
   | 'finished'
   /** Today's investigation cap is reached. */
-  | 'cap';
+  | 'cap'
+  /** No investigation login exists on this machine. */
+  | 'no_login';
 
 export class WardenRequestError extends Error {
   constructor(
@@ -441,11 +446,12 @@ export class WardenSweepService {
    *  about it. */
   async view(): Promise<WardenConfigView> {
     const stored = parseStoredWardenConfig(await this.ports.config.read());
-    const installed = await this.installedAgents();
+    const resolved = await this.resolveLogin(stored.config);
     return {
       config: stored.config,
-      accounts: [...wardenAccountsOf(stored.config)],
-      warnings: [...stored.warnings, ...wardenConfigWarnings(stored.config, installed)],
+      accounts: [...resolved.accounts],
+      warnings: [...stored.warnings, ...wardenConfigWarnings(stored.config, resolved)],
+      login: resolved.login,
     };
   }
 
@@ -463,10 +469,12 @@ export class WardenSweepService {
     const next = applyWardenConfigPatch(stored.config, patch);
     await this.ports.config.write(next);
     this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
+    const resolved = await this.resolveLogin(next);
     return {
       config: next,
-      accounts: [...wardenAccountsOf(next)],
-      warnings: [...wardenConfigWarnings(next, await this.installedAgents())],
+      accounts: [...resolved.accounts],
+      warnings: [...wardenConfigWarnings(next, resolved)],
+      login: resolved.login,
     };
   }
 
@@ -490,7 +498,8 @@ export class WardenSweepService {
       ...live.map(warden => warden.wardenId),
       ...Object.values(state.assignments ?? {}).map(assignment => assignment.wardenId),
     ]);
-    const budget = this.budget(stored.config, state, nowMs);
+    const resolved = await this.resolveLogin(stored.config);
+    const budget = this.budget(stored.config, state, nowMs, resolved.usable);
     return {
       config: stored.config,
       ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
@@ -500,7 +509,8 @@ export class WardenSweepService {
       ...(liveWarden === undefined ? {} : { liveWarden }),
       ...(state.lastSpawnAt === undefined ? {} : { lastSpawnAt: state.lastSpawnAt }),
       ...(await this.latestReportField()),
-      failover: await this.failoverStatus(stored.config, state.failover ?? {}),
+      failover: await this.failoverStatus(stored.config, resolved.accounts, state.failover ?? {}),
+      login: resolved.login,
       triage: budget.status,
       spend: budget.spend,
       savings: wardenSavings(triageDayFor(state.triageDay, nowMs), state.investigations ?? [], state.costAverage),
@@ -619,7 +629,15 @@ export class WardenSweepService {
         wardenSession: existing.wardenId,
         message: 'A warden is already investigating this ferret.',
       };
-    const budget = this.budget(stored.config, state, nowMs);
+    const resolved = await this.resolveLogin(stored.config);
+    if (!resolved.usable)
+      throw new WardenRequestError(
+        'no_login',
+        resolved.login.source === 'not_set'
+          ? 'No investigation login is set and this machine has no default runtime. Choose one in Settings › Warden.'
+          : `Unknown login '${resolved.accounts[0]?.agent}' — choose one in Settings › Warden.`,
+      );
+    const budget = this.budget(stored.config, state, nowMs, resolved.usable);
     if (budget.spend.capHit === 'investigation')
       throw new WardenRequestError(
         'cap',
@@ -680,7 +698,7 @@ export class WardenSweepService {
   }
 
   /** The triage in effect and today's spend, from the durable state. */
-  private budget(config: WardenConfig, state: WardenRuntimeState, nowMs: number): TriageBudget {
+  private budget(config: WardenConfig, state: WardenRuntimeState, nowMs: number, hasLogin: boolean): TriageBudget {
     const spend = wardenSpend({
       caps: config.caps,
       today: triageDayFor(state.triageDay, nowMs),
@@ -688,7 +706,7 @@ export class WardenSweepService {
       ...(state.costAverage === undefined ? {} : { average: state.costAverage }),
       nowMs,
     });
-    const triage = effectiveTriage(config.triage, config.enabled, spend);
+    const triage = effectiveTriage(config.triage, config.enabled, spend, hasLogin);
     const guard = config.triage === 'jev' ? state.guard : undefined;
     return {
       spend,
@@ -715,6 +733,7 @@ export class WardenSweepService {
   async run(options: { readonly force: boolean }): Promise<WardenRunView> {
     const stored = parseStoredWardenConfig(await this.ports.config.read());
     const config = stored.config;
+    const login = await this.resolveLogin(config);
     const fleet = await this.ports.fleet.fleet();
     const nowMs = this.ports.nowMs();
     const at = new Date(nowMs).toISOString();
@@ -740,6 +759,7 @@ export class WardenSweepService {
       anomalies: detected.anomalies.filter(anomaly => anomaly.assignedWarden === true),
       fleet,
       config,
+      login,
       state,
       at,
       force: options.force,
@@ -751,6 +771,7 @@ export class WardenSweepService {
       fingerprint: detected.fingerprint,
       fleet,
       config,
+      login,
       state,
       at,
       force: options.force,
@@ -853,6 +874,7 @@ export class WardenSweepService {
     readonly anomalies: readonly WardenAnomaly[];
     readonly fleet: readonly WardenFleetSession[];
     readonly config: WardenConfig;
+    readonly login: ResolvedWardenLogin;
     readonly state: WardenRuntimeState;
     readonly at: string;
     readonly force: boolean;
@@ -872,7 +894,7 @@ export class WardenSweepService {
     }
 
     const nowMs = this.ports.nowMs();
-    const budget = this.budget(input.config, state, nowMs);
+    const budget = this.budget(input.config, state, nowMs, input.login.usable);
     const automatic = input.force || budget.status.effective !== 'rules';
     const meta: Record<string, WardenQueueEntryMeta> = { ...(state.queueMeta ?? {}) };
     // A flag queued by an AI triage the owner has since turned off is no longer
@@ -883,7 +905,8 @@ export class WardenSweepService {
         automatic ||
         meta[anomaly.sessionId]?.origin === 'owner' ||
         budget.status.reason === 'jev_cap' ||
-        budget.status.reason === 'investigation_cap',
+        budget.status.reason === 'investigation_cap' ||
+        budget.status.reason === 'no_login',
     );
     const isOwnerRequest = (targetId: string): boolean =>
       queued.some(anomaly => anomaly.sessionId === targetId && anomaly.kind === 'owner_request');
@@ -950,7 +973,7 @@ export class WardenSweepService {
 
     // The hourly limit and the investigation cap are budgets, not slots: what
     // they hold back is queued, never dropped, and starts once they allow it.
-    const spend = this.budget(input.config, state, nowMs).spend;
+    const spend = this.budget(input.config, state, nowMs, input.login.usable).spend;
     const allowed = input.force
       ? decision.spawn.length
       : spend.capHit === 'investigation'
@@ -972,7 +995,7 @@ export class WardenSweepService {
       if (anomaly === undefined || target === undefined) continue;
       // Per spawn, so round-robin rotates across targets and fallback re-checks
       // the preferred account every time.
-      const picked = await this.pickAccount(input.config, state);
+      const picked = await this.pickAccount(input.login.accounts, input.config, state);
       state = picked.state;
       if (picked.account === undefined) {
         deferred.push(targetId);
@@ -1356,6 +1379,7 @@ export class WardenSweepService {
     readonly fingerprint: string;
     readonly fleet: readonly WardenFleetSession[];
     readonly config: WardenConfig;
+    readonly login: ResolvedWardenLogin;
     readonly state: WardenRuntimeState;
     readonly at: string;
     readonly force: boolean;
@@ -1372,12 +1396,14 @@ export class WardenSweepService {
     });
     if (unblessed.length === 0) return { state, outcome: { message: 'no anomalies to escalate' } };
 
-    const budget = this.budget(config, state, nowMs);
+    const budget = this.budget(config, state, nowMs, input.login.usable);
     if (!force && budget.status.effective === 'rules') {
       const why =
         budget.status.reason === 'configured'
           ? 'rules only: the flags are shown to you and nothing is spent'
-          : `today’s ${budget.status.reason === 'jev_cap' ? 'Jev' : 'investigation'} cap is reached: rules only until midnight UTC`;
+          : budget.status.reason === 'no_login'
+            ? 'no investigation login exists on this machine: rules only until one is chosen in Settings › Warden'
+            : `today’s ${budget.status.reason === 'jev_cap' ? 'Jev' : 'investigation'} cap is reached: rules only until midnight UTC`;
       return { state, outcome: { message: why } };
     }
     const guarded = !force && budget.status.effective === 'jev';
@@ -1433,7 +1459,7 @@ export class WardenSweepService {
     }
     const sentKey = guarded ? spawnSuppressionKey(state, fingerprintAnomalies(anomalies)) : key;
 
-    const picked = await this.pickAccount(config, state);
+    const picked = await this.pickAccount(input.login.accounts, config, state);
     state = picked.state;
     if (picked.account === undefined)
       return { state, outcome: { message: 'every configured warden account is currently ineligible (exhausted)' } };
@@ -1634,6 +1660,7 @@ export class WardenSweepService {
    * episode, not one per sweep, or the journal would fill with the same fact.
    */
   private async pickAccount(
+    accounts: readonly WardenAccount[],
     config: WardenConfig,
     state: WardenRuntimeState,
   ): Promise<{
@@ -1641,7 +1668,10 @@ export class WardenSweepService {
     readonly account?: WardenAccount;
     readonly selection: WardenSelectionProvenance;
   }> {
-    const accounts = wardenAccountsOf(config);
+    const policy = effectiveFailoverConfig(config.failover).policy;
+    // No login at all is not an exhausted one: nothing failed, so nothing is journalled or raised.
+    if (accounts.length === 0)
+      return { state, selection: { policy, selection: 'preferred', configuredFirst: '', skipped: {} } };
     const usage = await this.ports.usage.accounts().catch(() => []);
     const nowMs = this.ports.nowMs();
     const reconciled = reconcileDemotions(state.failover ?? {}, usage, nowMs);
@@ -1651,7 +1681,6 @@ export class WardenSweepService {
     const installed = await this.installedAgents();
     const wasExhausted = reconciled.state.exhaustedSince !== undefined;
     const previous = reconciled.state.lastSelection?.agent;
-    const policy = effectiveFailoverConfig(config.failover).policy;
     const configuredFirst = accounts[0]?.agent ?? '';
     const selection = selectWardenAccount({
       accounts,
@@ -1771,6 +1800,13 @@ export class WardenSweepService {
     return await this.ports.agents.installed().catch(() => []);
   }
 
+  /** The investigation login in effect: the owner's order, else the machine's default runtime, else none. */
+  private async resolveLogin(config: WardenConfig): Promise<ResolvedWardenLogin> {
+    const installed = await this.installedAgents();
+    const defaultRuntime = await this.ports.agents.defaultRuntime().catch(() => undefined);
+    return resolveWardenLogin(config, installed, defaultRuntime);
+  }
+
   private async latestReportField(): Promise<Pick<WardenStatusView, 'lastReport'>> {
     const latest = await this.ports.artifacts.latest().catch(() => undefined);
     return latest === undefined ? {} : { lastReport: latest };
@@ -1778,7 +1814,11 @@ export class WardenSweepService {
 
   /** The failover block of the status: every configured account with its live
    *  health and why it is or is not eligible right now. */
-  private async failoverStatus(config: WardenConfig, state: WardenFailoverState): Promise<WardenFailoverStatus> {
+  private async failoverStatus(
+    config: WardenConfig,
+    accounts: readonly WardenAccount[],
+    state: WardenFailoverState,
+  ): Promise<WardenFailoverStatus> {
     const failover = effectiveFailoverConfig(config.failover);
     const usage = await this.ports.usage.accounts().catch(() => []);
     const installed = await this.installedAgents();
@@ -1788,7 +1828,7 @@ export class WardenSweepService {
       policy: failover.policy,
       failureThreshold: failover.failureThreshold,
       cooldownMinutes: failover.cooldownMinutes,
-      accounts: wardenAccountsOf(config).map(account => {
+      accounts: accounts.map(account => {
         const reason = ineligibilityReason(account, { installedAgents: installed, usage, state, nowMs });
         const health = byAgent.get(account.agent);
         return {

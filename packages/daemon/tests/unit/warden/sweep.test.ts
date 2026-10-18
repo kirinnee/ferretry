@@ -108,7 +108,7 @@ describe('reading the warden configuration', () => {
 
     // Assert
     should(actual.config.enabled).be.true();
-    should(actual.accounts).deepEqual([{ agent: 'claude-auto-glm52a' }]);
+    should(actual.accounts).deepEqual([{ agent: 'claude-default' }]);
   });
 
   it('should carry both the loader warning and the configuration warnings', async () => {
@@ -120,7 +120,7 @@ describe('reading the warden configuration', () => {
 
     // Assert
     should(actual.warnings).matchAny(/did not validate/u);
-    should(actual.warnings).matchAny(/not installed on this host/u);
+    should(actual.warnings).matchAny(/unknown login 'claude-default'/u);
   });
 
   it('should warn about nobody when the host inventory cannot be read', async () => {
@@ -267,7 +267,7 @@ describe('the warden status', () => {
     const actual = await subject.service.status();
 
     // Assert
-    should(actual.failover?.accounts).deepEqual([{ agent: 'claude-auto-glm52a', eligible: true }]);
+    should(actual.failover?.accounts).deepEqual([{ agent: 'claude-default', eligible: true }]);
   });
 
   it('should report why an account is ineligible', async () => {
@@ -582,7 +582,7 @@ describe('escalating to a fleet warden', () => {
     const subject = harness({
       config: enabled(),
       fleet: [triageable('s1')],
-      installed: async () => ['someone-else'],
+      usage: async () => [{ agent: 'claude-default', atLimit: true }],
     });
 
     // Act
@@ -634,7 +634,7 @@ describe('escalating to a fleet warden', () => {
       config: enabled(),
       fleet: [triageable('s1')],
       state: {
-        failover: { strikes: { 'claude-auto-glm52a': { count: 1, lastAt: at(-9), lastReason: 'boom' } } },
+        failover: { strikes: { 'claude-default': { count: 1, lastAt: at(-9), lastReason: 'boom' } } },
       },
     });
 
@@ -940,13 +940,17 @@ describe('assigning a warden to one suspect session', () => {
     // Assert
     should(actual.assignedWardens).be.undefined();
     should(subject.state().assignedCooldowns?.s1).equal(at(0));
-    should(subject.state().failover?.strikes?.['claude-auto-glm52a']?.count).equal(1);
+    should(subject.state().failover?.strikes?.['claude-default']?.count).equal(1);
     should(journalTypes(subject)).containEql('fleet.warden_spawn_failed');
   });
 
   it('should queue rather than cool down a target it skipped for want of an account', async () => {
     // Arrange
-    const subject = harness({ config: enabled(), fleet: [suspect('s1')], installed: async () => ['someone-else'] });
+    const subject = harness({
+      config: enabled(),
+      fleet: [suspect('s1')],
+      usage: async () => [{ agent: 'claude-default', atLimit: true }],
+    });
 
     // Act
     await subject.service.run({ force: false });
@@ -993,7 +997,11 @@ describe('choosing the account a warden runs on', () => {
 
   it('should journal exhaustion once per episode rather than once per sweep', async () => {
     // Arrange
-    const subject = harness({ config: enabled(), fleet: [triageable('s1')], installed: async () => ['someone-else'] });
+    const subject = harness({
+      config: enabled(),
+      fleet: [triageable('s1')],
+      usage: async () => [{ agent: 'claude-default', atLimit: true }],
+    });
 
     // Act
     await subject.service.run({ force: false });

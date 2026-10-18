@@ -8,7 +8,13 @@
  * Exported for onboarding: the new-machine flow sets the Warden up with this same form.
  */
 
-import type { WardenAccount, WardenConfig, WardenConfigPatch, WardenMayActAlone } from '@ferretry/protocol';
+import type {
+  WardenAccount,
+  WardenConfig,
+  WardenConfigPatch,
+  WardenConfigView,
+  WardenMayActAlone,
+} from '@ferretry/protocol';
 
 /** Whether the Jev key is in this machine's secret store. `unknown` when that could not be read. */
 export type JevKeyState = 'set' | 'missing' | 'unknown';
@@ -73,11 +79,18 @@ const ACT_ALONE_WORDS: Readonly<Record<keyof WardenMayActAlone, string>> = {
   stop: 'stop',
 };
 
-/** `claude-auto-loge` as written: the summary names the login the owner picked, not a shortened one. */
-const loginName = (account: WardenAccount | undefined): string => account?.agent ?? 'no login';
+/**
+ * The machine default runtime the daemon stands in when the owner chose no login, or undefined when it
+ * stood in none (a login was chosen, or the machine has no default, or the daemon predates the fact).
+ */
+export const wardenMachineDefaultLogin = (view: Pick<WardenConfigView, 'accounts' | 'login'>): string | undefined =>
+  view.login?.source === 'machine_default' ? view.accounts[0]?.agent : undefined;
 
-/** The plain-English sentence under the form: what these settings will do, and what they may spend. */
-export const wardenSummary = (config: WardenConfig, hasJevKey: boolean): string => {
+/**
+ * The plain-English sentence under the form: what these settings will do, and what they may spend.
+ * `machineDefault` names the login an empty failover order runs on; without one it is "no login".
+ */
+export const wardenSummary = (config: WardenConfig, hasJevKey: boolean, machineDefault?: string): string => {
   if (!config.enabled) return 'The Warden is off. Nothing watches your ferrets, and nothing spends money.';
   const every = `Every ${config.intervalMinutes} min the sweep flags anomalies`;
   if (config.triage === 'rules') return `${every} and shows them to you. No AI runs and nothing is spent.`;
@@ -92,9 +105,12 @@ export const wardenSummary = (config: WardenConfig, hasJevKey: boolean): string 
   const stop = config.mayActAlone.stop ? '' : '; stopping always asks you first';
   const head = config.accounts[0];
   const model = head?.model === undefined ? '' : `${head.model} `;
+  // The login as written: the summary names what the owner picked, never a shortened form.
+  const order =
+    config.accounts.length > 0 ? config.accounts.map(account => account.agent) : [machineDefault ?? 'no login'];
   const atATime =
     errors.maxAssignedWardens === undefined ? `${config.maxAssignedWardens} at a time` : '(fix) at a time';
-  const investigation = `a read-only ${model}investigation on ${loginName(head)} (${config.investigation.effort} effort, ${atATime}; failover ${config.accounts.map(account => account.agent).join(' → ')})`;
+  const investigation = `a read-only ${model}investigation on ${order[0]} (${config.investigation.effort} effort, ${atATime}; failover ${order.join(' → ')})`;
   const invCap = errors.investigationUsdPerDay === undefined ? money(config.caps.investigationUsdPerDay) : '(fix)';
   if (config.triage === 'llm')
     return `${every}, and every flag gets ${investigation}, as kteam does. Cap: ${invCap}/day. ${acts}${stop}.`;

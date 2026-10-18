@@ -1,0 +1,107 @@
+/* ============================================================================
+   The approval card — a harness permission prompt above the Composer. Compact: one sentence, an
+   optional quiet line, a row of answers that wraps at phone width. Theme tokens only.
+   ========================================================================== */
+
+.fy-approval-card {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: var(--stroke-panel, 1px) solid var(--accent);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+.fy-approval-card__ask {
+  margin: 0;
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+/* The command or path is the thing being decided on: its own face, never clipped, wrapping anywhere so a
+   long one stays inside a 320px card. */
+.fy-approval-card__what {
+  padding: 1px 4px;
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: normal;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.fy-approval-card__detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.fy-approval-card__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* Two lines for an always-allow — the app's words, then the harness's — so the button grows rather than
+   clipping: `height` becomes a floor. */
+.fy-approval-card__option.kt-btn {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  height: auto;
+  min-height: var(--control-h);
+  max-width: 100%;
+  padding-block: 4px;
+  text-align: left;
+}
+.fy-approval-card__option[data-default][data-permission-kind='deny'] {
+  border-color: var(--accent);
+}
+.fy-approval-card__label {
+  font-weight: var(--weight-strong);
+}
+.fy-approval-card__secondary {
+  font-size: var(--text-2xs);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.fy-approval-card__note {
+  display: grid;
+  gap: 4px;
+}
+.fy-approval-card__note-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-approval-card__note-toggle {
+  justify-self: start;
+  min-height: var(--control-h-sm);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fy-approval-card__note-toggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.fy-approval-card__status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.fy-approval-card__status[role='alert'] {
+  color: var(--err);
+}

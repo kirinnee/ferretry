@@ -20,12 +20,12 @@ import {
 
 export const wardenConfig = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({
   ...DEFAULT_WARDEN_CONFIG,
-  accounts: [{ agent: 'claude-auto-loge' }],
+  accounts: [{ agent: 'claude-default' }],
   ...overrides,
 });
 
 export const wardenAccount = (overrides: Partial<WardenFailoverAccountView> = {}): WardenFailoverAccountView => ({
-  agent: 'claude-auto-loge',
+  agent: 'claude-default',
   eligible: true,
   ...overrides,
 });

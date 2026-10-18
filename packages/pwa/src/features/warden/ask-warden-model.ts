@@ -13,6 +13,7 @@
 
 import type { GrantsView, WardenStatusView } from '@ferretry/protocol';
 import { usd } from './warden-overview-model.ts';
+import { wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
 
 export type AskWardenFocus = 'stuck' | 'failures' | 'recent';
 
@@ -56,7 +57,7 @@ export const askWardenCostLine = (status: WardenStatusView): string => {
 
 /** Who would investigate: the head of the Warden's failover list, read-only. */
 export const askWardenInvestigatorLine = (status: WardenStatusView): string => {
-  const [head] = status.config.accounts;
+  const head = wardenInvestigationHead(status);
   const model = head?.model === undefined ? '' : ` with ${head.model}`;
   const login = head === undefined ? '' : ` on ${head.agent}${model}`;
   return `A read-only assigned warden${login} reads the transcript, pane, diffs and CI and writes a report with a verdict. Manual requests skip Jev and wait for a free slot.`;
@@ -69,6 +70,8 @@ export const askWardenInvestigatorLine = (status: WardenStatusView): string => {
  */
 export const askWardenBlocker = (status: WardenStatusView): string | null => {
   if (!status.config.enabled) return 'The Warden is off. Turn it on in Settings › Warden.';
+  const login = wardenLoginProblem(status.login, status.failover?.accounts ?? []);
+  if (login !== null) return `${login}. Choose one in Settings › Warden.`;
   if (status.spend.capHit === 'investigation')
     return `Today’s ${usd(status.spend.investigationCapUsd)} investigation cap is reached. Raise it in Settings › Warden.`;
   return null;

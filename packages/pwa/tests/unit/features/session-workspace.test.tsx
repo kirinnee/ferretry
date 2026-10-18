@@ -753,3 +753,102 @@ describe('workspace seams', () => {
     expect(seen.every(value => value === null)).toBe(true);
   });
 });
+
+describe('closing workspace tabs', () => {
+  afterEach(() => resetBrowserSurfaceSessions());
+
+  const openTabs = (store: WorkspaceLayoutStore) =>
+    store.update(scope, layout =>
+      [
+        workspaceTab('browser', 'app', { label: 'app' }),
+        workspaceTab('browser', 'b1', { label: 'Browser' }),
+        workspaceTab('file', 'src/login.tsx', { label: 'login.tsx' }),
+        workspaceTab('terminal', TERMINAL, { label: 'dev' }),
+      ].reduce((layoutSoFar, tab) => openWorkspaceTab(layoutSoFar, tab), layout),
+    );
+
+  test('on a desktop, closing a page tab closes its page; a plain browser or a file tab is only a view', async () => {
+    const browser = fakeSessionBrowser(runningBrowser([browserPage('PAGE1', { name: 'app' })]), () => null);
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    openTabs(store);
+    const { page } = mountWorkspace('desktop', { browser: browserEngine, browserPages: browser.pages }, store);
+    try {
+      await settle();
+      const closed = page.root.findByType(WorkspaceView).props.onTabClosed;
+      const tabs = store.snapshot(scope).tabs;
+      run(() => closed(tabs['browser:b1']));
+      run(() => closed(tabs['file:src/login.tsx']));
+      run(() => closed(tabs[`terminal:${TERMINAL}`]));
+      await settle();
+      expect(browser.acted).toEqual([]);
+      run(() => closed(tabs['browser:app']));
+      await settle();
+      expect(browser.acted).toEqual([{ action: 'close-page', pageId: 'PAGE1' }]);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('without a page list, closing a browser tab touches no browser', () => {
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    openTabs(store);
+    const { page } = mountWorkspace('desktop', { browser: browserEngine }, store);
+    try {
+      run(() => page.root.findByType(WorkspaceView).props.onTabClosed(store.snapshot(scope).tabs['browser:app']));
+      expect(store.snapshot(scope).tabs['browser:app']).toBeDefined();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('on a phone, ✕ closes one tab, Close others the rest, and End shell ends the terminal too', async () => {
+    const browser = fakeSessionBrowser(runningBrowser([browserPage('PAGE1', { name: 'app' })]), () => null);
+    const deck = fakeDeck(async () => terminalListing([terminalView(TERMINAL)]));
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    openTabs(store);
+    const { page } = mountWorkspace(
+      'phone',
+      { browser: browserEngine, browserPages: browser.pages, deck: deck.dependencies },
+      store,
+    );
+    try {
+      await settle();
+      const phone = () => page.root.findByType(PhoneWorkspace);
+      const ids = () => Object.keys(store.snapshot(scope).tabs).sort();
+      // Every workspace tab is closable; Chat and Console are not in the list the phone may close.
+      expect(phone().props.tabs.map((tab: { closable?: boolean }) => tab.closable)).toEqual([true, true, true, true]);
+
+      run(() => phone().props.onCloseTab('browser:app'));
+      await settle();
+      expect(ids()).not.toContain('browser:app');
+      expect(browser.acted).toEqual([{ action: 'close-page', pageId: 'PAGE1' }]);
+
+      run(() => phone().props.onEndTerminal(`terminal:${TERMINAL}`));
+      await settle();
+      expect(ids()).not.toContain(`terminal:${TERMINAL}`);
+      expect(deck.closed).toEqual([TERMINAL]);
+
+      run(() => phone().props.onCloseOthers('file:src/login.tsx'));
+      await settle();
+      expect(ids()).toEqual(['chat', 'console', 'file:src/login.tsx']);
+
+      // Nothing left to close: the layout is left exactly as it was.
+      const before = store.snapshot(scope);
+      run(() => phone().props.onCloseOthers('file:src/login.tsx'));
+      expect(store.snapshot(scope)).toBe(before);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('on a phone without terminals, closing never offers to end a shell', () => {
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    openTabs(store);
+    const { page } = mountWorkspace('phone', {}, store);
+    try {
+      expect(page.root.findByType(PhoneWorkspace).props.onEndTerminal).toBeUndefined();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});

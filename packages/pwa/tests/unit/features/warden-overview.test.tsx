@@ -282,10 +282,10 @@ describe('WardenOverview', () => {
       actions: [wardenAction({ sessionId: 'sess-act', reportPath: 'reports/act.md' })],
       failover: wardenFailover({
         accounts: [
-          { agent: 'claude-auto-loge', eligible: true },
-          { agent: 'codex-auto-terra', eligible: false, reason: 'at limit' },
+          { agent: 'claude-default', eligible: true },
+          { agent: 'codex-default', eligible: false, reason: 'at limit' },
         ],
-        lastSelection: { agent: 'claude-auto-loge', policy: 'fallback', at: '2026-07-31T11:00:00.000Z', reason: 'x' },
+        lastSelection: { agent: 'claude-default', policy: 'fallback', at: '2026-07-31T11:00:00.000Z', reason: 'x' },
       }),
     });
     const view = await render({
@@ -322,8 +322,8 @@ describe('WardenOverview', () => {
       expect(text).toContain('a-very-l…');
       expect(text).toContain('Marin');
       expect(text).toContain('pane lost');
-      expect(text).toContain('loge · in use');
-      expect(text).toContain('terra · at limit');
+      expect(text).toContain('claude-default · in use');
+      expect(text).toContain('codex-default · at limit');
       expect(investigates).toHaveLength(2);
       expect(investigates.filter(node => node.disabled)).toHaveLength(1);
       expect(view.calls.investigations).toEqual(['sess-flag']);

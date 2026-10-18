@@ -486,12 +486,13 @@ describe('MigrateSheet', () => {
     expect(view.root.findByType('ul').props.className).toContain('list-disc');
   });
 
-  it('warns when the target account is on a restricted routing tier', () => {
-    const restricted = source();
+  it('never guesses a provider or a routing tier from a runtime’s name', () => {
+    // A runtime is named by its owner; a name that happens to contain a model family says nothing.
+    const named = source();
     const view = renderSheet(
-      <MigrateSheet {...props({ view: { ...restricted, config: { ...restricted.config, agent: 'claude-glm52' } } })} />,
+      <MigrateSheet {...props({ view: { ...named, config: { ...named.config, agent: 'claude-glm52' } } })} />,
     );
-    expect(JSON.stringify(view.toJSON())).toContain('Restricted tier');
+    expect(JSON.stringify(view.toJSON())).not.toContain('Restricted tier');
   });
 
   it('reuses one request id for a repeated confirmation of the same target, and mints a new one when it changes', async () => {
