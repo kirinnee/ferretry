@@ -7,6 +7,7 @@ import {
   paneBlockingPrompt,
   paneShowsActiveWork,
   paneShowsPermissionPrompt,
+  parsePermissionPrompt,
   type SessionId,
   type SessionTranscriptTail,
   type SessionTurnPorts,
@@ -84,11 +85,13 @@ export class StorageTurnPorts implements SessionTurnPorts {
     if (typeof tmuxSession !== 'string' || tmuxSession === '') return undefined;
     const pane = await this.panes.state(tmuxSession).catch(() => undefined);
     if (pane === undefined || !pane.alive || pane.dead) return undefined;
+    const request = parsePermissionPrompt(pane.visible);
     return {
       working: paneShowsActiveWork(pane.visible),
       atPrompt: pane.promptReady,
-      permission: paneShowsPermissionPrompt(pane.visible),
+      permission: request !== undefined || paneShowsPermissionPrompt(pane.visible),
       prompt: paneBlockingPrompt(pane.visible),
+      request,
     };
   }
 
@@ -110,6 +113,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
       }
       if (change.prompt === undefined) delete next.turnPrompt;
       else next.turnPrompt = change.prompt;
+      if (change.request === undefined) delete next.permissionRequest;
+      else next.permissionRequest = change.request;
       written = true;
       return next as typeof raw;
     });
@@ -121,6 +126,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
       from: change.from ?? null,
       to: change.to ?? null,
       prompt: change.prompt ?? null,
+      // The request itself rides the feed, so a page shows the approval card from the event alone.
+      permissionRequest: change.request ?? null,
     });
     if (change.to === undefined) this.tails.delete(id);
     return true;

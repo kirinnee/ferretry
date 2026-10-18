@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import {
   type CapabilityGrants,
   type ConfigChangeKind,
@@ -15,10 +16,10 @@ import {
   SessionStateSchema,
   type SessionView,
   type SignalSessionRequest,
-  type StartSessionRequest,
   type SpeedupProvider,
   type SpeedupsView,
   type SpeedupTestResult,
+  type StartSessionRequest,
   type SttEnhancementResult,
   type SurfaceOpener,
   type TaskActionRequest,
@@ -42,7 +43,6 @@ import {
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
-import { ConfigChangeLedger, ConfigChangeStreamService } from '../../../../src/lib/config-files/index.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
   type AttentionLedger,
@@ -55,6 +55,7 @@ import type {
   BrowserLoginLifecycle,
   BrowserLoginStatus,
 } from '../../../../src/lib/browser/control/index.ts';
+import { ConfigChangeLedger, ConfigChangeStreamService } from '../../../../src/lib/config-files/index.ts';
 import {
   type AccountInventoryPort,
   type CoreAccount,
@@ -119,7 +120,6 @@ import type {
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
-import type { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import {
   configuredReferences,
   type SecretChildOutcome,
@@ -145,6 +145,7 @@ import {
   type SessionHealthObservation,
   SessionHealthService,
 } from '../../../../src/lib/session/health/index.ts';
+import { ProvedPaneCapture, SessionPermissionService } from '../../../../src/lib/session/permission/index.ts';
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
@@ -180,6 +181,7 @@ import {
 } from '../../../../src/lib/terminal/policy.ts';
 import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
 import { defaultWardenConfig } from '../../../../src/lib/warden/index.ts';
+import type { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import { catalog, inventory } from '../../core/fixtures.ts';
 
 /** Shared fakes for the mounted-surface tests: real domain services over storage the test owns. */
@@ -1884,6 +1886,56 @@ export function consoleSubsystem(world: AttachWorld = {}, tmux: ConsoleTmux = co
       return { code: tmux.code, stdout: '', stderr: tmux.stderr };
     },
   });
+}
+
+/** The captured pane of a Claude Code 2.1.281 "Read file" permission prompt, as a real harness drew it. */
+export const PERMISSION_FRAME = readFileSync(
+  new URL('../../../fixtures/permission-prompts/claude-2.1.281-read-outside.txt', import.meta.url),
+  'utf8',
+);
+
+/** The same pane after the prompt was answered: the agent back at its input box. */
+const IDLE_FRAME = `${PERMISSION_FRAME.split('\n').slice(0, 7).join('\n')}\n\n  Reading /etc/hostname… done\n\n❯ \n`;
+
+/** Every `send-keys` a permission fixture ran (`commands`, as the Console's are) and every `capture-pane`. */
+export interface PermissionTmux extends ConsoleTmux {
+  readonly captures: (readonly string[])[];
+  captureCode: number;
+}
+
+export const permissionTmux = (): PermissionTmux => ({ ...consoleTmux(), captures: [], captureCode: 0 });
+
+/**
+ * The REAL permission service over the REAL attach proof, pane capture and Console: only tmux is
+ * scripted. `capture-pane` answers `frames` in order and repeats the last one, `send-keys` is recorded
+ * like the Console's, and the settle wait is free.
+ */
+export function permissionSubsystem(
+  world: AttachWorld = {},
+  tmux: PermissionTmux = permissionTmux(),
+  frames: readonly string[] = [PERMISSION_FRAME, IDLE_FRAME],
+): SessionPermissionService {
+  const attach = attachSubsystem(world);
+  let shown = 0;
+  const execute = async (command: readonly string[]) => {
+    if (command[0] === 'capture-pane') {
+      tmux.captures.push(command);
+      const frame = frames[Math.min(shown, frames.length - 1)] ?? '';
+      shown += 1;
+      return { code: tmux.captureCode, stdout: frame, stderr: tmux.captureCode === 0 ? '' : 'no such pane' };
+    }
+    tmux.commands.push(command);
+    return { code: tmux.code, stdout: '', stderr: tmux.stderr };
+  };
+  const capture = new ProvedPaneCapture(attach, { execute });
+  const typing = new SessionConsoleService(attach, { execute });
+  return new SessionPermissionService(
+    {
+      capture: async sessionId => await capture.capture(sessionId),
+      write: async (sessionId, bytes) => await typing.write(sessionId, bytes),
+    },
+    async () => undefined,
+  );
 }
 
 /**

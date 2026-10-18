@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -19,6 +19,7 @@ import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.
 import {
   ClaudeTranscriptParser,
   CodexTranscriptParser,
+  parsePermissionPrompt,
   parseSessionId,
   type SessionId,
   type SessionTranscriptTail,
@@ -85,11 +86,13 @@ interface Fixture {
   readonly status: (status: string) => Promise<void>;
   readonly turnState: () => Promise<unknown>;
   readonly turnPrompt: () => Promise<unknown>;
+  readonly permissionRequest: () => Promise<unknown>;
+  readonly journal: () => Promise<readonly { type: string; data: unknown }[]>;
   readonly events: () => Promise<readonly (string | null)[]>;
   readonly settle: () => Promise<void>;
 }
 
-async function fixture(harness: 'claude' | 'codex', initialFrame: string): Promise<Fixture> {
+async function fixture(harness: 'claude' | 'codex', initialFrame: string, width = 100): Promise<Fixture> {
   const tmux = Bun.which('tmux');
   if (tmux === null) throw new Error('tmux is required for turn-state integration coverage');
   const home = await mkdtemp(join(tmpdir(), 'ferretry-turn-'));
@@ -128,7 +131,7 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string): Promi
   await chmod(player, 0o755);
   const commands = new BunTmuxProcess(tmux, join(home, 'tmux.sock'));
   const controller = new TmuxController(commands);
-  await controller.launch({ session: tmuxSession, cwd: home, command: ['/bin/sh', player], width: 100, height: 30 });
+  await controller.launch({ session: tmuxSession, cwd: home, command: ['/bin/sh', player], width, height: 40 });
 
   const source = new NodeTranscriptSource(
     harness === 'claude' ? new ClaudeTranscriptParser() : new CodexTranscriptParser(),
@@ -161,6 +164,9 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string): Promi
     },
     turnState: async () => (await state()).turnState,
     turnPrompt: async () => (await state()).turnPrompt,
+    permissionRequest: async () => (await state()).permissionRequest,
+    journal: async () =>
+      (await opened.storage.replay(id)).events.map(event => ({ type: event.type, data: event.data })),
     events: async () =>
       (await opened.storage.replay(id)).events
         .filter(event => event.type === 'turn.state')
@@ -168,6 +174,21 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string): Promi
     // Long enough for the player's 50ms poll to redraw and tmux to show it.
     settle: async () => await Bun.sleep(400),
   };
+}
+
+/** A real pane captured from a harness, from `tests/fixtures/permission-prompts`. */
+const prompt = async (name: string): Promise<string> =>
+  await readFile(join(import.meta.dir, '../../../fixtures/permission-prompts', `${name}.txt`), 'utf8');
+
+/** Ticks until the recorded permission request is `id`. */
+async function untilRequest(subject: Fixture, id: string | undefined, budgetMs = 6_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < budgetMs) {
+    await subject.watcher.tick();
+    if (((await subject.permissionRequest()) as { id?: string } | undefined)?.id === id) return;
+    await Bun.sleep(200);
+  }
+  throw new Error(`permissionRequest never became ${String(id)}`);
 }
 
 /** Ticks until the record reads `expected` or the budget runs out, and answers how long it took. */
@@ -286,6 +307,45 @@ describe('the turn watcher over real panes and transcripts', () => {
     should(await subject.turnPrompt()).be.undefined();
     should(await subject.events()).deepEqual(['needs-input', 'your-turn']);
   }, 30_000);
+
+  it('a real harness permission prompt: recorded as data, replaced by the next, cleared once answered', async () => {
+    for (const [harness, first, second] of [
+      ['claude', 'claude-2.1.281-read-outside', 'claude-2.1.281-bash'],
+      ['codex', 'codex-0.156.1-shell', 'codex-0.156.1-patch'],
+    ] as const) {
+      // Arrange — the panes Claude Code and Codex really drew, at the width they were captured at.
+      const subject = await fixture(harness, await prompt(first), 120);
+      await subject.settle();
+
+      // Act + Assert — on screen: needs input, and the request is the one the pane shows.
+      await until(subject, 'needs-input');
+      should(await subject.permissionRequest()).deepEqual(parsePermissionPrompt(await prompt(first)));
+
+      // The next prompt replaces it beside the same needs-input — its own event, not a new boundary.
+      await subject.frame(await prompt(second));
+      await subject.settle();
+      await untilRequest(subject, parsePermissionPrompt(await prompt(second))?.id);
+
+      // Answered: the prompt is gone, and so is the request.
+      await subject.frame(harness === 'claude' ? CLAUDE_IDLE : CODEX_IDLE);
+      await subject.settle();
+      await until(subject, 'your-turn');
+      should(await subject.permissionRequest()).be.undefined();
+
+      const journal = (await subject.journal()).filter(event => event.type.startsWith('turn.'));
+      should(journal.map(event => event.type)).deepEqual(['turn.state', 'turn.prompt', 'turn.state']);
+      // The request rides the live feed itself, so a page can show it from the event alone.
+      should(
+        journal.map(
+          event => (event.data as { permissionRequest: { id: string } | null }).permissionRequest?.id ?? null,
+        ),
+      ).deepEqual([
+        parsePermissionPrompt(await prompt(first))?.id,
+        parsePermissionPrompt(await prompt(second))?.id,
+        null,
+      ]);
+    }
+  }, 60_000);
 
   it('should re-derive a turn still running after the daemon restarts, from the transcript alone', async () => {
     // Arrange — a working turn, then a fresh watcher (a restarted daemon) with no memory of it.

@@ -161,6 +161,32 @@ describe('statusMark from the daemon turn fact', () => {
     expect(live('needs-input').label).toBe('waiting — needs your input');
   });
 
+  it('names a permission prompt as needing approval, in the same shape and tone', () => {
+    const approval = statusMark(
+      sessionView('s', {
+        state: {
+          status: 'running',
+          turnState: 'needs-input',
+          permissionRequest: {
+            id: '0123456789abcdef',
+            harness: 'claude',
+            tool: 'Read',
+            action: 'read',
+            what: '/etc/hostname',
+            question: 'Do you want to proceed?',
+            options: [
+              { number: 1, label: 'Yes', kind: 'allow' },
+              { number: 2, label: 'No', kind: 'deny' },
+            ],
+            selected: 1,
+          },
+        },
+      }),
+    );
+    expect(approval).toMatchObject({ shape: 'diamond', klass: 'waiting', tone: 'accent', live: false });
+    expect(approval.label).toBe('waiting — needs approval');
+  });
+
   it('never lets a stale turn fact override a finished session or a declared park', () => {
     expect(live('working', 'completed').klass).toBe('finished');
     const parked = statusMark(

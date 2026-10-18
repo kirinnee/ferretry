@@ -23,7 +23,7 @@
  * PURE AND TOTAL: values in, values out. Nothing here reads a file or a terminal.
  */
 
-import type { SessionState, SessionStatus, SessionTurnState } from '@ferretry/protocol';
+import type { PermissionRequest, SessionState, SessionStatus, SessionTurnState } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 
 /** What one live frame of the agent's pane shows. */
@@ -39,6 +39,8 @@ export interface TurnPaneEvidence {
    * words a person is shown for it. Like a permission prompt, nothing moves until somebody answers.
    */
   readonly prompt?: string | undefined;
+  /** The tool-permission prompt on screen, read as data — what it asks and the choices it offers. */
+  readonly request?: PermissionRequest | undefined;
 }
 
 /** What the transcript's tail says about the current turn. */
@@ -97,6 +99,8 @@ export interface TurnObservation {
   readonly confirmed: boolean;
   /** The harness dialog behind a `needs-input`, when that is what it is. */
   readonly prompt?: string | undefined;
+  /** The tool-permission prompt behind a `needs-input`, when that is what it is. */
+  readonly request?: PermissionRequest | undefined;
 }
 
 /**
@@ -109,6 +113,7 @@ export function observeTurn(evidence: TurnEvidence): TurnObservation | undefined
   if (state.status === 'awaiting_question' || (state.pendingQuestion ?? null) !== null)
     return { state: 'needs-input', confirmed: true };
   if (pane?.prompt !== undefined) return { state: 'needs-input', confirmed: true, prompt: pane.prompt };
+  if (pane?.request !== undefined) return { state: 'needs-input', confirmed: true, request: pane.request };
   if (pane?.permission === true) return { state: 'needs-input', confirmed: true };
   if (pane?.working === true) return { state: 'working', confirmed: true };
   if (pane?.atPrompt === true) return { state: 'your-turn', confirmed: transcript !== 'working' };
@@ -168,4 +173,18 @@ export function turnStatePatch(
 ): Partial<Pick<SessionState, 'turnState' | 'turnStateAt'>> | undefined {
   if (current.turnState === next) return undefined;
   return next === undefined ? { turnState: undefined, turnStateAt: undefined } : { turnState: next, turnStateAt: at };
+}
+
+/**
+ * The permission request to RECORD beside `next`, by the same rule as {@link settleTurnPrompt}: the one
+ * a `needs-input` observation read, the one already recorded when this observation did not decide the
+ * turn, and none for any turn but `needs-input`.
+ */
+export function settlePermissionRequest(
+  recorded: PermissionRequest | undefined,
+  next: SessionTurnState | undefined,
+  observation: TurnObservation | undefined,
+): PermissionRequest | undefined {
+  if (next !== 'needs-input') return undefined;
+  return observation?.state === 'needs-input' ? observation.request : recorded;
 }

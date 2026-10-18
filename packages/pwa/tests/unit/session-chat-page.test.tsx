@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   MCP_OAUTH_PATH,
   matchesSessionSearchQuery,
+  type PermissionRequest,
   type SessionView,
   sessionSearchTaskHaystack,
 } from '@ferretry/protocol';
@@ -21,6 +22,7 @@ import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
+import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
 import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
 import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
@@ -1707,6 +1709,106 @@ describe('SessionChatPage', () => {
       );
       expect(page.root.findAllByProps({ 'data-question-unavailable': '' }).length).toBeGreaterThan(0);
       expect(page.root.findAllByProps({ className: 'fy-composer' })).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('answers a permission prompt above the Composer through the daemon, and sends a deny note as a message', async () => {
+    const permissionRequest: PermissionRequest = {
+      id: '0123456789abcdef',
+      harness: 'claude',
+      tool: 'Read',
+      action: 'read',
+      what: '/etc/hostname',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', kind: 'allow' },
+        { number: 2, label: 'No', kind: 'deny' },
+      ],
+      selected: 1,
+    };
+    const parked = sessionView('shared', {
+      config: { teammate: 'hadi' },
+      state: { status: 'running', turnState: 'needs-input', permissionRequest },
+    });
+    const posted: { url: string; body: unknown }[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/permission')) {
+        posted.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+        return Response.json({ requestId: permissionRequest.id, cleared: true });
+      }
+      return route(input);
+    }) as typeof fetch;
+    const sends: unknown[][] = [];
+    const chat = {
+      ...(client([], parked) as unknown as Record<string, unknown>),
+      send: async (...args: unknown[]) => {
+        sends.push(args);
+        return { accepted: true };
+      },
+    } as unknown as SessionChatClient;
+    let refreshed = 0;
+    const mountFor = (session: SessionView, canControl = true) => (
+      <SessionChatPage
+        canControl={canControl}
+        client={chat}
+        connection={alpha}
+        entries={[]}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = renderSessionChatPage(mountFor(parked));
+    try {
+      const card = page.root.findByType(ApprovalCard);
+      expect(card.props.agentName).toBe('Hadi');
+      expect(card.props.request).toEqual(permissionRequest);
+      // Above the Composer, inside the same input column.
+      const column = page.root.findByProps({ className: 'fy-chat-input__column' });
+      const kinds = column.children.map(child => (typeof child === 'string' ? child : child.type));
+      expect(kinds.indexOf(ApprovalCard)).toBeLessThan(kinds.indexOf(Composer));
+
+      const scope = daemonSessionScope(alpha, 'shared');
+      expect(await card.props.api.answer(alpha, scope, { kind: 'deny', requestId: permissionRequest.id })).toEqual({
+        requestId: permissionRequest.id,
+        cleared: true,
+      });
+      expect(posted).toEqual([
+        {
+          url: 'https://alpha.example.test/v1/sessions/shared/permission',
+          body: { kind: 'deny', requestId: permissionRequest.id },
+        },
+      ]);
+      await card.props.api.note(alpha, scope, 'read the cached copy');
+      expect(sends).toEqual([['shared', { message: 'read the cached copy', now: false }]]);
+      await expect(
+        card.props.api.note(
+          daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'other-token' }),
+          scope,
+          'x',
+        ),
+      ).rejects.toThrow('different daemon pairing');
+      card.props.onSettled();
+      expect(refreshed).toBe(1);
+
+      // Nothing to answer from a device that cannot control the session, or once it is over.
+      run(() => page.update(withSessionSearch(mountFor(parked, false))));
+      expect(page.root.findAllByType(ApprovalCard)).toHaveLength(0);
+      run(() =>
+        page.update(
+          withSessionSearch(
+            mountFor(
+              sessionView('shared', { state: { status: 'completed', turnState: 'needs-input', permissionRequest } }),
+            ),
+          ),
+        ),
+      );
+      expect(page.root.findAllByType(ApprovalCard)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }

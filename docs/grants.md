@@ -101,6 +101,12 @@ names — the session's single registration, matched on pane id, pid and process
 name. The security log records each write as `terminal.input` on the session (`detail.mode: 'console'`),
 folded per window, and never what was typed.
 
+**So is answering a permission prompt.** `POST /v1/sessions/:sessionId/permission` answers the harness's
+tool-permission prompt with one key into the same proved pane, so it is declared `terminal` / `use` and
+governed exactly as the Console is — a relayed answer is a remote one. It is audited as `terminal.input`
+with `detail.mode: 'permission'`, never with the choice. How the prompt is read and why the answer is a
+single key is [docs/permission-prompts.md](permission-prompts.md).
+
 Each has two axes, and they are different questions:
 
 - **use** — may the caller exercise the capability at all?

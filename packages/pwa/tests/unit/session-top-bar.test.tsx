@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { PermissionRequest } from '@ferretry/protocol';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -117,6 +118,46 @@ describe('SessionTopBar turn word', () => {
         expect(shown?.textContent).toBe(`, on screen: ${prompt}`);
         // A phone keeps the words for a screen reader; the room goes to the name.
         expect(shown?.className).toBe(compact ? 'sr-only' : 'fy-session-bar__blocked');
+      } else {
+        expect(status.getAttribute('title')).toBeNull();
+        expect(shown).toBeNull();
+      }
+      await view.unmount();
+      view = null;
+    }
+  });
+
+  test('says a permission prompt as the request it is waiting for approval on', async () => {
+    const permissionRequest: PermissionRequest = {
+      id: '0123456789abcdef',
+      harness: 'claude',
+      tool: 'Read',
+      action: 'read',
+      what: '/etc/hostname',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', kind: 'allow' },
+        { number: 2, label: 'No', kind: 'deny' },
+      ],
+      selected: 1,
+    };
+    for (const turn of ['needs-input', 'working'] as const) {
+      view = await mount(
+        <SessionTopBar
+          actions={null}
+          compact={false}
+          project={null}
+          session={sessionView('s1', {
+            state: { status: 'running', turnState: turn, turnPrompt: 'Do you want to proceed?', permissionRequest },
+          })}
+          turn={turn}
+        />,
+      );
+      const status = must(view.container.querySelector('.fy-session-bar__status'), 'the status');
+      const shown = status.querySelector('[data-session-blocked-by]');
+      if (turn === 'needs-input') {
+        expect(status.getAttribute('title')).toBe('Waiting for approval: read /etc/hostname');
+        expect(shown?.textContent).toBe(', Waiting for approval: read /etc/hostname');
       } else {
         expect(status.getAttribute('title')).toBeNull();
         expect(shown).toBeNull();
