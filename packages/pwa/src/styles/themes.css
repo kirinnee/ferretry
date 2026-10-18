@@ -179,6 +179,28 @@
   --code-font-size: 12.5px;
   --chrome-font-size: 11px;
 
+  /* ---- vertical flow: ONE spacing scale for reading surfaces ----
+     The transcript, the lists and the headers space themselves from these, never from literals, so a
+     family that re-tunes its type re-tunes its rhythm in the same place. The steps are 4px multiples;
+     the paragraph and list gaps are `em`, so they follow the text they separate. The phone ramp
+     (styles/index.css DENSITY RAMP) re-tunes the same names for a 17px body. */
+  --flow-1: 4px;
+  --flow-2: 8px;
+  --flow-3: 12px;
+  --flow-4: 16px;
+  --flow-5: 24px;
+  /* Between two machine rows (tools, commands, notices): tight, so a run of them reads as one block. */
+  --flow-chrome: 2px;
+  /* Machine rows that follow a message belong to it. */
+  --flow-chrome-after: 6px;
+  /* Between two messages, and the stronger gap where the speaker changes. */
+  --flow-message: 14px;
+  --flow-turn: 18px;
+  /* The live "Pontificating… 42s" row stands apart from the last thing that happened. */
+  --flow-live: 10px;
+  --flow-paragraph: 0.55em;
+  --flow-list: 0.25em;
+
   /* ---- geometry ---- */
   --radius-xs: 4px;
   --radius-sm: 6px;

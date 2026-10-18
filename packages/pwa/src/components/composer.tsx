@@ -798,8 +798,8 @@ export function Composer({
   const interruptTitle = `Interrupt & send — stops the agent's turn and sends now (${modifierLabel}⇧↵)`;
   const fieldDisabled = disabled || sending;
 
-  // ONE attach control, placed by layout: before the field on a desktop, at the top of the stacked
-  // dock on a phone, so the field there spans every pixel the dock leaves.
+  // ONE attach control, placed by layout: before the field on a desktop, at the top of the phone's
+  // left-hand column.
   const attachButton = (
     <button
       aria-label="Attach an image, audio or a file"
@@ -813,6 +813,23 @@ export function Composer({
       <Plus aria-hidden="true" size={18} />
     </button>
   );
+
+  const dictation = dictationSettings ? (
+    <DictationControl
+      {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
+      className="fy-composer-icon"
+      composerRef={elementRef}
+      daemon={daemon}
+      disabled={fieldDisabled}
+      draft={draft}
+      layout="compact"
+      onDraftChange={applyDictation}
+      {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
+      selectionRef={inputRef}
+      sessionId={sessionId}
+      settings={dictationSettings}
+    />
+  ) : null;
 
   return (
     <form
@@ -871,7 +888,18 @@ export function Composer({
         />
       ) : null}
       <div className="fy-composer-row">
-        {compact ? null : attachButton}
+        {/* THE PHONE ROW IS KTEAM'S: attach and the mic stacked on the LEFT, Interrupt & send above Send
+            on the RIGHT, the field between them. Both columns are always two 44px slots tall — the
+            interrupt's slot is held empty while the agent is idle — so neither the field's height nor
+            its width moves when a turn starts or ends. A desktop keeps its one inline row. */}
+        {compact ? (
+          <div className="fy-composer-dock" data-composer-dock="start">
+            {attachButton}
+            {dictation}
+          </div>
+        ) : (
+          attachButton
+        )}
         <input
           aria-hidden="true"
           className="hidden"
@@ -924,27 +952,10 @@ export function Composer({
               under the on-screen keyboard. */}
           <ComposerAutocompletePopover surface={autocomplete} />
         </div>
-        {/* The controls after the field. A desktop lays them inline in the row (`display: contents`); a
-            phone stacks them in a narrow column — attach, mic, Interrupt & send, Send — with Send at the
-            bottom, nearest the thumb. */}
+        {/* The controls after the field: inline in the row on a desktop (`display: contents`), the
+            right-hand column on a phone — Interrupt & send's slot over Send, nearest the thumb. */}
         <div className="fy-composer-dock" data-composer-dock="">
-          {compact ? attachButton : null}
-          {dictationSettings ? (
-            <DictationControl
-              {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
-              className="fy-composer-icon"
-              composerRef={elementRef}
-              daemon={daemon}
-              disabled={fieldDisabled}
-              draft={draft}
-              layout="compact"
-              onDraftChange={applyDictation}
-              {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
-              selectionRef={inputRef}
-              sessionId={sessionId}
-              settings={dictationSettings}
-            />
-          ) : null}
+          {compact ? null : dictation}
           {busy ? (
             <button
               aria-label="Interrupt & send"
@@ -957,6 +968,10 @@ export function Composer({
             >
               <Zap aria-hidden="true" size={17} strokeWidth={2.25} />
             </button>
+          ) : compact ? (
+            // Interrupt & send's place, held empty while there is no turn to interrupt, so Send never
+            // moves and the field never resizes as the agent starts and stops.
+            <span aria-hidden="true" className="fy-composer-slot" data-composer-interrupt-slot="" />
           ) : null}
           <button
             aria-label={sendLabel}

@@ -7,7 +7,6 @@ import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { SessionQuotaResolver } from '../lib/usage.ts';
-import { Badge } from '../shell/primitives.tsx';
 import {
   DENSITY_COLUMN_LABELS,
   DENSITY_COLUMN_WIDTHS,
@@ -15,6 +14,7 @@ import {
   groupHueVar,
   groupHueVars,
   hoistedStatus,
+  routineStatus,
   statusWord,
 } from './session-dashboard-model.ts';
 import {
@@ -186,15 +186,21 @@ export interface LeanGroupPanelProps extends NavigationProps {
   readonly scoped: boolean;
 }
 
-/** One hue-railed project panel with a hoisted majority status where visible. */
+/**
+ * One project panel with a hoisted majority status where visible. LIGHT ON PURPOSE: the project's hue
+ * marks its folder icon only — a 3px coloured rail on every panel plus a ruled header made a page of
+ * nested boxes, where the sessions are the content. The header is a plain row on the panel itself.
+ */
 export function LeanGroupPanel({ daemonId, group, hue, density, scoped, onFocus, onNavigate }: LeanGroupPanelProps) {
-  const hoisted = !scoped && density === 'compact' ? hoistedStatus(group.rows) : null;
+  const found = !scoped && density === 'compact' ? hoistedStatus(group.rows) : null;
+  // A hoisted "run" is the routine again, said once for the whole folder: the dots already say it.
+  const hoisted = found !== null && routineStatus(found.status) ? null : found;
   return (
-    <section className="kt-panel overflow-hidden" style={{ borderLeftWidth: 3, borderLeftColor: hue }}>
+    <section className="kt-panel overflow-hidden">
       {!scoped && (
         <button
           aria-label={`Focus folder ${group.name}`}
-          className="kt-panel__header min-h-[44px] w-full min-w-0 text-left hover:bg-surface-2"
+          className="flex min-h-[44px] w-full min-w-0 items-center gap-sm px-panel pt-1 text-left hover:bg-surface-2"
           onClick={() => onFocus(group.path)}
           title={`Focus folder ${group.name}`}
           type="button"
@@ -205,9 +211,13 @@ export function LeanGroupPanel({ daemonId, group, hue, density, scoped, onFocus,
             <span className="mono hidden min-w-0 truncate text-meta text-faint sm:inline">{group.path}</span>
           )}
           {hoisted && (
-            <Badge className="ml-auto shrink-0" title={hoisted.status} tone={dashboardTone(hoisted.status)}>
+            <span
+              className="ml-auto shrink-0 text-meta font-medium"
+              style={{ color: `var(--${dashboardTone(hoisted.status)})` }}
+              title={hoisted.status}
+            >
               {hoisted.uniform ? statusWord(hoisted.status) : `${hoisted.count}× ${statusWord(hoisted.status)}`}
-            </Badge>
+            </span>
           )}
           <span className={cn('mono shrink-0 text-meta text-faint', !hoisted && 'ml-auto')}>{group.rows.length}</span>
         </button>

@@ -323,6 +323,39 @@ describe('the composer in a real browser', () => {
     }
   }, 60_000);
 
+  test('a phone field keeps its exact box when Interrupt & send appears, with attach and mic on the left', async () => {
+    const measure = async (busy: boolean) => {
+      const scene = await open(
+        { editor: 'on', theme: 'studio-light', ...(busy ? { busy: '1' } : {}) },
+        { phone: true },
+      );
+      try {
+        return await scene.page.evaluate(() => {
+          const box = (selector: string) => {
+            const rect = (document.querySelector(selector) as Element).getBoundingClientRect();
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+          };
+          return {
+            field: box('.fy-composer-input-layer'),
+            row: box('.fy-composer-row'),
+            send: box('[data-composer-send]'),
+            attach: box('[data-composer-attach]'),
+          };
+        });
+      } finally {
+        await scene.close();
+      }
+    };
+    const [idle, working] = [await measure(false), await measure(true)];
+    // The owner's "stable box": nothing about the field or the row moves as a turn starts.
+    expect(working.field).toEqual(idle.field);
+    expect(working.row).toEqual(idle.row);
+    expect(working.send).toEqual(idle.send);
+    // kteam's layout: attach left of the field, Send right of it.
+    expect(idle.attach.left + idle.attach.width).toBeLessThanOrEqual(idle.field.left + 0.5);
+    expect(idle.send.left).toBeGreaterThanOrEqual(idle.field.left + idle.field.width - 0.5);
+  }, 60_000);
+
   test('a dropped file still becomes an attachment', async () => {
     const scene = await open({ editor: 'on', theme: 'studio-light' });
     const { page } = scene;

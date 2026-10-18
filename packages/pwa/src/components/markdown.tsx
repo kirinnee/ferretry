@@ -43,6 +43,7 @@ import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.t
 import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender, remarkFyRenderFences } from '../lib/fy-render.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { trustedHighlight } from '../lib/trusted-types.ts';
+import { MarkdownTable } from './markdown-table.tsx';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   type AgentReferenceResolver,
@@ -452,11 +453,8 @@ export const Markdown = memo(function Markdown({
             if (parsed?.ok === true) return <FyRenderBlock block={parsed.block} />;
             return <pre {...rest}>{children}</pre>;
           },
-          table: ({ node: _node, ...rest }) => (
-            <div className="md-table-scroll scroll-thin">
-              <table {...rest} />
-            </div>
-          ),
+          // A phone reads a table as cards or as the real table, its own choice (`markdown-table.tsx`).
+          table: ({ node: _node, ...rest }) => <MarkdownTable {...rest} />,
           // kteam additionally set the explicit ARIA table roles
           // (`role="table"`/`rowgroup`/`row`/`cell`/`columnheader`) so the
           // header-to-cell association survived the phone layout switching cells

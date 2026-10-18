@@ -493,27 +493,35 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* The bottom padding is the one gap between the conversation's last line and the composer: a whole
+   scale step, so the newest message, the live row and the box under them never touch. */
 .fy-transcript-content {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 12px 16px 32px;
+  padding: var(--flow-3) var(--flow-4) var(--flow-4);
 }
 .fy-transcript-content > * {
   max-width: 100%;
   min-width: 0;
 }
+/* The rhythm is the theme's flow scale (themes.css "vertical flow"; re-tuned for a phone in the density
+   ramp), so these gaps grow and shrink with the type they separate. */
 .fy-transcript-content > [data-transcript-density] {
-  margin-top: 2px;
+  margin-top: var(--flow-chrome);
 }
 .fy-transcript-content > [data-transcript-density='message'] {
-  margin-top: 14px;
+  margin-top: var(--flow-message);
 }
 .fy-transcript-content > [data-transcript-density='message'][data-transcript-turn='true'] {
-  margin-top: 18px;
+  margin-top: var(--flow-turn);
 }
 .fy-transcript-content > [data-transcript-density='chrome'][data-transcript-after='message'] {
-  margin-top: 6px;
+  margin-top: var(--flow-chrome-after);
+}
+/* The live row is its own moment, not one more tool line: it stands clear of the row above it. */
+.fy-transcript-content > .fy-live-activity {
+  margin-top: var(--flow-live);
 }
 .fy-transcript-content > :first-child {
   margin-top: 0;
@@ -535,7 +543,7 @@
   flex: 0 0 auto;
 }
 .fy-message p {
-  margin: 3px 0 0;
+  margin: var(--flow-1) 0 0;
   white-space: pre-wrap;
 }
 .fy-message-user {
@@ -759,19 +767,28 @@ button.fy-receipt {
 .fy-command-body {
   margin: 2px 0 4px 6px;
 }
+/* THE GROUND THE CHAT SITS ON, for anything that has to fade into it. A desktop pane is the surface
+   (workspace.css `.fy-ws-pane`); a phone's workspace is the page ground. The jump pill's strip used to
+   fade to the surface everywhere, so on a phone it drew a pale band over the text that read as broken. */
+.kt-chat-surface {
+  --chat-ground: var(--fy-surface);
+}
+[data-phone-workspace] .kt-chat-surface {
+  --chat-ground: var(--bg, var(--fy-surface));
+}
 .fy-jump-latest-shell {
   align-items: end;
   background: linear-gradient(
     to top,
-    var(--fy-surface),
-    color-mix(in srgb, var(--fy-surface) 85%, transparent),
+    var(--chat-ground, var(--fy-surface)),
+    color-mix(in srgb, var(--chat-ground, var(--fy-surface)) 85%, transparent) 45%,
     transparent
   );
   bottom: 0;
   display: flex;
   justify-content: center;
   left: 0;
-  padding: 32px 16px 12px;
+  padding: var(--flow-5) var(--flow-4) var(--flow-2);
   pointer-events: none;
   position: absolute;
   right: 0;
@@ -824,7 +841,8 @@ button.fy-receipt {
 @media (pointer: coarse) {
   .fy-composer .fy-composer-row button,
   .fy-composer-icon,
-  .fy-composer-send {
+  .fy-composer-send,
+  .fy-composer .fy-composer-slot {
     height: 44px;
     min-height: 44px;
     min-width: 44px;
@@ -1383,16 +1401,20 @@ button.fy-receipt {
 }
 /* THE PHONE COMPOSER (Composer.tsx `compact`, i.e. the drawer-width layout — the same instance
    `.kt-composer--compact` scopes, never a media query, so a coarse tablet on the desktop layout keeps
-   the desktop composer). The owner: "way too small … make buttons vertical so there's more space for
-   typing". So:
-     - the controls stack in a 44px column on the right — attach, mic, Interrupt & send, Send — and the
-       field takes the whole remaining width;
-     - the field rests at four lines and fills the row's height, so the column never leaves a dead gap
-       beside it; it grows to the JS ceiling while typing (ten lines, six with the keyboard up);
+   the desktop composer). It follows kteam's dock, because the owner asked for "a stable box":
+     - attach and the mic stack in a 44px column on the LEFT; Interrupt & send and Send stack in a 44px
+       column on the RIGHT, Send at the bottom, nearest the thumb;
+     - BOTH COLUMNS ARE ALWAYS TWO SLOTS TALL. While the agent is idle the interrupt's slot is held
+       empty (`.fy-composer-slot`), so the field is the same height and the same width whether a turn
+       is running or not — the #539 column grew from three controls to four the moment Interrupt
+       appeared and resized the box under the reader's thumb;
+     - the field rests at four lines (three with the keyboard up) and fills the row between the
+       columns; it grows to the JS ceiling while typing (ten lines, six with the keyboard up);
      - its text is the phone body size, 17px, never below the 16px iOS focus-zoom floor. */
 .fy-composer[data-composer-layout='phone'] .fy-composer-row {
   align-items: stretch;
-  padding: 4px 4px 4px 8px;
+  gap: var(--flow-1, 4px);
+  padding: var(--flow-1, 4px);
 }
 .fy-composer[data-composer-layout='phone'] .fy-composer-dock {
   display: flex;
@@ -1400,6 +1422,15 @@ button.fy-receipt {
   flex-direction: column;
   gap: 2px;
   justify-content: flex-end;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer-dock[data-composer-dock='start'] {
+  justify-content: flex-start;
+}
+.fy-composer-slot {
+  display: block;
+  flex: 0 0 auto;
+  height: 36px;
+  width: 36px;
 }
 .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer {
   align-self: stretch;
@@ -1419,32 +1450,8 @@ button.fy-receipt {
 .fy-composer[data-composer-layout='phone'] .fy-live-editor [data-line] {
   min-height: 24px;
 }
-/* The keyboard is up and the agent is working, so the column holds four 44px controls — 182px, which
-   would cost the transcript the room #511 gave it. The column is capped at three: it fills from the
-   bottom (Send, then Interrupt & send, then the mic) and the fourth, attach, steps into a second
-   column beside it. Send stays bottom-right under the thumb. At rest, or with three controls, nothing
-   wraps. */
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock {
-  flex-direction: column-reverse;
-  flex-wrap: wrap-reverse;
-  justify-content: flex-start;
-  max-height: calc(3 * 44px + 2 * 2px);
-  column-gap: 2px;
-}
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > * {
-  order: 3;
-}
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > .fy-composer-send {
-  order: 1;
-}
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > .fy-composer-interrupt {
-  order: 2;
-}
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-dock > [data-composer-attach] {
-  order: 4;
-}
-/* The keyboard is up: three lines is the floor, so the transcript keeps the room #511 gave it. The
-   stacked controls still set the row's height, and the field fills it. */
+/* The keyboard is up: three lines is the floor, so the transcript keeps the room #511 gave it. The two
+   control columns (2 × 44px) still fit beside three lines, so nothing wraps and nothing moves. */
 html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer textarea,
 html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer .fy-live-editor {
   min-height: calc(3 * 24px);
@@ -1707,5 +1714,34 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
     top: 50%;
     transform: translate(-50%, -50%);
     width: var(--target-floor);
+  }
+}
+
+/* THE PHONE'S STATUS LINE STAYS ONE LINE. The model chip gives way (it truncates) before the context and
+   quota readouts wrap onto a second row of their own — a row that cost the transcript 20px to say
+   "5h 23% wk 41%". */
+.fy-composer[data-composer-layout='phone'] .fy-composer-actions {
+  flex-wrap: nowrap;
+  gap: var(--flow-1) var(--flow-2);
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer__runtime-row {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer__runtime-row > .fy-composer__runtime:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.fy-composer[data-composer-layout='phone'] .fy-composer__runtime-row > .fy-composer__runtime:not(:first-child),
+.fy-composer[data-composer-layout='phone'] .fy-composer-context,
+.fy-composer[data-composer-layout='phone'] .fy-composer-quota {
+  flex: 0 0 auto;
+}
+
+/* The Sessions page's "+ New": a pill on a phone, the ordinary button from `sm` up. */
+@media (max-width: 639px) {
+  .kt-btn.fy-new-session {
+    border-radius: 9999px;
+    padding-inline: var(--flow-3, 12px);
   }
 }

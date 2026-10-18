@@ -26,11 +26,7 @@ import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../../src/components/composer-runtime.tsx';
-import {
-  isPromptKnownBusy,
-  type RuntimeModelCatalog,
-  RuntimeModelControls,
-} from '../../../src/components/runtime-controls.tsx';
+import { isPromptKnownBusy, RuntimeModelControls } from '../../../src/components/runtime-controls.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../../src/components/reference-surface.tsx';
 import { SessionSurfaceReferences } from '../../../src/components/session-surface-references.tsx';
 import { Transcript } from '../../../src/components/transcript.tsx';
@@ -41,6 +37,7 @@ import { addReferenceToComposer } from '../../../src/lib/composer-references.ts'
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
+import type { RuntimeModelCatalog } from '../../../src/lib/runtime-models.ts';
 import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
 import { taskSummary } from '../../support/tasks.ts';
 

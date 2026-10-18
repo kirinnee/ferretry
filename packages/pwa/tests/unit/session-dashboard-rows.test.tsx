@@ -255,7 +255,17 @@ describe('session dashboard row leaves', () => {
         view={view('lean', { state: { needsHuman: 'Take over', status: 'running' } })}
       />,
     ).root;
-    expect(text(compact)).toContain('runneeds human');
+    // The routine "run" is the dot's to say; only the flag is a word.
+    expect(text(compact)).toContain('Ship dashboard rowsneeds human');
+    expect(text(compact)).not.toContain('run');
+    const failed = render(
+      <LeanSessionCard
+        daemonId={DAEMON}
+        density="compact"
+        view={view('lean-failed', { state: { status: 'failed' } })}
+      />,
+    ).root;
+    expect(failed.findByProps({ 'data-status-word': 'failed' }).props.style).toEqual({ color: 'var(--err)' });
 
     const hoisted = render(
       <LeanSessionCard daemonId={DAEMON} density="compact" statusHoisted view={view('hoisted')} />,
