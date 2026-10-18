@@ -50,8 +50,8 @@ export interface MachineTabProps {
   readonly createClient: FleetClientFactory;
   /** The daemon's connection and security panels, for the Machine tab. */
   readonly daemonPanels?: DaemonPanelsRenderer;
-  /** Open this machine's full-screen first run. */
-  readonly onSetUp?: () => void;
+  /** Open this machine's full-screen New machine setup, on one of its steps (`'claude'` for Import again). */
+  readonly onSetUp?: (startAt?: string) => void;
 }
 
 export type MachineTabSurfaces = Readonly<Partial<Record<MachineTabId, ComponentType<MachineTabProps>>>>;
@@ -107,8 +107,8 @@ export interface MachinesSurfaceProps {
   readonly unknownMachine?: string;
   /** Go to a machine's tab. The page turns this into an address. */
   readonly onOpen: (daemonId: DaemonId, tab: MachineTabId) => void;
-  /** Open this machine's full-screen first run, from the "Finish setting up" banner and the tabs. */
-  readonly onSetUp?: (daemonId: DaemonId) => void;
+  /** Open this machine's full-screen New machine setup, from the "Finish setting up" banner and the tabs. */
+  readonly onSetUp?: (daemonId: DaemonId, startAt?: string) => void;
   readonly createClient: FleetClientFactory;
   readonly tabs?: MachineTabSurfaces;
   readonly daemonPanels?: DaemonPanelsRenderer;
@@ -239,7 +239,7 @@ export function MachinesSurface({
             onRetry={onRetry}
             createClient={createClient}
             {...(daemonPanels === undefined ? {} : { daemonPanels })}
-            {...(onSetUp === undefined ? {} : { onSetUp: () => onSetUp(daemonId) })}
+            {...(onSetUp === undefined ? {} : { onSetUp: (startAt?: string) => onSetUp(daemonId, startAt) })}
           />
         ) : (
           <EmptyMachineTab tab={tab} machineName={name} />

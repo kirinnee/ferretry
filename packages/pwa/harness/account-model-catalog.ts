@@ -330,7 +330,7 @@ const PROFILES = {
   ],
 };
 
-const runtime = (name: string, harness: 'claude' | 'codex', profile: string, credential: string) => ({
+export const harnessRuntime = (name: string, harness: 'claude' | 'codex', profile: string, credential: string) => ({
   id: `runtime-${name}`,
   name,
   wrapper: name,
@@ -347,11 +347,11 @@ const runtime = (name: string, harness: 'claude' | 'codex', profile: string, cre
 const RUNTIMES = {
   format: 'version-2',
   runtimes: [
-    runtime('claude-agent', 'claude', 'Agent work', 'claude-personal'),
-    runtime('claude-default', 'claude', 'Default', 'claude-personal'),
-    runtime('claude-review', 'claude', 'Review', 'claude-personal'),
-    runtime('claude-work', 'claude', 'Default', 'claude-work'),
-    runtime('codex-default', 'codex', 'Codex', 'codex'),
+    harnessRuntime('claude-agent', 'claude', 'Agent work', 'claude-personal'),
+    harnessRuntime('claude-default', 'claude', 'Default', 'claude-personal'),
+    harnessRuntime('claude-review', 'claude', 'Review', 'claude-personal'),
+    harnessRuntime('claude-work', 'claude', 'Default', 'claude-work'),
+    harnessRuntime('codex-default', 'codex', 'Codex', 'codex'),
   ],
 };
 

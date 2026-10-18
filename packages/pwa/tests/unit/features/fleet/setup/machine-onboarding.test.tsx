@@ -19,7 +19,7 @@ import { interact, type Mounted, mount, must } from '../../../../support/dom.ts'
 import { config as learningConfig } from '../../../../support/learning.ts';
 import { wardenConfig } from '../../../../support/warden.ts';
 import { fileView } from '../../config-files/config-files-support.ts';
-import { CREDENTIALS, PROFILES, RUNTIMES } from '../account-support.ts';
+import { CREDENTIALS, PROFILES } from '../account-support.ts';
 import {
   APPLY_PATH,
   bundle,
@@ -28,6 +28,8 @@ import {
   FRESH_MACHINE,
   machineAnswer,
   machineView,
+  runtimes,
+  runtimeView,
   STAGED,
   STUDIO,
   scan,
@@ -98,10 +100,15 @@ const daemon = (routes: Routes, calls: Call[] = []): FleetClient => ({
   },
 });
 
+const NO_RUNTIMES = runtimes([]);
+const CLAUDE_RUNTIME = runtimes([runtimeView('claude-default')]);
+const CODEX_RUNTIME = runtimes([runtimeView('codex-default', { harness: 'codex' })]);
+
 const CREDENTIAL_READS: Routes = {
   'GET /v1/fleet/credentials': CREDENTIALS,
-  'GET /v1/fleet/runtimes': RUNTIMES,
+  'GET /v1/fleet/runtimes': NO_RUNTIMES,
   'GET /v1/fleet/profiles': PROFILES,
+  '/v1/fleet/setup/scan': scan(),
 };
 
 const SET_UP_READS: Routes = {
@@ -200,14 +207,15 @@ const finished = (screen: Screen): Promise<void> => screen.rail('done');
 // ── The rail ─────────────────────────────────────────────────────────────────────────────────────
 
 describe('MachineOnboarding · the rail', () => {
-  it('lists all nine steps twice, down a column and across a phone strip, with Pair already set', async () => {
+  it('lists all ten steps twice, down a column and across a phone strip, with Pair already set', async () => {
     const screen = await render();
     const column = screen.all('[data-onboarding-rail="column"] [data-onboarding-go]');
     const strip = screen.all('[data-onboarding-rail="row"] [data-onboarding-go]');
     expect(column.map(step => step.getAttribute('data-onboarding-go'))).toEqual([
       'pair',
       'start',
-      'logins',
+      'claude',
+      'codex',
       'speedups',
       'voice',
       'warden',
@@ -215,8 +223,8 @@ describe('MachineOnboarding · the rail', () => {
       'controls',
       'done',
     ]);
-    expect(strip).toHaveLength(9);
-    expect(screen.all('[data-onboarding-count]').map(count => count.textContent)).toEqual(['1 of 8 set', '1 of 8 set']);
+    expect(strip).toHaveLength(10);
+    expect(screen.all('[data-onboarding-count]').map(count => count.textContent)).toEqual(['1 of 9 set', '1 of 9 set']);
     expect(column[0]?.getAttribute('data-state')).toBe('done');
     expect(column[0]?.textContent).toContain('✓');
     expect(column[0]?.textContent).toContain(', set');
@@ -233,7 +241,7 @@ describe('MachineOnboarding · the rail', () => {
     const current = screen.all('[aria-current="step"]');
     expect(current.map(step => step.getAttribute('data-onboarding-go'))).toEqual(['warden', 'warden']);
     // Looking is not doing: opening a step sets nothing.
-    expect(screen.text('[data-onboarding-count]')).toBe('1 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('1 of 9 set');
     await screen.click('[data-onboarding-rail="row"] [data-onboarding-go="learning"]');
     expect(screen.at()).toBe('learning');
   });
@@ -241,17 +249,17 @@ describe('MachineOnboarding · the rail', () => {
   it('shows Continue as set (✓) and advances', async () => {
     const screen = await render();
     await screen.click('[data-onboarding-next]');
-    expect(screen.at()).toBe('logins');
+    expect(screen.at()).toBe('claude');
     const start = screen.all('[data-onboarding-rail="column"] [data-onboarding-go="start"]')[0];
     expect(start?.getAttribute('data-state')).toBe('done');
     expect(start?.textContent).toContain('✓');
-    expect(screen.text('[data-onboarding-count]')).toBe('2 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
   });
 
   it('shows Skip as skipped (–), says so on the column only, and advances', async () => {
     const screen = await render();
     await screen.click('[data-onboarding-skip]');
-    expect(screen.at()).toBe('logins');
+    expect(screen.at()).toBe('claude');
     const column = screen.all('[data-onboarding-rail="column"] [data-onboarding-go="start"]')[0];
     const strip = screen.all('[data-onboarding-rail="row"] [data-onboarding-go="start"]')[0];
     expect(column?.getAttribute('data-state')).toBe('skipped');
@@ -259,7 +267,7 @@ describe('MachineOnboarding · the rail', () => {
     expect(column?.textContent).toContain('skipped');
     expect(strip?.textContent).toContain('–');
     expect(strip?.textContent).not.toContain('skipped,');
-    expect(screen.text('[data-onboarding-count]')).toBe('1 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('1 of 9 set');
   });
 
   it('never unsets a step that was set when it is skipped on a second visit', async () => {
@@ -297,13 +305,29 @@ describe('MachineOnboarding · the kept place', () => {
     const saved: MachineSetupProgress = { at: 'voice', states: { pair: 'done', start: 'skipped' }, start: 'fresh' };
     const screen = await render({ props: { progress: { saved, save: store.save } } });
     expect(screen.at()).toBe('voice');
-    expect(screen.text('[data-onboarding-count]')).toBe('1 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('1 of 9 set');
     expect(store.saves).toEqual([saved]);
 
     await screen.click('[data-onboarding-skip]');
     await screen.click('[data-onboarding-back]');
     expect(store.saves.map(progress => progress?.at)).toEqual(['voice', 'warden', 'voice']);
     expect(store.saves.at(-1)?.states.voice).toBe('skipped');
+  });
+
+  it('opens on the step it was told to, over the kept place, and keeps that as the place', async () => {
+    const store = memory();
+    const saved: MachineSetupProgress = { at: 'voice', states: { pair: 'done', start: 'done' }, start: 'fresh' };
+    const screen = await render({ props: { progress: { saved, save: store.save }, startAt: 'claude' } });
+    expect(screen.at()).toBe('claude');
+    expect(screen.text('#machine-onboarding-title')).toBe('Claude Code');
+    expect(store.saves).toEqual([{ ...saved, at: 'claude' }]);
+    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
+  });
+
+  it('opens on the step it was told to when nothing was kept', async () => {
+    const screen = await render({ props: { startAt: 'codex' } });
+    expect(screen.at()).toBe('codex');
+    expect(screen.text('[data-onboarding-count]')).toBe('1 of 9 set');
   });
 
   it('starts at the beginning when nothing was saved, and works with no storage at all', async () => {
@@ -336,6 +360,36 @@ describe('MachineOnboarding · Done', () => {
     await interact(() => later.click());
     expect(screen.went).toEqual([later.getAttribute('href') ?? '']);
     expect(screen.q('[data-onboarding-later="start"]')).toBeNull();
+  });
+
+  it('names the runtimes each CLI has now, from the machine, and links a CLI with none to Runtimes', async () => {
+    const screen = await render({
+      routes: {
+        ...SET_UP_READS,
+        'GET /v1/fleet/runtimes': runtimes([runtimeView('claude-default'), runtimeView('claude-glm')]),
+      },
+    });
+    await screen.click('[data-onboarding-next]');
+    await screen.click('[data-onboarding-next]');
+    await screen.click('[data-onboarding-next]');
+    await finished(screen);
+    const row = (id: string) => screen.q(`[data-onboarding-summary-row="${id}"]`);
+    expect(row('claude')?.textContent).toContain('claude-default, claude-glm');
+    expect(row('claude')?.getAttribute('data-state')).toBe('set');
+    expect(screen.q('[data-onboarding-later="claude"]')).toBeNull();
+    expect(row('codex')?.getAttribute('data-state')).toBe('skipped');
+    expect(row('codex')?.textContent).not.toContain('codex-default');
+    const later = screen.q('[data-onboarding-later="codex"]') as HTMLAnchorElement;
+    expect(later.getAttribute('href')).toBe('/d/studio/settings#machines/studio-mac/runtimes');
+    await interact(() => later.click());
+    expect(screen.went).toEqual(['/d/studio/settings#machines/studio-mac/runtimes']);
+  });
+
+  it('says nothing of the runtimes when the machine will not list them', async () => {
+    const screen = await render({ routes: { ...SET_UP_READS, 'GET /v1/fleet/runtimes': new Error('unreachable') } });
+    await finished(screen);
+    expect(screen.q('[data-onboarding-summary-row="claude"]')?.textContent).not.toContain('claude-default');
+    expect(screen.q('[data-onboarding-summary-row="speedups"]')?.textContent).toContain('Jev ✓ · Groq not set');
   });
 
   it('says only what it could read when some of the reads fail', async () => {
@@ -374,7 +428,7 @@ describe('MachineOnboarding · Done', () => {
     await finished(screen);
     await screen.click('[data-onboarding-restart]');
     expect(screen.at()).toBe('start');
-    expect(screen.text('[data-onboarding-count]')).toBe('1 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('1 of 9 set');
   });
 
   it('does not read the machine until Done opens', async () => {
@@ -410,7 +464,7 @@ describe('MachineOnboarding · steps that save through their own surface', () =>
     await settle();
     expect(patched).toHaveLength(1);
     expect(screen.at()).toBe('warden');
-    expect(screen.text('[data-onboarding-count]')).toBe('2 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
     expect(
       screen.all('[data-onboarding-rail="column"] [data-onboarding-go="warden"]')[0]?.getAttribute('data-state'),
     ).toBe('done');
@@ -431,7 +485,7 @@ describe('MachineOnboarding · steps that save through their own surface', () =>
     await screen.click('[data-setup-choice="off"] input');
     expect(patched.map(call => call.body)).toEqual([{ passiveDefault: false }]);
     expect(screen.at()).toBe('learning');
-    expect(screen.text('[data-onboarding-count]')).toBe('2 of 8 set');
+    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
   });
 
   it('passes the clean-up choice through to the Voice step, and reads the machine default for it', async () => {
@@ -482,50 +536,147 @@ describe('MachineOnboarding · steps that save through their own surface', () =>
   });
 });
 
-// ── Logins ───────────────────────────────────────────────────────────────────────────────────────
+// ── Claude Code and Codex ────────────────────────────────────────────────────────────────────────
 
-describe('MachineOnboarding · Logins', () => {
-  const freshRoutes: Routes = {
+describe('MachineOnboarding · Claude Code and Codex', () => {
+  const freshRoutes = (catalog: Route = NO_RUNTIMES): Routes => ({
     ...SET_UP_READS,
     '/v1/fleet/machine': FRESH_MACHINE,
-    '/v1/fleet/setup/scan': scan({ tools: scan().tools }),
-  };
-  const fresh = (props: Partial<MachineOnboardingProps> = {}) =>
-    render({ routes: freshRoutes, machine: FRESH_MACHINE, props });
+    'GET /v1/fleet/runtimes': catalog,
+  });
+  const fresh = (catalog: Route = NO_RUNTIMES, props: Partial<MachineOnboardingProps> = {}, extra: Routes = {}) =>
+    render({ routes: { ...freshRoutes(catalog), ...extra }, machine: FRESH_MACHINE, props });
+  const stateOf = (screen: Screen, id: string) =>
+    screen.all(`[data-onboarding-rail="column"] [data-onboarding-go="${id}"]`)[0]?.getAttribute('data-state');
 
-  it('continues when the Claude Code and Codex check is done', async () => {
+  it('gives each CLI its own one-screen step, with no stepper inside it', async () => {
+    const screen = await fresh(NO_RUNTIMES, { pollMs: 5 });
+    await screen.rail('claude');
+    expect(screen.text('#machine-onboarding-title')).toBe('Claude Code');
+    expect(screen.q('[data-onboarding-step-body="claude"]')).not.toBeNull();
+    expect(screen.q('[data-onboarding-step-body="codex"]')).toBeNull();
+    expect(screen.q('[data-machine-stepper]')).toBeNull();
+    await screen.click('[data-onboarding-next]');
+    expect(screen.at()).toBe('codex');
+    expect(screen.text('#machine-onboarding-title')).toBe('Codex');
+    expect(screen.q('[data-onboarding-step-body="codex"]')).not.toBeNull();
+    expect(screen.q('[data-onboarding-step-body="claude"]')).toBeNull();
+  });
+
+  it('marks Claude Code set (✓) when the step finds a Claude Code runtime, and not Codex', async () => {
+    const screen = await fresh(CLAUDE_RUNTIME);
+    expect(stateOf(screen, 'claude')).toBe('todo');
+    await screen.rail('claude');
+    expect(stateOf(screen, 'claude')).toBe('done');
+    expect(screen.all('[data-onboarding-rail="column"] [data-onboarding-go="claude"]')[0]?.textContent).toContain('✓');
+    expect(stateOf(screen, 'codex')).toBe('todo');
+    expect(screen.at()).toBe('claude');
+    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
+  });
+
+  it('marks Codex set when the step finds a Codex runtime, and not Claude Code', async () => {
+    const screen = await fresh(CODEX_RUNTIME);
+    await screen.rail('codex');
+    expect(stateOf(screen, 'codex')).toBe('done');
+    expect(stateOf(screen, 'claude')).toBe('todo');
+    expect(screen.text('[data-onboarding-count]')).toBe('2 of 9 set');
+  });
+
+  it('marks the step set when its own import makes the runtime, in place, without moving', async () => {
+    let imported = false;
+    const screen = await fresh(
+      () => (imported ? CLAUDE_RUNTIME : NO_RUNTIMES),
+      {},
+      { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: { outcome: 'executed', executor: 'setup', summary: 'Imported' } },
+    );
+    await screen.rail('claude');
+    expect(stateOf(screen, 'claude')).toBe('todo');
+    expect((screen.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('claude-default');
+    imported = true;
+    await screen.click('[data-change-submit]');
+    const proposed = screen.calls.find(call => call.path === '/v1/fleet/proposals');
+    expect(proposed?.body).toMatchObject({ change: { kind: 'setup.import', include: ['claude'] } });
+    expect(stateOf(screen, 'claude')).toBe('done');
+    expect(screen.at()).toBe('claude');
+    expect(screen.q('[data-harness-imported="claude"]')).not.toBeNull();
+  });
+
+  it('keeps a Continue on an imported step set, and moves on', async () => {
+    const screen = await fresh(CLAUDE_RUNTIME);
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-next]');
+    expect(screen.at()).toBe('codex');
+    expect(stateOf(screen, 'claude')).toBe('done');
+  });
+
+  it('counts Continue on a CLI step that was not imported as skipped, not set', async () => {
     const screen = await fresh();
-    await screen.rail('logins');
-    expect(screen.q('[data-onboarding-step-body="logins"]')).not.toBeNull();
-    await screen.click('[data-step-next]');
-    await screen.click('[data-harness-skip]');
-    await screen.click('[data-harness-skip]');
-    expect(screen.at()).toBe('logins');
-    await screen.click('[data-first-run-finish]');
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-next]');
+    expect(screen.at()).toBe('codex');
+    expect(stateOf(screen, 'claude')).toBe('skipped');
+    await screen.click('[data-onboarding-next]');
     expect(screen.at()).toBe('speedups');
-    expect(
-      screen.all('[data-onboarding-rail="column"] [data-onboarding-go="logins"]')[0]?.getAttribute('data-state'),
-    ).toBe('done');
+    expect(stateOf(screen, 'codex')).toBe('skipped');
+    expect(screen.text('[data-onboarding-count]')).toBe('1 of 9 set');
   });
 
-  it('skips Logins when the check is left', async () => {
-    const kept: unknown[] = [];
-    const screen = await fresh({ firstRunProgress: { saved: null, save: next => kept.push(next) } });
-    await screen.rail('logins');
-    await screen.click('[data-stepper-back]');
-    const stop = screen.q('[data-stepper-stop]');
-    if (stop !== null) await screen.click('[data-stepper-stop]');
-    expect(screen.at()).toBe('speedups');
-    expect(
-      screen.all('[data-onboarding-rail="column"] [data-onboarding-go="logins"]')[0]?.getAttribute('data-state'),
-    ).toBe('skipped');
+  it('counts Skip on a CLI step as skipped, and never unsets one that was imported', async () => {
+    const screen = await fresh();
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-skip]');
+    expect(stateOf(screen, 'claude')).toBe('skipped');
+    const imported = await fresh(CODEX_RUNTIME);
+    await imported.rail('codex');
+    await imported.click('[data-onboarding-skip]');
+    expect(stateOf(imported, 'codex')).toBe('done');
   });
 
-  it('shows only the logins list, not the first-run check, on a machine that is set up', async () => {
-    const screen = await render();
-    await screen.rail('logins');
-    expect(screen.q('[data-setup-section="logins-import"]')).toBeNull();
-    expect(screen.q('[data-setup-section="logins-list"]')).not.toBeNull();
+  it('keeps the runtime name typed on a step when the person leaves it and comes back', async () => {
+    const store = memory();
+    const screen = await fresh(NO_RUNTIMES, { progress: { saved: null, save: store.save } });
+    await screen.rail('claude');
+    const field = must(screen.q('[data-harness-name="claude"]') as HTMLInputElement | null, 'name field');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, ' my-claude ');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(store.saves.at(-1)?.answers).toEqual({ claude: { name: 'my-claude' } });
+    await screen.rail('speedups');
+    expect(screen.q('[data-harness-name="claude"]')).toBeNull();
+    await screen.rail('claude');
+    expect((screen.q('[data-harness-name="claude"]') as HTMLInputElement).value).toBe('my-claude');
+    // the other CLI's step keeps its own answers
+    await screen.rail('codex');
+    expect((screen.q('[data-harness-name="codex"]') as HTMLInputElement).value).toBe('codex-default');
+  });
+
+  it('reopens a step on the name kept with the saved place', async () => {
+    const saved: MachineSetupProgress = {
+      at: 'codex',
+      states: { pair: 'done' },
+      start: 'fresh',
+      answers: { codex: { name: 'codex-mine' } },
+    };
+    const screen = await fresh(NO_RUNTIMES, { progress: { saved, save: memory().save } });
+    expect(screen.at()).toBe('codex');
+    expect((screen.q('[data-harness-name="codex"]') as HTMLInputElement).value).toBe('codex-mine');
+  });
+
+  it('shows no CLI step body while the machine is asleep, and still lets the person skip it', async () => {
+    const screen = await render({ props: { online: false }, machine: null });
+    await screen.rail('claude');
+    expect(screen.text('[data-setup-note="harness-paused"]')).toContain('studio-mac is asleep or offline');
+    await screen.click('[data-onboarding-skip]');
+    expect(screen.at()).toBe('codex');
+  });
+
+  it('sends nothing for a skipped CLI step', async () => {
+    const screen = await fresh();
+    await screen.rail('claude');
+    await screen.click('[data-onboarding-skip]');
+    await screen.click('[data-onboarding-skip]');
+    expect(screen.calls.filter(call => call.method === 'POST')).toEqual([]);
   });
 });
 
@@ -559,7 +710,7 @@ describe('MachineOnboarding · Start from › Clone', () => {
     expect(copied).toBe(true);
     expect(screen.left.retried).toBeGreaterThan(0);
     await screen.click('[data-clone-finish]');
-    expect(screen.at()).toBe('logins');
+    expect(screen.at()).toBe('claude');
     expect(
       screen.all('[data-onboarding-rail="column"] [data-onboarding-go="start"]')[0]?.getAttribute('data-state'),
     ).toBe('done');
@@ -567,11 +718,21 @@ describe('MachineOnboarding · Start from › Clone', () => {
     expect(screen.q('[data-onboarding-summary-row="start"]')?.textContent).toContain('cloned from work-linux');
   });
 
-  it('goes back to a fresh start when the clone is left', async () => {
+  it('draws no step list, no “Step n of m” and no stepper title of its own inside the Start step', async () => {
+    const screen = await render({ machine: FRESH_MACHINE });
+    await screen.click('[data-setup-choice="clone"] input');
+    const body = must(screen.q('[data-onboarding-step-body="start"]'), 'start body');
+    expect(body.querySelector('[data-presentation="embedded"]')).not.toBeNull();
+    expect(body.textContent).not.toMatch(/Step \d+ of \d+/);
+    expect(body.querySelector('#machine-stepper-title')).toBeNull();
+    expect(body.querySelector('[data-stepper-back]')).toBeNull();
+  });
+
+  it('drops the clone when a fresh start is chosen again', async () => {
     const screen = await render({ machine: FRESH_MACHINE });
     await screen.click('[data-setup-choice="clone"] input');
     expect(screen.q('[data-onboarding-step-body="start"] [data-machine-stepper]')).not.toBeNull();
-    await screen.click('[data-stepper-back]');
+    await screen.click('[data-setup-choice="fresh"] input');
     expect(screen.q('[data-onboarding-step-body="start"] [data-machine-stepper]')).toBeNull();
     expect(screen.at()).toBe('start');
     expect((screen.q('[data-setup-choice="fresh"] input') as HTMLInputElement).checked).toBe(true);

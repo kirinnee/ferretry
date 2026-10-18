@@ -1,6 +1,4 @@
-// The Profiles tab, its drag-and-drop editor (R5), and Add runtime's "+ Build a new profile", which
-// hosts the same editor as a one-step sub-flow through BUILD_PROFILE_FLOW_KIND.
-export * from './profile-builder-step.tsx';
+// The Profiles tab and its drag-and-drop editor (R5).
 export * from './profile-contents.tsx';
 export * from './profile-editor.tsx';
 export * from './profile-library.tsx';

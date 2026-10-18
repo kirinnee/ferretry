@@ -1,5 +1,5 @@
 /**
- * "Sign in now", inside the first run's Claude Code or Codex step (docs/design/account-model.md §4.3, E4).
+ * "Sign in now", on New machine setup's Claude Code or Codex step (docs/design/account-model.md §4.3, E4).
  *
  * A tool that is installed but not signed in can still be imported and signed in later. This is the
  * other answer: sign in HERE, then carry on with the same step — missing, so made in place, then back.
@@ -19,7 +19,7 @@ import { readFleetCredentials } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type CredentialLoginFlow, startCredentialSignIn } from '../harness-login-api.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
-import { freeName } from './first-run-model.ts';
+import { uniqueName } from '../runtimes/runtimes-model.ts';
 import type { SetupAccess } from './setup-access.ts';
 import { SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
 
@@ -66,7 +66,7 @@ export function FirstRunSignIn({
     }
     const existing = hostLogin(listed.value.credentials, harness);
     if (existing !== undefined) return existing;
-    const id = freeName(`${harness}-you`, new Set(listed.value.credentials.map(candidate => candidate.id)));
+    const id = uniqueName(`${harness}-you`, new Set(listed.value.credentials.map(candidate => candidate.id)));
     const made = await changes.apply({ kind: 'credential.add', id, harness, store: 'host' });
     if (made.kind === 'refused') return undefined;
     const after = await access.read(client => readFleetCredentials(client));

@@ -228,9 +228,9 @@ mapping.
    1 of a top-level stepper asks to confirm leaving.
 4. **Cancel confirms**, says what will not be created, and lists anything already **saved for reuse**
    inside the flow, which is kept (E17).
-5. **A missing thing is created in place, then you return**: no login → "+ Add a new login"; no
-   fitting profile → "+ Build a new profile"; no component → "+ Create new …". Each opens a sub-stepper
-   and comes back with the new thing picked.
+5. **A missing thing is created in place, then you return**: no login → "+ Add a new login", which
+   opens under the list and comes back with the new login picked. **A step never holds a stepper**
+   (owner, 2026-10-18): New machine setup is one rail, and Add runtime is one form.
 6. **A beginner who imports never sees the word "Component".**
 7. Status uses the four words and four shapes: ● Ready, ◐ Refresh due, ○ Needs sign-in, ◌ Checking.
 8. No wrapper paths, UUIDs, config directories, `<kind>:<identity>` lines or the word "home" anywhere.
@@ -268,76 +268,81 @@ Detail pages (one concept each):
 
 Where this surface mounts (open question O1, now resolved, §14): the PWA Settings list has one **Machines** entry, linkable as `#machines/<name>/<tab>`.
 
-### 4.3 First run (per machine)
+### 4.3 First run (per machine): New machine setup's Claude Code and Codex steps
 
 A FULL SCREEN OF ITS OWN, outside Settings and with no app chrome (`/d/<id>/setup`, usability redesign
 2026-10-14): it opens by itself right after pairing a machine that is not set up, and from the
-"Finish setting up" banner — "Finish later" keeps the answers and the step in this browser. Earlier
-wording, kept for the decision record: shown BY ITSELF when a machine is selected that is not set up: right after pairing, and whenever
-Settings › Machines lands on it (owner decision, 2026-10-13: "ask the user on the screen"). Starting
-a daemon never imports anything, so a fresh machine is not set up until somebody chooses. Five steps,
-each one decision.
+"Finish setting up" banner. Starting a daemon never imports anything, so a fresh machine is not set up
+until somebody chooses.
 
-1. **Check tools.** "Ferretry runs Claude Code and Codex on _machine_. First it checks they're
-   installed." Each tool shows Installed · _version_ or Not installed. For missing ones: a checkbox
-   per tool showing the **exact command** Ferretry will run on the machine (`brew install --cask
-claude-code`, `npm install -g @openai/codex`, …; §8.6), and, from a phone or any governed
-   caller, a **passkey confirmation** on the device. Then **Install _n_ tools**, or
-   **Skip, continue without them** (E1). A failed install says why and gives the command to run by
-   hand, with **Retry** (E2).
-2. **Claude Code.** "We found Claude Code on _machine_. Use your login and setup?" A **Found on _machine_** list: Account
-   (Signed in / refresh due / Not signed in), Instructions (`CLAUDE.md`, size), Settings
-   (`settings.json`, "6 settings, 1 hook"), MCP servers (names), Skills (names), with warnings
-   inline. **Import** or **Skip** (Skip moves on; Back asks again). "Importing copies your setup into
-   Ferretry. Claude Code on _machine_ keeps working as before." Import creates: the credential
-   (`store: host`, shared in place), one component per item found, and a **Default** profile FOR THIS
-   HARNESS that matches the person's setup — `claude-default`, Claude only: the generic parts plus
-   Claude's own, so Codex gets its own `codex-default` and no profile mixes the two (P7) — or a plain
-   **Starter** profile with only a model set when nothing was found (E5). An import made before P7
-   left ONE shared `default`; Import again keeps extending that one. Because the login is shared in place, the screen says so in words: "Ferretry and your
-   own `claude` share this login: signing out in one signs out both." (the prototype shows the shorter
-   badge "Shared with claude in your terminal" on the credential). The result screen lists "Login · _email_" and "Default profile · Now has your
-   instructions, settings, 3 MCP servers and 5 skills", plus notes (E6–E9).
-3. **Codex.** The same, for Codex. When Claude was already imported, Instructions says "Same as your
-   CLAUDE.md · one shared copy" or "Different from your CLAUDE.md · kept separately" (E9). When Codex
-   is not installed this step is one quiet line and **Continue** (E3).
-4. **Name runtimes.** "A runtime is a login plus a profile. It's what you launch. Name each one."
-   One card per imported harness with a prefilled name (`claude-default`, `codex-default`: harness +
-   profile name), validated as you type (E16). When an identical runtime already exists (Import
-   again), "Add another anyway" is unchecked by default.
-5. **Done.** "_machine_ is ready · 2 runtimes created", each with status, email, profile and model,
-   then **Go to Runtimes**. With nothing imported: "Nothing is set up on _machine_ yet" on a first run,
-   "Nothing was imported" on Import again, each with **Start again** and **Go to Runtimes** (E10).
+**ONE RAIL, NO STEPPER INSIDE A STEP** (owner, 2026-10-18: "the first step is to create a runtime, but
+that is a nested stepper"). New machine setup is ten steps on one progress rail — Pair · Start from ·
+**Claude Code** · **Codex** · Speed-ups · Voice · Warden · Learning · Agent controls · Done — every one
+skippable and revisitable, with Finish later keeping the place, the states and the runtime names typed.
+There is no Check tools step, no Name runtimes step and no runtime wizard. Each CLI's step is ONE
+screen, top to bottom:
 
-The runtimes the first run creates are **agent runtimes** (O2). **The daemon never runs this import
-itself**: an earlier build imported at the first boot (`fleet.prepareDefaults`), and that key is now
-retired — tolerated in an old `config/daemon.json` and said once in the boot trail. The same questions
-are `fy daemon setup` in a terminal; `fy daemon import claude|codex` is the no-questions form for
-scripts. A tool that is installed but not signed in offers **Sign in now** on its step: it adds the
-person's own login (`credential.add`, `store: host`), runs the existing sign-in in place, and returns
-to the step, so the import reuses that login. Skipping both tools ends on "Nothing is set up on
-_machine_ yet" with **Start again** and **Go to Runtimes**.
+1. **Installed?** Installed, or Not installed with the install in place: the **exact command** Ferretry
+   will run on the machine (`brew install --cask claude-code`, `npm install -g @openai/codex`, …; §8.6),
+   a **passkey confirmation** from a phone or any governed caller, and **Skip** (E1). A failed install
+   says why and gives the command to run by hand, with **Retry** (E2). Not installed and skipped is one
+   quiet line (E3).
+2. **Found on _machine_**: Account (Signed in / refresh due / Not signed in), Instructions
+   (`CLAUDE.md`, size), Settings (`settings.json`, "6 settings, 1 hook"), MCP servers (names), Skills
+   (names), with warnings inline. On Codex, when Claude Code is already imported, Instructions says
+   "Same as your CLAUDE.md · one shared copy" or "Different from your CLAUDE.md · kept separately" (E9).
+3. **Sign in now**, when the person's own login is installed but not signed in: it adds that login
+   (`credential.add`, `store: host`), runs the existing sign-in in place, and the step reads the
+   machine again, so the import reuses that login.
+4. **Runtime name**, prefilled with the daemon's own suggestion — `claude-default` / `codex-default`
+   (harness + profile), `-starter` when nothing was found (E5), `-2` on a clash — validated as you type
+   (E16). When a runtime already uses this login and profile (Import again), "Also add another runtime"
+   is unchecked by default and no name is asked (E15).
+5. **What changed** (Import again only): each update offered, none ticked (O6).
+6. **Import and create _name_** ("…, sign in later" when not signed in, E4): ONE reviewed change,
+   `setup.import` with `include: [<this harness>]` and `names: { <harness>: <name> }`. It creates the
+   credential (`store: host`, shared in place), one component per item found, and a **Default** profile
+   FOR THIS HARNESS (`claude-default`, Claude only; Codex gets its own `codex-default`, so no profile
+   mixes the two, P7) — and the runtime, under the name in the field. The step then says "_name_ is
+   ready" (or **Sign in before you launch**) with the notes (E6–E9). "Importing copies your setup into
+   Ferretry. Claude Code on _machine_ keeps working as before", and "Ferretry and your own `claude`
+   share this login: signing out in one signs out both."
+7. **Use a provider key instead** (collapsed): the provider grid (§4.6) for this CLI. The login it adds
+   gets its runtime right there — a name field and **Create** (`runtime.put`) on the profile this CLI's
+   import made; without one, it says to import first.
 
-**Import again** (Settings → Setup) runs steps 2–5 again and only adds what is new.
+A CLI's step is **set** once that CLI has a runtime on the machine; Continue past one that was not
+imported counts as skipped, and Done says which runtime each CLI has, with **Set up later** → Runtimes
+for a skipped one. More runtimes are Settings › Runtimes › Add runtime (§4.4).
+
+The runtimes this makes are **agent runtimes** (O2). **The daemon never runs this import itself**: an
+earlier build imported at the first boot (`fleet.prepareDefaults`), and that key is now retired —
+tolerated in an old `config/daemon.json` and said once in the boot trail. The same questions are
+`fy daemon setup` in a terminal; `fy daemon import claude|codex` is the no-questions form for scripts.
+
+**Import again** (Settings › Machine › Setup) opens the same full screen on its Claude Code step, and
+an import only adds what is new.
 
 ### 4.4 Add runtime
 
-Four steps. The page title is "Add a runtime".
+ONE FORM on one page (no stepper; owner, 2026-10-18). The page title is "Add a runtime".
 
-1. **Credential.** "Which login should this runtime use?" Radio rows: email, label, harness, status,
-   "used by _n_ runtimes", and "isn't installed here" where true; then **+ Add a new login**. With no
-   credentials the step is "Add a login first" with Sign in to Claude Code / Codex (E12). Picking a
-   Needs-sign-in credential shows the sign-in panel inline and allows **Next, sign in later** (E13).
-2. **Profile.** "Which profile should it use with _email_ on _harness_?" Each profile shows its scope
-   badge, and only Generic profiles and those of the login's harness can be picked (P7); one for the
-   other harness, or a Mixed one, is disabled with the reason. One that cannot apply is disabled the
-   same way, and one partly supported carries "Partly supported on Codex" (E14). Then **+ Build a new profile** (§4.5), which returns here with
-   the new profile picked. A duplicate pair asks first (E15).
-3. **Name.** A summary row, **Runtime name** (validated, suggestion on clash, E16), and the checkbox
-   **Ferretry launches this as an agent** — "Adds Ferretry's fixed layer last: no trust or onboarding
-   prompts, and the machine's agent permissions." **Create runtime**.
-4. **Done.** "_name_ is ready to launch" (or "Sign in before you launch"), "Also saved for reuse: …",
-   **Back to Runtimes** / **Open _name_**.
+- **Login.** Radio rows: email, label, scope chip, status, "used by _n_ runtimes", and "isn't installed
+  here" where true; then **+ Add a new login**, which opens IN PLACE under the list — Sign in to Claude
+  Code / Codex (one tap makes the login and starts its sign-in; **Use it, sign in later**) or a
+  **Provider key** from the provider grid — and comes back picked (E12). Picking a Needs-sign-in login
+  shows the sign-in panel inline; the runtime can be created before it is signed in (E13).
+- **Runs**, for a login that drives both CLIs.
+- **Profile.** Each profile shows its scope badge, and only Generic profiles and those of the login's
+  harness can be picked (P7); one for the other harness, or a Mixed one, is disabled with the reason.
+  One that cannot apply is disabled the same way, and one partly supported carries "Partly supported on
+  Codex" (E14). Profiles are built on the Profiles tab, linked from here. A duplicate pair needs
+  "Add another anyway" (E15).
+- **Name** (prefilled harness + profile, validated, suggestion on clash, E16) and the checkbox
+  **Ferretry launches this as an agent** — "Adds Ferretry's fixed layer last: no trust or onboarding
+  prompts, and the machine's agent permissions."
+- **Create runtime**, then "_name_ is ready to launch" (or "Sign in before you launch"), **Back to
+  Runtimes** / **Open _name_**.
 
 ### 4.5 A profile as a bag of components (supersedes the Build a profile stepper)
 
@@ -362,9 +367,8 @@ key. The profile page and **+ New profile** open the same editor:
 - **Save** sends the whole list as one `profile.put`; **Discard changes** goes back to the saved list.
   A saved profile also offers **Edit as YAML** on its file, `config/profiles/<name>.yaml`.
 
-Add runtime's **+ Build a new profile** opens the same editor as a one-step sub-flow, for the login's
-tool, and returns with the new profile picked. Components are created on the Components tab; the
-editor only arranges what exists.
+Profiles are built here only; Add runtime links to this tab rather than opening the editor inside its
+form. Components are created on the Components tab; the editor only arranges what exists.
 
 ### 4.6 Add a login
 
@@ -930,7 +934,7 @@ screen.
 
 | ID  | Case                                              | What happens                                                                                                                                                                                                                                                                               |
 | --- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| E1  | Neither harness installed                         | Check tools lists both Not installed. "Install what's missing": a checkbox per tool showing the exact command, a passkey confirmation, **Install 2 tools**. Continue waits; **Skip, continue without them**.                                                                               |
+| E1  | Neither harness installed                         | Each CLI step says Not installed, with its install in place: the exact command, a passkey confirmation, **Install**, or **Skip**. Nothing below it is asked until it is installed.                                                                                                         |
 | E2  | Install fails (needs admin)                       | "Couldn't install on _machine_": npm needs admin rights and the operator account isn't an admin. Shows `sudo npm install -g …` to run yourself, then **Retry** or **Skip, continue without them**.                                                                                         |
 | E3  | Only Claude installed                             | The Codex step is one quiet line, "Codex isn't installed · Install later in Settings", and Continue.                                                                                                                                                                                       |
 | E4  | Installed but not signed in                       | Account reads "Not signed in · Your setup can still be imported"; the sign-in panel is inline; the button reads **Import, sign in later**; the credential lands as Needs sign-in with a note.                                                                                              |
@@ -939,9 +943,9 @@ screen.
 | E7  | Secret-looking values                             | Settings carries "2 secret values · go to the secret store, never shown"; after import the Settings component lists `env.NAME` as "In Ferretry's secret store · never shown".                                                                                                              |
 | E8  | MCP command missing                               | The `notes` server is imported with the warning "Command not found: uvx" and a note to install uv on the machine; it starts working once installed.                                                                                                                                        |
 | E9  | `CLAUDE.md` and `AGENTS.md` identical / different | Identical: one generic Instructions component, "one shared copy". Different: "Claude instructions" and "Codex instructions", each harness-only.                                                                                                                                            |
-| E10 | Skipped everything                                | Done: "Nothing was imported. That's fine." Runtimes tab: "No runtimes on _machine_ yet" with **Add your first runtime**.                                                                                                                                                                   |
+| E10 | Skipped everything                                | Done lists Claude Code and Codex as skipped, each with **Set up later** → Runtimes. Runtimes tab: "No runtimes on _machine_ yet" with **Add your first runtime**.                                                                                                                          |
 | E11 | Machine goes offline mid-stepper                  | "_machine_ is asleep or offline. Setup is paused. Your progress is kept." **Retry**.                                                                                                                                                                                                       |
-| E12 | Add runtime with no credentials                   | Step 1 is "Add a login first" with Sign in to Claude Code / Codex (disabled when not installed); the login sub-stepper returns to Step 1 with it picked.                                                                                                                                   |
+| E12 | Add runtime with no credentials                   | The Login part says there are none yet; **+ Add a new login** opens in place (Sign in to Claude Code / Codex, disabled when not installed, or a provider key) and returns it picked.                                                                                                       |
 | E13 | Chosen login needs sign-in                        | The sign-in panel opens inline below the list; **Next, sign in later** is allowed.                                                                                                                                                                                                         |
 | E14 | Claude-only parts on a Codex login                | A profile with only Claude parts is disabled: "Only Claude settings. Nothing here applies on Codex." Mixed: "Claude settings will be skipped on Codex"; partial: "Partly supported on Codex".                                                                                              |
 | E15 | Same login and profile already a runtime          | "_name_ already uses this login and profile. Add another anyway?" with **Add another anyway** / **Pick a different profile**; Next waits for a choice.                                                                                                                                     |

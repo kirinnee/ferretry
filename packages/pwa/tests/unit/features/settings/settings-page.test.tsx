@@ -1112,6 +1112,30 @@ describe('SettingsPage Machines section', () => {
     await view.unmount();
   });
 
+  it('opens the full-screen setup on the step a tab names: Import again lands on Claude Code', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/machine');
+    const callbacks = calls();
+    const view = await mount(
+      page({
+        createMachineClient: answering,
+        calls: callbacks,
+        machineTabs: {
+          machine: ({ onSetUp }) => (
+            <div>
+              <button type="button" data-open-setup="" onClick={() => onSetUp?.()} />
+              <button type="button" data-open-import="" onClick={() => onSetUp?.('claude')} />
+            </div>
+          ),
+        },
+      }),
+    );
+    await settle();
+    await interact(() => must(view.container.querySelector<HTMLElement>('[data-open-setup]'), 'setup').click());
+    await interact(() => must(view.container.querySelector<HTMLElement>('[data-open-import]'), 'import').click());
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/setup', '/d/daemon-alpha/setup#claude']);
+    await view.unmount();
+  });
+
   it('asks the open machine again when the reader says Check again', async () => {
     let reads = 0;
     const flaky: FleetClientFactory = async () => {

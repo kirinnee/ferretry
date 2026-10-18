@@ -1,8 +1,10 @@
 /**
  * What the harness machines answer for New machine setup and Copy settings (build plan P9): the
- * Speed-ups read, the Warden's and Learning's settings, the secret store's NAMES, and the three
- * settings files a copy reads from the source and writes here. In memory and per machine, so a key
- * "added" on one screen shows as set on the next, and nothing ever leaves the page.
+ * Speed-ups read, the Warden's and Learning's settings, the secret store's NAMES, the three settings
+ * files a copy reads from the source and writes here, and — on a machine that is not set up — the
+ * runtimes its Claude Code and Codex steps create. In memory and per machine, so a key "added" on one
+ * screen shows as set on the next, a runtime imported on one step is listed on Done, and nothing ever
+ * leaves the page.
  *
  * No value is held: a stored "secret" is its name and two instants, as the daemon answers.
  */
@@ -13,6 +15,7 @@ import {
   type SpeedupsView,
   type WardenConfig,
 } from '@ferretry/protocol';
+import { harnessRuntime } from './account-model-catalog.ts';
 
 const NOW = '2026-10-16T09:00:00.000Z';
 
@@ -28,6 +31,8 @@ interface MachineState {
   secrets: string[];
   warden: WardenConfig;
   passiveDefault: boolean;
+  /** The runtimes a machine that is not set up has made so far. */
+  runtimes: ReturnType<typeof harnessRuntime>[];
 }
 
 const states = new Map<string, MachineState>();
@@ -35,7 +40,7 @@ const states = new Map<string, MachineState>();
 const stateOf = (machine: string): MachineState => {
   const known = states.get(machine);
   if (known !== undefined) return known;
-  const fresh: MachineState = { secrets: [], warden: DEFAULT_WARDEN_CONFIG, passiveDefault: true };
+  const fresh: MachineState = { secrets: [], warden: DEFAULT_WARDEN_CONFIG, passiveDefault: true, runtimes: [] };
   states.set(machine, fresh);
   return fresh;
 };
@@ -94,6 +99,31 @@ export const machineSetupAnswer = (machine: string, source: boolean, path: strin
   const url = new URL(path, 'http://harness.invalid');
   const method = init?.method ?? 'GET';
   switch (url.pathname) {
+    case '/v1/fleet/runtimes':
+      return source ? undefined : { format: 'version-2', runtimes: state.runtimes };
+    case '/v1/fleet/proposals': {
+      // A machine that is not set up makes its runtimes as it is set up; staging is the catalogue's answer.
+      if (source || method !== 'POST') return undefined;
+      const change = body(init).change as
+        | { kind?: string; names?: Record<string, string>; name?: string; credential?: string }
+        | undefined;
+      if (change?.kind === 'setup.import')
+        for (const [harness, name] of Object.entries(change.names ?? {}))
+          if (!state.runtimes.some(made => made.name === name))
+            state.runtimes.push(
+              harnessRuntime(name, harness === 'codex' ? 'codex' : 'claude', 'default', `${harness}-you`),
+            );
+      if (change?.kind === 'runtime.put' && change.name !== undefined)
+        state.runtimes.push(
+          harnessRuntime(
+            change.name,
+            change.credential?.startsWith('codex') === true ? 'codex' : 'claude',
+            'default',
+            change.credential ?? 'claude-you',
+          ),
+        );
+      return undefined;
+    }
     case '/v1/speedups':
       return speedups(state.secrets);
     case '/v1/secrets':

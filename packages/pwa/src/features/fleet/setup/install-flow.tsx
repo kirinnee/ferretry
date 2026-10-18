@@ -11,7 +11,7 @@ import { readFleetSetupScan } from '../setup-api.ts';
 import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { type StepperState, startStepper } from '../shell/stepper-model.ts';
-import { missingTools } from './first-run-model.ts';
+import { missingTools } from './harness-import-model.ts';
 import type { InstallPhase } from './install-model.ts';
 import { useSetupAccess } from './setup-access.ts';
 import { SetupNote } from './setup-ui.tsx';

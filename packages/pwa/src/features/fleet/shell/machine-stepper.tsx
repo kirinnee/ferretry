@@ -7,12 +7,11 @@
  *
  * Two presentations of the same rules (`stepper-model.ts`):
  *
- * - `inline` — inside Settings (Add a runtime, Clone, Import again…): ‹ Back, "Step n of m", Cancel,
- *   the named steps, the page title, then the step.
- * - `screen` — the full-screen first run of a new machine: the numbered steps down the left on a
- *   desktop (segments + names on a phone), "Finish later" at the top, and ‹ Back with the step's own
- *   actions PINNED to the bottom of the screen, above a phone's home indicator, in the same place on
- *   every step ({@link StepperFoot}).
+ * - `inline` — inside Settings (Clone, Add a login, Install…): ‹ Back, "Step n of m", Cancel, the named
+ *   steps, the page title, then the step.
+ * - `embedded` — inside a step of New machine setup (Start from › Clone). That rail is the only stepper
+ *   on screen, so this draws NO step list, no "Step n of m" and no title of its own: only the page and,
+ *   after its first page, a ‹ Back. A step never holds a stepper.
  *
  * And the two states that replace a step's body:
  *
@@ -27,11 +26,10 @@
 
 import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { AccountStatus } from './account-status.tsx';
-import { StepperFootContext } from './stepper-foot.tsx';
 import {
   backStep,
   cancelStepper,
@@ -39,7 +37,6 @@ import {
   keepGoing,
   type StepperFlow,
   type StepperState,
-  type StepperStep,
   stepPosition,
   stopStepper,
 } from './stepper-model.ts';
@@ -55,10 +52,8 @@ export interface MachineStepperProps {
   /** A reachability check is running, so Retry is busy. */
   readonly checking?: boolean;
   readonly onRetry: () => void;
-  /** Inside Settings, or the full-screen first run. */
-  readonly presentation?: 'inline' | 'screen';
-  /** Steps the flow will ask once they apply, drawn as still to come ({@link shownSteps}). */
-  readonly upcoming?: readonly StepperStep[];
+  /** Inside Settings, or embedded in a step of New machine setup. */
+  readonly presentation?: 'inline' | 'embedded';
   /** The current step's body. Not rendered while confirming or paused. */
   readonly children: ReactNode;
 }
@@ -75,31 +70,23 @@ interface ShownStep {
 /**
  * The steps a person is walked through. A last "Done" step is not one of them — it is where the walk
  * ends — so on it every named step reads as done.
- *
- * `upcoming` are steps the flow WILL ask once an answer makes them apply (the first run's Name runtimes,
- * which exists only once something is chosen to import). They are drawn after the real steps, as still
- * to come, so the stepper names the whole job from the first screen. On the final step they are dropped:
- * a step that never applied was not done.
  */
-export const shownSteps = (flow: StepperFlow, upcoming: readonly StepperStep[] = []): readonly ShownStep[] => {
-  const { index, step: at } = stepPosition(flow);
-  const real = flow.steps.filter(step => step.final !== true);
-  const later = at.final === true ? [] : upcoming.filter(extra => !flow.steps.some(step => step.id === extra.id));
-  return [...real, ...later].map((step, number) => {
-    const position = flow.steps.indexOf(step);
-    return {
+export const shownSteps = (flow: StepperFlow): readonly ShownStep[] => {
+  const { index } = stepPosition(flow);
+  return flow.steps
+    .filter(step => step.final !== true)
+    .map((step, number) => ({
       id: step.id,
       label: step.label,
       number: number + 1,
-      state: position === -1 || position > index ? 'todo' : position < index ? 'done' : 'now',
-    };
-  });
+      state: number > index ? 'todo' : number < index ? 'done' : 'now',
+    }));
 };
 
-/** The numbered list: a column beside a full-screen step, a row above an inline one. */
-function StepList({ steps, layout }: { readonly steps: readonly ShownStep[]; readonly layout: 'column' | 'row' }) {
+/** The numbered list above an inline step. */
+function StepList({ steps }: { readonly steps: readonly ShownStep[] }) {
   return (
-    <ol aria-label="Steps" className={cn('kt-steps', layout === 'row' && 'kt-steps--row')} data-stepper-steps={layout}>
+    <ol aria-label="Steps" className="kt-steps kt-steps--row" data-stepper-steps="row">
       {steps.map(step => (
         <li
           key={step.id}
@@ -156,7 +143,6 @@ export function MachineStepper({
   checking = false,
   onRetry,
   presentation = 'inline',
-  upcoming,
   children,
 }: MachineStepperProps) {
   const flow = currentFlow(state);
@@ -164,12 +150,10 @@ export function MachineStepper({
   const final = step.final === true;
   const titleRef = useRef<HTMLHeadingElement>(null);
   const stepKey = `${state.stack.length}:${flow.kind}:${flow.at}`;
-  const steps = shownSteps(flow, upcoming);
+  const steps = shownSteps(flow);
   const current = steps.findIndex(candidate => candidate.state === 'now');
   const position =
     current === -1 ? `${flow.title} · done` : `Step ${current + 1} of ${steps.length} · ${steps[current]?.label}`;
-  // The pinned footer's slot. Held in state, so the steps' actions move into it once it exists.
-  const [footSlot, setFootSlot] = useState<HTMLElement | null>(null);
 
   // A new page, so the reader starts at its title — the prototype moves focus the same way.
   useEffect(() => {
@@ -223,84 +207,35 @@ export function MachineStepper({
     </div>
   );
 
-  // The full-screen first run is a page of its own, so its title is the page's; inline it sits under a
-  // section and a machine heading.
-  const Heading = presentation === 'screen' ? 'h1' : 'h3';
   const title = (className: string) => (
-    <Heading
+    <h3
       id="machine-stepper-title"
       ref={titleRef}
       tabIndex={-1}
       className={cn('m-0 font-display font-semibold tracking-display text-fg outline-none', className)}
     >
       {flow.title}
-    </Heading>
+    </h3>
   );
 
-  if (presentation === 'screen') {
-    // Finish later leaves at once: nothing is imported before the last step, and the progress is kept.
-    const finishLater = (
-      <Button type="button" variant="ghost" data-stepper-finish-later="" onClick={() => onChange(null)}>
-        Finish later
-      </Button>
-    );
+  if (presentation === 'embedded')
     return (
-      <section
-        data-machine-stepper={flow.kind}
-        data-step={flow.at}
-        data-presentation="screen"
-        aria-labelledby="machine-stepper-title"
-        className="flex h-full min-h-0 min-w-0 flex-col md:grid md:grid-cols-[16rem_minmax(0,1fr)]"
-      >
-        <aside className="hidden min-h-0 border-r border-border-strong px-5 py-6 md:block" data-stepper-rail="">
-          <StepList steps={steps} layout="column" />
-        </aside>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex flex-col gap-2.5 border-b border-border-strong px-panel py-3 md:hidden">
-            <div className="flex min-h-control items-center justify-between gap-2">
-              <span className="kt-label" data-stepper-position="">
-                {current === -1 ? 'Done' : `Step ${current + 1} of ${steps.length}`}
-              </span>
-              {final ? null : finishLater}
-            </div>
-            <StepSegments steps={steps} />
-          </header>
-
-          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-panel py-5 md:px-8 md:py-7">
-            <div className="mx-auto flex w-full max-w-[52rem] min-w-0 flex-col gap-4">
-              <div className="hidden min-w-0 items-start justify-between gap-3 md:flex">
-                <p className="kt-label m-0 pt-1">{position}</p>
-                {final ? null : finishLater}
-              </div>
-              {title('text-display')}
-              <div className="min-w-0">
-                <StepperFootContext.Provider value={footSlot}>{content}</StepperFootContext.Provider>
-              </div>
-            </div>
-          </div>
-
-          {/* PINNED, above the home indicator: ‹ Back on the left, the step's own actions on the right. */}
-          <footer
-            className="border-t border-border-strong bg-surface px-panel pt-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] md:px-8"
-            data-stepper-foot=""
+      <section data-machine-stepper={flow.kind} data-step={flow.at} data-presentation="embedded" className="min-w-0">
+        {index === 0 || final || state.confirming ? null : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="kt-btn--flush-start"
+            data-stepper-back=""
+            onClick={back}
           >
-            {/* The same column as the step above it, so ‹ Back lines up with the step's own left edge. */}
-            <div className="mx-auto flex w-full max-w-[52rem] min-w-0 items-center justify-between gap-2">
-              <div className="shrink-0">
-                {final || state.confirming || index === 0 ? null : (
-                  <Button type="button" variant="ghost" data-stepper-back="" onClick={back}>
-                    ‹ Back
-                  </Button>
-                )}
-              </div>
-              <div ref={setFootSlot} className="flex min-w-0 flex-wrap items-center justify-end gap-2" />
-            </div>
-          </footer>
-        </div>
+            ‹ Back
+          </Button>
+        )}
+        <div className="min-w-0">{content}</div>
       </section>
     );
-  }
 
   return (
     <section
@@ -339,7 +274,7 @@ export function MachineStepper({
         )}
       </div>
       <div className="mt-2 hidden md:block">
-        <StepList steps={steps} layout="row" />
+        <StepList steps={steps} />
       </div>
       <div className="mt-2 md:hidden">
         <StepSegments steps={steps} />

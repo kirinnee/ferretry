@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  answerOnboardingHarness,
   backOnboardingStep,
   chooseOnboardingStart,
   continueOnboarding,
@@ -31,11 +32,12 @@ const progress = (overrides: Partial<MachineSetupProgress> = {}): MachineSetupPr
 });
 
 describe('onboarding steps', () => {
-  it('lists the nine steps in rail order, ending on Done', () => {
+  it('lists the ten steps in rail order, ending on Done', () => {
     expect(ONBOARDING_STEPS.map(step => step.id)).toEqual([
       'pair',
       'start',
-      'logins',
+      'claude',
+      'codex',
       'speedups',
       'voice',
       'warden',
@@ -46,7 +48,7 @@ describe('onboarding steps', () => {
   });
 
   it('keeps Done out of the steps that can be set or skipped', () => {
-    expect(ONBOARDING_TASKS).toHaveLength(8);
+    expect(ONBOARDING_TASKS).toHaveLength(9);
     expect(ONBOARDING_TASKS).not.toContain('done' as MachineSetupTaskId);
   });
 
@@ -73,14 +75,28 @@ describe('moving through the rail', () => {
   });
 
   it('marks a step set and opens the next when Continue is pressed', () => {
-    const next = continueOnboarding(progress({ at: 'logins' }));
-    expect(next.at).toBe('speedups');
-    expect(next.states).toEqual({ pair: 'done', logins: 'done' });
+    const next = continueOnboarding(progress({ at: 'speedups' }));
+    expect(next.at).toBe('voice');
+    expect(next.states).toEqual({ pair: 'done', speedups: 'done' });
   });
 
   it('turns a skipped step into a set one when Continue is pressed on it', () => {
-    const next = continueOnboarding(progress({ at: 'logins', states: { logins: 'skipped' } }));
-    expect(next.states.logins).toBe('done');
+    const next = continueOnboarding(progress({ at: 'voice', states: { voice: 'skipped' } }));
+    expect(next.states.voice).toBe('done');
+  });
+
+  it.each(['claude', 'codex'] as const)(
+    'counts Continue on a %s step that was not imported as skipped, not set',
+    harness => {
+      const next = continueOnboarding(progress({ at: harness }));
+      expect(next.at).toBe(harness === 'claude' ? 'codex' : 'speedups');
+      expect(next.states).toEqual({ pair: 'done', [harness]: 'skipped' });
+    },
+  );
+
+  it.each(['claude', 'codex'] as const)('keeps a %s step set when Continue is pressed after its import', harness => {
+    const next = continueOnboarding(progress({ at: harness, states: { pair: 'done', [harness]: 'done' } }));
+    expect(next.states).toEqual({ pair: 'done', [harness]: 'done' });
   });
 
   it('stays on Done, marking nothing, when Continue is pressed there', () => {
@@ -109,7 +125,7 @@ describe('moving through the rail', () => {
   });
 
   it('goes back one step without marking anything', () => {
-    const next = backOnboardingStep(progress({ at: 'logins' }));
+    const next = backOnboardingStep(progress({ at: 'claude' }));
     expect(next.at).toBe('start');
     expect(next.states).toEqual({ pair: 'done' });
   });
@@ -119,9 +135,9 @@ describe('moving through the rail', () => {
   });
 
   it('marks a step set without moving, when a surface saved on its own', () => {
-    const next = markOnboardingStep(progress({ at: 'speedups' }), 'logins');
+    const next = markOnboardingStep(progress({ at: 'speedups' }), 'claude');
     expect(next.at).toBe('speedups');
-    expect(next.states).toEqual({ pair: 'done', logins: 'done' });
+    expect(next.states).toEqual({ pair: 'done', claude: 'done' });
   });
 
   it('records the chosen start without touching the steps', () => {
@@ -129,30 +145,42 @@ describe('moving through the rail', () => {
     expect(next).toEqual({ at: 'start', states: { pair: 'done' }, start: 'clone' });
   });
 
+  it('keeps what was answered on each CLI’s step, apart from the other CLI’s', () => {
+    const withClaude = answerOnboardingHarness(progress({ at: 'claude' }), 'claude', { name: 'claude-mine' });
+    const both = answerOnboardingHarness(withClaude, 'codex', { addAnother: true, accepted: ['skills'] });
+    expect(both.at).toBe('claude');
+    expect(both.answers).toEqual({
+      claude: { name: 'claude-mine' },
+      codex: { addAnother: true, accepted: ['skills'] },
+    });
+    expect(answerOnboardingHarness(both, 'claude', { name: 'claude-2' }).answers?.claude).toEqual({ name: 'claude-2' });
+  });
+
   it('never changes the progress it was given', () => {
-    const before = progress({ at: 'logins' });
+    const before = progress({ at: 'claude' });
     continueOnboarding(before);
     skipOnboardingStep(before);
     markOnboardingStep(before, 'voice');
-    expect(before).toEqual({ at: 'logins', states: { pair: 'done' }, start: 'fresh' });
+    answerOnboardingHarness(before, 'claude', { name: 'x' });
+    expect(before).toEqual({ at: 'claude', states: { pair: 'done' }, start: 'fresh' });
   });
 });
 
 describe('the rail’s words', () => {
-  it('counts the steps that are set out of the eight that can be', () => {
-    expect(onboardingSetCount(progress({ states: {} }))).toBe('0 of 8 set');
-    expect(onboardingSetCount(progress({ states: { pair: 'done', logins: 'done', voice: 'skipped' } }))).toBe(
-      '2 of 8 set',
+  it('counts the steps that are set out of the nine that can be', () => {
+    expect(onboardingSetCount(progress({ states: {} }))).toBe('0 of 9 set');
+    expect(onboardingSetCount(progress({ states: { pair: 'done', claude: 'done', voice: 'skipped' } }))).toBe(
+      '2 of 9 set',
     );
   });
 
   it('marks a set step ✓, a skipped step –, and any other step with its number', () => {
-    const states = { pair: 'done', logins: 'skipped' } as const;
+    const states = { pair: 'done', claude: 'skipped' } as const;
     const kept = progress({ states });
     expect(onboardingRailMarker(kept, 'pair')).toBe('✓');
-    expect(onboardingRailMarker(kept, 'logins')).toBe('–');
-    expect(onboardingRailMarker(kept, 'speedups')).toBe('4');
-    expect(onboardingRailMarker(kept, 'done')).toBe('9');
+    expect(onboardingRailMarker(kept, 'claude')).toBe('–');
+    expect(onboardingRailMarker(kept, 'speedups')).toBe('5');
+    expect(onboardingRailMarker(kept, 'done')).toBe('10');
   });
 });
 
@@ -167,8 +195,9 @@ describe('set up later', () => {
     expect(href('learning')).toBe('/d/studio/settings#machines/Work%20Mac/machine/learning');
   });
 
-  it('links Logins to the machine’s Credentials tab', () => {
-    expect(href('logins')).toBe('/d/studio/settings#machines/Work%20Mac/credentials');
+  it('links Claude Code and Codex to the machine’s Runtimes tab', () => {
+    expect(href('claude')).toBe('/d/studio/settings#machines/Work%20Mac/runtimes');
+    expect(href('codex')).toBe('/d/studio/settings#machines/Work%20Mac/runtimes');
   });
 
   it('links Agent controls to the machine tab itself', () => {
@@ -198,9 +227,9 @@ describe('what Done says', () => {
   });
 
   it('says set, skipped or not visited, and links only the steps that are not set', () => {
-    const list = rows(progress({ states: { pair: 'done', logins: 'done', voice: 'skipped' } }));
-    expect(row(list, 'logins').state).toBe('set');
-    expect(row(list, 'logins').later).toBeUndefined();
+    const list = rows(progress({ states: { pair: 'done', claude: 'done', voice: 'skipped' } }));
+    expect(row(list, 'claude').state).toBe('set');
+    expect(row(list, 'claude').later).toBeUndefined();
     expect(row(list, 'voice').state).toBe('skipped');
     expect(row(list, 'voice').later).toBe('/d/studio/settings#dictation');
     expect(row(list, 'warden').state).toBe('not visited');
@@ -215,9 +244,30 @@ describe('what Done says', () => {
 
   it('adds no detail to a step with nothing to add', () => {
     const list = rows(progress(), { clonedFrom: 'work-mac', keys: { Jev: true }, warden: 'on', passiveDefault: true });
-    expect(row(list, 'logins').detail).toBeUndefined();
     expect(row(list, 'voice').detail).toBeUndefined();
     expect(row(list, 'controls').detail).toBeUndefined();
+  });
+
+  describe('claude and codex', () => {
+    it('names the runtimes each CLI has, from the machine', () => {
+      const list = rows(progress(), {
+        runtimes: { claude: ['claude-default', 'claude-glm'], codex: ['codex-default'] },
+      });
+      expect(row(list, 'claude').detail).toBe('claude-default, claude-glm');
+      expect(row(list, 'codex').detail).toBe('codex-default');
+    });
+
+    it('says nothing for a CLI with no runtime, and nothing when the runtimes are not known', () => {
+      expect(row(rows(progress(), { runtimes: { claude: [] } }), 'claude').detail).toBeUndefined();
+      expect(row(rows(progress(), { runtimes: { claude: ['claude-default'] } }), 'codex').detail).toBeUndefined();
+      expect(row(rows(progress()), 'claude').detail).toBeUndefined();
+    });
+
+    it('links a CLI that has no runtime to Runtimes, even when its step was only visited', () => {
+      const list = rows(progress({ states: { claude: 'skipped' } }));
+      expect(row(list, 'claude').later).toBe('/d/studio/settings#machines/Work%20Mac/runtimes');
+      expect(row(list, 'codex').later).toBe('/d/studio/settings#machines/Work%20Mac/runtimes');
+    });
   });
 
   describe('start', () => {
@@ -276,7 +326,7 @@ describe('what Done says', () => {
 describe('the steps still to do', () => {
   it('lists every step that is not set, in rail order, skipped or never visited', () => {
     const kept = progress({ states: { pair: 'done', start: 'done', voice: 'skipped', learning: 'done' } });
-    expect(onboardingSkippedSteps(kept)).toEqual(['logins', 'speedups', 'voice', 'warden', 'controls']);
+    expect(onboardingSkippedSteps(kept)).toEqual(['claude', 'codex', 'speedups', 'voice', 'warden', 'controls']);
   });
 
   it('lists nothing once every step is set', () => {

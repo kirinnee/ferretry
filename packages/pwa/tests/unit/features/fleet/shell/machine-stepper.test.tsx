@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { useState } from 'react';
 import { MachineStepper, shownSteps } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
-import { StepperFoot } from '../../../../../src/features/fleet/shell/stepper-foot.tsx';
 import {
   currentFlow,
+  cancelStepper,
   openSubStepper,
   type StepperFlowInput,
   type StepperState,
@@ -166,93 +166,71 @@ describe('MachineStepper', () => {
   });
 });
 
-function ScreenHost({ initial, left = [] }: { readonly initial: StepperState; readonly left?: string[] }) {
+function EmbeddedHost({ initial, online = true }: { readonly initial: StepperState; readonly online?: boolean }) {
   const [state, setState] = useState<StepperState | null>(initial);
   if (state === null) return <p data-left="">left</p>;
   return (
     <MachineStepper
       state={state}
-      presentation="screen"
-      onChange={next => {
-        if (next === null) left.push('left');
-        setState(next);
-      }}
+      presentation="embedded"
+      onChange={setState}
       machineName="studio-mac"
-      online
+      online={online}
       onRetry={() => undefined}
     >
-      <p data-body="">body of {currentFlow(state).at}</p>
-      <StepperFoot>
-        <button type="button" data-next="" onClick={() => setState(stepForward(state))}>
-          Next
-        </button>
-      </StepperFoot>
+      <button type="button" data-body="" onClick={() => setState(stepForward(state))}>
+        body of {currentFlow(state).at}
+      </button>
     </MachineStepper>
   );
 }
 
-describe('MachineStepper as a full screen', () => {
-  it('draws the numbered rail and the phone segments, pins the step actions to the footer, and Finish later leaves', async () => {
-    const left: string[] = [];
-    const view = await mount(<ScreenHost initial={startStepper(flow)} left={left} />);
+describe('MachineStepper embedded in a step', () => {
+  it('draws no step list, position or title, and offers Back only after the first page', async () => {
+    const view = await mount(<EmbeddedHost initial={startStepper(flow)} />);
     const section = must(view.container.querySelector('[data-machine-stepper]'), 'stepper');
-    expect(section.getAttribute('data-presentation')).toBe('screen');
-    expect(view.container.querySelector('[data-stepper-rail] [data-stepper-steps="column"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-stepper-progress]')).not.toBeNull();
-    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2');
-    expect(view.container.querySelector('h1#machine-stepper-title')?.textContent).toBe('Add a runtime');
-    // The step's own action lands in the pinned footer, still inside the stepper's section.
-    const foot = must(view.container.querySelector('[data-stepper-foot]'), 'footer');
-    expect(foot.querySelector('[data-next]')).not.toBeNull();
-    expect(section.contains(foot)).toBe(true);
-    // Step 1 has nowhere to go back to.
-    expect(foot.querySelector('[data-stepper-back]')).toBeNull();
-    await click(view.container, '[data-next]');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 2');
-    await click(view.container, '[data-stepper-back]');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 2');
-    // Finish later leaves at once: nothing was sent, and the progress is the caller's to keep.
-    await click(view.container, '[data-stepper-finish-later]');
-    expect(left).toEqual(['left']);
-    await view.unmount();
-  });
-
-  it('on the final step offers neither Back nor Finish later', async () => {
-    const view = await mount(<ScreenHost initial={stepForward(stepForward(startStepper(flow)))} />);
-    expect(text(view.container, '[data-stepper-position]')).toBe('Done');
+    expect(section.getAttribute('data-presentation')).toBe('embedded');
+    expect(view.container.querySelector('[data-stepper-steps]')).toBeNull();
+    expect(view.container.querySelector('[data-stepper-progress]')).toBeNull();
+    expect(view.container.querySelector('[data-stepper-position]')).toBeNull();
+    expect(view.container.querySelector('#machine-stepper-title')).toBeNull();
+    expect(view.container.querySelector('[data-stepper-cancel]')).toBeNull();
+    // The first page has nowhere to go back to.
     expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
-    expect(view.container.querySelector('[data-stepper-finish-later]')).toBeNull();
+    await click(view.container, '[data-body]');
+    expect(section.getAttribute('data-step')).toBe('profile');
+    await click(view.container, '[data-stepper-back]');
+    expect(section.getAttribute('data-step')).toBe('credential');
+    expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
     await view.unmount();
   });
-});
 
-describe('StepperFoot', () => {
-  it('renders a step’s actions under it when no stepper offers a footer', async () => {
-    const view = await mount(
-      <StepperFoot>
-        <button type="button">Skip</button>
-      </StepperFoot>,
-    );
-    expect(view.container.querySelector('div > button')?.textContent).toBe('Skip');
-    await view.unmount();
+  it('hides Back on the final page and while confirming, and still pauses offline', async () => {
+    const done = await mount(<EmbeddedHost initial={stepForward(stepForward(startStepper(flow)))} />);
+    expect(done.container.querySelector('[data-stepper-back]')).toBeNull();
+    expect(done.container.querySelector('[data-body]')).not.toBeNull();
+    await done.unmount();
+
+    const confirming = await mount(<EmbeddedHost initial={cancelStepper(stepForward(startStepper(flow)))} />);
+    expect(confirming.container.querySelector('[data-stepper-confirm]')).not.toBeNull();
+    expect(confirming.container.querySelector('[data-stepper-back]')).toBeNull();
+    expect(confirming.container.querySelector('[data-body]')).toBeNull();
+    await confirming.unmount();
+
+    const paused = await mount(<EmbeddedHost initial={stepForward(startStepper(flow))} online={false} />);
+    expect(paused.container.querySelector('[data-body]')).toBeNull();
+    expect(text(paused.container, '[data-stepper-paused]')).toContain('studio-mac is asleep or offline');
+    await paused.unmount();
   });
 });
 
 describe('shownSteps', () => {
-  it('names a step that will apply later as still to come, and drops it once the walk is done', () => {
-    const later = [{ id: 'name', label: 'Name' }];
-    const start = currentFlow(startStepper(flow));
-    expect(shownSteps(start, later).map(step => `${step.number} ${step.id}:${step.state}`)).toEqual([
+  it('names every step but the final Done, numbered, and reads them all done once the walk ends', () => {
+    expect(shownSteps(currentFlow(startStepper(flow))).map(step => `${step.number} ${step.id}:${step.state}`)).toEqual([
       '1 credential:now',
       '2 profile:todo',
-      '3 name:todo',
     ]);
-    // A step that is already in the flow is not drawn twice.
-    expect(shownSteps(start, [{ id: 'profile', label: 'Profile' }])).toHaveLength(2);
     const done = currentFlow(stepForward(stepForward(startStepper(flow))));
-    expect(shownSteps(done, later).map(step => `${step.id}:${step.state}`)).toEqual([
-      'credential:done',
-      'profile:done',
-    ]);
+    expect(shownSteps(done).map(step => `${step.id}:${step.state}`)).toEqual(['credential:done', 'profile:done']);
   });
 });
