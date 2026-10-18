@@ -28,6 +28,7 @@ import type {
   ProjectInfo,
   SecretList,
   SecuritySettingsView,
+  SessionFsFile,
   SessionSearchTask,
   SessionView,
   TaskLive,
@@ -2284,15 +2285,35 @@ const HARNESS_PREVIEW_CSV = [
 ].join('\n');
 
 /**
+ * A file body the way the daemon sends one: `size` is the UTF-8 byte count of
+ * what it carries, because `SessionFsFileSchema` REQUIRES it.
+ *
+ * Measured rather than typed in, so a fixture edit cannot carry a size that
+ * disagrees with its own bytes.
+ */
+const harnessFsFile = (path: string, content: string): SessionFsFile => ({
+  path,
+  size: new TextEncoder().encode(content).length,
+  content,
+});
+
+/**
  * One real file body, so the file INSTANCE tab (#35) paints its own bytes
  * rather than a network failure. The harness aborts every non-loopback request,
  * so a file tab has nothing to show unless this answers for it.
+ *
+ * TYPED AS THE WIRE SHAPE, not `unknown`. Since #432 every file read is parsed
+ * with `SessionFsFileSchema`, and three of these bodies had no `size`: each
+ * failed to parse, so the two Reload cards never had a first copy to keep and
+ * the full screenshot pass timed out waiting for a notice that could not be
+ * drawn. `unknown` let that through the typechecker; this type does not. It
+ * also has no `lang`: the wire never carried one, the view derives it from the
+ * path, and the parser was silently dropping the one these fixtures set.
  */
-const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
+const HARNESS_FS_FILES: Readonly<Record<string, SessionFsFile>> = {
   'CLAUDE.md': {
     path: 'CLAUDE.md',
     size: 4_812,
-    lang: 'markdown',
     content: [
       '# Workspace agent guide',
       '',
@@ -2309,20 +2330,17 @@ const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
   'Taskfile.yaml': {
     path: 'Taskfile.yaml',
     size: 9_233,
-    lang: 'yaml',
     content: ['version: "3"', '', 'tasks:', '  test:', '    desc: Run unit, integration and SIT suites'].join('\n'),
   },
-  'coverage.csv': { path: 'coverage.csv', lang: 'csv', content: HARNESS_PREVIEW_CSV },
-  [HARNESS_RELOAD_PENDING]: {
-    path: HARNESS_RELOAD_PENDING,
-    lang: 'markdown',
-    content: ['# Release notes', '', 'The bytes on screen were loaded a moment ago.'].join('\n'),
-  },
-  [HARNESS_RELOAD_FAILING]: {
-    path: HARNESS_RELOAD_FAILING,
-    lang: 'markdown',
-    content: ['# Deploy log', '', 'The bytes on screen were loaded before the host went away.'].join('\n'),
-  },
+  'coverage.csv': harnessFsFile('coverage.csv', HARNESS_PREVIEW_CSV),
+  [HARNESS_RELOAD_PENDING]: harnessFsFile(
+    HARNESS_RELOAD_PENDING,
+    ['# Release notes', '', 'The bytes on screen were loaded a moment ago.'].join('\n'),
+  ),
+  [HARNESS_RELOAD_FAILING]: harnessFsFile(
+    HARNESS_RELOAD_FAILING,
+    ['# Deploy log', '', 'The bytes on screen were loaded before the host went away.'].join('\n'),
+  ),
 };
 
 /**
@@ -2330,8 +2348,8 @@ const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
  * enough to show a real table renderer; a PDF or a raster would only prove the
  * browser can decode, which is not this surface's decision.
  */
-const HARNESS_FS_PREVIEWS: Readonly<Record<string, unknown>> = {
-  'coverage.csv': { path: 'coverage.csv', base64: btoa(HARNESS_PREVIEW_CSV) },
+const HARNESS_FS_PREVIEWS: Readonly<Record<string, SessionFsFile>> = {
+  'coverage.csv': { path: 'coverage.csv', size: HARNESS_PREVIEW_CSV.length, base64: btoa(HARNESS_PREVIEW_CSV) },
 };
 
 /**
@@ -5320,10 +5338,15 @@ function Shell() {
     },
     {
       label: 'Session screen',
+      // `grid-cols-1` below `xl`, NOT the implicit `auto` column. An `auto` track grows to its items'
+      // min-content, and a `truncate` label's min-content is its WHOLE text: with the Ubuntu runner's
+      // fonts the panel came out 391.5px inside a 370px track, pushed the 390px page 11px sideways, and
+      // the full gallery refused the tool-group capture because isolating it changed its width.
+      // `minmax(0, 1fr)` lets the truncation do its job, as the real session page's layout does.
       render: () => (
         <section
           aria-label="Session screen harness"
-          className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
+          className="grid grid-cols-1 gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
           id="harness-session-screen"
         >
           <SessionList

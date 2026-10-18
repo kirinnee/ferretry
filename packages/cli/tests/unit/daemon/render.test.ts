@@ -179,3 +179,38 @@ describe('install rendering', () => {
     should(actual).equal('fyd user service installed from /tmp/units/fyd.service and started');
   });
 });
+
+describe('status of a daemon serving outside its service manager', () => {
+  const failedUnit = { manager: 'systemd' as const, state: 'failed' as const, detail: 'systemd reports failed' };
+
+  it('should say it is serving but supervised by nothing, beside what the manager reports', () => {
+    // Act
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', failedUnit, health({ pid: 31337 })));
+
+    // Assert
+    should(actual).startWith('fyd is serving, but OUTSIDE systemd — nothing supervises it\n');
+    should(actual).containEql('pid 31337');
+    should(actual).endWith('  systemd: failed (systemd reports failed)');
+  });
+
+  it('should still be a serving status, so a script asking "can I use it" is not failed', () => {
+    // Act
+    const actual = decideDaemonStatus('fyd', failedUnit, health({ pid: 31337 }));
+
+    // Assert
+    should(actual.orphan).be.true();
+    should(statusExitCode(actual)).equal(0);
+  });
+
+  it('should carry the verdict in the machine shape, false for a supervised daemon', () => {
+    // Act
+    const orphan: unknown = JSON.parse(renderDaemonStatusJson(decideDaemonStatus('fyd', failedUnit, health())));
+    const supervised: unknown = JSON.parse(renderDaemonStatusJson(decideDaemonStatus('fyd', runningReport, health())));
+    const stopped: unknown = JSON.parse(renderDaemonStatusJson(decideDaemonStatus('fyd', stoppedReport, undefined)));
+
+    // Assert
+    should(orphan).have.property('orphan', true);
+    should(supervised).have.property('orphan', false);
+    should(stopped).have.property('orphan', false);
+  });
+});
