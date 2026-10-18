@@ -1,4 +1,4 @@
-import { DaemonCarriersViewSchema, type PairingResponse } from '@ferretry/protocol';
+import { type ConfigChangeKind, DaemonCarriersViewSchema, type PairingResponse } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { publishedConnectionMethods } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
@@ -32,6 +32,7 @@ import {
   DaemonConnectionStore,
   type DaemonConnectionsSnapshot,
 } from './connections.ts';
+import { DaemonConfigChangeStore } from './config-changes.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -345,6 +346,8 @@ export interface AppStore {
   readonly controls: DaemonControlsStore;
   readonly projects: DaemonProjectsStore;
   readonly accountPicker: DaemonAccountPickerStore;
+  /** Which kinds of each machine's configuration have moved, so a screen reads them again. */
+  readonly configChanges: DaemonConfigChangeStore;
   /** The one daemon/session-scoped Attention cache and mutation client. */
   readonly attention: DaemonAttentionClient;
   readonly usage: DaemonUsageStore;
@@ -567,6 +570,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   };
   const fleet = new DaemonFleetStore(fleetPort);
   const controls = new DaemonControlsStore();
+  const configChanges = new DaemonConfigChangeStore();
   const projects = new DaemonProjectsStore(daemonProjectsPort(carried));
   const accountPicker = new DaemonAccountPickerStore({
     catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
@@ -655,6 +659,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     controls,
     projects,
     accountPicker,
+    configChanges,
     attention,
     usage,
     pins,
@@ -907,6 +912,48 @@ export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) =>
         : async (daemon: DaemonConnection, act?: string) => await store.stepUp.require(daemon, act),
     [store],
   );
+}
+
+/** No machine's configuration ever moves outside a store, so a screen reads once, as it always did. */
+const NO_CONFIG_CHANGES = new DaemonConfigChangeStore();
+
+/**
+ * How many times any of these kinds of configuration has moved on this machine — the number a screen
+ * that shows configuration puts in its read's dependencies, so it reads again the moment the machine's
+ * configuration moves, from anywhere (docs/config-files.md "Live changes"). Outside a provider (a
+ * component rendered on its own by a suite) it never moves.
+ */
+export function useConfigChangeCounter(daemonId: DaemonId, kinds: readonly ConfigChangeKind[]): number {
+  const store = useContext(StoreContext)?.configChanges ?? NO_CONFIG_CHANGES;
+  const key = kinds.join(',');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the kinds' spelling is the deliberate key
+  const read = useCallback(() => store.counter(daemonId, kinds), [store, daemonId, key]);
+  return useSyncExternalStore(
+    useCallback(listener => store.subscribe(listener), [store]),
+    read,
+    read,
+  );
+}
+
+/**
+ * Run `reread` whenever any of these kinds of this machine's configuration moves after the screen
+ * mounted — never on mount itself, which is the screen's own first read. The latest `reread` is
+ * called, so a caller need not memoise it.
+ */
+export function useConfigChangeEffect(
+  daemonId: DaemonId,
+  kinds: readonly ConfigChangeKind[],
+  reread: () => void,
+): void {
+  const counter = useConfigChangeCounter(daemonId, kinds);
+  const latest = useRef(reread);
+  latest.current = reread;
+  const seen = useRef(counter);
+  useEffect(() => {
+    if (counter === seen.current) return;
+    seen.current = counter;
+    latest.current();
+  }, [counter]);
 }
 
 /**

@@ -15,6 +15,7 @@ import {
 } from '../../../src/features/speedups/speedups-surface.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
+import { configChangeHarness } from '../config-change-support.tsx';
 
 const AT = '2026-10-16T10:00:00.000Z';
 const KEY = 'gsk-test-0123456789abcdef';
@@ -435,5 +436,115 @@ describe('SpeedupsSurface', () => {
     // Assert
     expect(tab).toMatchObject({ id: 'speedups', label: 'Speed-ups' });
     expect(renderer.root.findAllByType(SpeedupsPanel)).toHaveLength(1);
+  });
+});
+
+/** A daemon whose speed-up status a test changes by hand, and whose reads it can fail or hold back. */
+function movingMachine() {
+  const reads: string[] = [];
+  const held: (() => void)[] = [];
+  const state = { current: view(), failing: false, holding: false };
+  const createClient = async () =>
+    ({
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        reads.push(path);
+        if (state.holding) await new Promise<void>(resolve => held.push(resolve));
+        if (state.failing) throw new Error('the daemon is unreachable');
+        return schema.parse(state.current);
+      },
+    }) as never;
+  return { reads, held, state, createClient };
+}
+
+describe('SpeedupsSurface when the machine’s speed-ups move', () => {
+  it('shows a key saved from another device without a reload', async () => {
+    // Arrange
+    const machine = movingMachine();
+    const harness = configChangeHarness(connection('a').daemonId);
+    const renderer = render(
+      harness.wrap(<SpeedupsSurface connection={connection('a')} createClient={machine.createClient} />),
+    );
+    await runAsync(async () => undefined);
+    expect(renderer.root.findAll(node => node.props['data-speedup-set'] === '')).toHaveLength(0);
+
+    // Act — a key is saved elsewhere, then the machine says its speed-ups moved.
+    machine.state.current = view({ providers: [status({ set: true })] });
+    await harness.move(['speedups']);
+    await runAsync(async () => undefined);
+
+    // Assert
+    expect(machine.reads).toEqual(['/v1/speedups', '/v1/speedups']);
+    expect(renderer.root.findAll(node => node.props['data-speedup-set'] === '')).toHaveLength(1);
+  });
+
+  it('does nothing for a move that arrives before the client is ready', async () => {
+    // Arrange
+    const machine = movingMachine();
+    const harness = configChangeHarness(connection('a').daemonId);
+    const renderer = render(
+      harness.wrap(
+        <SpeedupsSurface connection={connection('a')} createClient={async () => await new Promise(() => undefined)} />,
+      ),
+    );
+
+    // Act
+    await harness.move(['speedups']);
+    await runAsync(async () => undefined);
+
+    // Assert
+    expect(machine.reads).toEqual([]);
+    expect(text(renderer.toJSON())).toContain('Reading this machine');
+  });
+
+  it('keeps what was shown when the re-read fails', async () => {
+    // Arrange
+    const machine = movingMachine();
+    machine.state.current = view({ providers: [status({ set: true })] });
+    const harness = configChangeHarness(connection('a').daemonId);
+    const renderer = render(
+      harness.wrap(<SpeedupsSurface connection={connection('a')} createClient={machine.createClient} />),
+    );
+    await runAsync(async () => undefined);
+
+    // Act
+    machine.state.failing = true;
+    await harness.move(['speedups']);
+    await runAsync(async () => undefined);
+
+    // Assert
+    expect(machine.reads).toEqual(['/v1/speedups', '/v1/speedups']);
+    expect(renderer.root.findAll(node => node.props['data-speedup-set'] === '')).toHaveLength(1);
+    expect(text(renderer.toJSON())).not.toContain('the daemon is unreachable');
+  });
+
+  it('drops a re-read that lands after the reader switched machines', async () => {
+    // Arrange
+    const machine = movingMachine();
+    const harness = configChangeHarness(connection('a').daemonId);
+    const renderer = render(
+      harness.wrap(<SpeedupsSurface connection={connection('a')} createClient={machine.createClient} />),
+    );
+    await runAsync(async () => undefined);
+    machine.state.holding = true;
+    await harness.move(['speedups']);
+
+    // Act — switch to a machine that has not answered, then let the old machine's re-read land.
+    run(() =>
+      renderer.update(
+        harness.wrap(
+          <SpeedupsSurface
+            connection={connection('b')}
+            createClient={async () => await new Promise(() => undefined)}
+          />,
+        ),
+      ),
+    );
+    await runAsync(async () => {
+      for (const release of machine.held.splice(0)) release();
+    });
+
+    // Assert
+    expect(text(renderer.toJSON())).toContain('Reading this machine');
+    expect(renderer.root.findAllByType(SpeedupsPanel)).toHaveLength(0);
   });
 });

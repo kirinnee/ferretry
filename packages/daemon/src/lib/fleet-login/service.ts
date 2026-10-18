@@ -152,6 +152,11 @@ export interface DaemonHarnessLoginOptions {
   readonly portHolders: HarnessLoginPortHolders;
   /** The ports a Codex link sign-in listens on. Codex's own, unless a test names others. */
   readonly callbackPorts?: readonly number[];
+  /**
+   * Told when a sign-in completes, so an open app learns the login's state moved even though no request
+   * of its own changed it — the sign-in finished in the background (docs/config-files.md "Live changes").
+   */
+  readonly onSignedIn?: (credentialId: string) => void;
 }
 
 /**
@@ -638,6 +643,7 @@ export class HarnessLoginService {
       record.stage.harness === 'claude'
         ? { harness: 'claude', stage: { stage: 'complete' } }
         : { harness: 'codex', stage: { stage: 'complete' } };
+    this.options.onSignedIn?.(record.credentialId);
   }
 
   /** End this flow and its child, keeping whatever outcome it already reached. */

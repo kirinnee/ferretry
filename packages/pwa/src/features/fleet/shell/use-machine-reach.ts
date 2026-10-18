@@ -4,14 +4,19 @@
  *
  * Machines are listed by name with a status line on both layouts now, so a reach read can no longer
  * wait for somebody to open a switcher. Each machine is asked once when Settings opens — this page's
- * own machine first, because its tabs are waiting on the answer — and again only when someone asks.
+ * own machine first, because its tabs are waiting on the answer — and again when someone asks, or when
+ * the machine on screen says its configuration moved.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
+import { useConfigChangeEffect } from '../../../lib/store.tsx';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type MachineReach, readMachineReach, type ShownReach } from './machine-reach.ts';
+
+/** What a machine's own answer says: its settings, its runtimes, and whether its logins are set up. */
+const MACHINE_VIEW_KINDS = ['machine', 'runtimes', 'credentials'] as const;
 
 export interface MachineReachOptions {
   /** The machine this Settings page is for; asked first. */
@@ -46,9 +51,11 @@ export function useMachineReach({
   latest.current = connections;
 
   const ask = useCallback(
-    (connection: DaemonConnectionRecord): void => {
+    (connection: DaemonConnectionRecord, quietly = false): void => {
       if (createClient === undefined) return;
-      setReach(current => new Map(current).set(connection.daemonId, { kind: 'checking' }));
+      // A quiet re-read keeps the answer on screen until the next one lands, so the machine's tabs do not
+      // blink back to "checking" because its configuration moved.
+      if (!quietly) setReach(current => new Map(current).set(connection.daemonId, { kind: 'checking' }));
       void readMachineReach(() => createClient(connection)).then(next => {
         setReach(current => new Map(current).set(connection.daemonId, next));
         if (next.kind === 'online') named.current?.(connection.daemonId, next.machine.name);
@@ -67,6 +74,13 @@ export function useMachineReach({
     if (own) ask(own);
     for (const connection of paired) if (connection.daemonId !== daemonId) ask(connection);
   }, [ask, daemonId, pairedIds]);
+
+  // This machine's own answer — agent permissions, What agents may control, the default runtime, how
+  // many runtimes — is read again the moment the machine says it moved, from wherever it was changed.
+  useConfigChangeEffect(daemonId, MACHINE_VIEW_KINDS, () => {
+    const own = latest.current.find(candidate => candidate.daemonId === daemonId);
+    if (own) ask(own, true);
+  });
 
   const lockedNow = new Set(locked);
   const reachOf = (id: DaemonId): ShownReach =>

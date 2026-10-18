@@ -13,7 +13,7 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { fetchLearningConfig, learningErrorMessage, patchLearningConfig } from '../../lib/learning-api.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
-import { useDaemonFetch } from '../../lib/store.tsx';
+import { useConfigChangeCounter, useDaemonFetch } from '../../lib/store.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
 import { basename, sessionName } from './learning-model.ts';
 import { usePassiveLearning } from './passive-learning.tsx';
@@ -39,6 +39,9 @@ export function LearningSettingsSurface({ connection, sessions = null, fetcher }
   const ferretsTitle = useId();
   const byId = useMemo(() => new Map((sessions ?? []).map(view => [view.config.id, view])), [sessions]);
 
+  // `learning.yaml` changed anywhere — another device, `fy`, a hand edit — and the default is read again.
+  const moved = useConfigChangeCounter(connection.daemonId, ['learning']);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `moved` is the re-read trigger
   useEffect(() => {
     let current = true;
     fetchLearningConfig(connection, daemonFetch).then(
@@ -52,7 +55,7 @@ export function LearningSettingsSurface({ connection, sessions = null, fetcher }
     return () => {
       current = false;
     };
-  }, [connection, daemonFetch]);
+  }, [connection, daemonFetch, moved]);
 
   const toggleDefault = async (passiveDefault: boolean) => {
     setSaving(true);

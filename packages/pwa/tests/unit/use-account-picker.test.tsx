@@ -4,6 +4,7 @@ import type { AccountPickerCatalog, AccountPickerHealthCatalog } from '../../src
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../support/dom.ts';
+import { configChangeHarness } from './config-change-support.tsx';
 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
@@ -33,6 +34,12 @@ const catalog = (wrapper: string): AccountPickerCatalog => ({
   ],
 });
 const noHealth: AccountPickerHealthCatalog = { health: new Map(), error: null };
+
+const settle = async (): Promise<void> => {
+  await interact(async () => {
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  });
+};
 
 function Status({ store, daemon }: { readonly store: DaemonAccountPickerStore; readonly daemon: typeof laptop }) {
   const slice = useAccountPickerSlice(store, daemon);
@@ -124,6 +131,43 @@ describe('useAccountPickerSlice', () => {
 
     expect(mounted.container.textContent).toBe('ready:stable pairing');
     expect(reads).toBe(1);
+    await mounted.unmount();
+  });
+  it('shows a runtime added on another device without a reload, and ignores unrelated changes', async () => {
+    // Arrange — the roster was read once on mount
+    let roster = 'claude-auto-before';
+    let reads = 0;
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => {
+        reads += 1;
+        return catalog(roster);
+      },
+      health: async () => noHealth,
+      checkHealth: async () => noHealth,
+    });
+    const harness = configChangeHarness(laptop.daemonId);
+    const mounted = await mount(harness.wrap(<Status store={store} daemon={laptop} />));
+    expect(mounted.container.textContent).toBe('ready:claude-auto-before');
+    expect(reads).toBe(1);
+
+    // Act + Assert — a change to something the picker does not show reads nothing
+    await harness.move(['profiles']);
+    await settle();
+    expect(reads).toBe(1);
+
+    // Act — `fy` adds a runtime on the machine
+    roster = 'codex-auto-added';
+    await harness.move(['runtimes']);
+    await settle();
+
+    // Assert
+    expect(mounted.container.textContent).toBe('ready:codex-auto-added');
+    expect(reads).toBe(2);
+
+    // Act — a login moved, which changes each runtime's health
+    await harness.move(['credentials']);
+    await settle();
+    expect(reads).toBe(3);
     await mounted.unmount();
   });
 });

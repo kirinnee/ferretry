@@ -4,6 +4,7 @@ import {
   LearningSettingsSurface,
 } from '../../../../src/features/learning/learning-settings.tsx';
 import { mount, must } from '../../../support/dom.ts';
+import { configChangeHarness } from '../../config-change-support.tsx';
 import { AT, fakeLearningDaemon, learningDaemon } from '../../../support/learning.ts';
 import { byText, click, textOf, waitForText } from '../../../support/learning-dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -75,6 +76,34 @@ describe('Settings › Learning', () => {
     await waitForText(view.container, 'On');
     await click(must(view.container.querySelector('[role="switch"]'), 'switch'));
     await waitForText(view.container, 'fleet.configure is closed');
+    await view.unmount();
+  });
+
+  it('shows the new default when learning.yaml changes elsewhere, without a reload', async () => {
+    // Arrange: the screen reads the default as On.
+    const daemon = fakeLearningDaemon();
+    const harness = configChangeHarness(learningDaemon.daemonId);
+    const view = await mount(
+      harness.wrap(<LearningSettingsSurface connection={learningDaemon} fetcher={daemon.fetch} />),
+    );
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[role="switch"]'), 'switch');
+    await waitForText(toggle, 'On');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    const reads = () => daemon.calls.filter(call => call.method === 'GET' && call.path === '/v1/learning/config');
+    expect(reads()).toHaveLength(1);
+
+    // Act: another device (or a hand edit) turns passive learning off, and the machine says learning moved.
+    daemon.state.config = { ...daemon.state.config, passiveDefault: false };
+    await harness.move(['learning']);
+
+    // Assert: the default was read again and the switch shows it.
+    await waitForText(toggle, 'Off');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(reads()).toHaveLength(2);
+
+    // A change to some other kind of configuration does not re-read it.
+    await harness.move(['runtimes']);
+    expect(reads()).toHaveLength(2);
     await view.unmount();
   });
 });

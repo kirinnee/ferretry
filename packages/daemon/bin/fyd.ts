@@ -345,7 +345,12 @@ import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
-import { ConfigFilesService, watchConfigFiles } from '../src/lib/config-files/index.ts';
+import {
+  ConfigChangeLedger,
+  ConfigChangeStreamService,
+  ConfigFilesService,
+  watchConfigFiles,
+} from '../src/lib/config-files/index.ts';
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
@@ -4886,6 +4891,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const bootNotices = bootJournal(overrides.logLevel);
   /**
+   * "The configuration moved" (docs/config-files.md "Live changes"): ONE ledger every source of a change
+   * announces into — a load that finds a file changed, a route that changes a login or a speed-up, a
+   * sign-in that finishes on its own — and the one revision `/v1/events?topic=config` serves. Counted in
+   * memory per boot; the epoch names the boot.
+   */
+  const configChangeTimers = {
+    after: (milliseconds: number, action: () => void) => {
+      const timer = setTimeout(action, milliseconds);
+      return { cancel: () => clearTimeout(timer) };
+    },
+  };
+  const configChanges = new ConfigChangeLedger(crypto.randomUUID(), configChangeTimers);
+  const configChangeStream = new ConfigChangeStreamService(configChanges, configChangeTimers);
+  /**
    * The configuration files (docs/config-files.md): ONE service every in-process reader of the
    * machine's configuration goes through — the fleet catalogue, the agent-control switches, the Warden,
    * Learning — so none of them can disagree about which version of a file is in effect. A broken file
@@ -4906,6 +4925,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     digest: text => new Bun.CryptoHasher('sha256').update(text).digest('hex'),
     now: () => new Date(),
+    changes: configChanges,
   });
   const configLocations = { configDirectory: paths.config, fleetDirectory: paths.fleet };
   // The login window is created before a state home is opened, while browser sessions are created
@@ -5287,6 +5307,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     timer: harnessLoginTimer,
     portHolders: systemPortHolders(),
     clientName: CLIENT_NAME,
+    onSignedIn: () => configChanges.announce(['credentials', 'runtimes']),
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */
@@ -7207,6 +7228,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttach,
         // The Console types into the pane the attach proof names, on the same private tmux server.
         sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
+        configChanges: {
+          handler: downstream => configChangeStream.handler(downstream),
+          announce: kinds => configChanges.announce(kinds),
+        },
         // ONE feed over ONE opened storage: live listeners cannot see another daemon's appends, and
         // the fleet backfill refuses if any indexed session has lost the journal its marker owes.
         fleetEvents: new FleetEventStreamService(

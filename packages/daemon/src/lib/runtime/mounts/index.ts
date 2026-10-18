@@ -9,6 +9,7 @@ import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
 import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
+import { type ConfigChangeSink, configAnnouncedRoutes } from '../../config-files/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
@@ -39,7 +40,11 @@ import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts'
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
-import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
+import {
+  type ConfigChangeStreamSubsystem,
+  type FleetEventStreamSubsystem,
+  fleetEventSocketRoutes,
+} from './fleet-events.ts';
 import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts';
 import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
@@ -333,6 +338,11 @@ export interface MountedSubsystems {
   /** This daemon's bounded recent event tail followed by its own live journal appends. */
   readonly fleetEvents: FleetEventStreamSubsystem;
   /**
+   * "The configuration moved": the stream `/v1/events?topic=config` serves, and the sink the routes in
+   * `ANNOUNCED_ROUTES` announce into. One ledger behind both (docs/config-files.md "Live changes").
+   */
+  readonly configChanges: ConfigChangeStreamSubsystem & ConfigChangeSink;
+  /**
    * What this machine has agreed a caller who is NOT on it may do.
    *
    * TWO ROLES IN ONE FIELD, and both are load-bearing. It serves the routes a UI reads to explain its
@@ -553,7 +563,9 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
   // The step-up witness is the subsystem the step-up routes mint into, so a confirmation is visible to
   // the very next request on the same session.
   return new ApiDispatcher(
-    new ApiRouter(mountedDaemonRoutes(base, subsystems)),
+    // A change a route makes without touching a file announces itself once the route has answered —
+    // direct and relayed alike, since both dispatch here. See `ANNOUNCED_ROUTES`.
+    new ApiRouter(configAnnouncedRoutes(subsystems.configChanges, mountedDaemonRoutes(base, subsystems))),
     base.credentials,
     subsystems.grants,
     undefined,
@@ -579,7 +591,7 @@ export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly Soc
       agentControlledSockets(subsystems.agentControl, [
         // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
         // optional session filter one route rather than a second dispatcher.
-        ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions),
+        ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
         ...terminalSocketRoutes(subsystems.terminals),
         ...browserSocketRoutes(subsystems.browser),
       ]),

@@ -414,4 +414,165 @@ describe('DaemonAccountPickerStore', () => {
     await store.checkHealth(laptop);
     expect(publications).toBe(published);
   });
+
+  describe('reread', () => {
+    const settle = async (): Promise<void> => {
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    };
+
+    it('reads the roster and the verdicts again while the rows already shown stay on screen', async () => {
+      // Arrange — a settled slice, then a runtime added on another device
+      let release!: (answer: AccountPickerCatalog) => void;
+      const pending = new Promise<AccountPickerCatalog>(resolve => {
+        release = resolve;
+      });
+      let catalogCalls = 0;
+      let healthCalls = 0;
+      const store = new DaemonAccountPickerStore({
+        catalog: async () => {
+          catalogCalls += 1;
+          return catalogCalls === 1 ? catalog('claude-auto-before') : await pending;
+        },
+        health: async () => {
+          healthCalls += 1;
+          return healthy;
+        },
+        checkHealth: async () => healthy,
+      });
+      await store.hydrate(laptop);
+      await settle();
+      expect([catalogCalls, healthCalls]).toEqual([1, 1]);
+
+      // Act
+      store.reread(laptop);
+
+      // Assert — loading, but the old rows are not blanked
+      expect([catalogCalls, healthCalls]).toEqual([2, 2]);
+      expect(store.sliceFor(laptop)).toMatchObject({ status: 'loading', healthStatus: 'loading' });
+      expect(store.sliceFor(laptop).catalog?.accounts[0]?.wrapper).toBe('claude-auto-before');
+
+      release(catalog('claude-auto-after'));
+      await settle();
+      expect(store.sliceFor(laptop)).toMatchObject({ status: 'ready', healthStatus: 'ready' });
+      expect(store.sliceFor(laptop).catalog?.accounts[0]?.wrapper).toBe('claude-auto-after');
+    });
+
+    it('joins reads already in flight instead of repeating them', async () => {
+      // Arrange — the mount's hydration is still running when the machine reports a change
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      let catalogCalls = 0;
+      let healthCalls = 0;
+      const store = new DaemonAccountPickerStore({
+        catalog: async () => {
+          catalogCalls += 1;
+          await gate;
+          return catalog('claude-auto-laptop');
+        },
+        health: async () => {
+          healthCalls += 1;
+          await gate;
+          return healthy;
+        },
+        checkHealth: async () => healthy,
+      });
+      const first = store.hydrate(laptop);
+
+      // Act
+      store.reread(laptop);
+      store.reread(laptop);
+      release();
+      await first;
+      await settle();
+
+      // Assert
+      expect([catalogCalls, healthCalls]).toEqual([1, 1]);
+      expect(store.sliceFor(laptop)).toMatchObject({ status: 'ready', healthStatus: 'ready' });
+    });
+
+    it('re-reads only the half that is not already in flight', async () => {
+      // Arrange — a roster refresh is running, then a health check is running, each with the other settled
+      let releaseCatalog!: () => void;
+      const catalogGate = new Promise<void>(resolve => {
+        releaseCatalog = resolve;
+      });
+      let releaseHealth!: () => void;
+      const healthGate = new Promise<void>(resolve => {
+        releaseHealth = resolve;
+      });
+      let catalogCalls = 0;
+      let healthCalls = 0;
+      let holdCatalog = false;
+      let holdHealth = false;
+      const store = new DaemonAccountPickerStore({
+        catalog: async () => {
+          catalogCalls += 1;
+          if (holdCatalog) await catalogGate;
+          return catalog('claude-auto-laptop');
+        },
+        health: async () => {
+          healthCalls += 1;
+          return healthy;
+        },
+        checkHealth: async () => {
+          if (holdHealth) await healthGate;
+          return healthy;
+        },
+      });
+      await store.hydrate(laptop);
+      await settle();
+      expect([catalogCalls, healthCalls]).toEqual([1, 1]);
+
+      // Act + Assert — the roster is mid-refresh, so only the verdicts are read again
+      holdCatalog = true;
+      const refreshing = store.refresh(laptop);
+      store.reread(laptop);
+      expect([catalogCalls, healthCalls]).toEqual([2, 2]);
+      releaseCatalog();
+      await refreshing;
+      await settle();
+
+      // Act + Assert — a health check is mid-flight, so only the roster is read again
+      holdHealth = true;
+      const checking = store.checkHealth(laptop);
+      store.reread(laptop);
+      expect([catalogCalls, healthCalls]).toEqual([3, 2]);
+      releaseHealth();
+      await checking;
+    });
+
+    it('keeps the last good rows and reports the failure when the re-read fails', async () => {
+      // Arrange
+      let calls = 0;
+      const store = new DaemonAccountPickerStore({
+        catalog: async () => {
+          calls += 1;
+          if (calls === 1) return catalog('claude-auto-laptop');
+          throw new Error('manifest unreadable');
+        },
+        health: async () => {
+          if (calls >= 2) throw new Error('verdicts unreadable');
+          return healthy;
+        },
+        checkHealth: async () => healthy,
+      });
+      await store.hydrate(laptop);
+      await settle();
+
+      // Act
+      store.reread(laptop);
+      await settle();
+
+      // Assert — nothing escapes as an unhandled rejection, and the roster on screen is the last good one
+      expect(store.sliceFor(laptop)).toMatchObject({
+        status: 'error',
+        error: 'manifest unreadable',
+        healthStatus: 'error',
+        healthError: 'verdicts unreadable',
+      });
+      expect(store.sliceFor(laptop).catalog?.accounts[0]?.wrapper).toBe('claude-auto-laptop');
+    });
+  });
 });

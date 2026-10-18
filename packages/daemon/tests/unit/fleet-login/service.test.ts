@@ -148,6 +148,8 @@ interface Fixture {
   /** Every pid starting over stopped, in order, and every port list it asked about. */
   readonly stopped: number[];
   readonly askedPorts: (readonly number[])[];
+  /** Every credential a completed sign-in was announced for, in order. */
+  readonly signedIn: string[];
   /** Let the not-awaited login work run. Everything in the fixture is synchronous or a microtask. */
   settle(): Promise<void>;
   /** The child a flow spawned, once it has. `index` picks one out of a run of several flows. */
@@ -182,6 +184,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
   const deliveries: CodexCallbackDelivery[] = [];
   const stopped: number[] = [];
   const askedPorts: (readonly number[])[] = [];
+  const signedIn: string[] = [];
   let minted = 0;
 
   const fallback = (id: string): CredentialSignInTarget => {
@@ -258,6 +261,9 @@ function fixture(options: FixtureOptions = {}): Fixture {
         return options.stops ?? true;
       },
     },
+    onSignedIn: credentialId => {
+      signedIn.push(credentialId);
+    },
     ...(options.windowMinutes === undefined ? {} : { windowMinutes: options.windowMinutes }),
   });
 
@@ -277,6 +283,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
     deliveries,
     stopped,
     askedPorts,
+    signedIn,
     settle,
     child: async (index = 0) => {
       await settle();
@@ -829,6 +836,8 @@ describe('the Codex leg', () => {
     // Assert
     should(actual).match({ harness: 'codex', state: 'complete', credentialId: CODEX_CREDENTIAL });
     should(actual).not.have.property('accounts');
+    // An open app is told the login moved, though no request of its own changed it.
+    should(subject.signedIn).deepEqual([CODEX_CREDENTIAL]);
   });
 });
 

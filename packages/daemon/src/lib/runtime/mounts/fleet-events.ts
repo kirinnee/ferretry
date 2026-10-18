@@ -2,6 +2,7 @@ import { ApiError } from '../../api/error.ts';
 import { queryValues } from '../../api/http.ts';
 import type { RouteContext } from '../../api/route.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
+import { CONFIG_CHANGE_TOPIC } from '@ferretry/protocol';
 import type { FleetEventStreamScope } from '../../session/events/index.ts';
 import { tryParseSessionId } from '../../session-id.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
@@ -10,10 +11,27 @@ export interface FleetEventStreamSubsystem {
   handler(scope: FleetEventStreamScope, downstream: SocketDownstream): SocketHandler;
 }
 
+/** The configuration stream: `?topic=config` on the same route (docs/config-files.md "Live changes"). */
+export interface ConfigChangeStreamSubsystem {
+  handler(downstream: SocketDownstream): SocketHandler;
+}
+
 function soleQuery(context: RouteContext, name: string): string | undefined {
   const values = queryValues(context.request, name);
   if (values.length > 1) throw new ApiError(400, `query parameter "${name}" may appear only once`, 'invalid_query');
   return values[0];
+}
+
+/** Whether this upgrade asks for the configuration stream rather than session events. */
+function isConfigTopic(context: RouteContext): boolean {
+  const topic = soleQuery(context, 'topic');
+  if (topic === undefined) return false;
+  if (topic !== CONFIG_CHANGE_TOPIC) throw new ApiError(400, `unknown event-stream topic "${topic}"`, 'invalid_query');
+  for (const name of context.request.query.keys()) {
+    if (name !== 'topic' && name !== 'token' && name !== 'ticket')
+      throw new ApiError(400, `the configuration stream takes no "${name}" parameter`, 'invalid_query');
+  }
+  return true;
 }
 
 async function scope(context: RouteContext, sessions: SessionDirectorySubsystem): Promise<FleetEventStreamScope> {
@@ -51,6 +69,7 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
 export function fleetEventSocketRoutes(
   events: FleetEventStreamSubsystem,
   sessions: SessionDirectorySubsystem,
+  configChanges: ConfigChangeStreamSubsystem,
 ): readonly SocketRoute[] {
   return [
     {
@@ -58,6 +77,7 @@ export function fleetEventSocketRoutes(
       path: '/v1/events',
       minimum: 'operator',
       accept: async context => {
+        if (isConfigTopic(context)) return async downstream => configChanges.handler(downstream);
         const requested = await scope(context, sessions);
         return async downstream => events.handler(requested, downstream);
       },
