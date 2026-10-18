@@ -23,12 +23,8 @@ import { machineHash } from '../shell/machine-route.ts';
 import { useMachineReach } from '../shell/use-machine-reach.ts';
 import { MachineOnboarding } from './machine-onboarding.tsx';
 import type { VoiceCleanupPort } from './onboarding-steps.tsx';
-import {
-  readMachineSetupProgress,
-  readSetupProgress,
-  writeMachineSetupProgress,
-  writeSetupProgress,
-} from './setup-progress.ts';
+import type { MachineSetupStepId } from './onboarding-model.ts';
+import { readMachineSetupProgress, writeMachineSetupProgress } from './setup-progress.ts';
 
 export interface MachineSetupScreenProps {
   readonly connection: DaemonConnectionRecord;
@@ -44,6 +40,8 @@ export interface MachineSetupScreenProps {
   readonly voice?: ParakeetVoice | null;
   /** The harness hands in a pairing client, so no capture ever holds a real code. */
   readonly createPairingClient?: PairingClientFactory;
+  /** Open on this step rather than where progress was kept: Settings' Import again opens on Claude Code. */
+  readonly startAt?: MachineSetupStepId;
 }
 
 /** A one-sentence screen for the states that are not a step: checking, unreadable. */
@@ -76,6 +74,7 @@ export function MachineSetupScreen({
   voiceCleanup,
   voice,
   createPairingClient,
+  startAt,
 }: MachineSetupScreenProps) {
   const daemonId = connection.daemonId;
   const machineName = distinctDaemonName(connection, connections);
@@ -98,16 +97,6 @@ export function MachineSetupScreen({
             saved: readMachineSetupProgress(storage, daemonId),
             save: (next: Parameters<typeof writeMachineSetupProgress>[2]) =>
               writeMachineSetupProgress(storage, daemonId, next),
-          },
-    [daemonId, storage],
-  );
-  const firstRunProgress = useMemo(
-    () =>
-      storage === null
-        ? undefined
-        : {
-            saved: readSetupProgress(storage, daemonId),
-            save: (next: Parameters<typeof writeSetupProgress>[2]) => writeSetupProgress(storage, daemonId, next),
           },
     [daemonId, storage],
   );
@@ -142,7 +131,7 @@ export function MachineSetupScreen({
         createClient={createClient}
         sources={sources}
         {...(progress === undefined ? {} : { progress })}
-        {...(firstRunProgress === undefined ? {} : { firstRunProgress })}
+        {...(startAt === undefined ? {} : { startAt })}
         onFinish={() => onNavigate(daemonSessionsPath(daemonId))}
         onLeave={toMachine}
         onNavigate={onNavigate}

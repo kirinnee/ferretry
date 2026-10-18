@@ -1,10 +1,12 @@
 /**
  * New machine setup, as data (spec R4, R6; build plan P9).
  *
- * Nine steps on a PROGRESS RAIL, not a forced stepper: **Pair** → **Start from** → **Logins** →
- * **Speed-ups** → **Voice** → **Warden** → **Learning** → **Agent controls** → **Done**. Every step can be
- * skipped, any step can be opened from the rail at any time, and every one of them is also a panel in
- * Settings, so a skipped step is never lost — Done lists it with a "Set up later" link to that panel.
+ * Ten steps on ONE PROGRESS RAIL, not a forced stepper and never a stepper inside a step: **Pair** →
+ * **Start from** → **Claude Code** → **Codex** → **Speed-ups** → **Voice** → **Warden** → **Learning** →
+ * **Agent controls** → **Done**. Every step can be skipped, any step can be opened from the rail at any
+ * time, and every one of them is also a panel in Settings, so a skipped step is never lost — Done lists
+ * it with a "Set up later" link to that panel. The Claude Code and Codex steps each make their runtime in
+ * place (`harness-import-model.ts`): there is no separate runtime wizard.
  *
  * NOTHING HERE IS SENT ANYWHERE. A step saves through its own surface (Speed-ups through the secret
  * route, the Warden through its PATCH, a control through a reviewed change); this module only knows
@@ -15,6 +17,8 @@
  */
 
 import type { WardenConfig } from '@ferretry/protocol';
+import type { HarnessAnswers } from './harness-import-model.ts';
+import type { SetupHarness } from './setup-words.ts';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { type MachineTabId, machineHash } from '../shell/machine-route.ts';
@@ -24,7 +28,8 @@ import { machineItemHash } from './settings-route.ts';
 export const ONBOARDING_STEPS = [
   { id: 'pair', label: 'Pair this device' },
   { id: 'start', label: 'Start from…' },
-  { id: 'logins', label: 'Logins' },
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
   { id: 'speedups', label: 'Speed-ups' },
   { id: 'voice', label: 'Voice' },
   { id: 'warden', label: 'Warden' },
@@ -56,6 +61,8 @@ export interface MachineSetupProgress {
   readonly at: MachineSetupStepId;
   readonly states: Readonly<Partial<Record<MachineSetupTaskId, MachineSetupStepState>>>;
   readonly start: MachineSetupStart;
+  /** What was answered on the Claude Code and Codex steps — the runtime name typed — so Finish later keeps it. */
+  readonly answers?: Readonly<Partial<Record<SetupHarness, HarnessAnswers>>>;
 }
 
 /**
@@ -84,12 +91,28 @@ export const goToOnboardingStep = (progress: MachineSetupProgress, id: MachineSe
   at: id,
 });
 
-/** Continue: this step is set, and the next one opens. */
-export const continueOnboarding = (progress: MachineSetupProgress): MachineSetupProgress => ({
-  ...progress,
-  at: after(progress.at),
-  states: isTask(progress.at) ? { ...progress.states, [progress.at]: 'done' } : progress.states,
-});
+/**
+ * The steps that are set only by their own button: a CLI's step is set once its import made the runtime,
+ * so Continue past one that was not imported says "skipped" rather than claiming a runtime exists.
+ */
+const SET_BY_THEIR_OWN_BUTTON: ReadonlySet<MachineSetupStepId> = new Set(['claude', 'codex']);
+
+/** Continue: this step is set, and the next one opens. A CLI step not imported yet counts as skipped. */
+export const continueOnboarding = (progress: MachineSetupProgress): MachineSetupProgress =>
+  SET_BY_THEIR_OWN_BUTTON.has(progress.at)
+    ? skipOnboardingStep(progress)
+    : {
+        ...progress,
+        at: after(progress.at),
+        states: isTask(progress.at) ? { ...progress.states, [progress.at]: 'done' } : progress.states,
+      };
+
+/** Keep what was answered on a CLI's step. */
+export const answerOnboardingHarness = (
+  progress: MachineSetupProgress,
+  harness: SetupHarness,
+  answers: HarnessAnswers,
+): MachineSetupProgress => ({ ...progress, answers: { ...progress.answers, [harness]: answers } });
 
 /**
  * Skip: the next one opens, and this one is marked skipped — unless it was already set, because skipping
@@ -149,7 +172,8 @@ const LATER: Readonly<
 > = {
   pair: { tab: 'machine', item: 'devices' },
   start: { tab: 'machine', item: 'clone' },
-  logins: { tab: 'credentials' },
+  claude: { tab: 'runtimes' },
+  codex: { tab: 'runtimes' },
   speedups: { tab: 'machine', item: 'speedups' },
   voice: { setting: 'dictation' },
   warden: { tab: 'machine', item: 'warden' },
@@ -187,6 +211,8 @@ export interface OnboardingDoneFacts {
   /** The Warden's own one-line summary. */
   readonly warden?: string;
   readonly passiveDefault?: boolean;
+  /** The runtimes each CLI has on the machine now, by name. */
+  readonly runtimes?: Readonly<Partial<Record<SetupHarness, readonly string[]>>>;
 }
 
 const detailOf = (
@@ -199,6 +225,11 @@ const detailOf = (
       if (progress.states.start !== 'done') return undefined;
       if (progress.start === 'fresh') return 'fresh setup';
       return facts.clonedFrom === undefined ? 'clone from another machine' : `cloned from ${facts.clonedFrom}`;
+    case 'claude':
+    case 'codex': {
+      const names = facts.runtimes?.[id];
+      return names === undefined || names.length === 0 ? undefined : names.join(', ');
+    }
     case 'speedups':
       return facts.keys === undefined
         ? undefined

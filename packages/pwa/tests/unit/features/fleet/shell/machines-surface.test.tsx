@@ -48,7 +48,12 @@ const surface = (options: SurfaceOptions = {}) => (
     onRetry={() => options.retried?.push('retry')}
     {...(options.unknownMachine === undefined ? {} : { unknownMachine: options.unknownMachine })}
     onOpen={(id, tab) => options.opened?.push(`${id}:${tab}`)}
-    {...(options.setUp === undefined ? {} : { onSetUp: (id: DaemonId) => options.setUp?.push(String(id)) })}
+    {...(options.setUp === undefined
+      ? {}
+      : {
+          onSetUp: (id: DaemonId, startAt?: string) =>
+            options.setUp?.push(startAt === undefined ? String(id) : `${String(id)}#${startAt}`),
+        })}
     createClient={answering}
     {...(options.tabs === undefined ? {} : { tabs: options.tabs })}
     {...(options.daemonPanels === undefined ? {} : { daemonPanels: options.daemonPanels })}
@@ -123,6 +128,8 @@ describe('MachinesSurface', () => {
     expect(retried).toEqual(['retry']);
     must(last.onSetUp, 'onSetUp')();
     expect(setUp).toEqual(['studio']);
+    must(last.onSetUp, 'onSetUp')('claude');
+    expect(setUp).toEqual(['studio', 'studio#claude']);
     await view.unmount();
   });
 

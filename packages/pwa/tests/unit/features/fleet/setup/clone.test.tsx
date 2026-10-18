@@ -133,6 +133,7 @@ interface Render {
   readonly onRetry?: () => void;
   readonly doneLabel?: string;
   readonly onCopied?: (source: string) => void;
+  readonly presentation?: 'inline' | 'embedded';
 }
 
 const render = async ({
@@ -144,6 +145,7 @@ const render = async ({
   onRetry = () => undefined,
   doneLabel,
   onCopied,
+  presentation,
 }: Render) => {
   const view = await mount(
     <CloneMachine
@@ -159,6 +161,7 @@ const render = async ({
       onLeave={onLeave}
       {...(doneLabel === undefined ? {} : { doneLabel })}
       {...(onCopied === undefined ? {} : { onCopied })}
+      {...(presentation === undefined ? {} : { presentation })}
     />,
   );
   await settle();
@@ -245,6 +248,24 @@ describe('CloneMachine · Source', () => {
       await click(screen.q('[data-stepper-back]'), 'Back');
       expect(left).toBe(1);
       expect(screen.q('[data-stepper-confirm]')).toBeNull();
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('draws no step list or title of its own when embedded in New machine setup, and Back appears after the first page', async () => {
+    const { createClient } = daemons({});
+    const screen = await render({ createClient, presentation: 'embedded' });
+    try {
+      expect(screen.q('[data-machine-stepper]')?.getAttribute('data-presentation')).toBe('embedded');
+      expect(screen.q('[data-stepper-steps]')).toBeNull();
+      expect(screen.q('[data-stepper-position]')).toBeNull();
+      expect(screen.q('#machine-stepper-title')).toBeNull();
+      expect(screen.q('[data-stepper-back]')).toBeNull();
+      await toPreview(screen);
+      expect(screen.q('[data-stepper-back]')).not.toBeNull();
+      await click(screen.q('[data-stepper-back]'), 'Back');
+      expect(screen.step()).toBe('source');
     } finally {
       await screen.view.unmount();
     }

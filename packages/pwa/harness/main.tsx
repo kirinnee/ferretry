@@ -125,6 +125,7 @@ import { ConfigFilesSurface } from '../src/features/config-files/config-files-se
 import { type NewDeviceNoticeClients, NewDeviceNotices } from '../src/features/device-notice/new-device-notice.tsx';
 import type { FleetClientFactory } from '../src/features/fleet/fleet-client.ts';
 import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.tsx';
+import { isMachineSetupStepId } from '../src/features/fleet/setup/onboarding-model.ts';
 import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
@@ -1026,9 +1027,13 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       onNavigate={to => {
         const target = new URL(to, window.location.href);
         const id = decodeURIComponent(target.pathname.split('/')[2] ?? '');
-        // The full-screen setup is a route of its own; the preview opens its own page for it.
+        // The full-screen setup is a route of its own; the preview opens its own page for it, on the
+        // step the address's hash names (Import again opens on Claude Code).
         if (target.pathname.endsWith('/setup')) {
-          window.location.assign(`${window.location.pathname}?machine-setup=${encodeURIComponent(id)}`);
+          const step = target.hash.replace(/^#/u, '');
+          window.location.assign(
+            `${window.location.pathname}?machine-setup=${encodeURIComponent(id)}${step === '' ? '' : `&setup-step=${step}`}`,
+          );
           return;
         }
         const next = connections.find(connection => String(connection.daemonId) === id);
@@ -1198,9 +1203,9 @@ const harnessSetupStorage = (): Pick<Storage, 'getItem' | 'setItem'> => {
 };
 
 /**
- * `?machine-setup=<daemon>`: one machine's full-screen first run, as the app shows it after pairing a
- * machine that is not set up — no app chrome, only its own stepper. Leaving it returns to the Settings
- * preview on that machine.
+ * `?machine-setup=<daemon>`: one machine's full-screen New machine setup, as the app shows it after pairing
+ * a machine that is not set up — no app chrome, only its own rail. `&setup-step=claude` opens it on a step,
+ * as Settings' Import again does. Leaving it returns to the Settings preview on that machine.
  */
 function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string }) {
   useAppViewport();
@@ -1208,6 +1213,7 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
   const record =
     connections.find(connection => String(connection.daemonId) === daemonId) ?? HARNESS_SETTINGS_CONNECTIONS[0];
   const storage = useMemo(harnessSetupStorage, []);
+  const step = new URLSearchParams(window.location.search).get('setup-step') ?? '';
   return (
     <section
       id="harness-machine-setup"
@@ -1221,6 +1227,7 @@ function StandaloneMachineSetupHarness({ daemonId }: { readonly daemonId: string
         createPairingClient={HARNESS_PAIRING_CLIENT}
         voice={HARNESS_PARAKEET_ABSENT}
         storage={storage}
+        {...(isMachineSetupStepId(step) ? { startAt: step } : {})}
         onNavigate={to => {
           const target = new URL(to, window.location.href);
           window.location.assign(`${window.location.pathname}?settings-harness=1${target.hash}`);
