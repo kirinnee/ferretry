@@ -136,7 +136,12 @@ const tag = BEFORE ? 'before' : 'after';
 
 /** Relative luminance and the WCAG contrast ratio of two `rgb()` strings. */
 const contrast = (a: string, b: string): number => {
-  const channels = (rgb: string): number[] => (rgb.match(/[\d.]+/gu) ?? []).slice(0, 3).map(Number);
+  // `color(srgb r g b)` carries 0-1 channels, `rgb()` 0-255.
+  const channels = (rgb: string): number[] =>
+    (rgb.match(/[\d.]+/gu) ?? [])
+      .slice(0, 3)
+      .map(Number)
+      .map(value => (rgb.startsWith('color(') ? value * 255 : value));
   const luminance = (rgb: string): number => {
     const [r, g, bl] = channels(rgb).map(value => {
       const unit = value / 255;
@@ -200,7 +205,7 @@ try {
       const failures: string[] = [];
       for (const family of THEME_FAMILIES) {
         for (const scheme of ['light', 'dark'] as const) {
-          const theme = `${family}-${scheme}`;
+          const theme = `${family.id}-${scheme}`;
           await page.goto(`${server.url}?theme=${theme}`);
           await page.locator('[data-marks]').waitFor({ state: 'visible' });
           const marks = await page.evaluate(() =>
