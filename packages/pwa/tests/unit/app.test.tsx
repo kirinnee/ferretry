@@ -3950,6 +3950,33 @@ describe('the sessions bar', () => {
     ]);
   });
 
+  it('lists every paired machine’s sessions, each read through its own pairing, unless the reader chose one', async () => {
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
+      sessions: ['one'],
+    });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      // The machine on screen first; the same session id on both is two rows, each linking to its own machine.
+      expect(
+        [...column.querySelectorAll('[data-sbar-machine-group]')].map(node =>
+          node.getAttribute('data-sbar-machine-group'),
+        ),
+      ).toEqual([ALPHA, BETA]);
+      expect([...column.querySelectorAll('[data-sbar-session="one"]')].map(node => node.getAttribute('href'))).toEqual([
+        `/d/${encodeURIComponent(ALPHA)}/session/one`,
+        `/d/${encodeURIComponent(BETA)}/session/one`,
+      ]);
+      expect(store.fleet.fleet(beta.daemonId).sessions?.map(view => view.config.id)).toEqual(['one']);
+
+      await interact(() => store.controls.setDeviceControls({ sessionsList: 'current' }));
+      expect(view.container.querySelector('[data-sbar-machine-group]')).toBeNull();
+      expect(view.container.querySelectorAll('[data-sessions-bar="column"] [data-sbar-session="one"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('stands on every machine page as a column the reader can fold to a rail and back', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId], { sessions: ['one'] });
     try {

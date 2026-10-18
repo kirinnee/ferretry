@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { ComposerEnterKeySettings } from '../../../../src/features/settings/composer-enter-key-settings.tsx';
-import { MotionSetting } from '../../../../src/features/settings/conversation-settings.tsx';
+import { MotionSetting, SessionsListSetting } from '../../../../src/features/settings/conversation-settings.tsx';
 import { render, run } from '../../../support/react.ts';
 
 const radios = (view: ReturnType<typeof render>, name: string) =>
@@ -45,5 +45,19 @@ describe('conversation and motion settings', () => {
     ]);
     run(() => options[1]?.props.onChange());
     expect(changes).toEqual(['reduced']);
+  });
+});
+
+describe('the sessions list setting', () => {
+  test('lists every machine unless the current machine alone is chosen', () => {
+    const changes: string[] = [];
+    const view = render(<SessionsListSetting scope="all" onChange={next => changes.push(next)} />);
+    const options = radios(view, 'behaviour-sessions-list');
+    expect(options.map(option => [option.props.value, option.props.checked])).toEqual([
+      ['all', true],
+      ['current', false],
+    ]);
+    run(() => options[1]?.props.onChange());
+    expect(changes).toEqual(['current']);
   });
 });

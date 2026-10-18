@@ -20,6 +20,7 @@ import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { absoluteTime } from '../lib/session-screens.ts';
 import type { SessionQuotaResolver } from '../lib/usage.ts';
+import { MachineChip } from '../shell/machine-chip.tsx';
 import { ModeBadge } from '../shell/mode-badge.tsx';
 import { Badge } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
@@ -374,7 +375,13 @@ export const LeanSessionCard = memo(function LeanSessionCard({
   now,
   onNavigate,
   statusHoisted = false,
-}: LeanSessionProps & { readonly now: number; readonly statusHoisted?: boolean }) {
+  machine,
+}: LeanSessionProps & {
+  readonly now: number;
+  readonly statusHoisted?: boolean;
+  /** The machine's name, on a row nothing around it names the machine for (the all-machines Needs you). */
+  readonly machine?: string;
+}) {
   const cfg = view.config;
   const task = sessionTaskName(cfg);
   const preview = task === '' ? view.state.activity?.trim() : undefined;
@@ -398,8 +405,11 @@ export const LeanSessionCard = memo(function LeanSessionCard({
             <AttentionFlags view={view} />
           </span>
         )}
+        {machine === undefined ? null : <MachineChip className="ml-auto shrink-0" name={machine} />}
         <span
-          className="mono ml-auto shrink-0 text-meta text-faint"
+          className={
+            machine === undefined ? 'mono ml-auto shrink-0 text-meta text-faint' : 'mono shrink-0 text-meta text-faint'
+          }
           data-session-age=""
           title={absoluteTime(view.state.lastActivityAt)}
         >
