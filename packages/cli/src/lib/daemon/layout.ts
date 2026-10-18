@@ -1,5 +1,5 @@
 import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
-import { DAEMON_LOCK_FILENAME } from '../state-home/claim.ts';
+import { DAEMON_LOCK_FILENAME, SESSION_TERMINAL_SOCKET_FILENAME } from '../state-home/claim.ts';
 import { type CallerLocale, daemonLocale } from './locale.ts';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
@@ -65,6 +65,15 @@ export interface DaemonLayout {
    * port, a container or a second installation cannot share.
    */
   readonly daemonLockFile: string;
+  /**
+   * The socket of the daemon's private tmux server, which every session's agent runs under.
+   *
+   * The CLI never talks to it except to END it, and only on `reset`. The server is not the daemon:
+   * it outlives a stop by design, so a session survives a restart — and that is exactly why a reset
+   * that only stopped the daemon left every agent running, writing back into the home it had just
+   * removed. Mirrored from the daemon's composition, as the lock above is.
+   */
+  readonly sessionTerminalSocket: string;
   /**
    * The one tree of CLI-owned installation artifacts, keyed by `XDG_STATE_HOME` and the product.
    *
@@ -260,6 +269,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     homeDirectory,
     stateHome,
     daemonLockFile: join(stateHome, DAEMON_LOCK_FILENAME),
+    sessionTerminalSocket: join(stateHome, SESSION_TERMINAL_SOCKET_FILENAME),
     stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),

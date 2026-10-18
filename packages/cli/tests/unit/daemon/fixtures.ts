@@ -23,9 +23,11 @@ import type {
   IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
+  ISessionTerminalServerPort,
   IStateHomeClaimPort,
   ResetTreeMeasure,
   RetiredArtifactOutcome,
+  SessionTerminalEnding,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
 
@@ -507,3 +509,17 @@ export const runningReport: DaemonSupervisorReport = { manager: 'systemd', state
 export const stoppedReport: DaemonSupervisorReport = { manager: 'systemd', state: 'stopped' };
 export const absentReport: DaemonSupervisorReport = { manager: 'direct', state: 'absent' };
 export const failedReport: DaemonSupervisorReport = { manager: 'systemd', state: 'failed' };
+
+/** Ends the session terminal server the way a test says it went, and records that it was asked. */
+export class FakeSessionTerminals implements ISessionTerminalServerPort {
+  readonly ended: string[] = [];
+  answer: SessionTerminalEnding = { kind: 'none' };
+
+  constructor(private readonly trail: string[] = []) {}
+
+  end(socket: string): Promise<SessionTerminalEnding> {
+    this.ended.push(socket);
+    this.trail.push(`end-terminals:${socket}`);
+    return Promise.resolve(this.answer);
+  }
+}

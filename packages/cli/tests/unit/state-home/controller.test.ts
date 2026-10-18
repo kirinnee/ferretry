@@ -2,11 +2,12 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim';
 import { StateHomeController } from '../../../src/lib/state-home/controller';
+import type { StateHomeEntry } from '../../../src/lib/state-home/ports';
 import { CapturedOutput, directories, FakeStateHomeFiles, files } from './fixtures';
 
 const HOME = '/tmp/fy-home/.ferretry';
 
-function controller(entries?: readonly { name: string; directory: boolean }[], marker?: string) {
+function controller(entries?: readonly StateHomeEntry[], marker?: string) {
   const out = new CapturedOutput();
   const store = new FakeStateHomeFiles(entries, marker);
   return {

@@ -239,6 +239,9 @@ export function renderResetPlan(plan: ResetPlan): string {
     '',
     'It destroys, permanently, with no backup:',
     ...inventoryLines(plan.daemon, plan.inventory),
+    // Said because it is the half nobody expects: the agents run under their own terminal server, not
+    // under the daemon, so they would otherwise outlive the reset and write into a home that is gone.
+    `  every session's running agent, which is ended rather than left running without a home`,
     '',
     'It does NOT touch:',
     ...plan.survivors.map(survivor => `  ${survivor}`),
@@ -252,7 +255,13 @@ export function renderResetPlan(plan: ResetPlan): string {
  * The numbers are the REMOVAL's own, not the preflight's. The preflight measured a running daemon that
  * was still writing, so reporting those figures as the outcome would report a count nobody took.
  */
-export function renderResetOutcome(daemon: string, removals: readonly ResetSurvey[], clientName: string): string {
+export function renderResetOutcome(
+  daemon: string,
+  removals: readonly ResetSurvey[],
+  clientName: string,
+  /** The state home claimed again after its removal, when it was. */
+  reclaimed?: string,
+): string {
   const removed = removals.filter(removal => removal.measure.kind !== 'absent');
   const total = (pick: (measure: Extract<ResetTreeMeasure, { kind: 'measured' }>) => number): number =>
     removed.reduce((sum, removal) => sum + (removal.measure.kind === 'absent' ? 0 : pick(removal.measure)), 0);
@@ -263,6 +272,7 @@ export function renderResetOutcome(daemon: string, removals: readonly ResetSurve
       ? `${daemon} had no persistent data on this host; nothing was removed`
       : `${daemon} reset: removed ${String(removed.length)} path(s), ${String(files)} files, ${megabytes(bytes)}`,
     ...removals.map(removal => `  ${removal.measure.kind === 'absent' ? 'absent ' : 'removed'} ${removal.root.path}`),
+    ...(reclaimed === undefined ? [] : [`  claimed ${reclaimed} again, empty, exactly as a fresh install does`]),
     `Run \`${clientName} daemon start\` to bring ${daemon} up on a clean slate, exactly as a fresh install does.`,
   ].join('\n');
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -44,9 +44,29 @@ describe('reading a state home from disk', () => {
 
     // Assert
     should([...(entries ?? [])].sort((a, b) => a.name.localeCompare(b.name))).deepEqual([
-      { name: 'api-token', directory: false },
-      { name: 'fleet', directory: true },
+      { name: 'api-token', directory: false, regularFile: true },
+      { name: 'fleet', directory: true, regularFile: false },
     ]);
+  });
+
+  it('should list a directory below the home without following a link inside it', async () => {
+    // Arrange — a link wearing a log's name is neither a directory nor an ordinary file, which is what
+    // keeps it from passing as an empty scaffold.
+    const root = await temporaryRoot();
+    const logs = join(root, 'logs');
+    await mkdir(logs, { recursive: true });
+    await writeFile(join(logs, 'fyd.log'), 'line\n');
+    await symlink(join(root, 'elsewhere'), join(logs, 'linked.log'));
+
+    // Act
+    const entries = await new FileStateHomeClaim().listDirectory(logs);
+
+    // Assert
+    should([...(entries ?? [])].sort((a, b) => a.name.localeCompare(b.name))).deepEqual([
+      { name: 'fyd.log', directory: false, regularFile: true },
+      { name: 'linked.log', directory: false, regularFile: false },
+    ]);
+    should(await new FileStateHomeClaim().listDirectory(join(root, 'absent'))).be.undefined();
   });
 
   it('should surface a failure that is not absence, rather than reading it as nothing there', async () => {

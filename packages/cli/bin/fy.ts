@@ -29,6 +29,7 @@ import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
+import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
@@ -139,7 +140,7 @@ import {
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
 import { registerSetupCommands } from '../src/lib/setup/commands';
-import { StateHomeClaimService } from '../src/lib/state-home/claim';
+import { type IStateHomeClaimNotices, StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
 import { registerStatuslineCommands } from '../src/lib/statusline/commands';
 import { BulkStopController, registerStopCommands } from '../src/lib/stop';
@@ -166,8 +167,8 @@ const DESCRIPTION = 'Command-line client for the per-host agent daemon';
  * own notion of when a home becomes ours is how they came to disagree in the first place. The repair
  * command is passed in rather than spelled inside the domain, so a renamed binary renames the advice.
  */
-function buildStateHomeClaims(): StateHomeClaimService {
-  return new StateHomeClaimService(new FileStateHomeClaim(), `${BINARY_NAME} daemon adopt`);
+function buildStateHomeClaims(notices?: IStateHomeClaimNotices): StateHomeClaimService {
+  return new StateHomeClaimService(new FileStateHomeClaim(), `${BINARY_NAME} daemon adopt`, notices);
 }
 
 /** Scaffold: the commander program skeleton (identity + `--help`/`--version`), domain-free. */
@@ -472,7 +473,9 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
   const files = new FileServiceStore();
   // Every supervisor claims the state home before it creates the log directory inside it, so the
   // marker exists before the first entry does whichever way round `fy` and `fyd` are run.
-  const claims = buildStateHomeClaims();
+  // Handed the terminal so a claim that adopts an empty, unmarked scaffold says so rather than
+  // taking a directory over silently.
+  const claims = buildStateHomeClaims(out);
   const service: IServiceDefinitionSupervisor | undefined =
     layout.manager === 'systemd'
       ? new SystemdSupervisor(layout, processes, files, claims)
@@ -503,6 +506,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     })(),
     retired: new FileRetiredArtifacts(),
     resetTrees: new FileResetTrees(),
+    sessionTerminals: new TmuxSessionTerminalServer(processes),
     /**
      * The reset inventory, over the AUTHENTICATED shared client rather than the health probe.
      *

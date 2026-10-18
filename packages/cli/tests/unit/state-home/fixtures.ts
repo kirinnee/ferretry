@@ -20,6 +20,10 @@ export class FakeStateHomeFiles implements IStateHomeFilePort {
   /** `undefined` means the home does not exist at all. */
   entries: StateHomeEntry[] | undefined;
   marker: string | undefined;
+  /** What each directory BELOW the home holds, by full path; anything absent here is an empty one. */
+  readonly below = new Map<string, readonly StateHomeEntry[]>();
+  /** Every directory below the home that was listed, so a test can prove a walk stopped. */
+  readonly listed: string[] = [];
 
   constructor(entries?: readonly StateHomeEntry[], marker?: string) {
     this.entries = entries === undefined ? undefined : [...entries];
@@ -28,6 +32,11 @@ export class FakeStateHomeFiles implements IStateHomeFilePort {
 
   listHome(): Promise<readonly StateHomeEntry[] | undefined> {
     return Promise.resolve(this.entries);
+  }
+
+  listDirectory(path: string): Promise<readonly StateHomeEntry[] | undefined> {
+    this.listed.push(path);
+    return Promise.resolve(this.below.get(path) ?? []);
   }
 
   readMarker(): Promise<string | undefined> {
@@ -49,12 +58,17 @@ export class FakeStateHomeFiles implements IStateHomeFilePort {
 
 /** Directory entries by name, the common case where the kind does not matter. */
 export function directories(...names: readonly string[]): readonly StateHomeEntry[] {
-  return names.map(name => ({ name, directory: true }));
+  return names.map(name => ({ name, directory: true, regularFile: false }));
 }
 
 /** File entries by name. */
 export function files(...names: readonly string[]): readonly StateHomeEntry[] {
-  return names.map(name => ({ name, directory: false }));
+  return names.map(name => ({ name, directory: false, regularFile: true }));
+}
+
+/** Entries that are neither a directory nor a regular file — a symbolic link, a socket. */
+export function links(...names: readonly string[]): readonly StateHomeEntry[] {
+  return names.map(name => ({ name, directory: false, regularFile: false }));
 }
 
 /** Captured terminal output, in the order it was written. */
