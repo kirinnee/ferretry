@@ -1132,6 +1132,20 @@ function AppChromeHarness({ active }: { readonly active: string }) {
       </main>
     ) : destination === 'warden' ? (
       <WardenPage connection={daemon} slots={{ Overview: HarnessWardenOverview }} />
+    ) : destination === 'sessions' ? (
+      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3" data-harness="sessions">
+        <SessionsPage
+          clock={HARNESS_FROZEN_CLOCK}
+          connection={daemon}
+          controls={APP_CHROME_SESSIONS_CONTROLS}
+          fleet={SESSIONS_PAGE_FLEET}
+          onOpenWardenReport={() => {}}
+          projects={SESSIONS_PAGE_PROJECTS}
+          scopeNavigation={SESSIONS_PAGE_NAVIGATION}
+          usage={SESSIONS_PAGE_USAGE}
+          wardenStatus={SESSIONS_PAGE_WARDEN}
+        />
+      </div>
     ) : active === 'warden-settings' ? (
       <main className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5" data-harness="warden-settings">
         <div className={INSIGHTS_COLUMN_CLASS}>
@@ -1163,7 +1177,11 @@ function AppChromeHarness({ active }: { readonly active: string }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {phone ? (
           <AppBar
-            crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]}
+            crumbs={
+              destination === 'sessions'
+                ? [{ label: 'Sessions' }]
+                : [{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'Settings' }]
+            }
             daemon={daemon.daemonId}
             onOpenPalette={() => {}}
             onOpenSidebar={() => {}}
@@ -3877,6 +3895,13 @@ const SESSIONS_PAGE_CONTROLS = new DaemonControlsStore(memoryControlsStorage());
 // Finished sessions are shown so this card carries the same rows as the
 // presentation cards above it; a reviewer is comparing them side by side.
 SESSIONS_PAGE_CONTROLS.setDeviceControls({ dashboardView: 'table', density: 'full', includeFinished: true });
+/** The app-chrome Sessions frame: a phone's own defaults (cards), `?density=full|compact|minimal` to pick one. */
+const APP_CHROME_SESSIONS_CONTROLS = new DaemonControlsStore(memoryControlsStorage());
+{
+  const density = new URLSearchParams(window.location.search).get('density');
+  if (density === 'full' || density === 'compact' || density === 'minimal')
+    APP_CHROME_SESSIONS_CONTROLS.setDeviceControls({ density });
+}
 
 const SESSIONS_PAGE_FLEET = new DaemonFleetStore({
   list: async () => DASHBOARD_SESSIONS,
@@ -7501,7 +7526,11 @@ const WORKSPACE_CLIENT: SessionChatClient = {
   answer: async () => WORKSPACE_SESSION,
   interrupt: async () => WORKSPACE_SESSION,
   resume: async () => WORKSPACE_SESSION,
-  send: async () => ({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never,
+  // `?slow-send`: the send never settles, so a capture can hold the moment of sending.
+  send: async () =>
+    new URLSearchParams(window.location.search).has('slow-send')
+      ? await new Promise<never>(() => undefined)
+      : (({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never),
   stop: async () => WORKSPACE_SESSION,
 };
 
@@ -7670,6 +7699,10 @@ const WORKSPACE_ACTIONS = [
 ];
 /** `?pickers` gives the workspace the runtime route, so the model and effort pickers draw (composer and Info › Runtime). */
 const WORKSPACE_PICKERS = new URLSearchParams(window.location.search).has('pickers');
+/** `?turn=working|your-turn`: the daemon's turn fact for the workspace; absent keeps the legacy live session. */
+const WORKSPACE_TURN = ((value: string | null) => (value === 'working' || value === 'your-turn' ? value : undefined))(
+  new URLSearchParams(window.location.search).get('turn'),
+);
 const WORKSPACE_PAGE_CLIENT: SessionChatClient = WORKSPACE_PICKERS
   ? { ...WORKSPACE_CLIENT, runtime: async () => WORKSPACE_SESSION }
   : WORKSPACE_CLIENT;
@@ -7681,6 +7714,16 @@ function SessionWorkspaceHarness() {
   const [session, setSession] = useState({
     ...WORKSPACE_SESSION,
     config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+    ...(WORKSPACE_TURN === undefined
+      ? {}
+      : {
+          state: {
+            ...WORKSPACE_SESSION.state,
+            turnState: WORKSPACE_TURN,
+            promptReady: WORKSPACE_TURN !== 'working',
+            ...(WORKSPACE_TURN === 'working' ? {} : { activity: undefined }),
+          },
+        }),
   } as SessionView);
   const [drawer, setDrawer] = useState(window.location.search.includes('drawer'));
   const learningActions = useHarnessLearningActions(daemon, WORKSPACE_FLEET);
