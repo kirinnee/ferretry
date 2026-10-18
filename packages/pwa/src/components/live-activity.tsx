@@ -14,11 +14,22 @@
  * activity sentence, or `Working…`. A failed read is not shown as an error. The line is a courtesy,
  * the transcript underneath is the record, and a red banner over a working session because one
  * capture failed would be a louder lie than a vaguer sentence.
+ *
+ * THE CLOCK AND THE COUNTS ARE LIVE. The pane is read every few seconds, so its printed `42s` could
+ * only ever move in jumps. The clock instead runs in this page from the turn's own start — the
+ * daemon's `turnStateAt`, the one whose-turn boundary — and ticks on each whole second. The token
+ * counts come from the daemon's `live` frames (`?live=1` on the session's event stream, sampled
+ * twice a second from the transcript's usage records and the pane's own counter) and from this
+ * page's pane read, whichever is further along, and count up to each new reading.
  */
 
+import type { SessionLiveActivity } from '@ferretry/protocol';
 import { useEffect, useState } from 'react';
+import { type LiveScheduler, useCountUp, useLiveElapsed } from '../hooks/use-live-counter.ts';
+import { formatElapsedSeconds, formatTokenCount, liveReadout } from '../lib/live-counter.ts';
 import { type PaneActivity, paneActivityDetail, parsePaneActivity } from '../lib/pane-activity.ts';
 import { type PaneReading, UNREAD_PANE } from '../lib/session-activity.ts';
+import { Spinner } from './spinner.tsx';
 import { thinkingActivityLabel } from './thinking-indicator.tsx';
 
 /** Reads the agent's pane as it is right now. */
@@ -73,11 +84,49 @@ export interface LiveActivityLineProps {
   readonly activity: PaneActivity | null;
   /** The daemon's activity sentence, used when the pane said nothing readable. */
   readonly fallback?: string | null;
+  /** The working turn's start (`state.turnStateAt`): the clock runs from here. */
+  readonly turnStartedAt?: string | null;
+  /** The latest `live` sample off the session's stream. */
+  readonly live?: SessionLiveActivity | null;
+  /** Injectable so a suite drives the clock; the browser's own otherwise. */
+  readonly scheduler?: LiveScheduler;
+  /** Whether the line holds still; absent, the transcript's shared selection hold decides. */
+  readonly hold?: boolean;
 }
 
-export function LiveActivityLine({ activity, fallback }: LiveActivityLineProps) {
-  const verb = activity?.verb ?? thinkingActivityLabel(fallback);
-  const detail = activity === null ? '' : paneActivityDetail(activity);
+/** A count as printed, `—` when nobody measured it. */
+const shownCount = (tokens: number | null): string => (tokens === null ? '—' : formatTokenCount(tokens));
+
+/**
+ * The line itself. With a turn boundary from the daemon, the clock ticks client-side from that
+ * instant — every second, on the second — and the token counts count up to each new reading, never
+ * down; `—` is printed for a count nobody measured. Without one (an older daemon), it prints the
+ * harness's own words as the pane last showed them.
+ *
+ * The ticking figures are hidden from assistive technology: a status region re-announced every
+ * second would talk over everything else. The verb is the announcement.
+ */
+export function LiveActivityLine({
+  activity,
+  fallback,
+  turnStartedAt = null,
+  live = null,
+  scheduler,
+  hold,
+}: LiveActivityLineProps) {
+  const readout = liveReadout({ turnStartedAt, live, pane: activity });
+  const options = { ...(scheduler === undefined ? {} : { scheduler }), ...(hold === undefined ? {} : { hold }) };
+  const seconds = useLiveElapsed(readout.startedAt, options);
+  const resetKey = turnStartedAt ?? '';
+  const output = useCountUp(readout.outputTokens, { ...options, resetKey });
+  const input = useCountUp(readout.inputTokens, { ...options, resetKey });
+  const verb = readout.verb ?? thinkingActivityLabel(fallback);
+  const timed = readout.startedAt !== null;
+  const detail = timed
+    ? `${formatElapsedSeconds(seconds ?? 0)} · ↓ ${shownCount(output)} · ↑ ${shownCount(input)}`
+    : activity === null
+      ? ''
+      : paneActivityDetail(activity);
   return (
     <div
       className="fy-live-activity"
@@ -85,10 +134,21 @@ export function LiveActivityLine({ activity, fallback }: LiveActivityLineProps) 
       data-transcript-density="chrome"
       role="status"
     >
-      <span aria-hidden="true" className="fy-live-activity-spinner" />
+      <Spinner />
       <span className="min-w-0 truncate">
         <b>{verb}</b>
-        {detail === '' ? null : <span className="fy-live-activity-detail"> {detail}</span>}
+        {detail === '' ? null : (
+          <span
+            aria-hidden="true"
+            className="fy-live-activity-detail"
+            data-live-elapsed={timed ? String(seconds ?? 0) : undefined}
+            data-live-input={timed && input !== null ? String(input) : undefined}
+            data-live-output={timed && output !== null ? String(output) : undefined}
+          >
+            {' '}
+            {detail}
+          </span>
+        )}
       </span>
     </div>
   );

@@ -59,7 +59,8 @@ describe('ConnectionHealthNoticeView', () => {
       expect(button.tagName).toBe('BUTTON');
       expect(button.textContent).toBe('Reconnecting…· retrying in 4s');
       expect(button.closest('[role="status"]')).not.toBeNull();
-      expect(button.querySelector('svg')?.getAttribute('class')).toContain('motion-reduce:animate-none');
+      // The theme's busy mark, which pulses rather than turns under reduced motion (spinner.css).
+      expect(button.querySelector('svg')?.getAttribute('class')).toBe('fy-spinner');
       await shown.render(view(reconnecting({ attempt: 3 })));
       expect(must(pill(), 'the pill').textContent).toBe('Reconnecting…· attempt 3');
       await shown.render(view(reconnecting({ nextAttemptAt: null })));

@@ -33,6 +33,9 @@ coveragePathIgnorePatterns = [
   "packages/*/bin/**",
   "packages/*/src/lib/**",
   "packages/*/tests/**",
+  # `components` is the fourth glue directory the unit ledger claims (coverage-ledger.sh); a feature an
+  # integration test imports can reach one (the shared Spinner), and it is no more an adapter there.
+  "packages/pwa/src/components/**",
   "packages/pwa/src/features/**",
   "packages/pwa/src/hooks/**",
   "packages/pwa/src/shell/**",

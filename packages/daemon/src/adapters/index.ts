@@ -30,6 +30,7 @@ export * from './security/index.ts';
 export * from './session/effects/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/lifecycle/index.ts';
+export * from './session/live/index.ts';
 export * from './session/monitor/index.ts';
 export * from './session/provenance/index.ts';
 export * from './session/question/index.ts';

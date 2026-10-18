@@ -2,7 +2,7 @@ import { ApiError } from '../../api/error.ts';
 import { queryValues } from '../../api/http.ts';
 import type { RouteContext } from '../../api/route.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
-import { CONFIG_CHANGE_TOPIC } from '@ferretry/protocol';
+import { CONFIG_CHANGE_TOPIC, SESSION_LIVE_STREAM_FLAG } from '@ferretry/protocol';
 import type { FleetEventStreamScope } from '../../session/events/index.ts';
 import { tryParseSessionId } from '../../session-id.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
@@ -39,13 +39,16 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
     // `token` and `ticket` are both consumed by the upgrade's authentication before the route is
     // reached — the first from a loopback peer, the second from a browser that cannot send a header
     // at all. Rejecting either here would refuse the only credential such a caller can present.
-    if (name !== 'after' && name !== 'sessionId' && name !== 'token' && name !== 'ticket')
+    if (name !== 'after' && name !== 'sessionId' && name !== 'live' && name !== 'token' && name !== 'ticket')
       throw new ApiError(400, `unknown event-stream query parameter "${name}"`, 'invalid_query');
   }
   const rawAfter = soleQuery(context, 'after') ?? '0';
   const after = Number(rawAfter);
   if (!/^[0-9]+$/u.test(rawAfter) || !Number.isSafeInteger(after))
     throw new ApiError(400, 'after must be a non-negative integer', 'invalid_query');
+  const rawLive = soleQuery(context, 'live');
+  if (rawLive !== undefined && rawLive !== SESSION_LIVE_STREAM_FLAG)
+    throw new ApiError(400, `live must be "${SESSION_LIVE_STREAM_FLAG}" when given`, 'invalid_query');
   const rawSessionId = soleQuery(context, 'sessionId');
   if (rawSessionId === undefined) {
     // There is no global sequence domain: the source-compatible fleet form is a bounded recent tail,
@@ -56,13 +59,16 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
         'a fleet stream has no global cursor; omit --after or follow one session',
         'fleet_cursor_unavailable',
       );
+    // A live readout is one turn's; the fleet has no one turn to read.
+    if (rawLive !== undefined)
+      throw new ApiError(400, 'a live readout follows one session; add sessionId', 'live_needs_session');
     return { kind: 'fleet' };
   }
   const id = tryParseSessionId(rawSessionId);
   if (id === undefined) throw new ApiError(400, 'sessionId is not a usable session id', 'invalid_session_id');
   const session = await sessions.get(id);
   if (session === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
-  return { kind: 'session', sessionId: id, after };
+  return { kind: 'session', sessionId: id, after, ...(rawLive === undefined ? {} : { live: true }) };
 }
 
 /** The optional-id event feed, mounted through the daemon's one socket dispatcher. */

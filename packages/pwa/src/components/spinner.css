@@ -1,0 +1,189 @@
+/* ═══ THE BUSY MARK (components/spinner.tsx) ═══════════════════════════════════════════════════
+   One accent arc on a visible track, styled entirely by tokens so each theme family gives it its own
+   hand. Defaults are Studio's soft round arc; a family block below restates only what differs.
+
+     --spinner-arc        the moving arc — held to 3:1 against its surface in every family and mode
+     --spinner-track      the ring under it — visible, never louder than the arc
+     --spinner-stroke     stroke width in the 16-unit viewBox (2 ≈ 1.75px at 14px)
+     --spinner-cap        round | square | butt
+     --spinner-sweep      how much of the ring the arc covers, out of 100
+     --spinner-speed      one revolution
+     --spinner-timing     the revolution's easing (a `steps()` reads as a stepping instrument)
+     --spinner-glow       a filter, for families whose ink glows
+     --spinner-track-dash a dash pattern for the track, for families that draw in ticks
+
+   Reduced motion (the OS setting or Settings › Appearance › Motion) pulses the arc instead of turning
+   it: a frozen spinner reads as a hung one. The pulse floor stays high enough that the arc keeps 3:1.
+   The harness sweep (`harness/live-activity-screenshot.tsx`) measures every family in both modes. */
+
+:root,
+[data-swatch] {
+  --spinner-arc: var(--accent);
+  --spinner-track: color-mix(in srgb, var(--fg) 24%, transparent);
+  --spinner-stroke: 2;
+  --spinner-cap: round;
+  --spinner-sweep: 32;
+  --spinner-speed: 0.9s;
+  --spinner-timing: cubic-bezier(0.45, 0.15, 0.55, 0.85);
+  --spinner-glow: none;
+  --spinner-track-dash: none;
+}
+
+/* ---- each family's hand --------------------------------------------------------------------------
+   Colour is the family's own accent in every block (the sweep proves it holds 3:1 in both modes);
+   what changes is the stroke — the same reason a Neo button is a hard block and a Geist one a hairline. */
+
+/* Mission Control: an instrument dial — a hairline square-cap needle over a ticked bezel. */
+:root[data-theme^='mission-'],
+[data-swatch^='mission-'] {
+  --spinner-stroke: 1.5;
+  --spinner-cap: square;
+  --spinner-sweep: 22;
+  --spinner-speed: 1.2s;
+  --spinner-timing: linear;
+  --spinner-track-dash: 1.6 1.54;
+}
+/* Neo-Brutalism: a thick square-cap arc on a hard ink track. */
+:root[data-theme^='neo-'],
+[data-swatch^='neo-'] {
+  --spinner-track: color-mix(in srgb, var(--fg) 30%, transparent);
+  --spinner-stroke: 3.25;
+  --spinner-cap: square;
+  --spinner-sweep: 28;
+  --spinner-speed: 0.8s;
+  --spinner-timing: linear;
+}
+/* Geist: a hairline, precise and quick. */
+:root[data-theme^='geist-'],
+[data-swatch^='geist-'] {
+  --spinner-stroke: 1.5;
+  --spinner-sweep: 25;
+  --spinner-speed: 0.75s;
+  --spinner-timing: linear;
+}
+/* High Contrast: a wide butt-ended arc on a track you cannot miss, and no easing to lose it in. */
+:root[data-theme^='contrast-'],
+[data-swatch^='contrast-'] {
+  --spinner-track: color-mix(in srgb, var(--fg) 38%, transparent);
+  --spinner-stroke: 2.75;
+  --spinner-cap: butt;
+  --spinner-sweep: 30;
+  --spinner-timing: linear;
+}
+/* Phosphor: a glowing beam stepping round a ticked CRT ring, like a scan. */
+:root[data-theme^='phosphor-'],
+[data-swatch^='phosphor-'] {
+  --spinner-stroke: 2;
+  --spinner-cap: square;
+  --spinner-sweep: 26;
+  --spinner-speed: 1.2s;
+  --spinner-timing: steps(12, end);
+  --spinner-glow: drop-shadow(0 0 1.5px var(--accent))
+    drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 55%, transparent));
+  --spinner-track-dash: 2 1.14;
+}
+/* Blueprint: a drafting line over a dashed construction circle. */
+:root[data-theme^='blueprint-'],
+[data-swatch^='blueprint-'] {
+  --spinner-stroke: 1.5;
+  --spinner-cap: butt;
+  --spinner-sweep: 30;
+  --spinner-speed: 1.1s;
+  --spinner-timing: linear;
+  --spinner-track-dash: 1 1;
+}
+/* Broadsheet: an ink stroke, as if drawn with the type's own pen. */
+:root[data-theme^='broadsheet-'],
+[data-swatch^='broadsheet-'] {
+  --spinner-arc: var(--fg);
+  --spinner-stroke: 1.75;
+  --spinner-sweep: 30;
+}
+/* Wayfinding: signage weight — a fat round arc readable across a platform. */
+:root[data-theme^='wayfinding-'],
+[data-swatch^='wayfinding-'] {
+  --spinner-stroke: 3.5;
+  --spinner-sweep: 30;
+}
+/* Ledger: a ruled, square-ended pen line at an even pace. */
+:root[data-theme^='ledger-'],
+[data-swatch^='ledger-'] {
+  --spinner-cap: square;
+  --spinner-sweep: 30;
+  --spinner-speed: 1s;
+  --spinner-timing: linear;
+}
+/* Ma: the least there can be — a fine short arc, unhurried. */
+:root[data-theme^='ma-'],
+[data-swatch^='ma-'] {
+  --spinner-stroke: 1.5;
+  --spinner-sweep: 20;
+  --spinner-speed: 1.6s;
+}
+
+.fy-spinner {
+  animation: fy-spinner-turn var(--spinner-speed) var(--spinner-timing) infinite;
+  display: inline-block;
+  filter: var(--spinner-glow);
+  flex: 0 0 auto;
+  overflow: visible;
+  transform-origin: 50% 50%;
+  vertical-align: middle;
+}
+.fy-spinner-track {
+  stroke: var(--spinner-track);
+  stroke-dasharray: var(--spinner-track-dash);
+  stroke-width: var(--spinner-stroke);
+}
+.fy-spinner-arc {
+  stroke: var(--spinner-arc);
+  stroke-dasharray: var(--spinner-sweep) 100;
+  stroke-linecap: var(--spinner-cap);
+  stroke-width: var(--spinner-stroke);
+}
+
+@keyframes fy-spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes fy-spinner-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
+/* Reduced motion: the whole ring pulses in place. These outrank index.css's global `*` stills by
+   specificity, which is the only way an `!important` there can be answered. */
+@media (prefers-reduced-motion: reduce) {
+  .fy-spinner.fy-spinner {
+    animation: fy-spinner-pulse 1.6s ease-in-out infinite !important;
+    filter: none;
+  }
+  .fy-spinner .fy-spinner-arc {
+    stroke-dasharray: 100 0;
+  }
+}
+:root[data-motion='reduced'] .fy-spinner.fy-spinner {
+  animation: fy-spinner-pulse 1.6s ease-in-out infinite !important;
+  filter: none;
+}
+:root[data-motion='reduced'] .fy-spinner .fy-spinner-arc {
+  stroke-dasharray: 100 0;
+}
+
+/* ON AN ACCENT FILL (Send while a message leaves): the arc is the button's own ink, so it keeps the
+   contrast the label would have, and the busy button is not dimmed like a disabled one — it is busy,
+   not unavailable. */
+.fy-spinner--on-accent {
+  --spinner-arc: var(--accent-fg, #fff);
+  --spinner-track: color-mix(in srgb, var(--accent-fg, #fff) 30%, transparent);
+  --spinner-glow: none;
+}
+.fy-composer-send[data-sending]:disabled {
+  opacity: 1;
+}

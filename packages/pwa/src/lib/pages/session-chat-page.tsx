@@ -68,6 +68,7 @@ import { browserPageForKey, useSessionBrowser } from '../../features/browser/use
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
+import { useLiveActivity } from '../../hooks/use-live-counter.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -85,6 +86,7 @@ import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
+import type { LiveActivityFeed } from '../live-activity-feed.ts';
 import { answerPermissionRequest } from '../permission-requests.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
@@ -233,6 +235,8 @@ export interface SessionChatPageProps {
    * AGENT marker and Take over / Hand back at once. Absent, the page still reads them on a poll.
    */
   readonly surfaceEvents?: SurfaceEventFeed;
+  /** This session's live readout (`live` frames off the same stream), for the working line's token counts. */
+  readonly liveActivity?: LiveActivityFeed;
   /**
    * More rows for Actions ▾, from features that are not the page's: the Warden's "Ask the Warden to
    * investigate", Learning's "Passive learning" and "Scan this ferret". Each is a registry contribution
@@ -359,6 +363,7 @@ export function SessionChatPage({
   context: contextDependencies,
   browser,
   surfaceEvents,
+  liveActivity,
   actionContributions = NO_CONTRIBUTIONS,
   infoRuntimeControls,
   infoLearning,
@@ -653,6 +658,7 @@ export function SessionChatPage({
     [connection, referenceFetch, scope],
   );
   const pane = usePaneActivity(readActivityFrame, working || legacyLive);
+  const liveSample = useLiveActivity(liveActivity);
   const turn = sessionTurn(session, pane);
   const busy = turn === 'working' || (turn === null && legacyLive);
   // The account's quota for this session, from the daemon's passive usage feed. The session document
@@ -1110,6 +1116,8 @@ export function SessionChatPage({
         <Transcript
           activity={pane.activity}
           activityFallback={session.state.activity ?? null}
+          live={liveSample}
+          turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}
           agentName={agentName}
           busy={busy}
           daemonId={connection.daemonId}

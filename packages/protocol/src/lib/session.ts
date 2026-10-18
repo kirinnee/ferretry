@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
+import { SessionLiveActivitySchema } from './session-live.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
@@ -622,6 +623,11 @@ export const FyEventStreamFrameSchema = z.discriminatedUnion('kind', [
     idleSeconds: PositiveIntegerSchema,
     scope: FyEventStreamIdleScopeSchema,
   }),
+  /**
+   * A working turn's live readout (`session-live.ts`). Only a per-session stream opened with
+   * `?live=1` ever carries one, so a reader that never asked never has to recognise it.
+   */
+  z.strictObject({ kind: z.literal('live'), live: SessionLiveActivitySchema }),
 ]);
 export type FyEventStreamFrame = z.infer<typeof FyEventStreamFrameSchema>;
 export type FyEventStreamIdle = Extract<FyEventStreamFrame, { readonly kind: 'idle' }>;

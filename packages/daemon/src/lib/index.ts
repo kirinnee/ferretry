@@ -71,6 +71,7 @@ export * from './session/filesystem/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';
+export * from './session/live/index.ts';
 export * from './session/monitor/index.ts';
 export * from './session/permission/index.ts';
 export * from './session/provenance/index.ts';

@@ -183,6 +183,29 @@ describe('DaemonEventTransport', () => {
     should(streams.opened).be.empty();
   });
 
+  it('should carry the live-readout flag a session stream asks for, and nothing else new', async () => {
+    // Arrange
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream({
+      ...streamInput(() => undefined),
+      url: 'wss://daemon.example.test/v1/events?after=3&sessionId=session-1&live=1',
+    });
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.daemonCloses({ code: 1000, reason: 'done' });
+    await streaming;
+
+    // Assert
+    should(session.request.query).deepEqual([
+      ['after', '3'],
+      ['sessionId', 'session-1'],
+      ['live', '1'],
+    ]);
+  });
+
   it('should refuse a query parameter the feed does not have, and so can never carry a ticket or token', async () => {
     // Arrange
     const streams = opener();

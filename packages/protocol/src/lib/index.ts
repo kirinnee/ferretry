@@ -41,6 +41,7 @@ export * from './service.ts';
 export * from './session.ts';
 export * from './session-filesystem.ts';
 export * from './session-fork.ts';
+export * from './session-live.ts';
 export * from './session-mcp.ts';
 export * from './session-permission.ts';
 export * from './session-search.ts';

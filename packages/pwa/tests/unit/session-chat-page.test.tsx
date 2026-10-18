@@ -39,6 +39,7 @@ import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
 import {
   type SessionAttentionModel,
   type SessionChatClient,
@@ -2187,7 +2188,7 @@ describe('SessionChatPage on a brand-new idle session', () => {
       state: { status: 'running', turn: 0, ...state },
     });
 
-  const mountPage = (view: SessionView, usage?: DaemonUsageStore) =>
+  const mountPage = (view: SessionView, usage?: DaemonUsageStore, liveActivity?: LiveActivityFeed) =>
     renderSessionChatPage(
       <SessionChatPage
         client={{ ...client([], view), runtime: async () => view }}
@@ -2197,6 +2198,7 @@ describe('SessionChatPage on a brand-new idle session', () => {
         presentation="pane"
         session={view}
         {...(usage === undefined ? {} : { usage })}
+        {...(liveActivity === undefined ? {} : { liveActivity })}
       />,
     );
 
@@ -2317,6 +2319,55 @@ describe('SessionChatPage on a brand-new idle session', () => {
       expect(page.root.findByType(Transcript).props.busy).toBe(true);
       expect(page.root.findByType(Composer).props.busy).toBe(true);
       expect(statusWord(page.root)).toBe('working');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('hands the working turn’s start and the stream’s latest live sample to the transcript', async () => {
+    // Arrange — the daemon says working since a known instant; the host's hub carries samples for it.
+    paneAnswers(CLAUDE_WORKING);
+    const turn = '2026-10-16T08:00:00.000Z';
+    const hub = createLiveActivityHub();
+    const page = mountPage(fresh('claude', { turn: 2, turnState: 'working', turnStateAt: turn }), undefined, hub);
+
+    try {
+      await settleUntil(() => page.root.findByType(Transcript).props.activity !== null, 'the status line', runAsync);
+      expect(page.root.findByType(Transcript).props.turnStartedAt).toBe(turn);
+      expect(page.root.findByType(Transcript).props.live).toBeNull();
+
+      // Act — the stream publishes a sample for this turn.
+      const sample = {
+        sessionId: 'fresh-claude',
+        at: '2026-10-16T08:00:05.000Z',
+        turnStartedAt: turn,
+        inputTokens: 48_000,
+      };
+      run(() => hub.publish(sample));
+
+      // Assert — the page re-renders with it, and the line prints its input count beside the pane’s own output reading.
+      expect(page.root.findByType(Transcript).props.live).toEqual(sample);
+      const figures = page.root.findByProps({ className: 'fy-live-activity-detail' });
+      expect(figures.props['data-live-input']).toBe('48000');
+      expect(figures.props['data-live-output']).toBe('1200');
+      expect(textOf(figures)).toContain('↓ 1.2k · ↑ 48k');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('gives the transcript no turn start when the session is not working, whatever the daemon last wrote', async () => {
+    // Arrange
+    paneAnswers(CLAUDE_WORKING);
+    const page = mountPage(
+      fresh('claude', { turn: 2, turnState: 'your-turn', turnStateAt: '2026-10-16T08:00:00.000Z' }),
+      undefined,
+      createLiveActivityHub(),
+    );
+
+    try {
+      // Assert
+      expect(page.root.findByType(Transcript).props.turnStartedAt).toBeNull();
     } finally {
       run(() => page.unmount());
     }

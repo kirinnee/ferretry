@@ -11,7 +11,7 @@
  */
 
 import type { FleetToolInstallResult } from '@ferretry/protocol';
-import { LoaderCircle } from 'lucide-react';
+import { Spinner } from '../../../components/spinner.tsx';
 import { useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { installFleetTools } from '../setup-api.ts';
@@ -84,7 +84,7 @@ export function ToolInstall({
         name="installing"
         title={
           <span className="flex items-center gap-2">
-            <LoaderCircle size={16} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />
+            <Spinner size={16} />
             {installingSentence(phase.harnesses, machineName)}
           </span>
         }

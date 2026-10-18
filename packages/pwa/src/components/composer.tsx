@@ -46,6 +46,7 @@ import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
+import { Spinner } from './spinner.tsx';
 
 interface SendFailure {
   readonly text: string;
@@ -1023,11 +1024,16 @@ export function Composer({
             aria-label={sendLabel}
             className="fy-composer-send"
             data-composer-send=""
+            data-sending={sending ? '' : undefined}
             disabled={!canSubmit}
             title={sendTitle}
             type="submit"
           >
-            <ArrowUp aria-hidden="true" size={18} strokeWidth={2.5} />
+            {sending ? (
+              <Spinner className="fy-spinner--on-accent" size={18} />
+            ) : (
+              <ArrowUp aria-hidden="true" size={18} strokeWidth={2.5} />
+            )}
           </button>
         </div>
       </div>

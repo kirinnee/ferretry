@@ -1,3 +1,4 @@
+import type { SessionLiveActivity } from '@ferretry/protocol';
 import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInputModality } from '../hooks/use-input-modality.ts';
 import { useTranscriptHold } from '../hooks/use-live-clock.ts';
@@ -27,6 +28,10 @@ export interface TranscriptProps {
   readonly activity?: PaneActivity | null;
   /** The daemon's activity sentence, shown when the pane said nothing readable. */
   readonly activityFallback?: string | null;
+  /** The working turn's start (`state.turnStateAt`), which the live line's clock runs from. */
+  readonly turnStartedAt?: string | null;
+  /** The latest live sample off the session's stream, for the live line's token counts. */
+  readonly live?: SessionLiveActivity | null;
   /** The agent's own name, which every assistant row is labelled with instead of a harness or account. */
   readonly agentName?: string;
   /**
@@ -101,11 +106,13 @@ export function Transcript({
   onRetry,
   activity = null,
   activityFallback = null,
+  turnStartedAt = null,
+  live = null,
   agentName,
   pinSignal = 0,
 }: TranscriptProps) {
   const hold = useTranscriptHold();
-  const shown = useHeldStill({ entries, busy, activity, activityFallback }, hold);
+  const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
   const items = transcriptItems(shown.entries);
   const ids = items.map(item => item.entry.id);
   const lastId = ids.at(-1) ?? null;
@@ -220,7 +227,14 @@ export function Transcript({
               previous={item.previous}
             />
           ))}
-          {shown.busy ? <LiveActivityLine activity={shown.activity} fallback={shown.activityFallback} /> : null}
+          {shown.busy ? (
+            <LiveActivityLine
+              activity={shown.activity}
+              fallback={shown.activityFallback}
+              live={shown.live}
+              turnStartedAt={shown.turnStartedAt}
+            />
+          ) : null}
         </div>
       </div>
       <ContextMenu

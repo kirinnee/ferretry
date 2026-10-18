@@ -75,7 +75,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
     return read.events;
   }
 
-  async pane(id: SessionId): Promise<TurnPaneEvidence | undefined> {
+  /** This session's live pane as captured now, or `undefined` when it has none or it is gone. */
+  async paneState(id: SessionId): Promise<PaneState | undefined> {
     // The lifecycle half of the document names the pane; the protocol schema does not carry it.
     const raw = await this.storage.readConfig(id).catch(() => undefined);
     const tmuxSession =
@@ -84,7 +85,12 @@ export class StorageTurnPorts implements SessionTurnPorts {
         : undefined;
     if (typeof tmuxSession !== 'string' || tmuxSession === '') return undefined;
     const pane = await this.panes.state(tmuxSession).catch(() => undefined);
-    if (pane === undefined || !pane.alive || pane.dead) return undefined;
+    return pane === undefined || !pane.alive || pane.dead ? undefined : pane;
+  }
+
+  async pane(id: SessionId): Promise<TurnPaneEvidence | undefined> {
+    const pane = await this.paneState(id);
+    if (pane === undefined) return undefined;
     const request = parsePermissionPrompt(pane.visible);
     return {
       working: paneShowsActiveWork(pane.visible),

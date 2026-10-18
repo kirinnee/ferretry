@@ -28,15 +28,15 @@ import {
   FileText,
   Hourglass,
   ListTodo,
-  Loader2,
   Search,
   Terminal,
   TriangleAlert,
   Wrench,
 } from 'lucide-react';
 import { memo, useState } from 'react';
-import { useLiveClock } from '../hooks/use-live-clock.ts';
+import { type LiveScheduler, useLiveElapsed } from '../hooks/use-live-counter.ts';
 import { cn } from '../lib/class-names.ts';
+import { formatElapsedSeconds, instantMs, wholeSecondsSince } from '../lib/live-counter.ts';
 import type { ToolCall } from '../lib/session-screens.ts';
 import {
   type ExtractedTool,
@@ -48,6 +48,7 @@ import {
   toolColorVar,
 } from '../lib/tool-extract.ts';
 import { CodeBlock } from './code-block.tsx';
+import { Spinner } from './spinner.tsx';
 
 const iconFor = (kind: ToolKind) => {
   switch (kind) {
@@ -86,10 +87,8 @@ export const summarizeToolRun = (calls: readonly ToolCall[]): string => {
 /** How long a running tool has been going, as a label. Undefined when the call
  *  carries no usable start time — a wrong duration is worse than none. */
 export const elapsedLabel = (since: string | undefined, now: number): string | undefined => {
-  const start = since === undefined ? Number.NaN : Date.parse(since);
-  if (!Number.isFinite(start)) return undefined;
-  const seconds = Math.max(0, Math.floor((now - start) / 1000));
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const start = instantMs(since);
+  return start === null ? undefined : formatElapsedSeconds(wholeSecondsSince(start, now));
 };
 
 /** The reading of a bare result whose tool use never arrived. */
@@ -101,14 +100,13 @@ const ORPHAN_RESULT: ExtractedTool = {
   isExec: false,
 };
 
-function Elapsed({ since }: { readonly since?: string }) {
-  // The shared clock, NOT `Date.now()` — see use-live-clock.ts. This span is its
-  // own element, so its per-second write is not what breaks a reader's
-  // selection, and rendering a pure function of a stable value means any
-  // re-render forced by a store notification writes nothing at all.
-  const label = elapsedLabel(since, useLiveClock());
-  if (label === undefined) return null;
-  return <span className="mono shrink-0">— {label}</span>;
+function Elapsed({ since, scheduler }: { readonly since?: string; readonly scheduler?: LiveScheduler | undefined }) {
+  // Ticks on the call's own seconds (`useLiveElapsed`), so `4s` becomes `5s` exactly five seconds
+  // after the tool started, not whenever a shared interval or a store update happens to land. This
+  // span is its own element, so its per-second write is not what breaks a reader's selection.
+  const seconds = useLiveElapsed(instantMs(since), scheduler === undefined ? {} : { scheduler });
+  if (seconds === null) return null;
+  return <span className="mono shrink-0 tabular-nums">— {formatElapsedSeconds(seconds)}</span>;
 }
 
 export interface ToolGroupProps {
@@ -117,9 +115,11 @@ export interface ToolGroupProps {
   readonly live: boolean;
   /** This is the final block in the transcript. */
   readonly isLast: boolean;
+  /** Injectable so a suite drives the running tool's clock; the browser's own otherwise. */
+  readonly scheduler?: LiveScheduler;
 }
 
-export const ToolGroup = memo(function ToolGroup({ calls, live, isLast }: ToolGroupProps) {
+export const ToolGroup = memo(function ToolGroup({ calls, live, isLast, scheduler }: ToolGroupProps) {
   const [open, setOpen] = useState(false);
 
   // The trailing unfinished call of a live session is "running".
@@ -132,7 +132,7 @@ export const ToolGroup = memo(function ToolGroup({ calls, live, isLast }: ToolGr
   // run you can still see exactly which tool is live.
   const history = running ? calls.slice(0, -1) : calls;
   const anyError = history.some(call => call.result?.isError);
-  const runningLine = running && lastCall !== undefined ? <RunningLine call={lastCall} /> : null;
+  const runningLine = running && lastCall !== undefined ? <RunningLine call={lastCall} scheduler={scheduler} /> : null;
 
   // A single running tool with nothing finished yet: just the live line.
   if (history.length === 0) return runningLine;
@@ -185,14 +185,14 @@ export const ToolGroup = memo(function ToolGroup({ calls, live, isLast }: ToolGr
 /** A dedicated slim status line for the live tool (spinner + elapsed). Still
  *  chrome-sized, but the spinner keeps the accent: this is the one tool state
  *  that is live information rather than a record of the past. */
-function RunningLine({ call }: { readonly call: ToolCall }) {
+function RunningLine({ call, scheduler }: { readonly call: ToolCall; readonly scheduler?: LiveScheduler | undefined }) {
   const summary = extractToolSummary(call.use.name, call.use.input);
   return (
     <div className="kt-chrome flex items-center gap-1.5 px-2 py-px">
-      <Loader2 aria-hidden="true" className="kt-chrome-alert shrink-0 animate-spin text-accent" size={10} />
+      <Spinner size={11} />
       <span className="mono shrink-0">{summary.verb}</span>
       <span className="mono min-w-0 flex-1 truncate">· {summary.headline}</span>
-      <Elapsed since={call.ts} />
+      <Elapsed scheduler={scheduler} since={call.ts} />
     </div>
   );
 }

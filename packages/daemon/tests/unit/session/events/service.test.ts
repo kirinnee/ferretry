@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { FyEventStreamFrameSchema, type FyEventStreamFrame } from '@ferretry/protocol';
+import { FyEventStreamFrameSchema, type FyEventStreamFrame, type SessionLiveActivity } from '@ferretry/protocol';
 import should from 'should';
 import type { SocketDownstream } from '../../../../src/lib/api/socket.ts';
 import {
@@ -8,12 +8,14 @@ import {
   EVENT_STREAM_MAX_PENDING,
   FLEET_EVENT_BACKLOG_LIMIT,
   FleetEventStreamService,
+  LIVE_SAMPLE_MS,
   orderFleetBacklog,
   type EventStreamScheduler,
   type EventStreamTimer,
   type FleetEventBacklog,
   type FleetEventSource,
   type FleetEventStreamScope,
+  type LiveActivitySource,
 } from '../../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 
@@ -690,5 +692,342 @@ describe('an event stream being torn down', () => {
     // Assert
     should(harness.source.subscribed).equal(0);
     should(harness.downstream.sent).be.empty();
+  });
+});
+
+/** Every timer ever armed, so an idle window and a live sample can be pending side by side. */
+class TimerBoard implements EventStreamScheduler {
+  /** Every delay armed, in order. */
+  readonly armed: number[] = [];
+  private readonly timers: Array<{ readonly delay: number; readonly action: () => void; cancelled: boolean }> = [];
+
+  after(milliseconds: number, action: () => void): EventStreamTimer {
+    this.armed.push(milliseconds);
+    const timer = { delay: milliseconds, action, cancelled: false };
+    this.timers.push(timer);
+    return {
+      cancel: () => {
+        timer.cancelled = true;
+      },
+    };
+  }
+
+  /** The delays still waiting to fire. */
+  get waiting(): number[] {
+    return this.timers.filter(timer => !timer.cancelled).map(timer => timer.delay);
+  }
+
+  /** Fires the newest live timer with this delay, as the clock would, and drops it from the board. */
+  fire(delay: number): void {
+    const timer = this.timers.findLast(candidate => candidate.delay === delay && !candidate.cancelled);
+    if (timer === undefined) throw new Error(`nothing is waiting ${delay}ms`);
+    timer.cancelled = true;
+    timer.action();
+  }
+}
+
+type LiveAnswer = SessionLiveActivity | Error | undefined;
+
+/** A live source that answers from a script and remembers what it was asked. */
+class ScriptedLive implements LiveActivitySource {
+  readonly asked: Array<{ readonly sessionId: string; readonly signal: AbortSignal }> = [];
+  private readonly answers: LiveAnswer[];
+  /** When set, the next ask waits for this to be released, so a close can land mid-sample. */
+  gate: Promise<void> | undefined;
+
+  constructor(answers: readonly LiveAnswer[]) {
+    this.answers = [...answers];
+  }
+
+  async sample(sessionId: string, signal: AbortSignal): Promise<SessionLiveActivity | undefined> {
+    this.asked.push({ sessionId, signal });
+    await this.gate;
+    const answer = this.answers.shift();
+    if (answer instanceof Error) throw answer;
+    return answer;
+  }
+}
+
+const LIVE_SESSION = { kind: 'session', sessionId: 's1', after: 0, live: true } as const;
+
+const reading = (seconds: number, outputTokens: number): SessionLiveActivity => ({
+  sessionId: 's1',
+  at: at(seconds),
+  turnStartedAt: at(0),
+  verb: 'Working…',
+  outputTokens,
+  outputSource: 'pane',
+});
+
+function liveSubject(scope: FleetEventStreamScope, live: LiveActivitySource | undefined, script: SourceScript = {}) {
+  const source = new ScriptedSource(script);
+  const scheduler = new TimerBoard();
+  const downstream = new RecordingDownstream();
+  return {
+    source,
+    scheduler,
+    downstream,
+    handler: new FleetEventStreamService(source, scheduler, live).handler(scope, downstream),
+    /** Fires the pending live sample and lets the async read settle. */
+    sampleNow: async (delay: number) => {
+      scheduler.fire(delay);
+      await Bun.sleep(0);
+    },
+    liveFrames: () => downstream.frames().filter(frame => frame.kind === 'live'),
+  };
+}
+
+describe('the live readout on a per-session event stream', () => {
+  it('should take its first sample straight after the replay, not before it', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const harness = liveSubject(LIVE_SESSION, live, { pages: [[stored('s1', 1)]] });
+
+    // Act
+    await harness.handler.open();
+
+    // Assert — the reader is told the durable history first; the sample is only scheduled (at zero).
+    should(harness.downstream.events()).deepEqual(['s1/1']);
+    should(live.asked).be.empty();
+    should(harness.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS, 0]);
+  });
+
+  it('should send a sample, resample every half second, and send only what changed', async () => {
+    // Arrange — the second answer differs only by the instant it was taken.
+    const first = reading(1, 10);
+    const sameButLater = { ...first, at: at(2) };
+    const grown = reading(3, 25);
+    const live = new ScriptedLive([first, sameButLater, grown]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+
+    // Act
+    await harness.sampleNow(0);
+    await harness.sampleNow(LIVE_SAMPLE_MS);
+    await harness.sampleNow(LIVE_SAMPLE_MS);
+
+    // Assert — three samples were read, two moved the readout, and every one re-armed the next.
+    should(live.asked.map(ask => ask.sessionId)).deepEqual(['s1', 's1', 's1']);
+    should(harness.liveFrames()).deepEqual([
+      { kind: 'live', live: first },
+      { kind: 'live', live: grown },
+    ]);
+    should(harness.scheduler.waiting).containEql(LIVE_SAMPLE_MS);
+    should(harness.scheduler.armed.filter(delay => delay === LIVE_SAMPLE_MS)).have.length(3);
+  });
+
+  it('should count a live frame as traffic, so an active readout never carries an idle proof', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+
+    // Act
+    await harness.sampleNow(0);
+
+    // Assert — the idle window was re-armed from the live frame, like it is from an event.
+    should(harness.scheduler.armed.filter(delay => delay === EVENT_STREAM_IDLE_MS)).have.length(2);
+    should(harness.scheduler.waiting.filter(delay => delay === EVENT_STREAM_IDLE_MS)).have.length(1);
+  });
+
+  it('should hand the source the session it follows and a signal that dies with the stream', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+
+    // Act
+    await harness.sampleNow(0);
+    const signal = live.asked[0]?.signal;
+    const abortedBefore = signal?.aborted;
+    harness.handler.close();
+
+    // Assert — a read still in flight can observe the close instead of running on.
+    should(abortedBefore).be.false();
+    should(signal?.aborted).be.true();
+  });
+
+  it('should skip a sample the source cannot give and try again in half a second', async () => {
+    // Arrange — nothing readable, then a thrown failure, then a good sample.
+    const good = reading(3, 40);
+    const live = new ScriptedLive([undefined, new Error('the pane is gone'), good]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+
+    // Act
+    await harness.sampleNow(0);
+    await harness.sampleNow(LIVE_SAMPLE_MS);
+    await harness.sampleNow(LIVE_SAMPLE_MS);
+
+    // Assert — a readout is a courtesy: neither a missing nor a throwing source ends the feed.
+    should(harness.downstream.closes).be.empty();
+    should(harness.liveFrames()).deepEqual([{ kind: 'live', live: good }]);
+    should(harness.scheduler.waiting).containEql(LIVE_SAMPLE_MS);
+  });
+
+  it('should drop a sample the protocol refuses, remember nothing of it, and keep going', async () => {
+    // Arrange — a negative token count is not a shape the wire can carry.
+    const invalid = { ...reading(1, 10), outputTokens: -5 };
+    const good = reading(2, 20);
+    const live = new ScriptedLive([invalid, invalid, good]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+
+    // Act
+    await harness.sampleNow(0);
+    await harness.sampleNow(LIVE_SAMPLE_MS);
+    const sentSoFar = harness.downstream.sent.length;
+    await harness.sampleNow(LIVE_SAMPLE_MS);
+
+    // Assert — nothing reached the socket for the bad ones, the stream stayed open, the good one went.
+    should(sentSoFar).equal(0);
+    should(harness.downstream.closes).be.empty();
+    should(harness.liveFrames()).deepEqual([{ kind: 'live', live: good }]);
+  });
+
+  it('should stop sampling for good once the stream closes', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10), reading(2, 20)]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+    await harness.sampleNow(0);
+
+    // Act
+    harness.handler.close();
+
+    // Assert — the pending resample was cancelled, so nothing can fire it and nothing is asked again.
+    should(harness.scheduler.waiting).be.empty();
+    should(() => harness.scheduler.fire(LIVE_SAMPLE_MS)).throw();
+    should(live.asked).have.length(1);
+  });
+
+  it('should send nothing and schedule nothing for a sample that lands after the close', async () => {
+    // Arrange — a slow read is in flight when the socket goes away.
+    let release: () => void = () => undefined;
+    const live = new ScriptedLive([reading(1, 10)]);
+    live.gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+    harness.scheduler.fire(0);
+    await Bun.sleep(0);
+
+    // Act
+    harness.handler.close();
+    release();
+    await Bun.sleep(0);
+
+    // Assert
+    should(harness.downstream.sent).be.empty();
+    should(harness.scheduler.waiting).be.empty();
+    should(harness.scheduler.armed.filter(delay => delay === LIVE_SAMPLE_MS)).be.empty();
+  });
+
+  it('should not stack reads: the next sample is scheduled only when the last one settles', async () => {
+    // Arrange
+    let release: () => void = () => undefined;
+    const live = new ScriptedLive([reading(1, 10)]);
+    live.gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+
+    // Act
+    harness.scheduler.fire(0);
+    await Bun.sleep(0);
+    const whileReading = harness.scheduler.waiting.filter(delay => delay === LIVE_SAMPLE_MS);
+    release();
+    await Bun.sleep(0);
+
+    // Assert
+    should(whileReading).be.empty();
+    should(harness.scheduler.waiting).containEql(LIVE_SAMPLE_MS);
+  });
+
+  it('should stop resampling once the transport refuses a live frame', async () => {
+    // Arrange — the peer went away, which the transport reports as a failed write.
+    const live = new ScriptedLive([reading(1, 10), reading(2, 20)]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+    harness.downstream.result = -1;
+
+    // Act
+    await harness.sampleNow(0);
+
+    // Assert — a refused write closed the handler; a timer on a socket nobody holds would leak.
+    should(harness.scheduler.waiting).be.empty();
+    should(harness.source.unsubscribed).equal(1);
+  });
+
+  it('should refuse a reader that fell behind rather than queueing live frames for it', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const harness = liveSubject(LIVE_SESSION, live);
+    await harness.handler.open();
+    harness.downstream.buffered = EVENT_STREAM_MAX_BUFFER_BYTES + 1;
+
+    // Act
+    await harness.sampleNow(0);
+
+    // Assert
+    should(harness.downstream.closes).deepEqual([[1013, 'event stream reader fell behind']]);
+    should(harness.scheduler.waiting).be.empty();
+  });
+
+  it('should never sample on a stream that did not ask for it', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const plain = liveSubject(SESSION, live);
+    const declined = liveSubject({ ...SESSION, live: false }, live);
+
+    // Act
+    await plain.handler.open();
+    await declined.handler.open();
+
+    // Assert — only the idle proof is armed, and the source is never asked.
+    should(plain.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS]);
+    should(declined.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS]);
+    should(live.asked).be.empty();
+  });
+
+  it('should never sample a fleet stream', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const harness = liveSubject(FLEET, live);
+
+    // Act
+    await harness.handler.open();
+
+    // Assert
+    should(harness.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS]);
+    should(live.asked).be.empty();
+  });
+
+  it('should carry no live frames when the daemon has no source for them', async () => {
+    // Arrange
+    const harness = liveSubject(LIVE_SESSION, undefined);
+
+    // Act
+    await harness.handler.open();
+
+    // Assert
+    should(harness.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS]);
+    should(harness.liveFrames()).be.empty();
+  });
+
+  it('should not start sampling when the replay failed', async () => {
+    // Arrange
+    const live = new ScriptedLive([reading(1, 10)]);
+    const harness = liveSubject(LIVE_SESSION, live, { failure: new Error('the journal is unreadable') });
+
+    // Act
+    await harness.handler.open();
+
+    // Assert
+    should(harness.downstream.closes).deepEqual([[1011, 'event evidence unavailable']]);
+    should(harness.scheduler.armed).be.empty();
+    should(live.asked).be.empty();
   });
 });

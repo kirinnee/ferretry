@@ -111,6 +111,20 @@ export const sessionIdleFrame = {
   scope: { kind: 'session', sessionId: sessionView.config.id, after: 1 },
 } satisfies FyEventStreamFrame;
 
+/** A working turn's live readout, as a `?live=1` session stream emits it. */
+export const liveFrame = {
+  kind: 'live',
+  live: {
+    sessionId: sessionView.config.id,
+    at: '2026-10-18T07:00:05.000Z',
+    turnStartedAt: '2026-10-18T07:00:00.000Z',
+    verb: 'Pontificating…',
+    outputTokens: 3_100,
+    inputTokens: 48_000,
+    outputSource: 'transcript',
+  },
+} satisfies FyEventStreamFrame;
+
 /** The fleet heartbeat, which invents no global cursor. */
 export const fleetIdleFrame = {
   kind: 'idle',

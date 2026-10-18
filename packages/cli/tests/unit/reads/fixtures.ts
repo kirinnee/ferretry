@@ -252,7 +252,7 @@ export class ScriptedReadsGateway implements IReadsGateway {
     for (const frame of this.script.frames ?? []) {
       if (signal?.aborted === true) return;
       if (frame.kind === 'event') onEvent(frame.event);
-      else onIdle?.(frame);
+      else if (frame.kind === 'idle') onIdle?.(frame);
     }
     if (this.script.blockStreamUntilAbort !== true) return;
     if (signal === undefined) throw new Error('the blocking stream needs a cancellation signal');

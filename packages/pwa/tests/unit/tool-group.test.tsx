@@ -6,6 +6,7 @@ import { extractToolSummary } from '../../src/lib/tool-extract.ts';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { selectionHeld, transcriptHeldStill, useLiveClock } from '../../src/hooks/use-live-clock.ts';
 import type { ToolCall } from '../../src/lib/session-screens.ts';
+import { manualScheduler } from '../support/live-scheduler.ts';
 import { render, run } from '../support/react.ts';
 
 const call = (key: string, name: string, input: unknown, overrides: Partial<ToolCall> = {}): ToolCall => ({
@@ -379,5 +380,39 @@ describe('useLiveClock', () => {
 
     expect(Number(frozen.root.findByType('span').children[0])).toBe(held);
     frozen.unmount();
+  });
+});
+
+describe('a running tool’s clock', () => {
+  test('ticks on the call’s own seconds under a fake clock, formatting minutes and hours', () => {
+    const started = Date.parse('2026-10-18T07:00:00.000Z');
+    const scheduler = manualScheduler(started + 4_400);
+    const group = render(
+      <ToolGroup
+        calls={[call('a', 'Bash', { command: 'bun test' }, { ts: '2026-10-18T07:00:00.000Z' })]}
+        isLast
+        live
+        scheduler={scheduler}
+      />,
+    );
+    expect(textOf(group)).toContain('— 4s');
+
+    scheduler.advance(599);
+    expect(textOf(group)).toContain('— 4s');
+    scheduler.advance(1);
+    expect(textOf(group)).toContain('— 5s');
+
+    scheduler.advance(60_000);
+    expect(textOf(group)).toContain('— 1m 5s');
+    scheduler.advance(3_600_000);
+    expect(textOf(group)).toContain('— 1h 01m');
+    run(() => group.unmount());
+  });
+
+  test('carries the one spinner mark instead of a bespoke icon', () => {
+    const group = render(<ToolGroup calls={[call('a', 'Bash', { command: 'bun test' })]} isLast live />);
+    expect(group.root.findAllByProps({ 'data-spinner': '' })).toHaveLength(1);
+    expect(iconsOf(group)).not.toContain('lucide-loader-circle');
+    run(() => group.unmount());
   });
 });
