@@ -356,6 +356,56 @@ describe('the composer in a real browser', () => {
     expect(idle.send.left).toBeGreaterThanOrEqual(idle.field.left + idle.field.width - 0.5);
   }, 60_000);
 
+  test("the composer takes the theme's own input and button tokens, so Neo's frame is not Studio's", async () => {
+    const read = async (theme: string) => {
+      const scene = await open({ editor: 'on', theme, busy: '1' }, { phone: true });
+      try {
+        return await scene.page.evaluate(() => {
+          // A token resolved by the engine itself: a probe styled with it, read back.
+          const resolve = (property: string, token: string) => {
+            const probe = document.createElement('div');
+            probe.style.setProperty('border-style', 'solid');
+            probe.style.setProperty(property, `var(${token})`);
+            document.body.append(probe);
+            const value = getComputedStyle(probe).getPropertyValue(property);
+            probe.remove();
+            return value;
+          };
+          const style = (selector: string) => getComputedStyle(document.querySelector(selector) as Element);
+          const row = style('.fy-composer-row');
+          const send = style('[data-composer-send]');
+          const interrupt = style('[data-composer-interrupt]');
+          return {
+            rowRadius: row.borderTopLeftRadius,
+            rowStroke: row.borderTopWidth,
+            sendRadius: send.borderTopLeftRadius,
+            sendShadow: send.boxShadow,
+            interruptStroke: interrupt.borderTopWidth,
+            radiusInput: resolve('border-top-left-radius', '--radius-input'),
+            radiusControl: resolve('border-top-left-radius', '--radius-control'),
+            strokeControl: resolve('border-top-width', '--stroke-control'),
+            shadowControl: resolve('box-shadow', '--shadow-control'),
+          };
+        });
+      } finally {
+        await scene.close();
+      }
+    };
+    const [studio, neo] = [await read('studio-light'), await read('neo-light')];
+    for (const [name, measured] of [
+      ['studio', studio],
+      ['neo', neo],
+    ] as const) {
+      expect({ name, radius: measured.rowRadius }).toEqual({ name, radius: measured.radiusInput });
+      expect({ name, stroke: measured.rowStroke }).toEqual({ name, stroke: measured.strokeControl });
+      expect({ name, radius: measured.sendRadius }).toEqual({ name, radius: measured.radiusControl });
+      expect({ name, shadow: measured.sendShadow }).toEqual({ name, shadow: measured.shadowControl });
+      expect({ name, stroke: measured.interruptStroke }).toEqual({ name, stroke: measured.strokeControl });
+    }
+    // Contrasting families really do draw different boxes: the guard would catch a pinned value.
+    expect(neo.rowStroke === studio.rowStroke && neo.rowRadius === studio.rowRadius).toBe(false);
+  }, 60_000);
+
   test('a dropped file still becomes an attachment', async () => {
     const scene = await open({ editor: 'on', theme: 'studio-light' });
     const { page } = scene;

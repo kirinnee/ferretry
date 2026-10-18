@@ -849,27 +849,39 @@ button.fy-receipt {
     width: 44px;
   }
 }
+/* THE BOX IS THE THEME'S INPUT. Every visual fact — stroke, radius, outline, surface, inset rule and the
+   focus ring — is the family's own input token (`.kt-input` in styles/index.css reads the same ones), so
+   Neo's thick black frame and square corners, Phosphor's glow and Studio's soft round box all reach the
+   composer. It used to pin a 1px border and a 12px radius, and in Neo it was the one soft rounded box
+   on a page of hard edges. */
 .fy-composer-row {
   align-items: flex-end;
-  background: var(--bg, var(--fy-surface));
-  border: 1px solid var(--fy-border);
-  border-radius: 12px;
+  background: var(--surface, var(--fy-surface));
+  border: var(--stroke-control, 1px) solid var(--border-strong, var(--fy-border));
+  border-radius: var(--radius-input, 12px);
+  box-shadow: var(--rule-inset, none);
   display: flex;
   gap: 4px;
+  outline: var(--outline-always, none);
+  outline-offset: calc(-1 * var(--stroke-control, 1px));
   padding: 4px;
 }
 .fy-composer-row:focus-within {
-  border-color: var(--border-strong, var(--fy-accent));
+  border-color: var(--accent, var(--fy-accent));
+  box-shadow:
+    0 0 0 3px var(--ring, transparent),
+    var(--focus-shadow, 0 0 #0000);
 }
 .fy-composer[data-composer-dropping] .fy-composer-row {
   border-color: var(--fy-accent);
   border-style: dashed;
 }
+/* The quiet controls are the theme's ghost button: no resting frame, the control radius. */
 .fy-composer-icon {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-control, 9px);
   color: var(--fy-muted);
   cursor: pointer;
   display: inline-flex;
@@ -889,11 +901,15 @@ button.fy-receipt {
   cursor: not-allowed;
   opacity: 0.5;
 }
+/* SEND IS THE THEME'S PRIMARY BUTTON (`.kt-btn[data-variant='primary']`): its stroke, radius, clip,
+   offset shadow and press translate, so a Neo Send is a hard-shadowed block like every other Neo button. */
 .fy-composer-send {
   align-items: center;
-  background: var(--fy-accent);
-  border: 0;
-  border-radius: 9px;
+  background: var(--accent, var(--fy-accent));
+  border: var(--stroke-control, 0) solid var(--accent, var(--fy-accent));
+  border-radius: var(--radius-control, 9px);
+  box-shadow: var(--shadow-control, none);
+  clip-path: var(--clip-control, none);
   color: var(--accent-fg, #fff);
   cursor: pointer;
   display: inline-flex;
@@ -901,6 +917,15 @@ button.fy-receipt {
   height: 36px;
   justify-content: center;
   width: 36px;
+}
+.fy-composer-send:hover:not(:disabled) {
+  background: var(--accent-strong, var(--fy-accent));
+  border-color: var(--accent-strong, var(--fy-accent));
+}
+.fy-composer-send:active:not(:disabled),
+.fy-composer-interrupt:active:not(:disabled) {
+  box-shadow: var(--shadow-active, none);
+  translate: var(--press-translate, 0) var(--press-translate, 0);
 }
 .fy-composer-send:disabled {
   cursor: not-allowed;
@@ -1132,9 +1157,11 @@ button.fy-receipt {
    so it never reads as the ordinary send. */
 .fy-composer-interrupt {
   align-items: center;
-  background: transparent;
-  border: 1px solid var(--warn, var(--fy-accent));
-  border-radius: 9px;
+  background: var(--surface, transparent);
+  border: var(--stroke-control, 1px) solid var(--warn, var(--fy-accent));
+  border-radius: var(--radius-control, 9px);
+  box-shadow: var(--shadow-control, none);
+  clip-path: var(--clip-control, none);
   color: var(--warn, var(--fy-accent));
   cursor: pointer;
   display: inline-flex;
@@ -1348,8 +1375,8 @@ button.fy-receipt {
 }
 .fy-composer-chip {
   background: transparent;
-  border: 1px solid var(--fy-border);
-  border-radius: 8px;
+  border: var(--stroke, 1px) solid var(--fy-border);
+  border-radius: var(--radius-control, 8px);
   color: var(--fy-muted);
   font-size: 12px;
   min-height: 28px;
