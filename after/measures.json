@@ -1,0 +1,466 @@
+{
+  "studio-light": {
+    "session-idle": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1253,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "picker": {
+      "open": true,
+      "top": 344,
+      "bottom": 844,
+      "left": 0,
+      "right": 390,
+      "visible": "visible"
+    },
+    "session-working": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "session-sending": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": null
+    },
+    "table-page": {
+      "docWidth": 390
+    },
+    "drawer": [
+      {
+        "sel": "div.fy-transcript",
+        "client": 594,
+        "scroll": 1262,
+        "content": 1262
+      },
+      {
+        "sel": "div.fy-sbar__list.scroll-thin",
+        "client": 645,
+        "scroll": 645,
+        "content": 482
+      }
+    ],
+    "sessions": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 555,
+        "scroll": 555,
+        "content": 280
+      }
+    ],
+    "sessions-full": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 555,
+        "scroll": 859,
+        "content": 859
+      }
+    ],
+    "insights": [
+      {
+        "sel": "main[Global analytics].min-h-0.flex-1",
+        "client": 679,
+        "scroll": 1367,
+        "content": 1367
+      }
+    ],
+    "settings": [
+      {
+        "sel": "main.scroll-thin.relative",
+        "client": 844,
+        "scroll": 844,
+        "content": 720
+      }
+    ]
+  },
+  "studio-dark": {
+    "session-idle": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1253,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "picker": {
+      "open": true,
+      "top": 344,
+      "bottom": 844,
+      "left": 0,
+      "right": 390,
+      "visible": "visible"
+    },
+    "session-working": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "session-sending": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": null
+    },
+    "table-page": {
+      "docWidth": 390
+    },
+    "drawer": [
+      {
+        "sel": "div.fy-transcript",
+        "client": 594,
+        "scroll": 1262,
+        "content": 1262
+      },
+      {
+        "sel": "div.fy-sbar__list.scroll-thin",
+        "client": 645,
+        "scroll": 645,
+        "content": 482
+      }
+    ],
+    "sessions": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 555,
+        "scroll": 555,
+        "content": 280
+      }
+    ],
+    "sessions-full": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 555,
+        "scroll": 859,
+        "content": 859
+      }
+    ],
+    "insights": [
+      {
+        "sel": "main[Global analytics].min-h-0.flex-1",
+        "client": 679,
+        "scroll": 1367,
+        "content": 1367
+      }
+    ],
+    "settings": [
+      {
+        "sel": "main.scroll-thin.relative",
+        "client": 844,
+        "scroll": 844,
+        "content": 720
+      }
+    ]
+  },
+  "geist-light": {
+    "session-idle": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1253,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "picker": {
+      "open": true,
+      "top": 344,
+      "bottom": 844,
+      "left": 0,
+      "right": 390,
+      "visible": "visible"
+    },
+    "session-working": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "session-sending": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": null
+    },
+    "table-page": {
+      "docWidth": 390
+    },
+    "drawer": [
+      {
+        "sel": "div.fy-transcript",
+        "client": 594,
+        "scroll": 1262,
+        "content": 1262
+      },
+      {
+        "sel": "div.fy-sbar__list.scroll-thin",
+        "client": 637,
+        "scroll": 637,
+        "content": 471
+      }
+    ],
+    "sessions": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 558,
+        "scroll": 558,
+        "content": 280
+      }
+    ],
+    "sessions-full": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 558,
+        "scroll": 899,
+        "content": 899
+      }
+    ],
+    "insights": [
+      {
+        "sel": "main[Global analytics].min-h-0.flex-1",
+        "client": 679,
+        "scroll": 1456,
+        "content": 1456
+      }
+    ],
+    "settings": [
+      {
+        "sel": "main.scroll-thin.relative",
+        "client": 844,
+        "scroll": 844,
+        "content": 778
+      }
+    ]
+  },
+  "geist-dark": {
+    "session-idle": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1253,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "picker": {
+      "open": true,
+      "top": 344,
+      "bottom": 844,
+      "left": 0,
+      "right": 390,
+      "visible": "visible"
+    },
+    "session-working": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": {
+        "width": 264,
+        "height": 96
+      }
+    },
+    "session-sending": {
+      "bar": {
+        "top": 0,
+        "height": 57
+      },
+      "tabs": {
+        "top": 57,
+        "height": 33
+      },
+      "transcriptViewport": 570,
+      "transcriptContent": 1262,
+      "composer": {
+        "top": 660,
+        "height": 184
+      },
+      "field": null
+    },
+    "table-page": {
+      "docWidth": 390
+    },
+    "drawer": [
+      {
+        "sel": "div.fy-transcript",
+        "client": 594,
+        "scroll": 1262,
+        "content": 1262
+      },
+      {
+        "sel": "div.fy-sbar__list.scroll-thin",
+        "client": 637,
+        "scroll": 637,
+        "content": 471
+      }
+    ],
+    "sessions": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 558,
+        "scroll": 558,
+        "content": 280
+      }
+    ],
+    "sessions-full": [
+      {
+        "sel": "div.min-h-0.flex-1",
+        "client": 558,
+        "scroll": 899,
+        "content": 899
+      }
+    ],
+    "insights": [
+      {
+        "sel": "main[Global analytics].min-h-0.flex-1",
+        "client": 679,
+        "scroll": 1456,
+        "content": 1456
+      }
+    ],
+    "settings": [
+      {
+        "sel": "main.scroll-thin.relative",
+        "client": 844,
+        "scroll": 844,
+        "content": 778
+      }
+    ]
+  }
+}
