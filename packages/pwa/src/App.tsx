@@ -93,6 +93,7 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useFleetPoll } from './hooks/use-fleet-poll.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
@@ -1549,6 +1550,9 @@ export function AppShell() {
     pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
       ? undefined
       : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);
+  // The machine on screen tells this browser when its configuration moves, so no screen showing it
+  // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
+  useConfigChangeFeed(store, connection);
   /*
    * A PASSKEY PROMPT COMES FROM THE MACHINE ON SCREEN: the one the route names, or — on setup and the
    * picker, which name none — the one just paired or chosen. Every other machine's background reads wait

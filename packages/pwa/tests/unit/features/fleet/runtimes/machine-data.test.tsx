@@ -13,6 +13,7 @@ import {
 import { type DaemonConnection, daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { CREDENTIALS, DATA, READS, STUDIO, scripted } from '../account-support.ts';
+import { configChangeHarness } from '../../../config-change-support.tsx';
 
 const OTHER = daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceId: 'u' });
 
@@ -267,6 +268,87 @@ describe('useMachineData', () => {
     expect(view.container.querySelector('p')?.textContent).toBe('Other is asleep.');
     expect(view.container.querySelector('p')?.getAttribute('data-machine')).toBe('');
     await view.unmount();
+  });
+});
+
+function RuntimeNamesHost({
+  factory,
+  probe,
+}: {
+  readonly factory: (connection: DaemonConnection) => Promise<FleetClient>;
+  readonly probe: Probe;
+}) {
+  const result = useMachineData(STUDIO, factory);
+  probe.current = result;
+  return (
+    <ul data-state={result.state.kind}>
+      {result.data?.runtimes.runtimes.map(entry => (
+        <li key={entry.name}>{entry.name}</li>
+      ))}
+    </ul>
+  );
+}
+
+describe('useMachineData when the machine says its configuration moved', () => {
+  const FEWER: MachineData = { ...DATA, runtimes: { ...DATA.runtimes, runtimes: DATA.runtimes.runtimes.slice(0, 1) } };
+  const names = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll('li')].map(item => item.textContent ?? '');
+
+  const mountLive = async (script: (read: number) => FleetClient) => {
+    const harness = configChangeHarness(STUDIO.daemonId);
+    const probe: Probe = { current: null };
+    let reads = 0;
+    const factory = async (): Promise<FleetClient> => {
+      reads += 1;
+      return script(reads);
+    };
+    const view = await mount(harness.wrap(<RuntimeNamesHost factory={factory} probe={probe} />));
+    await settle();
+    return { harness, view, reads: () => reads };
+  };
+
+  it('shows a runtime another device added, without a reload', async () => {
+    const live = await mountLive(read => scripted(read === 1 ? READS(FEWER) : READS()));
+    expect(names(live.view.container)).toEqual(['claude-default']);
+    expect(live.reads()).toBe(1);
+
+    await live.harness.move(['runtimes']);
+    await settle();
+
+    expect(live.reads()).toBe(2);
+    expect(names(live.view.container)).toEqual(DATA.runtimes.runtimes.map(entry => entry.name));
+    await live.view.unmount();
+  });
+
+  it('reads again for a change to each of the four things it shows', async () => {
+    const live = await mountLive(() => scripted(READS()));
+    for (const [index, kind] of (['credentials', 'runtimes', 'profiles', 'components'] as const).entries()) {
+      await live.harness.move([kind]);
+      await settle();
+      expect(live.reads()).toBe(index + 2);
+    }
+    await live.view.unmount();
+  });
+
+  it('leaves the screen alone when something it does not show moved', async () => {
+    const live = await mountLive(read => scripted(read === 1 ? READS(FEWER) : READS()));
+    await live.harness.move(['warden']);
+    await settle();
+    expect(live.reads()).toBe(1);
+    expect(names(live.view.container)).toEqual(['claude-default']);
+    await live.view.unmount();
+  });
+
+  it('keeps what it showed, beside the sentence, when the read after the change fails', async () => {
+    const live = await mountLive(read =>
+      scripted(read === 1 ? READS(FEWER) : FAILING(new FyHttpError('The machine said no.', 500, undefined))),
+    );
+    await live.harness.move(['runtimes']);
+    await settle();
+    expect(live.reads()).toBe(2);
+    expect(live.view.container.querySelector('ul')?.getAttribute('data-state')).toBe('failed');
+    expect(names(live.view.container)).toEqual(['claude-default']);
+    await live.view.unmount();
   });
 });
 

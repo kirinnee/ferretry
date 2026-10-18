@@ -526,6 +526,13 @@ const appStore = async (
         },
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
+        // The configuration stream the shell keeps open for the machine on screen: like the live feed
+        // below, it runs until it is cancelled, and a cancelled one ends.
+        configChanges: async (_onFrame: unknown, signal?: AbortSignal) =>
+          await new Promise<void>(resolve => {
+            if (signal?.aborted === true) resolve();
+            else signal?.addEventListener('abort', () => resolve(), { once: true });
+          }),
         /*
          * The live event feed the session route subscribes to. It never resolves and never rejects:
          * a real one runs for the life of the workspace, and a fake that RESOLVED would tell the

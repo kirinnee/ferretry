@@ -10,7 +10,7 @@
 import { type VoiceEngine, VoiceEngineSchema } from '@ferretry/protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { useDaemonClient } from '../../../lib/store.tsx';
+import { useConfigChangeCounter, useDaemonClient } from '../../../lib/store.tsx';
 import { readConfigFile } from '../../config-files/config-files-api.ts';
 
 export const VOICE_FILE = 'voice.yaml';
@@ -32,8 +32,9 @@ export const withMachineVoiceEngine = (text: string, engine: VoiceEngine): strin
 };
 
 /**
- * The machine default for one paired machine, read once per machine; `null` while unread, when the file
- * names none, or when it could not be read — a device then simply has no default, as before.
+ * The machine default for one paired machine, read once per machine and again whenever its `voice.yaml`
+ * moves (from setup on another device, `fy`, or a hand edit); `null` while unread, when the file names
+ * none, or when it could not be read — a device then simply has no default, as before.
  */
 export function useMachineVoiceEngine(daemon: DaemonConnection | undefined): VoiceEngine | null {
   const createClient = useDaemonClient();
@@ -42,6 +43,8 @@ export function useMachineVoiceEngine(daemon: DaemonConnection | undefined): Voi
   const latest = useRef(daemon);
   latest.current = daemon;
   const daemonId = daemon?.daemonId;
+  const moved = useConfigChangeCounter(daemonId ?? ('' as DaemonConnection['daemonId']), ['voice']);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `moved` is the re-read trigger
   useEffect(() => {
     const target = latest.current;
     if (daemonId === undefined || target === undefined) return;
@@ -55,6 +58,6 @@ export function useMachineVoiceEngine(daemon: DaemonConnection | undefined): Voi
     return () => {
       live = false;
     };
-  }, [createClient, daemonId]);
+  }, [createClient, daemonId, moved]);
   return engine !== null && engine.daemonId === daemonId ? engine.engine : null;
 }

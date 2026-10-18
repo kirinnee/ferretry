@@ -4,8 +4,9 @@
  *
  * One read of all three, because every page on these tabs needs at least two of them — a component's
  * "Used by" names profiles, a profile's "Where it is used" names runtimes — and a pair of reads that
- * disagreed would count the same thing twice differently. After any change the whole catalogue is read
- * again; nothing is patched in place, so what the page shows is always what the daemon answered.
+ * disagreed would count the same thing twice differently. After any change — made here, or anywhere
+ * the machine says its configuration moved — the whole catalogue is read again; nothing is patched in
+ * place, so what the page shows is always what the daemon answered.
  */
 
 import type {
@@ -17,6 +18,7 @@ import type {
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
+import { useConfigChangeEffect } from '../../../lib/store.tsx';
 import { readFleetComponents, readFleetProfiles, readFleetRuntimes } from '../catalog-api.ts';
 import type { FleetClient, FleetClientFactory } from '../fleet-client.ts';
 
@@ -57,6 +59,9 @@ export async function readAccountCatalog(client: () => Promise<FleetClient>): Pr
 export const allComponents = (catalog: AccountCatalog): readonly FleetComponentView[] =>
   catalog.components.kinds.flatMap(group => group.components);
 
+/** What the three reads show. */
+const CATALOG_KINDS = ['components', 'profiles', 'runtimes'] as const;
+
 export interface UseAccountCatalog {
   readonly read: AccountCatalogRead;
   /** Read again; answers the new read so a caller can pick what it just made. */
@@ -77,5 +82,13 @@ export function useAccountCatalog(connection: DaemonConnection, createClient: Fl
   useEffect(() => {
     void reload();
   }, [reload]);
+  // Changed anywhere else and read again; a re-read that fails keeps the catalogue on screen.
+  useConfigChangeEffect(connection.daemonId, CATALOG_KINDS, () => {
+    generation.current += 1;
+    const mine = generation.current;
+    void readAccountCatalog(() => createClient(connection)).then(next => {
+      if (mine === generation.current && next.kind === 'ready') setRead(next);
+    });
+  });
   return { read, reload };
 }

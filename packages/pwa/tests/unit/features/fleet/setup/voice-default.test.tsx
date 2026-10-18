@@ -15,6 +15,7 @@ import { type Mounted, mount } from '../../../../support/dom.ts';
 import { runAsync } from '../../../../support/react.ts';
 import { settleUntil } from '../../../../support/settle.ts';
 import { alpha, fileView } from '../../config-files/config-files-support.ts';
+import { configChangeHarness } from '../../../config-change-support.tsx';
 
 const beta = daemonConnection({
   daemonId: 'beta',
@@ -224,5 +225,65 @@ describe('useMachineVoiceEngine', () => {
     });
     await settleUntil(() => reads.length === 2, "beta's read", runAsync);
     expect(engineShown()).toBe('null');
+  });
+
+  it('reads voice.yaml again after the machine says its voice moved, and returns the new engine', async () => {
+    // Arrange: a machine whose file names parakeet, shown on a screen under a live change store.
+    const reads: Read[] = [];
+    let text = 'defaultEngine: parakeet\n';
+    const harness = configChangeHarness(alpha.daemonId);
+    shown = await mount(
+      harness.wrap(
+        probe(
+          alpha,
+          fakeFactory(() => text, reads),
+        ),
+      ),
+    );
+    await settleUntil(() => engineShown() === 'parakeet', 'the machine default to arrive', runAsync);
+    expect(reads).toHaveLength(1);
+
+    // Act: a hand edit changes defaultEngine, and the machine reports its voice moved.
+    text = 'defaultEngine: browser\n';
+    await harness.move(['voice']);
+
+    // Assert: the file is read again and the screen shows the new engine without a reload.
+    await settleUntil(() => engineShown() === 'browser', 'the new machine default to arrive', runAsync);
+    expect(reads).toHaveLength(2);
+  });
+
+  it('does not read again when only another kind of configuration moved', async () => {
+    const reads: Read[] = [];
+    const harness = configChangeHarness(alpha.daemonId);
+    shown = await mount(
+      harness.wrap(
+        probe(
+          alpha,
+          fakeFactory(() => 'defaultEngine: parakeet\n', reads),
+        ),
+      ),
+    );
+    await settleUntil(() => engineShown() === 'parakeet', 'the machine default to arrive', runAsync);
+
+    await harness.move(['runtimes']);
+
+    expect(reads).toHaveLength(1);
+    expect(engineShown()).toBe('parakeet');
+  });
+
+  it('works without a machine under a store provider, even when a change arrives', async () => {
+    const reads: Read[] = [];
+    const harness = configChangeHarness(alpha.daemonId);
+    shown = await mount(
+      harness.wrap(
+        probe(
+          undefined,
+          fakeFactory(() => 'defaultEngine: parakeet\n', reads),
+        ),
+      ),
+    );
+    await harness.move(['voice']);
+    expect(engineShown()).toBe('null');
+    expect(reads).toEqual([]);
   });
 });

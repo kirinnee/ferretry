@@ -41,13 +41,30 @@ class RecordingFleetEvents implements FleetEventStreamSubsystem {
   }
 }
 
+/** Counts the configuration streams it was asked for, instead of following a ledger. */
+class RecordingConfigChanges {
+  opened = 0;
+
+  handler(downstream: SocketDownstream): SocketHandler {
+    this.opened += 1;
+    return {
+      open: async () => {
+        downstream.send('config');
+      },
+      fromClient: () => undefined,
+      close: () => undefined,
+    };
+  }
+}
+
 function fixture(events: RecordingFleetEvents = new RecordingFleetEvents()) {
+  const configChanges = new RecordingConfigChanges();
   const dispatcher = new ApiSocketDispatcher(
-    new ApiRouter([...fleetEventSocketRoutes(events, sessionDirectory([sessionView('s1')]))]),
+    new ApiRouter([...fleetEventSocketRoutes(events, sessionDirectory([sessionView('s1')]), configChanges)]),
     CREDENTIALS,
     NO_GOVERNED_ROUTES_GUARD,
   );
-  return { events, dispatcher };
+  return { events, dispatcher, configChanges };
 }
 
 /** A socket that discards, for cases interested in the scope the attachment was bound to. */
@@ -76,6 +93,64 @@ function refusedCode(decision: Awaited<ReturnType<ApiSocketDispatcher['upgrade']
 }
 
 describe('the mounted fleet event feed', () => {
+  it('should open the configuration stream for the config topic, and no session stream', async () => {
+    // Arrange
+    const { events, dispatcher, configChanges } = fixture();
+    const sent: string[] = [];
+    const downstream: SocketDownstream = {
+      send: frame => sent.push(String(frame)),
+      close: () => undefined,
+      bufferedBytes: () => 0,
+    };
+
+    // Act
+    const decision = await dispatcher.upgrade(
+      request({ path: '/v1/events', query: [['topic', 'config']], headers: human }),
+    );
+    if (decision.outcome === 'accepted') await (await decision.attach(downstream)).open();
+
+    // Assert — the topic is its own stream: no session or fleet tail is replayed into it.
+    should(decision.outcome).equal('accepted');
+    should(configChanges.opened).equal(1);
+    should(sent).deepEqual(['config']);
+    should(events.scopes).be.empty();
+  });
+
+  it('should refuse a topic it does not serve, and a config topic with a session filter', async () => {
+    // Arrange
+    const { dispatcher, configChanges } = fixture();
+
+    // Act
+    const unknown = await dispatcher.upgrade(
+      request({ path: '/v1/events', query: [['topic', 'sessions']], headers: human }),
+    );
+    const filtered = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['topic', 'config'],
+          ['sessionId', 's1'],
+        ],
+        headers: human,
+      }),
+    );
+    const twice = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['topic', 'config'],
+          ['topic', 'config'],
+        ],
+        headers: human,
+      }),
+    );
+
+    // Assert — a filter the configuration stream ignores would promise something it does not do.
+    should([unknown, filtered, twice].map(refusedStatus)).deepEqual([400, 400, 400]);
+    should(new Set([unknown, filtered, twice].map(refusedCode))).deepEqual(new Set(['invalid_query']));
+    should(configChanges.opened).equal(0);
+  });
+
   it('should follow the whole fleet when no session is named', async () => {
     // Arrange
     const { events, dispatcher } = fixture();
