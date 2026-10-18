@@ -438,6 +438,24 @@ describe('the file send turn store', () => {
     should(again).equal(first);
     should(await readFile(first, 'utf8')).equal('a long payload\n');
   });
+
+  it('should read a hand-off back by its stem, from the folder each kind is written to', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-turns-');
+    const subject = new FileSendTurnStore(new FileResumeTurnStore(() => home), () => home);
+    await subject.writeTurn(ID, 8, 'the turn\n');
+    await subject.writeQueuedPayload(ID, 'send-1', 'the queued one');
+
+    // Act
+    const turn = await subject.readHandoff(ID, 'turn-008');
+    const queued = await subject.readHandoff(ID, 'queued-send-1');
+    const gone = await subject.readHandoff(ID, 'turn-009');
+
+    // Assert
+    should(turn).equal('the turn\n');
+    should(queued).equal('the queued one\n');
+    should(gone).be.undefined();
+  });
 });
 
 describe('the resume-backed reviver', () => {

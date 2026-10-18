@@ -5,6 +5,8 @@ import {
   SendRequestSchema,
   type SendResult,
   SendRetryRequestSchema,
+  type SessionHandoff,
+  SessionHandoffNameSchema,
   type SessionView,
 } from '@ferretry/protocol';
 import { PEER_ACTOR_PREFIX } from '../../api/actor.ts';
@@ -78,6 +80,8 @@ export interface SessionSendSubsystem {
   sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
   /** Re-attempts one send under its original id, as a person asked. */
   retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord>;
+  /** What the person sent in one hand-off document (`turn-008`, `queued-<send id>`). */
+  handoff(sessionId: string, name: string): Promise<SessionHandoff>;
 }
 
 /** A send as the route hands it over: the client's body, plus the two facts only the route knows. */
@@ -250,6 +254,19 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       noStore: true,
       handle: async context =>
         jsonResponse(await subsystem.sendStatus(pathSessionId(context), pathSendId(context)).catch(refuse)),
+    },
+    // The message behind a pointer the transcript records. It is the same words the send row above
+    // carries — the turn document is where a send writes them — so it takes the same minimum.
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/handoffs/:name',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const name = SessionHandoffNameSchema.safeParse(decodeParameter(context.params.get('name') ?? ''));
+        if (!name.success) throw new ApiError(400, 'the hand-off name in the path is not usable', 'invalid_handoff');
+        return jsonResponse(await subsystem.handoff(pathSessionId(context), name.data).catch(refuse));
+      },
     },
     {
       method: 'POST',

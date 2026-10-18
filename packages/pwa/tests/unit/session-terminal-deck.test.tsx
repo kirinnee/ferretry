@@ -544,6 +544,58 @@ describe('SessionTerminalDeck pane wiring', () => {
     run(() => page.unmount());
   });
 
+  test('reopens at once when the daemon is reachable again, keeping the pane it already drew', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const listeners = new Set<() => void>();
+    const recovered: string[] = [];
+    const dependencies = {
+      ...deck.dependencies,
+      onRecovered: (daemon: typeof alpha, listener: () => void) => {
+        recovered.push(daemon.daemonId);
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={dependencies} scope={scopeAlpha} />);
+    await settle();
+    // Live: a recovery has nothing to do.
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('open');
+      for (const listener of [...listeners]) listener();
+      await Promise.resolve();
+    });
+    expect(deck.sockets).toHaveLength(1);
+
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('close', { code: 1006 });
+      await Promise.resolve();
+    });
+    expect(json(page)).toContain('reconnecting');
+
+    // Act — the connection model says the daemon answered again.
+    await runAsync(async () => {
+      for (const listener of [...listeners]) listener();
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert — a second stream, opened now rather than after the backoff, for this daemon.
+    expect(deck.sockets).toHaveLength(2);
+    expect(recovered.every(id => id === 'alpha')).toBe(true);
+    run(() => page.unmount());
+    expect(listeners.size).toBe(0);
+  });
+
+  test('carries a recovery port through the browser dependencies only when one is given', () => {
+    const opener = async () => {
+      throw new Error('unused');
+    };
+    const fetcher = async () => new Response(null);
+    expect(browserTerminalDeckDependencies(fetcher, opener).onRecovered).toBeUndefined();
+    const port = () => () => undefined;
+    expect(browserTerminalDeckDependencies(fetcher, opener, port).onRecovered).toBe(port);
+  });
+
   test('reports a create, rename or close the daemon refused', async () => {
     const refuse = async (): Promise<never> => {
       throw new Error('terminal capacity reached');

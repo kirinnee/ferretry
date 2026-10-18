@@ -13,6 +13,7 @@ import { Composer } from '../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../src/components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../src/components/files-tab.tsx';
+import { HandoffSourceProvider } from '../../src/components/handoff-message.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
@@ -388,6 +389,36 @@ describe('SessionChatPage', () => {
     expect(page.root.findByType(SessionTopBar).props.onToggleInfo).toBeUndefined();
     expect(barAction(page.root, 'Interrupt turn').children.join('')).toBe('Interrupt');
     expect(barAction(page.root, 'Stop session').children.join('')).toBe('Stop');
+    run(() => page.unmount());
+  });
+
+  test('reads a message handed over through a file from this session, through the paired client', async () => {
+    const asked: [string, string][] = [];
+    const handoff = { name: 'turn-008', message: 'look at this', attachments: [] };
+    const daemon = async () =>
+      ({
+        handoff: async (id: string, name: string) => {
+          asked.push([id, name]);
+          return handoff;
+        },
+      }) as unknown as FyApiClient;
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+      daemon,
+    );
+    const source = page.root.findByType(HandoffSourceProvider).props.source;
+
+    expect(source.daemon).toBe(alpha);
+    expect(source.sessionId).toBe('shared');
+    expect(await source.read('turn-008')).toEqual(handoff);
+    expect(asked).toEqual([['shared', 'turn-008']]);
     run(() => page.unmount());
   });
 
@@ -1839,6 +1870,62 @@ describe('SessionChatPage', () => {
         .findAllByProps({ role: 'status' })
         .filter(node => textOf(node).includes('daemon did not answer'));
       expect(statuses).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('says nothing about an outage while the machine is reconnecting', () => {
+    const outage =
+      'Session workspace issue: Transcript: could not reach fyd (No configured connection worked: direct was not reachable (1006); hosted relay was not reachable (1006))';
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        connectionState={{
+          kind: 'reconnecting',
+          since: 0,
+          attempt: 2,
+          nextAttemptAt: null,
+          failures: [{ label: 'Direct', detail: 'direct was not reachable (1006)' }],
+          cause: 'unknown',
+          stalled: false,
+        }}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        refreshError={outage}
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(JSON.stringify(page.toJSON())).not.toContain('could not reach fyd');
+      expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
+      expect(page.root.findByType(Composer).props.connectionLive).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('keeps a refresh error that is not an outage to one line, with the whole sentence one tap away', () => {
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        connectionState={{ kind: 'connected' }}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        refreshError="Workspace refresh issue: the daemon did not answer."
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      const issue = page.root.findByProps({ 'data-session-issue': '' });
+      expect(issue.type).toBe('details');
+      expect(textOf(issue)).toBe('Workspace refresh issue: the daemon did not answer.');
+      expect(issue.findByType('summary').props.className).toContain('truncate');
+      expect(page.root.findByType(Composer).props.connectionLive).toBe(true);
     } finally {
       run(() => page.unmount());
     }

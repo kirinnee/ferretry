@@ -57,7 +57,7 @@ const TURN_PROMPT_FERRETRY = `Read the file /home/kirin/.ferretry/state/sessions
 
 const TURN_PROMPT_MAC = `Read the file /Users/erng/agents/abc-123/turns/turn-042.md now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
 
-const TURN_PROMPT_WIN = `Read the file C:\\Users\\erng\\state\\abc-123\\turns\\turn-002.md now, then carefully follow every instruction inside it.`;
+const TURN_PROMPT_WIN = `Read the file C:\\Users\\erng\\state\\abc-123\\turns\\turn-002.md now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
 
 const LIVENESS = `Liveness check: no output, pane change, or subprocess activity has been observed for several minutes. If you are alive, continue the task now.`;
 const AUTOMODE = `Automode: do not wait for user input. Make the best reasonable decision, continue the task, and write the required done marker when complete.`;

@@ -64,6 +64,13 @@ using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It publishes to the Wo
 custom origin instead. Manual `enable`, `disable` and `metrics` operations talk to the
 already-deployed control object; they do not deploy a release.
 
+**A deploy drops every live session**: it restarts the Worker and its Durable Objects, so every
+daemon and every browser on the relay reconnects. A push to `main` therefore deploys only when it
+touches the paths the Worker is built from, and only when the built bundle's fingerprint
+(`scripts/ci/relay-bundle-fingerprint.sh`, stamped on each version as its tag) differs from the
+version Cloudflare is serving. The operator secret ships with the deploy (`--secrets-file`) rather
+than as a second version. A manual `deploy` always publishes.
+
 The operator bearer is a domain-separated digest of the GitHub Cloudflare token, installed as a
 Worker secret, so neither credential is present in this repository or in a browser bundle. **After
 rotating `CLOUDFLARE_API_TOKEN`, run the `deploy` operation once** to reinstall the derived secret —

@@ -1537,6 +1537,25 @@ describe('daemon boot lifecycle', () => {
     const launched = launcher.launched[0];
     should(launched?.cwd).equal(home);
     should(launched?.command.slice(0, 2)).deepEqual([executable, '--session-id']);
+    // It may READ exactly this session's own hand-off folders without a permission prompt — its turn
+    // documents, its queued messages, its starting attachments and the copies a send delivers — and
+    // the launch grants nothing broader: no other folder, and no write anywhere.
+    const own = join(home, 'state', 'sessions', startedBody.config.id);
+    const grants = (launched?.command ?? []).filter(argument => argument.startsWith('--allowedTools'));
+    should(grants.slice(0, 3)).deepEqual([
+      `--allowedTools=Read(/${join(own, 'turns')}/**)`,
+      `--allowedTools=Read(/${join(own, 'channel')}/**)`,
+      `--allowedTools=Read(/${join(own, 'attachments')}/**)`,
+    ]);
+    // The attachment store's tree is keyed by this daemon's pairing identity, then by the session.
+    const store = join(home, 'state', 'attachments');
+    should(grants).have.length(4);
+    should(grants[3]?.startsWith(`--allowedTools=Read(/${store}/`)).be.true();
+    should(grants[3]?.endsWith(`/${startedBody.config.id}/**)`)).be.true();
+    should(grants[3]?.slice(`--allowedTools=Read(/${store}/`.length).split('/')).have.length(3);
+    should(
+      launched?.command.some(argument => argument === '--add-dir' || argument.startsWith('--add-dir=')),
+    ).be.false();
     // The transcript record is on the session's own document, in the same write as everything else
     // the start decided — and it names the exact file the harness will write.
     const provenance = startedBody.config.transcript;

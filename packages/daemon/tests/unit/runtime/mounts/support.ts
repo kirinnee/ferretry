@@ -11,6 +11,7 @@ import {
   type PinSnapshot,
   type SecretName,
   type SendRecord,
+  type SessionHandoff,
   type SendResult,
   SessionConfigSchema,
   SessionStateSchema,
@@ -1413,6 +1414,16 @@ export class FakeSessionSend implements SessionSendSubsystem {
   async retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord> {
     this.retries.push([sessionId, sendId, force]);
     return await this.sendStatus(sessionId, sendId);
+  }
+
+  /** Hand-off documents by name; a name not here is a document that is gone. */
+  handoffs: Record<string, SessionHandoff> = {};
+
+  async handoff(sessionId: string, name: string): Promise<SessionHandoff> {
+    this.refuse(sessionId);
+    const handoff = this.handoffs[name];
+    if (handoff === undefined) throw new SessionSendError('not_found', `no hand-off ${name}`);
+    return handoff;
   }
 
   async interrupt(sessionId: string): Promise<SessionView> {

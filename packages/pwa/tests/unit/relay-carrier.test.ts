@@ -15,7 +15,7 @@ import {
   OLDER_DAEMON_SENTENCE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
 } from '@ferretry/protocol';
-import { HEARTBEAT_GRACE_SECONDS, HEARTBEAT_SECONDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
+import { HEARTBEAT_GRACE_SECONDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from '../../src/lib/device-keys.ts';
@@ -28,6 +28,7 @@ import {
   DEVICE_NOT_ACCEPTED_SENTENCE,
   DIRECT_SESSION_DEADLINE_MS,
   DeviceNotAcceptedError,
+  KEEPALIVE_INTERVAL_MS,
   openRelaySession,
   relayResponse,
   relayTunnelRequest,
@@ -324,8 +325,8 @@ describe('opening one session', () => {
       mode,
     });
     should(session.live()).be.true();
-    // The opening deadline is §8's eviction window; the heartbeat is §8's interval.
-    should(heartbeat.intervals).eql([HEARTBEAT_GRACE_SECONDS * 1_000, HEARTBEAT_SECONDS * 1_000]);
+    // The opening deadline is §8's eviction window; the keepalive runs inside §8's interval.
+    should(heartbeat.intervals).eql([HEARTBEAT_GRACE_SECONDS * 1_000, KEEPALIVE_INTERVAL_MS]);
   });
 
   it('should refuse a rendezvous that neither opens a session nor closes the socket', async () => {
@@ -365,7 +366,7 @@ describe('opening one session', () => {
       daemon,
       method: RELAY,
       heartbeat: (tick, interval) => {
-        if (interval === HEARTBEAT_SECONDS * 1_000) beat = tick;
+        if (interval === KEEPALIVE_INTERVAL_MS) beat = tick;
         return () => undefined;
       },
       mode,
@@ -906,10 +907,10 @@ describe('the carrier router', () => {
     should((await router.send(relayOnlySet, `${DAEMON_URL}/v1/usage`)).status).equal(200);
     should(carriers.hosts()).eql([DIRECT_HOST]);
 
-    // The moment it stops carrying it is forgotten like any other winner.
+    // The moment it stops carrying it is forgotten like any other winner — and a READ walks the
+    // published set again inside the same call, so this one is answered over the rendezvous.
     directWorks = false;
     carriers.live.sockets[0]?.onClose?.(RELAY_CLOSE_CODES.heartbeatTimeout, 'the laptop left the network');
-    await should(router.send(relayOnlySet, `${DAEMON_URL}/v1/usage`)).be.rejected();
     should((await router.send(relayOnlySet, `${DAEMON_URL}/v1/usage`)).status).equal(200);
     const choice = router.choice(daemon.daemonId);
     if (choice?.ok !== true) throw new Error('the published rendezvous did not take over');

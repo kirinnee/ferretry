@@ -96,9 +96,10 @@ export const DaemonRelayConfigSchema = z
     /** Whether to dial at all. A configured address the operator has switched off stays readable
      *  rather than having to be deleted and retyped. */
     enabled: z.boolean().default(true),
-    /** How long to wait before dialling again after a socket ends. A rendezvous holds the incumbent
-     *  daemon's slot until its dead socket is swept — at most 45 seconds — so a redial that is faster
-     *  than the sweep is refused with `4409` rather than being granted early. */
+    /** The CEILING of the redial backoff, in seconds, clamped to 1–10 when used. The first redial after a
+     *  socket ends is immediate and each failed one waits longer (jittered, doubling from half a second)
+     *  up to this. A rendezvous holds a dead incumbent's slot until it is swept — at most 45 seconds — so
+     *  a redial faster than the sweep is refused with `4409` and is simply tried again later. */
     reconnectSeconds: z.number().int().positive().max(3_600).default(5),
   })
   .strict();
