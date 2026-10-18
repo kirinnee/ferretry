@@ -5331,10 +5331,15 @@ function Shell() {
     },
     {
       label: 'Session screen',
+      // `grid-cols-1` below `xl`, NOT the implicit `auto` column. An `auto` track grows to its items'
+      // min-content, and a `truncate` label's min-content is its WHOLE text: with the Ubuntu runner's
+      // fonts the panel came out 391.5px inside a 370px track, pushed the 390px page 11px sideways, and
+      // the full gallery refused the tool-group capture because isolating it changed its width.
+      // `minmax(0, 1fr)` lets the truncation do its job, as the real session page's layout does.
       render: () => (
         <section
           aria-label="Session screen harness"
-          className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
+          className="grid grid-cols-1 gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
           id="harness-session-screen"
         >
           <SessionList
