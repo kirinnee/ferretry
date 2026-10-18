@@ -88,6 +88,7 @@ import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import { sessionTurn } from '../session-activity.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
+import type { ConnectionHealthState } from '../connection-health.ts';
 import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
@@ -142,6 +143,11 @@ export interface SessionChatPageProps {
    * second `role=status` here made assistive tech say it twice.
    */
   readonly refreshError?: string | null;
+  /**
+   * This machine's connection health, from the shell. While it is `reconnecting` the page says nothing
+   * about the outage itself — the shell's connection notice says it once — and keeps what it last showed.
+   */
+  readonly connectionState?: ConnectionHealthState;
   /** The reader's chat measure. `full` is the shipped default and is uncapped. */
   readonly chatWidth?: ChatWidthPreference;
   /** Browser-local transcript composer key preference. */
@@ -296,6 +302,18 @@ function SessionSearchWorkspaceActions({
 }
 
 /**
+ * A refresh failure that is NOT an outage, said in one line. The whole sentence is one tap away, because
+ * a clipped error with no way to read the rest is worse than a long one.
+ */
+function CompactIssue({ sentence }: { readonly sentence: string }) {
+  return (
+    <details className="group min-w-0 px-3 py-1 text-meta text-warn" data-session-issue="">
+      <summary className="cursor-pointer truncate group-open:whitespace-normal">{sentence}</summary>
+    </details>
+  );
+}
+
+/**
  * Pure session-workspace composition. Runtime/store ownership remains in
  * App.tsx; this page receives one explicit daemon, one session view and one
  * client bound to that same live pairing.
@@ -310,6 +328,7 @@ export function SessionChatPage({
   presentation,
   canControl = true,
   refreshError = null,
+  connectionState,
   chatWidth = 'readable',
   composerEnterKey,
   composerPhoneEnterKey = null,
@@ -504,6 +523,7 @@ export function SessionChatPage({
   const [confirmStop, setConfirmStop] = useState(false);
   const [pendingAction, setPendingAction] = useState<SessionAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const reconnecting = connectionState?.kind === 'reconnecting';
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const dismissActionNotice = useCallback(() => setActionNotice(null), []);
   const live = useRef({ connection, sessionId: session.config.id });
@@ -1029,7 +1049,7 @@ export function SessionChatPage({
         here made assistive tech say it twice, and a prefix added here would
         have made the two disagree. Rendered only when there is something to
         render, precisely because it announces nothing. */}
-      {refreshError === null ? null : <p className="m-0 px-3 py-1 text-ui text-warn">{refreshError}</p>}
+      {refreshError === null || reconnecting ? null : <CompactIssue sentence={refreshError} />}
       {actionAlert}
     </>
   );
