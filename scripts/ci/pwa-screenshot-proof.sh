@@ -37,23 +37,42 @@ set -euo pipefail
 # Settings block, so the full gallery makes the SAME 35 checks for eight times the wall clock — it
 # would buy this gate nothing and would push the job past the ~4.6min Integration Tests critical path,
 # turning zero added CI wall clock into roughly two minutes of it on every push. The other `fail()`
-# assertions in the gallery's later sections are real and are NOT covered here; that is a declared gap,
-# not an oversight.
+# assertions in the gallery's later sections are real and are NOT covered by this mode.
+#
+# WHICH IS WHY THERE IS ALSO `full`, and why it is ONE extra leg rather than the default.
+# The declared gap above is not hypothetical: #432 began parsing every file read with
+# `SessionFsFileSchema`, three harness file fixtures had no `size`, and the File tab body section's
+# driven Reload never got a first copy to keep — so every full run timed out in `captureFiles` for
+# ~250 commits while this job stayed green, and the first to notice was an agent that needed the frames.
+# `full` runs the whole gallery, so a later section that hangs or fails is red on the PR that broke it.
+# It is one scheme because the later sections' assertions are about fixtures and waits, not colour, and
+# a second full leg would double ~7 minutes of runner time to re-prove the same fixtures. It is a
+# sibling matrix leg, so it costs runner time; its ~7 minutes sits under the E2E workflow every PR
+# already waits on, which is why it adds little or no wall clock.
 #
 # The `for` below iterates rather than substitutes because the two colour schemes are two full runs of
 # a dozen steps each, and `pre-paint.js` resolves the theme before first paint — a light capture is a
 # different first frame emulated at the browser context, not a class toggle inside one run.
 #
 # Local reproduction, identical to the job:
-#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light]
+#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light] [settings|full]
 #
-# With no argument it runs both schemes in turn; CI passes one per matrix job so they run side by side.
+# With no scheme it runs both in turn; CI passes one per matrix job so they run side by side. The
+# scope defaults to `settings`; `full` drops `--settings-only` and walks the whole gallery.
+
+usage() { echo "❌ usage: $0 [dark|light] [settings|full]" >&2 && exit 2; }
 
 schemes=(dark light)
 case "${1:-}" in
 "") ;;
 dark | light) schemes=("$1") ;;
-*) echo "❌ usage: $0 [dark|light]" >&2 && exit 2 ;;
+*) usage ;;
+esac
+
+scope="${2:-settings}"
+case "${scope}" in
+settings | full) ;;
+*) usage ;;
 esac
 
 root_dir="$(git rev-parse --show-toplevel)"
@@ -72,10 +91,11 @@ artifact_dir="packages/pwa/.artifacts/pwa-screenshot"
 rm -rf "${artifact_dir}"
 mkdir -p "${artifact_dir}"
 
-echo "📝 Driving ${chrome} over the Settings harness at 390x844 and 1440x900"
+echo "📝 Driving ${chrome} over the ${scope} harness at 390x844 and 1440x900"
 
 for scheme in "${schemes[@]}"; do
-  flags=(--settings-only)
+  flags=()
+  [ "${scope}" = "settings" ] && flags+=(--settings-only)
   [ "${scheme}" = "light" ] && flags+=(--light)
   log="${artifact_dir}/${scheme}.log"
 
@@ -83,7 +103,7 @@ for scheme in "${schemes[@]}"; do
   # way to review the wrong picture. The harness recreates it.
   rm -rf packages/pwa/harness/out
 
-  echo "🧪 Capturing the Settings surfaces in ${scheme}..."
+  echo "🧪 Capturing the ${scope} harness in ${scheme}..."
   # `pipefail` is what makes `tee` safe here: without it the harness's exit status is discarded and
   # every red run would report the exit status of `tee`, which is always zero.
   #
@@ -137,4 +157,4 @@ for scheme in "${schemes[@]}"; do
   echo "📸 ${frames} ${scheme} frames -> ${artifact_dir}/${scheme}/"
 done
 
-echo "✅ The Settings surfaces fit both viewports in ${schemes[*]}; frames are in ${artifact_dir}/"
+echo "✅ The ${scope} harness passed at both viewports in ${schemes[*]}; frames are in ${artifact_dir}/"
