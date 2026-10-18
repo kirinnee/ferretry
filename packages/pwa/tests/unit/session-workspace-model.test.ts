@@ -7,6 +7,7 @@ import {
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
 import { sessionView } from '../support/sessions.ts';
+import { turnFileInstruction } from '@ferretry/protocol';
 
 const NOW = Date.UTC(2026, 9, 18, 12, 0, 0);
 
@@ -31,6 +32,24 @@ describe('transcriptEntriesFromLog', () => {
       text: '## Done\n- built\n- tested',
     });
     expect(entries[0]?.id).not.toBe(entries[1]?.id);
+  });
+
+  test("reads the daemon's turn pointer as a hand-off on the person's own row, for Claude and Codex alike", () => {
+    const claude = turnFileInstruction('/home/kirin/.ferretry/state/sessions/s1/turns/turn-008.md');
+    const codex = turnFileInstruction('/Users/erng/.ferretry/state/sessions/s2/turns/turn-002.md');
+    const entries = transcriptEntriesFromLog(
+      `[10:11:12] user/message: ${claude}\n[10:11:13] assistant/message: on it\n[10:12:00] user/message: ${codex}`,
+      NOW,
+    );
+
+    expect(entries.map(entry => [entry.kind, entry.handoff?.name])).toEqual([
+      ['user', 'turn-008'],
+      ['assistant', undefined],
+      ['user', 'turn-002'],
+    ]);
+    // The pointer is kept as the row's text only so a row whose file is gone can show it faded.
+    expect(entries[0]?.text).toBe(claude);
+    expect(entries[0]?.label).toBe('You');
   });
 
   test('keeps the daemon’s UTC wall clock out of every label — the time is an instant, formatted by the reader', () => {

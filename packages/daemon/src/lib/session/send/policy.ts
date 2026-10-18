@@ -1,4 +1,4 @@
-import { peerEnvelopePreamble } from '@ferretry/protocol';
+import { peerEnvelopePreamble, queuedMessageInstruction, turnFileInstruction } from '@ferretry/protocol';
 import type { SessionSendSettings } from './settings.ts';
 import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
 import {
@@ -144,14 +144,14 @@ export function directLimitFor(target: SendTarget, settings: SessionSendSettings
   return target.directSendMaxChars ?? settings.directSendMaxChars;
 }
 
-/** What is typed into a pane so the agent picks up a tracked turn. */
+/** What is typed into a pane so the agent picks up a tracked turn. The wording is the protocol's, because the app reads it back out of the transcript (`turn-handoff.ts`). */
 export function turnInstruction(turnFile: string): string {
-  return `Read the file ${turnFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
+  return turnFileInstruction(turnFile);
 }
 
 /** What is typed into a BUSY pane when the payload was too long to type. */
 export function queuedPayloadInstruction(payloadFile: string): string {
-  return `Read the queued message file at ${payloadFile} completely now, then follow every instruction inside it.`;
+  return queuedMessageInstruction(payloadFile);
 }
 
 /** Whether a native-queue ride must go through a file rather than the composer. */

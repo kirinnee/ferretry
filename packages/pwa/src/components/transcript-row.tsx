@@ -2,6 +2,7 @@ import { clockOfInstant } from '../lib/message-clock.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
+import { HandoffMessage } from './handoff-message.tsx';
 import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
@@ -70,7 +71,8 @@ export function TranscriptRow({
 /**
  * The reader's own message: no "You · 14:02:55" header — the bubble's alignment already says who — and
  * its time and receipt as one small faded line at its foot (`send-receipt.tsx`), on the reader's own
- * clock (`message-clock.ts`).
+ * clock (`message-clock.ts`). A message the agent was handed through a file shows what the file holds
+ * (`handoff-message.tsx`), never the pointer it was typed.
  */
 function OwnMessageRow({
   entry,
@@ -84,7 +86,11 @@ function OwnMessageRow({
   return (
     <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
       <span className="sr-only">You said:</span>
-      <p>{entry.text}</p>
+      {entry.handoff === undefined ? (
+        <p>{entry.text}</p>
+      ) : (
+        <HandoffMessage pointer={entry.handoff} pointerText={entry.text} />
+      )}
       <MessageFooter answered={answered} clock={clockOfInstant(entry.at)} record={entry.send} side="own" />
     </article>
   );

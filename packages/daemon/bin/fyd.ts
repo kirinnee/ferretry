@@ -59,6 +59,7 @@ import {
   refusalNotice,
   type SessionConfig,
   SessionConfigSchema,
+  type SessionHandoff,
   SessionStateSchema,
   type SessionView,
   type SignalSessionRequest,
@@ -661,6 +662,9 @@ import {
   secretsMatch,
   selectableAutoAccounts,
   selectBrowserWorker,
+  handoffFolders,
+  handoffReadArguments,
+  handoffView,
   sendRecordView,
   sessionHealthSettingsAt,
   sessionNameClaim,
@@ -1686,6 +1690,8 @@ function createSessionControlSubsystem(
    * instructed, which is what a ferret with no record means.
    */
   adoptLearning: (id: SessionId) => Promise<void>,
+  /** The folders this session's agent is pointed into to read what it was sent (`handoffFolders`). */
+  readableHandoffs: (id: SessionId) => readonly string[],
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1826,6 +1832,8 @@ function createSessionControlSubsystem(
         executable,
         ...(request.remoteControl === true ? plan.extraArgs : []),
         ...transcript.launchArguments,
+        // Its own turn documents and attachments, readable without a permission prompt and nothing more.
+        ...handoffReadArguments(account.kind, readableHandoffs(id)),
         // The catalogue-proved model is the daemon's default. A free-form operator flag is last,
         // as documented: an explicitly supplied `--model` wins over that default.
         ...startupModelArguments(plan.model),
@@ -2283,6 +2291,8 @@ function createSessionSendSubsystem(
     sessionId: SessionId,
     attachmentIds: readonly string[],
   ) => Promise<readonly DeliveredAttachment[]>,
+  /** One hand-off document as the person's message; `undefined` when it is gone. */
+  readHandoff: (sessionId: SessionId, name: string) => Promise<SessionHandoff | undefined>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -2357,6 +2367,13 @@ function createSessionSendSubsystem(
         .reattempt(id, sendId, { by: 'person', force })
         .catch((error: unknown) => sendRefusal(error));
       return sendRecordView(record);
+    },
+    handoff: async (reference, name) => {
+      const id = require(reference);
+      const handoff = await readHandoff(id, name);
+      if (handoff === undefined)
+        throw new SessionSendError('not_found', `session ${id} has no hand-off document ${name}`);
+      return handoff;
     },
   };
 }
@@ -3212,6 +3229,8 @@ interface SessionMigrateParts {
   readonly transcriptProvenance: TranscriptProvenanceCapture;
   /** The session's own private directory, which is what a Codex rollout is correlated by. */
   readonly sessionDirectory: (id: SessionId) => string;
+  /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
+  readonly readableHandoffs: (id: SessionId) => readonly string[];
   /** Serializes whole migrations of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
 }
@@ -3396,6 +3415,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             executable,
             ...(config.remoteControl ? plan.extraArgs : []),
             ...relaunchTranscript.launchArguments,
+            ...handoffReadArguments(account.kind, parts.readableHandoffs(id)),
             ...config.harnessFlags,
           ],
           defaultSessionLifecycleSettings,
@@ -4782,6 +4802,8 @@ function createForkSubsystem(parts: ForkSubsystemParts): SessionForkSubsystem {
     runtime: parts.runtime,
     view: parts.view,
     sessionDirectory: id => createSessionPaths(parts.paths, id).directory,
+    readableHandoffs: id =>
+      handoffFolders(createSessionPaths(parts.paths, id).directory, parts.attachmentOriginals(id)),
     clock: parts.clock,
   });
   return new SessionForkFacade(
@@ -6290,12 +6312,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         defaultSendTrackerSettings,
       );
+      const sendTurns = new FileSendTurnStore(resumeTurns, id => createSessionPaths(paths, id).directory);
       const sends: SessionSendService = new SessionSendService(
         {
           repository: sendRepository,
           ledger: sendLedger,
           terminal: sendTerminal,
-          turns: new FileSendTurnStore(resumeTurns, id => createSessionPaths(paths, id).directory),
+          turns: sendTurns,
           channel: new FileSendChannel(id => createSessionPaths(paths, id).directory),
           gate: launchGate,
           reviver: new ResumeSendReviver(resume),
@@ -6495,6 +6518,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               return model === undefined ? undefined : resolveDefaultRuntime(model);
             },
             async id => await adoptLearning(id),
+            id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           ),
           attachmentStore,
         ),
@@ -6568,6 +6592,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         transcripts: createTranscriptReader(storage),
         transcriptProvenance,
         sessionDirectory: id => createSessionPaths(paths, id).directory,
+        readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
         // make every unrelated document write in the process wait behind it.
         serial: new KeyedSerialExecutor(),
@@ -7099,6 +7124,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               delivered.push({ path, mime: attachment.mime });
             }
             return delivered;
+          },
+          // The person's words behind a pointer the transcript records, read from the very document the
+          // send (or the start, or the revive) wrote.
+          async (sessionId, name) => {
+            const document = await sendTurns.readHandoff(sessionId, name);
+            return document === undefined
+              ? undefined
+              : handoffView(name, document, {
+                  reminder: defaultSessionResumeSettings.turnProtocolReminder,
+                  attachmentRoot: attachmentOriginals(sessionId),
+                });
           },
         ),
         sessionAnswer: createSessionAnswerSubsystem(

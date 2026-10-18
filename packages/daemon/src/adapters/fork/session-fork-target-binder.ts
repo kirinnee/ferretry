@@ -56,6 +56,7 @@ import type { ClockPort } from '../../lib/ports.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import { startupModelArguments } from '../../lib/session/harness/startup.ts';
 import { assignedTaskDocument } from '../../lib/session/lifecycle/policy.ts';
+import { handoffReadArguments } from '../../lib/session/send/handoff.ts';
 import type { SessionRuntimeStartupHeldPort } from '../../lib/session/runtime-control/types.ts';
 import {
   type LifecycleSessionStatus,
@@ -202,6 +203,8 @@ export interface SessionForkTargetBinderPorts {
   readonly view: (targetSessionId: SessionId) => Promise<SessionView | undefined>;
   /** The target's own private directory: the string a rollout is later correlated by. */
   readonly sessionDirectory: (targetSessionId: SessionId) => string;
+  /** The folders the target's agent is pointed into to read what it was sent (`handoffFolders`). */
+  readonly readableHandoffs?: (targetSessionId: SessionId) => readonly string[];
   readonly clock: ClockPort;
 }
 
@@ -503,6 +506,8 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       command: [
         resolved.executable,
         ...(plan.durable.remoteControl ? planned.extraArgs : []),
+        // Its own turn documents and attachments, readable without a permission prompt and nothing more.
+        ...handoffReadArguments(resolved.account.kind, this.ports.readableHandoffs?.(id) ?? []),
         ...plan.durable.harnessFlags,
         ...startupModelArguments(planned.model),
       ],

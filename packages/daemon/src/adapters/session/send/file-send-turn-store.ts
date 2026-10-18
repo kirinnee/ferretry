@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { ResumeTurnStore } from '../../../lib/session/resume/types.ts';
@@ -31,6 +31,20 @@ export class FileSendTurnStore implements SendTurnStore {
 
   async clearMarkers(id: SessionId): Promise<void> {
     await this.turns.clearMarkers(id);
+  }
+
+  /**
+   * One hand-off document by its stem — `turn-008` under `turns/`, `queued-<send id>` under
+   * `channel/` — or `undefined` when it is not there. The stem is the protocol's closed grammar, checked
+   * by the caller, so it cannot name anything outside those two folders.
+   */
+  async readHandoff(id: SessionId, name: string): Promise<string | undefined> {
+    const folder = name.startsWith('queued-') ? 'channel' : 'turns';
+    try {
+      return await readFile(join(this.sessionDirectory(id), folder, `${name}.md`), 'utf8');
+    } catch {
+      return undefined;
+    }
   }
 
   async writeQueuedPayload(id: SessionId, sendId: string, payload: string): Promise<string> {

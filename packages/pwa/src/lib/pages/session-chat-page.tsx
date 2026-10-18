@@ -9,6 +9,7 @@ import { type PaneFrameReader, usePaneActivity } from '../../components/live-act
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
+import { HandoffSourceProvider } from '../../components/handoff-message.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
@@ -357,6 +358,14 @@ export function SessionChatPage({
     ...(surfaceEvents === undefined ? {} : { events: surfaceEvents }),
   });
   const browserPages = useSessionBrowser(scope, connection, { client: daemonClient });
+  const handoffs = useMemo(
+    () => ({
+      daemon: connection,
+      sessionId: session.config.id,
+      read: async (name: string) => await (await daemonClient(connection)).handoff(session.config.id, name),
+    }),
+    [connection, session.config.id, daemonClient],
+  );
   const terminals = useSessionTerminals(deck, connection, scope);
   const [utility, setUtility] = useState<SessionUtility | null>(null);
   const utilityId = useId();
@@ -1139,74 +1148,78 @@ export function SessionChatPage({
     // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
     // workspace and whatever a later item renders here — reads references through this one surface.
     <ReferenceSurfaceProvider surface={references}>
-      <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
-      {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
+      {/* A message handed to the agent through a file is read back through the same daemon client, so the
+          transcript shows what the person sent rather than the pointer the agent was typed. */}
+      <HandoffSourceProvider source={handoffs}>
+        <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+        {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
           composer could scroll the whole session sideways and leave the header off the left edge. */}
-      <main
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
-        data-daemon={connection.daemonId}
-        data-session={session.config.id}
-      >
-        <SessionWorkspace
-          chat={chat}
-          connection={connection}
-          driving={driving}
-          formFactor={formFactor}
-          references={references}
-          renderHeader={header}
-          rails={workspaceRails}
-          session={session}
-          workspace={workspace}
-          {...(infoSlot === undefined ? {} : { info: infoSlot })}
-          {...(deck === undefined ? {} : { deck })}
-          {...(readSnapshot === undefined ? {} : { readSnapshot })}
-          {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
-          {...(browser === undefined ? {} : { browser })}
-          browserPages={browserPages}
-        />
-        <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
-        <BottomSheet
-          ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
-          closeLabel="Close"
-          id={utilityId}
-          onClose={() => setUtility(null)}
-          open={utility !== null}
-          panelClassName="bg-surface"
+        <main
+          className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
+          data-daemon={connection.daemonId}
+          data-session={session.config.id}
         >
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
-            {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
-            {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
-          </div>
-        </BottomSheet>
-        {/* Inside the reference provider, so Attention prose reads the SAME
+          <SessionWorkspace
+            chat={chat}
+            connection={connection}
+            driving={driving}
+            formFactor={formFactor}
+            references={references}
+            renderHeader={header}
+            rails={workspaceRails}
+            session={session}
+            workspace={workspace}
+            {...(infoSlot === undefined ? {} : { info: infoSlot })}
+            {...(deck === undefined ? {} : { deck })}
+            {...(readSnapshot === undefined ? {} : { readSnapshot })}
+            {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
+            {...(browser === undefined ? {} : { browser })}
+            browserPages={browserPages}
+          />
+          <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
+          <BottomSheet
+            ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
+            closeLabel="Close"
+            id={utilityId}
+            onClose={() => setUtility(null)}
+            open={utility !== null}
+            panelClassName="bg-surface"
+          >
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
+              {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
+              {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
+            </div>
+          </BottomSheet>
+          {/* Inside the reference provider, so Attention prose reads the SAME
             grammar the transcript does — including a `!A3` that re-targets
             this very sheet. */}
-        {attention === undefined ? null : (
-          <AttentionActionModal
-            client={attention.client}
+          {attention === undefined ? null : (
+            <AttentionActionModal
+              client={attention.client}
+              connection={connection}
+              id={attentionId}
+              onClose={closeAttention}
+              open={attentionOpen}
+              scope={scope}
+              snapshot={attention.snapshot}
+              status={attention.status}
+              swipeEnabled={compact}
+              targetId={attentionTarget}
+            />
+          )}
+          <MigrateSheet
+            {...(accountPicker === undefined ? {} : { accountPicker })}
+            canMutate={canControl}
             connection={connection}
-            id={attentionId}
-            onClose={closeAttention}
-            open={attentionOpen}
+            onClose={() => setMigrateOpen(false)}
+            onMigrated={(_daemon, _scope, view) => publish(view)}
+            open={migrateOpen}
             scope={scope}
-            snapshot={attention.snapshot}
-            status={attention.status}
-            swipeEnabled={compact}
-            targetId={attentionTarget}
+            {...(usage === undefined ? {} : { usage })}
+            view={session}
           />
-        )}
-        <MigrateSheet
-          {...(accountPicker === undefined ? {} : { accountPicker })}
-          canMutate={canControl}
-          connection={connection}
-          onClose={() => setMigrateOpen(false)}
-          onMigrated={(_daemon, _scope, view) => publish(view)}
-          open={migrateOpen}
-          scope={scope}
-          {...(usage === undefined ? {} : { usage })}
-          view={session}
-        />
-      </main>
+        </main>
+      </HandoffSourceProvider>
     </ReferenceSurfaceProvider>
   );
 }

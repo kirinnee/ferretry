@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { assignedTaskDocument as protocolAssignedTaskDocument, turnFileInstruction } from '@ferretry/protocol';
 import { HARNESS_LABEL } from '@ferretry/fleet';
 import type { CoreAccount } from '../../core/inventory.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
@@ -110,12 +111,12 @@ export function unrunnableAccountRefusal(
 
 /** The turn-one document an agent reads. */
 export function assignedTaskDocument(prompt: string): string {
-  return `# Assigned task\n\n${prompt}\n`;
+  return protocolAssignedTaskDocument(prompt);
 }
 
 /** What is typed into a ready terminal so the agent picks its assignment up. */
 export function firstTurnInstruction(taskFile: string): string {
-  return `Read the file ${taskFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
+  return turnFileInstruction(taskFile);
 }
 
 /**
