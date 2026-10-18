@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionLiveActivity } from '@ferretry/protocol';
 import { LiveActivityLine, type PaneFrameReader, usePaneActivity } from '../../src/components/live-activity.tsx';
-import type { LiveScheduler } from '../../src/hooks/use-live-counter.ts';
 import { type PaneReading, UNREAD_PANE } from '../../src/lib/session-activity.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { manualScheduler } from '../support/live-scheduler.ts';
 import { settleUntil } from '../support/settle.ts';
 
 const textOf = (value: unknown): string => {
@@ -135,36 +135,6 @@ describe('LiveActivityLine', () => {
     expect(textOf(none.toJSON())).toBe('Working…');
   });
 });
-
-/** A clock the test moves by hand — see `use-live-counter.test.tsx` for the full fake. */
-const manualScheduler = (start: number): LiveScheduler & { advance: (ms: number) => void } => {
-  let time = start;
-  const pending: Array<{ at: number; action: () => void }> = [];
-  return {
-    now: () => time,
-    after: (ms, action) => {
-      const entry = { at: time + ms, action };
-      pending.push(entry);
-      return () => {
-        const index = pending.indexOf(entry);
-        if (index >= 0) pending.splice(index, 1);
-      };
-    },
-    advance: ms => {
-      const until = time + ms;
-      run(() => {
-        for (;;) {
-          const due = pending.filter(entry => entry.at <= until).sort((a, b) => a.at - b.at)[0];
-          if (due === undefined) break;
-          pending.splice(pending.indexOf(due), 1);
-          time = due.at;
-          due.action();
-        }
-        time = until;
-      });
-    },
-  };
-};
 
 const TURN = '2026-10-18T07:00:00.000Z';
 const TURN_MS = Date.parse(TURN);
