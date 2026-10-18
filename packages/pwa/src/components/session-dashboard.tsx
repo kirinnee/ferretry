@@ -121,12 +121,7 @@ export function SessionDashboard({
       className="flex h-full min-h-0 w-full flex-col px-3 pb-2 sm:px-0"
       data-density={density}
     >
-      <div
-        className={cn(
-          'mt-0.5 mb-1 flex items-center justify-between gap-2 sm:mt-2 sm:mb-2',
-          scope === null && 'flex-wrap',
-        )}
-      >
+      <div className={cn('fy-sessions-head flex items-center justify-between gap-2', scope === null && 'flex-wrap')}>
         {scope === null ? (
           <h1
             className="sr-only m-0 font-display text-display font-bold tracking-display sm:not-sr-only"
@@ -248,6 +243,7 @@ export function SessionDashboard({
               density={density}
               groups={groups}
               mode={mode}
+              now={now}
               onFocus={onEnterScope}
               onNavigate={onNavigate}
               scoped={scope !== null}

@@ -3251,6 +3251,15 @@ const DASHBOARD_SESSIONS: readonly SessionView[] = [
   dashboardSession('ms9lina-f6', 'lina', 'Verify daemon isolation', '/work/home-manager', {
     contextPercent: 96,
   }),
+  // An interactive session started without a name: the daemon titles it "interactive", which the list drops.
+  dashboardSession(
+    'ms9ronaldo-h8',
+    'ronaldo',
+    'interactive',
+    '/work/ferretry',
+    { activity: undefined },
+    { mode: 'interactive' },
+  ),
   dashboardSession(
     'ms9mira-g7',
     'mira',

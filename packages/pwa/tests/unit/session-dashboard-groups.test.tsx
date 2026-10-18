@@ -99,6 +99,7 @@ describe('session dashboard groups', () => {
     const compact = render(
       <LeanDensityGroups
         daemonId={daemonId}
+        now={now}
         density="compact"
         groups={[group('ferretry', [view('zelda')])]}
         mode="table"
@@ -118,6 +119,7 @@ describe('session dashboard groups', () => {
       compact.update(
         <LeanDensityGroups
           daemonId={daemonId}
+          now={now}
           density="minimal"
           groups={[group('ferretry', [view('zelda')])]}
           mode="table"
@@ -140,6 +142,7 @@ describe('session dashboard groups', () => {
     const tree = render(
       <LeanDensityGroups
         daemonId={daemonId}
+        now={now}
         density="compact"
         groups={[group('ferretry', [view('a', 'awaiting_user'), view('b', 'awaiting_user'), view('c', 'failed')])]}
         mode="cards"
@@ -151,13 +154,18 @@ describe('session dashboard groups', () => {
     expect(panel.props.hue).toMatch(/^var\(--tool-/);
     expect(JSON.stringify(tree.toJSON())).toContain('2× you');
     expect(JSON.stringify(tree.toJSON())).toContain('failed');
-    expect(tree.root.findByProps({ 'aria-label': 'Focus folder ferretry' }).props.className).toContain('min-h-[44px]');
+    expect(tree.root.findByProps({ 'aria-label': 'Focus folder ferretry' }).props.className).toBe(
+      'fy-session-group__head',
+    );
+    // One container per project, holding every row: the heading sits outside it, on the page.
+    expect(tree.root.findByProps({ className: 'kt-panel fy-session-group__list' }).findAllByType('a')).toHaveLength(3);
   });
 
   it('suppresses the panel header and status hoist in scoped minimal cards', () => {
     const tree = render(
       <LeanGroupPanel
         daemonId={daemonId}
+        now={now}
         density="minimal"
         group={group('fallback', [view('solo')], '')}
         hue="var(--tool-read)"
@@ -175,6 +183,7 @@ describe('session dashboard groups', () => {
     const tree = render(
       <LeanDensityGroups
         daemonId={daemonId}
+        now={now}
         density="compact"
         groups={[group('ferretry', [view('a'), view('b'), view('c', 'failed')])]}
         mode="cards"

@@ -233,34 +233,49 @@ describe('session dashboard row leaves', () => {
       expect(String(label.props.className)).toBe('whitespace-normal sm:whitespace-nowrap');
     }
 
-    // The 44px panel row is a different path that already fits its pills, and
+    // The two-line panel row is a different path that already fits its pills, and
     // the containment must not have cost it either its height or its layout.
     const card = render(
       <LeanSessionCard
         daemonId={DAEMON}
+        now={NOW}
         density="compact"
         view={view('lean-crowded', { state: { needsHuman: 'Approve production deploy' } })}
       />,
     ).root;
-    expect(String(card.findByType('a').props.className)).toContain('min-h-[44px]');
-    const flagRow = card.findAllByType('span').find(node => String(node.props.className).includes('ml-auto'));
-    expect(String(flagRow?.props.className)).toContain('shrink-0');
+    expect(String(card.findByType('a').props.className)).toContain('fy-session-row');
+    const age = card.findByProps({ 'data-session-age': '' });
+    expect(text(age)).toBe('12s');
+    expect(String(age.props.className)).toContain('ml-auto shrink-0');
   });
 
   it('renders compact-card status and flag exceptions while minimal mounts neither', () => {
     const compact = render(
       <LeanSessionCard
         daemonId={DAEMON}
+        now={NOW}
         density="compact"
         view={view('lean', { state: { needsHuman: 'Take over', status: 'running' } })}
       />,
     ).root;
-    // The routine "run" is the dot's to say; only the flag is a word.
-    expect(text(compact)).toContain('Ship dashboard rowsneeds human');
+    // The routine "run" is the dot's to say; only the flag is a word, ahead of the age and the task.
+    expect(text(compact)).toContain('needs human12s');
+    expect(text(compact)).toContain('Ship dashboard rows');
     expect(text(compact)).not.toContain('run');
+    // A request for a human already says "you": the word is not said twice.
+    const asked = render(
+      <LeanSessionCard
+        daemonId={DAEMON}
+        now={NOW}
+        density="compact"
+        view={view('lean-asked', { state: { needsHuman: 'Choose', status: 'awaiting_user' } })}
+      />,
+    ).root;
+    expect(asked.findAllByProps({ 'data-status-word': 'awaiting_user' })).toHaveLength(0);
     const failed = render(
       <LeanSessionCard
         daemonId={DAEMON}
+        now={NOW}
         density="compact"
         view={view('lean-failed', { state: { status: 'failed' } })}
       />,
@@ -268,22 +283,46 @@ describe('session dashboard row leaves', () => {
     expect(failed.findByProps({ 'data-status-word': 'failed' }).props.style).toEqual({ color: 'var(--err)' });
 
     const hoisted = render(
-      <LeanSessionCard daemonId={DAEMON} density="compact" statusHoisted view={view('hoisted')} />,
+      <LeanSessionCard daemonId={DAEMON} density="compact" now={NOW} statusHoisted view={view('hoisted')} />,
     ).root;
     expect(text(hoisted)).not.toContain('run');
 
     const parked = render(
       <LeanSessionCard
         daemonId={DAEMON}
+        now={NOW}
         density="compact"
         view={view('lean-parked', { state: { waiting: { since: '2026-08-01T11:00:00.000Z' } } })}
       />,
     ).root;
     expect(text(parked)).toContain('parked');
 
-    const minimal = render(<LeanSessionCard daemonId={DAEMON} density="minimal" view={view('lean-minimal')} />).root;
+    const minimal = render(
+      <LeanSessionCard daemonId={DAEMON} density="minimal" now={NOW} view={view('lean-minimal')} />,
+    ).root;
     expect(text(minimal)).not.toContain('run');
     expect(text(minimal)).not.toContain('parked');
+  });
+
+  it('drops the daemon placeholder "interactive" title and shows what an unnamed session is doing instead', () => {
+    const unnamed = (state: NonNullable<Parameters<typeof sessionView>[1]>['state']) =>
+      view('unnamed', { config: { mode: 'interactive', name: 'interactive', remoteControl: false }, state });
+    const doing = render(
+      <LeanSessionCard daemonId={DAEMON} density="compact" now={NOW} view={unnamed({ activity: '  Reading logs ' })} />,
+    ).root;
+    expect(text(doing)).not.toContain('interactive');
+    const preview = doing.findByProps({ title: 'Reading logs' });
+    expect(text(preview)).toBe('Reading logs');
+    expect(String(preview.props.className)).toContain('fy-session-row__task');
+
+    const idle = render(
+      <LeanSessionCard daemonId={DAEMON} density="compact" now={NOW} view={unnamed({ activity: undefined })} />,
+    ).root;
+    expect(text(idle)).not.toContain('interactive');
+    expect(idle.findAll(node => String(node.props.className ?? '').includes('fy-session-row__task'))).toHaveLength(0);
+
+    const card = render(<SessionCard {...fullProps({ view: unnamed({}) })} />).root;
+    expect(text(card)).not.toContain('interactive');
   });
 
   it('renders and activates a project heading with optional path and its exact row count', () => {

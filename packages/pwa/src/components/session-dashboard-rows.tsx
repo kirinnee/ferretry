@@ -27,7 +27,14 @@ import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
-import { activityLine, dashboardTone, routineStatus, sessionAge, statusWord } from './session-dashboard-model.ts';
+import {
+  activityLine,
+  dashboardTone,
+  routineStatus,
+  sessionAge,
+  sessionTaskName,
+  statusWord,
+} from './session-dashboard-model.ts';
 
 interface SessionNavigationProps {
   readonly daemonId: DaemonId;
@@ -187,7 +194,7 @@ export const SessionRow = memo(function SessionRow({
         </RouteLink>
       </td>
       <td>
-        <TaskName name={cfg.name} size="md" className="max-w-full" />
+        <TaskName name={sessionTaskName(cfg)} size="md" className="max-w-full" />
       </td>
       <td>
         <Badge tone={dashboardTone(state.status)} className="max-w-full truncate">
@@ -251,7 +258,7 @@ export const LeanSessionRow = memo(function LeanSessionRow({ view, density, daem
         </RouteLink>
       </td>
       <td>
-        <TaskName name={cfg.name} teammate={cfg.teammate} size="md" className="max-w-full" />
+        <TaskName name={sessionTaskName(cfg)} teammate={cfg.teammate} size="md" className="max-w-full" />
       </td>
       {density === 'compact' && (
         <td>
@@ -298,7 +305,7 @@ export const SessionCard = memo(function SessionCard({
         <StatusWord status={state.status} />
       </div>
       <div className="mt-1">
-        <TaskName name={cfg.name} size="md" className="max-w-full" />
+        <TaskName name={sessionTaskName(cfg)} size="md" className="max-w-full" />
       </div>
       <div className="kt-chrome mono mt-0.5 flex flex-wrap items-center gap-x-sm gap-y-0.5">
         <span className="truncate">{cfg.id}</span>
@@ -354,37 +361,58 @@ export function StatusWord({ status }: { readonly status: string }) {
   );
 }
 
-/** A 44px reduced-density row for its group's panel. */
+/**
+ * One session in its project's list: TWO LINES in about 56px. The agent, the exception that needs
+ * reading (a status word that is not the routine, a park, a request for a human) and how long ago it
+ * last did anything on the first; the task, or what it is doing when it was given none, muted on the
+ * second. The time is the one column every row has, so the eye can run down the right edge.
+ */
 export const LeanSessionCard = memo(function LeanSessionCard({
   view,
   density,
   daemonId,
+  now,
   onNavigate,
   statusHoisted = false,
-}: LeanSessionProps & { readonly statusHoisted?: boolean }) {
+}: LeanSessionProps & { readonly now: number; readonly statusHoisted?: boolean }) {
   const cfg = view.config;
+  const task = sessionTaskName(cfg);
+  const preview = task === '' ? view.state.activity?.trim() : undefined;
+  // A request for a human already says "you" louder than the word would.
+  const word = !statusHoisted && !view.state.waiting && !view.state.needsHuman;
   return (
     <RouteLink
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
-      className="group flex min-h-[44px] min-w-0 items-center gap-sm px-panel py-1.5 transition-colors hover:bg-surface-2 active:bg-surface-2"
+      className="fy-session-row group"
+      data-session-row={cfg.id}
     >
-      <StatusMark view={view} />
-      <span
-        className={cn(
-          'min-w-16 max-w-[45%] shrink-[8] truncate text-row font-semibold group-hover:text-accent',
-          nameToneClass(view),
-        )}
-      >
-        {displayCallsign(cfg.teammate) || cfg.id}
-      </span>
-      <TaskName name={cfg.name} teammate={cfg.teammate} size="md" className="min-w-0 grow" />
-      {density === 'compact' && (
-        <span className="ml-auto flex shrink-0 items-center gap-xs">
-          {!statusHoisted && !view.state.waiting && <StatusWord status={view.state.status} />}
-          <AttentionFlags view={view} />
+      <span className="flex min-w-0 items-center gap-sm">
+        <StatusMark view={view} />
+        <span className={cn('min-w-0 truncate text-row font-semibold group-hover:text-accent', nameToneClass(view))}>
+          {displayCallsign(cfg.teammate) || cfg.id}
         </span>
-      )}
+        {density === 'compact' && (
+          <span className="flex min-w-0 shrink-0 items-center gap-xs">
+            {word && <StatusWord status={view.state.status} />}
+            <AttentionFlags view={view} />
+          </span>
+        )}
+        <span
+          className="mono ml-auto shrink-0 text-meta text-faint"
+          data-session-age=""
+          title={absoluteTime(view.state.lastActivityAt)}
+        >
+          {sessionAge(view.state.lastActivityAt, now)}
+        </span>
+      </span>
+      {task !== '' ? (
+        <TaskName name={task} teammate={cfg.teammate} size="sm" className="fy-session-row__task" />
+      ) : preview ? (
+        <span className="fy-session-row__task truncate text-ui text-muted" title={preview}>
+          {preview}
+        </span>
+      ) : null}
     </RouteLink>
   );
 });
