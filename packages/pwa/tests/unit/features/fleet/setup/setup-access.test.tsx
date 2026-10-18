@@ -6,8 +6,6 @@ import { type SetupAccess, useSetupAccess } from '../../../../../src/features/fl
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { machineAnswer, STUDIO, scriptedClient } from './setup-support.ts';
 
-const NO_ANSWER = 'This machine didn’t answer, so nothing was changed. Check it is awake and try again.';
-
 interface Probe {
   current: SetupAccess | null;
 }
@@ -85,7 +83,10 @@ describe('useSetupAccess', () => {
           throw new Error('socket hang up');
         });
       });
-      expect(result).toEqual({ kind: 'refused', sentence: NO_ANSWER });
+      expect(result).toEqual({
+        kind: 'refused',
+        sentence: 'This machine didn’t answer (socket hang up). Check it is awake and try again.',
+      });
     } finally {
       await view.unmount();
     }
@@ -148,7 +149,7 @@ describe('useSetupAccess', () => {
           throw new Error('connection reset');
         });
       });
-      expect(refusal()).toBe(NO_ANSWER);
+      expect(refusal()).toBe('This machine didn’t answer (connection reset). Check it is awake and try again.');
     } finally {
       await view.unmount();
     }
