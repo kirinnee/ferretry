@@ -61,10 +61,11 @@ export const MAX_BIND_CARRIERS = 1;
 export const MAX_RELAY_CARRIERS = 4;
 
 /**
- * How long to wait before dialling a rendezvous again after a socket ends.
+ * The CEILING of the redial backoff, in seconds (clamped to 1–10 where it is used): the first redial
+ * after a socket ends is immediate, and each failed one waits longer, jittered, up to this.
  *
- * A rendezvous holds the incumbent daemon's slot until its dead socket is swept — at most 45 seconds —
- * so a redial faster than the sweep is refused with `4409` rather than being granted early.
+ * A rendezvous holds a dead incumbent's slot until its socket is swept — at most 45 seconds — so a
+ * redial faster than the sweep is refused with `4409` and is simply tried again later.
  */
 const ReconnectSecondsSchema = z.number().int().positive().max(3_600).default(5);
 

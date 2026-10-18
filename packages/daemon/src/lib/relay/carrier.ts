@@ -11,12 +11,37 @@
  * compiles one in on either end.
  */
 
-import { connectionSocketUrl, HEARTBEAT_GRACE_SECONDS, HEARTBEAT_SECONDS } from '@ferretry/relay';
+import { connectionSocketUrl, HEARTBEAT_GRACE_SECONDS } from '@ferretry/relay';
 import type { DaemonRelayConfig } from '../runtime/config.ts';
 
-/** How often this side must prove it is alive, and how long silence is tolerated. */
-export const RELAY_HEARTBEAT_MS = HEARTBEAT_SECONDS * 1_000;
+/**
+ * How long silence is tolerated before the clock alone condemns a socket. This is the BACKSTOP, not
+ * the detector: the ping/pong deadline below finds a dead path within 30 seconds, and this rule is
+ * what finds one when the timers themselves did not run — a laptop that slept through its own ping,
+ * woken to a tick that fires late. Seeing 45 seconds of silence on that first tick drops the socket
+ * at once instead of pinging a corpse and waiting another ten seconds.
+ */
 export const RELAY_SILENCE_LIMIT_MS = HEARTBEAT_GRACE_SECONDS * 1_000;
+
+/**
+ * How often this side pings. The protocol says "at least every `heartbeatSeconds`" (§8), so a faster
+ * cadence conforms, and the edge answers `fy-ping` without waking the Durable Object: it costs the
+ * deployment nothing.
+ */
+export const RELAY_KEEPALIVE_MS = 20_000;
+
+/** How long a dial may take to open before it is abandoned and redialled. */
+export const RELAY_CONNECT_DEADLINE_MS = 15_000;
+
+/** After a ping, how long the socket may stay entirely silent before it is declared dead. ANY
+ *  inbound message counts as an answer — a socket carrying traffic is not dead. */
+export const RELAY_PONG_DEADLINE_MS = 10_000;
+
+/** The redial schedule: the first redial is immediate, then equal jitter on `BASE × 2^(attempt − 1)`. */
+export const RELAY_REDIAL_BASE_MS = 500;
+export const RELAY_REDIAL_CEILING_MIN_MS = 1_000;
+export const RELAY_REDIAL_CEILING_MAX_MS = 10_000;
+const RELAY_REDIAL_CEILING_FALLBACK_MS = 5_000;
 
 export type RelayCarrierDecision =
   | {
@@ -25,6 +50,9 @@ export type RelayCarrierDecision =
       readonly socketUrl: string;
       /** The host as the configured URL spells it. The claim signature covers this exact string. */
       readonly relayHost: string;
+      /** The scheme and authority only — the path carries the daemon fingerprint, so a log line names this. */
+      readonly relayOrigin: string;
+      /** The configured `reconnectSeconds`, in ms. It is the backoff CEILING, clamped where it is used. */
       readonly reconnectMs: number;
     }
   | { readonly kind: 'none'; readonly reason: string };
@@ -54,6 +82,7 @@ export function decideRelayCarrier(config: DaemonRelayConfig | undefined, daemon
     kind: 'dial',
     socketUrl,
     relayHost: new URL(config.url).host,
+    relayOrigin: new URL(config.url).origin,
     reconnectMs: config.reconnectSeconds * 1_000,
   };
 }
@@ -68,4 +97,34 @@ export function decideRelayCarrier(config: DaemonRelayConfig | undefined, daemon
  */
 export function relaySocketIsStale(lastSeenMs: number, nowMs: number): boolean {
   return nowMs - lastSeenMs >= RELAY_SILENCE_LIMIT_MS;
+}
+
+/**
+ * How long to wait before redial number `attempt` (0 is the first redial after a socket ended).
+ *
+ * ATTEMPT 0 IS IMMEDIATE. A Worker redeploy drops every socket at once and the slot it held is gone
+ * with it, so waiting only lengthens the outage; a dead path that the rendezvous has not yet swept
+ * answers the redial with `4409`, which is just attempt 1, and the schedule backs off from there.
+ * After that the window doubles from {@link RELAY_REDIAL_BASE_MS} to `ceilingMs`, and the delay lands in
+ * the upper half of it (EQUAL JITTER): never below `window / 2`, so a long backoff cannot collapse
+ * back to a storm, and never above `window`, so a fleet of daemons does not redial in one millisecond.
+ *
+ * `ceilingMs` is the operator's `reconnectSeconds`, reinterpreted as the CEILING and clamped to
+ * [{@link RELAY_REDIAL_CEILING_MIN_MS}, {@link RELAY_REDIAL_CEILING_MAX_MS}].
+ *
+ * TOTAL, AND NEVER SHORTER THAN THE SCHEDULE ALLOWS. `Math.min`/`Math.max` propagate `NaN`, and a timer
+ * coerces `NaN` to zero, so every input is normalised before it is clamped: an unusable `attempt`
+ * (NaN, negative) is the first redial, an infinite one the longest window; an unusable `random` is
+ * the bottom of the range; an unusable `ceilingMs` is the default five seconds, and an infinite one
+ * the clamp's own end.
+ */
+export function relayRedialDelayMs(attempt: number, random: number, ceilingMs: number): number {
+  const step = Number.isNaN(attempt) ? 0 : Math.max(0, Math.floor(attempt));
+  if (step === 0) return 0;
+  const ceiling = Number.isNaN(ceilingMs)
+    ? RELAY_REDIAL_CEILING_FALLBACK_MS
+    : Math.min(RELAY_REDIAL_CEILING_MAX_MS, Math.max(RELAY_REDIAL_CEILING_MIN_MS, ceilingMs));
+  const windowMs = Math.min(ceiling, RELAY_REDIAL_BASE_MS * 2 ** (step - 1));
+  const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0;
+  return Math.round(windowMs / 2 + (windowMs / 2) * jitter);
 }
