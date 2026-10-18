@@ -21,6 +21,7 @@ import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
+import { carrierDelivery } from '../lib/relay-carrier.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
@@ -46,6 +47,30 @@ import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
+interface SendFailure {
+  readonly text: string;
+  /** A carrier outage: the line goes away once the machine answers again. */
+  readonly outage: boolean;
+}
+
+/**
+ * What a failed send says. A carrier outage never shows the walk's long sentence, and it says "send it
+ * again" ONLY when nothing of the request provably left this browser: a send that died after leaving may
+ * already be with the daemon, and a resend under a new id would apply it twice — the transcript's send
+ * row settles that one, retrying under the original id only what it proves absent.
+ */
+const sendFailure = (cause: unknown): SendFailure => {
+  const delivery = carrierDelivery(cause);
+  if (delivery === 'unsent')
+    return { text: 'Not sent — the connection dropped. Your message is still here; send it again.', outage: true };
+  if (delivery === 'unknown')
+    return {
+      text: 'Connection dropped while sending — checking whether it arrived. Don’t send it again; it will show in the transcript.',
+      outage: true,
+    };
+  return { text: cause instanceof Error ? cause.message : 'Message could not be sent', outage: false };
+};
+
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
   readonly sessionId: string;
@@ -57,6 +82,11 @@ export interface ComposerProps {
   readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
   readonly onSent?: () => void;
+  /**
+   * The machine answers right now (its connection health reads `connected`). A send that failed on an
+   * outage stops saying so the moment this turns true.
+   */
+  readonly connectionLive?: boolean;
   /** Phone chrome. The host already knows its presentation; the composer does
    * not re-derive it, it only picks the growth ceiling from it. */
   readonly compact?: boolean;
@@ -260,6 +290,7 @@ export function Composer({
   quota,
   draftStore = documentDraftStore,
   onSent,
+  connectionLive = false,
   compact = false,
   enterKeyPreference = null,
   phoneEnterKeyPreference = null,
@@ -301,7 +332,12 @@ export function Composer({
   const draft = draftState.key === scopeKey ? draftState.text : draftStore.load(scope);
   const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SendFailure | null>(null);
+  // An outage line outlives nothing: once the machine answers again it is cleared, and an unconfirmed send
+  // is left to the transcript's send row, which settles it under the original id.
+  useEffect(() => {
+    if (connectionLive && error?.outage === true) setError(null);
+  }, [connectionLive, error]);
   const submitLock = useRef(false);
   const fieldId = useId();
   // A reader preference, not daemon data: it changes only how this browser
@@ -564,7 +600,7 @@ export function Composer({
       draftStore.clear(scope);
       onSent?.();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Message could not be sent');
+      setError(sendFailure(cause));
     } finally {
       submitLock.current = false;
       setSending(false);
@@ -1024,7 +1060,7 @@ export function Composer({
       ) : null}
       {error ? (
         <p className="fy-composer-error" role="alert">
-          {error}
+          {error.text}
         </p>
       ) : null}
     </form>

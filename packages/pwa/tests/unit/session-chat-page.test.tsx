@@ -1742,6 +1742,62 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('says nothing about an outage while the machine is reconnecting', () => {
+    const outage =
+      'Session workspace issue: Transcript: could not reach fyd (No configured connection worked: direct was not reachable (1006); hosted relay was not reachable (1006))';
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        connectionState={{
+          kind: 'reconnecting',
+          since: 0,
+          attempt: 2,
+          nextAttemptAt: null,
+          failures: [{ label: 'Direct', detail: 'direct was not reachable (1006)' }],
+          cause: 'unknown',
+          stalled: false,
+        }}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        refreshError={outage}
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(JSON.stringify(page.toJSON())).not.toContain('could not reach fyd');
+      expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
+      expect(page.root.findByType(Composer).props.connectionLive).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('keeps a refresh error that is not an outage to one line, with the whole sentence one tap away', () => {
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        connectionState={{ kind: 'connected' }}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        refreshError="Workspace refresh issue: the daemon did not answer."
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      const issue = page.root.findByProps({ 'data-session-issue': '' });
+      expect(issue.type).toBe('details');
+      expect(textOf(issue)).toBe('Workspace refresh issue: the daemon did not answer.');
+      expect(issue.findByType('summary').props.className).toContain('truncate');
+      expect(page.root.findByType(Composer).props.connectionLive).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   /**
    * ROW 17's SURFACE, IN THE SHIPPED WORKSPACE — not in a fixture.
    *

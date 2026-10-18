@@ -6056,6 +6056,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             pairing,
             connections: deviceConnections,
             lease: timings.lease,
+            log: line => bootNotices.state(line),
           }),
         })),
       };

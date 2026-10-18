@@ -164,8 +164,9 @@ const settle = async (): Promise<void> => {
 
 describe('the live feed retry schedule', () => {
   test('doubles to a ceiling and never exceeds it, jitter included', () => {
-    // Arrange — the two ends of the jitter range and the middle, at every attempt the budget allows.
-    const attempts = Array.from({ length: SESSION_EVENT_STREAM_BACKOFF.attemptBudget }, (_, index) => index);
+    // Arrange — the two ends of the jitter range and the middle, well past the attempt that reaches the
+    // ceiling. The budget is unbounded now, so the range is chosen rather than read from it.
+    const attempts = Array.from({ length: 8 }, (_, index) => index);
 
     // Act
     const floors = attempts.map(attempt => sessionEventStreamDelayMs(attempt, 0));
@@ -174,8 +175,8 @@ describe('the live feed retry schedule', () => {
 
     // Assert — equal jitter: each delay lands in the UPPER HALF of its window, so the schedule can
     // neither collapse back to hammering a daemon that is still down nor run past the ceiling.
-    expect(floors).toEqual([500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000, 15_000]);
-    expect(ceilings).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
+    expect(floors).toEqual([500, 1_000, 2_000, 4_000, 5_000, 5_000, 5_000, 5_000]);
+    expect(ceilings).toEqual([1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000, 10_000]);
     for (const [index, middle] of middles.entries()) {
       expect(middle).toBeGreaterThanOrEqual(floors[index] ?? 0);
       expect(middle).toBeLessThanOrEqual(ceilings[index] ?? 0);
@@ -729,5 +730,73 @@ describe('the live feed teardown', () => {
     expect(clock.delays).toEqual([DEADLINE]);
     expect(transport.attempts).toHaveLength(2);
     control.stop();
+  });
+});
+
+describe('the daemon coming back', () => {
+  /** A recovery signal the test fires, recording whether anybody still listens. */
+  const recovery = () => {
+    const listeners = new Set<() => void>();
+    return {
+      listeners,
+      onRecovered: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      fire: () => {
+        for (const listener of [...listeners]) listener();
+      },
+    };
+  };
+
+  test('reopens a feed waiting out its backoff at once, from its cursor', async () => {
+    // Arrange — a feed that delivered sequence 7, then lost its socket and is waiting to retry.
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered });
+    harness.transport.last.emit(event(7));
+    harness.transport.last.fail();
+    await settle();
+    expect(harness.control.status()).toBe('reconnecting');
+
+    // Act
+    signal.fire();
+
+    // Assert — no backoff waited out: a second subscription, resuming after 7, and nothing else armed.
+    expect(harness.transport.attempts).toHaveLength(2);
+    expect(harness.transport.last.after).toBe(7);
+    expect(harness.control.status()).toBe('connecting');
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    harness.control.stop();
+  });
+
+  test('reopens a feed that had given up', async () => {
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered, attemptBudget: 0 });
+    harness.transport.last.fail();
+    await settle();
+    expect(harness.control.status()).toBe('disconnected');
+    signal.fire();
+    expect(harness.transport.attempts).toHaveLength(2);
+    harness.control.stop();
+  });
+
+  test('leaves a live feed, and one already connecting, alone', () => {
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered });
+    signal.fire();
+    expect(harness.transport.attempts).toHaveLength(1);
+    harness.transport.last.idle(idleFrame(30));
+    expect(harness.control.status()).toBe('live');
+    signal.fire();
+    expect(harness.transport.attempts).toHaveLength(1);
+    harness.control.stop();
+  });
+
+  test('stops listening when the owner stops it', () => {
+    const signal = recovery();
+    const harness = subject({ onRecovered: signal.onRecovered });
+    expect(signal.listeners.size).toBe(1);
+    harness.control.stop();
+    expect(signal.listeners.size).toBe(0);
   });
 });

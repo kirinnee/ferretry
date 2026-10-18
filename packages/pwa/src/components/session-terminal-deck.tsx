@@ -119,6 +119,11 @@ export interface TerminalDeckDependencies {
   /** Confirmation before a shell is killed. Injected so a test never blocks. */
   confirmClose(title: string): boolean;
   writeClipboard(text: string): Promise<void>;
+  /**
+   * "This daemon is reachable again" (the connection model's `onRecovered`); returns how to stop. A
+   * pane waiting out its reopen backoff reopens at once. Absent means panes wait out the backoff.
+   */
+  onRecovered?(daemon: DaemonConnection, listener: () => void): () => void;
 }
 
 /**
@@ -132,7 +137,9 @@ export interface TerminalDeckDependencies {
 export const browserTerminalDeckDependencies = (
   fetcher: DaemonFetch,
   openStream: TerminalStreamOpener,
+  onRecovered?: TerminalDeckDependencies['onRecovered'],
 ): TerminalDeckDependencies => ({
+  ...(onRecovered === undefined ? {} : { onRecovered }),
   list: (daemon, scope) => listSessionTerminals(daemon, scope, fetcher),
   create: (daemon, scope) => createSessionTerminal(daemon, scope, {}, fetcher),
   rename: (daemon, scope, id, title) => renameSessionTerminal(daemon, scope, id, title, fetcher),
@@ -424,6 +431,15 @@ function TerminalCanvas({
         terminalReopenDelayMs(attemptRef.current),
       );
     };
+    // THE DAEMON IS BACK: a pane waiting out its backoff reopens now. The emulator is not touched, so
+    // the last frame stays on screen until the new stream paints over it.
+    const stopRecovered = dependencies.onRecovered?.(connection, () => {
+      if (disposed || reopenTimer === undefined) return;
+      clearTimeout(reopenTimer);
+      reopenTimer = undefined;
+      attemptRef.current = 0;
+      setReopenVersion(version => version + 1);
+    });
 
     // The attach is asynchronous on both carriers — a ticket purchase, or a rendezvous handshake —
     // so every teardown path has to survive the await: a tab switched away from mid-attach must not
@@ -487,6 +503,7 @@ function TerminalCanvas({
 
     return () => {
       disposed = true;
+      stopRecovered?.();
       if (reopenTimer !== undefined) clearTimeout(reopenTimer);
       if (streamRef.current === stream) streamRef.current = null;
       // §14 makes a client's leave an explicit sealed record rather than a dropped socket, "so that

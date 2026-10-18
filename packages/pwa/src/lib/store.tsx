@@ -32,6 +32,17 @@ import {
   DaemonConnectionStore,
   type DaemonConnectionsSnapshot,
 } from './connections.ts';
+import {
+  browserConnectionHealthEnvironment,
+  type ConnectionHealth,
+  type ConnectionHealthEnvironment,
+  DaemonConnectionHealth,
+} from './connection-health.ts';
+import {
+  browserConnectionSignals,
+  type ConnectionSignalEnvironment,
+  watchConnectionSignals,
+} from './connection-signals.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -378,6 +389,13 @@ export interface AppStore {
    */
   readonly carrier: DaemonCarrierRouter;
   /**
+   * HOW WELL EACH DAEMON IS REACHED, as one fact per daemon — and the loop that recovers it.
+   *
+   * Fed by the carrier router; read by every surface through `useConnectionHealth`. A lost carrier is
+   * said ONCE, here, instead of by every panel that happened to be polling when it went.
+   */
+  readonly connectionHealth: ConnectionHealth;
+  /**
    * The passkey prompt every daemon request shares: a refusal for want of a step-up raises it once,
    * and the request is sent again when the person has confirmed. Rendered by `StepUpDialog`.
    */
@@ -423,6 +441,10 @@ export interface CreateAppStoreOptions {
   readonly appOrigin?: string;
   /** The page's own attention signals by default. Injected so a suite decides who is present. */
   readonly presence?: Pick<PresenceTracker, 'present'>;
+  /** The real clock, timers, `Math.random` and `navigator.onLine` by default. Injected by suites. */
+  readonly connectionHealthEnvironment?: ConnectionHealthEnvironment;
+  /** `online`, foreground and network-change events by default. Injected so a suite fires them. */
+  readonly connectionSignals?: ConnectionSignalEnvironment;
 }
 
 /**
@@ -503,8 +525,23 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       }
     },
   });
+  /**
+   * Each reconnect attempt is a REAL read through the router — the same `/v1/carriers` read a fresh
+   * connection makes — so "recovered" always means a request was answered. Its outcome reaches the
+   * health model the way every request's does; nothing here reads it.
+   */
+  const connectionHealth = new DaemonConnectionHealth(
+    options.connectionHealthEnvironment ?? browserConnectionHealthEnvironment(),
+    async daemonId => {
+      const daemon = connections.list().find(record => record.daemonId === daemonId);
+      if (daemon === undefined) return;
+      const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
+      await carrier.probe(daemon, request.url, request.init);
+    },
+  );
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
+    health: connectionHealth,
     presence: () => presence.present(),
     stepUp: async (daemon, act, origin) => await stepUp.require(daemon, act, origin),
     unlockRequired: async (daemon, origin) => await unlockGate.require(daemon, undefined, origin),
@@ -617,6 +654,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       documentDraftStore,
       workspaceLayouts,
       carrier,
+      connectionHealth,
     ],
     // The key goes with the pairing it proved, and only when the pairing goes for good — a re-pair in
     // place has already saved the new key under the same daemon id.
@@ -634,6 +672,14 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   connections.subscribe(syncLandingPage);
 
   /** The daemon is authoritative; after a carrier first answers, replace the cache. */
+  // Back online, back in the foreground, a new network: retry every outage now, and prove every held
+  // session is still alive rather than waiting for its next ping. Document-lifetime, like the store.
+  watchConnectionSignals(options.connectionSignals ?? browserConnectionSignals(), {
+    reconnecting: () => connectionHealth.reconnecting(),
+    retryNow: daemonId => connectionHealth.retryNow(daemonId),
+    checkLiveness: () => carrier.checkLiveness(),
+  });
+
   carrier.onConnected(daemon => {
     void (async () => {
       const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
@@ -647,6 +693,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
 
   return {
     carrier,
+    connectionHealth,
     stepUp,
     unlockGate,
     connections,
