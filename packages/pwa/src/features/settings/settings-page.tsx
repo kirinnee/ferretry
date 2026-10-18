@@ -42,6 +42,7 @@ import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { MotionSetting } from './conversation-settings.tsx';
+import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
@@ -431,6 +432,7 @@ export function SettingsPage({
         <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
       ),
       motion: <MotionSetting motion={device.motion} onChange={motion => controls.setDeviceControls({ motion })} />,
+      'message-marks': <MessageMarksLegend />,
       'composer-markdown': (
         <MarkdownComposerSettings
           vimEnabled={device.composerVimMode}

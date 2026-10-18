@@ -17,6 +17,7 @@ export type SettingId =
   | 'theme'
   | 'chat-width'
   | 'motion'
+  | 'message-marks'
   | 'composer-markdown'
   | 'composer-enter-key'
   | 'composer-suggestions'
@@ -245,6 +246,25 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     description: 'Follow this device’s reduced-motion setting, or always keep spinners and transitions still here.',
     keywords: ['motion', 'animation', 'reduced', 'reduce', 'spinner', 'accessibility', 'vestibular'],
   },
+  {
+    id: 'message-marks',
+    label: 'Message marks',
+    description:
+      'What the clock, ticks and ! under your messages mean: sending, queued, delivered, answered by the agent, or not delivered.',
+    keywords: [
+      'ticks',
+      'tick',
+      'receipt',
+      'receipts',
+      'read',
+      'delivered',
+      'sent',
+      'queued',
+      'failed',
+      'legend',
+      'check',
+    ],
+  },
 ] as const;
 
 /**
@@ -258,7 +278,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'appearance',
     label: 'Appearance',
     description: 'Text, colour, density, and conversation layout on this device.',
-    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width'],
+    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks'],
   },
   {
     id: 'behaviour',

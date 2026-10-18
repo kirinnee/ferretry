@@ -5,6 +5,7 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { createAgentReferenceResolver } from '../../src/lib/agent-references.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { clockOfInstant } from '../../src/lib/message-clock.ts';
 import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
 import { render, run } from '../support/react.ts';
 
@@ -23,7 +24,7 @@ const PEER: TranscriptEntry = {
   id: 'p1',
   kind: 'user',
   text: "Hey! How's your **day** going?",
-  label: '10:01:02',
+  at: Date.UTC(2026, 9, 18, 1, 1, 2),
   peer: {
     name: 'torrey',
     sessionId: 'mvb0sw7d-27f71326',
@@ -65,12 +66,20 @@ describe('a message from another agent', () => {
   });
 
   test('says when the sender is parked on a reply, and omits an empty note', () => {
-    const view = render(
-      <TranscriptRow entry={{ ...PEER, label: undefined, peer: { name: 'kamila', replyExpected: true, note: '' } }} />,
-    );
+    const view = render(<TranscriptRow entry={{ ...PEER, peer: { name: 'kamila', replyExpected: true, note: '' } }} />);
     expect(textOf(view)).toContain('waiting for a reply');
     expect(view.root.findAllByType('details')).toHaveLength(0);
     expect(view.root.findAllByProps({ className: 'fy-peer-clock' })).toHaveLength(0);
+  });
+
+  test('carries its time at the foot, on the reader’s clock, never in the header', () => {
+    const view = render(<TranscriptRow entry={PEER} />);
+    const clock = clockOfInstant(PEER.at);
+    expect(view.root.findByProps({ 'data-message-footer': '' }).props['data-side']).toBe('other');
+    expect(view.root.findByType('time').children).toEqual([clock?.short ?? '']);
+    expect(view.root.findByType('header').findAllByType('time')).toHaveLength(0);
+    const { at: _at, ...undated } = PEER;
+    expect(render(<TranscriptRow entry={undated} />).root.findAllByType('time')).toHaveLength(0);
   });
 
   test('wears its delivery chip when the ledger proved it', () => {
@@ -107,18 +116,20 @@ describe('a notice from Ferretry itself', () => {
           id: 'n',
           kind: 'system',
           text: 'Your message to aniya did not reach it: `fy send aniya …`.',
-          label: '10:05:00',
+          at: Date.UTC(2026, 9, 18, 1, 5, 0),
         }}
       />,
     );
     const row = view.root.findByProps({ 'data-transcript-kind': 'system' });
     expect(row.props.role).toBe('note');
     expect(row.props['data-transcript-density']).toBe('chrome');
-    expect(textOf(view)).toBe('FerretryYour message to aniya did not reach it: fy send aniya ….10:05:00');
+    expect(textOf(view)).toBe(
+      `FerretryYour message to aniya did not reach it: fy send aniya ….${clockOfInstant(Date.UTC(2026, 9, 18, 1, 5, 0))?.short}`,
+    );
   });
 
   test('omits the clock when the record had none', () => {
     const view = render(<TranscriptRow entry={{ id: 'n', kind: 'system', text: 'A notice.' }} />);
-    expect(view.root.findAllByProps({ className: 'fy-system-clock' })).toHaveLength(0);
+    expect(view.root.findAllByType('time')).toHaveLength(0);
   });
 });

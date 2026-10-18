@@ -1,55 +1,63 @@
 /**
- * The foot of one of the reader's own bubbles: its time, small and faded, then its receipt mark —
- * `14:02 ✓✓`. It replaces a header row ("You · 14:02:55") and a pill ("delivered") that between them
- * took two lines of every message the reader sent.
+ * The foot of a message: its time, small and faded, then — on the reader's own messages — the receipt
+ * mark: `14:02 ✓✓`. ONE RULE FOR BOTH SIDES: the sender's name is a small muted line above a message and
+ * the time sits at its foot, so the reader's bubble, the agent's reply, a peer's message and a notice
+ * all read the same way and none carries a header full of seconds.
  *
- * The time and the mark are ONE button. A tap (a phone has no hover) reads out what a tooltip says on
- * a desktop: the time to the second and why the mark is what it is. A state that needs the reader also
- * wears a small word before the mark (`sendReceipt`'s `chip`); its actions live on the bubble itself.
+ * The time (and the mark, when there is one) is ONE button. A tap (a phone has no hover) reads out what a
+ * tooltip says on a desktop: the full local date and time to the second, and for a send why the mark is
+ * what it is. A state that needs the reader also wears a small word before the mark (`sendReceipt`'s
+ * `chip`); its actions live on the bubble itself.
  */
 
-import { Check, CheckCheck, CircleAlert, CircleHelp, Clock3 } from 'lucide-react';
 import { useState } from 'react';
+import type { MessageClock } from '../lib/message-clock.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
-import { type MessageClock, type SendReceiptKind, sendReceipt } from '../lib/send-receipt.ts';
-
-const MARK: Readonly<Record<SendReceiptKind, typeof Check>> = {
-  sending: Clock3,
-  held: Clock3,
-  queued: Check,
-  delivered: CheckCheck,
-  read: CheckCheck,
-  unconfirmed: CircleHelp,
-  failed: CircleAlert,
-};
+import { sendReceipt } from '../lib/send-receipt.ts';
+import { ReceiptMark } from './receipt-mark.tsx';
 
 export interface MessageFooterProps {
   /** When the message was sent; absent when nothing recorded a time. */
   readonly clock?: MessageClock | undefined;
   /** The send this message is, when the daemon's ledger knows it. */
   readonly record?: LedgerSendRecord | undefined;
-  /** The agent has replied after this message — a delivered send reads as `read`. */
+  /** The agent has replied after this message — a delivered send reads as `answered`. */
   readonly answered?: boolean;
+  /** Which side of the transcript the message sits on; the foot lines up with its bubble. */
+  readonly side?: 'own' | 'other';
 }
 
-export function MessageFooter({ clock, record, answered = false }: MessageFooterProps) {
+export function MessageFooter({ clock, record, answered = false, side = 'own' }: MessageFooterProps) {
   const [open, setOpen] = useState(false);
   if (record === undefined) {
     if (clock === undefined) return null;
     return (
-      <div className="fy-receipt-line" data-message-footer="">
-        <time className="fy-receipt" title={clock.full}>
-          {clock.short}
-        </time>
-      </div>
+      <>
+        <div className="fy-receipt-line" data-message-footer="" data-side={side}>
+          <button
+            aria-expanded={open}
+            aria-label={`Sent ${clock.full}`}
+            className="fy-receipt"
+            onClick={() => setOpen(current => !current)}
+            title={clock.full}
+            type="button"
+          >
+            <time aria-hidden="true">{clock.short}</time>
+          </button>
+        </div>
+        {open ? (
+          <p className="fy-receipt-detail" data-side={side} data-time-full="">
+            {clock.full}
+          </p>
+        ) : null}
+      </>
     );
   }
   const receipt = sendReceipt(record, answered);
-  const Mark = MARK[receipt.kind];
   const sent = clock === undefined ? undefined : `sent ${clock.full}`;
   return (
     <>
-      <div className="fy-receipt-line" data-message-footer="">
+      <div className="fy-receipt-line" data-message-footer="" data-side={side}>
         {receipt.chip === undefined ? null : (
           <span className="fy-receipt-chip" data-send-chip={receipt.kind}>
             {receipt.chip}
@@ -66,11 +74,11 @@ export function MessageFooter({ clock, record, answered = false }: MessageFooter
           type="button"
         >
           {clock === undefined ? null : <time aria-hidden="true">{clock.short}</time>}
-          <Mark aria-hidden="true" className="fy-receipt-mark" size={14} strokeWidth={2.25} />
+          <ReceiptMark className="fy-receipt-mark" kind={receipt.kind} />
         </button>
       </div>
       {open ? (
-        <p className="fy-receipt-detail" data-send-reason="">
+        <p className="fy-receipt-detail" data-send-reason="" data-side={side}>
           {sent === undefined ? receipt.detail : `${receipt.name} · ${sent} — ${receipt.detail}`}
         </p>
       ) : (

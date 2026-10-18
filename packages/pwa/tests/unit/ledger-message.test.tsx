@@ -253,7 +253,7 @@ describe('LedgerMessage', () => {
     expect(row.root.findAllByProps({ 'data-send-reason': '' })).toHaveLength(0);
 
     const receipt = row.root.findByProps({ 'data-send-receipt': 'queued' });
-    expect(receipt.props['aria-label']).toMatch(/^Queued, sent \d{2}:\d{2}:\d{2}$/u);
+    expect(receipt.props['aria-label']).toMatch(/^Queued, sent .*\d{2}:\d{2}:\d{2}/u);
     await click(receipt);
 
     expect(row.root.findByProps({ 'data-send-reason': '' })).toBeDefined();
