@@ -300,6 +300,26 @@ async function dropAndMeasure(
 
 let currentReport = REPORT_PATH;
 
+/** The renderer processes of the Chrome THIS test process launched: its descendants whose command line says `--type=renderer`. */
+function ownRendererPids(): number[] {
+  const listing = Bun.spawnSync(['ps', '-eo', 'pid=,ppid=,args=']).stdout.toString().split('\n');
+  const rows = listing.flatMap(line => {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/u.exec(line);
+    return match === null ? [] : [{ pid: Number(match[1]), ppid: Number(match[2]), args: match[3] ?? '' }];
+  });
+  const owned = new Set<number>(rows.filter(row => row.ppid === process.pid).map(row => row.pid));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const row of rows) {
+      if (!owned.has(row.pid) && owned.has(row.ppid)) {
+        owned.add(row.pid);
+        grew = true;
+      }
+    }
+  }
+  return rows.filter(row => owned.has(row.pid) && row.args.includes('--type=renderer')).map(row => row.pid);
+}
+
 /** "role code reason ×count" for every application-level close the rendezvous logged. */
 function closeSummary(stderr: string): string {
   const counts = new Map<string, number>();
@@ -611,6 +631,7 @@ describe('a relayed session page that loses its connection', () => {
             client: arrivals.filter(entry => entry.role === 'client' && entry.daemonId === fingerprint).length,
           };
         };
+        await page.waitForSelector('[data-live-stream="live"]', { timeout: 60_000 });
         const before = await dials();
         const transitions: string[] = [];
         let last = '';
@@ -651,12 +672,24 @@ describe('a relayed session page that loses its connection', () => {
   it(
     'should recover unaided after the page was frozen past the relay eviction grace',
     () =>
-      withJourney('frozen', async ({ environment, rendezvous, browser, page, session, mark }) => {
-        const devtools = await browser.cdp();
-        await devtools.send('Page.enable');
-        const before = await glass(page);
+      withJourney('frozen', async ({ environment, teardown, rendezvous, page, session, mark }) => {
         const frozenAt = Date.now();
-        await devtools.send('Page.setWebLifecycleState', { state: 'frozen' });
+        // A CDP lifecycle freeze left every socket open and answering in headless Chrome (measured), which is not a
+        // backgrounded phone. SIGSTOP on the renderer is: its timers, pings and sockets all stop, as under an OS suspend.
+        const liveBefore = await until(async () => ((await glass(page)).stream === 'live' ? Date.now() : undefined), 90_000);
+        await note(`- live before the freeze: ${String(liveBefore !== undefined)}; glass ${JSON.stringify(await glass(page))}`);
+        const renderers = ownRendererPids();
+        if (renderers.length === 0) throw new Error('no renderer process to suspend');
+        for (const pid of renderers) process.kill(pid, 'SIGSTOP');
+        teardown.add('resume renderers', () => {
+          for (const pid of renderers) {
+            try {
+              process.kill(pid, 'SIGCONT');
+            } catch {
+              // already gone
+            }
+          }
+        });
         await Bun.sleep(FREEZE_SECONDS * 1000);
         const held = await rendezvous.sockets().catch(() => []);
         await note(
@@ -667,7 +700,7 @@ describe('a relayed session page that loses its connection', () => {
         const target = await lastSequence(environment, session.sessionId);
         if (target <= sequenceBefore) await note('  - WARNING: the probe appended no journal event');
         const activeAt = Date.now();
-        await devtools.send('Page.setWebLifecycleState', { state: 'active' });
+        for (const pid of renderers) process.kill(pid, 'SIGCONT');
         await page.evaluate<boolean>(
           "(() => { document.dispatchEvent(new Event('visibilitychange')); window.dispatchEvent(new Event('focus')); window.dispatchEvent(new Event('online')); return true; })()",
         );
@@ -698,7 +731,6 @@ describe('a relayed session page that loses its connection', () => {
         }, 60_000);
         done = true;
         await watch;
-        await note(`- before the freeze: ${JSON.stringify(before)}`);
         await note(
           `- after unfreeze: live again ${liveAt === undefined ? 'NEVER (60 s)' : String(liveAt - activeAt)} ms, the event appended during the freeze shown ${shownAt === undefined ? 'NEVER (60 s)' : String(shownAt - activeAt)} ms; glass: ${[...seen].join(' | ')}`,
         );
