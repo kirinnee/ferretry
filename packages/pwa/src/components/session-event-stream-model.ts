@@ -15,25 +15,26 @@ export type SessionEventStreamStatus = 'connecting' | 'live' | 'reconnecting' | 
 /**
  * The retry schedule, as the four numbers that generate it rather than a table.
  *
- * BOUNDED IN BOTH DIRECTIONS, deliberately. The delay is bounded so a daemon that stays gone is
- * asked once every half minute instead of in a loop, and the ATTEMPT COUNT is bounded so a browser
- * left open overnight against a machine that is off stops asking at all. A schedule with no attempt
- * bound is not gentler — it is a page that keeps a radio busy forever and never once says out loud
- * that it has given up, which is the same "a dead stream looks alive" defect one layer down.
+ * THE DELAY IS BOUNDED AND THE ATTEMPTS ARE NOT. This schedule used to stop after eight attempts, on
+ * the argument that a page left open overnight against a machine that is off should stop asking. In
+ * practice the outage that ended feeds was never a machine that was off: it was a relay redeployed
+ * under a live page, or a phone that slept through a minute, and a feed that had given up by the time
+ * the carrier came back stayed dead until the reader found a button. The cost of asking forever is
+ * bounded by the ceiling — one attempt per ten seconds at worst — and the connection model's recovery
+ * signal (`onRecovered`) reopens the feed the moment ANY request reaches the daemon again, so a
+ * returning carrier is noticed in one round trip rather than one backoff window.
  *
- * Exhaustion is affordable HERE and would not be affordable anywhere else in this app, because the
- * three-second workspace poll underneath keeps the transcript correct the whole time and the reader
- * is given a control that starts the schedule over. Losing the feed makes the screen slower, not
- * wrong; the reader is told which of the two has happened.
+ * `disconnected` is still a state — a host that passes a finite `attemptBudget` reaches it — but the
+ * shipped app does not, because "it stopped trying" is not something a reader should have to repair.
  */
 export const SESSION_EVENT_STREAM_BACKOFF = {
   /** The first window. Short enough that a socket blip is invisible. */
   baseMs: 1_000,
   factor: 2,
   /** No window is ever longer than this, jitter included — see {@link sessionEventStreamDelayMs}. */
-  ceilingMs: 30_000,
-  /** Automatic attempts before the schedule settles into `disconnected`. */
-  attemptBudget: 8,
+  ceilingMs: 10_000,
+  /** Automatic attempts before the schedule settles into `disconnected`: none, it never does. */
+  attemptBudget: Number.POSITIVE_INFINITY,
 } as const;
 
 /**
@@ -130,6 +131,13 @@ export interface SessionEventStreamInput {
   readonly onStatus?: (status: SessionEventStreamStatus) => void;
   /** Overridable only so a test can exhaust the schedule; production uses the shipped budget. */
   readonly attemptBudget?: number;
+  /**
+   * Subscribes to "the daemon is reachable again" (the connection model's `onRecovered`, bound to this
+   * daemon); returns how to stop. A feed waiting out a backoff when it fires reconnects AT ONCE, from its
+   * cursor, rather than waiting out its backoff. Injected rather than imported, so this model needs no
+   * store.
+   */
+  readonly onRecovered?: (listener: () => void) => () => void;
 }
 
 export interface SessionEventStreamControl {
@@ -139,7 +147,7 @@ export interface SessionEventStreamControl {
    * Start over now: abandon whatever is open or scheduled, restore the full budget, and reconnect.
    *
    * This is the reader's way back from `disconnected`, and it is also correct from `reconnecting` —
-   * somebody who can see the daemon is back should not have to wait out a thirty-second window.
+   * somebody who can see the daemon is back should not have to wait out a backoff window.
    */
   readonly reconnect: () => void;
   readonly status: () => SessionEventStreamStatus;
@@ -316,24 +324,32 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
       .then(finish, finish);
   }
 
+  const reconnect = (): void => {
+    if (stopped) return;
+    abandon();
+    attempt = 0;
+    publish('connecting');
+    open();
+  };
+
   open();
+  // ONLY A FEED THAT IS WAITING. `connecting` has an attempt in flight — opened by this very recovery,
+  // often — and reopening it would hold two sockets for one session; `live` needs nothing.
+  const stopRecovered = input.onRecovered?.(() => {
+    if (status === 'reconnecting' || status === 'disconnected') reconnect();
+  });
 
   return {
     stop: () => {
       if (stopped) return;
       stopped = true;
+      stopRecovered?.();
       // Both halves, because a loop is only ever in one of them: the transport is cancelled through
       // the signal it was handed, and a scheduled reconnection is cancelled before it can fire.
       // Nothing is published — the owner tearing this down is not news anyone is left to hear.
       abandon();
     },
-    reconnect: () => {
-      if (stopped) return;
-      abandon();
-      attempt = 0;
-      publish('connecting');
-      open();
-    },
+    reconnect,
     status: () => status,
   };
 };

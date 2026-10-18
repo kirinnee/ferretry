@@ -486,6 +486,41 @@ describe('startSessionWorkspaceRefresh', () => {
     expect(errors.at(-1)).toBe('Session: offline');
   });
 
+  test('keeps the last good transcript and the message through a failure somebody else says', async () => {
+    // Arrange — a carrier outage, which the connection model reports once; and a daemon answer, which
+    // is still this screen's to say.
+    const browser = environment();
+    const outage = new Error('no carrier');
+    const errors: (string | null)[] = [];
+    const transcripts: unknown[] = [];
+    let logs: () => Promise<string> = async () => 'assistant/message: kept';
+    let get: () => Promise<ReturnType<typeof sessionView>> = async () => sessionView('s-1');
+    const control = startSessionWorkspaceRefresh({
+      api: { logs: async () => await logs(), get: async () => await get() },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: entries => transcripts.push(entries),
+      onSession: () => undefined,
+      onError: message => errors.push(message),
+      quiet: reason => reason === outage,
+    });
+    await control.initial;
+    expect(errors).toEqual([null]);
+
+    // Act I — both reads fail with the outage: nothing is said and nothing is cleared.
+    logs = async () => await Promise.reject(outage);
+    get = async () => await Promise.reject(outage);
+    await control.refresh();
+    expect(errors).toEqual([null]);
+    expect(transcripts).toHaveLength(1);
+
+    // Act II — one quiet failure beside a loud one: only the loud one is said.
+    get = async () => await Promise.reject(new Error('session read refused'));
+    await control.refresh();
+    control.stop();
+    expect(errors.at(-1)).toBe('Session: session read refused');
+  });
+
   test('drops a late answer after teardown', async () => {
     const browser = environment();
     const logs = deferred<string>();

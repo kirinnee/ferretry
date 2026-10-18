@@ -559,44 +559,6 @@ describe('what a socket does that a protocol does not', () => {
     }
   });
 
-  it('should drop a socket that stopped answering rather than believe it still holds the slot', async () => {
-    // Arrange — a clock the test moves past the grace window.
-    const fake = fakeSockets();
-    const clock = { value: 1_000 };
-    const carrier = new BunRelayCarrier({
-      config: config({ url: 'https://relay.example' }),
-      crypto: relayCrypto,
-      identity,
-      devices,
-      connections: new LiveDeviceConnections(),
-      sockets: relayStreams,
-      pairing: relayPairing,
-      dispatch: async () => ok({}),
-      socketFactory: fake.factory,
-      now: () => clock.value,
-      heartbeatMs: 5,
-    });
-    carrier.start();
-    const socket = fake.sockets[0];
-    if (socket === undefined) throw new Error('no socket');
-    socket.onopen?.(undefined);
-
-    // Act + Assert — while the socket is fresh, the tick pings.
-    socket.onmessage?.({ data: 'fy-ping' });
-    should(socket.sent).containEql('fy-pong');
-    await until(() => (socket.sent.includes('fy-ping') ? true : undefined), 'the heartbeat this side owes');
-
-    // Act — the socket goes quiet for longer than the grace window.
-    clock.value += 60_000;
-
-    // Assert — no evidence of life means dropped, not means fine: the alternative is a daemon that
-    // believes it holds a rendezvous slot every arriving client is being told is empty.
-    const closed = await until(() => socket.closes[0], 'the socket to be dropped');
-    should(closed.code).equal(4408);
-    should(carrier.status().detail).match(/stopped answering/u);
-    carrier.stop();
-  });
-
   it('should refuse a message that is neither text nor bytes, and survive a link that throws', async () => {
     // Arrange
     const fake = fakeSockets();
@@ -776,5 +738,405 @@ describe('what a stopped carrier owes a live stream', () => {
     should(closed).deepEqual(['released']);
     should(socket.closes.at(-1)).containDeep({ code: 1000 });
     should(carrier.status().phase).equal('stopped');
+  });
+});
+
+/** A clock and a scheduler that only move when the test says so: no test here waits on a wall clock. */
+function fakeClock() {
+  let current = 1_000;
+  let nextId = 0;
+  const pending = new Map<number, { readonly at: number; readonly action: () => void }>();
+  const delays: number[] = [];
+  return {
+    now: () => current,
+    delays,
+    pending: () => pending.size,
+    scheduler: {
+      after: (milliseconds: number, action: () => void) => {
+        nextId += 1;
+        const id = nextId;
+        delays.push(milliseconds);
+        pending.set(id, { at: current + milliseconds, action });
+        return { cancel: () => void pending.delete(id) };
+      },
+    },
+    /** Time passes AND every timer that falls due runs, earliest first. */
+    advance: (milliseconds: number) => {
+      const target = current + milliseconds;
+      for (;;) {
+        const due = [...pending.entries()]
+          .filter(([, timer]) => timer.at <= target)
+          .sort((a, b) => a[1].at - b[1].at)[0];
+        if (due === undefined) break;
+        current = Math.max(current, due[1].at);
+        pending.delete(due[0]);
+        due[1].action();
+      }
+      current = target;
+    },
+    /** Time passes and NO timer runs — a laptop asleep through its own ping. */
+    jump: (milliseconds: number) => {
+      current += milliseconds;
+    },
+  };
+}
+
+const CLAIMED = {
+  t: 'claimed',
+  protocol: RELAY_PROTOCOL_ID,
+  limits: { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 },
+} as const;
+
+function redialingCarrier(patch: Record<string, unknown> = {}, random = 1) {
+  const fake = fakeSockets();
+  const clock = fakeClock();
+  const lines: string[] = [];
+  const carrier = new BunRelayCarrier({
+    config: config({ url: 'https://relay.example', ...patch }),
+    crypto: relayCrypto,
+    identity,
+    devices,
+    connections: new LiveDeviceConnections(),
+    sockets: relayStreams,
+    pairing: relayPairing,
+    dispatch: async () => ok({}),
+    socketFactory: fake.factory,
+    scheduler: clock.scheduler,
+    now: clock.now,
+    random: () => random,
+    log: line => lines.push(line),
+  });
+  const socketAt = (index: number): FakeSocket => {
+    const socket = fake.sockets[index];
+    if (socket === undefined) throw new Error(`no socket ${index}`);
+    return socket;
+  };
+  /** The rendezvous half of a successful claim: challenge, the daemon's claim, then the acceptance. */
+  const claimOn = async (socket: FakeSocket): Promise<void> => {
+    socket.onmessage?.({
+      data: controlFrame({
+        t: 'challenge',
+        protocol: RELAY_PROTOCOL_ID,
+        nonce: toBase64Url(relayCrypto.randomBytes(NONCE_BYTES)),
+        host: 'relay.example',
+        deadlineSeconds: 10,
+      }),
+    });
+    await until(() => socket.sent.at(-1), 'the claim');
+    socket.onmessage?.({ data: controlFrame(CLAIMED) });
+    await until(() => (carrier.status().phase === 'carrying' ? true : undefined), 'the carrier to carry');
+  };
+  return { carrier, fake, clock, lines, socketAt, claimOn };
+}
+
+describe('a carrier that survives a dropped rendezvous', () => {
+  it('should redial at once after a drop and say what happened, naming the origin and never the path', () => {
+    // Arrange — a configured address WITH a path, which is exactly what must not reach a log line.
+    const { carrier, fake, clock, lines, socketAt } = redialingCarrier({ url: 'wss://relay.example/hosted/path' });
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+
+    // Act — the rendezvous goes away (a Worker redeploy).
+    socketAt(0).onclose?.({ code: 1006, reason: 'gone' });
+
+    // Assert — phase and detail stay honest while the redial is pending.
+    should(carrier.status()).containDeep({ phase: 'dialling' });
+    should(carrier.status().detail).match(/connection ended \(1006 gone\)/u);
+    should(fake.sockets).have.length(1);
+    clock.advance(0);
+    should(fake.sockets).have.length(2);
+    should(lines).deepEqual(['relay wss://relay.example: disconnected (1006 gone) — redial attempt 1 in 0ms']);
+    should(lines.join('\n')).not.match(/hosted|rendezvous|fy_daemon/u);
+    carrier.stop();
+  });
+
+  it('should back off with each failed redial, never above the ceiling, and keep trying', () => {
+    // Arrange — the top of the jitter range, so the windows themselves are read off the delays.
+    const { carrier, fake, clock, lines, socketAt } = redialingCarrier({ reconnectSeconds: 5 });
+    carrier.start();
+    const delays: string[] = [];
+
+    // Act — seven consecutive failed dials, each waited out exactly.
+    const expected = [0, 500, 1_000, 2_000, 4_000, 5_000, 5_000];
+    for (const [index, delay] of expected.entries()) {
+      socketAt(index).onclose?.({ code: 1006, reason: '' });
+      const said = lines.at(-1) ?? '';
+      delays.push(said.replace(/^.* in /u, ''));
+      if (delay > 0) {
+        clock.advance(delay - 1);
+        should(fake.sockets).have.length(index + 1);
+      }
+      clock.advance(delay > 0 ? 1 : 0);
+      should(fake.sockets).have.length(index + 2);
+    }
+
+    // Assert
+    should(delays).deepEqual(['0ms', '500ms', '1.0s', '2.0s', '4.0s', '5.0s', '5.0s']);
+    should(lines.at(-1)).match(/redial attempt 7 in 5\.0s/u);
+    carrier.stop();
+  });
+
+  it('should treat a huge configured wait as the ten-second ceiling', () => {
+    // Arrange
+    const { carrier, clock, socketAt } = redialingCarrier({ reconnectSeconds: 3_600 });
+    carrier.start();
+
+    // Act — drop twelve dials in a row.
+    for (let index = 0; index < 12; index += 1) {
+      socketAt(index).onclose?.({ code: 1006, reason: '' });
+      clock.advance(10_000);
+    }
+
+    // Assert — no wait was ever longer than ten seconds.
+    should(Math.max(...clock.delays.filter(delay => delay < 15_000))).be.belowOrEqual(10_000);
+    carrier.stop();
+  });
+
+  it('should reset the backoff once the rendezvous accepts the claim, and say how long it was away', async () => {
+    // Arrange — two failed dials, then a good one.
+    const { carrier, clock, lines, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+    clock.advance(0);
+    socketAt(1).onclose?.({ code: 1006, reason: '' });
+    clock.advance(500);
+    socketAt(2).onopen?.(undefined);
+
+    // Act
+    await claimOn(socketAt(2));
+
+    // Assert — a recovery line, and a status with nothing left to explain.
+    should(lines.at(-1)).equal('relay https://relay.example: reconnected after 2 attempts (0.5s offline)');
+    should(carrier.status()).containDeep({ phase: 'carrying' });
+    should(carrier.status().detail).be.undefined();
+
+    // Act — the next drop starts from the top of the schedule again, not from where it left off.
+    socketAt(2).onclose?.({ code: 1001, reason: 'going away' });
+
+    // Assert
+    should(lines.at(-1)).equal('relay https://relay.example: disconnected (1001 going away) — redial attempt 1 in 0ms');
+    carrier.stop();
+  });
+
+  it('should say when the rendezvous accepts the claim, and how long after dialling, even on the first connect', async () => {
+    // Arrange
+    const { carrier, clock, lines, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    clock.advance(1_200);
+
+    // Act
+    await claimOn(socketAt(0));
+
+    // Assert — one line, no "reconnected" because nothing was lost.
+    should(lines).deepEqual([
+      'relay https://relay.example: connected — the rendezvous accepted the claim 1.2s after dialling',
+    ]);
+    carrier.stop();
+  });
+
+  it("should log the relay's own in-band words alongside the close that follows them", async () => {
+    // Arrange — the Worker explains a refusal in-band and then closes the socket.
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    socketAt(0).onmessage?.({
+      data: controlFrame({ t: 'error', code: 4500, reason: 'hosted relay accounting is unavailable\nforged: line' }),
+    });
+    clock.advance(1_000);
+
+    // Act
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+
+    // Assert — both the close and the relay's words, on ONE printable line.
+    should(lines).deepEqual([
+      'relay https://relay.example: disconnected (1006; the relay said: error 4500 hosted relay accounting is unavailable forged: line) — redial attempt 1 in 0ms',
+    ]);
+    should(carrier.status().detail).match(/hosted relay accounting is unavailable/u);
+    carrier.stop();
+  });
+
+  it('should report an in-band session close, but not blame a close that happened long before the drop', () => {
+    // Arrange
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    socketAt(0).onmessage?.({ data: controlFrame({ t: 'closed', code: 4410, reason: 'client left' }, session()) });
+
+    // Act — soon after: blamed. Then a second socket: the old message is long gone.
+    clock.advance(2_000);
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+    clock.advance(0);
+    socketAt(1).onopen?.(undefined);
+    clock.advance(6_000);
+    socketAt(1).onclose?.({ code: 1006, reason: '' });
+
+    // Assert
+    should(lines[0]).match(/the relay said: closed 4410 client left/u);
+    should(lines[1]).not.match(/the relay said/u);
+    carrier.stop();
+  });
+
+  it('should not claim a recovery for a rendezvous that only opened the socket', async () => {
+    // Arrange — a socket that opens and is then refused (a 4409 against a slot not yet swept).
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+    clock.advance(0);
+    socketAt(1).onopen?.(undefined);
+
+    // Act
+    socketAt(1).onclose?.({ code: 4409, reason: 'a daemon is already connected' });
+
+    // Assert — attempt 2, and no "reconnected" line anywhere.
+    should(lines.at(-1)).match(/disconnected \(4409 a daemon is already connected\) — redial attempt 2 in 500ms/u);
+    should(lines.some(line => line.includes('reconnected'))).be.false();
+    carrier.stop();
+  });
+
+  it('should report a transport error as a disconnect too', () => {
+    // Arrange
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+
+    // Act
+    socketAt(0).onerror?.(undefined);
+
+    // Assert
+    should(lines).deepEqual(['relay https://relay.example: disconnected (connection error) — redial attempt 1 in 0ms']);
+    should(clock.pending()).equal(1);
+    carrier.stop();
+  });
+
+  it('should cancel a pending redial when the daemon stops', () => {
+    // Arrange — a drop leaves a redial pending.
+    const { carrier, fake, clock, socketAt } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+    should(clock.pending()).equal(1);
+
+    // Act
+    carrier.stop();
+    clock.advance(600_000);
+
+    // Assert — nothing is armed and nothing dials again.
+    should(clock.pending()).equal(0);
+    should(fake.sockets).have.length(1);
+    should(carrier.status().phase).equal('stopped');
+  });
+
+  it('should abandon a dial that never opens and redial', () => {
+    // Arrange — a black-holed route: the socket neither opens nor fails.
+    const { carrier, fake, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+
+    // Act
+    clock.advance(14_999);
+    should(socketAt(0).closes).be.empty();
+    clock.advance(1);
+
+    // Assert
+    should(socketAt(0).closes[0]?.code).equal(4408);
+    should(lines.at(-2)).equal(
+      'relay https://relay.example: liveness: the socket did not open within 15.0s — dropping it',
+    );
+    should(lines.at(-1)).match(/disconnected \(4408 no answer to the connection/u);
+    clock.advance(0);
+    should(fake.sockets).have.length(2);
+    carrier.stop();
+  });
+});
+
+describe('a carrier that notices a dead path in seconds', () => {
+  it('should drop a socket that stays silent after a ping, and redial', () => {
+    // Arrange
+    const { carrier, fake, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+
+    // Act + Assert — nothing is sent before the keepalive interval.
+    clock.advance(19_999);
+    should(socket.sent).be.empty();
+    clock.advance(1);
+    should(socket.sent).deepEqual(['fy-ping']);
+
+    // Act + Assert — and nothing answers: the deadline is ten seconds after the ping.
+    clock.advance(9_999);
+    should(socket.closes).be.empty();
+    clock.advance(1);
+
+    // Assert — closed with the heartbeat code, abandoned without waiting for a close handshake,
+    // and the redial is already pending.
+    should(socket.closes).deepEqual([{ code: 4408, reason: 'no answer within the heartbeat deadline' }]);
+    should(carrier.status().detail).match(/stopped answering/u);
+    should(lines).deepEqual([
+      'relay https://relay.example: liveness: no reply within 10.0s of the ping — dropping the socket',
+      'relay https://relay.example: disconnected (4408 no answer within the heartbeat deadline) — redial attempt 1 in 0ms',
+    ]);
+    clock.advance(0);
+    should(fake.sockets).have.length(2);
+    carrier.stop();
+  });
+
+  it('should keep a socket whose pong arrives in time, and keep pinging', () => {
+    // Arrange
+    const { carrier, clock, socketAt } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+
+    // Act — three keepalive rounds, each answered a second after its ping.
+    for (let round = 0; round < 3; round += 1) {
+      clock.advance(20_000 - (round === 0 ? 0 : 1_000));
+      socket.onmessage?.({ data: 'fy-pong' });
+      clock.advance(1_000);
+    }
+    clock.advance(10_000);
+
+    // Assert — never closed, three pings sent.
+    should(socket.closes).be.empty();
+    should(socket.sent.filter(sent => sent === 'fy-ping')).have.length(3);
+    should(carrier.status().phase).equal('dialling');
+    carrier.stop();
+  });
+
+  it('should count any inbound message as the answer, not only a pong', () => {
+    // Arrange
+    const { carrier, clock, socketAt } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+    clock.advance(20_000);
+
+    // Act — the peer's own ping arrives inside the window; that is evidence of life.
+    socket.onmessage?.({ data: 'fy-ping' });
+    clock.advance(10_000);
+
+    // Assert
+    should(socket.closes).be.empty();
+    carrier.stop();
+  });
+
+  it('should drop a socket at its first tick when the clock shows it was silent past the grace window', () => {
+    // Arrange — the process was asleep: the clock moved, no timer ran.
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+    clock.jump(60_000);
+
+    // Act — the first tick after waking is already overdue, so it runs the moment time is next observed.
+    clock.advance(0);
+
+    // Assert — dropped immediately, with no ping sent into a corpse and no further ten-second wait.
+    should(socket.sent).be.empty();
+    should(socket.closes[0]?.code).equal(4408);
+    should(carrier.status().detail).match(/stopped answering/u);
+    should(lines).deepEqual([
+      'relay https://relay.example: liveness: nothing received for 60.0s (limit 45.0s) — dropping the socket',
+      'relay https://relay.example: disconnected (4408 no answer within the heartbeat deadline) — redial attempt 1 in 0ms',
+    ]);
+    carrier.stop();
   });
 });

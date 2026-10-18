@@ -4,9 +4,28 @@ name: Deploy Hosted Relay
 # docs/cloudflare-relay-self-hosting.md. What this deployment can and cannot observe, and the wire
 # contract it serves, are docs/relay-protocol.md §13. None of this is part of ordinary product setup.
 
+# A DEPLOY IS AN OUTAGE FOR EVERY CONNECTED USER. Publishing restarts the Worker and its Durable
+# Objects, which drops every live WebSocket on both ends — every daemon's rendezvous claim and every
+# phone's session. This ran on every push to main, so a day of unrelated merges disconnected everybody
+# dozens of times. Two filters now stand in front of it: `paths` skips pushes that cannot change the
+# Worker, and the deploy job compares the built bundle's fingerprint with the version Cloudflare is
+# serving and publishes only when they differ (a dependency or Wrangler bump inside these paths that
+# leaves the bundle identical is skipped too). A manual `deploy` always publishes: it is how the
+# operator bearer is reinstalled after CLOUDFLARE_API_TOKEN rotates.
 on:
   push:
     branches: [main]
+    paths:
+      - packages/relay/**
+      - packages/protocol/**
+      - bun.lock
+      - package.json
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - scripts/ci/relay-bundle-fingerprint.sh
+      - scripts/validate/relay-config.sh
+      - .github/workflows/relay-hosted.yaml
   workflow_dispatch:
     inputs:
       operation:
@@ -58,30 +77,64 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+          # A manual deploy is an operator decision and always publishes (it reinstalls the operator
+          # bearer after a token rotation); a push publishes only a Worker that changed.
+          FORCE_DEPLOY: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
 
+          # Fingerprints go through files, not `$(nix develop …)`: whatever the dev shell prints on
+          # entry must never be mistaken for a fingerprint.
+          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
           nix develop .#ci -c bash -c '
             set -euo pipefail
             cd packages/relay
             bun install --frozen-lockfile
-            wrangler deploy --config wrangler.hosted.json
+            ../../scripts/ci/relay-bundle-fingerprint.sh >"$RUNNER_TEMP/relay-built"
+            ../../scripts/ci/relay-bundle-fingerprint.sh --deployed >"$RUNNER_TEMP/relay-deployed"
           '
+          built="$(tr -d '[:space:]' <"$RUNNER_TEMP/relay-built")"
+          deployed="$(tr -d '[:space:]' <"$RUNNER_TEMP/relay-deployed")"
+          [[ "$built" =~ ^bundle-[0-9a-f]{16}$ ]] || {
+            echo "could not fingerprint the hosted relay bundle (got '${built}')" >&2
+            exit 1
+          }
 
-          # Derive a relay-only bearer from the existing high-entropy GitHub secret. The raw
-          # Cloudflare token is never installed in the Worker; only this domain-separated digest is
-          # stored as a Worker secret. The same derivation authenticates the control-only job below.
-          operator_token="$({
-            printf 'ferretry-relay-operator-v1\0'
-            printf '%s' "$CLOUDFLARE_API_TOKEN"
-          } | sha256sum | awk '{print $1}')"
-          # A derived value is not a registered secret, so GitHub masks nothing about it on its own.
-          # Register it the instant it exists, before it is used, so no later edit to this file — a
-          # `set -x`, a `curl -v`, a debugging echo — can print a live operator bearer into a log
-          # that anybody can read.
-          echo "::add-mask::$operator_token"
-          printf '%s' "$operator_token" | nix develop .#ci -c bash -c \
-            'cd packages/relay && wrangler secret put RELAY_OPERATOR_TOKEN --config wrangler.hosted.json'
+          if [[ "$FORCE_DEPLOY" != "true" && "$built" == "$deployed" ]]; then
+            echo "hosted relay ${built} is already serving; not redeploying, because a deploy drops" \
+              "every live daemon and browser session"
+          else
+            echo "publishing hosted relay ${built} (serving: ${deployed:-unknown}; manual: ${FORCE_DEPLOY})"
+
+            # Derive a relay-only bearer from the existing high-entropy GitHub secret. The raw
+            # Cloudflare token is never installed in the Worker; only this domain-separated digest
+            # is stored as a Worker secret. The same derivation authenticates the control-only job.
+            operator_token="$({
+              printf 'ferretry-relay-operator-v1\0'
+              printf '%s' "$CLOUDFLARE_API_TOKEN"
+            } | sha256sum | awk '{print $1}')"
+            # A derived value is not a registered secret, so GitHub masks nothing about it on its
+            # own. Register it the instant it exists, before it is used, so no later edit to this
+            # file — a `set -x`, a `curl -v`, a debugging echo — can print a live operator bearer
+            # into a log that anybody can read.
+            echo "::add-mask::$operator_token"
+
+            # ONE VERSION, ONE RESTART. The secret travels with the deploy instead of a separate
+            # `wrangler secret put`, which published a second version and dropped every session a
+            # second time. The file is private to the runner and removed whatever happens next.
+            secrets_file="$RUNNER_TEMP/relay-secrets.json"
+            trap 'rm -f "$secrets_file"' EXIT
+            # shellcheck disable=SC2016 # $token is a jq variable
+            (umask 077 && jq -n --arg token "$operator_token" '{RELAY_OPERATOR_TOKEN: $token}' >"$secrets_file")
+            # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
+            RELAY_BUNDLE="$built" RELAY_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
+              set -euo pipefail
+              cd packages/relay
+              wrangler deploy --config wrangler.hosted.json --tag "$RELAY_BUNDLE" \
+                --message "hosted relay $RELAY_BUNDLE" --secrets-file "$RELAY_SECRETS_FILE"
+            '
+            rm -f "$secrets_file"
+          fi
 
           if [[ -z "$HOSTED_RELAY_ORIGIN" ]]; then
             worker_subdomain="$(
@@ -93,28 +146,32 @@ jobs:
             HOSTED_RELAY_ORIGIN="https://ferretry-hosted-relay.$worker_subdomain.workers.dev"
           fi
 
-          current="$(
-            curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 2 \
-              --header "Authorization: Bearer $operator_token" \
-              "$HOSTED_RELAY_ORIGIN/v1/operator/config"
-          )"
-          if [[ "$(jq -r '.configured' <<<"$current")" == "false" ]]; then
-            # The endpoint parses a STRICT input document — {version, relayUrl, limits} and nothing
-            # else — while GET returns the stored document, which also carries the server-owned
-            # `updatedAt`. Echoing GET back would be rejected, so project the three fields the
-            # operator actually owns. Projection rather than a delete: a field added server-side
-            # later must not silently start being sent back.
-            initial="$(jq -c --arg relay_url "$HOSTED_RELAY_ORIGIN" \
-              '.configuration | {version, relayUrl: $relay_url, limits}' <<<"$current")"
-            curl --fail --silent --show-error \
-              --request PUT \
-              --header "Authorization: Bearer $operator_token" \
-              --header 'Content-Type: application/json' \
-              --data-binary "$initial" \
-              "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
-              | jq -e '.configured == true and .configuration.relayUrl != null' >/dev/null
-          else
-            echo "preserving existing hosted relay runtime configuration"
+          # Only a deploy that just published can find the control object uninitialised; a skipped
+          # one changed nothing and derived no operator bearer.
+          if [[ -n "${operator_token-}" ]]; then
+            current="$(
+              curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 2 \
+                --header "Authorization: Bearer $operator_token" \
+                "$HOSTED_RELAY_ORIGIN/v1/operator/config"
+            )"
+            if [[ "$(jq -r '.configured' <<<"$current")" == "false" ]]; then
+              # The endpoint parses a STRICT input document — {version, relayUrl, limits} and
+              # nothing else — while GET returns the stored document, which also carries the
+              # server-owned `updatedAt`. Echoing GET back would be rejected, so project the three
+              # fields the operator actually owns. Projection rather than a delete: a field added
+              # server-side later must not silently start being sent back.
+              initial="$(jq -c --arg relay_url "$HOSTED_RELAY_ORIGIN" \
+                '.configuration | {version, relayUrl: $relay_url, limits}' <<<"$current")"
+              curl --fail --silent --show-error \
+                --request PUT \
+                --header "Authorization: Bearer $operator_token" \
+                --header 'Content-Type: application/json' \
+                --data-binary "$initial" \
+                "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
+                | jq -e '.configured == true and .configuration.relayUrl != null' >/dev/null
+            else
+              echo "preserving existing hosted relay runtime configuration"
+            fi
           fi
 
           # Smoke the route that matters. Discovery answering 200 proved nothing the day every

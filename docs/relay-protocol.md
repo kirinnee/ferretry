@@ -416,6 +416,21 @@ Durable Object. A heartbeat that woke the object every thirty seconds would defe
 an idle rendezvous would stop being free. A socket with no evidence of life for
 `heartbeatSeconds × 1.5` is evicted (`4408`) — _no evidence_ means evicted, not means fine.
 
+#### Endpoint keepalive (non-normative)
+
+"At least every `heartbeatSeconds`" is a floor, not a cadence, and the reference endpoints ping more
+often. Both the daemon and the browser send `fy-ping` every **20 seconds** and treat a socket that has
+delivered nothing — no pong, no frame — within **10 seconds** of a ping as dead: they close it with
+`4408` and dial again. Two reasons. Mobile carriers and NAT devices can forget an idle mapping in well under
+a minute, and a mapping that is forgotten never sends a close, so an endpoint waiting for the
+rendezvous's own `× 1.5` eviction would sit on a dead socket for most of a minute. And because the
+auto-responder answers `fy-ping` without waking the Durable Object, the faster cadence costs the
+rendezvous nothing. A browser also runs an immediate check — one ping, a **4-second** deadline — on
+every held session when the page comes back to the foreground, the device comes back online, or the
+network type changes, so a phone that wakes with a dead socket learns so in seconds. None of this
+changes the wire: a peer that pings only every thirty seconds is still conforming, and the
+rendezvous's eviction rule is unchanged.
+
 ### Credit
 
 A rendezvous **never queues**. It forwards a frame the instant it arrives or it ends the session, so
@@ -459,12 +474,26 @@ hole. Reconnecting creates a **new** session with new keys and a new session ide
 application above must re-request whatever it had in flight. There is no resume, no replay buffer,
 and no "probably fine".
 
+**Redial at once, then back off, forever (non-normative).** A rendezvous that restarts — a relay
+deploy, an edge migration — drops every socket on both sides at the same moment. The reference daemon
+redials immediately, then with equal-jitter exponential backoff (500 ms doubling, capped at the
+configured `reconnectSeconds`, itself clamped to 1–10 s) for as long as it runs, and logs every
+disconnect, attempt and reconnection; the jitter keeps a fleet of daemons from arriving in the same
+millisecond, and a redial that meets the incumbent's not-yet-evicted socket (`4409`) simply backs off
+again. The reference browser does the same with a 10 s cap and retries at once on the triggers above.
+What it re-requests is the application's business: reads are re-sent transparently on the new
+session, a live stream reopens from its own cursor, and a write whose session died after it left is
+never re-sent blind — the send ledger decides, from evidence, whether it arrived.
+
 **Self-hosted refusals cost the caller more than the relay.** An unknown daemon fingerprint is
 refused by a self-hosted deployment's stateless Worker before any Durable Object exists. The hosted
 deployment deliberately accepts any valid fingerprint, reserves account-wide capacity before
 routing it, and explains a refusal over an accepted WebSocket before closing so a browser can show
-the real reason. Beyond that: at most 4 unproved daemon sockets, at most 30 socket arrivals per
-rendezvous per minute, and every limit above.
+the real reason. Beyond that: at most 4 unproved daemon sockets, at most 30 client socket arrivals per
+rendezvous per minute, a separate 30 for the daemon, and every limit above. Refused arrivals count.
+The two windows are separate so that clients retrying against an absent daemon — every phone after a
+relay restart — can never spend the budget the returning daemon needs to end the outage; they once
+shared one, and the daemon was refused `4429` for as long as the clients kept trying.
 
 ### Close codes
 
@@ -703,8 +732,15 @@ one batch of `events` and `bytes`. The bytes a report names were relayed, so the
 when they cross a ceiling — the refusal stops what follows, not what already crossed. A refusal sends
 a typed `error` control frame to every socket the rendezvous holds and then closes them with `4432`
 or `4433`, including the reason (and, for bandwidth, a reset timestamp in the control-plane
-decision). Failure to reach or parse the meter is `4500` and is also a refusal. Nothing degrades into
-an unmetered path.
+decision). **An unreachable control object is not a refusal.** A missing or unusable answer to a
+meter report or to the periodic inspection is asked for once more, and then live sockets keep
+carrying for up to 120 seconds from the first failure: the unreported bytes are folded into the next
+report, the heartbeat sweep keeps running, and the next frame or sweep asks again. Before this, one
+lost answer from the single global control object closed every socket on the rendezvous — the
+daemon and every client — with no ceiling crossed. An outage that outlasts the window is `4500` and a
+refusal, so nothing degrades into an unmetered path for longer than that window; a definitive answer
+— the kill switch, a ceiling — still closes at once. A new arrival still needs a reservation, so
+admission during an outage fails closed as before.
 
 **Why not per frame, and what it costs.** The meter is one globally named object, placed wherever it
 was first created, while a rendezvous is created near the daemon that first claimed it. Holding every
@@ -1268,9 +1304,8 @@ ended (`4400`). At most **6** sessions per link may be pre-credential at once, c
 `awaiting-hello` and `awaiting-credential`; a further arrival is refused (`4429`) until a slot frees.
 Six admits two ordinary three-session device bursts. Keeping all six slots occupied continuously
 would cost 36 arrivals per minute against the rendezvous's sliding 30-per-minute admission cap, but
-that is a cost rather than a proof against a maximal attacker. The cap is shared by the daemon and
-every client; an attacker spending all 30 arrivals can hold five slots and deny honest arrivals at
-the rendezvous instead of at this link. The pre-credential bound prices a squat and does not prevent
+that is a cost rather than a proof against a maximal attacker. The client cap is shared by every client (the daemon has its own); an attacker spending all 30 client
+arrivals can hold five slots and deny honest clients at the rendezvous instead of at this link. The pre-credential bound prices a squat and does not prevent
 one. A client that opens several sessions at once must therefore treat `4429` as retryable rather
 than fatal. **That is a requirement, and the reference client meets it only by accident**: nothing
 in it reads `4429`, and what recovers does so because it retries every
