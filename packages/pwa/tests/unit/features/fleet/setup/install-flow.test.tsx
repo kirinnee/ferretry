@@ -193,7 +193,7 @@ describe('InstallTool', () => {
       const note = must(view.container.querySelector('[data-setup-note="scan-failed"]'), 'scan failure');
       expect(note.textContent).toContain('Couldn’t look at studio-mac');
       expect(note.textContent).toContain(
-        'This machine didn’t answer, so nothing was changed. Check it is awake and try again.',
+        'This machine didn’t answer (no route /v1/fleet/setup/scan). Check it is awake and try again.',
       );
       expect(view.container.querySelector('[data-install-flow]')).toBeNull();
     } finally {

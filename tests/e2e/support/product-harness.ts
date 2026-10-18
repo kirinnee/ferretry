@@ -365,6 +365,8 @@ export async function captureScreens(
   page: ProductPage,
   journey: string,
   screen: string,
+  /** An element to scroll into view at each size, when the screen's subject sits below the fold. */
+  focus?: string,
 ): Promise<{ readonly paths: readonly string[]; readonly findings: readonly LayoutFinding[] }> {
   const directory = join(EVIDENCE_ROOT, journey);
   await mkdir(directory, { recursive: true });
@@ -379,6 +381,10 @@ export async function captureScreens(
       await page.emulateMedia({ colorScheme: scheme });
       // Two frames: one for the media query to apply, one for any layout it caused.
       await page.evaluate('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))');
+      if (focus !== undefined)
+        await page.evaluate(
+          `(document.querySelector(${JSON.stringify(focus)})?.scrollIntoView({ block: 'center' }), new Promise(r => requestAnimationFrame(r)))`,
+        );
       /**
        * A `system` theme follows the OS LIVE only where `useTheme()` is mounted — the theme toggle and
        * Settings (`packages/pwa/src/hooks/use-theme.ts`). Elsewhere (phone layouts, the setup guide)

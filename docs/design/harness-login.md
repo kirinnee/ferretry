@@ -579,6 +579,16 @@ UI in front of a phone.
 - **A flow nobody follows ends before its window.** One that only a person bringing a value back can
   finish (Claude's code, a Codex link's address) ends after five minutes unread. A Codex device code is
   exempt: it completes at the provider with nobody reading, and ending it would throw an approval away.
+- **A Claude sign-in that prints no link ends within a minute.** Claude prints its link a second or two
+  after it starts; one silent for 60 seconds is waiting on something a browser cannot give it (a
+  terminal, a browser on the host), so it ends saying exactly that instead of leaving a phone on
+  "Starting sign-in…" for the whole window. The start itself never waits on the child: it answers with
+  the flow at once and the browser polls it, so no request is ever held open across a sign-in.
+- **A failure the browser could not read is never called silence.** "This machine didn't answer, so
+  nothing was changed" was once every non-HTTP failure's sentence — a timeout that may have applied the
+  change, a relay connection that broke, an answer in a shape this copy of the app cannot parse, a
+  revoked device. Each now says its own cause (`changeRefusalSentence`), and an unrecognised one carries
+  its own message, so an owner whose machine is up and whose log is clean can see what actually failed.
 - **Nothing here helps an API-key account** (§1.2). Unchanged — and the build makes the ABSENCE legible
   rather than silent: such an account gets no control and a sentence naming the file or the variable its
   credential comes from. Rotating a key is still `docs/secrets.md`.
