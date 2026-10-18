@@ -416,6 +416,21 @@ Durable Object. A heartbeat that woke the object every thirty seconds would defe
 an idle rendezvous would stop being free. A socket with no evidence of life for
 `heartbeatSeconds × 1.5` is evicted (`4408`) — _no evidence_ means evicted, not means fine.
 
+#### Endpoint keepalive (non-normative)
+
+"At least every `heartbeatSeconds`" is a floor, not a cadence, and the reference endpoints ping more
+often. Both the daemon and the browser send `fy-ping` every **20 seconds** and treat a socket that has
+delivered nothing — no pong, no frame — within **10 seconds** of a ping as dead: they close it with
+`4408` and dial again. Two reasons. Mobile carriers and NAT devices can forget an idle mapping in well under
+a minute, and a mapping that is forgotten never sends a close, so an endpoint waiting for the
+rendezvous's own `× 1.5` eviction would sit on a dead socket for most of a minute. And because the
+auto-responder answers `fy-ping` without waking the Durable Object, the faster cadence costs the
+rendezvous nothing. A browser also runs an immediate check — one ping, a **4-second** deadline — on
+every held session when the page comes back to the foreground, the device comes back online, or the
+network type changes, so a phone that wakes with a dead socket learns so in seconds. None of this
+changes the wire: a peer that pings only every thirty seconds is still conforming, and the
+rendezvous's eviction rule is unchanged.
+
 ### Credit
 
 A rendezvous **never queues**. It forwards a frame the instant it arrives or it ends the session, so
@@ -458,6 +473,17 @@ lost, because the sequence discipline in §7 turns a gap into a torn-down sessio
 hole. Reconnecting creates a **new** session with new keys and a new session identifier. The
 application above must re-request whatever it had in flight. There is no resume, no replay buffer,
 and no "probably fine".
+
+**Redial at once, then back off, forever (non-normative).** A rendezvous that restarts — a relay
+deploy, an edge migration — drops every socket on both sides at the same moment. The reference daemon
+redials immediately, then with equal-jitter exponential backoff (500 ms doubling, capped at the
+configured `reconnectSeconds`, itself clamped to 1–10 s) for as long as it runs, and logs every
+disconnect, attempt and reconnection; the jitter keeps a fleet of daemons from arriving in the same
+millisecond, and a redial that meets the incumbent's not-yet-evicted socket (`4409`) simply backs off
+again. The reference browser does the same with a 10 s cap and retries at once on the triggers above.
+What it re-requests is the application's business: reads are re-sent transparently on the new
+session, a live stream reopens from its own cursor, and a write whose session died after it left is
+never re-sent blind — the send ledger decides, from evidence, whether it arrived.
 
 **Self-hosted refusals cost the caller more than the relay.** An unknown daemon fingerprint is
 refused by a self-hosted deployment's stateless Worker before any Durable Object exists. The hosted
