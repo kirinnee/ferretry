@@ -27,6 +27,7 @@ describe('FyApiClient construction and generic requests', () => {
       'foreignHistoryConversation',
       'fork',
       'get',
+      'handoff',
       'handover',
       'handoverReceipt',
       'health',
