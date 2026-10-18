@@ -30,17 +30,17 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 
 ## CI jobs
 
-| Job              | Runs                                                                 | Notes                                                                |
-| ---------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`             | matrix `[format, gates]`: treefmt, and every other hook, in parallel |
-| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`        | matrix over `config/test-groups.json`                                |
-| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                | `needs: test`; the unit tier's 100% ledger                           |
-| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`         | matrix over `config/test-groups.json`                                |
-| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                 | `needs: int`; the int tier's 100% ledger                             |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME"` | matrix `[dark, light]`, Settings geometry in a real Chromium         |
-| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                   | uploads `cli-binaries` from `dist/bin/`                              |
-| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                       | `needs: compile`, downloads the binaries                             |
-| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`              | `needs: compile`, one runner per build target                        |
+| Job              | Runs                                                                          | Notes                                                                |
+| ---------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                      | matrix `[format, gates]`: treefmt, and every other hook, in parallel |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                 | matrix over `config/test-groups.json`                                |
+| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                         | `needs: test`; the unit tier's 100% ledger                           |
+| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                  | matrix over `config/test-groups.json`                                |
+| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                          | `needs: int`; the int tier's 100% ledger                             |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"` | Settings geometry in dark and light, plus the full gallery in dark   |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                            | uploads `cli-binaries` from `dist/bin/`                              |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                | `needs: compile`, downloads the binaries                             |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                       | `needs: compile`, one runner per build target                        |
 
 Notable details:
 
@@ -73,7 +73,9 @@ Notable details:
   compares them, and `.gitignore` keeps them out of the tree. The harness asserts its own tally of
   checks and the script requires that closing line, so a refactor that stops the checks running is
   red rather than green. Adding or removing a Settings surface means editing one integer, which is
-  the churn this shape chose over re-baselining a directory of images.
+  the churn this shape chose over re-baselining a directory of images. A third leg runs the whole
+  gallery once, in dark, so a later section that hangs or fails is red on the PR that broke it
+  rather than on the next person who needs its frames.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
