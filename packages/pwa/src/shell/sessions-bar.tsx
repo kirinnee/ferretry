@@ -21,11 +21,11 @@
 import type { SessionView } from '@ferretry/protocol';
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
 import { type ReactNode, useRef, useState, useSyncExternalStore } from 'react';
-import { PassiveLearningChip } from '../features/learning/passive-learning.tsx';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import { useInputModality } from '../hooks/use-input-modality.ts';
+import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -40,15 +40,12 @@ import {
 } from '../lib/pages/routes.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
+import { NewSessionMenu } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
-import {
-  needsYou,
-  type SessionsBarFilter,
-  sessionsBarDirectory,
-  sessionsBarSubline,
-  sessionsBarView,
-} from './sessions-bar-model.ts';
+import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
+import { type SessionsBarFilter, sessionsBarSubline, sessionsBarView } from './sessions-bar-model.ts';
+import { SessionsBarRow } from './sessions-bar-row.tsx';
 import { StatusMark } from './status-mark.tsx';
 
 /** The places at the foot of the bar. Insights is Analytics, Warden and Learning together. */
@@ -120,53 +117,13 @@ export interface SessionsBarProps {
   readonly learningPassive?: ReadonlySet<string>;
   /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
   readonly rails?: WorkspaceRailPreferenceStore;
-}
-
-function SessionRow({
-  view,
-  daemonId,
-  active,
-  learningPassive,
-  onNavigate,
-}: {
-  readonly view: SessionView;
-  readonly daemonId: DaemonId;
-  readonly active: boolean;
-  readonly learningPassive: boolean;
-  readonly onNavigate: (to: string) => void;
-}) {
-  const name = displayCallsign(view.config.teammate) || view.config.label || view.config.id;
-  const waiting = needsYou(view);
-  const task = sessionsBarSubline(view);
-  const directory = sessionsBarDirectory(view);
-  return (
-    <li>
-      <RouteLink
-        aria-current={active ? 'page' : undefined}
-        className="fy-sbar__session"
-        data-sbar-session={view.config.id}
-        onNavigate={onNavigate}
-        title={`${name} — ${task}\n${view.config.cwd}`}
-        to={daemonSessionPath(daemonId, view.config.id)}
-      >
-        <StatusMark view={view} />
-        <span className="fy-sbar__name">{name}</span>
-        {waiting ? (
-          <span className="fy-sbar__badge" data-sbar-needs-you="">
-            needs you
-          </span>
-        ) : learningPassive ? (
-          <PassiveLearningChip />
-        ) : null}
-        {task === view.config.cwd ? null : <span className="fy-sbar__sub">{task}</span>}
-        {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
-            the path's slashes reading left to right inside it. */}
-        <span className="fy-sbar__dir" data-sbar-dir="">
-          <bdi>{directory}</bdi>
-        </span>
-      </RouteLink>
-    </li>
-  );
+  /**
+   * Every paired machine's sessions, when the reader's Sessions list setting is All machines: the bar
+   * then lists them all (Needs you first, then machine by machine) instead of `sessions` alone.
+   */
+  readonly machineSources?: readonly MachineSource[];
+  /** The clock a machine's "last seen" is measured against. */
+  readonly now?: number;
 }
 
 /**
@@ -306,6 +263,9 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
   const { daemonId, sessions, projects, activeSessionId, active, navigate } = props;
   const [filter, setFilter] = useState<SessionsBarFilter>('all');
   const view = sessionsBarView(sessions ?? [], projects, filter);
+  const machineView =
+    props.machineSources === undefined ? null : allMachinesView(props.machineSources, { filter, sortRows: true });
+  const counts = machineView?.counts ?? view.counts;
   return (
     <>
       {props.update === undefined ? null : (
@@ -340,12 +300,29 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
             onClick={() => setFilter(id)}
             type="button"
           >
-            {FILTER_LABEL[id]} <span className="fy-sbar__count">{view.counts[id]}</span>
+            {FILTER_LABEL[id]} <span className="fy-sbar__count">{counts[id]}</span>
           </button>
         ))}
       </fieldset>
       <div className="fy-sbar__list scroll-thin">
-        {sessions === null ? (
+        {machineView !== null ? (
+          !machineView.loaded ? (
+            <p className="fy-sbar__empty" role="status">
+              Reading sessions…
+            </p>
+          ) : filter !== 'all' && machineView.needsYou.length === 0 && machineView.machines.length === 0 ? (
+            <p className="fy-sbar__empty">{`No sessions match ${FILTER_LABEL[filter]}.`}</p>
+          ) : (
+            <SessionsBarMachines
+              activeSessionId={activeSessionId}
+              daemonId={daemonId}
+              {...(props.learningPassive === undefined ? {} : { learningPassive: props.learningPassive })}
+              now={props.now ?? Date.now()}
+              onNavigate={navigate}
+              view={machineView}
+            />
+          )
+        ) : sessions === null ? (
           <p className="fy-sbar__empty" role="status">
             Reading sessions…
           </p>
@@ -362,7 +339,7 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
               </h2>
               <ul>
                 {group.rows.map(row => (
-                  <SessionRow
+                  <SessionsBarRow
                     active={row.config.id === activeSessionId}
                     daemonId={daemonId}
                     key={row.config.id}
@@ -395,6 +372,45 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
   );
 }
 
+/**
+ * "+ New": a plain link to this machine's new-session page — or, when the list shows every machine and
+ * there is more than one, a menu asking which machine, this one first.
+ */
+function NewSessionControl({
+  props,
+  navigate,
+  marked,
+}: {
+  readonly props: SessionsBarProps;
+  readonly navigate: (to: string) => void;
+  /** The column's control carries `data-sbar-new`; the rail's never did. */
+  readonly marked: boolean;
+}) {
+  if (props.machineSources !== undefined && props.machines.length > 1)
+    return (
+      <NewSessionMenu
+        className="fy-sbar__icon"
+        current={props.daemonId}
+        machines={props.machines}
+        onNavigate={navigate}
+      >
+        <Plus aria-hidden="true" size={16} />
+      </NewSessionMenu>
+    );
+  return (
+    <RouteLink
+      aria-label="New session"
+      className="fy-sbar__icon"
+      {...(marked ? { 'data-sbar-new': '' } : {})}
+      onNavigate={navigate}
+      title="New session"
+      to={daemonNewSessionPath(props.daemonId)}
+    >
+      <Plus aria-hidden="true" size={16} />
+    </RouteLink>
+  );
+}
+
 function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: string) => void }) {
   const drawer = props.presentation === 'drawer';
   return (
@@ -423,16 +439,7 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
         onNavigate={props.navigate}
         {...(props.onPairPhone === undefined ? {} : { onPairPhone: props.onPairPhone })}
       />
-      <RouteLink
-        aria-label="New session"
-        className="fy-sbar__icon"
-        data-sbar-new=""
-        onNavigate={props.navigate}
-        title="New session"
-        to={daemonNewSessionPath(props.daemonId)}
-      >
-        <Plus aria-hidden="true" size={16} />
-      </RouteLink>
+      <NewSessionControl marked navigate={props.navigate} props={props} />
     </div>
   );
 }
@@ -455,35 +462,36 @@ function SessionsRail(props: SessionsBarProps) {
           <Menu aria-hidden="true" size={16} />
         </button>
       )}
-      <RouteLink
-        aria-label="New session"
-        className="fy-sbar__icon"
-        onNavigate={onNavigate}
-        title="New session"
-        to={daemonNewSessionPath(daemonId)}
-      >
-        <Plus aria-hidden="true" size={16} />
-      </RouteLink>
+      <NewSessionControl marked={false} navigate={onNavigate} props={props} />
       <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
       <ul className="fy-sbar__list fy-sbar__dots scroll-thin">
-        {view.groups.flatMap(group =>
-          group.rows.map(row => {
-            const name = displayCallsign(row.config.teammate) || row.config.label || row.config.id;
-            return (
-              <li key={row.config.id}>
-                <RouteLink
-                  aria-current={row.config.id === activeSessionId ? 'page' : undefined}
-                  aria-label={name}
-                  className="fy-sbar__dot"
-                  onNavigate={onNavigate}
-                  title={`${name} — ${sessionsBarSubline(row)}`}
-                  to={daemonSessionPath(daemonId, row.config.id)}
-                >
-                  <StatusMark view={row} />
-                </RouteLink>
-              </li>
-            );
-          }),
+        {props.machineSources !== undefined ? (
+          <SessionsRailMachineDots
+            activeSessionId={activeSessionId}
+            daemonId={daemonId}
+            onNavigate={onNavigate}
+            view={allMachinesView(props.machineSources, { sortRows: true })}
+          />
+        ) : (
+          view.groups.flatMap(group =>
+            group.rows.map(row => {
+              const name = displayCallsign(row.config.teammate) || row.config.label || row.config.id;
+              return (
+                <li key={row.config.id}>
+                  <RouteLink
+                    aria-current={row.config.id === activeSessionId ? 'page' : undefined}
+                    aria-label={name}
+                    className="fy-sbar__dot"
+                    onNavigate={onNavigate}
+                    title={`${name} — ${sessionsBarSubline(row)}`}
+                    to={daemonSessionPath(daemonId, row.config.id)}
+                  >
+                    <StatusMark view={row} />
+                  </RouteLink>
+                </li>
+              );
+            }),
+          )
         )}
       </ul>
       <div className="fy-sbar__foot fy-sbar__foot--rail">

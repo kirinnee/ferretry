@@ -45,8 +45,13 @@ export interface PressPoint {
 export const cancelsRowLongPress = (start: PressPoint, point: PressPoint): boolean =>
   Math.abs(point.x - start.x) > MOVE_CANCEL_PX || Math.abs(point.y - start.y) > MOVE_CANCEL_PX;
 
-/** True while the click produced by the menu-opening gesture must be ignored. */
-export const suppressesRowClick = (firedAt: number, now: number): boolean => now - firedAt < CLICK_SUPPRESS_MS;
+/**
+ * True while the click produced by the menu-opening gesture must be ignored. `firedAt` 0 is "no menu
+ * opened": `performance.now()` also starts at zero, so without that case every click in the first 700ms
+ * of a page read as a long-press's trailing tap and was swallowed.
+ */
+export const suppressesRowClick = (firedAt: number, now: number): boolean =>
+  firedAt !== 0 && now - firedAt < CLICK_SUPPRESS_MS;
 
 // ---------------------------------------------------------------------------
 // Row and bulk menu contents

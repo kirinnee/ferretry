@@ -3,6 +3,7 @@ import {
   nextPhoneChip,
   PhoneChipRow,
   type PhoneChipRowProps,
+  phoneCloseItems,
   phoneNewTabItems,
 } from '../../../../../src/features/workspace/phone/phone-chip-row.tsx';
 import { phoneTabOrder } from '../../../../../src/features/workspace/phone/phone-tab.ts';
@@ -13,6 +14,9 @@ const tabs = phoneTabOrder([
   { id: 'b1', kind: 'browser', label: 'app', driver: null },
   { id: 'f1', kind: 'file', label: 'login.tsx' },
 ]);
+
+/** The same row as the host draws it: every workspace tab closable. */
+const closable = tabs.map(tab => (tab.kind === 'chat' || tab.kind === 'console' ? tab : { ...tab, closable: true }));
 
 const scrolls: ScrollToOptions[] = [];
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
@@ -81,6 +85,44 @@ describe('phoneNewTabItems', () => {
     expect(
       phoneNewTabItems({ onOpenFile: noop, onNewTerminal: noop, onNewBrowser: noop }).map(item => item.label),
     ).toEqual(['New terminal', 'New browser', 'Open file']);
+  });
+});
+
+describe('phoneCloseItems', () => {
+  const noop = () => {};
+  const labels = (...args: Parameters<typeof phoneCloseItems>) => phoneCloseItems(...args).map(item => item.label);
+  const [chat, , terminal, browser] = closable as [never, never, (typeof closable)[number], (typeof closable)[number]];
+
+  it('offers nothing for a tab that cannot close, or a host that offers no close', () => {
+    expect(labels(chat, closable, { onCloseTab: noop }, true)).toEqual([]);
+    expect(labels(browser, closable, {}, true)).toEqual([]);
+  });
+
+  it('asks a terminal whether its shell ends too, and offers Close others only from a long-press', () => {
+    const all = { onCloseTab: noop, onCloseOthers: noop, onEndTerminal: noop };
+    expect(labels(browser, closable, all, false)).toEqual(['Close']);
+    expect(labels(browser, closable, all, true)).toEqual(['Close', 'Close others']);
+    expect(labels(terminal, closable, all, false)).toEqual(['Close tab', 'End shell']);
+    expect(labels(terminal, closable, { onCloseTab: noop }, true)).toEqual(['Close']);
+    // Nothing else to close: the agent's tabs never are.
+    expect(labels(browser, [chat, browser], all, true)).toEqual(['Close']);
+  });
+
+  it('runs the choice against the tab it was opened for', () => {
+    const ran: string[] = [];
+    const items = phoneCloseItems(
+      terminal,
+      closable,
+      {
+        onCloseTab: id => ran.push(`close ${id}`),
+        onCloseOthers: id => ran.push(`others ${id}`),
+        onEndTerminal: id => ran.push(`end ${id}`),
+      },
+      true,
+    );
+    for (const item of items) item.onSelect();
+    expect(ran).toEqual(['close t1', 'end t1', 'others t1']);
+    expect(items.find(item => item.key === 'end-shell')?.danger).toBe(true);
   });
 });
 
@@ -164,5 +206,91 @@ describe('PhoneChipRow', () => {
     await interact(() => items[1]?.click());
     expect(ran).toEqual(['browser']);
     expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('puts a ✕ on the active workspace chip only, and only when the host can close it', async () => {
+    mounted = await mount(row({ tabs: closable, activeId: 'b1', onCloseTab: () => {} }));
+    const crosses = [...mounted.container.querySelectorAll('[data-phone-chip-close]')];
+    expect(crosses.map(node => node.closest('[data-phone-chip]')?.getAttribute('data-phone-chip'))).toEqual(['b1']);
+    expect(chip(mounted.container, 'b1').getAttribute('aria-keyshortcuts')).toBe('Delete');
+    expect(chip(mounted.container, 'chat').getAttribute('aria-keyshortcuts')).toBeNull();
+    await mounted.render(row({ tabs: closable, activeId: 'chat', onCloseTab: () => {} }));
+    expect(mounted.container.querySelector('[data-phone-chip-close]')).toBeNull();
+    await mounted.render(row({ tabs: closable, activeId: 'b1' }));
+    expect(mounted.container.querySelector('[data-phone-chip-close]')).toBeNull();
+  });
+
+  it('closes a page or file at once from ✕ or Delete, without selecting it', async () => {
+    const ran: string[] = [];
+    const props = {
+      tabs: closable,
+      onCloseTab: (id: string) => ran.push(`close ${id}`),
+      onSelect: (id: string) => ran.push(`select ${id}`),
+    };
+    mounted = await mount(row({ ...props, activeId: 'f1' }));
+    const cross = must(chip(mounted.container, 'f1').querySelector<HTMLElement>('[data-phone-chip-close]'), '✕');
+    await interact(() => cross.click());
+    await interact(() => pressKey(chip(must(mounted?.container, 'row'), 'f1'), 'Delete'));
+    // Delete on an agent tab is just a key: nothing closes.
+    await interact(() => pressKey(chip(must(mounted?.container, 'row'), 'chat'), 'Delete'));
+    expect(ran).toEqual(['close f1', 'close f1']);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('asks under a terminal chip whether to end its shell, and closes it outright when it cannot', async () => {
+    const ran: string[] = [];
+    mounted = await mount(
+      row({
+        tabs: closable,
+        activeId: 't1',
+        onCloseTab: id => ran.push(`close ${id}`),
+        onEndTerminal: id => ran.push(`end ${id}`),
+      }),
+    );
+    await interact(() =>
+      must(
+        chip(must(mounted?.container, 'row'), 't1').querySelector<HTMLElement>('[data-phone-chip-close]'),
+        '✕',
+      ).click(),
+    );
+    expect(must(document.querySelector('[role="menu"]'), 'menu').getAttribute('aria-label')).toBe('Close dev');
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.map(item => item.textContent)).toEqual(['Close tabkeeps running', 'End shellstops its process']);
+    await interact(() => items[1]?.click());
+    expect(ran).toEqual(['end t1']);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+
+    await mounted.render(row({ tabs: closable, activeId: 't1', onCloseTab: id => ran.push(`close ${id}`) }));
+    await interact(() =>
+      must(
+        chip(must(mounted?.container, 'row'), 't1').querySelector<HTMLElement>('[data-phone-chip-close]'),
+        '✕',
+      ).click(),
+    );
+    expect(ran).toEqual(['end t1', 'close t1']);
+  });
+
+  it('opens Close / Close others from a long-press on any workspace chip, and leaves the agent tabs alone', async () => {
+    const ran: string[] = [];
+    mounted = await mount(
+      row({ tabs: closable, onCloseTab: id => ran.push(`close ${id}`), onCloseOthers: id => ran.push(`others ${id}`) }),
+    );
+    const press = (id: string): MouseEvent => {
+      const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 20 });
+      chip(must(mounted?.container, 'row'), id).dispatchEvent(event);
+      return event;
+    };
+    let chatPress: MouseEvent | null = null;
+    await interact(() => {
+      chatPress = press('chat');
+    });
+    expect((chatPress as MouseEvent | null)?.defaultPrevented).toBe(false);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+
+    await interact(() => press('b1'));
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.map(item => item.textContent)).toEqual(['Close', 'Close others']);
+    await interact(() => items[1]?.click());
+    expect(ran).toEqual(['others b1']);
   });
 });

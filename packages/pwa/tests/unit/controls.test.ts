@@ -70,6 +70,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   composerPhoneEnterKey: 'send',
   motion: 'reduced',
   sidebarCollapsed: true,
+  sessionsList: 'current',
   suggestionKeys: 'both',
   skillSuggestions: false,
   composerVimMode: true,
@@ -116,6 +117,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       composerPhoneEnterKey: null,
       motion: 'system',
       sidebarCollapsed: true,
+      // A payload written before the list could span machines shows every machine: the new default.
+      sessionsList: 'all',
       // A payload written before the composer fields existed opens suggestions
       // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
       suggestionKeys: 'ladder',
@@ -725,5 +728,15 @@ describe('DaemonControlsStore', () => {
     // Nothing has been grafted onto ordinary objects.
     should(({} as Record<string, unknown>).projectScope).be.undefined();
     should(controlsFor(record, alpha).projectScope).be.null();
+  });
+});
+
+describe('the Sessions list scope', () => {
+  it('reads every machine by default, keeps "current", and refuses anything else', () => {
+    const read = (sessionsList: unknown) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { sessionsList } })).device.sessionsList;
+    should(read(undefined)).equal('all');
+    should(read('current')).equal('current');
+    should(read('every')).equal('all');
   });
 });

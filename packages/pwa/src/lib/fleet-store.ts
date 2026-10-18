@@ -98,6 +98,11 @@ export interface DaemonFleetSlice {
   /** The last failed answer. It survives into the next `loading` because a
    *  pending retry does not make the previous failure untrue. */
   readonly error: string | null;
+  /**
+   * When the last good list read settled, by the store's clock: how a machine that stopped answering
+   * says "last seen 5m". Absent until a read has succeeded; a failed read never moves it.
+   */
+  readonly readAt?: number;
 }
 
 /** Every paired daemon's fleet, addressed only by `DaemonId`. */
@@ -187,10 +192,13 @@ export class DaemonFleetStore {
   readonly #port: DaemonFleetPort;
   readonly #listeners = new Set<() => void>();
   readonly #entries = new Map<DaemonId, DaemonEntry>();
+  readonly #now: () => number;
   #snapshot: FleetSnapshot = { daemons: new Map() };
 
-  constructor(port: DaemonFleetPort) {
+  /** `now` stamps each good read's `readAt`; the real clock unless a suite fixes one. */
+  constructor(port: DaemonFleetPort, now: () => number = Date.now) {
     this.#port = port;
+    this.#now = now;
   }
 
   subscribe(listener: () => void): () => void {
@@ -367,7 +375,13 @@ export class DaemonFleetStore {
       const old = previous.byId.get(view.config.id);
       return old !== undefined && sameView(old, view) ? old : view;
     });
-    this.#patchSlice(daemonId, { sessions, byId: indexById(sessions), status: 'ready', error: null });
+    this.#patchSlice(daemonId, {
+      sessions,
+      byId: indexById(sessions),
+      status: 'ready',
+      error: null,
+      readAt: this.#now(),
+    });
   }
 
   #upsert(daemonId: DaemonId, view: SessionView): boolean {
