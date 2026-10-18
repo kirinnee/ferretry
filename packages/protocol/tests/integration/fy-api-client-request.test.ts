@@ -21,6 +21,7 @@ describe('FyApiClient construction and generic requests', () => {
       'attachTarget',
       'cancelHandover',
       'cgroupConfig',
+      'configChanges',
       'events',
       'foreignHistory',
       'foreignHistoryConversation',
