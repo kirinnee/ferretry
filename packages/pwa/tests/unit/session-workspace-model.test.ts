@@ -8,20 +8,52 @@ import {
 } from '../../src/components/session-workspace-model.ts';
 import { sessionView } from '../support/sessions.ts';
 
+const NOW = Date.UTC(2026, 9, 18, 12, 0, 0);
+
 describe('transcriptEntriesFromLog', () => {
   test('projects normalized user and assistant messages with multiline Markdown intact', () => {
     const entries = transcriptEntriesFromLog(
       '[10:11:12] user/message: Please ship it\n[10:11:13] assistant/message: ## Done\n    - built\n    - tested',
+      NOW,
     );
 
     expect(entries).toHaveLength(2);
-    expect(entries[0]).toMatchObject({ kind: 'user', label: 'You · 10:11:12', text: 'Please ship it' });
+    expect(entries[0]).toMatchObject({
+      kind: 'user',
+      label: 'You',
+      at: Date.UTC(2026, 9, 18, 10, 11, 12),
+      text: 'Please ship it',
+    });
     expect(entries[1]).toMatchObject({
       kind: 'assistant',
-      label: 'Assistant · 10:11:13',
+      label: 'Assistant',
+      at: Date.UTC(2026, 9, 18, 10, 11, 13),
       text: '## Done\n- built\n- tested',
     });
     expect(entries[0]?.id).not.toBe(entries[1]?.id);
+  });
+
+  test('keeps the daemon’s UTC wall clock out of every label — the time is an instant, formatted by the reader', () => {
+    const entries = transcriptEntriesFromLog('[01:45:44] user/message: hi\n[01:47:02] assistant/message: hello', NOW);
+    expect(entries.map(entry => entry.label)).toEqual(['You', 'Assistant']);
+    expect(entries.map(entry => entry.at)).toEqual([Date.UTC(2026, 9, 18, 1, 45, 44), Date.UTC(2026, 9, 18, 1, 47, 2)]);
+  });
+
+  test('dates a transcript that crosses midnight by walking back from the newest record', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        '[23:58:00] user/message: before midnight',
+        'assistant/message: no clock of its own',
+        '[00:01:00] assistant/message: after midnight',
+      ].join('\n'),
+      NOW,
+    );
+    expect(entries.map(entry => entry.at)).toEqual([
+      Date.UTC(2026, 9, 17, 23, 58, 0),
+      undefined,
+      Date.UTC(2026, 9, 18, 0, 1, 0),
+    ]);
+    expect(entries[1]).not.toHaveProperty('at');
   });
 
   test('leaves every bookkeeping record out of the conversation entirely', () => {
@@ -169,7 +201,7 @@ describe('transcriptEntriesFromLog', () => {
       ['[09:00:00] tool/error: E2: gone', 'system/error: E3: lost', 'system/turn: started'].join('\n'),
     );
     expect(entries.map(entry => [entry.kind, entry.label, entry.alert])).toEqual([
-      ['notice', 'Tool · Error · 09:00:00', true],
+      ['notice', 'Tool · Error', true],
       ['notice', 'System', true],
     ]);
   });
@@ -487,20 +519,20 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
   ].join('\n');
 
   test("renders another agent's message as FROM that agent, never as You", () => {
-    const [entry] = transcriptEntriesFromLog(peerLog);
+    const [entry] = transcriptEntriesFromLog(peerLog, NOW);
     expect(entry).toMatchObject({
       kind: 'user',
       text: "Hey! How's your day going?",
-      label: '10:01:02',
+      at: Date.UTC(2026, 9, 18, 10, 1, 2),
       peer: { name: 'torrey', sessionId: 'mvb0sw7d-27f71326', replyExpected: false },
     });
   });
 
   test('keeps the id the record would have had, whatever it was read as', () => {
-    const [peer] = transcriptEntriesFromLog(peerLog);
-    const [plain] = transcriptEntriesFromLog(peerLog.replace('[10:01:02] ', ''));
+    const [peer] = transcriptEntriesFromLog(peerLog, NOW);
+    const [plain] = transcriptEntriesFromLog(peerLog.replace('[10:01:02] ', ''), NOW);
     expect(peer?.id).toMatch(/^log:0:/);
-    expect(plain?.label).toBeUndefined();
+    expect(plain).not.toHaveProperty('at');
     expect(plain?.peer?.name).toBe('torrey');
   });
 
@@ -510,23 +542,25 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
         '[10:05:00] user/message: [ferretry] Your message to aniya (send s-1) did not reach it.',
         'user/message: [ferretry] A notice with no clock.',
       ].join('\n'),
+      NOW,
     );
     expect(entries).toEqual([
       expect.objectContaining({
         kind: 'system',
         text: 'Your message to aniya (send s-1) did not reach it.',
-        label: '10:05:00',
+        at: Date.UTC(2026, 9, 18, 10, 5, 0),
       }),
       expect.objectContaining({ kind: 'system', text: 'A notice with no clock.' }),
     ]);
-    expect(entries[1]).not.toHaveProperty('label');
+    expect(entries[1]).not.toHaveProperty('at');
   });
 
   test("shows a person's own paste without its markup, still as You", () => {
     const [entry] = transcriptEntriesFromLog(
       '[10:06:00] user/message: <pasted_content id="aa">\n    first line\n    second line\n    </pasted_content>',
+      NOW,
     );
-    expect(entry).toMatchObject({ kind: 'user', label: 'You · 10:06:00', text: 'first line\nsecond line' });
+    expect(entry).toMatchObject({ kind: 'user', label: 'You', text: 'first line\nsecond line' });
     expect(entry).not.toHaveProperty('peer');
   });
 });

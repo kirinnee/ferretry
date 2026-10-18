@@ -523,13 +523,16 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+/* THE SENDER'S NAME: a small muted line above the message, never a row with a clock in it — the time
+   lives at the foot of the message, on both sides (`send-receipt.tsx`). */
 .fy-message header {
   align-items: baseline;
   color: var(--fy-muted);
   display: flex;
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 500;
   gap: 8px;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 .fy-message time {
   flex: 0 0 auto;
@@ -581,7 +584,11 @@
 button.fy-receipt {
   cursor: pointer;
 }
-.fy-receipt-line .fy-receipt[data-send-receipt='read'] .fy-receipt-mark {
+.fy-receipt-mark {
+  color: var(--fy-muted);
+  flex: 0 0 auto;
+}
+.fy-receipt-line .fy-receipt[data-send-receipt='answered'] .fy-receipt-mark {
   color: var(--fy-accent);
 }
 .fy-receipt-line .fy-receipt[data-send-receipt='failed'] .fy-receipt-mark {
@@ -604,6 +611,16 @@ button.fy-receipt {
   font-size: 11px;
   margin: 2px 0 0;
   text-align: right;
+}
+/* The same foot on the other side of the conversation sits at the message's left edge. */
+.fy-receipt-line[data-side='other'] {
+  justify-content: flex-start;
+}
+.fy-receipt-detail[data-side='other'] {
+  text-align: left;
+}
+.fy-message-system > .fy-receipt-line {
+  margin-top: 0;
 }
 /* A finger still gets 44px: an invisible hit area laid over the small mark, so the line keeps its
    height. The same move `.kt-content` makes for a tool row's chevron (styles/index.css). */
@@ -1652,9 +1669,6 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   color: var(--warn, var(--fy-fg));
   font-size: 11px;
   padding: 0 8px;
-}
-.fy-peer-clock {
-  margin-left: auto;
 }
 .fy-peer-body {
   margin-top: 6px;

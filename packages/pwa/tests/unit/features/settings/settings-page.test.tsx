@@ -213,7 +213,7 @@ describe('SettingsPage sections', () => {
       'device',
     ]);
     expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined, undefined]);
-    expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width']);
+    expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
     run(() => view.unmount());

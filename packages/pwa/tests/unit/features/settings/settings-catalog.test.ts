@@ -32,6 +32,7 @@ describe('shared settings catalog', () => {
       'notifications',
       'install-app',
       'motion',
+      'message-marks',
     ]);
     expect(new Set(SETTINGS_DEFINITIONS.map(setting => setting.id)).size).toBe(SETTINGS_DEFINITIONS.length);
     for (const setting of SETTINGS_DEFINITIONS) {
@@ -50,7 +51,7 @@ describe('shared settings catalog', () => {
       'Machines',
     ]);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
-      ['text-size', 'theme', 'motion', 'density', 'chat-width'],
+      ['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks'],
       ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
       ['install-app'],
       [],
