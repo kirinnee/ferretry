@@ -152,6 +152,27 @@ describe('systemd supervisor lifecycle', () => {
     should(actual.pid).be.undefined();
   });
 
+  it('should restart with ONE systemctl restart, after rewriting the unit for the installed daemon', async () => {
+    // Arrange — no stop this CLI watches and start it issues, so there is no window with the unit
+    // down in which anything else can start a daemon beside it.
+    const { supervisor, processes, files } = systemd();
+
+    // Act
+    await supervisor.restartInPlace(daemonBinary.path);
+
+    // Assert
+    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${daemonBinary.path}"`);
+    should(processes.ran).deepEqual(['systemctl --user daemon-reload', 'systemctl --user restart fyd.service']);
+  });
+
+  it('should surface a restart systemctl refused', async () => {
+    // Arrange
+    const { supervisor } = systemd([['restart', { code: 1, stdout: '', stderr: 'Job failed' }]]);
+
+    // Act + Assert
+    await should(supervisor.restartInPlace(daemonBinary.path)).be.rejectedWith(ServiceManagerCommandError);
+  });
+
   it('should stop politely first and escalate to a real kill only when asked', async () => {
     // Arrange
     const { supervisor, processes } = systemd();
@@ -309,6 +330,17 @@ describe('launchd supervisor start', () => {
 });
 
 describe('launchd supervisor stop and inspection', () => {
+  it('should offer no one-command restart, because launchd caches ProgramArguments at bootstrap', () => {
+    // Arrange
+    const { supervisor } = launchd();
+
+    // Act
+    const actual = 'restartInPlace' in supervisor;
+
+    // Assert
+    should(actual).be.false();
+  });
+
   it('should boot the job out politely and kill it only on escalation', async () => {
     // Arrange
     const { supervisor, processes } = launchd();

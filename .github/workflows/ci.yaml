@@ -108,7 +108,7 @@ jobs:
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
 
   pwa-screenshot:
-    name: PWA Settings Geometry (${{ matrix.scheme }})
+    name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }})
     permissions:
       contents: read
     # `ubuntu-latest`, and deliberately NOT a macOS runner: the runner image already ships the same
@@ -119,10 +119,16 @@ jobs:
     runs-on: ubuntu-latest
     # One job per colour scheme: the two runs are independent first frames (`pre-paint.js` resolves the
     # theme before paint), so running them in sequence only added a scheme's ~70s to the wall clock.
+    # The third leg walks the WHOLE gallery once, in dark: the Settings legs never reach its later
+    # sections, and one of those timed out on every full run for ~250 commits with this job green.
+    # `scripts/ci/pwa-screenshot-proof.sh` says why it is one scheme and what it costs.
     strategy:
       fail-fast: false
       matrix:
-        scheme: [dark, light]
+        include:
+          - { scheme: dark, scope: settings }
+          - { scheme: light, scope: settings }
+          - { scheme: dark, scope: full }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -133,18 +139,19 @@ jobs:
       # clipping that shipped once already and every gate here would stay green. The script's header
       # says which frames this covers, which it does not, and why the assertion is the gate while the
       # images are only evidence.
-      - name: Prove the Settings surfaces fit both viewports in ${{ matrix.scheme }}
+      - name: Prove the ${{ matrix.scope }} harness at both viewports in ${{ matrix.scheme }}
         env:
           SCHEME: ${{ matrix.scheme }}
-        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME"
+          SCOPE: ${{ matrix.scope }}
+        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"
       # `always()` because a red run is the run whose frames matter most: the artifact carries this
       # colour scheme at both viewports plus the run's full log, so a reviewer can see the panel that
       # broke instead of reading a geometry number and guessing.
-      - name: Upload the captured Settings frames
+      - name: Upload the captured ${{ matrix.scope }} frames
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pwa-settings-frames-${{ matrix.scheme }}
+          name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}
           path: packages/pwa/.artifacts/pwa-screenshot/
           if-no-files-found: warn
 

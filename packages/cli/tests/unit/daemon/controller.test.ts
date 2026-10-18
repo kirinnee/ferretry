@@ -387,7 +387,7 @@ describe('daemon start', () => {
     const notice = new RecordingSetupNotice(lifecycle.trail);
     const started = harness({
       probes: [undefined, health()],
-      serviceFallback: stoppedReport,
+      serviceReports: [stoppedReport],
       lifecycle,
       overrides: { setupNotice: notice },
     });
@@ -442,7 +442,7 @@ describe('daemon stop', () => {
     const { controller, out, service } = harness({
       probes: [health(), undefined],
       serviceFallback: stoppedReport,
-      serviceReports: [stoppedReport],
+      serviceReports: [runningReport, stoppedReport],
     });
 
     // Act
@@ -575,7 +575,7 @@ describe('daemon reset', () => {
       resetTrees: trees,
       probes: [health(), undefined],
       serviceFallback: stoppedReport,
-      serviceReports: [stoppedReport],
+      serviceReports: [runningReport, stoppedReport],
     });
 
     // Act
@@ -853,8 +853,7 @@ describe('daemon restart', () => {
     // Arrange — a fixed 500ms sleep is what made kteam's successor die on EADDRINUSE.
     const { controller, out, service } = harness({
       probes: [health(), undefined, health()],
-      serviceReports: [stoppedReport],
-      serviceFallback: stoppedReport,
+      serviceReports: [runningReport, stoppedReport],
     });
 
     // Act
@@ -870,7 +869,7 @@ describe('daemon restart', () => {
     // Arrange
     const { controller, out, service } = harness({
       probes: [undefined, health()],
-      serviceFallback: stoppedReport,
+      serviceReports: [stoppedReport],
     });
 
     // Act
@@ -1210,8 +1209,7 @@ describe('nix garbage-collection root', () => {
       verb: 'restart' as const,
       options: {
         probes: [health(), undefined, health()],
-        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
-        serviceFallback: stoppedReport,
+        serviceReports: [runningReport, stoppedReport] as DaemonSupervisorReport[],
       },
     },
   ])('should pin the store output of the launched executable on $verb', async ({ verb, options }) => {
@@ -1341,8 +1339,7 @@ describe('retired snapshot store', () => {
       verb: 'restart' as const,
       options: {
         probes: [health(), undefined, health()],
-        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
-        serviceFallback: stoppedReport,
+        serviceReports: [runningReport, stoppedReport] as DaemonSupervisorReport[],
       },
     },
     { verb: 'uninstall' as const, options: {} },
@@ -1440,13 +1437,17 @@ describe('daemon lifecycle serialization', () => {
     {
       verb: 'stop',
       claimed: 'stop',
-      options: { probes: [health(), undefined], serviceFallback: stoppedReport },
+      options: {
+        probes: [health(), undefined],
+        serviceReports: [runningReport] as DaemonSupervisorReport[],
+        serviceFallback: stoppedReport,
+      },
       run: (c: DaemonController) => c.stop(),
     },
     {
       verb: 'restart',
       claimed: 'restart',
-      options: { probes: [undefined, health()], serviceFallback: stoppedReport },
+      options: { probes: [undefined, health()], serviceReports: [stoppedReport] as DaemonSupervisorReport[] },
       run: (c: DaemonController) => c.restart(),
     },
     { verb: 'status', claimed: undefined, options: {}, run: (c: DaemonController) => c.status({}) },
@@ -1773,5 +1774,203 @@ describe('DaemonController with no daemon executable', () => {
     // Assert
     should(out.text).equal('ok: fyd is already serving (pid 4242)');
     should(lifecycle.requests).not.be.empty();
+  });
+});
+
+describe('a daemon serving outside its service manager', () => {
+  // The stray: a daemon `fy daemon start` ran as a direct child, holding the state home's lock.
+  const ORPHAN_PID = 31337;
+  const orphan = (): HealthView => health({ pid: ORPHAN_PID });
+  const absentUnit: DaemonSupervisorReport = { manager: 'systemd', state: 'absent' };
+
+  it('should hand a directly started daemon over on install instead of leaving it beside a failed unit', async () => {
+    // Arrange — the double start an owner hit: `start` before the first `install` spawned a direct
+    // child, then `install` wrote the unit and restarted it; systemd's daemon exited 78 on the held
+    // lock, the unit went `failed`, and install reported success with the stray's pid.
+    const { controller, out, service, direct } = harness({
+      serviceInstalled: false,
+      probes: [orphan(), undefined, health()],
+      serviceReports: [absentUnit],
+    });
+
+    // Act
+    await controller.install();
+
+    // Assert — the stray is stopped the way a direct child is, BEFORE the unit is written.
+    should(direct.stops).deepEqual([{ pidHint: ORPHAN_PID, escalate: false }]);
+    should(service.stops).be.empty();
+    should(out.lines[0]).equal(
+      `warn: fyd pid ${String(ORPHAN_PID)} serves ${layout().stateHome} outside systemd; stopping it so systemd owns the daemon`,
+    );
+    should(service.calls).containEql('install');
+    should(out.text).endWith('and started (pid 4242)');
+  });
+
+  it('should never report a stray as the daemon install brought up', async () => {
+    // Arrange — nothing answered before the install, then something not systemd's did.
+    const { controller } = harness({
+      serviceInstalled: false,
+      probes: [undefined, orphan()],
+      serviceFallback: failedReport,
+    });
+
+    // Act + Assert
+    await should(controller.install()).be.rejectedWith(
+      new RegExp(`pid ${String(ORPHAN_PID)} serves .* outside systemd.*run fy daemon restart`, 'u'),
+    );
+  });
+
+  it('should restart from the production state: stop the orphan, then ONE systemctl restart', async () => {
+    // Arrange — unit installed and failed (status=78), the orphan serving.
+    const subject = harness({ probes: [orphan(), undefined, health()], serviceReports: [failedReport] });
+    subject.service.canRestartInPlace();
+
+    // Act
+    await subject.controller.restart();
+
+    // Assert — `systemctl stop` on a failed unit is a no-op, so the orphan is stopped directly.
+    should(subject.direct.stops).deepEqual([{ pidHint: ORPHAN_PID, escalate: false }]);
+    should(subject.service.calls).containEql('restartInPlace');
+    should(subject.service.calls).not.containEql('stop');
+    should(subject.service.calls).not.containEql('start');
+    should(subject.service.restartedExecutables).deepEqual([installedDaemon().path]);
+    should(subject.out.text).endWith('ok: fyd restarted (pid 4242)');
+  });
+
+  it('should restart a supervised daemon with the manager alone, touching no pid itself', async () => {
+    // Arrange
+    const subject = harness({ probes: [health(), health()] });
+    subject.service.canRestartInPlace();
+
+    // Act
+    await subject.controller.restart();
+
+    // Assert
+    should(subject.service.calls).containEql('restartInPlace');
+    should(subject.service.stops).be.empty();
+    should(subject.direct.stops).be.empty();
+    should(subject.out.text).equal('ok: fyd restarted (pid 4242)');
+  });
+
+  it('should say a restart in place found nothing running', async () => {
+    // Arrange
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport] });
+    subject.service.canRestartInPlace();
+
+    // Act
+    await subject.controller.restart();
+
+    // Assert
+    should(subject.out.lines[0]).equal('warn: fyd was not running; starting it');
+    should(subject.service.restartedExecutables).deepEqual([installedDaemon().path]);
+  });
+
+  it('should hand an orphan over on a restart without a one-command restart, the launchd path', async () => {
+    // Arrange — launchd's KeepAlive keeps respawning a daemon that exits on the held lock.
+    const launchd = new FakeSupervisor('launchd', { manager: 'launchd', state: 'running', pid: 4242 });
+    launchd.reports = [
+      { manager: 'launchd', state: 'failed', detail: 'last exit status 78' },
+      { manager: 'launchd', state: 'stopped' },
+    ];
+    const subject = harness({ probes: [orphan(), undefined, health()], overrides: { service: launchd } });
+
+    // Act
+    await subject.controller.restart();
+
+    // Assert
+    should(subject.direct.stops).deepEqual([{ pidHint: ORPHAN_PID, escalate: false }]);
+    should(launchd.stops).be.empty();
+    should(launchd.startedExecutables).deepEqual([installedDaemon().path]);
+    should(subject.out.text).endWith('ok: fyd restarted (pid 4242)');
+  });
+
+  it('should not call an orphan "already serving" on start, but hand it over and start the unit', async () => {
+    // Arrange
+    const { controller, out, service, direct } = harness({
+      probes: [orphan(), undefined, health()],
+      serviceReports: [failedReport, failedReport],
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(direct.stops).deepEqual([{ pidHint: ORPHAN_PID, escalate: false }]);
+    should(service.startedExecutables).deepEqual([installedDaemon().path]);
+    should(out.text).not.containEql('already serving');
+    should(out.text).containEql('ok: fyd ready (pid 4242)');
+  });
+
+  it('should keep waiting while the answering pid is not the one the manager started', async () => {
+    // Arrange — a stray still draining while the unit's own daemon is coming up.
+    const { controller, out } = harness({
+      probes: [undefined, orphan(), health()],
+      serviceReports: [stoppedReport],
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(out.text).containEql('ok: fyd ready (pid 4242)');
+  });
+
+  it('should stop an orphan directly, and leave a failed unit alone', async () => {
+    // Arrange
+    const { controller, out, service, direct } = harness({
+      probes: [orphan(), undefined],
+      serviceFallback: failedReport,
+    });
+
+    // Act
+    await controller.stop();
+
+    // Assert
+    should(direct.stops).deepEqual([{ pidHint: ORPHAN_PID, escalate: false }]);
+    should(service.stops).be.empty();
+    should(out.text).endWith('ok: fyd stopped');
+  });
+
+  it('should also stop a manager that respawned its own daemon the moment the orphan let go', async () => {
+    // Arrange
+    const { controller, service, direct } = harness({
+      probes: [orphan(), undefined],
+      serviceReports: [failedReport, runningReport],
+      serviceFallback: stoppedReport,
+    });
+
+    // Act
+    await controller.stop();
+
+    // Assert
+    should(direct.stops).deepEqual([{ pidHint: ORPHAN_PID, escalate: false }]);
+    should(service.stops).deepEqual([{ pidHint: undefined, escalate: false }]);
+  });
+
+  it('should report the orphan in status with the remedy, and still exit 0', async () => {
+    // Arrange
+    const { controller, out } = harness({ probes: [orphan()], serviceFallback: failedReport });
+
+    // Act
+    await controller.status({});
+
+    // Assert
+    should(out.lines[0]).startWith('warn: fyd is serving, but OUTSIDE systemd — nothing supervises it');
+    should(out.text).containEql(
+      `warn: pid ${String(ORPHAN_PID)} was not started by systemd, so systemd cannot start its own; run fy daemon restart`,
+    );
+    should(out.exitCode).be.undefined();
+  });
+
+  it('should keep the orphan verdict out of --json except as its field', async () => {
+    // Arrange
+    const { controller, out } = harness({ probes: [orphan()], serviceFallback: failedReport });
+
+    // Act
+    await controller.status({ json: true });
+
+    // Assert
+    should(out.lines).have.length(1);
+    should(JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '')).have.property('orphan', true);
   });
 });

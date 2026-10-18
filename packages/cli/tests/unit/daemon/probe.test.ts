@@ -6,7 +6,9 @@ import {
   parseSystemdProperties,
   readLaunchdReport,
   readSystemdReport,
+  servesOutsideSupervisor,
 } from '../../../src/lib/daemon/probe';
+import { health } from './fixtures';
 
 describe('systemd property parsing', () => {
   it('should read the properties systemctl show emits', () => {
@@ -204,5 +206,33 @@ describe('liveness mapping', () => {
     should(livenessOf({ manager: 'systemd', state: 'failed' })).equal('dead');
     should(livenessOf({ manager: 'systemd', state: 'stopped' })).equal('absent');
     should(livenessOf({ manager: 'direct', state: 'absent' })).equal('absent');
+  });
+});
+
+describe('serving outside the service manager', () => {
+  it('should call a daemon the manager reports as its own running pid supervised', () => {
+    // Act + Assert
+    should(servesOutsideSupervisor({ manager: 'systemd', state: 'running', pid: 4242 }, health())).be.false();
+  });
+
+  it('should call a daemon serving while the unit has failed an orphan — the production state', () => {
+    // Act + Assert — systemd gave up on exit 78 because this very daemon held the lock.
+    should(servesOutsideSupervisor({ manager: 'systemd', state: 'failed' }, health({ pid: 31337 }))).be.true();
+    should(servesOutsideSupervisor({ manager: 'systemd', state: 'stopped' }, health())).be.true();
+    should(servesOutsideSupervisor({ manager: 'systemd', state: 'absent' }, health())).be.true();
+  });
+
+  it('should call a daemon whose pid is not the one the manager runs an orphan', () => {
+    // Act + Assert — launchd's KeepAlive respawn can be running while a stray still answers.
+    should(
+      servesOutsideSupervisor({ manager: 'launchd', state: 'running', pid: 4242 }, health({ pid: 31337 })),
+    ).be.true();
+  });
+
+  it('should believe a running manager that names no pid, and never judge a direct child or a silent API', () => {
+    // Act + Assert
+    should(servesOutsideSupervisor({ manager: 'launchd', state: 'running' }, health())).be.false();
+    should(servesOutsideSupervisor({ manager: 'direct', state: 'absent' }, health())).be.false();
+    should(servesOutsideSupervisor({ manager: 'systemd', state: 'failed' }, undefined)).be.false();
   });
 });
