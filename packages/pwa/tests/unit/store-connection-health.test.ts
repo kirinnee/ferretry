@@ -10,6 +10,7 @@ import type { ConnectionHealthEnvironment, DaemonConnectionHealth } from '../../
 import type { ConnectionSignal } from '../../src/lib/connection-signals.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
+import { startSessionEventStream } from '../../src/components/session-event-stream-model.ts';
 import { createAppStore } from '../../src/lib/store.tsx';
 import { autoDial, keyedDaemon, relayCrypto, ScriptedSocket, settle } from '../support/relay.ts';
 
@@ -116,5 +117,112 @@ describe('the store’s connection health', () => {
     // The attempt settled without a request, so the loop simply scheduled its next try.
     expect(health.state(nobody)).toMatchObject({ kind: 'reconnecting', attempt: 1 });
     expect(timers.armed.filter(entry => !entry.cancelled).map(entry => entry.delayMs)).toEqual([30_000, 500]);
+  });
+
+  it('recovers from two outages back to back on one page, the feed resuming both times', async () => {
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://alpha.example.test');
+    const scripted = autoDial(identity, {
+      respond: request =>
+        request.path === '/v1/carriers'
+          ? { body: { carriers: [{ kind: 'direct', url: 'https://alpha.example.test' }] } }
+          : { body: [] },
+    });
+    let reachable = true;
+    let refusedDials = 0;
+    const dial = (): ScriptedSocket => {
+      if (reachable) return scripted.dial();
+      refusedDials += 1;
+      const refused = new ScriptedSocket();
+      queueMicrotask(() => refused.onClose?.(1006, 'the address did not answer'));
+      return refused;
+    };
+    const timers = manualHealthEnvironment();
+    let signal: ((kind: ConnectionSignal) => void) | undefined;
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+      deviceKeys,
+      relayCrypto,
+      relayDial: dial,
+      connectionHealthEnvironment: timers.environment,
+      connectionSignals: {
+        listen: listener => {
+          signal = listener;
+          return () => undefined;
+        },
+      },
+    });
+    store.connections.add(daemon);
+    let recovered = 0;
+    store.connectionHealth.onRecovered(daemon.daemonId, () => {
+      recovered += 1;
+    });
+
+    // The live feed, through the SAME router: each subscription is a stream session, ending when its
+    // socket does. Its own retry clock never fires here — only recovery may reopen it.
+    const resumedFrom: number[] = [];
+    const feedTimers: (() => void)[] = [];
+    const feed = startSessionEventStream({
+      api: {
+        stream: async (_sessionId, after) => {
+          resumedFrom.push(after ?? 0);
+          const session = await store.carrier.openStream(daemon, { path: '/v1/events', onData: () => undefined });
+          await new Promise<void>(resolve => session.onStreamClosed(() => resolve()));
+        },
+      },
+      sessionId: 's1',
+      after: 7,
+      environment: {
+        setTimeout: run => {
+          feedTimers.push(run);
+          return feedTimers.length;
+        },
+        clearTimeout: () => undefined,
+        random: () => 0,
+      },
+      onEvent: () => undefined,
+      onRecovered: listener => store.connectionHealth.onRecovered(daemon.daemonId, listener),
+    });
+    await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`);
+    await settle();
+    expect(store.connectionHealth.state(daemon.daemonId).kind).toBe('connected');
+    expect(resumedFrom).toEqual([7]);
+
+    for (const round of [1, 2]) {
+      // The relay drops every socket; nothing answers for a while.
+      reachable = false;
+      for (const socket of scripted.sockets) socket.onClose?.(1006, 'the relay was redeployed');
+      await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`).catch(() => undefined);
+      await settle();
+      expect(store.connectionHealth.state(daemon.daemonId).kind).toBe('reconnecting');
+      expect(feed.status()).toBe('reconnecting');
+
+      // A panel retrying, and the feed's own retry, dial nothing while the model is reconnecting.
+      const dialsBefore = refusedDials;
+      await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`).catch(() => undefined);
+      for (const run of feedTimers.splice(0)) run();
+      await settle();
+      expect(refusedDials).toBe(dialsBefore);
+
+      // The model's own attempt, still unreachable: one walk, still reconnecting.
+      signal?.('online');
+      await settle();
+      expect(refusedDials).toBe(dialsBefore + 1);
+      expect(store.connectionHealth.state(daemon.daemonId)).toMatchObject({ kind: 'reconnecting', attempt: 1 });
+
+      // The daemon is reachable again: the next attempt recovers, and the feed reopens at once.
+      reachable = true;
+      signal?.('online');
+      await settle();
+      expect(store.connectionHealth.state(daemon.daemonId).kind).toBe('connected');
+      expect(recovered).toBe(round);
+      expect(feed.status()).toBe('connecting');
+      // One subscription per round from the feed's own (deferred, undialled) retry and one from recovery,
+      // every one resuming from the cursor.
+      expect(resumedFrom).toEqual(Array.from({ length: 1 + 2 * round }, () => 7));
+      expect((await store.carrier.fetch(`${daemon.baseUrl}/v1/projects`)).status).toBe(200);
+    }
+    feed.stop();
   });
 });
