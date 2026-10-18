@@ -90,6 +90,8 @@ export interface LiveActivityLineProps {
   readonly live?: SessionLiveActivity | null;
   /** Injectable so a suite drives the clock; the browser's own otherwise. */
   readonly scheduler?: LiveScheduler;
+  /** Whether the line holds still; absent, the transcript's shared selection hold decides. */
+  readonly hold?: boolean;
 }
 
 /** A count as printed, `—` when nobody measured it. */
@@ -110,9 +112,10 @@ export function LiveActivityLine({
   turnStartedAt = null,
   live = null,
   scheduler,
+  hold,
 }: LiveActivityLineProps) {
   const readout = liveReadout({ turnStartedAt, live, pane: activity });
-  const options = scheduler === undefined ? {} : { scheduler };
+  const options = { ...(scheduler === undefined ? {} : { scheduler }), ...(hold === undefined ? {} : { hold }) };
   const seconds = useLiveElapsed(readout.startedAt, options);
   const resetKey = turnStartedAt ?? '';
   const output = useCountUp(readout.outputTokens, { ...options, resetKey });

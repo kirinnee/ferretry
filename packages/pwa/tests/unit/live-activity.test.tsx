@@ -156,6 +156,7 @@ describe('LiveActivityLine with the turn’s own clock', () => {
         activity={{ harness: 'claude', verb: 'Pontificating…' }}
         live={liveSample({ outputTokens: 3_100, inputTokens: 48_000 })}
         scheduler={scheduler}
+        hold={false}
         turnStartedAt={TURN}
       />,
     );
@@ -177,6 +178,7 @@ describe('LiveActivityLine with the turn’s own clock', () => {
         activity={null}
         fallback="Editing app.tsx (3s)"
         scheduler={manualScheduler(TURN_MS + 5_000)}
+        hold={false}
         turnStartedAt={TURN}
       />,
     );
@@ -189,7 +191,7 @@ describe('LiveActivityLine with the turn’s own clock', () => {
   test('counts a new reading up from what is shown and never back down', () => {
     const scheduler = manualScheduler(TURN_MS + 1_000);
     const line = (live: SessionLiveActivity) => (
-      <LiveActivityLine activity={null} live={live} scheduler={scheduler} turnStartedAt={TURN} />
+      <LiveActivityLine activity={null} hold={false} live={live} scheduler={scheduler} turnStartedAt={TURN} />
     );
     const view = render(line(liveSample({ outputTokens: 1_000, inputTokens: 2_000 })));
     run(() => view.update(line(liveSample({ outputTokens: 2_000, inputTokens: 2_000 }))));
@@ -211,6 +213,7 @@ describe('LiveActivityLine with the turn’s own clock', () => {
         activity={{ harness: 'claude', verb: 'Working…', tokens: '↓ 1.2k tokens' }}
         live={liveSample({ turnStartedAt: '2026-10-18T06:00:00.000Z', outputTokens: 99_000, inputTokens: 99_000 })}
         scheduler={manualScheduler(TURN_MS)}
+        hold={false}
         turnStartedAt={TURN}
       />,
     );

@@ -163,7 +163,9 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
       await page.locator('#harness-session-workspace-page .kt-chat-surface').waitFor({ state: 'attached' });
       await page.evaluate(async () => {
         await document.fonts.ready;
-        for (const animation of document.getAnimations()) animation.finish();
+        // An infinite busy mark (a spinner's pulse) has no end; `finish()` throws on one.
+        for (const animation of document.getAnimations())
+          if (animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY) animation.finish();
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       });
       const theme = await page.evaluate(() => document.documentElement.dataset.theme);

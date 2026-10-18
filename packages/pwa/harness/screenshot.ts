@@ -897,7 +897,10 @@ const assertTerminalGeometry = async (page: Page, rootUrl: string, family: strin
 
 const settleTransitions = async (page: Page): Promise<void> => {
   await page.evaluate(() => {
-    for (const animation of document.getAnimations()) animation.finish();
+    // A finite transition is settled; an infinite busy mark (a spinner's reduced-motion pulse) has no
+    // end to finish at, and `finish()` throws on one.
+    for (const animation of document.getAnimations())
+      if (animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY) animation.finish();
   });
 };
 
