@@ -1120,6 +1120,7 @@ export function SessionChatPage({
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               onSent={onSent}
+              connectionLive={connectionState?.kind === 'connected'}
               quota={quota}
               sessionId={session.config.id}
               {...(session.state.contextPercent === undefined ? {} : { contextPercent: session.state.contextPercent })}
