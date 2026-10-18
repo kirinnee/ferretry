@@ -21,6 +21,7 @@ import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
+import { carrierDelivery } from '../lib/relay-carrier.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
@@ -45,6 +46,20 @@ import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
+
+/**
+ * What a failed send says. A carrier outage never shows the walk's long sentence, and it says "send it
+ * again" ONLY when nothing of the request provably left this browser: a send that died after leaving may
+ * already be with the daemon, and a resend under a new id would apply it twice — the transcript's send
+ * row settles that one, retrying under the original id only what it proves absent.
+ */
+const sendFailureMessage = (cause: unknown): string => {
+  const delivery = carrierDelivery(cause);
+  if (delivery === 'unsent') return 'Not sent — the connection dropped. Your message is still here; send it again.';
+  if (delivery === 'unknown')
+    return 'Connection dropped while sending — checking whether it arrived. Don’t send it again; it will show in the transcript.';
+  return cause instanceof Error ? cause.message : 'Message could not be sent';
+};
 
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
@@ -564,7 +579,7 @@ export function Composer({
       draftStore.clear(scope);
       onSent?.();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Message could not be sent');
+      setError(sendFailureMessage(cause));
     } finally {
       submitLock.current = false;
       setSending(false);
