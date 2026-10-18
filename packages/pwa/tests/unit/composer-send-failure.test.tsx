@@ -78,14 +78,19 @@ describe('Composer send failures', () => {
     });
   });
 
-  test('never invites a resend when the send may already be with the daemon, and clears on recovery', async () => {
+  test('never invites a resend when the send may already be with the daemon, not even once it reconnects', async () => {
     const shown = await failSend(outage('unknown'));
     expect(shown.error).toBe(
       'Connection dropped while sending — checking whether it arrived. Don’t send it again; it will show in the transcript.',
     );
     expect(shown.error).not.toContain('1006');
-    // The send row settles it once the machine is back; the composer stops talking about it.
-    expect(shown.afterRecovery).toBeNull();
+    // Reconnecting takes under a second, and a line that vanished then left the draft one press from a
+    // duplicate (E2E: delivered once, draft still in the box, Send enabled, nothing said). It stays, and
+    // points at the transcript, whose send row settles it under the original id.
+    expect(shown.draft).toBe('hello');
+    expect(shown.afterRecovery).toBe(
+      'Back online — check the transcript before sending again; this message may already be there.',
+    );
   });
 
   test('says what the daemon said for anything that is not an outage, and keeps saying it', async () => {

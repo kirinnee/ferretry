@@ -49,8 +49,16 @@ import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 
 interface SendFailure {
   readonly text: string;
-  /** A carrier outage: the line goes away once the machine answers again. */
+  /** A carrier outage: the line changes once the machine answers again. */
   readonly outage: boolean;
+  /**
+   * What the line says once the machine answers again; absent means it goes away.
+   *
+   * A send whose fate is unknown keeps a line after recovery ON PURPOSE. Reconnecting takes well under a
+   * second now, so a warning that vanished on recovery left the draft in the box, Send enabled and
+   * nothing said, beside a message the daemon may already have — one press from a duplicate (#507).
+   */
+  readonly recovered?: string;
 }
 
 /**
@@ -67,6 +75,7 @@ const sendFailure = (cause: unknown): SendFailure => {
     return {
       text: 'Connection dropped while sending — checking whether it arrived. Don’t send it again; it will show in the transcript.',
       outage: true,
+      recovered: 'Back online — check the transcript before sending again; this message may already be there.',
     };
   return { text: cause instanceof Error ? cause.message : 'Message could not be sent', outage: false };
 };
@@ -333,10 +342,11 @@ export function Composer({
   const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<SendFailure | null>(null);
-  // An outage line outlives nothing: once the machine answers again it is cleared, and an unconfirmed send
-  // is left to the transcript's send row, which settles it under the original id.
+  // Once the machine answers again an outage line is cleared — or, for a send that may already have
+  // arrived, replaced by one that points at the transcript, whose send row settles it under the original id.
   useEffect(() => {
-    if (connectionLive && error?.outage === true) setError(null);
+    if (!connectionLive || error?.outage !== true) return;
+    setError(error.recovered === undefined ? null : { text: error.recovered, outage: false });
   }, [connectionLive, error]);
   const submitLock = useRef(false);
   const fieldId = useId();
