@@ -1768,6 +1768,7 @@ describe('SessionChatPage', () => {
     try {
       expect(JSON.stringify(page.toJSON())).not.toContain('could not reach fyd');
       expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
+      expect(page.root.findByType(Composer).props.connectionLive).toBe(false);
     } finally {
       run(() => page.unmount());
     }
@@ -1791,6 +1792,7 @@ describe('SessionChatPage', () => {
       expect(issue.type).toBe('details');
       expect(textOf(issue)).toBe('Workspace refresh issue: the daemon did not answer.');
       expect(issue.findByType('summary').props.className).toContain('truncate');
+      expect(page.root.findByType(Composer).props.connectionLive).toBe(true);
     } finally {
       run(() => page.unmount());
     }
