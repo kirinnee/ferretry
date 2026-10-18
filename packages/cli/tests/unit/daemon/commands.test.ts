@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerDaemonCommands } from '../../../src/lib/daemon/commands';
 import { DaemonController } from '../../../src/lib/daemon/controller';
+import type { DaemonSupervisorReport } from '../../../src/lib/daemon/ports';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim';
 import { StateHomeController } from '../../../src/lib/state-home/controller';
 import { CapturedOutput as CapturedClaimOutput, FakeStateHomeFiles } from '../state-home/fixtures';
@@ -31,6 +32,7 @@ import {
 function run(
   argv: string[],
   probes: ReadonlyArray<ReturnType<typeof health> | undefined> = [health()],
+  reports: DaemonSupervisorReport[] = [],
 ): {
   parsed: Promise<unknown>;
   service: FakeSupervisor;
@@ -42,6 +44,7 @@ function run(
   prompt: FakePrompt;
 } {
   const service = new FakeSupervisor('systemd', stoppedReport);
+  service.reports = reports;
   const out = new CapturedOutput();
   const logs = new FakeLogs();
   const resetTrees = new FakeResetTrees();
@@ -107,7 +110,7 @@ function run(
 describe('daemon command surface', () => {
   it('should route install to the controller', async () => {
     // Arrange + Act
-    const { parsed, service } = run(['daemon', 'install']);
+    const { parsed, service } = run(['daemon', 'install'], [undefined, health()], [runningReport]);
     await parsed;
 
     // Assert
@@ -125,7 +128,7 @@ describe('daemon command surface', () => {
 
   it('should route start to the controller', async () => {
     // Arrange + Act
-    const { parsed, out } = run(['daemon', 'start']);
+    const { parsed, out } = run(['daemon', 'start'], [health()], [runningReport]);
     await parsed;
 
     // Assert
@@ -134,7 +137,7 @@ describe('daemon command surface', () => {
 
   it('should route stop to the controller', async () => {
     // Arrange + Act
-    const { parsed, service } = run(['daemon', 'stop'], [health(), undefined]);
+    const { parsed, service } = run(['daemon', 'stop'], [health(), undefined], [runningReport]);
     await parsed;
 
     // Assert
@@ -143,7 +146,11 @@ describe('daemon command surface', () => {
 
   it('should route restart to the controller', async () => {
     // Arrange + Act
-    const { parsed, service } = run(['daemon', 'restart'], [health(), undefined, health()]);
+    const { parsed, service } = run(
+      ['daemon', 'restart'],
+      [health(), undefined, health()],
+      [runningReport, stoppedReport, runningReport],
+    );
     await parsed;
 
     // Assert
@@ -181,7 +188,7 @@ describe('daemon command surface', () => {
 
   it('should print a human status by default', async () => {
     // Arrange + Act
-    const { parsed, out } = run(['daemon', 'status']);
+    const { parsed, out } = run(['daemon', 'status'], [health()], [runningReport]);
     await parsed;
 
     // Assert

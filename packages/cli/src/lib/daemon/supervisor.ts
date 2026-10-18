@@ -188,6 +188,18 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     return {};
   }
 
+  /**
+   * `systemctl --user restart`, after the definition is rewritten for `executable`.
+   *
+   * One command rather than a stop this CLI watches and a start it issues: systemd then owns the whole
+   * transition, escalates a stuck stop under its own timeout, and never has a window in which the unit
+   * is down and something else can start a daemon beside it.
+   */
+  async restartInPlace(executable: string): Promise<void> {
+    await this.#refresh(executable);
+    await this.#require(['restart', this.layout.systemdUnitName]);
+  }
+
   async stop(request: StopRequest): Promise<void> {
     await this.#require(
       request.escalate

@@ -114,6 +114,23 @@ upgrade nobody asked for is a worse surprise than the stale version.
 than at the next boot, because `systemd` fails such a unit with 203/EXEC and `launchd` behaves the
 same way.
 
+### One owner per host
+
+Once a systemd unit or launchd agent is installed, it is the only thing that runs `fyd`. A daemon
+answering for the state home that the service manager did not start — typically one `fy daemon start`
+spawned before the first `fy daemon install` — holds the state home's lock, so the manager's own
+daemon exits at once (systemd marks the unit `failed`, status 78) while the stray serves unsupervised.
+
+`fy daemon status` reports that as serving **outside** systemd or launchd and names the remedy.
+`install`, `start`, `restart` and `stop` hand it over: they stop the stray the way a direct child is
+stopped (only once it is proved to hold this state home's lock) and then let the manager own the
+daemon. On systemd, `fy daemon restart` is one `systemctl --user restart` after rewriting the unit.
+
+```bash
+fy daemon status          # "serving, but OUTSIDE systemd" when a stray holds the state home
+fy daemon restart         # stops the stray, then systemd starts its own
+```
+
 ### Upgrading from a release with the daemon snapshot store
 
 Earlier releases copied `fyd` into a content-addressed store under

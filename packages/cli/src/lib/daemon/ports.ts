@@ -338,4 +338,13 @@ export interface IDaemonSupervisor {
  */
 export interface IServiceDefinitionSupervisor extends IDaemonSupervisor {
   readonly definitionPath: string;
+  /**
+   * Rewrite the definition for this exact executable and have the manager restart it in ONE command.
+   *
+   * Present only where the manager has such a command that also picks up a rewritten definition:
+   * systemd's `restart` after a `daemon-reload` does, and stops, escalates and starts under its own
+   * timeouts. launchd caches `ProgramArguments` at bootstrap, so it has no equivalent and leaves this
+   * out; its restart stays stop, wait until down, reload.
+   */
+  readonly restartInPlace?: (executable: string) => Promise<void>;
 }
