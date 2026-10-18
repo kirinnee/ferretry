@@ -14,11 +14,18 @@
  *   sessions the carrier delivered perfectly. The chain waits for a frame to be HANDLED, never for
  *   the request it completed to be answered: that runs beside the frames behind it, or one slow
  *   route would hold up every session on the link.
- * - **Liveness.** A ping every `heartbeatSeconds`, and a socket with no evidence of life for the
- *   grace window is dropped and redialled. No evidence means dead: waiting for a close that a
- *   suspended laptop will never send is how a daemon believes it holds a rendezvous slot it lost.
- * - **Patience.** A redial waits, because the rendezvous holds the incumbent's slot until its dead
- *   socket is swept and a faster redial is simply refused with `4409`.
+ * - **Liveness.** A ping every {@link RELAY_KEEPALIVE_MS}, and a socket that has received NOTHING
+ *   {@link RELAY_PONG_DEADLINE_MS} after one is dropped and redialled — a dead path is found within 30
+ *   seconds, not 75. The older rule (no evidence of life for the grace window) stays as the backstop
+ *   for a tick that fires late. No evidence means dead: waiting for a close that a suspended laptop
+ *   will never send is how a daemon believes it holds a rendezvous slot it lost. A socket WE condemn
+ *   is abandoned at once rather than awaiting a close handshake a dead path will never finish.
+ * - **Persistence.** A redial never stops until `stop()`. The first is immediate (a Worker redeploy
+ *   frees the slot with the socket), then jittered exponential backoff up to the configured ceiling;
+ *   a redial faster than the rendezvous's sweep of a dead incumbent is refused with `4409` and simply
+ *   becomes the next, longer attempt. The count resets only when the rendezvous accepts the claim.
+ *   Every disconnect, attempt and recovery is logged, naming the relay's ORIGIN and never its path —
+ *   the path carries the daemon's fingerprint.
  *
  * WHAT IT WILL NOT DO is present a carrier it does not have. `status()` reports `none` with the
  * sentence explaining why, `dialling` while there is no proved slot, and `carrying` only once the
@@ -40,9 +47,13 @@ import type {
 } from '../../lib/relay/index.ts';
 import {
   decideRelayCarrier,
-  RELAY_HEARTBEAT_MS,
+  RELAY_CONNECT_DEADLINE_MS,
+  RELAY_KEEPALIVE_MS,
+  RELAY_PONG_DEADLINE_MS,
   type RelayCarrierDecision,
   RelayLink,
+  type RelayLinkTimer,
+  relayRedialDelayMs,
   relaySocketIsStale,
 } from '../../lib/relay/index.ts';
 import type { DaemonRelayConfig } from '../../lib/runtime/config.ts';
@@ -76,9 +87,10 @@ export interface BunRelayCarrierDependencies {
   /** A seam, so the pre-credential deadline can be proved without a test that waits ten seconds. */
   readonly scheduler?: RelayLinkScheduler;
   readonly now?: () => number;
-  /** How often this side pings. A seam, so the liveness sweep can be proved without a test that
-   *  waits half a minute for one tick — production passes nothing and gets the protocol's cadence. */
-  readonly heartbeatMs?: number;
+  /** The redial jitter's source, in [0, 1). A seam so a test can prove both ends of the range. */
+  readonly random?: () => number;
+  /** Where disconnects, redial attempts and recoveries are said. One line each, relay origin only. */
+  readonly log?: (line: string) => void;
   /** The lease and its cap; absent means the protocol's own. */
   readonly lease?: AccessLeasePolicy;
 }
@@ -104,6 +116,18 @@ const runtimeScheduler: RelayLinkScheduler = {
   },
 };
 
+/** A close event as a person reads it: the code and the rendezvous's own reason, bounded. */
+function describeClose(event: unknown): string {
+  const { code, reason } = (event ?? {}) as { code?: unknown; reason?: unknown };
+  const said = typeof reason === 'string' ? reason.slice(0, 80) : '';
+  return [typeof code === 'number' ? String(code) : 'no close code', said].filter(part => part !== '').join(' ');
+}
+
+const formatSeconds = (milliseconds: number): string => `${(Math.max(0, milliseconds) / 1_000).toFixed(1)}s`;
+
+const formatDelay = (milliseconds: number): string =>
+  milliseconds < 1_000 ? `${milliseconds}ms` : formatSeconds(milliseconds);
+
 export class BunRelayCarrier {
   readonly #decision: RelayCarrierDecision;
   readonly #socketFactory: RelayWebSocketFactory;
@@ -111,9 +135,18 @@ export class BunRelayCarrier {
   #phase: RelayCarrierPhase = 'idle';
   #socket: RelayWebSocket | undefined;
   #link: RelayLink | undefined;
-  #heartbeat: ReturnType<typeof setInterval> | undefined;
-  #redial: ReturnType<typeof setTimeout> | undefined;
+  readonly #scheduler: RelayLinkScheduler;
+  readonly #random: () => number;
+  #connectDeadline: RelayLinkTimer | undefined;
+  #keepalive: RelayLinkTimer | undefined;
+  #pongDeadline: RelayLinkTimer | undefined;
+  #redial: RelayLinkTimer | undefined;
   #lastSeen = 0;
+  /** Messages received on this socket, so "anything since the ping" is a comparison and not a clock. */
+  #received = 0;
+  /** Redials scheduled since the rendezvous last accepted a claim. */
+  #attempts = 0;
+  #offlineSince: number | undefined;
   #inbox: Promise<void> = Promise.resolve();
   #detail: string | undefined;
   #stopped = false;
@@ -122,6 +155,8 @@ export class BunRelayCarrier {
     this.#decision = decideRelayCarrier(deps.config, deps.identity.daemonId);
     this.#socketFactory = deps.socketFactory ?? browserSocket;
     this.#now = deps.now ?? Date.now;
+    this.#scheduler = deps.scheduler ?? runtimeScheduler;
+    this.#random = deps.random ?? Math.random;
     if (this.#decision.kind === 'none') {
       this.#phase = 'none';
       this.#detail = this.#decision.reason;
@@ -173,6 +208,7 @@ export class BunRelayCarrier {
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
     this.#lastSeen = this.#now();
+    this.#received = 0;
     const link = new RelayLink({
       crypto: this.deps.crypto,
       identity: this.deps.identity,
@@ -183,19 +219,32 @@ export class BunRelayCarrier {
       devices: this.deps.devices,
       pairing: this.deps.pairing,
       connections: this.deps.connections,
-      scheduler: this.deps.scheduler ?? runtimeScheduler,
+      scheduler: this.#scheduler,
       clock: { now: () => this.#now() },
       ...(this.deps.lease === undefined ? {} : { lease: this.deps.lease }),
     });
     this.#link = link;
+    // A connect that neither opens nor fails (a black-holed route) would otherwise leave the daemon
+    // "dialling" forever with no timer running, which is the one way "redial forever" could stop.
+    this.#connectDeadline = this.#scheduler.after(RELAY_CONNECT_DEADLINE_MS, () => {
+      if (!this.#live(socket, link)) return;
+      this.#abandon(
+        socket,
+        link,
+        'the rendezvous did not answer the connection, so the daemon dropped the socket',
+        'no answer to the connection within the connect deadline',
+      );
+    });
     socket.onopen = () => {
       if (!this.#live(socket, link)) return;
+      this.#connectDeadline?.cancel();
+      this.#connectDeadline = undefined;
       this.#lastSeen = this.#now();
-      this.#heartbeat = setInterval(() => this.#tick(socket, link), this.deps.heartbeatMs ?? RELAY_HEARTBEAT_MS);
+      this.#armKeepalive(socket, link);
     };
     socket.onmessage = event => this.#receive(socket, link, event.data);
-    socket.onclose = () => this.#ended(socket, link);
-    socket.onerror = () => this.#ended(socket, link);
+    socket.onclose = event => this.#ended(socket, link, describeClose(event));
+    socket.onerror = () => this.#ended(socket, link, 'connection error');
   }
 
   /**
@@ -209,6 +258,7 @@ export class BunRelayCarrier {
   #receive(socket: RelayWebSocket, link: RelayLink, data: unknown): void {
     if (!this.#live(socket, link)) return;
     this.#lastSeen = this.#now();
+    this.#received += 1;
     if (typeof data === 'string') {
       link.receiveText(data);
       return;
@@ -238,22 +288,63 @@ export class BunRelayCarrier {
         const receipt = await link.accept(bytes);
         receipt.settled.catch(failed);
         if (!this.#live(socket, link)) return;
-        if (link.report().claimed) this.#phase = 'carrying';
+        if (link.report().claimed) this.#carrying();
       })
       .catch(failed);
+  }
+
+  #armKeepalive(socket: RelayWebSocket, link: RelayLink): void {
+    this.#keepalive = this.#scheduler.after(RELAY_KEEPALIVE_MS, () => this.#tick(socket, link));
   }
 
   #tick(socket: RelayWebSocket, link: RelayLink): void {
     if (!this.#live(socket, link)) return;
     if (relaySocketIsStale(this.#lastSeen, this.#now())) {
-      this.#detail = 'the rendezvous stopped answering, so the daemon dropped the socket';
-      socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no answer within the heartbeat grace window');
+      this.#abandon(
+        socket,
+        link,
+        'the rendezvous stopped answering, so the daemon dropped the socket',
+        'no answer within the heartbeat deadline',
+      );
       return;
     }
     link.heartbeat();
+    const heard = this.#received;
+    this.#pongDeadline = this.#scheduler.after(RELAY_PONG_DEADLINE_MS, () => {
+      if (!this.#live(socket, link) || this.#received !== heard) return;
+      this.#abandon(
+        socket,
+        link,
+        'the rendezvous stopped answering, so the daemon dropped the socket',
+        'no answer within the heartbeat deadline',
+      );
+    });
+    this.#armKeepalive(socket, link);
   }
 
-  #ended(socket: RelayWebSocket, link: RelayLink): void {
+  /** Condemn a socket we believe dead: say so on the wire, and do not wait for an answer a dead path
+   *  will never give. */
+  #abandon(socket: RelayWebSocket, link: RelayLink, detail: string, why: string): void {
+    this.#detail = detail;
+    socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, why);
+    this.#ended(socket, link, `${RELAY_CLOSE_CODES.heartbeatTimeout} ${why}`);
+  }
+
+  /** The rendezvous accepted the claim: this is a carrier, and the backoff starts over. */
+  #carrying(): void {
+    if (this.#phase === 'carrying') return;
+    this.#phase = 'carrying';
+    this.#detail = undefined;
+    if (this.#offlineSince !== undefined && this.#decision.kind === 'dial') {
+      const offline = formatSeconds(this.#now() - this.#offlineSince);
+      const attempts = `${this.#attempts} attempt${this.#attempts === 1 ? '' : 's'}`;
+      this.#say(`reconnected after ${attempts} (${offline} offline)`);
+    }
+    this.#attempts = 0;
+    this.#offlineSince = undefined;
+  }
+
+  #ended(socket: RelayWebSocket, link: RelayLink, how: string): void {
     if (!this.#live(socket, link)) return;
     this.#clearTimers();
     this.#detach(socket);
@@ -265,7 +356,18 @@ export class BunRelayCarrier {
     link.close();
     this.#phase = 'dialling';
     if (this.#decision.kind !== 'dial') return;
-    this.#redial = setTimeout(() => this.#dial(), this.#decision.reconnectMs);
+    this.#detail ??= `the rendezvous connection ended (${how})`;
+    this.#offlineSince ??= this.#now();
+    const delay = relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);
+    this.#attempts += 1;
+    this.#say(`disconnected (${how}) — redial attempt ${this.#attempts} in ${formatDelay(delay)}`);
+    this.#redial = this.#scheduler.after(delay, () => this.#dial());
+  }
+
+  /** One log line, naming the relay's origin and never the path that carries the fingerprint. */
+  #say(line: string): void {
+    if (this.#decision.kind !== 'dial') return;
+    this.deps.log?.(`relay ${this.#decision.relayOrigin}: ${line}`);
   }
 
   /** Whether an asynchronous socket callback still belongs to the carrier that is alive now. */
@@ -282,9 +384,13 @@ export class BunRelayCarrier {
   }
 
   #clearTimers(): void {
-    if (this.#heartbeat !== undefined) clearInterval(this.#heartbeat);
-    if (this.#redial !== undefined) clearTimeout(this.#redial);
-    this.#heartbeat = undefined;
+    this.#connectDeadline?.cancel();
+    this.#keepalive?.cancel();
+    this.#pongDeadline?.cancel();
+    this.#redial?.cancel();
+    this.#connectDeadline = undefined;
+    this.#keepalive = undefined;
+    this.#pongDeadline = undefined;
     this.#redial = undefined;
   }
 
