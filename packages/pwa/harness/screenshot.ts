@@ -3373,7 +3373,9 @@ try {
             fullBrowserGeometry.width !== fullBrowserGeometry.viewportWidth ||
             fullBrowserGeometry.height !== fullBrowserGeometry.viewportHeight
           ) {
-            fail(`the full browser does not occupy the ${viewport.name} viewport`);
+            fail(
+              `the full browser does not occupy the ${viewport.name} viewport: ${JSON.stringify(fullBrowserGeometry)}`,
+            );
           }
           await page.screenshot({ path: fullBrowserTarget });
           process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
