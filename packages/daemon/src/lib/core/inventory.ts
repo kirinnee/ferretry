@@ -41,7 +41,7 @@ export type CoreAccountModel = FleetManifestModel;
  *
  * `agent` is not a second field on disk — {@link wrapperName} derives it from `wrapper`, so there is
  * nothing here a manifest could contradict. It exists because a name is what an operator types
- * (`fy start claude-auto-loge`), what a session record carries and what a usage row is keyed by,
+ * (`fy start claude-default`), what a session record carries and what a usage row is keyed by,
  * while `wrapper` is what a start actually runs.
  */
 export interface CoreAccount extends FleetManifestAccount {

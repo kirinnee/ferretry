@@ -645,3 +645,61 @@ describe('SessionsPage', () => {
     expect(reads).toBe(1);
   });
 });
+
+describe('SessionsPage across every machine', () => {
+  const machineSource = (connection: DaemonConnection, rows: readonly SessionView[]) => ({
+    daemonId: connection.daemonId,
+    name: String(connection.daemonId),
+    reach: 'online' as const,
+    projects: projectsFor(connection),
+    slice: { sessions: rows, byId: new Map(), status: 'ready' as const, error: null },
+  });
+
+  it('lists every machine, filters each by the page’s own search, and opens another machine’s folder there', async () => {
+    const navigated: string[] = [];
+    const props = pageProps({
+      machineSources: [machineSource(alpha, sessions('alpha')), machineSource(beta, sessions('beta'))],
+      newSessionMachines: [
+        { daemonId: alpha.daemonId, name: 'alpha' },
+        { daemonId: beta.daemonId, name: 'beta' },
+      ],
+      onNavigate: path => navigated.push(path),
+    });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    expect(page.container.querySelectorAll('[data-machine-section]')).toHaveLength(2);
+    expect(page.container.querySelector('[data-new-session-menu]')).not.toBeNull();
+    const heads = [...page.container.querySelectorAll<HTMLButtonElement>('[aria-label="Focus folder beta repo"]')];
+    await interact(() => heads[0]?.click());
+    expect(navigated).toEqual([projectScopePath(beta.daemonId, '/beta/repo')]);
+
+    await interact(() => props.controls.setDeviceControls({ query: 'beta task' }));
+    expect(page.container.querySelector('[data-machine-section="alpha"] .fy-machine-section__empty')?.textContent).toBe(
+      'No sessions on this machine.',
+    );
+    await page.unmount();
+  });
+
+  it('a focused folder is one machine’s page again', async () => {
+    const props = pageProps({
+      machineSources: [machineSource(alpha, sessions('alpha')), machineSource(beta, sessions('beta'))],
+      scopeNavigation: navigation(projectScopePath(alpha.daemonId, '/alpha/repo')),
+    });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    expect(page.container.querySelector('[data-all-machines]')).toBeNull();
+    await page.unmount();
+  });
+
+  it('without a navigator another machine’s folder goes nowhere rather than somewhere wrong', async () => {
+    const props = pageProps({
+      machineSources: [machineSource(alpha, sessions('alpha')), machineSource(beta, sessions('beta'))],
+    });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    const heads = [...page.container.querySelectorAll<HTMLButtonElement>('[aria-label="Focus folder beta repo"]')];
+    await interact(() => heads[0]?.click());
+    expect(page.container.querySelectorAll('[data-machine-section]')).toHaveLength(2);
+    await page.unmount();
+  });
+});

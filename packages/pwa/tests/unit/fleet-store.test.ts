@@ -485,3 +485,28 @@ describe('DaemonFleetStore generations', () => {
     ignore(rotated);
   });
 });
+
+describe('DaemonFleetStore — when a machine was last read', () => {
+  it('stamps a good read with the store clock and keeps it through a failed one', async () => {
+    let now = 1_000;
+    let fail = false;
+    const store = new DaemonFleetStore(
+      {
+        list: async () => {
+          if (fail) throw new Error('not answering');
+          return [session('one')];
+        },
+        get: async () => session('one'),
+      },
+      () => now,
+    );
+    should(store.fleet(daemonA.daemonId).readAt).be.undefined();
+    await store.hydrate(daemonA);
+    should(store.fleet(daemonA.daemonId).readAt).equal(1_000);
+    now = 9_000;
+    fail = true;
+    await store.hydrate(daemonA).catch(() => undefined);
+    should(store.fleet(daemonA.daemonId).status).equal('error');
+    should(store.fleet(daemonA.daemonId).readAt).equal(1_000);
+  });
+});

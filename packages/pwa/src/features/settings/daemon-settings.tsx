@@ -61,7 +61,7 @@ const pairedDay = (pairedAt: number): string =>
  * {@link daemonDisplayName}, told apart from every other paired machine that would read the same — in
  * words a person can use, never the machine's fingerprint.
  *
- * Two machines on one host both call themselves by its name, so a prompt naming "kirin-box" could not
+ * Two machines on one host both call themselves by its name, so a prompt naming "dev-box" could not
  * say WHICH machine wants the passkey. A twin is followed by its address. A pairing a newer one replaced
  * ({@link replacedPairing}) is called the old pairing, and the live one then needs no suffix at all.
  * Two that still share an address are told apart by the day each was paired.

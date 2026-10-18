@@ -163,7 +163,7 @@ type Client = Awaited<ReturnType<WardenClientFactory>>;
 const client = (overrides: Partial<Client> = {}): Client => ({
   wardenConfig: async () => view(wardenConfig({ triage: 'llm' })),
   wardenStatus: async () =>
-    wardenStatus({ failover: wardenFailover({ accounts: [{ agent: 'codex-auto-terra', eligible: true }] }) }),
+    wardenStatus({ failover: wardenFailover({ accounts: [{ agent: 'codex-default', eligible: true }] }) }),
   updateWardenConfig: async patch => view(wardenConfig({ ...patch } as Partial<WardenConfig>)),
   request: (async (path: string) => {
     if (path !== SPEEDUPS_PATH) throw new Error(`unexpected ${path}`);
@@ -179,7 +179,7 @@ describe('WardenConfigSurface', () => {
     await settle();
 
     // Assert
-    expect(json(renderer)).toContain('codex-auto-terra');
+    expect(json(renderer)).toContain('codex-default');
     const link = renderer.root.findAll(node => node.type === 'a' && node.props.href === '/d/a/settings#speedups');
     expect(link).toHaveLength(0);
     run(() => renderer.root.findByProps({ role: 'switch' }).props.onClick());
@@ -226,7 +226,7 @@ describe('WardenConfigSurface', () => {
 
     // Assert
     expect(json(renderer)).toContain('key status unknown');
-    expect(json(renderer)).not.toContain('codex-auto-terra');
+    expect(json(renderer)).not.toContain('codex-default');
     run(() => renderer.unmount());
   });
 
@@ -644,5 +644,58 @@ describe('WardenConfigSurface', () => {
       expect(json(renderer)).not.toContain('claude-auto-stale');
       run(() => renderer.unmount());
     });
+  });
+});
+
+describe('the investigation login the daemon resolved', () => {
+  it('should offer every login the machine has, and say the order runs on the machine default', async () => {
+    // Arrange
+    const resolved: WardenConfigView = {
+      config: wardenConfig({ triage: 'llm', accounts: [] }),
+      accounts: [{ agent: 'claude-default' }],
+      warnings: [],
+      login: { source: 'machine_default', unknown: [], available: ['claude-default', 'claude-spare'] },
+    };
+
+    // Act
+    const renderer = render(
+      <WardenConfigSurface
+        connection={connection('a')}
+        createClient={async () => client({ wardenConfig: async () => resolved })}
+      />,
+    );
+    await settle();
+
+    // Assert
+    expect(json(renderer)).toContain('Machine default — claude-default');
+    expect(json(renderer)).toContain('claude-spare');
+    expect(json(renderer)).not.toContain('codex-default');
+    run(() => renderer.unmount());
+  });
+
+  it('should name an unknown login and leave it chosen until the owner picks another', () => {
+    // Arrange
+    const legacy: WardenConfigView = {
+      config: wardenConfig({ triage: 'llm', accounts: [{ agent: 'legacy-wrapper' }] }),
+      accounts: [{ agent: 'legacy-wrapper' }],
+      warnings: [],
+      login: { source: 'configured', unknown: ['legacy-wrapper'], available: ['claude-default'] },
+    };
+
+    // Act
+    const renderer = render(
+      <WardenConfigCard
+        view={legacy}
+        draft={legacy.config}
+        onChange={() => {}}
+        jevKey={{ state: 'set' }}
+        onSave={() => {}}
+      />,
+    );
+
+    // Assert
+    expect(json(renderer)).toContain('Unknown login ‘');
+    expect(json(renderer)).toContain('legacy-wrapper');
+    run(() => renderer.unmount());
   });
 });

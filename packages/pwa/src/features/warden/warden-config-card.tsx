@@ -29,6 +29,7 @@ import {
   hasWardenFormErrors,
   type JevKeyStatus,
   wardenConfigPatchFrom,
+  wardenMachineDefaultLogin,
   wardenFormErrors,
 } from './warden-settings-model.ts';
 
@@ -79,6 +80,8 @@ export function WardenConfigCard({
         jevKey={jevKey}
         errors={errors}
         loginOptions={loginOptions}
+        {...(view.login === undefined ? {} : { login: view.login })}
+        {...(wardenMachineDefaultLogin(view) === undefined ? {} : { machineDefault: wardenMachineDefaultLogin(view) })}
         {...(speedupsHref === undefined ? {} : { speedupsHref })}
         {...(onNavigate === undefined ? {} : { onNavigate })}
       />
@@ -182,7 +185,11 @@ export function WardenConfigSurface({
           view,
           draft: view.config,
           jevKey: jevKeyStatus(speedups),
-          loginOptions: (status?.failover?.accounts ?? []).map(account => ({ agent: account.agent })),
+          // Every login this machine has, so a Warden with none chosen yet can be given one. A daemon that
+          // predates the list offers the ones in its failover order.
+          loginOptions: (view.login?.available ?? status?.failover?.accounts.map(account => account.agent) ?? []).map(
+            agent => ({ agent }),
+          ),
         });
       })
       .catch(() => {

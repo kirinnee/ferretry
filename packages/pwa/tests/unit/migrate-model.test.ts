@@ -7,7 +7,6 @@ import {
   migrationFailure,
   migrationHasRuntimeChange,
   migrationModelSuggestions,
-  migrationRoutingCaution,
   migrationTarget,
   modelFromDowngradeError,
   oneMillionVariant,
@@ -100,8 +99,6 @@ describe('migration model selection', () => {
         migrationTarget('codex-auto-loge', 'gpt-5.6-terra'),
       ),
     ).toBe(true);
-    expect(migrationRoutingCaution('claude-auto-mm3')).toContain('Restricted tier');
-    expect(migrationRoutingCaution('codex-auto-loge')).toBeNull();
   });
 });
 

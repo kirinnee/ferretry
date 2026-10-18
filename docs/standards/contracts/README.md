@@ -41,7 +41,7 @@ laundered a defect into something every gate was right to pass.
 | `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                              |
 | `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is stored, and no PWA network call skips the carrier |
 | `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their two teaching files               |
-| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths                         |
+| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper   |
 | `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory                   |
 | `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                            |
 | `route-agreement.sh`          | `a-route-agreement`                      | client/daemon paths, verbs and declared method debt agree                       |

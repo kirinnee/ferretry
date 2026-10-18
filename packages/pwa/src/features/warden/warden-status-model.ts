@@ -14,7 +14,13 @@
  * inside one feature is a dependency the shell should never have to take.
  */
 
-import type { WardenAnomaly, WardenFailoverAccountView, WardenStatusView } from '@ferretry/protocol';
+import type {
+  WardenAccount,
+  WardenAnomaly,
+  WardenFailoverAccountView,
+  WardenLogin,
+  WardenStatusView,
+} from '@ferretry/protocol';
 import { displayCallsign } from '../../lib/callsign.ts';
 import { ANOMALY_CHIPS, TRIAGE_LABEL } from './warden-vocabulary.ts';
 
@@ -36,9 +42,35 @@ export const wardenExhaustionLabel = (failover: WardenStatusView['failover']): s
   return noCredentials ? 'no warden credentials!' : 'no usable warden account!';
 };
 
-/** The short account chip label: the wrapper prefix is noise on a dense strip. */
-export const wardenAccountLabel = (account: Pick<WardenFailoverAccountView, 'agent'>): string =>
-  account.agent.replace(/^(?:claude|codex)-auto-/u, '');
+/**
+ * The account chip label: the login's name as the owner wrote it. A login is named by its owner, so no
+ * prefix is noise — trimming one only ever fit somebody's own wrapper naming.
+ */
+export const wardenAccountLabel = (account: Pick<WardenFailoverAccountView, 'agent'>): string => account.agent;
+
+/**
+ * The investigation login in effect: the head of the daemon's failover status, which already resolved
+ * the machine default when the owner chose none. A daemon without that status falls back to the stored
+ * order.
+ */
+export const wardenInvestigationHead = (
+  status: Pick<WardenStatusView, 'config' | 'failover'>,
+): Pick<WardenAccount, 'agent' | 'model'> | undefined => status.failover?.accounts[0] ?? status.config.accounts[0];
+
+/**
+ * Why no investigation can run on this machine, in the owner's words — or null when one can. A login
+ * the machine does not have is named, never swapped for another: the owner chooses.
+ */
+export const wardenLoginProblem = (
+  login: WardenLogin | undefined,
+  accounts: readonly Pick<WardenAccount, 'agent'>[],
+): string | null => {
+  if (login === undefined) return null;
+  if (login.source === 'not_set') return 'No investigation login is set';
+  const known = accounts.filter(account => !login.unknown.includes(account.agent));
+  if (accounts.length === 0 || known.length > 0) return null;
+  return `Unknown login '${accounts[0]?.agent}'`;
+};
 
 /** `healthy`, or the daemon's own stated reason — never an invented one. */
 export const wardenAccountTitle = (account: Pick<WardenFailoverAccountView, 'eligible' | 'reason'>): string =>
@@ -89,5 +121,6 @@ export const wardenTriageLabel = (status: WardenStatusView): string => {
   if (!status.config.enabled || triage.reason === 'disabled') return 'Off';
   if (triage.reason === 'jev_cap' || triage.reason === 'investigation_cap')
     return `${TRIAGE_LABEL[triage.effective]} (cap hit)`;
+  if (triage.reason === 'no_login') return `${TRIAGE_LABEL[triage.effective]} (no login)`;
   return TRIAGE_LABEL[triage.effective];
 };

@@ -86,4 +86,37 @@ if [ "${wire_status}" -eq 0 ]; then
 fi
 [ "${wire_status}" -gt 1 ] && echo "❌ failed to scan package source for obsolete wire identifiers" >&2 && exit "${wire_status}"
 
+# One owner's own fleet is not Ferretry's default. `DEFAULT_WARDEN_ACCOUNT` once shipped as
+# `claude-auto-glm52a` — a wrapper name from the setup Ferretry was migrated off — so every machine
+# that never chose a Warden login was told to investigate on an account it had never had. Defaults
+# are derived from the machine's own configuration (its default runtime, its logins' presets), never
+# compiled in, so production source names no wrapper of that shape and none of its tier aliases.
+#
+#   (claude|codex)-auto-<name>   a kfleet wrapper name. `claude-auto-mode-unsupported` is a fixed-layer
+#                                refusal kind, not a wrapper, and is the one spelling let through.
+#   glm52 / glm52a / dsv4 / mm3  that fleet's tier aliases; a runtime is named by its owner, and a
+#                                name that happens to contain a model family says nothing about it.
+#
+# A version-1 recogniser spells the family as `(?:claude|codex)-auto-`, which this does not match:
+# reading a format that existed is compatibility, naming somebody's account in it is a default.
+owner_hits=""
+owner_status=1
+if [ "${#source_files[@]}" -gt 0 ]; then
+  set +e
+  owner_hits="$(rg --line-number --pcre2 \
+    -e '\b(?:claude|codex)-auto-(?!mode-unsupported\b)[A-Za-z0-9]' \
+    -e '\b(?:glm52a?|dsv4|mm3)\b' \
+    -- "${source_files[@]}")"
+  owner_status=$?
+  set -e
+fi
+
+if [ "${owner_status}" -eq 0 ]; then
+  echo "❌ an owner-specific fleet wrapper or tier alias is named in package source:" >&2
+  printf '%s\n' "${owner_hits}" >&2
+  echo "   Derive the default from the machine's own configuration instead of compiling a name in." >&2
+  exit 1
+fi
+[ "${owner_status}" -gt 1 ] && echo "❌ failed to scan package source for owner-specific wrapper names" >&2 && exit "${owner_status}"
+
 echo "✅ No legacy identifiers or state paths found under packages/"

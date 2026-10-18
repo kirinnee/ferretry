@@ -80,6 +80,18 @@ export type ModeFilter = 'all' | InteractionMode;
 export type DashboardView = 'cards' | 'table';
 export type Density = 'full' | 'compact' | 'minimal';
 /** The persisted form of the shell's conversation-width choice. */
+/**
+ * WHICH SESSIONS THE LIST SHOWS — Settings › Behaviour › "Sessions list".
+ *
+ *   all      every paired machine's sessions, with one Needs you group across them (the default);
+ *   current  only the machine on screen, as the list always was.
+ *
+ * A property of this device's screen, like the rest: another browser keeps its own answer.
+ */
+export type SessionsListScope = 'all' | 'current';
+
+export const SESSIONS_LIST_SCOPES: readonly SessionsListScope[] = ['all', 'current'];
+
 export type ChatWidthPreference = 'full' | 'balanced' | 'readable';
 
 /**
@@ -106,6 +118,8 @@ export interface DeviceControls {
   /** Reduced motion: follow the operating system, or always reduce it on this device. */
   readonly motion: MotionPreference;
   readonly sidebarCollapsed: boolean;
+  /** Every paired machine's sessions in the list, or only the machine on screen's. */
+  readonly sessionsList: SessionsListScope;
   /**
    * Which keys open the composer's reference menu: the `@` ladder, the direct
    * symbols, or both (`SuggestionKeys`).
@@ -148,6 +162,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   composerPhoneEnterKey: null,
   motion: 'system',
   sidebarCollapsed: false,
+  sessionsList: 'all',
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
   composerVimMode: false,
@@ -237,6 +252,7 @@ const readDeviceControls = (value: unknown): DeviceControls => {
     composerEnterKey:
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
     sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
+    sessionsList: fields.sessionsList === 'current' ? 'current' : DEFAULT_DEVICE_CONTROLS.sessionsList,
     // The two switches this choice replaced (`mentionSuggestions`, `directReferenceSuggestions`) may
     // still sit in a stored record; they are left unread rather than translated, because the new
     // default is a deliberate change of offer and an old "all on" is not a choice of keys.

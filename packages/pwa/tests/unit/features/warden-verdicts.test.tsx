@@ -22,7 +22,7 @@ const verdict: WardenVerdictView = {
   reason: 'Waiting for a status update',
   reportPath: 'warden/2026-07-31.md',
   spawn: {
-    agent: 'claude-auto-loge',
+    agent: 'claude-default',
     model: 'claude-sonnet-4-5',
     modelSource: 'harness',
     harness: 'claude',
@@ -51,7 +51,7 @@ describe('WardenVerdicts', () => {
     expect(tree).toContain('Ms-98');
     expect(tree).toContain('Waiting for a status update');
     expect(tree).toContain('2m ago');
-    expect(tree).toContain('claude-auto-loge · claude-sonnet-4-5 · claude');
+    expect(tree).toContain('claude-default · claude-sonnet-4-5 · claude');
     expect(tree).toContain('switched account');
     expect(tree).toContain('moved off claude-auto-opus: at quota');
     expect(tree).not.toContain('device-token-a');

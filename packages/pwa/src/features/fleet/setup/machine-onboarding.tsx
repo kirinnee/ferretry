@@ -24,7 +24,7 @@ import type { PairingClientFactory } from '../../settings/add-device-settings.ts
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
-import { wardenSummary } from '../../warden/warden-settings-model.ts';
+import { wardenMachineDefaultLogin, wardenSummary } from '../../warden/warden-settings-model.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { OnboardingHarnessStep } from './harness-step.tsx';
 import {
@@ -103,7 +103,7 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
         ...(speedups === null
           ? {}
           : { keys: Object.fromEntries(speedups.providers.map(provider => [provider.label, provider.set])) }),
-        ...(warden === null ? {} : { warden: wardenSummary(warden.config, jev) }),
+        ...(warden === null ? {} : { warden: wardenSummary(warden.config, jev, wardenMachineDefaultLogin(warden)) }),
         ...(learning === null ? {} : { passiveDefault: learning.passiveDefault }),
         ...(runtimes === null
           ? {}

@@ -86,7 +86,7 @@ const FILES: Readonly<Record<string, string>> = {
     'enabled: true',
     'intervalMinutes: five',
     'accounts:',
-    '  - agent: claude-auto-glm52a',
+    '  - agent: claude-default',
     'spendCap: 20',
     '',
   ].join('\n'),

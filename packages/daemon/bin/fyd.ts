@@ -2853,6 +2853,8 @@ interface WardenParts {
   readonly attention: AttentionService;
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort;
+  /** The machine's default runtime, read fresh: the investigation login when `warden.yaml` names none. */
+  readonly defaultRuntime: () => Promise<string | undefined>;
   readonly files: NodeWardenReportFileSystem;
   readonly reportsReader: WardenReportReader;
   readonly wardenRoot: string;
@@ -3003,6 +3005,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       config: new ConfigFileWardenConfigStore(parts.config),
       agents: {
         installed: async () => selectableAutoAccounts(await parts.accounts.accounts()).map(account => account.id),
+        defaultRuntime: parts.defaultRuntime,
       },
       // The daemon-wide feed, with the one shape difference reconciled here: the wire lets `retryAt`
       // be explicitly null to mean "the provider named no retry time", and the warden's health type
@@ -7239,6 +7242,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           attention,
           usage,
           accounts,
+          defaultRuntime: async () => {
+            const model = await declaredAccountModel();
+            return model === undefined ? undefined : resolveDefaultRuntime(model);
+          },
           files: wardenFiles,
           // The SAME reader `world.wardenReports` builds, over the same directory: the verdict list
           // and the sweep's own "was this target cleared" read must agree about what a report says.

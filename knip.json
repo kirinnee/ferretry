@@ -50,6 +50,7 @@
         "tests/integration/fixtures/fy-render-visual-scene.tsx",
         "scripts/build-composer-integration-fixture.ts",
         "tests/integration/fixtures/composer-editor-scene.tsx",
+        "tests/integration/fixtures/all-machines-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
         "scripts/fy-render-shell/lottie-entry.ts"

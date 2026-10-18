@@ -112,11 +112,6 @@ export const migrationHasRuntimeChange = (
   (target.agent !== currentAgent ||
     (target.model === undefined ? currentModelHint.trim() !== '' : target.model.trim() !== currentModel.trim()));
 
-export const migrationRoutingCaution = (agent: string): string | null =>
-  /(mm3|minimax|dsv4|glm52)/iu.test(agent)
-    ? 'Restricted tier — check the routing policy before moving product-facing work here.'
-    : null;
-
 /** Accepts the old CLI hint and the mounted daemon's current refusal prose. */
 export const modelFromDowngradeError = (message: string): string | null => {
   const explicit = message.match(/use --model\s+([^\s]+\[1m\])/iu)?.[1];
