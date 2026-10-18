@@ -34,7 +34,7 @@
  */
 
 import type { DaemonIdentity, RelayCrypto } from '@ferretry/relay';
-import { RELAY_CLOSE_CODES } from '@ferretry/relay';
+import { decodeControlMessage, decodeFrame, FRAME_KINDS, RELAY_CLOSE_CODES } from '@ferretry/relay';
 import type { DeviceConnectionTracker } from '../../lib/pairing/index.ts';
 import type {
   AccessLeasePolicy,
@@ -50,6 +50,7 @@ import {
   RELAY_CONNECT_DEADLINE_MS,
   RELAY_KEEPALIVE_MS,
   RELAY_PONG_DEADLINE_MS,
+  RELAY_SILENCE_LIMIT_MS,
   type RelayCarrierDecision,
   RelayLink,
   type RelayLinkTimer,
@@ -119,9 +120,15 @@ const runtimeScheduler: RelayLinkScheduler = {
 /** A close event as a person reads it: the code and the rendezvous's own reason, bounded. */
 function describeClose(event: unknown): string {
   const { code, reason } = (event ?? {}) as { code?: unknown; reason?: unknown };
-  const said = typeof reason === 'string' ? reason.slice(0, 80) : '';
+  const said = typeof reason === 'string' ? printable(reason) : '';
   return [typeof code === 'number' ? String(code) : 'no close code', said].filter(part => part !== '').join(' ');
 }
+
+/** How recent an in-band message must be to be blamed for a close. */
+const IN_BAND_WINDOW_MS = 5_000;
+
+/** A peer-supplied string as one printable line: a log line must not be forgeable or split. */
+const printable = (value: string): string => value.replace(/\p{Cc}/gu, ' ').slice(0, 120);
 
 const formatSeconds = (milliseconds: number): string => `${(Math.max(0, milliseconds) / 1_000).toFixed(1)}s`;
 
@@ -147,6 +154,10 @@ export class BunRelayCarrier {
   /** Redials scheduled since the rendezvous last accepted a claim. */
   #attempts = 0;
   #offlineSince: number | undefined;
+  #dialledAt = 0;
+  /** The last `error`/`closed` the rendezvous sent in-band on this socket: it explains a refusal and
+   *  THEN closes, so the close alone ("1006") would hide the relay's own words. */
+  #inBand: { readonly text: string; readonly at: number } | undefined;
   #inbox: Promise<void> = Promise.resolve();
   #detail: string | undefined;
   #stopped = false;
@@ -209,6 +220,8 @@ export class BunRelayCarrier {
     this.#socket = socket;
     this.#lastSeen = this.#now();
     this.#received = 0;
+    this.#dialledAt = this.#now();
+    this.#inBand = undefined;
     const link = new RelayLink({
       crypto: this.deps.crypto,
       identity: this.deps.identity,
@@ -233,6 +246,7 @@ export class BunRelayCarrier {
         link,
         'the rendezvous did not answer the connection, so the daemon dropped the socket',
         'no answer to the connection within the connect deadline',
+        `the socket did not open within ${formatSeconds(RELAY_CONNECT_DEADLINE_MS)} — dropping it`,
       );
     });
     socket.onopen = () => {
@@ -269,6 +283,7 @@ export class BunRelayCarrier {
         : data instanceof Uint8Array
           ? data
           : /* A carrier sending neither text nor bytes is not speaking this protocol. */ undefined;
+    if (bytes !== undefined) this.#noteInBand(bytes);
     if (bytes === undefined) {
       this.#detail = 'the carrier sent a message that is neither text nor bytes';
       socket.close(RELAY_CLOSE_CODES.protocolError, 'unsupported message type');
@@ -305,6 +320,7 @@ export class BunRelayCarrier {
         link,
         'the rendezvous stopped answering, so the daemon dropped the socket',
         'no answer within the heartbeat deadline',
+        `nothing received for ${formatSeconds(this.#now() - this.#lastSeen)} (limit ${formatSeconds(RELAY_SILENCE_LIMIT_MS)}) — dropping the socket`,
       );
       return;
     }
@@ -317,6 +333,7 @@ export class BunRelayCarrier {
         link,
         'the rendezvous stopped answering, so the daemon dropped the socket',
         'no answer within the heartbeat deadline',
+        `no reply within ${formatSeconds(RELAY_PONG_DEADLINE_MS)} of the ping — dropping the socket`,
       );
     });
     this.#armKeepalive(socket, link);
@@ -324,8 +341,9 @@ export class BunRelayCarrier {
 
   /** Condemn a socket we believe dead: say so on the wire, and do not wait for an answer a dead path
    *  will never give. */
-  #abandon(socket: RelayWebSocket, link: RelayLink, detail: string, why: string): void {
+  #abandon(socket: RelayWebSocket, link: RelayLink, detail: string, why: string, liveness: string): void {
     this.#detail = detail;
+    this.#say(`liveness: ${liveness}`);
     socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, why);
     this.#ended(socket, link, `${RELAY_CLOSE_CODES.heartbeatTimeout} ${why}`);
   }
@@ -335,6 +353,9 @@ export class BunRelayCarrier {
     if (this.#phase === 'carrying') return;
     this.#phase = 'carrying';
     this.#detail = undefined;
+    this.#say(
+      `connected — the rendezvous accepted the claim ${formatSeconds(this.#now() - this.#dialledAt)} after dialling`,
+    );
     if (this.#offlineSince !== undefined && this.#decision.kind === 'dial') {
       const offline = formatSeconds(this.#now() - this.#offlineSince);
       const attempts = `${this.#attempts} attempt${this.#attempts === 1 ? '' : 's'}`;
@@ -344,7 +365,16 @@ export class BunRelayCarrier {
     this.#offlineSince = undefined;
   }
 
-  #ended(socket: RelayWebSocket, link: RelayLink, how: string): void {
+  /** Remember what the rendezvous said in-band about this socket, for the disconnect line. */
+  #noteInBand(bytes: Uint8Array): void {
+    const decoded = decodeFrame(bytes);
+    if (!decoded.ok || decoded.frame.kind !== FRAME_KINDS.control) return;
+    const message = decodeControlMessage(decoded.frame.payload);
+    if (message === null || (message.t !== 'error' && message.t !== 'closed')) return;
+    this.#inBand = { text: `${message.t} ${message.code} ${printable(message.reason)}`, at: this.#now() };
+  }
+
+  #ended(socket: RelayWebSocket, link: RelayLink, closed: string): void {
     if (!this.#live(socket, link)) return;
     this.#clearTimers();
     this.#detach(socket);
@@ -356,6 +386,10 @@ export class BunRelayCarrier {
     link.close();
     this.#phase = 'dialling';
     if (this.#decision.kind !== 'dial') return;
+    let how = closed;
+    const said =
+      this.#inBand !== undefined && this.#now() - this.#inBand.at <= IN_BAND_WINDOW_MS ? this.#inBand.text : undefined;
+    if (said !== undefined) how = `${how}; the relay said: ${said}`;
     this.#detail ??= `the rendezvous connection ended (${how})`;
     this.#offlineSince ??= this.#now();
     const delay = relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);

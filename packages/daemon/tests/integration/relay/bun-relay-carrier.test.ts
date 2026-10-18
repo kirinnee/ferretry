@@ -918,6 +918,65 @@ describe('a carrier that survives a dropped rendezvous', () => {
     carrier.stop();
   });
 
+  it('should say when the rendezvous accepts the claim, and how long after dialling, even on the first connect', async () => {
+    // Arrange
+    const { carrier, clock, lines, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    clock.advance(1_200);
+
+    // Act
+    await claimOn(socketAt(0));
+
+    // Assert — one line, no "reconnected" because nothing was lost.
+    should(lines).deepEqual([
+      'relay https://relay.example: connected — the rendezvous accepted the claim 1.2s after dialling',
+    ]);
+    carrier.stop();
+  });
+
+  it("should log the relay's own in-band words alongside the close that follows them", async () => {
+    // Arrange — the Worker explains a refusal in-band and then closes the socket.
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    socketAt(0).onmessage?.({
+      data: controlFrame({ t: 'error', code: 4500, reason: 'hosted relay accounting is unavailable\nforged: line' }),
+    });
+    clock.advance(1_000);
+
+    // Act
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+
+    // Assert — both the close and the relay's words, on ONE printable line.
+    should(lines).deepEqual([
+      'relay https://relay.example: disconnected (1006; the relay said: error 4500 hosted relay accounting is unavailable forged: line) — redial attempt 1 in 0ms',
+    ]);
+    should(carrier.status().detail).match(/hosted relay accounting is unavailable/u);
+    carrier.stop();
+  });
+
+  it('should report an in-band session close, but not blame a close that happened long before the drop', () => {
+    // Arrange
+    const { carrier, clock, lines, socketAt } = redialingCarrier();
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    socketAt(0).onmessage?.({ data: controlFrame({ t: 'closed', code: 4410, reason: 'client left' }, session()) });
+
+    // Act — soon after: blamed. Then a second socket: the old message is long gone.
+    clock.advance(2_000);
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+    clock.advance(0);
+    socketAt(1).onopen?.(undefined);
+    clock.advance(6_000);
+    socketAt(1).onclose?.({ code: 1006, reason: '' });
+
+    // Assert
+    should(lines[0]).match(/the relay said: closed 4410 client left/u);
+    should(lines[1]).not.match(/the relay said/u);
+    carrier.stop();
+  });
+
   it('should not claim a recovery for a rendezvous that only opened the socket', async () => {
     // Arrange — a socket that opens and is then refused (a 4409 against a slot not yet swept).
     const { carrier, clock, lines, socketAt } = redialingCarrier();
@@ -978,6 +1037,9 @@ describe('a carrier that survives a dropped rendezvous', () => {
 
     // Assert
     should(socketAt(0).closes[0]?.code).equal(4408);
+    should(lines.at(-2)).equal(
+      'relay https://relay.example: liveness: the socket did not open within 15.0s — dropping it',
+    );
     should(lines.at(-1)).match(/disconnected \(4408 no answer to the connection/u);
     clock.advance(0);
     should(fake.sockets).have.length(2);
@@ -1008,9 +1070,10 @@ describe('a carrier that notices a dead path in seconds', () => {
     // and the redial is already pending.
     should(socket.closes).deepEqual([{ code: 4408, reason: 'no answer within the heartbeat deadline' }]);
     should(carrier.status().detail).match(/stopped answering/u);
-    should(lines.at(-1)).equal(
+    should(lines).deepEqual([
+      'relay https://relay.example: liveness: no reply within 10.0s of the ping — dropping the socket',
       'relay https://relay.example: disconnected (4408 no answer within the heartbeat deadline) — redial attempt 1 in 0ms',
-    );
+    ]);
     clock.advance(0);
     should(fake.sockets).have.length(2);
     carrier.stop();
@@ -1070,7 +1133,10 @@ describe('a carrier that notices a dead path in seconds', () => {
     should(socket.sent).be.empty();
     should(socket.closes[0]?.code).equal(4408);
     should(carrier.status().detail).match(/stopped answering/u);
-    should(lines).have.length(1);
+    should(lines).deepEqual([
+      'relay https://relay.example: liveness: nothing received for 60.0s (limit 45.0s) — dropping the socket',
+      'relay https://relay.example: disconnected (4408 no answer within the heartbeat deadline) — redial attempt 1 in 0ms',
+    ]);
     carrier.stop();
   });
 });
