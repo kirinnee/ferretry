@@ -181,14 +181,17 @@ export function SessionDashboard({
               tabs={DASHBOARD_TABS}
             />
           ) : null}
+          {/* A compact "+ New" pill on a phone, on the count's line — never a filled 44px square — and the
+              full "New session" from `sm` up. The pill keeps its 44px tap height through its hit area. */}
           <RouteLink
             aria-label="New session"
-            className="kt-btn"
+            className="kt-btn kt-btn--sm fy-new-session"
             data-variant="primary"
             onNavigate={onNavigate}
             to={daemonNewSessionPath(connection.daemonId)}
           >
             <Plus aria-hidden="true" size={13} />
+            <span className="sm:hidden">New</span>
             <span className="hidden sm:inline">New session</span>
           </RouteLink>
         </div>

@@ -86,6 +86,18 @@ const STATUS_WORDS: Readonly<Record<string, string>> = {
   stopped: 'stopped',
 };
 
+/**
+ * THE ORDINARY STATE OF A LIVE AGENT. A list of sessions is mostly agents getting on with it, so a
+ * "RUN" chip on every one of them was noise the reader learned to skip — and in skipping it, missed
+ * the one that said "you". The status dot already says live; the word is shown only when it is not
+ * one of these.
+ */
+const ROUTINE_STATUSES: ReadonlySet<string> = new Set(['running', 'thinking', 'tool_running']);
+
+export function routineStatus(status: string): boolean {
+  return ROUTINE_STATUSES.has(status);
+}
+
 /** A compact human word; unknown statuses remain visible and unshouted. */
 export function statusWord(status: string): string {
   return STATUS_WORDS[status] ?? status.replace(/_/g, ' ');
