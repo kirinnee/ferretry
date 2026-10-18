@@ -22,7 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../lib/pages/routes.ts';
-import { useDaemonClient } from '../../lib/store.tsx';
+import { useConfigChangeEffect, useDaemonClient } from '../../lib/store.tsx';
 import { readSpeedups } from '../speedups/speedups-api.ts';
 import { WardenSettingsForm } from './warden-settings-form.tsx';
 import {
@@ -125,6 +125,9 @@ export function WardenConfigCard({
 type WardenClient = Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig' | 'request'>;
 export type WardenClientFactory = (connection: DaemonConnection) => Promise<WardenClient>;
 
+/** The card shows the Warden's settings and whether its Jev key is set in Speed-ups. */
+const WARDEN_CARD_KINDS = ['warden', 'speedups'] as const;
+
 interface Loaded {
   readonly daemonId: DaemonConnection['daemonId'];
   readonly client: WardenClient;
@@ -189,6 +192,25 @@ export function WardenConfigSurface({
       current = false;
     };
   }, [connection, createClient]);
+
+  // Changed anywhere else — another device, `fy`, a hand edit of warden.yaml, a key added in
+  // Speed-ups — and read again without blanking the card. An unsaved edit is kept: only a draft that
+  // still matches what was on screen follows the machine's new settings.
+  const loadedRef = useRef(loaded);
+  loadedRef.current = loaded;
+  useConfigChangeEffect(connection.daemonId, WARDEN_CARD_KINDS, () => {
+    const before = loadedRef.current;
+    if (before === null || before.daemonId !== connection.daemonId) return;
+    void Promise.all([before.client.wardenConfig(), readSpeedups(before.client).catch(() => null)])
+      .then(([view, speedups]) => {
+        setLoaded(current => {
+          if (current === null || current.daemonId !== before.daemonId) return current;
+          const untouched = JSON.stringify(current.draft) === JSON.stringify(current.view.config);
+          return { ...current, view, draft: untouched ? view.config : current.draft, jevKey: jevKeyStatus(speedups) };
+        });
+      })
+      .catch(() => undefined);
+  });
 
   // The daemon on screen now. A save answered after the reader switched daemon belongs to the one
   // left, so neither its "Saved" nor its error may appear on this one.

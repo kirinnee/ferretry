@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { useEffect } from 'react';
+import { type ReactElement, useEffect } from 'react';
 import type { FleetClient, FleetClientFactory } from '../../../../../src/features/fleet/fleet-client.ts';
 import {
   type MachineReachOptions,
@@ -10,6 +10,7 @@ import {
 import type { DaemonConnectionRecord } from '../../../../../src/lib/connections.ts';
 import { type DaemonId, daemonId } from '../../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
+import { configChangeHarness } from '../../../config-change-support.tsx';
 import { machineClient, machineView, pairing } from './machine-support.ts';
 
 const alpha = pairing('alpha', 'Alpha');
@@ -61,20 +62,24 @@ const Probe = ({
   return null;
 };
 
-const renderReach = async (options: MachineReachOptions) => {
+const renderReach = async (options: MachineReachOptions, wrap: (element: ReactElement) => ReactElement = e => e) => {
   let latest: MachineReachState | undefined;
-  const element = (next: MachineReachOptions) => (
-    <Probe
-      options={next}
-      onState={state => {
-        latest = state;
-      }}
-    />
-  );
+  const seen: string[] = [];
+  const element = (next: MachineReachOptions) =>
+    wrap(
+      <Probe
+        options={next}
+        onState={state => {
+          latest = state;
+          seen.push(state.reachOf(next.daemonId).kind);
+        }}
+      />,
+    );
   const mounted = await mount(element(options));
   const current = (): MachineReachState => must(latest, 'the reach state');
   return {
     current,
+    seen,
     kind: (id: DaemonId): string => current().reachOf(id).kind,
     rerender: (next: MachineReachOptions) => mounted.render(element(next)),
     unmount: () => mounted.unmount(),
@@ -197,6 +202,137 @@ describe('useMachineReach', () => {
       expect(view.kind(daemonId('nobody'))).toBe('checking');
     } finally {
       await view.unmount();
+    }
+  });
+
+  it('re-reads this page’s machine quietly when it says its setup moved, keeping the old answer until the new one lands', async () => {
+    // A hand edit, another device or `fy` changes the machine; the page must show the new answer without a reload.
+    const second = deferred<FleetClient>();
+    const reads: Promise<FleetClient>[] = [
+      Promise.resolve(machineClient(machineView({ name: 'before' }))),
+      second.promise,
+    ];
+    const asked: string[] = [];
+    const named: string[] = [];
+    const createClient: FleetClientFactory = connection => {
+      asked.push(String(connection.daemonId));
+      return must(reads.shift(), 'a read');
+    };
+    const harness = configChangeHarness(alpha.daemonId);
+    const view = await renderReach(
+      {
+        daemonId: alpha.daemonId,
+        connections: [alpha],
+        createClient,
+        onNamed: (id, name) => named.push(`${String(id)}=${name}`),
+      },
+      harness.wrap,
+    );
+    try {
+      await settle();
+      expect(view.current().reachOf(alpha.daemonId)).toEqual({
+        kind: 'online',
+        machine: machineView({ name: 'before' }),
+      });
+      expect(asked).toEqual(['alpha']);
+      const shown = view.seen.length;
+
+      await harness.move(['machine']);
+      // Asked again, and the previous answer is still what the page shows while it waits.
+      expect(asked).toEqual(['alpha', 'alpha']);
+      expect(view.current().reachOf(alpha.daemonId)).toEqual({
+        kind: 'online',
+        machine: machineView({ name: 'before' }),
+      });
+
+      second.resolve(machineClient(machineView({ name: 'after' })));
+      await settle();
+      expect(view.current().reachOf(alpha.daemonId)).toEqual({
+        kind: 'online',
+        machine: machineView({ name: 'after' }),
+      });
+      expect(named).toEqual(['alpha=before', 'alpha=after']);
+      // At no point between the two answers did the page fall back to "checking".
+      expect(view.seen.slice(shown)).not.toContain('checking');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('re-reads on a runtimes or credentials move too, and ignores a move of something its answer does not hold', async () => {
+    const { asked, createClient } = answering({ alpha: machineView() });
+    const harness = configChangeHarness(alpha.daemonId);
+    const view = await renderReach({ daemonId: alpha.daemonId, connections: [alpha], createClient }, harness.wrap);
+    try {
+      await settle();
+      expect(asked).toEqual(['alpha']);
+
+      await harness.move(['runtimes']);
+      await settle();
+      expect(asked).toEqual(['alpha', 'alpha']);
+
+      await harness.move(['credentials']);
+      await settle();
+      expect(asked).toEqual(['alpha', 'alpha', 'alpha']);
+
+      await harness.move(['warden']);
+      await settle();
+      expect(asked).toEqual(['alpha', 'alpha', 'alpha']);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('shows a quiet re-read that fails as offline straight from the old answer, without passing through checking', async () => {
+    const reads: (() => Promise<FleetClient>)[] = [
+      async () => machineClient(machineView({ name: 'before' })),
+      async () => {
+        throw new Error('network down');
+      },
+    ];
+    const harness = configChangeHarness(alpha.daemonId);
+    const view = await renderReach(
+      { daemonId: alpha.daemonId, connections: [alpha], createClient: () => must(reads.shift(), 'a read')() },
+      harness.wrap,
+    );
+    try {
+      await settle();
+      const shown = view.seen.length;
+      await harness.move(['machine']);
+      await settle();
+      expect(view.current().reachOf(alpha.daemonId)).toEqual({ kind: 'offline' });
+      expect(view.seen.slice(shown)).not.toContain('checking');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('does nothing when its own machine is not among the pairings, or when nothing can be asked', async () => {
+    const { asked, createClient } = answering({ beta: machineView() });
+    const harness = configChangeHarness(alpha.daemonId);
+    const view = await renderReach({ daemonId: alpha.daemonId, connections: [beta], createClient }, harness.wrap);
+    try {
+      await settle();
+      expect(asked).toEqual(['beta']);
+      await harness.move(['machine']);
+      await settle();
+      // The move concerns a machine this page does not hold a pairing for: nothing is asked, nothing changes.
+      expect(asked).toEqual(['beta']);
+      expect(view.kind(alpha.daemonId)).toBe('checking');
+      expect(view.kind(beta.daemonId)).toBe('online');
+    } finally {
+      await view.unmount();
+    }
+
+    const quiet = configChangeHarness(alpha.daemonId);
+    const without = await renderReach({ daemonId: alpha.daemonId, connections: [alpha] }, quiet.wrap);
+    try {
+      await settle();
+      await quiet.move(['machine']);
+      await settle();
+      expect(without.kind(alpha.daemonId)).toBe('checking');
+    } finally {
+      await without.unmount();
     }
   });
 

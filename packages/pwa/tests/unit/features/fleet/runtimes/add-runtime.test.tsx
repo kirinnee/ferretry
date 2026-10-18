@@ -9,23 +9,9 @@ import {
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import {
-  AddRuntime,
-  type AddRuntimeDraft,
-  addRuntimeFlowInput,
-  EMPTY_ADD_RUNTIME,
-  type ProfileBuilder,
-  type ProfileBuilderStepProps,
-} from '../../../../../src/features/fleet/runtimes/add-runtime.tsx';
+import { AddRuntime } from '../../../../../src/features/fleet/runtimes/add-runtime.tsx';
 import type { MachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
-import {
-  goToStep,
-  returnToParent,
-  type StepperState,
-  saveForReuse,
-  startStepper,
-} from '../../../../../src/features/fleet/shell/stepper-model.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,
@@ -46,8 +32,11 @@ import {
   stagedFrom,
   withStatus,
 } from '../account-support.ts';
+import { DEEPSEEK, PROVIDERS } from '../credentials/environment-support.ts';
 
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
+const PROPOSE = 'POST /v1/fleet/proposals';
+const LOGIN = 'POST /v1/fleet/login';
 
 const credentialsOf = (...items: ReturnType<typeof credential>[]): FleetCredentialList =>
   FleetCredentialListSchema.parse({ format: 2, machine: 'studio-mac', credentials: items });
@@ -96,19 +85,14 @@ const type = async (input: HTMLInputElement, value: string): Promise<void> => {
 const text = (container: ParentNode, selector: string): string =>
   must(container.querySelector(selector), selector).textContent ?? '';
 
-const stepAt = (step: string): StepperState => goToStep(startStepper(addRuntimeFlowInput()), step);
-
 interface HostOptions {
   readonly data?: MachineData;
-  /** What the next re-read answers. */
+  /** What every re-read answers. */
   readonly after?: MachineData;
   readonly routes?: Record<string, unknown>;
   readonly calls?: Call[];
   readonly machine?: FleetMachineView | null;
   readonly online?: boolean;
-  readonly profileBuilder?: ProfileBuilder;
-  readonly state?: StepperState;
-  readonly draft?: Partial<AddRuntimeDraft>;
   readonly finishes?: (string | null)[];
   readonly reloads?: string[];
 }
@@ -117,43 +101,28 @@ const mountHost = async (options: HostOptions = {}) => {
   const client: FleetClient = scripted(options.routes ?? READS(), options.calls);
   const createClient = async (): Promise<FleetClient> => client;
   const initial = options.data ?? DATA;
-  const startState = options.state ?? startStepper(addRuntimeFlowInput());
-  const startDraft: AddRuntimeDraft = { ...EMPTY_ADD_RUNTIME, ...options.draft };
 
   function Host() {
-    const [state, setState] = useState<StepperState | null>(startState);
-    const [draft, setDraft] = useState<AddRuntimeDraft>(startDraft);
     const [data, setData] = useState<MachineData>(initial);
     const changes = useAccountChanges({ connection: STUDIO, createClient });
-    if (state === null) return <p data-left="">left</p>;
     return (
-      <>
-        <AddRuntime
-          state={state}
-          onState={setState}
-          draft={draft}
-          onDraft={setDraft}
-          data={data}
-          reload={async () => {
-            options.reloads?.push('reload');
-            const next = options.after ?? data;
-            setData(next);
-            return next;
-          }}
-          changes={changes}
-          machine={options.machine === undefined ? machine() : options.machine}
-          machineName="studio-mac"
-          online={options.online ?? true}
-          checking={false}
-          onRetry={() => undefined}
-          connection={STUDIO}
-          createClient={createClient}
-          {...(options.profileBuilder === undefined ? {} : { profileBuilder: options.profileBuilder })}
-          onFinish={open => options.finishes?.push(open)}
-          pollMs={5}
-        />
-        <pre data-draft="">{JSON.stringify(draft)}</pre>
-      </>
+      <AddRuntime
+        data={data}
+        reload={async () => {
+          options.reloads?.push('reload');
+          const next = options.after ?? data;
+          setData(next);
+          return next;
+        }}
+        changes={changes}
+        machine={options.machine === undefined ? machine() : options.machine}
+        machineName="studio-mac"
+        online={options.online ?? true}
+        connection={STUDIO}
+        createClient={createClient}
+        onFinish={open => options.finishes?.push(open)}
+        pollMs={5}
+      />
     );
   }
 
@@ -162,11 +131,6 @@ const mountHost = async (options: HostOptions = {}) => {
   return view;
 };
 
-const draftOf = (container: ParentNode): AddRuntimeDraft => JSON.parse(text(container, '[data-draft]'));
-
-const flowName = (container: ParentNode): string | null | undefined =>
-  container.querySelector('[data-machine-stepper]')?.getAttribute('data-machine-stepper');
-
 const NOT_INSTALLED_CODEX = machine({
   tools: [
     { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
@@ -174,30 +138,57 @@ const NOT_INSTALLED_CODEX = machine({
   ],
 });
 
-describe('Add runtime: the flow', () => {
-  it('is Credential → Profile → Name → Done, and leaving it stops with no runtime', async () => {
-    expect(addRuntimeFlowInput().steps.map(step => step.label)).toEqual(['Credential', 'Profile', 'Name', 'Done']);
-    const view = await mountHost();
-    expect(text(view.container, '#machine-stepper-title')).toBe('Add a runtime');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Step 1 of 3 · Credential');
-    await click(view.container, '[data-stepper-cancel]');
-    expect(text(view.container, '[data-stepper-confirm]')).toContain('Stop adding a runtime?');
-    expect(text(view.container, '[data-stepper-confirm]')).toContain('No runtime is created.');
-    await click(view.container, '[data-stepper-stop]');
-    expect(view.container.querySelector('[data-left]')).not.toBeNull();
+const withRuntime = (base: MachineData, ...made: ReturnType<typeof runtime>[]): MachineData => ({
+  ...base,
+  runtimes: FleetRuntimeCatalogSchema.parse({ ...RUNTIMES, runtimes: [...RUNTIMES.runtimes, ...made] }),
+});
+
+const STAGED_ROUTES = (data: MachineData = DATA) => ({
+  ...READS(data),
+  [PROPOSE]: (call: Call) => stagedFrom(call),
+  [APPLY]: APPLIED,
+});
+
+const proposed = (calls: readonly Call[]): unknown[] =>
+  calls.filter(call => call.path === '/v1/fleet/proposals').map(call => call.body);
+
+const nameInput = (container: ParentNode): HTMLInputElement =>
+  must(container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name input');
+
+const submit = (container: ParentNode): HTMLButtonElement =>
+  must([...container.querySelectorAll<HTMLButtonElement>('[data-change-submit]')].at(-1), 'submit');
+
+describe('Add runtime: the page', () => {
+  it('is one form: a way back, the Login part, and nothing else until a login is picked', async () => {
+    const finishes: (string | null)[] = [];
+    const view = await mountHost({ finishes });
+    expect(text(view.container, 'h3')).toBe('Add a runtime');
+    expect(text(view.container, '[data-page-back]')).toBe('Runtimes');
+    expect(view.container.textContent).toContain(
+      'A runtime is a login plus a profile. It’s what you launch on studio-mac.',
+    );
+    expect(view.container.querySelectorAll('[data-add-runtime-part]')).toHaveLength(1);
+    expect(view.container.querySelector('[data-add-runtime-part="login"]')).not.toBeNull();
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
+    expect(submit(view.container).textContent).toBe('Create runtime');
+    expect(submit(view.container).disabled).toBe(true);
+    await click(view.container, '[data-page-back]');
+    expect(finishes).toEqual([null]);
     await view.unmount();
   });
 
-  it('pauses while the machine is offline, keeping the step', async () => {
+  it('waits while the machine is offline, even with everything chosen', async () => {
     const view = await mountHost({ online: false });
-    expect(view.container.querySelector('[data-add-runtime-step]')).toBeNull();
-    expect(text(view.container, '[data-stepper-paused]')).toContain('studio-mac is asleep or offline');
+    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
+    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
+    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(submit(view.container).disabled).toBe(true);
     await view.unmount();
   });
 });
 
-describe('Add runtime: Credential', () => {
-  it('lists the logins, claude first, with their status and use; Next waits for a pick', async () => {
+describe('Add runtime: Login', () => {
+  it('lists the logins, claude first, with their status and use', async () => {
     const view = await mountHost();
     const rows = [...view.container.querySelectorAll('[data-add-runtime-credential]')];
     expect(rows.map(row => row.getAttribute('data-add-runtime-credential'))).toEqual([
@@ -205,47 +196,15 @@ describe('Add runtime: Credential', () => {
       'claude-work',
       'codex',
     ]);
-    expect(text(view.container, '[data-add-runtime-credential="claude-personal"]')).toContain('you@example.com');
-    expect(text(view.container, '[data-add-runtime-credential="claude-personal"]')).toContain('personal');
-    expect(text(view.container, '[data-add-runtime-credential="claude-personal"]')).toContain('Claude Code');
-    expect(text(view.container, '[data-add-runtime-credential="claude-personal"]')).toContain('Ready');
-    expect(text(view.container, '[data-add-runtime-credential="claude-personal"]')).toContain('used by 3 runtimes');
+    const personal = text(view.container, '[data-add-runtime-credential="claude-personal"]');
+    expect(personal).toContain('you@example.com');
+    expect(personal).toContain('personal');
+    expect(personal).toContain('Claude Code');
+    expect(personal).toContain('Ready');
+    expect(personal).toContain('used by 3 runtimes');
     expect(text(view.container, '[data-add-runtime-credential="codex"]')).toContain('used by 1 runtime');
     expect(text(view.container, '[data-add-runtime-credential="claude-work"]')).toContain('Refresh due');
-    expect(text(view.container, '[data-add-runtime-step="credential"] p')).toBe('Which login should this runtime use?');
-    const next = must(view.container.querySelector<HTMLButtonElement>('[data-step-next]'), 'next');
-    expect(next.disabled).toBe(true);
-    expect(next.textContent).toBe('Next');
-    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
-    expect(draftOf(view.container).credentialId).toBe('claude-personal');
-    expect(next.disabled).toBe(false);
-    await click(view.container, '[data-step-next]');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Step 2 of 3 · Profile');
-    await view.unmount();
-  });
-
-  it('picking another login clears what was chosen after it; picking the same one keeps it', async () => {
-    const view = await mountHost({
-      draft: { credentialId: 'claude-personal', profile: 'Review', name: 'claude-review-2', addAnother: true },
-    });
-    const radio = must(
-      view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude-personal"] input'),
-      'radio',
-    );
-    expect(radio.checked).toBe(true);
-    const props = must(
-      Object.keys(radio).find(key => key.startsWith('__reactProps')),
-      'react props',
-    );
-    await interact(() => (radio as unknown as Record<string, { onChange: () => void }>)[props]?.onChange());
-    expect(draftOf(view.container).profile).toBe('Review');
-    await click(view.container, '[data-add-runtime-credential="codex"] input');
-    expect(draftOf(view.container)).toMatchObject({
-      credentialId: 'codex',
-      profile: null,
-      name: '',
-      addAnother: false,
-    });
+    expect(view.container.querySelector('[data-add-runtime-no-logins]')).toBeNull();
     await view.unmount();
   });
 
@@ -256,131 +215,245 @@ describe('Add runtime: Credential', () => {
     await view.unmount();
   });
 
-  it('E13: a login that needs sign-in can be signed in here, or later', async () => {
+  it('E12: with no logins it says so and offers to add one', async () => {
+    const view = await mountHost({ data: NO_LOGINS });
+    expect(text(view.container, '[data-add-runtime-no-logins]')).toBe(
+      'There are no logins on studio-mac yet. Add one below: sign in to Claude Code or Codex, or use a provider key.',
+    );
+    expect(view.container.querySelector('[data-add-runtime-credential]')).toBeNull();
+    expect(text(view.container, '[data-add-row="login"]')).toBe('Add a new login');
+    await view.unmount();
+  });
+
+  it('picking a login shows its Profile; picking another clears what was chosen after it', async () => {
+    const view = await mountHost();
+    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
+    expect(view.container.querySelector('[data-add-runtime-part="profile"]')).not.toBeNull();
+    await click(view.container, '[data-add-runtime-profile="Review"] input');
+    await click(view.container, '[data-duplicate-ok]');
+    expect(nameInput(view.container).value).toBe('claude-review-2');
+    await click(view.container, '[data-add-runtime-credential="codex"] input');
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
+    expect(
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Review"] input'), 'review')
+        .checked,
+    ).toBe(false);
+    expect(view.container.querySelector('[data-add-runtime-duplicate]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('E13: a login that needs sign-in can be signed in right there', async () => {
     const reloads: string[] = [];
     const view = await mountHost({
       data: SIGN_IN_NEEDED,
       reloads,
       routes: {
         ...READS(SIGN_IN_NEEDED),
-        'POST /v1/fleet/login': claudeFlow('awaiting-code', 'claude-work'),
+        [LOGIN]: claudeFlow('awaiting-code', 'claude-work'),
         'GET /v1/fleet/login/flow-1': claudeFlow('complete', 'claude-work'),
       },
     });
     expect(view.container.querySelector('[data-credential-sign-in]')).toBeNull();
     await click(view.container, '[data-add-runtime-credential="claude-work"] input');
     expect(text(view.container, '[data-credential-sign-in="start"]')).toContain('Sign in to Claude Code');
-    expect(text(view.container, '[data-step-next]')).toBe('Next, sign in later');
     await click(view.container, '[data-credential-sign-in="start"] [data-change-submit]');
     await waitFor(view.container, '[data-credential-sign-in="complete"]');
     expect(reloads).toEqual(['reload']);
     await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
-    expect(text(view.container, '[data-step-next]')).toBe('Next');
     expect(view.container.querySelector('[data-credential-sign-in]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('"+ Add a new login" opens Add a login on the Choose tool step, and Back returns here', async () => {
-    const view = await mountHost();
-    expect(text(view.container, '[data-add-row="login"]')).toBe('Add a new login');
-    await click(view.container, '[data-add-row="login"]');
-    expect(flowName(view.container)).toBe('add-login');
-    expect(text(view.container, '[data-add-login-step="tool"] p')).toBe(
-      'Which tool do you want to sign in to on studio-mac?',
-    );
-    expect(draftOf(view.container).loginHarness).toBeNull();
-    await click(view.container, '[data-stepper-back]');
-    expect(flowName(view.container)).toBe('add-runtime');
-    expect(view.container.querySelector('[data-add-runtime-step="credential"]')).not.toBeNull();
     await view.unmount();
   });
 });
 
-describe('Add runtime: no logins (E12)', () => {
-  it('asks for a login first, with one button per tool, and nothing to go Next to', async () => {
-    const view = await mountHost({ data: NO_LOGINS, machine: NOT_INSTALLED_CODEX });
-    expect(text(view.container, '[data-add-runtime-step="no-logins"] h4')).toBe('Add a login first');
-    expect(text(view.container, '[data-add-runtime-step="no-logins"] p')).toBe(
-      'A runtime needs a login to Claude Code or Codex. You don’t have one on studio-mac yet. Pick which one to sign in to.',
-    );
+describe('Add runtime: Add a new login', () => {
+  const NEW_CLAUDE = credential({ id: 'claude', email: undefined, ...withStatus('needs_sign_in') });
+  const withNew = (...extra: ReturnType<typeof credential>[]): MachineData => ({
+    ...DATA,
+    credentials: credentialsOf(...CREDENTIALS.credentials, ...extra),
+  });
+  const newLoginRoutes = (after: MachineData, extra: Record<string, unknown> = {}) => ({
+    ...STAGED_ROUTES(after),
+    'GET /v1/fleet/presets': PROVIDERS,
+    'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+    'POST /v1/secrets': (call: Call) => ({
+      name: (call.body as { name: string }).name,
+      createdAt: '2026-10-16T08:00:00.000Z',
+      updatedAt: '2026-10-16T08:00:00.000Z',
+    }),
+    ...extra,
+  });
+
+  it('opens in place under the list, offers a sign-in per tool, and Cancel closes it', async () => {
+    const view = await mountHost({ machine: NOT_INSTALLED_CODEX });
+    expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();
+    await click(view.container, '[data-add-row="login"]');
+    expect(view.container.querySelector('[data-add-row="login"]')).toBeNull();
+    expect(text(view.container, '[data-add-runtime-new-login="signin"]')).toContain('Add a new login');
     const claude = must(
       view.container.querySelector<HTMLButtonElement>('[data-add-runtime-login="claude"]'),
       'claude button',
     );
-    expect(claude.textContent).toContain('Sign in to Claude Code');
-    expect(claude.textContent).toContain('Installed on studio-mac');
+    expect(claude.textContent).toBe('Sign in to Claude Code');
     expect(claude.disabled).toBe(false);
     const codex = must(
       view.container.querySelector<HTMLButtonElement>('[data-add-runtime-login="codex"]'),
       'codex button',
     );
-    expect(codex.textContent).toContain('Sign in to Codex');
-    expect(codex.textContent).toContain('Not installed on studio-mac · install it in Settings');
+    expect(codex.textContent).toBe('Codex isn’t installed here');
     expect(codex.disabled).toBe(true);
-    expect(must(view.container.querySelector<HTMLButtonElement>('[data-step-next]'), 'next').disabled).toBe(true);
+    await click(view.container, '[data-add-runtime-new-login-close]');
+    expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();
+    expect(view.container.querySelector('[data-add-row="login"]')).not.toBeNull();
     await view.unmount();
   });
 
-  it('signs in to a tool in place and comes back with the new login picked, saved for reuse', async () => {
-    const created: MachineData = {
-      ...DATA,
-      credentials: credentialsOf(credential({ id: 'claude', email: 'new@example.com' })),
-    };
+  it('Sign in to Claude Code makes the login, starts its sign-in, and "Use it, sign in later" picks it', async () => {
     const calls: Call[] = [];
     const reloads: string[] = [];
+    const after = withNew(NEW_CLAUDE);
     const view = await mountHost({
-      data: NO_LOGINS,
-      after: created,
       calls,
       reloads,
-      routes: {
-        ...READS(NO_LOGINS),
-        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
-        [APPLY]: APPLIED,
-        'POST /v1/fleet/login': claudeFlow('awaiting-code', 'claude'),
-        'GET /v1/fleet/login/flow-1': claudeFlow('complete', 'claude'),
-      },
+      after,
+      routes: newLoginRoutes(after, { [LOGIN]: claudeFlow('awaiting-code', 'claude') }),
     });
+    await click(view.container, '[data-add-row="login"]');
     await click(view.container, '[data-add-runtime-login="claude"]');
-    expect(flowName(view.container)).toBe('add-login');
-    expect(draftOf(view.container).loginHarness).toBe('claude');
-    expect(text(view.container, '[data-add-login-step="start"] p')).toBe(
-      'Sign in to Claude Code. The login is kept on studio-mac.',
-    );
-    await click(view.container, '[data-change-submit]');
-    await waitFor(view.container, '[data-add-login-step="signed-in"]');
-    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
-      change: { kind: 'credential.add', id: 'claude', harness: 'claude' },
-    });
-    await click(view.container, '[data-step-next]');
-    expect(flowName(view.container)).toBe('add-runtime');
-    expect(draftOf(view.container)).toMatchObject({ credentialId: 'claude', profile: null, name: '' });
+    await waitFor(view.container, '[data-credential-sign-in="awaiting-code"]');
+    expect(proposed(calls)).toEqual([{ change: { kind: 'credential.add', id: 'claude', harness: 'claude' } }]);
+    expect(reloads).toEqual(['reload']);
+    expect(calls.find(call => call.path === '/v1/fleet/login')?.body).toEqual({ credentialId: 'claude' });
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+
+    await click(view.container, '[data-add-runtime-sign-in-later]');
+    expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();
     expect(
-      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new login')
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new')
         .checked,
     ).toBe(true);
+    expect(view.container.querySelector('[data-add-runtime-part="profile"]')).not.toBeNull();
+    // It still needs sign-in, so the Login part offers the sign-in under the list.
+    expect(view.container.querySelector('[data-credential-sign-in="start"]')).not.toBeNull();
+    await view.unmount();
+  });
 
-    await click(view.container, '[data-step-next]');
-    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
-    await click(view.container, '[data-step-next]');
-    await click(view.container, '[data-change-submit]');
-    await waitFor(view.container, '[data-add-runtime-step="done"]');
-    expect(text(view.container, '[data-add-runtime-saved]')).toBe('Also saved for reuse: Claude Code login.');
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain(
-      'Claude Code · new@example.com · Claude hooks profile.',
+  it('a sign-in finished here picks the new login and re-reads', async () => {
+    const reloads: string[] = [];
+    const after = withNew(NEW_CLAUDE);
+    const view = await mountHost({
+      reloads,
+      after,
+      routes: newLoginRoutes(after, {
+        [LOGIN]: claudeFlow('awaiting-code', 'claude'),
+        'GET /v1/fleet/login/flow-1': claudeFlow('complete', 'claude'),
+      }),
+    });
+    await click(view.container, '[data-add-row="login"]');
+    await click(view.container, '[data-add-runtime-login="claude"]');
+    await waitFor(view.container, '[data-add-row="login"]');
+    expect(reloads.length).toBeGreaterThanOrEqual(2);
+    expect(
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new')
+        .checked,
+    ).toBe(true);
+    await view.unmount();
+  });
+
+  it('a sign-in that cannot start still leaves the login made, says why, and lets it be used', async () => {
+    const after = withNew(NEW_CLAUDE);
+    const view = await mountHost({
+      after,
+      routes: newLoginRoutes(after, {
+        [LOGIN]: new FyHttpError('Another sign-in is open on this machine.', 409, 'fleet_change_conflict'),
+      }),
+    });
+    await click(view.container, '[data-add-row="login"]');
+    await click(view.container, '[data-add-runtime-login="claude"]');
+    await waitFor(view.container, '[data-add-runtime-new-login] [role="alert"]');
+    expect(text(view.container, '[data-add-runtime-new-login] [role="alert"]')).toContain(
+      'Another sign-in is open on this machine.',
     );
+    expect(
+      view.container.querySelector('[data-add-runtime-new-login] [data-credential-sign-in="start"]'),
+    ).not.toBeNull();
+    await click(view.container, '[data-add-runtime-sign-in-later]');
+    expect(
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude"] input'), 'new')
+        .checked,
+    ).toBe(true);
+    await view.unmount();
+  });
+
+  it('a login that cannot be made says why right there, and the form below says nothing of it', async () => {
+    const view = await mountHost({
+      routes: newLoginRoutes(DATA, {
+        [PROPOSE]: new FyHttpError(
+          'This change conflicts with the setup on this machine.',
+          409,
+          'fleet_change_conflict',
+        ),
+      }),
+    });
+    await click(view.container, '[data-add-row="login"]');
+    await click(view.container, '[data-add-runtime-login="claude"]');
+    await waitFor(view.container, '[data-add-runtime-new-login] [role="alert"]');
+    expect(text(view.container, '[data-add-runtime-new-login] [role="alert"]')).toBe(
+      'This change conflicts with the setup on this machine.',
+    );
+    expect(view.container.querySelector('[data-add-runtime-credential="claude"]')).toBeNull();
+    expect(view.container.querySelector('[data-change-refusal]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('Provider key shows the provider grid; Sign in goes back; a key added there comes back picked', async () => {
+    const calls: Call[] = [];
+    const deepseek = credential({
+      id: 'deepseek',
+      store: 'environment',
+      email: undefined,
+      harnesses: ['claude', 'codex'],
+      usedBy: [],
+    });
+    const after = withNew(deepseek);
+    const view = await mountHost({
+      calls,
+      after,
+      routes: newLoginRoutes(after, { 'GET /v1/fleet/presets': { presets: [...PROVIDERS.presets, DEEPSEEK] } }),
+    });
+    await click(view.container, '[data-add-row="login"]');
+    await click(view.container, '[data-add-login-kind-option="environment"] input');
+    expect(text(view.container, '[data-add-runtime-new-login]')).toContain('Add a new login');
+    expect(view.container.querySelector('[data-add-runtime-new-login="environment"]')).not.toBeNull();
+    await waitFor(view.container, '[data-provider-grid]');
+    await click(view.container, '[data-add-login-kind-option="signin"] input');
+    expect(view.container.querySelector('[data-add-runtime-login="claude"]')).not.toBeNull();
+    await click(view.container, '[data-add-login-kind-option="environment"] input');
+    await waitFor(view.container, '[data-provider-tile="deepseek"]');
+    await click(view.container, '[data-provider-tile="deepseek"]');
+    await type(
+      must(view.container.querySelector<HTMLInputElement>('[data-env-secret-input="DEEPSEEK_API_KEY"]'), 'key'),
+      'a-pasted-deepseek-key',
+    );
+    await click(view.container, '[data-change-submit]');
+    await waitFor(view.container, '[data-env-login="added"]');
+    await click(view.container, '[data-env-login="added"] [data-step-next]');
+    expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();
+    expect(
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="deepseek"] input'), 'new')
+        .checked,
+    ).toBe(true);
+    expect(view.container.querySelector('[data-add-runtime-runs]')).not.toBeNull();
     await view.unmount();
   });
 });
 
 describe('Add runtime: Profile', () => {
-  const profileStep = { state: stepAt('profile') };
+  const pick = async (container: ParentNode, login: string): Promise<void> =>
+    await click(container, `[data-add-runtime-credential="${login}"] input`);
 
-  it('lists the profiles with their size; Next waits for a pick and carries a suggested name on', async () => {
-    const view = await mountHost({ ...profileStep, draft: { credentialId: 'claude-personal' } });
-    expect(text(view.container, '[data-add-runtime-step="profile"] p')).toBe(
-      'Which profile should it use with you@example.com on Claude Code?',
-    );
+  it('lists the profiles with their size; a pick brings the Name with a suggestion', async () => {
+    const view = await mountHost();
+    await pick(view.container, 'claude-personal');
     const names = [...view.container.querySelectorAll('[data-add-runtime-profile]')].map(row =>
       row.getAttribute('data-add-runtime-profile'),
     );
@@ -388,28 +461,27 @@ describe('Add runtime: Profile', () => {
     expect(text(view.container, '[data-add-runtime-profile="Default"]')).toContain('2 parts');
     expect(view.container.querySelector('[data-add-runtime-profile="Default"] [data-tone="warn"]')).toBeNull();
     expect(view.container.querySelector('[data-profile-unavailable]')).toBeNull();
-    const next = must(view.container.querySelector<HTMLButtonElement>('[data-step-next]'), 'next');
-    expect(next.disabled).toBe(true);
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
+    expect(submit(view.container).disabled).toBe(true);
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
-    expect(next.disabled).toBe(false);
-    await click(view.container, '[data-step-next]');
-    expect(draftOf(view.container).name).toBe('claude-claude-hooks');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Step 3 of 3 · Name');
+    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(submit(view.container).disabled).toBe(false);
     await view.unmount();
   });
 
-  it('keeps a name already chosen when Next is pressed again', async () => {
-    const view = await mountHost({
-      ...profileStep,
-      draft: { credentialId: 'claude-personal', profile: 'Claude hooks', name: 'mine' },
-    });
-    await click(view.container, '[data-step-next]');
-    expect(draftOf(view.container).name).toBe('mine');
+  it('links to Profiles for building or changing one', async () => {
+    const view = await mountHost();
+    await pick(view.container, 'claude-personal');
+    const link = must(view.container.querySelector('[data-add-runtime-profiles-link]'), 'link');
+    expect(link.getAttribute('href')).toBe('#machines/studio-mac/profiles');
+    expect(link.textContent).toBe('Build or change profiles in Profiles');
+    expect(view.container.querySelector('[data-add-row="profile"]')).toBeNull();
     await view.unmount();
   });
 
   it('E14: a profile that does not apply to the login’s tool is disabled, with the machine’s reason; partial fits carry notes', async () => {
-    const view = await mountHost({ ...profileStep, draft: { credentialId: 'codex' } });
+    const view = await mountHost();
+    await pick(view.container, 'codex');
     const hooks = must(
       view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Claude hooks"] input'),
       'hooks radio',
@@ -425,7 +497,7 @@ describe('Add runtime: Profile', () => {
     ]);
     expect(text(view.container, '[data-add-runtime-profile="Default"]')).toContain('3 parts');
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
-    expect(draftOf(view.container).profile).toBeNull();
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
     await view.unmount();
   });
 
@@ -441,15 +513,15 @@ describe('Add runtime: Profile', () => {
         ],
       }),
     };
-    const view = await mountHost({ ...profileStep, data: scoped, draft: { credentialId: 'claude-personal' } });
+    const view = await mountHost({ data: scoped });
+    await pick(view.container, 'claude-personal');
     const rows = [...view.container.querySelectorAll<HTMLElement>('[data-add-runtime-profile]')];
     expect(rows.map(row => row.dataset.addRuntimeProfile)).toEqual(['Claude work', 'Codex work', 'Old mix']);
     expect(text(view.container, '[data-add-runtime-profile="Claude work"]')).toContain('Claude only');
-    const codex = must(
-      view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Codex work"] input'),
-      'codex',
-    );
-    expect(codex.disabled).toBe(true);
+    expect(
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Codex work"] input'), 'codex')
+        .disabled,
+    ).toBe(true);
     expect(text(view.container, '[data-add-runtime-profile="Codex work"] [data-profile-unavailable]')).toBe(
       'Codex only — this login is Claude Code',
     );
@@ -460,233 +532,200 @@ describe('Add runtime: Profile', () => {
   });
 
   it('says so when the machine has no profiles', async () => {
-    const view = await mountHost({ ...profileStep, data: NO_PROFILES, draft: { credentialId: 'claude-personal' } });
-    expect(text(view.container, '[data-add-runtime-step="profile"]')).toContain(
+    const view = await mountHost({ data: NO_PROFILES });
+    await pick(view.container, 'claude-personal');
+    expect(text(view.container, '[data-add-runtime-part="profile"]')).toContain(
       'There are no profiles on studio-mac yet.',
     );
     expect(view.container.querySelector('[data-add-runtime-profile]')).toBeNull();
-    expect(view.container.querySelector('[data-add-row="profile"]')).toBeNull();
+    expect(view.container.querySelector('[data-add-runtime-profiles-link]')).not.toBeNull();
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
     await view.unmount();
   });
 
-  it('E15: the same login and profile can be added again anyway, or another profile picked', async () => {
-    const view = await mountHost({ ...profileStep, draft: { credentialId: 'claude-personal' } });
+  it('E15: the same login and profile needs "Add another anyway"; picking another profile starts over', async () => {
+    const view = await mountHost();
+    await pick(view.container, 'claude-personal');
     await click(view.container, '[data-add-runtime-profile="Review"] input');
     const duplicate = must(view.container.querySelector('[data-add-runtime-duplicate]'), 'duplicate');
     expect(duplicate.textContent).toContain('claude-review already uses this login and profile.');
-    expect(duplicate.textContent).toContain('Add another anyway?');
-    const next = must(view.container.querySelector<HTMLButtonElement>('[data-step-next]'), 'next');
-    expect(next.disabled).toBe(true);
+    expect(duplicate.textContent).toContain('Add another anyway');
+    expect(submit(view.container).disabled).toBe(true);
 
-    await click(view.container, '[data-duplicate-no]');
-    expect(draftOf(view.container).profile).toBeNull();
-    expect(view.container.querySelector('[data-add-runtime-duplicate]')).toBeNull();
-
-    await click(view.container, '[data-add-runtime-profile="Review"] input');
     await click(view.container, '[data-duplicate-ok]');
-    expect(draftOf(view.container).addAnother).toBe(true);
-    expect(text(view.container, '[data-add-runtime-duplicate]')).toContain('OK, you’ll get a second one');
-    expect(view.container.querySelector('[data-duplicate-ok]')).toBeNull();
-    expect(next.disabled).toBe(false);
-    await click(view.container, '[data-step-next]');
-    expect(draftOf(view.container).name).toBe('claude-review-2');
-    await view.unmount();
-  });
+    expect(must(view.container.querySelector<HTMLInputElement>('[data-duplicate-ok]'), 'checkbox').checked).toBe(true);
+    expect(nameInput(view.container).value).toBe('claude-review-2');
+    expect(submit(view.container).disabled).toBe(false);
 
-  it('no "+ Build a new profile" row is offered without a builder', async () => {
-    const view = await mountHost({ ...profileStep, draft: { credentialId: 'claude-personal' } });
-    expect(view.container.querySelector('[data-add-row="profile"]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('"+ Build a new profile" opens the injected builder for this login’s tool and comes back with the profile picked', async () => {
-    const seen: ProfileBuilderStepProps[] = [];
-    const asked: (string | undefined)[] = [];
-    const builder: ProfileBuilder = {
-      kind: 'build-profile',
-      flowInput: ({ harness }) => {
-        asked.push(harness);
-        return {
-          kind: 'build-profile',
-          title: 'Build a profile',
-          steps: [{ id: 'only', label: 'Only' }],
-          leave: { question: 'Stop building?', consequence: 'No profile is made.', stopLabel: 'Stop' },
-        };
-      },
-      Step: props => {
-        seen.push(props);
-        return (
-          <button type="button" data-built="" onClick={() => props.onBuilt('Fresh', returnToParent(props.state))}>
-            Built
-          </button>
-        );
-      },
-    };
-    const after: MachineData = {
-      ...DATA,
-      profiles: FleetLayeredProfileCatalogSchema.parse({
-        ...PROFILES,
-        profiles: [...PROFILES.profiles, profile({ name: 'Fresh' })],
-      }),
-    };
-    const reloads: string[] = [];
-    const view = await mountHost({
-      ...profileStep,
-      draft: { credentialId: 'codex', profile: 'Default', name: 'x', addAnother: true },
-      profileBuilder: builder,
-      after,
-      reloads,
-    });
-    expect(text(view.container, '[data-add-row="profile"]')).toBe('Build a new profile');
-    await click(view.container, '[data-add-row="profile"]');
-    expect(asked).toEqual(['codex']);
-    expect(flowName(view.container)).toBe('build-profile');
-    const props = must(seen[0], 'builder props');
-    expect(props.harness).toBe('codex');
-    expect(props.openedFromAddRuntime).toBe(true);
-    expect(props.machineName).toBe('studio-mac');
-    expect(props.machine?.name).toBe('studio-mac');
-    expect(props.connection).toBe(STUDIO);
-
-    await click(view.container, '[data-built]');
-    expect(reloads).toEqual(['reload']);
-    expect(flowName(view.container)).toBe('add-runtime');
-    expect(draftOf(view.container)).toMatchObject({ profile: 'Fresh', name: '', addAnother: false });
-    expect(
-      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-profile="Fresh"] input'), 'fresh radio')
-        .checked,
-    ).toBe(true);
+    await click(view.container, '[data-add-runtime-profile="Default"] input');
+    expect(view.container.querySelector('[data-add-runtime-duplicate]')).not.toBeNull();
+    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
+    expect(view.container.querySelector('[data-add-runtime-duplicate]')).toBeNull();
+    await click(view.container, '[data-add-runtime-profile="Review"] input');
+    expect(must(view.container.querySelector<HTMLInputElement>('[data-duplicate-ok]'), 'checkbox').checked).toBe(false);
     await view.unmount();
   });
 });
 
-describe('Add runtime: Name', () => {
-  const nameStep = {
-    state: stepAt('name'),
-    draft: { credentialId: 'claude-personal', profile: 'Claude hooks', name: 'claude-claude-hooks' },
+describe('Add runtime: Name and Create', () => {
+  const ready = async (options: HostOptions = {}) => {
+    const view = await mountHost(options);
+    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
+    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
+    return view;
   };
-  const input = (container: ParentNode) =>
-    must(container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name input');
-  const submit = (container: ParentNode) =>
-    must(container.querySelector<HTMLButtonElement>('[data-change-submit]'), 'submit');
 
-  it('shows the login and profile chosen, the suggested name, and the agent choice', async () => {
-    const view = await mountHost(nameStep);
-    expect(text(view.container, '[data-add-runtime-step="name"] .kt-panel')).toContain('you@example.com');
-    expect(text(view.container, '[data-add-runtime-step="name"] .kt-panel')).toContain(
-      'Claude Code · Claude hooks profile',
-    );
-    expect(input(view.container).value).toBe('claude-claude-hooks');
+  it('shows the suggested name and the agent choice', async () => {
+    const view = await ready();
+    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
     expect(view.container.querySelector('[data-runtime-name-problem]')).toBeNull();
-    expect(text(view.container, '[data-add-runtime-step="name"]')).toContain(
+    expect(text(view.container, '[data-add-runtime-part="name"]')).toContain(
       'Letters, digits and dashes. You type this to launch it.',
     );
     expect(text(view.container, '[data-add-runtime-agent]')).toContain('Ferretry launches this as an agent');
     expect(text(view.container, '[data-add-runtime-agent]')).toContain(
       'Adds Ferretry’s fixed layer last: no trust or onboarding prompts, and the machine’s agent permissions.',
     );
-    expect(submit(view.container).textContent).toBe('Create runtime');
     expect(submit(view.container).disabled).toBe(false);
     await view.unmount();
   });
 
   it('E16: an invalid name says why, offers one that works, and cannot be created until fixed', async () => {
-    const view = await mountHost(nameStep);
-    await type(input(view.container), 'bad name!');
+    const view = await ready();
+    await type(nameInput(view.container), 'bad name!');
     expect(text(view.container, '[data-runtime-name-problem]')).toContain('Use only letters, digits and dashes.');
-    expect(input(view.container).getAttribute('aria-invalid')).toBe('true');
+    expect(nameInput(view.container).getAttribute('aria-invalid')).toBe('true');
     expect(submit(view.container).disabled).toBe(true);
     expect(text(view.container, '[data-runtime-name-suggestion]')).toBe('Use bad-name');
     await click(view.container, '[data-runtime-name-suggestion]');
-    expect(input(view.container).value).toBe('bad-name');
+    expect(nameInput(view.container).value).toBe('bad-name');
     expect(view.container.querySelector('[data-runtime-name-problem]')).toBeNull();
     expect(submit(view.container).disabled).toBe(false);
     await view.unmount();
   });
 
   it('E16: a name already taken offers the next free one', async () => {
-    const view = await mountHost(nameStep);
-    await type(input(view.container), 'claude-default');
+    const view = await ready();
+    await type(nameInput(view.container), 'claude-default');
     expect(text(view.container, '[data-runtime-name-problem]')).toContain(
       'claude-default is already a runtime on studio-mac.',
     );
     expect(text(view.container, '[data-runtime-name-suggestion]')).toBe('Use claude-default-2');
     await click(view.container, '[data-runtime-name-suggestion]');
-    expect(input(view.container).value).toBe('claude-default-2');
+    expect(nameInput(view.container).value).toBe('claude-default-2');
     await view.unmount();
   });
 
   it('an empty name asks for one and offers nothing; spaces typed around a name are trimmed', async () => {
-    const view = await mountHost(nameStep);
-    await type(input(view.container), '');
+    const view = await ready();
+    await type(nameInput(view.container), '');
     expect(text(view.container, '[data-runtime-name-problem]')).toContain('Give the runtime a name.');
     expect(view.container.querySelector('[data-runtime-name-suggestion]')).toBeNull();
     expect(submit(view.container).disabled).toBe(true);
-    await type(input(view.container), '  spaced  ');
-    expect(input(view.container).value).toBe('spaced');
+    await type(nameInput(view.container), '  spaced  ');
+    expect(nameInput(view.container).value).toBe('spaced');
     await view.unmount();
   });
 
-  it('creates the runtime with exactly what was chosen, including agent and add-another', async () => {
+  it('creates the runtime with exactly what was chosen, re-reads, and shows the made panel', async () => {
     const calls: Call[] = [];
     const reloads: string[] = [];
-    const view = await mountHost({
-      ...nameStep,
-      draft: { ...nameStep.draft, addAnother: true },
-      calls,
-      reloads,
-      routes: { ...READS(), 'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
-    });
+    const finishes: (string | null)[] = [];
+    const after = withRuntime(
+      DATA,
+      runtime({
+        name: 'claude-claude-hooks',
+        profile: 'Claude hooks',
+        credential: { id: 'claude-personal', store: 'host', status: 'ready' },
+      }),
+    );
+    const view = await ready({ calls, reloads, finishes, after, routes: STAGED_ROUTES(after) });
     await click(view.container, '[data-add-runtime-agent] input');
-    expect(draftOf(view.container).agent).toBe(true);
     await click(view.container, '[data-change-submit]');
-    await waitFor(view.container, '[data-add-runtime-step="done"]');
-    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
-      change: {
-        kind: 'runtime.put',
-        name: 'claude-claude-hooks',
-        credential: 'claude-personal',
-        profile: 'Claude hooks',
-        agent: true,
-        create: true,
-        addAnother: true,
+    await waitFor(view.container, '[data-add-runtime-done]');
+    expect(proposed(calls)).toEqual([
+      {
+        change: {
+          kind: 'runtime.put',
+          name: 'claude-claude-hooks',
+          credential: 'claude-personal',
+          profile: 'Claude hooks',
+          agent: true,
+          create: true,
+        },
       },
-    });
+    ]);
     expect(reloads).toEqual(['reload']);
-    expect(draftOf(view.container).made).toBe('claude-claude-hooks');
-    expect(text(view.container, '[data-stepper-position]')).toBe('Add a runtime · done');
+    expect(view.container.querySelector('[data-add-runtime-made="claude-claude-hooks"]')).not.toBeNull();
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-claude-hooks is ready to launch');
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('Claude Code · Claude hooks profile');
+    expect(text(view.container, '[data-add-runtime-done]')).not.toContain('Sign in before you launch');
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
+    expect(text(view.container, '[data-add-runtime-finish="list"]')).toBe('Back to Runtimes');
+    expect(text(view.container, '[data-add-runtime-finish="open"]')).toBe('Open claude-claude-hooks');
+    await click(view.container, '[data-add-runtime-finish="list"]');
+    await click(view.container, '[data-add-runtime-finish="open"]');
+    await click(view.container, '[data-page-back]');
+    expect(finishes).toEqual([null, 'claude-claude-hooks', null]);
     await view.unmount();
   });
 
-  it('sends no add-another when it was not asked for, and no agent unless ticked', async () => {
+  it('sends add-another when asked for, and a typed name', async () => {
     const calls: Call[] = [];
-    const view = await mountHost({
-      ...nameStep,
-      calls,
-      routes: { ...READS(), 'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
-    });
+    const view = await mountHost({ calls, routes: STAGED_ROUTES() });
+    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
+    await click(view.container, '[data-add-runtime-profile="Review"] input');
+    await click(view.container, '[data-duplicate-ok]');
+    await type(nameInput(view.container), 'my-review');
     await click(view.container, '[data-change-submit]');
-    await waitFor(view.container, '[data-add-runtime-step="done"]');
-    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
-      change: {
-        kind: 'runtime.put',
-        name: 'claude-claude-hooks',
-        credential: 'claude-personal',
-        profile: 'Claude hooks',
-        agent: false,
-        create: true,
+    await waitFor(view.container, '[data-add-runtime-done]');
+    expect(proposed(calls)).toEqual([
+      {
+        change: {
+          kind: 'runtime.put',
+          name: 'my-review',
+          credential: 'claude-personal',
+          profile: 'Review',
+          agent: false,
+          create: true,
+          addAnother: true,
+        },
       },
-    });
+    ]);
+    // The re-read did not list it, so the panel still reads without its details.
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('my-review is ready to launch');
+    expect(text(view.container, '[data-add-runtime-done]')).not.toContain('profile');
     await view.unmount();
   });
 
-  it('a refusal is one sentence on the same step, and nothing moves on until it works', async () => {
+  it('says to sign in before launching when the made runtime’s login needs it', async () => {
+    const after = withRuntime(
+      SIGN_IN_NEEDED,
+      runtime({
+        name: 'claude-claude-hooks',
+        profile: 'Claude hooks',
+        credential: { id: 'claude-work', store: 'ferretry', status: 'needs_sign_in' },
+      }),
+    );
+    const view = await mountHost({ data: SIGN_IN_NEEDED, after, routes: STAGED_ROUTES(after) });
+    await click(view.container, '[data-add-runtime-credential="claude-work"] input');
+    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
+    await interact(() => submit(view.container).click());
+    await waitFor(view.container, '[data-add-runtime-done]');
+    expect(text(view.container, '[data-add-runtime-done]')).toContain(
+      'Claude hooks profile. Sign in before you launch.',
+    );
+    await view.unmount();
+  });
+
+  it('a refusal is one sentence on the form, and nothing moves on until it works', async () => {
     let refuse = true;
-    const view = await mountHost({
-      ...nameStep,
+    const reloads: string[] = [];
+    const view = await ready({
+      reloads,
       routes: {
         ...READS(),
-        'POST /v1/fleet/proposals': (call: Call) =>
+        [PROPOSE]: (call: Call) =>
           refuse
             ? new FyHttpError('This change conflicts with the setup on this machine.', 409, 'fleet_change_conflict')
             : stagedFrom(call),
@@ -696,84 +735,12 @@ describe('Add runtime: Name', () => {
     await click(view.container, '[data-change-submit]');
     await waitFor(view.container, '[data-change-refusal]');
     expect(text(view.container, '[data-change-refusal]')).toBe('This change conflicts with the setup on this machine.');
-    expect(view.container.querySelector('[data-add-runtime-step="name"]')).not.toBeNull();
-    expect(draftOf(view.container).made).toBeNull();
+    expect(view.container.querySelector('[data-add-runtime-done]')).toBeNull();
+    expect(nameInput(view.container).value).toBe('claude-claude-hooks');
+    expect(reloads).toEqual([]);
     refuse = false;
     await click(view.container, '[data-change-submit]');
-    await waitFor(view.container, '[data-add-runtime-step="done"]');
-    await view.unmount();
-  });
-});
-
-describe('Add runtime: Done', () => {
-  const doneStep = {
-    state: stepAt('done'),
-    draft: { credentialId: 'claude-personal', profile: 'Claude hooks', made: 'claude-claude-hooks' },
-  };
-  const withMade = (credentialId: string, status?: 'needs_sign_in'): MachineData => ({
-    ...(status === undefined ? DATA : SIGN_IN_NEEDED),
-    runtimes: FleetRuntimeCatalogSchema.parse({
-      ...RUNTIMES,
-      runtimes: [
-        ...RUNTIMES.runtimes,
-        runtime({
-          name: 'claude-claude-hooks',
-          profile: 'Claude hooks',
-          credential: { id: credentialId, store: 'host', status: status ?? 'ready' },
-        }),
-      ],
-    }),
-  });
-
-  it('says the runtime is ready, with its login and profile, and offers Back to Runtimes and Open', async () => {
-    const finishes: (string | null)[] = [];
-    const view = await mountHost({ ...doneStep, data: withMade('claude-personal'), finishes });
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain(
-      'claude-claude-hooks is ready to launch',
-    );
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain(
-      'Claude Code · you@example.com · Claude hooks profile.',
-    );
-    expect(view.container.querySelector('[data-add-runtime-saved]')).toBeNull();
-    expect(view.container.querySelector('[data-stepper-back]')).toBeNull();
-    expect(text(view.container, '[data-add-runtime-finish="list"]')).toBe('Back to Runtimes');
-    expect(text(view.container, '[data-add-runtime-finish="open"]')).toBe('Open claude-claude-hooks');
-    await click(view.container, '[data-add-runtime-finish="list"]');
-    await click(view.container, '[data-add-runtime-finish="open"]');
-    expect(finishes).toEqual([null, 'claude-claude-hooks']);
-    await view.unmount();
-  });
-
-  it('says to sign in before launching when the runtime’s login needs it', async () => {
-    const view = await mountHost({
-      ...doneStep,
-      draft: { ...doneStep.draft, credentialId: 'claude-work' },
-      data: withMade('claude-work', 'needs_sign_in'),
-    });
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain(
-      'Claude hooks profile. Sign in before you launch.',
-    );
-    await view.unmount();
-  });
-
-  it('lists what was saved for reuse along the way', async () => {
-    const view = await mountHost({
-      ...doneStep,
-      state: saveForReuse(saveForReuse(stepAt('done'), 'Profile Fresh'), 'Claude Code login'),
-      data: withMade('claude-personal'),
-    });
-    expect(text(view.container, '[data-add-runtime-saved]')).toBe(
-      'Also saved for reuse: Profile Fresh, Claude Code login.',
-    );
-    await view.unmount();
-  });
-
-  it('still reads when the login is no longer there to name', async () => {
-    const view = await mountHost({ state: stepAt('done'), draft: { profile: 'Claude hooks', made: 'gone' } });
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain('gone is ready to launch');
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"] p:last-child')).toBe(
-      'Claude hooks profile.',
-    );
+    await waitFor(view.container, '[data-add-runtime-done]');
     await view.unmount();
   });
 });
@@ -805,7 +772,7 @@ describe('Add runtime: a login that drives both CLIs', () => {
     const rows = [...view.container.querySelectorAll('[data-add-runtime-credential]')];
     expect(rows.map(row => row.getAttribute('data-add-runtime-credential'))).toEqual(['claude-personal', 'deepseek']);
     const row = text(view.container, '[data-add-runtime-credential="deepseek"]');
-    expect(row).toContain('Claude Code + Codex login');
+    expect(row).toContain('Claude Code + Codex ·');
     expect(row).toContain('Claude + Codex');
     expect(row).toContain('Codex isn’t installed here');
     expect(
@@ -813,13 +780,12 @@ describe('Add runtime: a login that drives both CLIs', () => {
         .querySelector('[data-add-runtime-credential="deepseek"] [data-login-scope]')
         ?.getAttribute('data-login-scope'),
     ).toBe('both');
-    await click(view.container, '[data-add-runtime-credential="deepseek"] input');
-    expect(draftOf(view.container)).toMatchObject({ credentialId: 'deepseek', runs: null });
     await view.unmount();
   });
 
   it('Runs follows a scoped profile until chosen; choosing a CLI drops a profile that no longer fits', async () => {
-    const view = await mountHost({ data: DUAL_DATA, state: stepAt('profile'), draft: { credentialId: 'deepseek' } });
+    const view = await mountHost({ data: DUAL_DATA });
+    await click(view.container, '[data-add-runtime-credential="deepseek"] input');
     expect(runsAt(view.container)).toBe('claude');
     expect(text(view.container, '[data-add-runtime-runs]')).toContain('picked from the profile until you choose');
     const codexWork = () =>
@@ -830,73 +796,54 @@ describe('Add runtime: a login that drives both CLIs', () => {
     expect(codexWork().disabled).toBe(false);
     await click(view.container, '[data-add-runtime-profile="Codex work"] input');
     expect(runsAt(view.container)).toBe('codex');
+    expect(nameInput(view.container).value).toBe('codex-codex-work');
     await click(view.container, '[data-add-runtime-runs-option="claude"] input');
-    expect(draftOf(view.container)).toMatchObject({ runs: 'claude', profile: null });
+    expect(view.container.querySelector('#add-runtime-name')).toBeNull();
     expect(codexWork().disabled).toBe(true);
     expect(text(view.container, '[data-add-runtime-runs]')).not.toContain('until you choose');
     await click(view.container, '[data-add-runtime-profile="Default"] input');
     await click(view.container, '[data-add-runtime-runs-option="codex"] input');
-    expect(draftOf(view.container)).toMatchObject({ runs: 'codex', profile: 'Default' });
-    await click(view.container, '[data-step-next]');
-    expect(draftOf(view.container).name).toBe('codex-default-2');
+    expect(nameInput(view.container).value).toBe('codex-default-2');
     await view.unmount();
   });
 
-  it('sends the CLI it runs with the runtime, and names it on the Name step', async () => {
+  it('sends the CLI it runs with the runtime, and names it on the made panel', async () => {
     const calls: Call[] = [];
-    const view = await mountHost({
-      data: DUAL_DATA,
-      state: stepAt('name'),
-      draft: { credentialId: 'deepseek', profile: 'Codex work', name: 'codex-codex-work' },
-      calls,
-      routes: { ...READS(DUAL_DATA), 'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call), [APPLY]: APPLIED },
-    });
-    expect(text(view.container, '[data-add-runtime-step="name"] .kt-panel')).toContain('Codex · Codex work profile');
-    await click(view.container, '[data-change-submit]');
-    await waitFor(view.container, '[data-add-runtime-step="done"]');
-    expect(calls.find(call => call.path === '/v1/fleet/proposals')?.body).toEqual({
-      change: {
-        kind: 'runtime.put',
+    const after = withRuntime(
+      DUAL_DATA,
+      runtime({
         name: 'codex-codex-work',
-        credential: 'deepseek',
-        profile: 'Codex work',
         harness: 'codex',
-        agent: false,
-        create: true,
+        profile: 'Codex work',
+        credential: { id: 'deepseek', store: 'environment', status: 'ready' },
+      }),
+    );
+    const view = await mountHost({ data: DUAL_DATA, after, calls, routes: STAGED_ROUTES(after) });
+    await click(view.container, '[data-add-runtime-credential="deepseek"] input');
+    await click(view.container, '[data-add-runtime-profile="Codex work"] input');
+    await click(view.container, '[data-change-submit]');
+    await waitFor(view.container, '[data-add-runtime-done]');
+    expect(proposed(calls)).toEqual([
+      {
+        change: {
+          kind: 'runtime.put',
+          name: 'codex-codex-work',
+          credential: 'deepseek',
+          profile: 'Codex work',
+          harness: 'codex',
+          agent: false,
+          create: true,
+        },
       },
-    });
+    ]);
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('Codex · Codex work profile');
     await view.unmount();
   });
 
   it('offers no Runs choice for a login that drives one CLI', async () => {
-    const view = await mountHost({ state: stepAt('profile'), draft: { credentialId: 'claude-personal' } });
+    const view = await mountHost();
+    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
     expect(view.container.querySelector('[data-add-runtime-runs]')).toBeNull();
-    await view.unmount();
-  });
-
-  it('names the CLI the made runtime runs on Done', async () => {
-    const data: MachineData = {
-      ...DUAL_DATA,
-      runtimes: FleetRuntimeCatalogSchema.parse({
-        ...RUNTIMES,
-        runtimes: [
-          runtime({
-            name: 'codex-codex-work',
-            harness: 'codex',
-            profile: 'Codex work',
-            credential: { id: 'deepseek', store: 'environment', status: 'ready' },
-          }),
-        ],
-      }),
-    };
-    const view = await mountHost({
-      data,
-      state: stepAt('done'),
-      draft: { credentialId: 'deepseek', profile: 'Codex work', made: 'codex-codex-work' },
-    });
-    expect(text(view.container, '[data-add-runtime-step="done"] [role="status"]')).toContain(
-      'Codex · Claude Code + Codex login · Codex work profile.',
-    );
     await view.unmount();
   });
 });

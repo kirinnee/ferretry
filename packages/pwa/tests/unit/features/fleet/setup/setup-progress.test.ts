@@ -4,10 +4,7 @@ import {
   browserSetupStorage,
   MACHINE_SETUP_PROGRESS_KEY,
   readMachineSetupProgress,
-  readSetupProgress,
-  SETUP_PROGRESS_KEY,
   writeMachineSetupProgress,
-  writeSetupProgress,
 } from '../../../../../src/features/fleet/setup/setup-progress.ts';
 import { daemonId } from '../../../../../src/lib/daemon-connection.ts';
 import '../../../../support/dom.ts';
@@ -24,60 +21,7 @@ const memory = (initial: Record<string, string> = {}) => {
   };
 };
 
-const PROGRESS = {
-  at: 'codex',
-  answers: { choices: { claude: 'import' as const }, names: { claude: 'claude-mine' }, make: {}, accepted: [] },
-};
-
-describe('setup progress', () => {
-  it('keeps one machine’s step and answers, and gives them back to that machine only', () => {
-    const storage = memory();
-    writeSetupProgress(storage, studio, PROGRESS);
-    expect(readSetupProgress(storage, studio)).toEqual(PROGRESS);
-    expect(readSetupProgress(storage, work)).toBeNull();
-  });
-
-  it('forgets one machine without touching another', () => {
-    const storage = memory();
-    writeSetupProgress(storage, studio, PROGRESS);
-    writeSetupProgress(storage, work, { ...PROGRESS, at: 'claude' });
-    writeSetupProgress(storage, studio, null);
-    expect(readSetupProgress(storage, studio)).toBeNull();
-    expect(readSetupProgress(storage, work)?.at).toBe('claude');
-  });
-
-  it('reads an unreadable or hand-edited value as nothing kept, never as an error', () => {
-    expect(readSetupProgress(memory({ [SETUP_PROGRESS_KEY]: '{not json' }), studio)).toBeNull();
-    expect(readSetupProgress(memory({ [SETUP_PROGRESS_KEY]: '{"studio":{"at":""}}' }), studio)).toBeNull();
-    expect(readSetupProgress(memory(), studio)).toBeNull();
-  });
-
-  it('still works when storage refuses a write', () => {
-    const full = {
-      getItem: () => null,
-      setItem: () => {
-        throw new Error('QuotaExceededError');
-      },
-    };
-    expect(() => writeSetupProgress(full, studio, PROGRESS)).not.toThrow();
-  });
-
-  it('reaches the browser’s storage, or says there is none', () => {
-    expect(browserSetupStorage()).toBe(window.localStorage);
-    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      get: () => {
-        throw new Error('blocked');
-      },
-    });
-    try {
-      expect(browserSetupStorage()).toBeNull();
-    } finally {
-      if (original) Object.defineProperty(window, 'localStorage', original);
-    }
-  });
-});
+const edited = (value: unknown) => memory({ [MACHINE_SETUP_PROGRESS_KEY]: JSON.stringify({ studio: value }) });
 
 describe('new machine setup progress', () => {
   const RAIL: MachineSetupProgress = {
@@ -86,18 +30,25 @@ describe('new machine setup progress', () => {
     start: 'clone',
   };
 
+  it('keeps its place under a version 2 key, so a place kept by the old Logins rail is not resumed', () => {
+    expect(MACHINE_SETUP_PROGRESS_KEY).toBe('fy-onboarding-progress-v2');
+    const storage = memory({ 'fy-onboarding-progress': JSON.stringify({ studio: RAIL }) });
+    expect(readMachineSetupProgress(storage, studio)).toBeNull();
+  });
+
   it('keeps one machine’s rail and gives it back to that machine only', () => {
     const storage = memory();
     writeMachineSetupProgress(storage, studio, RAIL);
     expect(readMachineSetupProgress(storage, studio)).toEqual(RAIL);
     expect(readMachineSetupProgress(storage, work)).toBeNull();
+    expect([...storage.values.keys()]).toEqual([MACHINE_SETUP_PROGRESS_KEY]);
   });
 
   it('keeps the other machines’ rails when one is written', () => {
     const storage = memory();
-    writeMachineSetupProgress(storage, work, { ...RAIL, at: 'logins' });
+    writeMachineSetupProgress(storage, work, { ...RAIL, at: 'claude' });
     writeMachineSetupProgress(storage, studio, RAIL);
-    expect(readMachineSetupProgress(storage, work)?.at).toBe('logins');
+    expect(readMachineSetupProgress(storage, work)?.at).toBe('claude');
     expect(readMachineSetupProgress(storage, studio)?.at).toBe('warden');
   });
 
@@ -110,12 +61,27 @@ describe('new machine setup progress', () => {
     expect(readMachineSetupProgress(storage, work)?.at).toBe('done');
   });
 
-  it('keeps the rail apart from the first run’s own progress', () => {
+  it('keeps the runtime names, the update ticks and the also-add choice typed on each CLI’s step', () => {
     const storage = memory();
-    writeSetupProgress(storage, studio, PROGRESS);
-    writeMachineSetupProgress(storage, studio, RAIL);
-    expect(readSetupProgress(storage, studio)).toEqual(PROGRESS);
-    expect(readMachineSetupProgress(storage, studio)).toEqual(RAIL);
+    const answered: MachineSetupProgress = {
+      ...RAIL,
+      at: 'codex',
+      states: { pair: 'done', claude: 'done', codex: 'skipped' },
+      answers: {
+        claude: { name: 'claude-mine', addAnother: true, accepted: ['skills', 'mcp'] },
+        codex: { name: 'codex-2' },
+      },
+    };
+    writeMachineSetupProgress(storage, studio, answered);
+    expect(readMachineSetupProgress(storage, studio)).toEqual(answered);
+  });
+
+  it('reads a rail kept without answers, and answers for one CLI only', () => {
+    expect(
+      readMachineSetupProgress(edited({ at: 'claude', states: {}, start: 'fresh' }), studio)?.answers,
+    ).toBeUndefined();
+    const one = edited({ at: 'claude', states: {}, start: 'fresh', answers: { claude: {} } });
+    expect(readMachineSetupProgress(one, studio)?.answers).toEqual({ claude: {} });
   });
 
   it('reads an unreadable value as nothing kept, never as an error', () => {
@@ -124,7 +90,6 @@ describe('new machine setup progress', () => {
   });
 
   it('reads a hand-edited value as nothing kept', () => {
-    const edited = (value: unknown) => memory({ [MACHINE_SETUP_PROGRESS_KEY]: JSON.stringify({ studio: value }) });
     expect(readMachineSetupProgress(edited({ at: 'warden', states: {} }), studio)).toBeNull();
     expect(readMachineSetupProgress(edited({ at: 'warden', states: {}, start: 'borrowed' }), studio)).toBeNull();
     expect(
@@ -132,9 +97,17 @@ describe('new machine setup progress', () => {
     ).toBeNull();
   });
 
+  it('reads hand-edited answers as nothing kept', () => {
+    const answers = (value: unknown) => edited({ at: 'claude', states: {}, start: 'fresh', answers: value });
+    expect(readMachineSetupProgress(answers({ gemini: { name: 'x' } }), studio)).toBeNull();
+    expect(readMachineSetupProgress(answers({ claude: { name: 7 } }), studio)).toBeNull();
+    expect(readMachineSetupProgress(answers({ claude: { addAnother: 'yes' } }), studio)).toBeNull();
+    expect(readMachineSetupProgress(answers({ claude: { accepted: [1] } }), studio)).toBeNull();
+  });
+
   it('rejects a step id it does not know, as the open step and as a marked one', () => {
-    const edited = (value: unknown) => memory({ [MACHINE_SETUP_PROGRESS_KEY]: JSON.stringify({ studio: value }) });
     expect(readMachineSetupProgress(edited({ at: 'billing', states: {}, start: 'fresh' }), studio)).toBeNull();
+    expect(readMachineSetupProgress(edited({ at: 'logins', states: {}, start: 'fresh' }), studio)).toBeNull();
     expect(
       readMachineSetupProgress(edited({ at: 'warden', states: { billing: 'done' }, start: 'fresh' }), studio),
     ).toBeNull();
@@ -151,5 +124,23 @@ describe('new machine setup progress', () => {
       },
     };
     expect(() => writeMachineSetupProgress(full, studio, RAIL)).not.toThrow();
+  });
+});
+
+describe('browser storage', () => {
+  it('reaches the browser’s storage, or says there is none', () => {
+    expect(browserSetupStorage()).toBe(window.localStorage);
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('blocked');
+      },
+    });
+    try {
+      expect(browserSetupStorage()).toBeNull();
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+    }
   });
 });

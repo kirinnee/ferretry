@@ -42,6 +42,7 @@ import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { MotionSetting } from './conversation-settings.tsx';
+import { MessageMarksLegend } from './message-marks-legend.tsx';
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
@@ -431,6 +432,7 @@ export function SettingsPage({
         <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
       ),
       motion: <MotionSetting motion={device.motion} onChange={motion => controls.setDeviceControls({ motion })} />,
+      'message-marks': <MessageMarksLegend />,
       'composer-markdown': (
         <MarkdownComposerSettings
           vimEnabled={device.composerVimMode}
@@ -494,8 +496,12 @@ export function SettingsPage({
   const openSection = (id: Exclude<SettingsSectionId, 'machines'>): void => go(`${daemonSettingsPath(daemonId)}#${id}`);
   /** Back to Settings' first screen — on a phone, the grouped cards. */
   const home = (): void => go(daemonSettingsPath(daemonId));
-  /** A machine's first run is a full screen of its own, outside Settings. */
-  const openSetup = useCallback((target: DaemonId): void => go(daemonMachineSetupPath(target)), [go]);
+  /** A machine's setup is a full screen of its own, outside Settings; a step is named by the address's hash. */
+  const openSetup = useCallback(
+    (target: DaemonId, startAt?: string): void =>
+      go(`${daemonMachineSetupPath(target)}${startAt === undefined ? '' : `#${startAt}`}`),
+    [go],
+  );
   const switchToId = activeSection === 'machines' ? switchTo?.daemonId : undefined;
   useEffect(() => {
     if (switchToId !== undefined) openMachine(switchToId, machineRoute.tab);

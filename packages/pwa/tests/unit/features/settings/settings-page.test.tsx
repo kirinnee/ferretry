@@ -213,7 +213,7 @@ describe('SettingsPage sections', () => {
       'device',
     ]);
     expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined, undefined]);
-    expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width']);
+    expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks']);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
     run(() => view.unmount());
@@ -1109,6 +1109,30 @@ describe('SettingsPage Machines section', () => {
       ).click(),
     );
     expect(callbacks.navigated).toEqual(['/d/daemon-alpha/setup']);
+    await view.unmount();
+  });
+
+  it('opens the full-screen setup on the step a tab names: Import again lands on Claude Code', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#machines/Alpha%20workstation/machine');
+    const callbacks = calls();
+    const view = await mount(
+      page({
+        createMachineClient: answering,
+        calls: callbacks,
+        machineTabs: {
+          machine: ({ onSetUp }) => (
+            <div>
+              <button type="button" data-open-setup="" onClick={() => onSetUp?.()} />
+              <button type="button" data-open-import="" onClick={() => onSetUp?.('claude')} />
+            </div>
+          ),
+        },
+      }),
+    );
+    await settle();
+    await interact(() => must(view.container.querySelector<HTMLElement>('[data-open-setup]'), 'setup').click());
+    await interact(() => must(view.container.querySelector<HTMLElement>('[data-open-import]'), 'import').click());
+    expect(callbacks.navigated).toEqual(['/d/daemon-alpha/setup', '/d/daemon-alpha/setup#claude']);
     await view.unmount();
   });
 

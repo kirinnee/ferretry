@@ -190,6 +190,30 @@ The built-in **Set up Ferretry** skill teaches any agent the layout, the schemas
 It is the Ferretry tools server's instructions in every agent runtime, and `fy config guide` prints it as a
 `SKILL.md` to drop into any skills directory.
 
+## Live changes
+
+An open app never needs a reload to see a change made somewhere else. The daemon counts every change to
+what a screen shows as configuration, from **any** source, and tells every open app which kinds moved:
+
+| Source                                                                      | How the daemon notices                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| A hand edit, `fy`, an agent, the app, another device                        | the next load finds a file different (the watcher loads within about a second of a save) |
+| A reviewed fleet change applied                                             | its apply route, at once                                                                 |
+| Check now, a speed-up key or test, a secret, a tool install, an MCP sign-in | the route that made it (`ANNOUNCED_ROUTES`)                                              |
+| A harness sign-in finishing in the background                               | the sign-in flow completing                                                              |
+
+`GET /v1/events?topic=config` (a WebSocket, like the session feed) sends where the revision stands first, then
+one frame per change: `{ kind: "config", epoch, revision, kinds }`, `kinds` drawn from `files`, `machine`,
+`credentials`, `components`, `profiles`, `runtimes`, `speedups`, `warden`, `learning`, `voice`, `presets`.
+Announcements within 100 ms are merged into one revision. A quiet stream sends an `idle` proof every thirty
+seconds. The frame carries kinds and a counter, never a value from a file.
+
+The app keeps one stream for the machine on screen and re-reads only the screens whose kinds moved, keeping
+what is shown until the new answer lands; an unsaved edit in a form or the file editor is kept. Nothing is read
+on a timer. The revision is per boot (`epoch`), and it is how the app learns what it missed: the stream reopens
+whenever the app returns to the foreground or the network comes back, and if the first frame's revision moved —
+or names another boot — every screen reads again.
+
 ## Declared gaps
 
 - The fleet's own files apply as written; a component or profile change is not judged for loosening,
@@ -198,3 +222,7 @@ It is the Ferretry tools server's instructions in every agent runtime, and `fy c
   loosening that is waiting, a change saved from the app rewrites that file from the version in effect,
   which drops the waiting edit — confirm or revert it first.
 - There is no back-compat: a `fleet/config.yaml` is refused by sentence ([account-model.md](account-model.md)).
+- Live changes ([above](#live-changes)) cover the screens that show configuration. The session page's
+  "This folder" rail reads its MCP sign-ins when it opens, not when one changes elsewhere.
+- A login's status that moves on its own — a token refreshed or expired by the harness, with no route
+  or sign-in in between — is not announced; it shows at the next read or Check now.

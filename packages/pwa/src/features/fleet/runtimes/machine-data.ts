@@ -6,8 +6,9 @@
  * Both tabs need the same picture — the logins, the runtimes on them, the profiles a runtime can pick,
  * and the parts those profiles are made of — so one hook reads all four through the app's client pool
  * and re-reads after every change. Nothing is patched optimistically: what is on screen is what the
- * machine answered last. A read is made when the tab opens, when the person retries, or after a change
- * they made; never on a timer.
+ * machine answered last. A read is made when the tab opens, when the person retries, after a change
+ * they made, and when the machine says its configuration moved — from another device, `fy`, a hand
+ * edit or a sign-in that finished on its own; never on a timer.
  *
  * ## A page is a link
  *
@@ -24,6 +25,7 @@ import type {
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
+import { useConfigChangeEffect } from '../../../lib/store.tsx';
 import { readFleetComponents, readFleetProfiles, readFleetRuntimes } from '../catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
@@ -59,6 +61,9 @@ export const readMachineData = async (
   return { credentials, runtimes, profiles, components };
 };
 
+/** What the four reads show: a change to any of them is read again. */
+const MACHINE_DATA_KINDS = ['credentials', 'runtimes', 'profiles', 'components'] as const;
+
 export interface UseMachineData {
   readonly state: MachineDataState;
   /** The newest answer, from either a ready read or the one kept beside a failure. */
@@ -93,6 +98,9 @@ export function useMachineData(connection: DaemonConnection, createClient: Fleet
     setState({ kind: 'loading' });
     void reload();
   }, [reload]);
+  // A change made anywhere else — another device, `fy`, a hand edit, a sign-in finishing — is read the
+  // moment the machine says it happened, keeping what is on screen until the answer lands.
+  useConfigChangeEffect(connection.daemonId, MACHINE_DATA_KINDS, () => void reload());
 
   const data = state.kind === 'ready' ? state.data : state.kind === 'failed' ? state.last : null;
   return { state, data, reload };

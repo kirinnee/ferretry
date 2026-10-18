@@ -2,8 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import { FleetAccountChangeSchema, type FleetResolvedEntry } from '@ferretry/protocol';
 import {
   addRefusal,
-  BUILD_PROFILE_FLOW_KIND,
-  buildProfileFlowInput,
   contentScope,
   filterLibrary,
   includedBy,
@@ -228,13 +226,5 @@ describe('saving and where a profile is used', () => {
     expect(profileUseLine(base, 3)).toBe('4 items · 4 parts · used by 3 runtimes');
     expect(profileUseLine(review, 1)).toBe('2 items · 1 part · used by 1 runtime');
     expect(profileUseLine({ ...base, harnesses: [] }, 0)).toBe('4 items · 0 parts · not used yet');
-  });
-
-  it('is one step when Add runtime builds a profile in place', () => {
-    const flow = buildProfileFlowInput({ harness: 'claude' });
-    expect(flow.kind).toBe(BUILD_PROFILE_FLOW_KIND);
-    expect(flow.steps.map(step => step.id)).toEqual(['build']);
-    expect(flow.leave.consequence).toBe('No profile is created.');
-    expect(buildProfileFlowInput().title).toBe('Build a profile');
   });
 });

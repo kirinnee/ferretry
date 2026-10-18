@@ -119,6 +119,12 @@ function socketDispatcher(events: FleetEventStreamService): ApiSocketDispatcher 
     // The session directory as the route uses it: it asks only whether the scope names a session
     // this daemon holds, and refuses with a 404 when it does not.
     { get: async () => ({ id: SESSION }) as never, list: async () => ({ sessions: [] }) as never },
+    // No configuration stream is asked for here; a handler that would refuse is enough.
+    {
+      handler: () => {
+        throw new Error('this suite asks for no configuration stream');
+      },
+    },
   );
   return new ApiSocketDispatcher(
     new ApiRouter(routes),

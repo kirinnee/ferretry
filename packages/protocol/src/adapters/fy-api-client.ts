@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
 import { type ProjectList, ProjectListSchema, type SessionSkills, SessionSkillsSchema } from '../lib/catalog.ts';
+import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
   FY_BOARD_CAPABILITY_HEADER,
   FY_REQUEST_ID_HEADER,
@@ -863,6 +864,18 @@ export class FyApiClient implements IFyApiClient {
         if (frame.kind === 'event') onEvent(frame.event);
         else onIdle?.(frame);
       },
+    });
+  }
+
+  configChanges(onFrame: (frame: ConfigChangeFrame) => void, signal?: AbortSignal): Promise<void> {
+    const url = new URL(`${this.#baseUrl}/v1/events`);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('topic', CONFIG_CHANGE_TOPIC);
+    return this.#eventTransport.stream({
+      url: url.toString(),
+      token: this.#token,
+      ...(signal === undefined ? {} : { signal }),
+      onMessage: value => onFrame(ConfigChangeFrameSchema.parse(value)),
     });
   }
 

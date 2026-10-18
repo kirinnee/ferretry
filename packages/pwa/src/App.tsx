@@ -39,11 +39,10 @@ import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
-import { BuildProfileStep } from './features/fleet/profiles/profile-builder-step.tsx';
-import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
-import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
+import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
+import { isMachineSetupStepId } from './features/fleet/setup/onboarding-model.ts';
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
@@ -96,6 +95,7 @@ import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.t
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useFleetPoll } from './hooks/use-fleet-poll.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
@@ -1245,9 +1245,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
  * Components U18, Settings U19.
  */
 const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
-  runtimes: createRuntimesTab({
-    profileBuilder: { kind: BUILD_PROFILE_FLOW_KIND, flowInput: buildProfileFlowInput, Step: BuildProfileStep },
-  }),
+  runtimes: RuntimesTab,
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsSurface,
@@ -1496,9 +1494,15 @@ function MachineSetupRoute({ connection }: DaemonPageProps) {
     async (daemon: DaemonConnection) => await store.clients.client(daemon),
     [store.clients],
   );
+  // `/d/<id>/setup#claude` opens on that step: Settings' Import again lands on Claude Code.
+  const [startAt] = useState(() => {
+    const step = window.location.hash.replace(/^#/u, '');
+    return isMachineSetupStepId(step) ? step : undefined;
+  });
   if (record === undefined) return null;
   return (
     <MachineSetupScreen
+      {...(startAt === undefined ? {} : { startAt })}
       connection={record}
       connections={connections}
       createClient={createClient}
@@ -1576,6 +1580,9 @@ export function AppShell() {
     pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
       ? undefined
       : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);
+  // The machine on screen tells this browser when its configuration moves, so no screen showing it
+  // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
+  useConfigChangeFeed(store, connection);
   /*
    * A PASSKEY PROMPT COMES FROM THE MACHINE ON SCREEN: the one the route names, or — on setup and the
    * picker, which name none — the one just paired or chosen. Every other machine's background reads wait

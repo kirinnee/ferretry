@@ -18,6 +18,7 @@ import {
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { wardenConfig, wardenFailover, wardenStatus } from '../../support/warden.ts';
+import { configChangeHarness } from '../config-change-support.tsx';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
@@ -397,5 +398,251 @@ describe('WardenConfigSurface', () => {
     // Assert
     expect(json(renderer)).not.toContain('daemon a refused');
     run(() => renderer.unmount());
+  });
+
+  describe('when the machine says its configuration moved', () => {
+    const switchOf = (renderer: ReactTestRenderer) => renderer.root.findByProps({ role: 'switch' });
+
+    /** A daemon whose Warden settings and Jev key a test changes between reads, counting the reads. */
+    const changing = (first: WardenConfigView) => {
+      const state = { view: first, keyed: false, reads: 0, failNext: false };
+      const make = (): Client =>
+        client({
+          wardenConfig: async () => {
+            state.reads += 1;
+            if (state.reads > 1 && state.failNext) throw new Error('unreachable');
+            return state.view;
+          },
+          request: (async () => speedups(state.keyed)) as Client['request'],
+        });
+      return { state, make };
+    };
+
+    it('should follow another device’s change, and a Jev key added in Speed-ups, when the draft is untouched', async () => {
+      // Arrange
+      const daemon = changing(view(wardenConfig({ enabled: true, triage: 'jev' })));
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => daemon.make()} />),
+      );
+      await settle();
+      expect(switchOf(renderer).props['aria-checked']).toBe(true);
+      expect(json(renderer)).toContain('needs Jev key');
+
+      // Act
+      daemon.state.view = view(wardenConfig({ enabled: false, triage: 'jev' }), ['Edited on the host.']);
+      daemon.state.keyed = true;
+      await harness.move(['speedups']);
+      await settle();
+
+      // Assert
+      expect(daemon.state.reads).toBe(2);
+      expect(switchOf(renderer).props['aria-checked']).toBe(false);
+      expect(json(renderer)).toContain('Edited on the host.');
+      expect(json(renderer)).not.toContain('needs Jev key');
+      expect(json(renderer)).not.toContain('Discard changes');
+      run(() => renderer.unmount());
+    });
+
+    it('should read again for a Warden move too, and keep an edit the reader has not saved', async () => {
+      // Arrange
+      const daemon = changing(view(wardenConfig({ enabled: true })));
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => daemon.make()} />),
+      );
+      await settle();
+      turnOff(renderer);
+
+      // Act
+      daemon.state.view = view(wardenConfig({ enabled: true, triage: 'llm' }), ['Loosened elsewhere.']);
+      await harness.move(['warden']);
+      await settle();
+
+      // Assert
+      expect(daemon.state.reads).toBe(2);
+      expect(json(renderer)).toContain('Loosened elsewhere.');
+      expect(switchOf(renderer).props['aria-checked']).toBe(false);
+      expect(button(renderer, 'Save').props.disabled).toBe(false);
+      run(() => button(renderer, 'Discard changes').props.onClick());
+      expect(switchOf(renderer).props['aria-checked']).toBe(true);
+      run(() => renderer.unmount());
+    });
+
+    it('should keep what is on screen when the read after a move fails', async () => {
+      // Arrange
+      const daemon = changing(view(wardenConfig({ enabled: true })));
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => daemon.make()} />),
+      );
+      await settle();
+      daemon.state.failNext = true;
+
+      // Act
+      await harness.move(['warden']);
+      await settle();
+
+      // Assert
+      expect(daemon.state.reads).toBe(2);
+      expect(switchOf(renderer).props['aria-checked']).toBe(true);
+      expect(json(renderer)).not.toContain('Warden settings unavailable');
+      run(() => renderer.unmount());
+    });
+
+    it('should not read for a kind the card does not show', async () => {
+      // Arrange
+      const daemon = changing(view());
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => daemon.make()} />),
+      );
+      await settle();
+
+      // Act
+      await harness.move(['runtimes']);
+      await settle();
+
+      // Assert
+      expect(daemon.state.reads).toBe(1);
+      run(() => renderer.unmount());
+    });
+
+    it('should read nothing for a move that lands before the first read has answered', async () => {
+      // Arrange
+      let answer: ((value: WardenConfigView) => void) | undefined;
+      let reads = 0;
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(
+          <WardenConfigSurface
+            connection={connection('a')}
+            createClient={async () =>
+              client({
+                wardenConfig: () => {
+                  reads += 1;
+                  return new Promise<WardenConfigView>(resolve => {
+                    answer = resolve;
+                  });
+                },
+              })
+            }
+          />,
+        ),
+      );
+      await settle();
+
+      // Act
+      await harness.move(['warden']);
+      await settle();
+      await runAsync(async () => {
+        answer?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-late' }] })));
+        await Promise.resolve();
+      });
+      await settle();
+
+      // Assert
+      expect(reads).toBe(1);
+      expect(json(renderer)).toContain('claude-auto-late');
+      run(() => renderer.unmount());
+    });
+
+    it('should not read the daemon the reader left when the new one is already moved', async () => {
+      // Arrange
+      const a = changing(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })));
+      const harness = configChangeHarness(connection('a').daemonId);
+      harness.configChanges.observe(connection('b').daemonId, {
+        kind: 'config',
+        epoch: 'boot',
+        revision: 0,
+        kinds: [],
+      });
+      harness.configChanges.observe(connection('b').daemonId, {
+        kind: 'config',
+        epoch: 'boot',
+        revision: 1,
+        kinds: ['warden'],
+      });
+      const createClient: WardenClientFactory = async active =>
+        active.daemonId === 'a'
+          ? a.make()
+          : client({
+              wardenConfig: async () =>
+                view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] })),
+            });
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={createClient} />),
+      );
+      await settle();
+
+      // Act
+      run(() =>
+        renderer.update(harness.wrap(<WardenConfigSurface connection={connection('b')} createClient={createClient} />)),
+      );
+      await settle();
+
+      // Assert
+      expect(a.state.reads).toBe(1);
+      expect(json(renderer)).toContain('claude-auto-beta');
+      expect(json(renderer)).not.toContain('claude-auto-alpha');
+      run(() => renderer.unmount());
+    });
+
+    it('should drop a re-read answered after the reader switched daemon, loaded or not', async () => {
+      // Arrange
+      let late: ((value: WardenConfigView) => void) | undefined;
+      let readsOfA = 0;
+      let releaseB: ((value: WardenConfigView) => void) | undefined;
+      const beta = view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] }));
+      const harness = configChangeHarness(connection('a').daemonId);
+      const createClient: WardenClientFactory = async active =>
+        active.daemonId === 'a'
+          ? client({
+              wardenConfig: () => {
+                readsOfA += 1;
+                return readsOfA === 1
+                  ? Promise.resolve(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })))
+                  : new Promise<WardenConfigView>(resolve => {
+                      late = resolve;
+                    });
+              },
+            })
+          : client({
+              wardenConfig: () =>
+                new Promise<WardenConfigView>(resolve => {
+                  releaseB = resolve;
+                }),
+            });
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={createClient} />),
+      );
+      await settle();
+      await harness.move(['warden']);
+      await settle();
+      expect(readsOfA).toBe(2);
+
+      // Act
+      run(() =>
+        renderer.update(harness.wrap(<WardenConfigSurface connection={connection('b')} createClient={createClient} />)),
+      );
+      await settle();
+      await runAsync(async () => {
+        late?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-stale' }] })));
+        await Promise.resolve();
+      });
+      await settle();
+      const whileLoading = json(renderer);
+      await runAsync(async () => {
+        releaseB?.(beta);
+        await Promise.resolve();
+      });
+      await settle();
+
+      // Assert
+      expect(whileLoading).not.toContain('claude-auto-stale');
+      expect(json(renderer)).toContain('claude-auto-beta');
+      expect(json(renderer)).not.toContain('claude-auto-stale');
+      run(() => renderer.unmount());
+    });
   });
 });

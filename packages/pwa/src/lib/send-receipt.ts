@@ -13,14 +13,14 @@
  * decides how loudly the claim is drawn, so the two cannot disagree about a fate. `name` is the
  * accessible name and the tooltip's first line: a mark is never carried by colour or shape alone.
  *
- * `read` is the one state the ledger does not hold. It is a delivered send with an assistant reply
+ * `answered` is the one state the ledger does not hold. It is a delivered send with an assistant reply
  * after it in the loaded transcript — the agent has demonstrably handled the turn that carried it.
  */
 
 import { sendBadge } from './send-badge.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 
-export type SendReceiptKind = 'sending' | 'held' | 'queued' | 'delivered' | 'read' | 'unconfirmed' | 'failed';
+export type SendReceiptKind = 'sending' | 'held' | 'queued' | 'delivered' | 'answered' | 'unconfirmed' | 'failed';
 
 export interface SendReceipt {
   readonly kind: SendReceiptKind;
@@ -32,7 +32,7 @@ export interface SendReceipt {
   readonly chip?: string;
 }
 
-const READ_DETAIL = 'the agent has replied since this message arrived';
+const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
 
 /**
  * Every fate the daemon can report, mapped once. The order is `sendBadge`'s: a settled fate outranks
@@ -44,7 +44,7 @@ const READ_DETAIL = 'the agent has replied since this message arrived';
  * | `held` (kept for a revive)          | `held`        | faint clock     | —               |
  * | `queued` (in the agent's queue)     | `queued`      | one grey tick   | —               |
  * | `delivered`                         | `delivered`   | two grey ticks  | —               |
- * | `delivered` + a reply after it      | `read`        | two accent ticks| —               |
+ * | `delivered` + a reply after it      | `answered`    | two accent ticks| —               |
  * | `unaccounted`                       | `unconfirmed` | faint question  | "unconfirmed"   |
  * | `timed_out`                         | `failed`      | small red !     | "not delivered" |
  */
@@ -53,7 +53,7 @@ export const sendReceipt = (record: LedgerSendRecord, answered = false): SendRec
   switch (record.fate) {
     case 'delivered':
       return answered
-        ? { kind: 'read', name: 'Read', detail: `${detail}; ${READ_DETAIL}` }
+        ? { kind: 'answered', name: 'Answered', detail: `${detail}; ${ANSWERED_DETAIL}` }
         : { kind: 'delivered', name: 'Delivered', detail };
     case 'timed_out':
       return { kind: 'failed', name: 'Not delivered', detail, chip: 'not delivered' };
@@ -66,32 +66,22 @@ export const sendReceipt = (record: LedgerSendRecord, answered = false): SendRec
   }
 };
 
-/** A message's time as the bubble shows it (`HH:MM`) and as its tooltip spells it out (`HH:MM:SS`). */
-export interface MessageClock {
-  readonly short: string;
-  readonly full: string;
+/**
+ * THE LEGEND: what each mark claims, in the words Settings › Appearance prints beside it. It lives
+ * here, beside the mapping, so the legend and the tooltips cannot drift apart. `held` shares the
+ * clock with `sending` and is named in its line rather than given a row of its own.
+ */
+export interface ReceiptLegendRow {
+  readonly kind: SendReceiptKind;
+  readonly name: string;
+  readonly meaning: string;
 }
 
-const pad = (value: number): string => String(value).padStart(2, '0');
-
-/** The reader's local wall-clock time of an instant; `undefined` for one that does not parse. */
-export const clockOfInstant = (at: number | string | undefined): MessageClock | undefined => {
-  if (at === undefined) return undefined;
-  const date = new Date(typeof at === 'number' ? at : Date.parse(at));
-  if (!Number.isFinite(date.getTime())) return undefined;
-  const short = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  return { short, full: `${short}:${pad(date.getSeconds())}` };
-};
-
-const LABEL_CLOCK = /·\s*(\d{2}):(\d{2}):(\d{2})$/u;
-
-/**
- * The clock a transcript label carries — "You · 13:58:44" — which is the daemon's own printed time and
- * the only time a log-derived row has. `undefined` when the label carries none.
- */
-export const clockOfLabel = (label: string | undefined): MessageClock | undefined => {
-  const match = LABEL_CLOCK.exec(label ?? '');
-  if (match === null) return undefined;
-  const short = `${match[1]}:${match[2]}`;
-  return { short, full: `${short}:${match[3]}` };
-};
+export const RECEIPT_LEGEND: readonly ReceiptLegendRow[] = [
+  { kind: 'sending', name: 'Sending', meaning: 'On its way, or kept until the session is revived.' },
+  { kind: 'queued', name: 'Queued', meaning: 'Waiting in the agent’s queue in Claude or Codex.' },
+  { kind: 'delivered', name: 'Delivered', meaning: 'It is in the transcript.' },
+  { kind: 'answered', name: 'Answered', meaning: 'The agent replied after it.' },
+  { kind: 'unconfirmed', name: 'Unconfirmed', meaning: 'It could not be proven either way.' },
+  { kind: 'failed', name: 'Not delivered', meaning: 'It never arrived. Retry is offered on the message.' },
+];

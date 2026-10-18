@@ -27,7 +27,7 @@ import { AlertTriangle, Check, ExternalLink, FlaskConical, KeyRound, Zap } from 
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useDaemonClient } from '../../lib/store.tsx';
+import { useConfigChangeEffect, useDaemonClient } from '../../lib/store.tsx';
 import { putSecret } from '../secrets/secrets-api.ts';
 import { readSpeedups, type SpeedupClient, testSpeedup } from './speedups-api.ts';
 
@@ -322,6 +322,14 @@ export function SpeedupsSurface({
       current = false;
     };
   }, [connection, createClient]);
+
+  // A key saved, removed or tested from anywhere else, or a tool installed, is read again in place.
+  useConfigChangeEffect(connection.daemonId, ['speedups'], () => {
+    if (client === null) return;
+    void readSpeedups(client)
+      .then(view => setLoaded(current => (current?.daemonId === connection.daemonId ? { ...current, view } : current)))
+      .catch(() => undefined);
+  });
 
   const act = useCallback(
     async (

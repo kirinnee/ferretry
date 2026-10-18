@@ -14,15 +14,19 @@
  *   ?draft=<text>         a saved draft to open with
  *   ?layout=chat          a phone chat page: a transcript above the composer, sized by the app's own
  *                         viewport hook, so a (faked) keyboard shrinks it exactly as in the app
+ *   ?runtime=your-turn|working   the model and effort chips, for a session whose last send left
+ *                         `promptReady: false` behind (see below)
  *   ?entries=1            every Add to chat / quote entry point beside the composer — the shipped
  *                         transcript, terminal list, task row and skills surface, each delivering
  *                         through its own production path, inside a reference surface that proves
  *                         the tokens they add (so a chip is a link, as in the app)
  */
-import type { TerminalListView } from '@ferretry/protocol';
+import type { SessionView, TerminalListView } from '@ferretry/protocol';
 import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../../../src/components/composer.tsx';
+import { ComposerRuntime } from '../../../src/components/composer-runtime.tsx';
+import { isPromptKnownBusy, RuntimeModelControls } from '../../../src/components/runtime-controls.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../../src/components/reference-surface.tsx';
 import { SessionSurfaceReferences } from '../../../src/components/session-surface-references.tsx';
 import { Transcript } from '../../../src/components/transcript.tsx';
@@ -33,6 +37,7 @@ import { addReferenceToComposer } from '../../../src/lib/composer-references.ts'
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
+import type { RuntimeModelCatalog } from '../../../src/lib/runtime-models.ts';
 import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
 import { taskSummary } from '../../support/tasks.ts';
 
@@ -122,6 +127,63 @@ function EntryPoints() {
   );
 }
 
+/**
+ * `?runtime=your-turn|working`: the model and effort chips on the composer's status line, exactly as
+ * `SessionChatPage` builds them — `busy` is the shared `isPromptKnownBusy` predicate over the session's
+ * state — for a session whose last send left `promptReady: false` behind, which is every session after
+ * its first message. A choice records its command on `window.__runtime`.
+ */
+const runtimeTurn = parameters.get('runtime');
+const runtimeSent: unknown[] = [];
+(window as unknown as { __runtime: unknown[] }).__runtime = runtimeSent;
+const RUNTIME_VIEW = {
+  config: {
+    id: 'scene-session',
+    name: 'Scene',
+    agent: 'claude-default',
+    harness: 'claude',
+    mode: 'interactive',
+    model: 'claude-opus-5-5',
+    cwd: '/work/scene',
+    createdAt: '2026-10-16T10:00:00.000Z',
+    updatedAt: '2026-10-16T10:00:00.000Z',
+  },
+  state: {
+    id: 'scene-session',
+    status: 'running',
+    turn: 3,
+    promptReady: false,
+    turnState: runtimeTurn === 'working' ? 'working' : 'your-turn',
+  },
+} as unknown as SessionView;
+const RUNTIME_CATALOG: RuntimeModelCatalog = {
+  harness: 'claude',
+  source: 'wrapper-inventory',
+  choices: [
+    { value: 'claude-opus-5-5', label: 'Opus 5.5', isDefault: true, reasoningEfforts: [] },
+    { value: 'claude-sonnet-5', label: 'Sonnet 5', reasoningEfforts: [] },
+  ],
+};
+const runtimeSlot =
+  runtimeTurn === null ? undefined : (
+    <ComposerRuntime
+      busy={isPromptKnownBusy(RUNTIME_VIEW.state)}
+      canControl
+      presentation={parameters.get('compact') === '1' ? 'sheet' : 'popover'}
+      renderModelControls={lifecycle => (
+        <RuntimeModelControls
+          api={{ runtime: async (_daemon, _id, command) => void runtimeSent.push(command) }}
+          canControl
+          catalogs={{ load: async () => RUNTIME_CATALOG }}
+          daemon={daemon}
+          view={RUNTIME_VIEW}
+          {...lifecycle}
+        />
+      )}
+      view={RUNTIME_VIEW}
+    />
+  );
+
 const composer = (
   <Composer
     api={{
@@ -136,6 +198,7 @@ const composer = (
     draftStore={drafts}
     enterKeyPreference="send"
     sessionId="scene-session"
+    {...(runtimeSlot === undefined ? {} : { statusSlot: runtimeSlot })}
     vimMode={parameters.get('vim') === '1'}
   />
 );

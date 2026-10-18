@@ -386,24 +386,24 @@ pre,
    suppressed so the transcript never opens on dead space. */
 .kt-block {
   min-width: 0;
-  margin-top: 2px;
+  margin-top: var(--flow-chrome);
 }
 .kt-block:first-child {
   margin-top: 0;
 }
 /* Real conversation breathes. */
 .kt-block[data-kind='message'] {
-  margin-top: 14px;
+  margin-top: var(--flow-message);
 }
 /* A change of speaker is the strongest boundary in the transcript, and this
    space is what lets it read as one without a divider rule. */
 .kt-block[data-kind='message'][data-turn='true'] {
-  margin-top: 18px;
+  margin-top: var(--flow-turn);
 }
 /* Chrome that FOLLOWS a message belongs to it — keep it close, so the tools an
    assistant ran read as part of that reply rather than as a separate event. */
 .kt-block[data-kind='chrome'][data-after='message'] {
-  margin-top: 6px;
+  margin-top: var(--flow-chrome-after);
 }
 
 /* Genuine human turns and their optimistic copies share one shell. Alignment
@@ -455,7 +455,7 @@ pre,
   margin-bottom: 0;
 }
 .md p {
-  margin: 0.55em 0;
+  margin: var(--flow-paragraph) 0;
 }
 .md h1,
 .md h2,
@@ -482,7 +482,7 @@ pre,
 }
 .md ul,
 .md ol {
-  margin: 0.55em 0;
+  margin: var(--flow-paragraph) 0;
   padding-left: 1.4em;
 }
 .md ul {
@@ -492,7 +492,7 @@ pre,
   list-style: decimal;
 }
 .md li {
-  margin: 0.25em 0;
+  margin: var(--flow-list) 0;
 }
 .md li::marker {
   color: var(--faint);
@@ -632,29 +632,80 @@ pre,
   background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 
-/* PHONE: stack each row into a labelled card (item: "different on mobile").
-   A 4-5 column table cannot show a header row and its cells at 390px without
-   squashing both into unreadable slivers. Below the phone breakpoint every row
-   becomes a card and every value prints its column name via
-   `content: attr(data-label)` (stamped by remarkTableLabels). The real <thead>
-   stays in the DOM (visually clipped, not display:none) and the ARIA roles +
-   `scope=col` on the elements survive `display:block`, so a screen reader still
-   reads proper column headers. 767px is the repo's phone gate (below DRAWER_MAX,
-   the same line used by the keyboard/chrome rules above). */
+/* THE PHONE'S TWO WAYS TO READ A TABLE (markdown-table.tsx). Below the phone breakpoint a table is
+   CARDS by default and the real TABLE on request, the device's choice, switched from the small
+   Cards / Table group in each table's top-right corner. 767px is the repo's phone gate (below
+   DRAWER_MAX, the same line used by the keyboard/chrome rules above). A desktop never shows the
+   switch and always draws the table above. */
+.md-table-tools {
+  display: none;
+  margin: 0;
+}
 @media (max-width: 767px) {
-  .md-table-scroll {
+  .md-table {
+    margin: 0.75em 0;
+  }
+  .md-table > .md-table-scroll {
+    margin: 0;
+  }
+  .md-table-tools {
+    display: flex;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    margin-bottom: var(--flow-1, 4px);
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    line-height: 1;
+  }
+  .md-table-tools button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control, 6px);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+  }
+  .md-table-tools button[aria-pressed='true'] {
+    border-color: var(--border);
+    background: var(--surface-2);
+    color: var(--fg);
+  }
+  .md-table-tools [data-md-table-full] {
+    margin-left: var(--flow-1, 4px);
+  }
+
+  /* CARDS: each row stacks into a labelled record. ONE outer border round the whole table and a
+     hairline between records — the old per-row bordered card drew every row in the theme's stroke,
+     which in Neo is a heavy black rule per row. Every value prints its column's name via
+     `content: attr(data-label)` (stamped by remarkTableLabels). The real <thead> stays in the DOM
+     (visually clipped, not display:none) and `scope=col` survives `display:block`, so a screen
+     reader still reads proper column headers. */
+  [data-md-table-view='cards'] .md-table-scroll {
     width: 100%;
     max-width: 100%;
     overflow-x: visible;
   }
-  .md table,
-  .md tbody,
-  .md tr,
-  .md td {
+  [data-md-table-view='cards'] table,
+  [data-md-table-view='cards'] tbody,
+  [data-md-table-view='cards'] tr,
+  [data-md-table-view='cards'] td {
     display: block;
     width: 100%;
   }
-  .md thead {
+  [data-md-table-view='cards'] table {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  [data-md-table-view='cards'] thead {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -666,30 +717,24 @@ pre,
     white-space: nowrap;
     border: 0;
   }
-  .md tr {
-    margin: 0.55em 0;
-    border: var(--border-width) solid var(--border);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
+  [data-md-table-view='cards'] tr {
+    padding: var(--flow-1, 4px) 0;
+    border-top: 1px solid var(--border-soft, var(--border));
   }
-  .md tr:first-child {
-    margin-top: 0;
+  [data-md-table-view='cards'] tr:first-child {
+    border-top: 0;
   }
-  .md td {
+  [data-md-table-view='cards'] td {
     position: relative;
-    padding: 0.4em 0.7em 0.4em 42%;
+    padding: 0.25em 0.7em 0.25em 42%;
     border: 0;
-    border-bottom: var(--border-width) solid var(--border);
     min-height: 1.6em;
   }
-  .md tr td:last-child {
-    border-bottom: 0;
-  }
-  .md td::before {
+  [data-md-table-view='cards'] td::before {
     content: attr(data-label);
     position: absolute;
     left: 0.7em;
-    top: 0.4em;
+    top: 0.25em;
     width: 38%;
     padding-right: 0.7em;
     box-sizing: border-box;
@@ -700,16 +745,66 @@ pre,
   }
   /* A cell with no header (row longer than the header, or a malformed table):
      no label gutter, value spans the whole card. */
-  .md td:not([data-label]) {
+  [data-md-table-view='cards'] td:not([data-label]) {
     padding-left: 0.7em;
   }
-  .md td:not([data-label])::before {
+  [data-md-table-view='cards'] td:not([data-label])::before {
     content: none;
   }
-  /* Zebra is per-card noise once rows are bordered cards. */
-  .md tr:nth-child(even) td {
+  /* Zebra is noise once rows are separated records. */
+  [data-md-table-view='cards'] tr:nth-child(even) td {
     background: transparent;
   }
+
+  /* TABLE: the real table, in its own horizontal scroller — the page never scrolls sideways. Columns
+     keep a readable width instead of wrapping to slivers, and the header row and the first column stay
+     put while the reader pans, so every value keeps its row and its column in view. */
+  [data-md-table-view='table'] .md-table-scroll {
+    width: 100%;
+    max-width: 100%;
+  }
+  [data-md-table-view='table'] table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  [data-md-table-view='table'] th,
+  [data-md-table-view='table'] td {
+    max-width: 16em;
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: manual;
+    border-width: 0 1px 1px 0;
+    border-color: var(--border-soft, var(--border));
+  }
+  [data-md-table-view='table'] tr > :first-child {
+    border-left-width: 1px;
+  }
+  [data-md-table-view='table'] thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    border-top-width: 1px;
+  }
+  [data-md-table-view='table'] tr > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+  /* The zebra stripe is translucent; a sticky column has to be opaque or the cells it covers show through. */
+  [data-md-table-view='table'] tbody tr:nth-child(even) > :first-child {
+    background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+  }
+  [data-md-table-view='table'] thead tr > :first-child {
+    z-index: 3;
+    background: var(--surface-2);
+  }
+}
+/* The full-screen sheet pans in both directions inside itself. */
+.md-table-pan {
+  overscroll-behavior: contain;
 }
 .md img {
   max-width: 100%;
@@ -997,6 +1092,40 @@ body {
   :root .kt-composer__runtime {
     min-width: 0;
   }
+
+  /* A TABLE'S Cards / Table switch (markdown-table.tsx) is 24px to the eye and 44px to the finger,
+     so every table in the conversation does not grow a 44px toolbar. */
+  :root .md-table-tools button {
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+  }
+  :root .md-table-tools button::after {
+    content: '';
+    height: var(--target-floor);
+    left: 0;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  /* THE SESSIONS PAGE'S "+ New" PILL is 32px to the eye and 44px to the finger: an invisible hit area
+     the full floor tall, laid over it, so the list header keeps one slim line. */
+  :root a.fy-new-session {
+    height: 32px;
+    min-height: 32px;
+    position: relative;
+  }
+  :root a.fy-new-session::after {
+    content: '';
+    height: var(--target-floor);
+    left: 0;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+  }
 }
 
 /* ---- DENSITY RAMP ---------------------------------------------------------
@@ -1032,19 +1161,29 @@ body {
        real phone, 16px still drew "make the text and everything bigger" from the
        owner. 17px is what iOS's own Large text setting renders body copy at. */
     --font-size-base: 17px;
-    --leading-base: 1.55;
     --md-font-size: 17px;
-    --md-leading: 1.6;
     --code-font-size: 14.5px;
     --chrome-font-size: 13.5px;
-  }
-  /* Rendered prose gets a little more room to breathe between blocks, since the
-     line count per paragraph roughly doubles at this width. */
-  .kt-block[data-kind='message'] {
-    margin-top: 16px;
-  }
-  .kt-block[data-kind='message'][data-turn='true'] {
-    margin-top: 22px;
+
+    /* THE PHONE SPACING SCALE, tied to the 17px type (themes.css "vertical flow"). #539 raised the text
+       and kept the desktop rhythm, so on a phone the lines inside a paragraph were airy (1.6) while the
+       gaps BETWEEN blocks were smaller than one line — big text, crammed structure. The owner: "make
+       it comfortable WITHOUT using lots of space". So the space moves rather than grows:
+         - lines sit at 1.45 — still open for a 17px sans, and it is what pays for everything below;
+         - paragraphs part by 0.6em and list items by 0.35em, so a list reads as a list;
+         - a message is a full 16px from the last one and a change of speaker 24px — whole steps of
+           the 4/8/12/16/24 scale, more than one line's leading, so the turn is visible at a glance;
+         - machine rows (tools, commands) stay a tight 4px run, 8px under the message they belong to;
+         - the live "Pontificating…" row stands 16px clear of whatever happened last. */
+    --leading-base: 1.45;
+    --md-leading: 1.45;
+    --flow-chrome: var(--flow-1);
+    --flow-chrome-after: var(--flow-2);
+    --flow-message: var(--flow-4);
+    --flow-turn: var(--flow-5);
+    --flow-live: var(--flow-4);
+    --flow-paragraph: 0.6em;
+    --flow-list: 0.35em;
   }
 }
 
@@ -1918,12 +2057,18 @@ body {
 .kt-chat-surface {
   --chat-column: var(--chat-measure-readable, 720px);
   --chat-gutter-x: 12px;
+  /* THE COMPOSER RUNS NEARLY EDGE TO EDGE ON A PHONE, the way kteam's does: the owner asked for a box
+     that "ALMOST spans the whole width". The text column keeps its reading gutter; the composer's
+     column takes only a sliver, so with the route's own 4px it sits 8px from each screen edge and the
+     field gets the width. From 640px up both halves share one gutter again. */
+  --chat-input-gutter-x: var(--flow-1, 4px);
   width: 100%;
   min-width: 0;
 }
 @media (min-width: 640px) {
   .kt-chat-surface {
     --chat-gutter-x: 16px;
+    --chat-input-gutter-x: var(--chat-gutter-x);
   }
 }
 .kt-chat-surface[data-chat-width='balanced'] {
@@ -1946,6 +2091,23 @@ body {
   margin-inline: auto;
   padding-inline: var(--chat-gutter-x);
 }
+/* A soft fade, never a hard edge, where the conversation runs under the composer: text scrolled to the
+   bottom of the log dissolves into the ground instead of being cut off by the box. It sits in the gap
+   above the composer (pointer-events none), so at rest — the transcript's own bottom padding filling
+   it — there is nothing to fade and it is invisible. */
+.fy-chat-input {
+  position: relative;
+}
+.fy-chat-input::before {
+  background: linear-gradient(to top, var(--chat-ground, transparent), transparent);
+  bottom: 100%;
+  content: '';
+  height: var(--flow-3, 12px);
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: var(--fy-chat-gutter, 0px);
+}
 .fy-chat-input {
   flex-shrink: 0;
   min-width: 0;
@@ -1958,7 +2120,7 @@ body {
   min-width: 0;
   max-width: var(--chat-column);
   margin-inline: auto;
-  padding-inline: var(--chat-gutter-x);
+  padding-inline: var(--chat-input-gutter-x, var(--chat-gutter-x));
 }
 
 /* ---- table / list rows -------------------------------------------------- */

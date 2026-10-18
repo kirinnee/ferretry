@@ -1,0 +1,71 @@
+/**
+ * THE MARKS A RECEIPT IS DRAWN WITH, as one small SVG family so a tick is the same tick everywhere.
+ *
+ * The owner asked for the shapes a messaging app has taught everyone to read, so these are drawn here
+ * instead of borrowed from an icon set whose double tick is two slanted strokes crossing each other:
+ *
+ *   * ONE CHECK is a single clean tick, 10 units wide.
+ *   * TWO CHECKS are that same tick twice, the second 35% of its width to the right, so the second
+ *     sits partly over the first and both stay legible.
+ *   * Every stroke is 1.75 CSS px with round caps and joins, at a height of 14px.
+ *
+ * The stroke is `non-scaling`, so it is 1.75px at any size and any device pixel ratio instead of a
+ * unit count that rounds differently at 1×, 2× and 3×. Colour is `currentColor`: the stylesheet makes it
+ * muted, accent for an answered send and red for a failed one — and the shape alone already says which,
+ * so a mark is never carried by colour.
+ */
+
+import type { SendReceiptKind } from '../lib/send-receipt.ts';
+
+const HEIGHT = 14;
+const STROKE = 1.75;
+const CHECK = 'M2 8.5 5.5 12 12 4.5';
+/** 35% of the check's 10-unit width: far enough to read as two, near enough to overlap. */
+const SECOND_OFFSET = 3.5;
+
+interface Drawing {
+  /** The viewBox width; its height is always 16. */
+  readonly width: number;
+  readonly paths: readonly string[];
+}
+
+const DRAWINGS: Readonly<Record<SendReceiptKind, Drawing>> = {
+  sending: { width: 16, paths: ['M8 4.6V8l2.3 1.5', 'M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2Z'] },
+  held: { width: 16, paths: ['M8 4.6V8l2.3 1.5', 'M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2Z'] },
+  queued: { width: 14, paths: [CHECK] },
+  delivered: {
+    width: 17.5,
+    paths: [CHECK, `M${2 + SECOND_OFFSET} 8.5 ${5.5 + SECOND_OFFSET} 12 ${12 + SECOND_OFFSET} 4.5`],
+  },
+  answered: {
+    width: 17.5,
+    paths: [CHECK, `M${2 + SECOND_OFFSET} 8.5 ${5.5 + SECOND_OFFSET} 12 ${12 + SECOND_OFFSET} 4.5`],
+  },
+  unconfirmed: { width: 16, paths: ['M5.6 5.6a2.6 2.6 0 1 1 3.8 2.3c-.9.5-1.4 1-1.4 2', 'M8 13h.01'] },
+  failed: { width: 16, paths: ['M8 2.5v7.5', 'M8 13h.01'] },
+};
+
+export function ReceiptMark({ kind, className }: { readonly kind: SendReceiptKind; readonly className?: string }) {
+  const { width, paths } = DRAWINGS[kind];
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      data-receipt-mark={kind}
+      fill="none"
+      focusable="false"
+      height={HEIGHT}
+      shapeRendering="geometricPrecision"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={STROKE}
+      viewBox={`0 0 ${width} 16`}
+      width={(HEIGHT * width) / 16}
+    >
+      {paths.map(path => (
+        <path d={path} key={path} vectorEffect="non-scaling-stroke" />
+      ))}
+    </svg>
+  );
+}

@@ -76,3 +76,4 @@ invalidate DaemonRuntimeModelCatalogStore # unmounted: no construction site in p
 # is no daemon, no session, no token and no daemon URL anywhere in its props or its request; giving it
 # a `DaemonConnection` to satisfy this rule would ADD the credential the design exists to withhold.
 access packages/pwa/src/components/fy-render-sandbox.tsx # a fixed same-origin static asset, deliberately unscoped: see docs/fy-render.md
+retain packages/pwa/src/lib/message-clock.ts:formatters # memoised Intl.DateTimeFormat objects keyed by locale and timezone. They describe how this device prints a time, which every paired daemon shares; no daemon record is stored.

@@ -40,6 +40,7 @@ import { CircleAlert, FileCode2, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useConfigChangeEffect } from '../../lib/store.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { PanelPath } from '../../shell/panel-typography.tsx';
 import { Badge, type BadgeTone, Button } from '../../shell/primitives.tsx';
@@ -447,6 +448,20 @@ export function ConfigFileEditor({
     };
   }, [connection, createClient, path, reads]);
 
+  // Changed on the machine — a hand edit, `fy`, another device — and read again in place, unless the
+  // person has started editing: their draft stays, and saving it says the file moved under them.
+  useConfigChangeEffect(connection.daemonId, ['files'], () => {
+    if (load.status !== 'ready' || draft !== load.file.text) return;
+    void createClient(connection)
+      .then(async client => await readConfigFile(client, path))
+      .then(file => {
+        setLoad({ status: 'ready', file });
+        setDraft(file.text);
+        setEtag(file.etag);
+      })
+      .catch(() => undefined);
+  });
+
   const submit = (): void => {
     setSave({ status: 'saving' });
     setConfirm(IDLE);
@@ -645,6 +660,8 @@ export function ConfigFilesSurface({
   }, [connection, createClient, reads]);
 
   const reread = useCallback(() => setReads(count => count + 1), []);
+  // What is in effect, what is broken and what waits — read again whenever any file moved, from anywhere.
+  useConfigChangeEffect(connection.daemonId, ['files'], reread);
 
   const confirmPending = (pending: ConfigPending): void => {
     const mark = (state: ConfirmState): void => setConfirming(previous => ({ ...previous, [pending.path]: state }));

@@ -190,6 +190,19 @@ export class DaemonAccountPickerStore {
     return this.#readCatalog(entry);
   }
 
+  /**
+   * Read the roster and the stored verdicts again, keeping the rows on screen until the answers land:
+   * the machine said its runtimes or logins moved. A read already in flight is joined, not repeated.
+   */
+  reread(daemon: DaemonConnection): void {
+    const entry = this.#entryFor(daemon);
+    if (entry.catalogRequest === null) void this.#readCatalog(entry).catch(() => undefined);
+    if (entry.healthRequest === null) {
+      entry.healthAttempted = true;
+      void this.#readHealth(entry, connection => this.#port.health(connection)).catch(() => undefined);
+    }
+  }
+
   #readCatalog(entry: AccountPickerEntry): Promise<AccountPickerCatalog> {
     entry.catalogAttempted = true;
 

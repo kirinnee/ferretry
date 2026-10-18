@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
+import type { ConfigChangeFrame } from './config-changes.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
 import type {
@@ -196,4 +197,9 @@ export interface IFyApiClient {
     signal?: AbortSignal,
     onIdle?: (idle: FyEventStreamIdle) => void,
   ): Promise<void>;
+  /**
+   * The configuration stream (`/v1/events?topic=config`): the revision in effect first, then every
+   * change as it happens — which kinds of configuration moved. Resolves when the daemon ends it.
+   */
+  configChanges(onFrame: (frame: ConfigChangeFrame) => void, signal?: AbortSignal): Promise<void>;
 }

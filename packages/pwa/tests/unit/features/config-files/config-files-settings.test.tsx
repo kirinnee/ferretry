@@ -13,6 +13,7 @@ import {
 } from '../../../../src/features/config-files/config-files-settings.tsx';
 import { SETTINGS_LINKS, settingsPaletteEntries } from '../../../../src/features/settings/settings-catalog.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
+import { configChangeHarness } from '../../config-change-support.tsx';
 import { runAsync } from '../../../support/react.ts';
 import { settleUntil } from '../../../support/settle.ts';
 import { alpha, DIRECTORY, fakeClients, fileView, type Handler, httpError, STATUS } from './config-files-support.ts';
@@ -32,16 +33,19 @@ afterEach(async () => {
 
 const show = async (handlers: Readonly<Record<string, Handler>>, writes: string[] = []) => {
   const clients = fakeClients({ 'GET /v1/config/status': () => STATUS, ...handlers });
+  const machine = configChangeHarness(alpha.daemonId);
   shown = await mount(
-    <ConfigFilesSurface
-      connection={alpha}
-      createClient={clients.createClient}
-      write={async text => {
-        writes.push(text);
-      }}
-    />,
+    machine.wrap(
+      <ConfigFilesSurface
+        connection={alpha}
+        createClient={clients.createClient}
+        write={async text => {
+          writes.push(text);
+        }}
+      />,
+    ),
   );
-  return { ...clients, view: shown };
+  return { ...clients, move: machine.move, view: shown };
 };
 
 const q = <E extends Element = HTMLElement>(selector: string): E | null =>
@@ -349,6 +353,111 @@ describe('Settings › Files', () => {
       'logins/claude.yaml could not be read. offline',
     );
     expect(must(q<HTMLButtonElement>('[data-config-submit]'), 'save').disabled).toBe(true);
+  });
+});
+
+describe('Settings › Files, when the machine says its files moved', () => {
+  const statusReads = (calls: readonly { readonly route: string }[]) =>
+    calls.filter(call => call.route === 'GET /v1/config/status').length;
+  const fileReads = (calls: readonly { readonly route: string }[]) =>
+    calls.filter(call => call.route === 'GET /v1/config/file').length;
+
+  it('reads the status again when a file changed elsewhere, and ignores a move of anything else', async () => {
+    let issues = STATUS.issues;
+    const { calls, move } = await show({ 'GET /v1/config/status': () => ({ ...STATUS, issues }) });
+    await until('[data-config-files-panel]');
+    expect(q('[data-config-summary]')?.textContent).toBe('4 files · 1 with errors · 1 waiting for you');
+
+    // A hand edit fixed the warden file; nobody touched this screen.
+    issues = [];
+    await move(['runtimes']);
+    expect(statusReads(calls)).toBe(1);
+
+    await move(['files']);
+    await settleUntil(
+      () => q('[data-config-summary]')?.textContent?.includes('0 with errors') === true,
+      'fixed',
+      runAsync,
+    );
+    expect(statusReads(calls)).toBe(2);
+    expect(q('[data-config-section="issues"]')).toBeNull();
+  });
+
+  it('shows the newer text in an open editor when the person has not typed', async () => {
+    let version = 1;
+    const { calls, move } = await show({
+      'GET /v1/config/file': () => fileView({ text: `version: ${String(version)}\n`, etag: `etag-${String(version)}` }),
+      'PUT /v1/config/file': () => ({ path: 'logins/glm.yaml', etag: 'etag-3', outcome: 'applied' }),
+    });
+    await click('[data-config-edit="logins/glm.yaml"]');
+    await until('[data-config-editor-text]');
+    expect(editorText().value).toBe('version: 1\n');
+
+    // `fy` rewrote the file while the editor was open.
+    version = 2;
+    await move(['files']);
+    await settleUntil(() => editorText().value === 'version: 2\n', 'the newer text', runAsync);
+    expect(fileReads(calls)).toBe(2);
+
+    // Saving now answers to the newer version, not the one first opened.
+    await click('[data-config-submit]');
+    await until('[data-config-save="applied"]');
+    const put = must(
+      calls.find(call => call.route === 'PUT /v1/config/file'),
+      'the write',
+    );
+    expect(put.headers.get('if-match')).toBe('etag-2');
+  });
+
+  it('keeps what the person typed and reads nothing when the file moves under their draft', async () => {
+    let version = 1;
+    const { calls, move } = await show({
+      'GET /v1/config/file': () => fileView({ text: `version: ${String(version)}\n`, etag: `etag-${String(version)}` }),
+    });
+    await click('[data-config-edit="logins/glm.yaml"]');
+    await until('[data-config-editor-text]');
+    await type('version: mine\n');
+
+    version = 2;
+    await move(['files']);
+    expect(fileReads(calls)).toBe(1);
+    expect(editorText().value).toBe('version: mine\n');
+  });
+
+  it('keeps the editor as it was when reading the newer file fails', async () => {
+    let reads = 0;
+    const { move } = await show({
+      'GET /v1/config/file': () => {
+        reads += 1;
+        if (reads > 1) throw new Error('offline');
+        return fileView();
+      },
+    });
+    await click('[data-config-edit="logins/glm.yaml"]');
+    await until('[data-config-editor-text]');
+
+    await move(['files']);
+    await settleUntil(() => reads === 2, 'the second read', runAsync);
+    expect(editorText().value).toBe(fileView().text);
+    expect(q('[data-config-editor-failed]')).toBeNull();
+    expect(must(q<HTMLButtonElement>('[data-config-submit]'), 'save').disabled).toBe(false);
+  });
+
+  it('does not read again while the file is still loading or could not be read', async () => {
+    let reads = 0;
+    const { calls, move } = await show({
+      'GET /v1/config/file': () => {
+        reads += 1;
+        throw new Error('offline');
+      },
+    });
+    await click('[data-config-edit="logins/glm.yaml"]');
+    await until('[data-config-editor-failed]');
+
+    await move(['files']);
+    expect(reads).toBe(1);
+    expect(fileReads(calls)).toBe(1);
+    expect(q('[data-config-editor-failed]')).not.toBeNull();
   });
 });
 

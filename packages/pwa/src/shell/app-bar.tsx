@@ -235,7 +235,7 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
       onClick={onOpen}
       aria-label="Open the fleet sidebar"
       title="Open the fleet sidebar"
-      className="kt-btn kt-btn--sm shrink-0 items-center gap-xs text-muted"
+      className="kt-btn kt-btn--sm fy-drawer-trigger shrink-0 items-center gap-xs text-muted"
     >
       <Users size={12} aria-hidden="true" />
       <span className="mono">{sessionCount}</span>
@@ -403,7 +403,7 @@ export function AppBar({
     // and a new stacking context would trap its fixed overlay under page content.
     <header data-density-region="app-bar" className="shrink-0 border-b border-border-strong bg-[var(--bar-bg)]">
       <div
-        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-md font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md"
+        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-1.5 font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md md:py-md"
         data-app-bar-primary=""
       >
         {/* Identity stays together at the start. */}

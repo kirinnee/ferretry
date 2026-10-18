@@ -39,6 +39,7 @@ import {
   FakeTaskBoards,
   FakeTerminals,
   FakeWarden,
+  configChangeSubsystem,
   fleetEventSubsystem,
   grantSubsystem,
   healthSubsystem,
@@ -553,6 +554,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   sessionConsole: consoleSubsystem(),
   fleetEvents: fleetEventSubsystem(),
+  configChanges: configChangeSubsystem(),
   grants: grantSubsystem(),
   audit: {
     log: { record: async () => undefined },

@@ -108,7 +108,8 @@ credentials, components, profiles and runtimes, and a runtime is one credential 
 contract is [docs/account-model.md](docs/account-model.md); the why is
 [docs/design/account-model.md](docs/design/account-model.md). **A credential is stored once and never
 copied**. **Starting a daemon imports nothing**: a machine is "not set up" until somebody chooses.
-The PWA opens the first-run stepper by itself (after pairing, and on Settings › Machines),
+The PWA opens New machine setup by itself (after pairing, and on Settings › Machines) — one rail whose
+Claude Code and Codex steps import, sign in and name each runtime on one screen —
 `fy daemon setup` asks the same questions at a terminal, and `fy daemon import claude|codex` is the
 no-questions verb for scripts. Each import is of the host's own setup with `store: host`, so the
 login is shared in place and never seeded. A `config.yaml` that is not `version: 2` is **refused,

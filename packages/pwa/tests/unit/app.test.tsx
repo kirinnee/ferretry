@@ -537,6 +537,13 @@ const appStore = async (
         },
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
+        // The configuration stream the shell keeps open for the machine on screen: like the live feed
+        // below, it runs until it is cancelled, and a cancelled one ends.
+        configChanges: async (_onFrame: unknown, signal?: AbortSignal) =>
+          await new Promise<void>(resolve => {
+            if (signal?.aborted === true) resolve();
+            else signal?.addEventListener('abort', () => resolve(), { once: true });
+          }),
         /*
          * The live event feed the session route subscribes to. It never resolves and never rejects:
          * a real one runs for the life of the workspace, and a fake that RESOLVED would tell the
@@ -3894,6 +3901,27 @@ describe('the full-screen machine setup route', () => {
       expect(view.container.querySelector(`[data-machine-setup="${ALPHA}"]`)).not.toBeNull();
       expect(view.container.querySelector('[data-density-region="app-bar"]')).toBeNull();
       expect(view.container.querySelector('[data-app-tab-bar]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens on the step named by the address hash, as Settings’ Import again does', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/setup#claude`, [alpha.daemonId], { fleet: NOT_SET_UP });
+    try {
+      await settle();
+      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('ignores a hash that names no step and opens where the setup was', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/setup#nowhere`, [alpha.daemonId], { fleet: NOT_SET_UP });
+    try {
+      await settle();
+      expect(view.container.querySelector(`[data-machine-setup="${ALPHA}"]`)).not.toBeNull();
+      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).toBeNull();
     } finally {
       await view.unmount();
     }

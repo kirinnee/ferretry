@@ -56,7 +56,7 @@ interface Setup {
   readonly answers?: Parameters<typeof scriptedClient>[0];
   readonly sources?: readonly DaemonConnectionRecord[];
   readonly daemonPanels?: MachineSettingsTabProps['daemonPanels'];
-  readonly onSetUp?: () => void;
+  readonly onSetUp?: (startAt?: string) => void;
 }
 
 const props = (
@@ -417,32 +417,79 @@ describe('MachineSettingsTab', () => {
       expect(setup.querySelector('[data-settings-action="import"]')?.textContent).toContain('Import again');
       await click(setup.querySelector('[data-settings-action="import"]'), 'import');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/import');
-      expect(q('[data-first-run-step]')).not.toBeNull();
+      expect(q('[data-setup-note="setup-moved"]')?.textContent).toContain('Import again is');
     });
   });
 
-  it('New machine setup on a set-up machine calls the shell’s full-screen setup', async () => {
-    let opened = 0;
+  it('Import again calls the shell’s full-screen setup on the Claude Code step', async () => {
+    const opened: (string | undefined)[] = [];
     await withTab(
       {
-        onSetUp: () => {
-          opened += 1;
+        onSetUp: startAt => {
+          opened.push(startAt);
+        },
+      },
+      async ({ q, browser }) => {
+        await click(q('[data-settings-action="import"]'), 'import again');
+        expect(opened).toEqual(['claude']);
+        expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+        expect(q('[data-setup-note="setup-moved"]')).toBeNull();
+      },
+    );
+  });
+
+  it('New machine setup on a set-up machine calls the shell’s full-screen setup', async () => {
+    const opened: (string | undefined)[] = [];
+    await withTab(
+      {
+        onSetUp: startAt => {
+          opened.push(startAt);
         },
       },
       async ({ q, browser }) => {
         await click(q('[data-settings-action="setup"]'), 'new machine setup');
-        expect(opened).toBe(1);
+        expect(opened).toEqual([undefined]);
         expect(browser.location.hash).toBe('#machines/studio-mac/machine');
       },
     );
   });
 
-  it('New machine setup opens the in-tab setup flow when the shell offers no full screen', async () => {
+  it('New machine setup shows the full-screen note, with no Open, when the shell offers no full screen', async () => {
     await withTab({ answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
       await click(q('[data-settings-action="setup"]'), 'new machine setup');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
-      expect(q('[data-first-run-step]')).not.toBeNull();
+      expect(q('[data-setup-note="setup-moved"]')?.textContent).toContain('New machine setup is');
+      expect(q('[data-setup-moved-open]')).toBeNull();
+      await click(q('[data-setup-moved-back]'), 'back');
+      expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+      expect(q('[data-machine-settings]')).not.toBeNull();
     });
+  });
+
+  it('an old setup or import link offers Open on the right step, and Back leaves it', async () => {
+    for (const [flow, expected] of [
+      ['setup', undefined],
+      ['import', 'claude'],
+    ] as const) {
+      const opened: (string | undefined)[] = [];
+      await withTab(
+        {
+          hash: `#machines/studio-mac/machine/${flow}`,
+          onSetUp: startAt => {
+            opened.push(startAt);
+          },
+        },
+        async ({ q, browser }) => {
+          expect(q('[data-setup-note="setup-moved"]')?.textContent).toContain('Setup is a full screen now');
+          expect(q('[data-setup-moved-open]')?.textContent).toContain('Open studio-mac’s setup');
+          await click(q('[data-setup-moved-open]'), 'open');
+          expect(opened).toEqual([expected]);
+          await click(q('[data-setup-moved-back]'), 'back');
+          expect(browser.location.hash).toBe('#machines/studio-mac/machine');
+          expect(q('[data-machine-settings]')).not.toBeNull();
+        },
+      );
+    }
   });
 
   it('Export settings opens the export flow, and its back button returns to the tab', async () => {
@@ -458,29 +505,29 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-  it('Set up opens the first run', async () => {
+  it('Set up opens the full-screen note when the shell offers no full screen', async () => {
     await withTab({ machine: FRESH_MACHINE, answers: { '/v1/fleet/setup/scan': scan() } }, async ({ q, browser }) => {
       await click(q('[data-settings-action="setup"]'), 'set up');
       expect(browser.location.hash).toBe('#machines/studio-mac/machine/setup');
-      expect(q('[data-first-run-step="tools"]')).not.toBeNull();
+      expect(q('[data-setup-note="setup-moved"]')).not.toBeNull();
     });
   });
 
-  it('a not-set-up machine’s Set up opens the full-screen first run when the shell offers one', async () => {
-    let opened = 0;
+  it('a not-set-up machine’s Set up opens the full-screen setup when the shell offers one', async () => {
+    const opened: (string | undefined)[] = [];
     await withTab(
       {
         machine: FRESH_MACHINE,
-        onSetUp: () => {
-          opened += 1;
+        onSetUp: startAt => {
+          opened.push(startAt);
         },
       },
       async ({ q, browser }) => {
         await click(q('[data-settings-action="setup"]'), 'set up');
-        expect(opened).toBe(1);
+        expect(opened).toEqual([undefined]);
         // The address is left alone: the first run is a screen of its own, not a flow inside this tab.
         expect(browser.location.hash).toBe('#machines/studio-mac/machine');
-        expect(q('[data-first-run-step]')).toBeNull();
+        expect(q('[data-setup-note="setup-moved"]')).toBeNull();
         expect(q('[data-machine-settings]')).not.toBeNull();
       },
     );
@@ -576,8 +623,8 @@ describe('MachineSettingsTab', () => {
       '/v1/fleet/runtimes': runtimes([runtimeView('claude-default')]),
     };
     const flows: readonly [string, string][] = [
-      ['setup', '[data-first-run-step="tools"]'],
-      ['import', '[data-first-run-step]'],
+      ['setup', '[data-setup-note="setup-moved"]'],
+      ['import', '[data-setup-note="setup-moved"]'],
       ['clone', '[data-clone-step="source"]'],
       ['install-claude', '[data-install-flow="claude"]'],
       ['install-codex', '[data-install-flow="codex"]'],

@@ -50,9 +50,11 @@ import {
   type ConfigPending,
   type ConfigStatusView,
   classifyConfigPath,
+  configChangeKindsForPaths,
   configSchemaId,
   configSchemaModeline,
 } from '@ferretry/protocol';
+import { type ConfigChangeSink, changedConfigPaths } from './changes.ts';
 
 /** The configuration directory, as this service needs it. */
 export interface ConfigDirectoryPort {
@@ -92,6 +94,8 @@ export interface ConfigFilesServiceDeps {
   /** sha256 of the text's UTF-8 bytes, hex: the provisioner's revision, so a file's etag is its revision. */
   digest(text: string): string;
   now(): Date;
+  /** Told the kinds a load found changed since the last load. Absent, nobody is told. */
+  readonly changes?: ConfigChangeSink;
 }
 
 /** A refused edit, with every located reason. */
@@ -146,6 +150,9 @@ const isSingletonAddress = (address: ConfigFileAddress): address is { readonly k
 export class ConfigFilesService {
   #queue: Promise<unknown> = Promise.resolve();
   #snapshot: ConfigSnapshot | undefined;
+  /** The last snapshot a LOAD made — never the empty stand-in `current` answers before one — so a
+   *  change is always judged against something that was actually read. */
+  #loaded: ConfigSnapshot | undefined;
   /** What the log has already been told, so a broken file is reported once, not on every read. */
   #reported = new Set<string>();
   /**
@@ -212,7 +219,19 @@ export class ConfigFilesService {
       at: this.deps.now(),
     };
     this.#snapshot = snapshot;
+    this.#announce(this.#loaded, snapshot);
+    this.#loaded = snapshot;
     return snapshot;
+  }
+
+  /**
+   * Tell the change sink what this load found different from the last one. The first load is the
+   * baseline, not a change: there is nothing a reader could have read before it.
+   */
+  #announce(previous: ConfigSnapshot | undefined, next: ConfigSnapshot): void {
+    if (previous === undefined || this.deps.changes === undefined) return;
+    const paths = changedConfigPaths(previous, next);
+    if (paths.length > 0) this.deps.changes.announce(configChangeKindsForPaths(paths));
   }
 
   /** Tell the log about every issue and held edit it has not been told about yet. */

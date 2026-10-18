@@ -451,3 +451,37 @@
 .fy-sbar--drawer .kt-findbox kbd {
   display: none;
 }
+
+/* THE DRAWER'S FILTER CHIPS keep their 26px pill under a finger too: the 44px floor became three fat
+   44px capsules that out-weighed the sessions under them. An invisible hit area the full floor tall is
+   laid over each, the same trade the receipt mark and a table's view switch make. */
+@media (pointer: coarse) {
+  :root .fy-sbar__chip {
+    min-height: 32px;
+    min-width: 0;
+    position: relative;
+  }
+  :root .fy-sbar__chip::after {
+    content: '';
+    height: var(--target-floor);
+    left: 0;
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  :root .fy-sbar__filters {
+    row-gap: var(--flow-2, 8px);
+  }
+}
+
+/* The app bar's ☰-and-count opener is an icon like the session bar's, not an outlined box — the same
+   weight as ⓘ and Actions on the page a tap away. */
+[data-density-region='app-bar'] .kt-btn.fy-drawer-trigger {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+[data-density-region='app-bar'] .kt-btn.fy-drawer-trigger:hover {
+  background: var(--nav-hover, var(--surface-2));
+}

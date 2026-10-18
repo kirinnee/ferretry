@@ -21,19 +21,17 @@ const title = (value: string): string =>
     .map(part => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(' ');
 
-const recordLabel = (record: LogRecord): string => {
-  const speaker =
-    record.role === 'user'
-      ? 'You'
-      : record.role === 'assistant'
-        ? record.kind === 'message'
-          ? 'Assistant'
-          : title(record.kind)
-        : record.role === 'tool'
-          ? `Tool · ${title(record.kind)}`
-          : title(record.role);
-  return record.clock === undefined ? speaker : `${speaker} · ${record.clock}`;
-};
+/** Who spoke. The record's time is not part of it: it becomes the row's own instant (`at`). */
+const recordLabel = (record: LogRecord): string =>
+  record.role === 'user'
+    ? 'You'
+    : record.role === 'assistant'
+      ? record.kind === 'message'
+        ? 'Assistant'
+        : title(record.kind)
+      : record.role === 'tool'
+        ? `Tool · ${title(record.kind)}`
+        : title(record.role);
 
 const recordKind = (record: LogRecord): TranscriptEntry['kind'] => {
   if (record.role === 'user' && record.kind === 'message') return 'user';
@@ -57,7 +55,7 @@ const isToolRecord = (record: LogRecord): boolean => record.kind === 'tool-call'
 const isHiddenRecord = (record: LogRecord): boolean =>
   !isToolRecord(record) && record.kind !== 'error' && recordKind(record) === 'notice';
 
-const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
+const entryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => {
   const text = record.lines.join('\n');
   const signature = `${record.clock ?? ''}|${record.role}|${record.kind}|${text}`;
   return {
@@ -65,6 +63,7 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
     kind: recordKind(record),
     text: text || title(record.kind),
     label: recordLabel(record),
+    ...(at === undefined ? {} : { at }),
     ...(record.kind === 'error' ? { alert: true } : {}),
   };
 };
@@ -73,17 +72,17 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
  * A person's message, another agent's, or Ferretry's own notice — the user channel carries all three.
  *
  * The id is taken from the record as written, so a row keeps its identity whatever this reading of it
- * decides. A peer or notice row is not labelled "You": who sent it is the row's own chrome, so its label
- * carries only the record's clock.
+ * decides. A peer or notice row is not labelled "You": who sent it is the row's own chrome, so it
+ * carries no label, only the record's instant.
  */
-const userEntryFor = (record: LogRecord, index: number): TranscriptEntry => {
-  const entry = entryFor(record, index);
+const userEntryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => {
+  const entry = entryFor(record, index, at);
   const message = readUserMessage(entry.text);
   if (message.kind === 'human') return { ...entry, text: message.text };
-  const clock = record.clock === undefined ? {} : { label: record.clock };
+  const instant = at === undefined ? {} : { at };
   return message.kind === 'notice'
-    ? { id: entry.id, kind: 'system', text: message.text, ...clock }
-    : { id: entry.id, kind: 'user', text: message.body, peer: message.from, ...clock };
+    ? { id: entry.id, kind: 'system', text: message.text, ...instant }
+    : { id: entry.id, kind: 'user', text: message.body, peer: message.from, ...instant };
 };
 
 /** `Read({"path":"src/App.tsx"})` — the daemon's rendering of one tool call. */
@@ -107,19 +106,34 @@ const toolResult = (text: string): ToolResultData =>
 const DAY_MS = 86_400_000;
 
 /**
- * The instant a record's `HH:MM:SS` clock names, or nothing.
+ * The instant of every record, oldest first; `undefined` for one with no clock.
  *
- * The daemon prints only the UTC wall clock, so the date is inferred: the most recent such instant
- * not after `now`. That is exact for anything under a day old — which is every tool still running —
- * and a record with no clock gets no instant rather than a made-up one, because a wrong elapsed time
- * is worse than none.
+ * THE ONLY PLACE A UTC WALL CLOCK IS READ. The daemon prints each record's time as `HH:MM:SS` in UTC
+ * and nothing else, so this turns that into a real instant once, and everything the reader sees is then
+ * formatted from the instant on the reader's own clock (`message-clock.ts`) — never from the printed
+ * text, which is why a phone in Tokyo no longer shows London's afternoon.
+ *
+ * The date is inferred by walking back from `now`: each record is the most recent instant its clock
+ * names that is not after the record that follows it. That dates a long transcript correctly so long as
+ * no two neighbouring records are a day apart. A record with no clock gets no instant rather than a
+ * made-up one, because a wrong time is worse than none.
  */
-const recordInstant = (clock: string | undefined, now: number): string | undefined => {
-  if (clock === undefined) return undefined;
-  const [hours, minutes, seconds] = clock.split(':').map(Number) as [number, number, number];
-  const today = new Date(now);
-  const at = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), hours, minutes, seconds);
-  return new Date(at > now ? at - DAY_MS : at).toISOString();
+const recordInstants = (records: readonly LogRecord[], now: number): readonly (number | undefined)[] => {
+  const instants: (number | undefined)[] = [];
+  let ceiling = now;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const clock = records[index]?.clock;
+    if (clock === undefined) {
+      instants[index] = undefined;
+      continue;
+    }
+    const [hours, minutes, seconds] = clock.split(':').map(Number) as [number, number, number];
+    const day = new Date(ceiling);
+    const same = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hours, minutes, seconds);
+    ceiling = same > ceiling ? same - DAY_MS : same;
+    instants[index] = ceiling;
+  }
+  return instants;
 };
 
 interface ToolRun {
@@ -156,6 +170,7 @@ const commandEntry = (id: string, command: SlashCommand): TranscriptEntry => ({
 });
 
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
+  const instants = recordInstants(records, now);
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
   const flush = (): void => {
@@ -169,8 +184,8 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       run ??= { index, calls: [] };
       const key = `log:${index}:${fieldHash(`${record.kind}|${text}`)}`;
       if (record.kind === 'tool-call') {
-        const ts = recordInstant(record.clock, now);
-        run.calls.push({ key, use: toolUse(text), ...(ts === undefined ? {} : { ts }) });
+        const at = instants[index];
+        run.calls.push({ key, use: toolUse(text), ...(at === undefined ? {} : { ts: new Date(at).toISOString() }) });
         return;
       }
       const waiting = run.calls.find(call => call.result === undefined && call.orphanResult !== true);
@@ -200,7 +215,8 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       entries.push(commandEntry(id, withCommandOutput({ name: '', tone: 'ok' }, command)));
       return;
     }
-    entries.push(recordKind(record) === 'user' ? userEntryFor(record, index) : entryFor(record, index));
+    const at = instants[index];
+    entries.push(recordKind(record) === 'user' ? userEntryFor(record, index, at) : entryFor(record, index, at));
   });
   flush();
   return entries;

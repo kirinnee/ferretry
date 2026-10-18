@@ -1,4 +1,5 @@
 import { displayCallsign } from '../lib/callsign.ts';
+import { clockOfInstant } from '../lib/message-clock.ts';
 import type { PeerFrom } from '../lib/peer-message.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { Markdown } from './markdown.tsx';
@@ -46,11 +47,10 @@ export function PeerMessageRow({
         </span>
         <Markdown className="fy-peer-reference" text={`:${peer.name}`} {...surface} />
         {peer.replyExpected ? <span className="fy-peer-awaiting">waiting for a reply</span> : null}
-        {entry.label === undefined ? null : <span className="fy-peer-clock">{entry.label}</span>}
       </header>
       <Markdown className="fy-peer-body" text={entry.text} {...surface} />
       {/* Where this send is, as the same small receipt mark the reader's own bubbles wear. */}
-      <MessageFooter record={entry.send} />
+      <MessageFooter clock={clockOfInstant(entry.at)} record={entry.send} side="other" />
       {peer.note === '' ? null : (
         <details className="fy-peer-note">
           <summary>Delivery note for the agent</summary>
@@ -71,7 +71,7 @@ export function SystemNoticeRow({ entry, rhythm }: { readonly entry: TranscriptE
     >
       <span className="fy-system-label">Ferretry</span>
       <Markdown className="fy-system-text" text={entry.text} />
-      {entry.label === undefined ? null : <span className="fy-system-clock">{entry.label}</span>}
+      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
     </div>
   );
 }

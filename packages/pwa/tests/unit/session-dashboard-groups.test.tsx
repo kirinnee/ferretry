@@ -136,12 +136,12 @@ describe('session dashboard groups', () => {
     expect(compact.root.findAllByProps({ 'aria-label': 'Focus folder ferretry' })).toHaveLength(0);
   });
 
-  it('hoists a strict compact-card majority and preserves the exception pill', () => {
+  it('hoists a strict compact-card majority and preserves the exception word', () => {
     const tree = render(
       <LeanDensityGroups
         daemonId={daemonId}
         density="compact"
-        groups={[group('ferretry', [view('a'), view('b'), view('c', 'failed')])]}
+        groups={[group('ferretry', [view('a', 'awaiting_user'), view('b', 'awaiting_user'), view('c', 'failed')])]}
         mode="cards"
         onFocus={() => undefined}
         scoped={false}
@@ -149,7 +149,7 @@ describe('session dashboard groups', () => {
     );
     const panel = tree.root.findByType(LeanGroupPanel);
     expect(panel.props.hue).toMatch(/^var\(--tool-/);
-    expect(JSON.stringify(tree.toJSON())).toContain('2× run');
+    expect(JSON.stringify(tree.toJSON())).toContain('2× you');
     expect(JSON.stringify(tree.toJSON())).toContain('failed');
     expect(tree.root.findByProps({ 'aria-label': 'Focus folder ferretry' }).props.className).toContain('min-h-[44px]');
   });
@@ -167,9 +167,24 @@ describe('session dashboard groups', () => {
     );
     expect(tree.root.findAllByType('button')).toHaveLength(0);
     expect(tree.root.findAll(node => node.props['data-tone'] !== undefined)).toHaveLength(0);
-    expect(tree.root.findByType('section').props.style).toEqual({
-      borderLeftWidth: 3,
-      borderLeftColor: 'var(--tool-read)',
-    });
+    // No coloured rail: the hue marks the folder icon only.
+    expect(tree.root.findByType('section').props.style).toBeUndefined();
+  });
+
+  it('never hoists the routine "run": the dots already say it, and the exceptions keep their words', () => {
+    const tree = render(
+      <LeanDensityGroups
+        daemonId={daemonId}
+        density="compact"
+        groups={[group('ferretry', [view('a'), view('b'), view('c', 'failed')])]}
+        mode="cards"
+        onFocus={() => undefined}
+        scoped={false}
+      />,
+    );
+    const json = JSON.stringify(tree.toJSON());
+    expect(json).not.toContain('2× run');
+    expect(json).not.toContain('"run"');
+    expect(json).toContain('failed');
   });
 });

@@ -18,6 +18,7 @@ export * from './carriers.ts';
 export * from './catalog.ts';
 export * from './client.ts';
 export * from './common.ts';
+export * from './config-changes.ts';
 export * from './config-files.ts';
 export * from './doctor.ts';
 export * from './fleet-catalog.ts';

@@ -7,6 +7,9 @@ import {
   AnalyticsPricingViewSchema,
   AnalyticsResponseSchema,
   BrowserLoginStatusSchema,
+  type ConfigChangeFrame,
+  ConfigChangeFrameSchema,
+  type ConfigChangeKind,
   ConversationMessagePointSchema,
   DaemonCarriersViewSchema,
   type FyEventStreamFrame,
@@ -3682,6 +3685,98 @@ describe('daemon boot lifecycle', () => {
     for (const entries of [fleetFinal, followerFinal]) should(new Set(entries).size).equal(entries.length);
     // Shutdown ended both feeds rather than leaving journal listeners attached to dead sockets.
     should([fleet.closes, follower.closes]).deepEqual([[1000], [1000]]);
+  });
+
+  /**
+   * The configuration stream, driven through the production composition root over a real WebSocket.
+   *
+   * The bug this exists for: an open app showed the logins and runtimes it read once, and a change made
+   * anywhere else — a hand edit, `fy`, another device — never reached it until the whole app was
+   * reloaded. So both halves are real here: the watcher finding a YAML file a person saved by hand, and
+   * another client's edit through the editor route, each reaching an already-open socket as one frame
+   * naming what moved, and the runtime read afterwards answering the new runtime.
+   */
+  it('should tell an open config stream about a hand-edited runtime and another client edit', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-config-stream');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/events?token=${token}&topic=config`);
+    const frames: ConfigChangeFrame[] = [];
+    const closes: number[] = [];
+    socket.addEventListener('message', event => {
+      frames.push(ConfigChangeFrameSchema.parse(JSON.parse(String(event.data))));
+    });
+    socket.addEventListener('close', event => closes.push(event.code));
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve());
+      socket.addEventListener('error', () => reject(new Error('the config socket never opened')));
+    });
+    for (let attempt = 0; attempt < 200 && frames.length === 0; attempt += 1) await Bun.sleep(10);
+    type Change = Extract<ConfigChangeFrame, { readonly kind: 'config' }>;
+    /** Wait for a change frame naming `kind`, past the watcher's one-second fingerprint and its debounce. */
+    const changeNaming = async (kind: ConfigChangeKind): Promise<Change | undefined> => {
+      for (let attempt = 0; attempt < 500; attempt += 1) {
+        const found = frames.find((frame): frame is Change => frame.kind === 'config' && frame.kinds.includes(kind));
+        if (found !== undefined) return found;
+        await Bun.sleep(10);
+      }
+      return undefined;
+    };
+
+    // Act — a person saves three files by hand, the way `fy` or an editor would write them.
+    const config = join(home, 'config');
+    await mkdir(join(config, 'logins'), { recursive: true });
+    await mkdir(join(config, 'profiles'), { recursive: true });
+    await mkdir(join(config, 'runtimes'), { recursive: true });
+    await writeFile(join(config, 'logins', 'you.yaml'), 'harness: claude\nstore: host\n', { mode: 0o600 });
+    await writeFile(join(config, 'profiles', 'default.yaml'), 'contents: []\n', { mode: 0o600 });
+    await writeFile(join(config, 'runtimes', 'hand-made.yaml'), 'credential: you\nprofile: default\nagent: true\n', {
+      mode: 0o600,
+    });
+    const handEdit = await changeNaming('runtimes');
+    const runtimes = await (await fetch(`http://127.0.0.1:${port}/v1/fleet/runtimes`, { headers })).json();
+    // Another client edits `voice.yaml` through the editor route, as a second device would.
+    const edited = await fetch(`http://127.0.0.1:${port}/v1/config/file`, {
+      method: 'PUT',
+      headers: { ...headers, 'content-type': 'application/json', 'if-match': 'absent' },
+      body: JSON.stringify({ path: 'voice.yaml', text: 'defaultEngine: browser\n' }),
+    });
+    const editorChange = await changeNaming('voice');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+    for (let attempt = 0; attempt < 200 && closes.length === 0; attempt += 1) await Bun.sleep(10);
+
+    // Assert
+    should(code).equal(0);
+    // The first frame is where the revision stood when the socket opened, naming nothing.
+    should(frames[0]).match({ kind: 'config', revision: 0, kinds: [] });
+    should(handEdit).match({ kind: 'config' });
+    should(handEdit?.kinds).containDeep(['files', 'credentials', 'profiles', 'runtimes']);
+    should(handEdit?.kinds).not.containEql('voice');
+    should(JSON.stringify(runtimes)).containEql('hand-made');
+    should(edited.status).equal(200);
+    should(editorChange?.kinds).containDeep(['files', 'voice']);
+    should(editorChange?.kinds).not.containEql('runtimes');
+    // One boot, one counter that only moves forward.
+    should(new Set(frames.map(frame => frame.epoch)).size).equal(1);
+    const revisions = frames.map(frame => frame.revision);
+    should(revisions).deepEqual([...revisions].sort((left, right) => left - right));
+    should(closes).deepEqual([1000]);
   });
 
   /**

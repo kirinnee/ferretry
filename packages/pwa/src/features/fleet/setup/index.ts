@@ -1,4 +1,4 @@
-// The first run, Import again, installing a tool, Clone and the move to the new account format
+// The Claude Code and Codex steps, Import again, installing a tool, Clone and the move to the new account format
 // (docs/design/account-model.md §4.3, §4.7, §4.8, §10.3).
 export * from './clone.tsx';
 export * from './clone-model.ts';
@@ -7,9 +7,9 @@ export * from './clone-settings.tsx';
 export * from './clone-settings-model.ts';
 export * from './export-settings.tsx';
 export * from './export-settings-model.ts';
-export * from './first-run.tsx';
+export * from './harness-import-model.ts';
+export * from './harness-step.tsx';
 export * from './first-run-landing.ts';
-export * from './first-run-model.ts';
 export * from './first-run-sign-in.tsx';
 export * from './install-flow.tsx';
 export * from './install-model.ts';

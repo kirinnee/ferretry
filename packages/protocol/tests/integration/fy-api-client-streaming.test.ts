@@ -563,3 +563,45 @@ describe('WebSocketEventTransport', () => {
     );
   });
 });
+
+describe('FyApiClient configuration stream', () => {
+  it('should ask the event route for the config topic and hand on every validated frame', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport(
+      { kind: 'config', epoch: 'boot', revision: 2, kinds: [] },
+      { kind: 'config', epoch: 'boot', revision: 3, kinds: ['runtimes'] },
+      { kind: 'idle', epoch: 'boot', revision: 3, idleSeconds: 30 },
+    );
+    const client = await connectClient(new QueuedHttpTransport(), {
+      baseUrl: 'https://daemon.test/api/',
+      eventTransport,
+    });
+    const frames: unknown[] = [];
+    const controller = new AbortController();
+
+    // Act
+    await client.configChanges(frame => frames.push(frame), controller.signal);
+    await client.configChanges(() => undefined);
+
+    // Assert — no cursor travels: the first frame's revision is how a reader learns what it missed.
+    should(eventTransport.calls[0]?.url).equal('wss://daemon.test/api/v1/events?topic=config');
+    should(eventTransport.signals).deepEqual([controller.signal, undefined]);
+    should(frames).deepEqual([
+      { kind: 'config', epoch: 'boot', revision: 2, kinds: [] },
+      { kind: 'config', epoch: 'boot', revision: 3, kinds: ['runtimes'] },
+      { kind: 'idle', epoch: 'boot', revision: 3, idleSeconds: 30 },
+    ]);
+  });
+
+  it('should refuse a frame that is not a configuration frame', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport({ kind: 'config', epoch: 'boot', revision: 1, kinds: ['all'] });
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+
+    // Act
+    const error = await captureError(async () => await client.configChanges(() => undefined));
+
+    // Assert
+    should(error).be.instanceOf(z.ZodError);
+  });
+});

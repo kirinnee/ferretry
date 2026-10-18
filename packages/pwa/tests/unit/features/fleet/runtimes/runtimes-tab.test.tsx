@@ -2,12 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRuntimeCatalog, FleetRuntimeView } from '@ferretry/protocol';
 import { FleetRuntimeCatalogSchema } from '@ferretry/protocol';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { ProfileBuilder } from '../../../../../src/features/fleet/runtimes/add-runtime.tsx';
-import {
-  createRuntimesTab,
-  launchHref,
-  RuntimesTab,
-} from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
+import { launchHref, RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import {
   APPLIED,
@@ -57,7 +52,6 @@ interface TabOptions {
   readonly online?: boolean;
   readonly calls?: Call[];
   readonly createClient?: () => Promise<FleetClient>;
-  readonly profileBuilder?: ProfileBuilder;
 }
 
 const open = async (options: TabOptions = {}) => {
@@ -71,7 +65,6 @@ const open = async (options: TabOptions = {}) => {
       checking={false}
       onRetry={() => undefined}
       createClient={options.createClient ?? (async () => client)}
-      {...(options.profileBuilder === undefined ? {} : { profileBuilder: options.profileBuilder })}
       pollMs={5}
     />,
   );
@@ -152,7 +145,7 @@ describe('Runtimes tab list', () => {
     expect(text(view.container, '[data-runtimes-empty] button')).toBe('Add your first runtime');
     expect(view.container.querySelector('[data-runtime-row]')).toBeNull();
     await click(view.container, '[data-add-runtime]');
-    expect(text(view.container, '#machine-stepper-title')).toBe('Add a runtime');
+    expect(text(view.container, '[data-add-runtime] h3')).toBe('Add a runtime');
     await view.unmount();
   });
 
@@ -196,15 +189,24 @@ describe('Add runtime from the tab', () => {
   const journey = async (view: Awaited<ReturnType<typeof open>>): Promise<void> => {
     await click(view.container, '[data-add-runtime]');
     await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
-    await click(view.container, '[data-step-next]');
     await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
-    await click(view.container, '[data-step-next]');
     expect(must(view.container.querySelector<HTMLInputElement>('#add-runtime-name'), 'name').value).toBe(
       'claude-claude-hooks',
     );
     await click(view.container, '[data-change-submit]');
     await settle();
   };
+
+  it('opens the one form in place of the list, and its way back returns to the list', async () => {
+    const view = await open();
+    await click(view.container, '[data-add-runtime]');
+    expect(text(view.container, 'h3')).toBe('Add a runtime');
+    expect(view.container.querySelector('[data-runtimes-tab]')).toBeNull();
+    await click(view.container, '[data-page-back]');
+    expect(view.container.querySelectorAll('[data-runtime-row]')).toHaveLength(5);
+    expect(window.location.hash).toBe('#machines/studio-mac/runtimes');
+    await view.unmount();
+  });
 
   it('creates a runtime, re-reads, and Open lands on the runtime’s own page', async () => {
     const made = runtime({ name: 'claude-claude-hooks', profile: 'Claude hooks' });
@@ -223,7 +225,7 @@ describe('Add runtime from the tab', () => {
       },
     });
     await journey(view);
-    expect(text(view.container, '[data-add-runtime-step="done"]')).toContain('claude-claude-hooks is ready to launch');
+    expect(text(view.container, '[data-add-runtime-done]')).toContain('claude-claude-hooks is ready to launch');
     await click(view.container, '[data-add-runtime-finish="open"]');
     expect(view.container.querySelector('[data-runtime-page="claude-claude-hooks"]')).not.toBeNull();
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes/claude-claude-hooks');
@@ -249,48 +251,6 @@ describe('Add runtime from the tab', () => {
     expect(text(view.container, '[data-runtimes-tab] [role="alert"]')).toContain('didn’t answer');
     expect(window.location.hash).toBe('#machines/studio-mac/runtimes');
     await view.unmount();
-  });
-
-  it('createRuntimesTab plugs the profile builder into "+ Build a new profile"', async () => {
-    const Tab = createRuntimesTab({
-      profileBuilder: { kind: 'build-profile', flowInput: () => ({}) as never, Step: () => null },
-      pollMs: 5,
-    });
-    const client = scripted(reads());
-    const view = await mount(
-      <Tab
-        connection={STUDIO}
-        machineName="studio-mac"
-        machine={machine()}
-        online
-        checking={false}
-        onRetry={() => undefined}
-        createClient={async () => client}
-      />,
-    );
-    await settle();
-    expect(view.container.querySelector('[data-runtimes-tab]')).not.toBeNull();
-    await click(view.container, '[data-add-runtime]');
-    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
-    await click(view.container, '[data-step-next]');
-    expect(text(view.container, '[data-add-row="profile"]')).toBe('Build a new profile');
-    await view.unmount();
-
-    const Plain = createRuntimesTab();
-    const bare = await mount(
-      <Plain
-        connection={STUDIO}
-        machineName="studio-mac"
-        machine={machine()}
-        online
-        checking={false}
-        onRetry={() => undefined}
-        createClient={async () => client}
-      />,
-    );
-    await settle();
-    expect(bare.container.querySelector('[data-runtimes-tab]')).not.toBeNull();
-    await bare.unmount();
   });
 });
 

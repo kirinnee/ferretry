@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   type CapabilityGrants,
+  type ConfigChangeKind,
   type CreateTerminalRequest,
   DAEMON_CAPABILITIES,
   type LearningConfig,
@@ -41,6 +42,7 @@ import {
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
+import { ConfigChangeLedger, ConfigChangeStreamService } from '../../../../src/lib/config-files/index.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
   type AttentionLedger,
@@ -2101,4 +2103,16 @@ export function deviceGrantsOver(
     clientName: 'fy',
     changed,
   });
+}
+
+/** The configuration stream and its sink, over a ledger whose announcements every test can read. */
+export function configChangeSubsystem(announced: (readonly ConfigChangeKind[])[] = []) {
+  const ledger = new ConfigChangeLedger('epoch-test', { after: () => undefined });
+  const stream = new ConfigChangeStreamService(ledger, { after: () => ({ cancel: () => undefined }) });
+  return {
+    handler: (downstream: SocketDownstream) => stream.handler(downstream),
+    announce: (kinds: readonly ConfigChangeKind[]) => {
+      announced.push(kinds);
+    },
+  };
 }
