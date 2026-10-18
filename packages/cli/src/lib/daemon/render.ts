@@ -1,5 +1,6 @@
 import type { HealthView } from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
+import { servesOutsideSupervisor } from './probe.ts';
 
 /** What `daemon status` concluded, before it is turned into text or JSON. */
 export interface DaemonStatusView {
@@ -8,6 +9,8 @@ export interface DaemonStatusView {
   readonly reachability: 'serving' | 'unreachable' | 'stopped';
   readonly supervisor: DaemonSupervisorReport;
   readonly health?: HealthView | undefined;
+  /** Serving, but not as the installed service manager's daemon. See `servesOutsideSupervisor`. */
+  readonly orphan: boolean;
 }
 
 /**
@@ -22,9 +25,11 @@ export function decideDaemonStatus(
   supervisor: DaemonSupervisorReport,
   health: HealthView | undefined,
 ): DaemonStatusView {
-  if (health !== undefined) return { daemon, reachability: 'serving', supervisor, health };
+  if (health !== undefined) {
+    return { daemon, reachability: 'serving', supervisor, health, orphan: servesOutsideSupervisor(supervisor, health) };
+  }
   const alive = supervisor.state === 'running';
-  return { daemon, reachability: alive ? 'unreachable' : 'stopped', supervisor };
+  return { daemon, reachability: alive ? 'unreachable' : 'stopped', supervisor, orphan: false };
 }
 
 /** A status that is not `serving` is a failure for a script asking "can I use the daemon?". */
@@ -57,7 +62,10 @@ export function renderDaemonStatus(view: DaemonStatusView): string {
       : `  ${view.supervisor.manager}: ${view.supervisor.state}${view.supervisor.detail === undefined || view.supervisor.detail === '' ? '' : ` (${view.supervisor.detail})`}`;
 
   if (view.reachability === 'serving' && view.health !== undefined) {
-    return [`${view.daemon} is serving`, ...healthLines(view.health), supervised].join('\n');
+    const headline = view.orphan
+      ? `${view.daemon} is serving, but OUTSIDE ${view.supervisor.manager} — nothing supervises it`
+      : `${view.daemon} is serving`;
+    return [headline, ...healthLines(view.health), supervised].join('\n');
   }
   if (view.reachability === 'unreachable') {
     const pid = view.supervisor.pid === undefined ? '' : ` (pid ${String(view.supervisor.pid)})`;
@@ -72,6 +80,7 @@ export function renderDaemonStatusJson(view: DaemonStatusView): string {
     {
       daemon: view.daemon,
       reachability: view.reachability,
+      orphan: view.orphan,
       supervisor: {
         manager: view.supervisor.manager,
         state: view.supervisor.state,

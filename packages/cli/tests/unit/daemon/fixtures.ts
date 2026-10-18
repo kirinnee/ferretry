@@ -469,6 +469,20 @@ export class FakeSupervisor implements IServiceDefinitionSupervisor {
     return Promise.resolve(this.startHandle);
   }
 
+  /** Absent until `canRestartInPlace`, the way launchd has no one-command restart. */
+  restartInPlace?: (executable: string) => Promise<void>;
+  readonly restartedExecutables: string[] = [];
+
+  /** Behave like systemd: one `restart` command that also rewrites the definition. */
+  canRestartInPlace(): this {
+    this.restartInPlace = (executable: string): Promise<void> => {
+      this.calls.push('restartInPlace');
+      this.restartedExecutables.push(executable);
+      return Promise.resolve();
+    };
+    return this;
+  }
+
   stop(request: StopRequest): Promise<void> {
     this.calls.push(request.escalate ? 'stop:escalate' : 'stop');
     this.stops.push(request);

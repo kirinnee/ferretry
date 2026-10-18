@@ -21,7 +21,7 @@ import type {
   IStateHomeClaimPort,
   RetiredArtifactOutcome,
 } from './ports.ts';
-import { livenessOf } from './probe.ts';
+import { livenessOf, servesOutsideSupervisor } from './probe.ts';
 import {
   beginReadinessWait,
   decideReadiness,
@@ -242,6 +242,11 @@ export class DaemonController {
     const service = this.#service();
     // Before anything is written: one definition per host, and it may belong to another state home.
     await service.assertServes(undefined);
+    // A daemon `fy daemon start` ran before there was a definition holds the state home's lock, so the
+    // manager's own daemon would exit at once and leave that one serving with nothing supervising it —
+    // while this verb reported success with the stray's pid. It is handed over first.
+    const orphan = await this.#orphanOf(service, await this.deps.health.probe());
+    if (orphan !== undefined) await this.#stopOrphan(service, orphan);
     // Before the definition is written, so a unit file never names a store path nothing is holding.
     await this.#holdDaemonClosure(daemon.path);
     await service.install(daemon.path);
@@ -271,9 +276,16 @@ export class DaemonController {
 
   async #start(): Promise<void> {
     const owner = await this.#owner();
-    const serving = await this.deps.health.probe();
+    let serving = await this.deps.health.probe();
     // "Already serving" is a claim about THIS state home, and so is the rewrite a start does below.
     await owner.assertServes(serving?.pid);
+    // Serving outside the installed manager is not "already serving": the manager owns this daemon
+    // once it has a definition, so the stray is stopped and the manager starts its own below.
+    const orphan = await this.#orphanOf(owner, serving);
+    if (orphan !== undefined) {
+      await this.#stopOrphan(owner, orphan);
+      serving = undefined;
+    }
     if (serving !== undefined) {
       this.#warnIfRunningIsStale(serving);
       this.deps.out.success(`${this.#name} is already serving (pid ${String(serving.pid)})`);
@@ -300,11 +312,10 @@ export class DaemonController {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     await owner.assertServes(health?.pid);
-    if (!(await this.#running(owner, health))) {
+    if (!(await this.#bringDown(owner, health))) {
       this.deps.out.warn(`${this.#name} is not running`);
       return;
     }
-    await this.#pressStop(owner, health?.pid);
     this.deps.out.success(`${this.#name} stopped`);
   }
 
@@ -316,14 +327,37 @@ export class DaemonController {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     await owner.assertServes(health?.pid);
-    if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
-    else this.deps.out.warn(`${this.#name} was not running; starting it`);
-    // Restart is when an upgraded executable is picked up, so the root is reconciled here too.
-    await this.#holdDaemonClosure(daemon.path);
-    const handle = await owner.start(daemon.path);
-    const ready = await this.#awaitReady(owner, handle);
+    const ready = await this.#restartUnder(owner, daemon.path, health);
     await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
+  }
+
+  /**
+   * Take the daemon down and bring it back under `owner`.
+   *
+   * A manager that can restart in one command is asked to, so the daemon is never down with nothing
+   * owning the transition; only a daemon serving OUTSIDE it is stopped by this CLI first, because the
+   * manager cannot stop what it did not start. Every other owner is stopped, watched until it is
+   * down, and started. Either way the root is reconciled before the launch, because restart is when
+   * an upgraded executable is picked up.
+   */
+  async #restartUnder(
+    owner: IDaemonSupervisor,
+    executable: string,
+    health: HealthView | undefined,
+  ): Promise<HealthView> {
+    const service = this.deps.service;
+    if (service === undefined || owner !== service || service.restartInPlace === undefined) {
+      if (!(await this.#bringDown(owner, health))) this.deps.out.warn(`${this.#name} was not running; starting it`);
+      await this.#holdDaemonClosure(executable);
+      return await this.#awaitReady(owner, await owner.start(executable));
+    }
+    const orphan = await this.#orphanOf(owner, health);
+    if (orphan !== undefined) await this.#stopOrphan(owner, orphan);
+    else if (!(await this.#running(owner, health))) this.deps.out.warn(`${this.#name} was not running; starting it`);
+    await this.#holdDaemonClosure(executable);
+    await service.restartInPlace(executable);
+    return await this.#awaitReady(owner, {});
   }
 
   /**
@@ -364,7 +398,7 @@ export class DaemonController {
     this.deps.out.warn(renderResetPlan(plan));
     await this.#confirmReset(options);
 
-    if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
+    await this.#bringDown(owner, health);
     const removals: ResetSurvey[] = [];
     for (const root of roots) removals.push({ root, measure: await this.deps.resetTrees.remove(root.path) });
     this.deps.out.success(renderResetOutcome(this.#name, removals, this.deps.clientName));
@@ -415,8 +449,15 @@ export class DaemonController {
     const view = decideDaemonStatus(this.#name, supervisor, health);
     const code = statusExitCode(view);
     if (options.json === true) this.deps.out.success(renderDaemonStatusJson(view));
-    else if (code === 0) this.deps.out.success(renderDaemonStatus(view));
+    else if (code === 0 && !view.orphan) this.deps.out.success(renderDaemonStatus(view));
     else this.deps.out.warn(renderDaemonStatus(view));
+    // Still exit 0: an orphan serves, which is the question a script asks. The remedy is said instead.
+    if (options.json !== true && view.orphan && health !== undefined) {
+      this.deps.out.warn(
+        `pid ${String(health.pid)} was not started by ${supervisor.manager}, so ${supervisor.manager} cannot start its own; ` +
+          `run ${this.deps.clientName} daemon restart to stop it and have ${supervisor.manager} own the daemon`,
+      );
+    }
     if (options.json !== true && health !== undefined) this.#warnIfRunningIsStale(health);
     if (code !== 0) this.deps.out.setExitCode(code);
   }
@@ -679,14 +720,63 @@ export class DaemonController {
     return (await owner.inspect()).state === 'running';
   }
 
+  /** The answering daemon, when it serves this state home outside the installed service manager. */
+  async #orphanOf(owner: IDaemonSupervisor, health: HealthView | undefined): Promise<HealthView | undefined> {
+    if (owner === this.deps.direct || health === undefined) return undefined;
+    return servesOutsideSupervisor(await owner.inspect(), health) ? health : undefined;
+  }
+
+  /**
+   * Stop a daemon the service manager did not start, the way a direct one is stopped.
+   *
+   * The manager cannot do it: `systemctl stop` on a failed unit is a no-op that succeeds, and the
+   * daemon it was asked about keeps serving. The direct supervisor signals the pid only once it is
+   * proved to hold THIS state home's lock, so an unrelated process on the port is never touched.
+   */
+  async #stopOrphan(owner: IDaemonSupervisor, orphan: HealthView): Promise<void> {
+    this.deps.out.warn(
+      `${this.#name} pid ${String(orphan.pid)} serves ${this.deps.layout.stateHome} outside ${owner.manager}; ` +
+        `stopping it so ${owner.manager} owns the daemon`,
+    );
+    await this.#pressStop(this.deps.direct, orphan.pid);
+  }
+
+  /**
+   * Stop whatever serves this state home; `false` when nothing was running.
+   *
+   * An orphan is stopped directly, and then the manager too if it reports its own daemon running — a
+   * launchd `KeepAlive` job can have respawned one the moment the orphan let go of the lock.
+   */
+  async #bringDown(owner: IDaemonSupervisor, health: HealthView | undefined): Promise<boolean> {
+    const orphan = await this.#orphanOf(owner, health);
+    if (orphan !== undefined) {
+      await this.#stopOrphan(owner, orphan);
+      if ((await owner.inspect()).state === 'running') await this.#pressStop(owner, undefined);
+      return true;
+    }
+    if (!(await this.#running(owner, health))) return false;
+    await this.#pressStop(owner, health?.pid);
+    return true;
+  }
+
   /** Poll until the daemon serves HTTP, it is observed to have died, or the deadline passes. */
   async #awaitReady(owner: IDaemonSupervisor, handle: DaemonStartHandle, initiallyAlive = false): Promise<HealthView> {
     let state = beginReadinessWait(this.deps.clock.now());
     if (initiallyAlive) state = { ...state, sawAlive: true };
     while (true) {
       const health = await this.deps.health.probe();
-      if (health !== undefined) return health;
-      const liveness = livenessOf(await owner.inspect(handle));
+      if (health !== undefined && owner === this.deps.direct) return health;
+      const report = await owner.inspect(handle);
+      // An answer from a daemon the manager did not start is not THIS start coming up: reporting it as
+      // ready is how `install` once said "started (pid N)" about a stray while the unit had failed.
+      if (health !== undefined && !servesOutsideSupervisor(report, health)) return health;
+      if (health !== undefined && report.state !== 'running') {
+        throw new DaemonStartupFailedError(
+          `${this.#name} pid ${String(health.pid)} serves ${this.deps.layout.stateHome} outside ${owner.manager}, so ` +
+            `${owner.manager}'s own daemon could not take the state home; run ${this.deps.clientName} daemon restart to hand it over`,
+        );
+      }
+      const liveness = livenessOf(report);
       const decision = decideReadiness(state, liveness, this.deps.clock.now(), this.readiness);
       if (decision.kind === 'exited') {
         throw new DaemonStartupFailedError(

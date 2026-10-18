@@ -1,3 +1,4 @@
+import type { HealthView } from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
 import type { DaemonLiveness } from './readiness.ts';
 
@@ -110,6 +111,23 @@ export function readLaunchdReport(
     return { manager: 'launchd', state: 'absent', detail: 'no launchd user agent is installed' };
   }
   return { manager: 'launchd', state: 'stopped', detail };
+}
+
+/**
+ * Is the daemon answering for this state home one its installed service manager did NOT start?
+ *
+ * That daemon is an ORPHAN: it holds the state home's lifetime lock, so the manager's own daemon
+ * exits with "another one owns this state home" — on systemd `RestartPreventExitStatus` then leaves
+ * the unit `failed`, on launchd `KeepAlive` respawns it every throttle interval — while the orphan
+ * serves unsupervised. A `fy daemon start` before the first `install` used to leave exactly that.
+ *
+ * The answering daemon's own pid is compared with the one the manager runs. A manager that reports
+ * itself running but names no pid cannot be contradicted, so it is believed rather than guessed about.
+ */
+export function servesOutsideSupervisor(report: DaemonSupervisorReport, health: HealthView | undefined): boolean {
+  if (health === undefined || report.manager === 'direct') return false;
+  if (report.state !== 'running') return true;
+  return report.pid !== undefined && report.pid !== health.pid;
 }
 
 /** What the supervisor's verdict means to a readiness wait. */
