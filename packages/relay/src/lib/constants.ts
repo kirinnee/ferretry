@@ -100,7 +100,8 @@ export const CLAIM_DEADLINE_SECONDS = 10 as const;
 export const MAX_PENDING_DAEMON_SOCKETS = 4 as const;
 
 /**
- * Socket arrivals one rendezvous accepts in {@link CONNECTION_RATE_WINDOW_SECONDS}.
+ * Socket arrivals one rendezvous accepts in {@link CONNECTION_RATE_WINDOW_SECONDS}, PER ROLE: clients
+ * share one window and the daemon has its own, so retrying clients can never lock the daemon out.
  *
  * A relay only ever serves the fingerprints its deployer listed, so this is not abuse policing —
  * it is the bound that stops a known fingerprint, leaked or misconfigured, from turning into an
