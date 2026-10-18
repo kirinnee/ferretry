@@ -2,9 +2,10 @@
  * New machine setup — onboarding v2 (spec R4, R6; build plan P9; the approved mock's "New machine
  * setup").
  *
- * A PROGRESS RAIL, NOT A FORCED STEPPER. The steps are listed down the left on a desktop and across the
- * top on a phone; any of them opens with one tap, every one has Skip, and Done lists what was set and
- * what was skipped with a "Set up later" link to the Settings panel that owns it. The rules — which
+ * ONE PROGRESS RAIL, NOT A FORCED STEPPER, AND NO STEPPER INSIDE A STEP. The steps are listed down the
+ * left on a desktop and across the top on a phone; any of them opens with one tap, every one has Skip, and
+ * Done lists what was set and what was skipped with a "Set up later" link to the Settings panel that owns
+ * it. Claude Code and Codex are a step each, and each makes its runtime on its own screen. The rules — which
  * step is next, what Skip marks, where "later" is — are `onboarding-model.ts`; each step's body reuses
  * its Settings surface (`onboarding-steps.tsx`).
  *
@@ -21,10 +22,13 @@ import { Button } from '../../../shell/primitives.tsx';
 import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
+import { readFleetRuntimes } from '../catalog-api.ts';
 import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
 import { wardenSummary } from '../../warden/warden-settings-model.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
+import { OnboardingHarnessStep } from './harness-step.tsx';
 import {
+  answerOnboardingHarness,
   backOnboardingStep,
   chooseOnboardingStart,
   continueOnboarding,
@@ -45,7 +49,6 @@ import {
   OnboardingControlsStep,
   OnboardingDoneStep,
   OnboardingLearningStep,
-  OnboardingLoginsStep,
   OnboardingPairStep,
   OnboardingSpeedupsStep,
   OnboardingStartStep,
@@ -53,15 +56,15 @@ import {
   OnboardingWardenStep,
   type VoiceCleanupPort,
 } from './onboarding-steps.tsx';
-import type { FirstRunProgressPort, MachineSetupProgressPort } from './setup-progress.ts';
+import type { MachineSetupProgressPort } from './setup-progress.ts';
 
 export interface MachineOnboardingProps extends MachineTabProps {
   /** Every OTHER machine this browser has paired, for Start from › Clone. */
   readonly sources: readonly DaemonConnectionRecord[];
   /** Where the rail's place is kept; absent when this browser has no storage. */
   readonly progress?: MachineSetupProgressPort;
-  /** The Logins step's own progress (the Claude Code and Codex check). */
-  readonly firstRunProgress?: FirstRunProgressPort;
+  /** Open on this step (Import again opens on Claude Code); the kept progress otherwise. */
+  readonly startAt?: MachineSetupStepId;
   /** Finish setup: the person is done here. */
   readonly onFinish: () => void;
   /** Finish later: leave now, the place kept. */
@@ -74,6 +77,8 @@ export interface MachineOnboardingProps extends MachineTabProps {
   readonly voice?: ParakeetVoice | null;
   /** The harness and tests hand in a pairing client, so no capture ever holds a real code. */
   readonly createPairingClient?: PairingClientFactory;
+  /** How often a waiting sign-in is re-read. Supplied in tests. */
+  readonly pollMs?: number;
 }
 
 /** What Done can say about each step, read from the machine when Done opens. */
@@ -86,10 +91,11 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
     void (async () => {
       const client = await createClient(connection).catch(() => null);
       if (client === null) return;
-      const [speedups, warden, learning] = await Promise.all([
+      const [speedups, warden, learning, runtimes] = await Promise.all([
         readSpeedups(client).catch(() => null),
         client.request('/v1/warden/config', WardenConfigViewSchema).catch(() => null),
         client.request('/v1/learning/config', LearningConfigSchema).catch(() => null),
+        readFleetRuntimes(client).catch(() => null),
       ]);
       if (!live) return;
       const jev = jevKeyStatus(speedups).state === 'set';
@@ -99,6 +105,14 @@ function useDoneFacts(tab: MachineTabProps, active: boolean, clonedFrom: string 
           : { keys: Object.fromEntries(speedups.providers.map(provider => [provider.label, provider.set])) }),
         ...(warden === null ? {} : { warden: wardenSummary(warden.config, jev) }),
         ...(learning === null ? {} : { passiveDefault: learning.passiveDefault }),
+        ...(runtimes === null
+          ? {}
+          : {
+              runtimes: {
+                claude: runtimes.runtimes.filter(runtime => runtime.harness === 'claude').map(runtime => runtime.name),
+                codex: runtimes.runtimes.filter(runtime => runtime.harness === 'codex').map(runtime => runtime.name),
+              },
+            }),
       });
     })();
     return () => {
@@ -112,17 +126,21 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
   const {
     sources,
     progress: store,
-    firstRunProgress,
+    startAt,
     onFinish,
     onLeave,
     onNavigate,
     voiceCleanup,
     voice,
     createPairingClient,
+    pollMs,
     ...tab
   } = props;
   const { connection, machineName } = tab;
-  const [progress, setProgress] = useState<MachineSetupProgress>(() => store?.saved ?? ONBOARDING_START);
+  const [progress, setProgress] = useState<MachineSetupProgress>(() => {
+    const kept = store?.saved ?? ONBOARDING_START;
+    return startAt === undefined ? kept : goToOnboardingStep(kept, startAt);
+  });
   const [clonedFrom, setClonedFrom] = useState<string | undefined>(undefined);
   const at = progress.at;
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -175,13 +193,17 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             onCloned={() => move(continueOnboarding)}
           />
         );
-      case 'logins':
+      case 'claude':
+      case 'codex':
         return (
-          <OnboardingLoginsStep
+          <OnboardingHarnessStep
+            key={step}
             tab={tab}
-            {...(firstRunProgress === undefined ? {} : { progress: firstRunProgress })}
-            onDone={() => move(continueOnboarding)}
-            onLeave={() => move(skipOnboardingStep)}
+            harness={step}
+            answers={progress.answers?.[step] ?? {}}
+            onAnswers={answers => move(current => answerOnboardingHarness(current, step, answers))}
+            onReady={() => move(current => markOnboardingStep(current, step))}
+            {...(pollMs === undefined ? {} : { pollMs })}
           />
         );
       case 'speedups':

@@ -3883,6 +3883,27 @@ describe('the full-screen machine setup route', () => {
       await view.unmount();
     }
   });
+
+  it('opens on the step named by the address hash, as Settings’ Import again does', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/setup#claude`, [alpha.daemonId], { fleet: NOT_SET_UP });
+    try {
+      await settle();
+      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('ignores a hash that names no step and opens where the setup was', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/setup#nowhere`, [alpha.daemonId], { fleet: NOT_SET_UP });
+    try {
+      await settle();
+      expect(view.container.querySelector(`[data-machine-setup="${ALPHA}"]`)).not.toBeNull();
+      expect(view.container.querySelector('[data-onboarding-step-body="claude"]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
 });
 
 /** The Warden page's refresh cadence. */

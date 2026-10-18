@@ -254,38 +254,40 @@ async function expectScreen(page: ProductPage, selector: string, timeout = 20_00
 }
 
 /**
- * From the first run's opening to the Claude question, through whatever stands between.
- *
- * The scan gate (main's operator password) and the tools step each render only after a read, so
- * checking for either at one instant raced them. This waits for SOME known screen and answers it
- * until the Claude question is on the glass.
+ * From New machine setup's opening to its Claude Code step: Start from is answered fresh, and the step
+ * is reached once its runtime name field is on the glass (the scan has been read).
  */
 async function reachClaudeQuestion(page: ProductPage, journey: string): Promise<void> {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
     const at = await page.evaluate<string>(`(() => {
-      if (document.querySelector('[data-machine-stepper][data-step="claude"] [data-harness-import]')) return 'claude';
-      if (document.querySelector('[data-first-run-locked] [data-change-submit]')) return 'locked';
-      if (document.querySelector('[data-machine-stepper][data-step="tools"] [data-step-next]')) return 'tools';
+      if (document.querySelector('[data-onboarding-step-body="claude"] [data-harness-name="claude"]')) return 'claude';
+      if (document.querySelector('[data-machine-onboarding][data-onboarding-at="start"] [data-onboarding-next]')) return 'start';
       return 'waiting';
     })()`);
-    if (at === 'claude') return;
-    if (at === 'locked') {
-      await answerPasswordIfAsked(page);
-      await page.click('[data-first-run-locked] [data-change-submit]');
-      await page.waitForSelector('[data-first-run-locked]', { state: 'detached', timeout: 20_000 });
+    if (at === 'claude') {
       await recordStep({
         journey,
-        step: 'first-run-scan-gate',
+        step: 'setup-claude-step',
         status: 'PASS',
-        evidence: 'the scan asked for the operator password and read the machine once given it',
+        evidence: 'the Claude Code step read the machine',
       });
-    } else if (at === 'tools') await page.click('[data-machine-stepper][data-step="tools"] [data-step-next]');
+      return;
+    }
+    if (at === 'start') await page.click('[data-machine-onboarding] [data-onboarding-next]');
     else await Bun.sleep(200);
   }
   throw new Error(
-    `the first run never reached the Claude question: ${(await renderedDataAttributes(page as never)).slice(0, 800)}`,
+    `New machine setup never reached its Claude Code step: ${(await renderedDataAttributes(page as never)).slice(0, 800)}`,
   );
+}
+
+/** Claude Code's one button: import it and make its runtime, then on to Codex. */
+async function importClaude(page: ProductPage): Promise<void> {
+  await answerPasswordIfAsked(page);
+  await page.click('[data-onboarding-step-body="claude"] [data-change-submit]');
+  await expectScreen(page, '[data-harness-imported="claude"]', 30_000);
+  await page.click('[data-machine-onboarding] [data-onboarding-next]');
 }
 
 /** Whether this build has the unlock model (#464): its security settings route exists. */
@@ -511,14 +513,10 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   await registerPasskeyAndUnlock(product, daemonId, journey);
   const promptsAtUnlock = (await hasUnlockModel(environment)) ? await promptsShown(page) : 0;
 
-  // Journey 4: the first run opens by itself.
+  // Journey 4: New machine setup opens by itself.
   await step(journey, 'first-run-opens-itself', async () => {
-    // With the one-tap first passkey (#470) the unlock itself lands on the stepper; navigating would leave it.
-    const landed = await waitUntil(
-      page,
-      `document.querySelector('[data-machine-stepper="first-run"]') !== null`,
-      3_000,
-    ).then(
+    // With the one-tap first passkey (#470) the unlock itself lands on the setup; navigating would leave it.
+    const landed = await waitUntil(page, `document.querySelector('[data-machine-onboarding]') !== null`, 3_000).then(
       () => true,
       () => false,
     );
@@ -534,46 +532,28 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
         waitUntil: 'load',
         timeout: 30_000,
       });
-    await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
+    await expectScreen(page, '[data-machine-onboarding]', 30_000);
     return {
       value: undefined,
-      evidence: `the first-run stepper opened at ${page.url()} (${landed ? 'by itself, straight after the unlock' : open ? 'via Open my fleet' : 'on opening the full-screen setup'})`,
+      evidence: `New machine setup opened at ${page.url()} (${landed ? 'by itself, straight after the unlock' : open ? 'via Open my fleet' : 'on opening the full-screen setup'})`,
     };
   });
   await captureScreens(page, journey, '02-first-run-start');
   await reachClaudeQuestion(page, journey);
+  // The runtime is named ON the Claude Code step and made by its one import: no Name step, no wizard.
+  const runtimeName = 'claude-e2e';
   await step(journey, 'first-run-claude-import', async () => {
+    await page.fill('[data-harness-name="claude"]', runtimeName);
     await captureScreens(page, journey, '03-first-run-claude');
-    await page.click('[data-harness-import]');
-    return { value: undefined, evidence: 'Claude: Import' };
+    await importClaude(page);
+    return { value: undefined, evidence: `Claude Code imported with its runtime named ${runtimeName}` };
   });
   await step(journey, 'first-run-codex-skip', async () => {
-    await expectScreen(page, '[data-machine-stepper][data-step="codex"] [data-harness-skip]');
+    await expectScreen(page, '[data-onboarding-step-body="codex"]');
     await captureScreens(page, journey, '04-first-run-codex');
-    await page.click('[data-harness-skip]');
-    return { value: undefined, evidence: 'Codex: Skip' };
-  });
-  if (await page.evaluate<boolean>(`document.querySelector('[data-machine-stepper][data-step="updates"]') !== null`))
-    await page.click('[data-step-next]');
-  const runtimeName = 'claude-e2e';
-  await step(journey, 'first-run-names', async () => {
-    await expectScreen(page, '[data-machine-stepper][data-step="names"] input[data-name-input="claude"]');
-    await page.fill('input[data-name-input="claude"]', runtimeName);
-    await captureScreens(page, journey, '05-first-run-names');
-    const asked = await answerPasswordIfAsked(page);
-    await page.click('[data-change-submit]');
-    await expectScreen(page, '[data-first-run-step="done"]', 30_000);
-    const result = await page.evaluate<string | null>(
-      `document.querySelector('[data-first-run-step="done"]').getAttribute('data-first-run-result')`,
-    );
-    if (result !== 'imported')
-      throw new Error(
-        `the first run finished with result ${String(result)}: ${String(await textNow(page, '[data-first-run-step="done"]'))}`,
-      );
-    return {
-      value: undefined,
-      evidence: `runtime named ${runtimeName}; done=${result}; password asked: ${String(asked)}`,
-    };
+    await page.click('[data-machine-onboarding] [data-onboarding-skip]');
+    await expectScreen(page, '[data-onboarding-step-body="speedups"]');
+    return { value: undefined, evidence: 'Codex: Skip, on to Speed-ups' };
   });
   await captureScreens(page, journey, '06-first-run-done');
   const runtimes = await asOwner(environment, 'GET', '/v1/fleet/runtimes');
@@ -931,11 +911,11 @@ describe('signing a harness in from the first run', () => {
       await registerPasskeyAndUnlock(product, daemonId, journey);
       await openFirstRun(product, daemonId);
       await reachClaudeQuestion(page, journey);
-      await page.click('[data-harness-import]');
+      await importClaude(page);
 
       // Act — Codex: Sign in now → device code → switch to a link → paste the callback address.
       await softStep(journey, 'codex-sign-in-now', async () => {
-        await expectScreen(page, '[data-machine-stepper][data-step="codex"] [data-harness-sign-in]');
+        await expectScreen(page, '[data-onboarding-step-body="codex"] [data-harness-sign-in]');
         await page.click('[data-harness-sign-in]');
         await expectScreen(page, '[data-first-run-sign-in="codex"]');
         await captureScreens(page, journey, '50-codex-sign-in-start');
@@ -968,7 +948,7 @@ describe('signing a harness in from the first run', () => {
         // gone before a poll sees it. The re-read is the durable signal: Codex now reads Signed in.
         await waitUntil(
           page,
-          `document.querySelector('[data-codex-login="complete"]') !== null || (document.querySelector('[data-first-run-sign-in="codex"]') === null && /Signed in/.test(document.querySelector('[data-machine-stepper][data-step="codex"]')?.textContent ?? ''))`,
+          `document.querySelector('[data-codex-login="complete"]') !== null || (document.querySelector('[data-first-run-sign-in="codex"]') === null && /Signed in/.test(document.querySelector('[data-onboarding-step-body="codex"]')?.textContent ?? ''))`,
           45_000,
           'the Codex sign-in to complete',
         ).catch(async (error: unknown) => {
@@ -1026,34 +1006,17 @@ describe('signing a harness in from the first run', () => {
 });
 
 /**
- * From an unlocked device to the first run's stepper, wherever the unlock left it.
- *
- * The one-tap first passkey can land on the stepper by itself; otherwise the machine's setup is opened.
- * That opens the setup guide on its first page, whose "Start fresh" leads to the Logins step the first
- * run lives in.
+ * From an unlocked device to New machine setup, wherever the unlock left it: the one-tap first passkey
+ * can land on it by itself; otherwise the machine's setup address is opened.
  */
 async function openFirstRun(product: Product, daemonId: string): Promise<void> {
   const page = product.browser.page;
-  const landed = await waitUntil(
-    page,
-    `document.querySelector('[data-machine-stepper="first-run"]') !== null`,
-    3_000,
-  ).then(
+  const landed = await waitUntil(page, `document.querySelector('[data-machine-onboarding]') !== null`, 3_000).then(
     () => true,
     () => false,
   );
   if (!landed) await page.goto(`${product.origin.origin}/d/${daemonId}/setup`, { waitUntil: 'load', timeout: 30_000 });
-  await waitUntil(
-    page,
-    `document.querySelector('[data-machine-stepper="first-run"]') !== null || document.querySelector('[data-setup-choice="fresh"]') !== null`,
-    30_000,
-    'the setup guide or the first run',
-  );
-  if (await page.evaluate<boolean>(`document.querySelector('[data-setup-choice="fresh"]') !== null`)) {
-    await page.click('[data-setup-choice="fresh"]');
-    await page.click('[data-onboarding-next]');
-  }
-  await expectScreen(page, '[data-machine-stepper="first-run"]', 30_000);
+  await expectScreen(page, '[data-machine-onboarding]', 30_000);
 }
 
 /**
@@ -1077,7 +1040,7 @@ async function claudeSignInJourney(product: Product, journey: string): Promise<v
 
   // Act — Sign in now → the link → paste the code.
   await step(journey, 'claude-sign-in-link', async () => {
-    await expectScreen(page, '[data-machine-stepper][data-step="claude"] [data-harness-sign-in]');
+    await expectScreen(page, '[data-onboarding-step-body="claude"] [data-harness-sign-in]');
     await page.click('[data-harness-sign-in]');
     await expectScreen(page, '[data-first-run-sign-in="claude"]');
     await captureScreens(page, journey, '60-claude-sign-in-start', '[data-first-run-sign-in="claude"]');
@@ -1100,7 +1063,7 @@ async function claudeSignInJourney(product: Product, journey: string): Promise<v
     await page.click('[data-claude-login] button[type="submit"]');
     await waitUntil(
       page,
-      `document.querySelector('[data-claude-login="complete"]') !== null || (document.querySelector('[data-first-run-sign-in="claude"]') === null && /Signed in/.test(document.querySelector('[data-machine-stepper][data-step="claude"]')?.textContent ?? ''))`,
+      `document.querySelector('[data-claude-login="complete"]') !== null || (document.querySelector('[data-first-run-sign-in="claude"]') === null && /Signed in/.test(document.querySelector('[data-onboarding-step-body="claude"]')?.textContent ?? ''))`,
       45_000,
       'the Claude sign-in to complete',
     ).catch(async (error: unknown) => {

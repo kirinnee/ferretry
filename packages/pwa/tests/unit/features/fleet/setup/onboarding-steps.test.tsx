@@ -16,7 +16,6 @@ import {
   OnboardingControlsStep,
   OnboardingDoneStep,
   OnboardingLearningStep,
-  OnboardingLoginsStep,
   OnboardingPairStep,
   OnboardingSpeedupsStep,
   OnboardingStartStep,
@@ -35,15 +34,11 @@ import { wardenConfig } from '../../../../support/warden.ts';
 import { fileView } from '../../config-files/config-files-support.ts';
 import {
   type Call,
-  credentials,
-  credentialView,
-  FRESH_MACHINE,
   machineAnswer,
   machineView,
   runtimes,
   runtimeView,
   STUDIO,
-  scan,
   scriptedClient,
   WORK,
 } from './setup-support.ts';
@@ -256,68 +251,18 @@ describe('OnboardingStartStep', () => {
     expect(started).toEqual(['clone']);
   });
 
-  it('renders the Copy flow inline when cloning, and leaving it goes back to a fresh setup', async () => {
+  it('embeds the Copy flow when cloning, with no step list, no “Step n of m” and no title of its own', async () => {
     const started: string[] = [];
     await show(startStep('clone', started));
     expect(q('[data-setup-choice="clone"] input')).toHaveProperty('checked', true);
     expect(q('[data-clone-step="source"]')).not.toBeNull();
-    await click(q('[data-stepper-back]'), 'Back');
-    expect(started).toEqual(['fresh']);
-  });
-});
-
-// ── Logins ───────────────────────────────────────────────────────────────────────────────────────
-
-describe('OnboardingLoginsStep', () => {
-  const answers = {
-    '/v1/fleet/setup/scan': scan(),
-    '/v1/fleet/runtimes': runtimes([]),
-    '/v1/fleet/credentials': credentials([credentialView('claude-host')]),
-    '/v1/fleet/profiles': { format: 'version-2', profiles: [] },
-  };
-  const noop = (): void => undefined;
-
-  it('checks Claude Code and Codex from the top on a machine that is not set up', async () => {
-    const { tab } = tabFor(answers, { machine: FRESH_MACHINE });
-    const events: string[] = [];
-    await show(
-      <OnboardingLoginsStep tab={tab} onDone={() => events.push('done')} onLeave={() => events.push('left')} />,
-    );
-    expect(text('[data-setup-section="logins-import"]')).toContain('Claude Code and Codex on studio-mac');
-    expect(q('[data-setup-section="logins-import"] [data-first-run-step="tools"]')).not.toBeNull();
-    await click(q('[data-stepper-cancel]'), 'Cancel');
-    await click(q('[data-stepper-stop]'), 'Leave setup');
-    expect(events).toEqual(['left']);
-  });
-
-  it('hands the progress port to the check on a machine that is not set up', async () => {
-    const { tab } = tabFor(answers, { machine: FRESH_MACHINE });
-    const saved: unknown[] = [];
-    await show(
-      <OnboardingLoginsStep
-        tab={tab}
-        progress={{ saved: null, save: value => saved.push(value) }}
-        onDone={noop}
-        onLeave={noop}
-      />,
-    );
-    expect(saved.length).toBeGreaterThan(0);
-  });
-
-  it('skips the check on a machine that is already set up, and still lists its logins', async () => {
-    const { tab } = tabFor(answers, { machine: machineView() });
-    await show(<OnboardingLoginsStep tab={tab} onDone={noop} onLeave={noop} />);
-    expect(q('[data-setup-section="logins-import"]')).toBeNull();
-    expect(q('[data-first-run-step]')).toBeNull();
-    expect(text('[data-setup-section="logins-list"]')).toContain('Logins on studio-mac');
-  });
-
-  it('always shows Settings › Logins itself, with the login the machine holds', async () => {
-    const { tab } = tabFor(answers, { machine: machineView() });
-    await show(<OnboardingLoginsStep tab={tab} onDone={noop} onLeave={noop} />);
-    const list = must(q('[data-setup-section="logins-list"]'), 'the logins list');
-    expect(list.textContent).toContain('claude-host');
-    expect(text('[data-onboarding-step-body="logins"]')).toContain('one tap each');
+    const body = must(q('[data-onboarding-step-body="start"]'), 'the start body');
+    expect(body.querySelector('[data-presentation="embedded"]')).not.toBeNull();
+    expect(body.textContent).not.toMatch(/Step \d+ of \d+/);
+    expect(body.querySelector('#machine-stepper-title')).toBeNull();
+    expect(body.querySelector('[data-stepper-back]')).toBeNull();
+    expect(body.querySelector('[data-stepper-cancel]')).toBeNull();
+    expect(started).toEqual([]);
   });
 });
 
@@ -707,7 +652,7 @@ describe('OnboardingControlsStep', () => {
 // ── Done ─────────────────────────────────────────────────────────────────────────────────────────
 
 describe('OnboardingDoneStep', () => {
-  const SET: OnboardingDoneRow = { id: 'logins', label: 'Logins', state: 'set', detail: 'Claude Code ✓' };
+  const SET: OnboardingDoneRow = { id: 'claude', label: 'Claude Code', state: 'set', detail: 'claude-default' };
   const SKIPPED: OnboardingDoneRow = {
     id: 'speedups',
     label: 'Speed-ups',
@@ -746,10 +691,10 @@ describe('OnboardingDoneStep', () => {
   it('lists each step with its state, tone and detail', async () => {
     await done([SET, SKIPPED, UNVISITED]);
     const row = (id: string) => must(q(`[data-onboarding-summary-row="${id}"]`), `the ${id} row`);
-    expect(row('logins').getAttribute('data-state')).toBe('set');
-    expect(row('logins').querySelector('.kt-badge')?.getAttribute('data-tone')).toBe('ok');
-    expect(row('logins').textContent).toContain('Claude Code ✓');
-    expect(row('logins').querySelector('[data-onboarding-later]')).toBeNull();
+    expect(row('claude').getAttribute('data-state')).toBe('set');
+    expect(row('claude').querySelector('.kt-badge')?.getAttribute('data-tone')).toBe('ok');
+    expect(row('claude').textContent).toContain('claude-default');
+    expect(row('claude').querySelector('[data-onboarding-later]')).toBeNull();
     expect(row('speedups').querySelector('.kt-badge')?.getAttribute('data-tone')).toBe('warn');
     expect(row('speedups').textContent).not.toContain('Rules only');
     expect(row('warden').querySelector('.kt-badge')?.getAttribute('data-tone')).toBe('pend');

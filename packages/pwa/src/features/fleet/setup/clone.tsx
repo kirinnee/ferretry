@@ -88,6 +88,8 @@ export interface CloneMachineProps extends MachineTabProps {
   readonly doneLabel?: string;
   /** Told the source's name once the copy has run, so a caller can say where the settings came from. */
   readonly onCopied?: (source: string) => void;
+  /** `embedded` inside New machine setup's Start from step: no stepper of its own on screen. */
+  readonly presentation?: 'inline' | 'embedded';
 }
 
 interface CloneResult {
@@ -126,6 +128,7 @@ export function CloneMachine(props: CloneMachineProps) {
     onLeave,
     doneLabel = 'Go to Runtimes',
     onCopied,
+    presentation = 'inline',
   } = props;
   const target = useSetupAccess({ connection, createClient });
   const { changes } = target;
@@ -595,6 +598,7 @@ export function CloneMachine(props: CloneMachineProps) {
       online={online}
       checking={checking}
       onRetry={onRetry}
+      presentation={presentation}
     >
       {body()}
     </MachineStepper>

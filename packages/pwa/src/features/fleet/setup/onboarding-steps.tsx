@@ -4,9 +4,10 @@
  *
  * - **Pair** — this device is already paired (the screen is only reachable through a pairing); a
  *   phone can be paired too, with Settings › Add a device's own surface.
- * - **Start from** — fresh, or Copy settings from another machine (`clone.tsx`), inline.
- * - **Logins** — the Claude Code and Codex check (`first-run.tsx`) while the machine has no runtime, then
- *   Settings › Logins itself (`credentials-tab.tsx`), whose Add login is the one-tap provider grid.
+ * - **Start from** — fresh, or Copy settings from another machine (`clone.tsx`), embedded in the step with no
+ *   stepper of its own.
+ * - **Claude Code**, **Codex** — one screen each that detects, imports, signs in and names the runtime
+ *   (`harness-step.tsx`).
  * - **Speed-ups** — Settings › Speed-ups (`speedups-surface.tsx`): paste → Test → "set ✓".
  * - **Voice** — Settings › Dictation's engine choice (Parakeet, with its download size and optional install,
  *   or phone/browser voice), saved as the MACHINE's default in `voice.yaml`; clean-up is this device's.
@@ -42,16 +43,13 @@ import { SpeedupsSurface } from '../../speedups/speedups-surface.tsx';
 import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
 import { wardenConfigPatchFrom } from '../../warden/warden-settings-model.ts';
 import { AgentControlSection, DefaultRuntimeSection } from '../machine/settings-tab.tsx';
-import { CredentialsTab } from '../credentials/credentials-tab.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { CloneMachine } from './clone.tsx';
-import { MachineFirstRun } from './first-run.tsx';
 import type { MachineSetupStart, OnboardingDoneRow } from './onboarding-model.ts';
 import { wardenStartingDraft } from './onboarding-model.ts';
 import { useSetupAccess } from './setup-access.ts';
 import { machineVoiceEngine, VOICE_FILE, withMachineVoiceEngine } from './voice-default.ts';
-import type { FirstRunProgressPort } from './setup-progress.ts';
 import { RadioChoices, SetupNote, SetupSection } from './setup-ui.tsx';
 
 /** One step's lead sentence, the same size on every step. */
@@ -142,54 +140,12 @@ export function OnboardingStartStep({
           {...tab}
           sources={sources}
           doneLabel="Continue setup"
+          presentation="embedded"
           onDone={onCloned}
           onCopied={onCopied}
           onLeave={() => onStart('fresh')}
         />
       ) : null}
-    </div>
-  );
-}
-
-// ── Logins ───────────────────────────────────────────────────────────────────────────────────────
-
-export function OnboardingLoginsStep({
-  tab,
-  progress,
-  onDone,
-  onLeave,
-}: {
-  readonly tab: MachineTabProps;
-  readonly progress?: FirstRunProgressPort;
-  readonly onDone: () => void;
-  readonly onLeave: () => void;
-}) {
-  const setUp = tab.machine?.setUp === true;
-  return (
-    <div className="flex min-w-0 flex-col gap-5" data-onboarding-step-body="logins">
-      <Lead>
-        Sign in to the CLIs your ferrets will use, or add a provider with its key: GLM, DeepSeek, Kimi, OpenRouter,
-        Bedrock and more, one tap each.
-      </Lead>
-      {setUp ? null : (
-        // A machine that is not set up has no runtime yet: the Claude Code and Codex check brings in the
-        // logins it finds AND names the runtimes that use them, which a login added below does not.
-        <SetupSection title={`Claude Code and Codex on ${tab.machineName}`} name="logins-import">
-          <MachineFirstRun
-            {...tab}
-            mode="setup"
-            presentation="inline"
-            {...(progress === undefined ? {} : { progress })}
-            onDone={onDone}
-            onLeave={onLeave}
-          />
-        </SetupSection>
-      )}
-      {/* Settings › Logins itself — its list, and Add login's provider grid — so this step and its
-          "Set up later" panel are one surface. */}
-      <SetupSection title={`Logins on ${tab.machineName}`} name="logins-list">
-        <CredentialsTab {...tab} />
-      </SetupSection>
     </div>
   );
 }

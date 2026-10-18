@@ -36,7 +36,6 @@ import {
   listed,
   SCOPE_WORDS,
 } from '../components/component-model.ts';
-import type { StepperFlowInput, StepperStep } from '../shell/stepper-model.ts';
 
 export const PROFILE_PREFIX = 'profile/';
 
@@ -331,29 +330,3 @@ export function partCount(profile: FleetLayeredProfileView): number {
 /** The one line under a profile's name on the list: "3 items · 6 parts · used by 2 runtimes". */
 export const profileUseLine = (profile: FleetLayeredProfileView, runtimes: number): string =>
   `${counted(profile.layers.length, 'item')} · ${counted(partCount(profile), 'part')} · ${runtimes === 0 ? 'not used yet' : `used by ${counted(runtimes, 'runtime')}`}`;
-
-// ── Build a profile from Add runtime ─────────────────────────────────────────────────────────────
-
-export const BUILD_PROFILE_FLOW_KIND = 'build-profile';
-
-const BUILD_STEPS: readonly StepperStep[] = [{ id: 'build', label: 'Profile' }];
-
-export interface BuildProfileOptions {
-  /** The login's tool, when opened from Add runtime. */
-  readonly harness?: CatalogHarness;
-}
-
-/**
- * Add runtime's "+ Build a new profile": ONE step that holds the same editor the Profiles tab uses,
- * so a profile made in place is made exactly as one made there.
- */
-export const buildProfileFlowInput = (_options: BuildProfileOptions = {}): StepperFlowInput => ({
-  kind: BUILD_PROFILE_FLOW_KIND,
-  title: 'Build a profile',
-  steps: BUILD_STEPS,
-  leave: {
-    question: 'Stop building this profile?',
-    consequence: 'No profile is created.',
-    stopLabel: 'Stop, discard profile',
-  },
-});

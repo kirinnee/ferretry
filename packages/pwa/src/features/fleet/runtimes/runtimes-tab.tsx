@@ -9,7 +9,7 @@
 
 import type { FleetMachineView, FleetRuntimeView } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Lock, Plus, TriangleAlert } from 'lucide-react';
-import { type ComponentType, type MouseEvent, useState } from 'react';
+import { type MouseEvent, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonNewSessionPath } from '../../../lib/pages/routes.ts';
@@ -19,14 +19,7 @@ import { credentialEmail } from '../credentials/credentials-model.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { type StepperState, startStepper } from '../shell/stepper-model.ts';
-import {
-  AddRuntime,
-  type AddRuntimeDraft,
-  addRuntimeFlowInput,
-  EMPTY_ADD_RUNTIME,
-  type ProfileBuilder,
-} from './add-runtime.tsx';
+import { AddRuntime } from './add-runtime.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
 import {
   harnessInstalled,
@@ -345,8 +338,6 @@ function RuntimeRow({
 }
 
 export interface RuntimesTabOptions {
-  /** The Profiles tab's Build a profile, used for "+ Build a new profile". */
-  readonly profileBuilder?: ProfileBuilder;
   /** Supplied in tests. */
   readonly pollMs?: number;
 }
@@ -356,17 +347,13 @@ export function RuntimesTab({
   machineName,
   machine,
   online,
-  checking,
-  onRetry,
   createClient,
-  profileBuilder,
   pollMs,
 }: MachineTabProps & RuntimesTabOptions) {
   const { state, data, reload } = useMachineData(connection, createClient);
   const changes = useAccountChanges({ connection, createClient });
   const [detail, openDetail] = useMachineDetail(machineName, 'runtimes');
-  const [flow, setFlow] = useState<StepperState | null>(null);
-  const [draft, setDraft] = useState<AddRuntimeDraft>(EMPTY_ADD_RUNTIME);
+  const [adding, setAdding] = useState(false);
 
   // M3: a machine that is not set up has no runtimes; the banner above the tabs resumes its setup.
   if (machine !== null && !machine.setUp)
@@ -390,27 +377,20 @@ export function RuntimesTab({
       </p>
     );
 
-  if (flow !== null)
+  if (adding)
     return (
       <AddRuntime
-        state={flow}
-        onState={setFlow}
-        draft={draft}
-        onDraft={setDraft}
         data={data}
         reload={reload}
         changes={changes}
         machine={machine}
         machineName={machineName}
         online={online}
-        checking={checking}
-        onRetry={onRetry}
         connection={connection}
         createClient={createClient}
-        {...(profileBuilder === undefined ? {} : { profileBuilder })}
         {...(pollMs === undefined ? {} : { pollMs })}
         onFinish={open => {
-          setFlow(null);
+          setAdding(false);
           openDetail(open);
         }}
       />
@@ -418,8 +398,7 @@ export function RuntimesTab({
 
   const start = (): void => {
     changes.clear();
-    setDraft(EMPTY_ADD_RUNTIME);
-    setFlow(startStepper(addRuntimeFlowInput()));
+    setAdding(true);
   };
 
   const runtime = detail === null ? undefined : data.runtimes.runtimes.find(item => item.name === detail);
@@ -482,9 +461,3 @@ export function RuntimesTab({
     </section>
   );
 }
-
-/** The tab as the composition root's `machineTabs` entry, with the profile builder plugged in. */
-export const createRuntimesTab = (options: RuntimesTabOptions = {}): ComponentType<MachineTabProps> =>
-  function RuntimesTabSurface(props: MachineTabProps) {
-    return <RuntimesTab {...props} {...options} />;
-  };

@@ -24,7 +24,6 @@ import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
-import { MachineFirstRun } from '../setup/first-run.tsx';
 import { InstallTool } from '../setup/install-flow.tsx';
 import { type SettingsFlow, useSettingsFlow } from '../setup/settings-route.ts';
 import { type SetupAccess, useSetupAccess } from '../setup/setup-access.ts';
@@ -341,8 +340,31 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { daemonPanels } = props;
   const panels = daemonPanels === undefined ? null : daemonPanels(undefined, route.openPanel);
 
+  // New machine setup is a full screen of its own; an old in-tab address points there.
   if (flow === 'setup' || flow === 'import')
-    return <MachineFirstRun key={flow} {...props} mode={flow} onDone={toRuntimes} onLeave={leave} />;
+    return (
+      <SetupNote name="setup-moved" title="Setup is a full screen now">
+        <span>
+          {flow === 'import' ? 'Import again is' : 'New machine setup is'} the Claude Code and Codex steps of{' '}
+          {machineName}’s setup.
+        </span>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {props.onSetUp === undefined ? null : (
+            <Button
+              type="button"
+              variant="primary"
+              data-setup-moved-open=""
+              onClick={() => props.onSetUp?.(flow === 'import' ? 'claude' : undefined)}
+            >
+              Open {machineName}’s setup
+            </Button>
+          )}
+          <Button type="button" data-setup-moved-back="" onClick={leave}>
+            Back
+          </Button>
+        </div>
+      </SetupNote>
+    );
   if (flow === 'clone') return <CloneMachine {...props} sources={sources} onDone={toRuntimes} onLeave={leave} />;
   if (flow === 'export')
     return (
@@ -424,10 +446,10 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
           title={machine.setUp ? 'New machine setup' : `Set up ${machineName}`}
           detail={
             machine.setUp
-              ? 'Walk through logins, speed-ups, voice, the Warden, learning and agent controls again.'
-              : 'Pair, start fresh or copy another machine, then logins, speed-ups and the Warden.'
+              ? 'Walk through Claude Code, Codex, speed-ups, voice, the Warden, learning and agent controls again.'
+              : 'Pair, start fresh or copy another machine, then Claude Code, Codex, speed-ups and the Warden.'
           }
-          // The setup is a full screen of its own; the in-tab flow is kept only for an old link.
+          // The setup is a full screen of its own: one rail, every step on it.
           onClick={() => (props.onSetUp === undefined ? route.open('setup') : props.onSetUp())}
         />
         {machine.setUp ? (
@@ -435,7 +457,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
             name="import"
             title="Import again"
             detail={`Read Claude Code and Codex on ${machineName} again and add anything new.`}
-            onClick={() => route.open('import')}
+            onClick={() => (props.onSetUp === undefined ? route.open('import') : props.onSetUp('claude'))}
           />
         ) : null}
         <NavRow

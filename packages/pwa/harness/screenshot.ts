@@ -175,7 +175,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 159;
+const SETTINGS_SIDEWAYS_CHECKS = 171;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -190,7 +190,7 @@ const SETTINGS_SIDEWAYS_CHECKS = 159;
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 114;
+const MACHINES_GEOMETRY_CHECKS = 126;
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -2498,17 +2498,7 @@ try {
             await machinesSurface.locator('[data-machine-tab="machine"]').click();
             await machinesSurface.locator('[data-machine-settings]').waitFor({ state: 'visible' });
           };
-          await machinesSurface.locator('[data-settings-action="import"]').click();
-          await machinesSurface.locator('[data-first-run-step="claude"]').waitFor({ state: 'visible' });
-          await machineFrame('Import again found list', 'import-found');
-          await machinesSurface.locator('[data-harness-import]').click();
-          await machinesSurface.locator('[data-first-run-step="codex"]').waitFor({ state: 'visible' });
-          await machinesSurface.locator('[data-step-next]').click();
-          await machinesSurface.locator('[data-first-run-step="updates"]').waitFor({ state: 'visible' });
-          await machinesSurface.locator('[data-step-next]').click();
-          await machinesSurface.locator('[data-first-run-step="names"]').waitFor({ state: 'visible' });
-          await machineFrame('Import again names', 'import-names');
-          await backToSettingsTab();
+          // Import again is New machine setup's Claude Code step, full screen: it is walked with the setup below.
           await machinesSurface.locator('[data-settings-action="clone"]').click();
           await machinesSurface.locator('[data-clone-source-reason]').nth(1).waitFor({ state: 'visible' });
           await machineFrame('Clone source', 'clone-source');
@@ -2611,21 +2601,33 @@ try {
           await runtimesPanel.locator('[data-runtime-models]').waitFor({ state: 'visible' });
           await accountShot('runtime-models', 'runtime page with unavailable models');
           await runtimesPanel.locator('[data-page-back]').click();
+          // ADD A RUNTIME IS ONE FORM: login, profile and name on one page, each frame scrolled to its part.
+          const toPart = (part: string) => async (): Promise<void> => {
+            await runtimesPanel
+              .locator(`[data-add-runtime-part="${part}"]`)
+              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+          };
           await runtimesPanel.locator('[data-add-runtime]').click();
           await runtimesPanel.locator('[data-add-runtime-credential="claude-personal"]').click();
-          await accountShot('add-runtime-credential', 'Add a runtime login step');
-          await runtimesPanel.locator('[data-step-next]').click();
+          await accountShot('add-runtime-credential', 'Add a runtime, login picked');
           await runtimesPanel.locator('[data-add-runtime-profile="Default"]').click();
           await runtimesPanel.locator('[data-add-runtime-duplicate]').waitFor({ state: 'visible' });
-          await accountShot('add-runtime-profile', 'Add a runtime profile step');
+          await accountShot('add-runtime-profile', 'Add a runtime, profile with a duplicate', toPart('profile'));
           await themedShot('add-runtime-profile');
-          await runtimesPanel.locator('[data-duplicate-ok]').click();
-          await runtimesPanel.locator('[data-step-next]').click();
+          await runtimesPanel.locator('[data-duplicate-ok]').check();
           await runtimesPanel.locator('#add-runtime-name').fill('claude-default');
           await runtimesPanel.locator('[data-runtime-name-problem]').waitFor({ state: 'visible' });
-          await accountShot('add-runtime-name', 'Add a runtime name step');
-          await runtimesPanel.locator('[data-stepper-cancel]').click();
-          await runtimesPanel.locator('[data-stepper-stop]').click();
+          await accountShot('add-runtime-name', 'Add a runtime, a name that clashes', toPart('name'));
+          // "+ Add a new login" opens IN PLACE under the list: no stepper of its own.
+          await runtimesPanel.locator('[data-add-row="login"]').click();
+          await runtimesPanel.locator('[data-add-runtime-new-login]').waitFor({ state: 'visible' });
+          await accountShot('add-runtime-new-login', 'Add a runtime, a new login in place', async () => {
+            await runtimesPanel
+              .locator('[data-add-runtime-new-login]')
+              .evaluate(element => element.scrollIntoView({ block: 'start', behavior: 'instant' }));
+          });
+          await runtimesPanel.locator('[data-add-runtime-new-login-close]').click();
+          await runtimesPanel.locator('[data-page-back]').click();
 
           await machinesSurface.locator('[data-machine-tab="credentials"]').click();
           const credentialsPanel = machinesSurface.locator('[data-machine-tab-panel="credentials"]');
@@ -2862,31 +2864,71 @@ try {
           await newMachine.locator('[data-machine-finish-setup]').waitFor({ state: 'visible' });
           await accountShot('not-set-up', 'machine not set up');
           await newMachine.locator('[data-machine-finish-setup-open]').click();
-          // New machine setup (P9): a progress rail, every step skippable. Five frames — Start from, the
-          // Logins step with the Claude Code and Codex check inside it, Speed-ups, the Warden, and Done
-          // listing what was skipped with its "Set up later" link — each measured for the rail and footer.
+          // New machine setup: ONE rail, no stepper inside any step. The whole journey, every step a frame
+          // measured for the rail and the pinned footer: Start from, Claude Code (its runtime renamed and
+          // imported in place), Codex (imported to sign in later), Speed-ups, Voice (skipped), the Warden,
+          // Learning, Agent controls, and Done naming both runtimes and the skipped step's "Set up later".
           const setupScreen = page.locator('#harness-machine-setup [data-machine-onboarding]');
-          await setupScreen.locator('[data-onboarding-step-body="start"]').waitFor({ state: 'visible' });
-          await setupShot('first-run', 'Start from');
-          await setupScreen.locator('[data-onboarding-skip]').click();
-          await setupScreen.locator('[data-first-run-step="tools"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-claude', 'Logins with the Claude Code and Codex check');
-          await setupScreen.locator('[data-onboarding-skip]').click();
-          await setupScreen.locator('[data-onboarding-step-body="speedups"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-codex', 'Speed-ups');
-          await setupScreen.locator('[data-onboarding-skip]').click();
-          await setupScreen.locator('[data-onboarding-skip]').click();
-          await setupScreen.locator('[data-onboarding-step-body="warden"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-sign-in', 'Warden');
-          await setupScreen.locator('[data-onboarding-go="done"]:visible').first().click();
-          await setupScreen.locator('[data-onboarding-step-body="done"]').waitFor({ state: 'visible' });
-          await setupShot('first-run-nothing', 'Done with skipped steps');
+          const setupStep = async (step: string): Promise<void> =>
+            setupScreen.locator(`[data-onboarding-step-body="${step}"]`).waitFor({ state: 'visible' });
+          const setupNext = async (): Promise<void> => setupScreen.locator('[data-onboarding-next]').click();
+          await setupStep('start');
+          await setupShot('start', 'Start from');
+          await setupNext();
+          await setupScreen.locator('[data-harness-name="claude"]').waitFor({ state: 'visible' });
+          await setupShot('claude', 'Claude Code, its runtime named in place');
+          await setupScreen.locator('[data-harness-name="claude"]').fill('claude-main');
+          await setupScreen.locator('[data-onboarding-step-body="claude"] [data-change-submit]').click();
+          await setupScreen.locator('[data-harness-imported="claude"]').waitFor({ state: 'visible' });
+          await setupShot('claude-imported', 'Claude Code imported, claude-main made');
+          await setupNext();
+          await setupScreen.locator('[data-harness-name="codex"]').waitFor({ state: 'visible' });
+          await setupShot('codex', 'Codex, not signed in');
+          await setupScreen.locator('[data-onboarding-step-body="codex"] [data-change-submit]').click();
+          await setupScreen.locator('[data-harness-imported="codex"]').waitFor({ state: 'visible' });
+          await setupNext();
+          for (const [step, label] of [
+            ['speedups', 'Speed-ups'],
+            ['voice', 'Voice'],
+            ['warden', 'Warden'],
+            ['learning', 'Learning'],
+            ['controls', 'Agent controls'],
+          ] as const) {
+            await setupStep(step);
+            await setupShot(step, label);
+            if (step === 'voice') await setupScreen.locator('[data-onboarding-skip]').click();
+            else await setupNext();
+          }
+          await setupStep('done');
+          await setupScreen
+            .locator('[data-onboarding-summary-row="codex"]')
+            .filter({ hasText: 'codex-default' })
+            .waitFor();
+          const claudeRow = await setupScreen.locator('[data-onboarding-summary-row="claude"]').innerText();
+          if (!claudeRow.includes('claude-main')) fail(`Done does not name the runtime Claude Code made: ${claudeRow}`);
+          await setupShot('done', 'Done naming both runtimes, Voice skipped');
           // Leaving lands back on the machine in Settings, banner and all.
           await setupScreen.locator('[data-onboarding-restart]').click();
           await setupScreen.locator('[data-onboarding-later-all]').click();
           await page
             .locator('[data-machines-surface="checking-daemon"] [data-machine-finish-setup]')
             .waitFor({ state: 'visible' });
+          // IMPORT AGAIN is the same Claude Code step on a machine that is set up: what changed, a runtime
+          // that already uses this login and profile, and Codex to install — the widest layouts at 390px.
+          {
+            const importUrl = new URL(server.url);
+            importUrl.searchParams.set('machine-setup', 'harness-daemon');
+            importUrl.searchParams.set('setup-step', 'claude');
+            await page.goto(importUrl.toString());
+            await setupScreen.locator('[data-harness-add-another]').waitFor({ state: 'visible' });
+            await setupScreen.locator('[data-harness-add-another]').check();
+            await setupScreen.locator('[data-harness-name="claude"]').fill('claude-default');
+            await setupScreen.locator('[data-harness-name-problem="claude"]').waitFor({ state: 'visible' });
+            await setupShot('import-again-claude', 'Import again on Claude Code');
+            await setupNext();
+            await setupScreen.locator('[data-onboarding-step-body="codex"] [data-tool-install]').first().waitFor();
+            await setupShot('import-again-codex', 'Import again, Codex to install');
+          }
           settingsPage = page.getByLabel('Settings page preview', { exact: true });
 
           // The compact registry is a separate deterministic route rather than a

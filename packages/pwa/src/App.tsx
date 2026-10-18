@@ -38,11 +38,10 @@ import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
-import { BuildProfileStep } from './features/fleet/profiles/profile-builder-step.tsx';
-import { BUILD_PROFILE_FLOW_KIND, buildProfileFlowInput } from './features/fleet/profiles/profile-model.ts';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
-import { createRuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
+import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
 import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts';
+import { isMachineSetupStepId } from './features/fleet/setup/onboarding-model.ts';
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
@@ -1215,9 +1214,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
  * Components U18, Settings U19.
  */
 const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
-  runtimes: createRuntimesTab({
-    profileBuilder: { kind: BUILD_PROFILE_FLOW_KIND, flowInput: buildProfileFlowInput, Step: BuildProfileStep },
-  }),
+  runtimes: RuntimesTab,
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsSurface,
@@ -1466,9 +1463,15 @@ function MachineSetupRoute({ connection }: DaemonPageProps) {
     async (daemon: DaemonConnection) => await store.clients.client(daemon),
     [store.clients],
   );
+  // `/d/<id>/setup#claude` opens on that step: Settings' Import again lands on Claude Code.
+  const [startAt] = useState(() => {
+    const step = window.location.hash.replace(/^#/u, '');
+    return isMachineSetupStepId(step) ? step : undefined;
+  });
   if (record === undefined) return null;
   return (
     <MachineSetupScreen
+      {...(startAt === undefined ? {} : { startAt })}
       connection={record}
       connections={connections}
       createClient={createClient}
