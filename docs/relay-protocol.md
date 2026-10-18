@@ -729,8 +729,15 @@ one batch of `events` and `bytes`. The bytes a report names were relayed, so the
 when they cross a ceiling — the refusal stops what follows, not what already crossed. A refusal sends
 a typed `error` control frame to every socket the rendezvous holds and then closes them with `4432`
 or `4433`, including the reason (and, for bandwidth, a reset timestamp in the control-plane
-decision). Failure to reach or parse the meter is `4500` and is also a refusal. Nothing degrades into
-an unmetered path.
+decision). **An unreachable control object is not a refusal.** A missing or unusable answer to a
+meter report or to the periodic inspection is asked for once more, and then live sockets keep
+carrying for up to 120 seconds from the first failure: the unreported bytes are folded into the next
+report, the heartbeat sweep keeps running, and the next frame or sweep asks again. Before this, one
+lost answer from the single global control object closed every socket on the rendezvous — the
+daemon and every client — with no ceiling crossed. An outage that outlasts the window is `4500` and a
+refusal, so nothing degrades into an unmetered path for longer than that window; a definitive answer
+— the kill switch, a ceiling — still closes at once. A new arrival still needs a reservation, so
+admission during an outage fails closed as before.
 
 **Why not per frame, and what it costs.** The meter is one globally named object, placed wherever it
 was first created, while a rendezvous is created near the daemon that first claimed it. Holding every
