@@ -299,7 +299,7 @@ describe('Add runtime: Add a new login', () => {
       view.container.querySelector<HTMLButtonElement>('[data-add-runtime-login="codex"]'),
       'codex button',
     );
-    expect(codex.textContent).toBe('Codex isn’t installed on studio-mac');
+    expect(codex.textContent).toBe('Codex isn’t installed here');
     expect(codex.disabled).toBe(true);
     await click(view.container, '[data-add-runtime-new-login-close]');
     expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();

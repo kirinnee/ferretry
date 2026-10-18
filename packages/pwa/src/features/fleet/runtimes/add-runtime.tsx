@@ -612,7 +612,7 @@ function NewLogin({
                   >
                     {ready
                       ? `Sign in to ${HARNESS_NAMES[candidate]}`
-                      : `${HARNESS_NAMES[candidate]} isn’t installed on ${machineName}`}
+                      : `${HARNESS_NAMES[candidate]} isn’t installed here`}
                   </Button>
                 );
               })}
