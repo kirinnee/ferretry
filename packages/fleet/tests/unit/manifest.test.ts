@@ -76,7 +76,7 @@ describe('FleetManifestAccountSchema', () => {
   });
 
   it.each([
-    ['hyphen heavy', '/state/fleet/bin/claude-auto-glm52a'],
+    ['hyphen heavy', '/state/fleet/bin/claude-team-a-2b'],
     ['alias shaped, harness prefix absent', '/state/fleet/bin/crc-auto-atomi'],
     ['looks like the other harness', '/state/fleet/bin/codex-auto-kirin'],
   ])('should accept a claude account whose wrapper path reads as %s', (_label, wrapper) => {

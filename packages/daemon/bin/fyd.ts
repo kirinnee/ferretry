@@ -22,10 +22,10 @@ import {
   hostCodexHome,
   InMemoryCredentialStatusStore,
   manifestRuntimes,
+  PASSIVE_LEARNING_ENV,
   resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
-  PASSIVE_LEARNING_ENV,
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
@@ -46,11 +46,11 @@ import {
 } from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
+  type AnalyticsPricingRate,
   CONFIG_ACCEPTED_FILE,
   type DaemonCarrier,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
-  type AnalyticsPricingRate,
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
@@ -87,7 +87,6 @@ import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-at
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
-import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
@@ -111,6 +110,7 @@ import {
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import {
+  AnalyticsTranscriptSpend,
   AuthorizedProviderProbe,
   BrowserLoginWindowService,
   BrowserProfileStore,
@@ -121,7 +121,6 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
-  AnalyticsTranscriptSpend,
   CachedUsageFeed,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -295,6 +294,7 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
+import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   FileTaskBoardRepository,
@@ -421,9 +421,6 @@ import {
   CodexTranscriptParser,
   CredentialAgentIdentities,
   CredentialUsageSource,
-  ProviderQuotaService,
-  unattendedUsageFeed,
-  WatchedUsageFeed,
   childGrantRequester,
   chooseRelayCarrierSources,
   claimStartName,
@@ -529,8 +526,10 @@ import {
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
+  ProviderQuotaService,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -622,6 +621,7 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
+  SessionPermissionService,
   SessionPlanner,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
@@ -692,13 +692,14 @@ import {
   type TranscriptSearchOptions,
   TranscriptSendEvidence,
   type TranscriptSource,
+  type TriageGuardPort,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
-  type TriageGuardPort,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
+  unattendedUsageFeed,
   unreadableManifestPreflight,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
@@ -707,14 +708,14 @@ import {
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
+  WatchedUsageFeed,
+  type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
-  type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
 import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
-import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
-import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
   ConversationLeases,
   LeaseClaimingLaunchWrapper,
@@ -722,6 +723,7 @@ import {
 } from '../src/lib/session/conversation-lease.ts';
 import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
   ConversationFacetContributor,
@@ -2852,6 +2854,8 @@ interface WardenParts {
   readonly attention: AttentionService;
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort;
+  /** The machine's default runtime, read fresh: the investigation login when `warden.yaml` names none. */
+  readonly defaultRuntime: () => Promise<string | undefined>;
   readonly files: NodeWardenReportFileSystem;
   readonly reportsReader: WardenReportReader;
   readonly wardenRoot: string;
@@ -3002,6 +3006,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       config: new ConfigFileWardenConfigStore(parts.config),
       agents: {
         installed: async () => selectableAutoAccounts(await parts.accounts.accounts()).map(account => account.id),
+        defaultRuntime: parts.defaultRuntime,
       },
       // The daemon-wide feed, with the one shape difference reconciled here: the wire lets `retryAt`
       // be explicitly null to mean "the provider named no retry time", and the warden's health type
@@ -7249,6 +7254,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           attention,
           usage,
           accounts,
+          defaultRuntime: async () => {
+            const model = await declaredAccountModel();
+            return model === undefined ? undefined : resolveDefaultRuntime(model);
+          },
           files: wardenFiles,
           // The SAME reader `world.wardenReports` builds, over the same directory: the verdict list
           // and the sweep's own "was this target cleared" read must agree about what a report says.
@@ -7277,6 +7286,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttach,
         // The Console types into the pane the attach proof names, on the same private tmux server.
         sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
+        // A permission answer re-reads and types into that same proved pane, and nothing else.
+        sessionPermission: (() => {
+          const typing = new SessionConsoleService(sessionAttach, launchTmuxCommands);
+          const capture = new ProvedPaneCapture(sessionAttach, launchTmuxCommands);
+          return new SessionPermissionService(
+            {
+              capture: async id => await capture.capture(id),
+              write: async (id, bytes) => await typing.write(id, bytes),
+            },
+            milliseconds => Bun.sleep(milliseconds),
+          );
+        })(),
         configChanges: {
           handler: downstream => configChangeStream.handler(downstream),
           announce: kinds => configChanges.announce(kinds),

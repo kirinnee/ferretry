@@ -293,6 +293,8 @@ import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 import {
   WARDEN_FIXTURE_ATTENTION,
   WARDEN_FIXTURE_CONFIG,
+  WARDEN_FIXTURE_CONFIG_NO_LOGIN,
+  WARDEN_FIXTURE_CONFIG_UNKNOWN_LOGIN,
   WARDEN_FIXTURE_NOW,
   WARDEN_FIXTURE_STATUS,
   wardenFixtureRequest,
@@ -2010,15 +2012,15 @@ function HarnessWardenOverview({ connection }: { readonly connection: DaemonConn
 }
 
 /** Settings › Warden, controlled the way Settings holds it, without a daemon. */
-function HarnessWardenConfig() {
-  const [draft, setDraft] = useState(WARDEN_CONFIG.config);
+function HarnessWardenConfig({ view = WARDEN_CONFIG }: { readonly view?: WardenConfigView }) {
+  const [draft, setDraft] = useState(view.config);
   return (
     <WardenConfigCard
-      view={WARDEN_CONFIG}
+      view={view}
       draft={draft}
       onChange={setDraft}
       jevKey={{ state: 'missing', keyUrl: 'https://typesafe.ai/keys' }}
-      loginOptions={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
+      loginOptions={(view.login?.available ?? []).map(agent => ({ agent }))}
       speedupsHref="#speedups"
       onSave={() => {}}
     />
@@ -3251,6 +3253,15 @@ const DASHBOARD_SESSIONS: readonly SessionView[] = [
   dashboardSession('ms9lina-f6', 'lina', 'Verify daemon isolation', '/work/home-manager', {
     contextPercent: 96,
   }),
+  // An interactive session started without a name: the daemon titles it "interactive", which the list drops.
+  dashboardSession(
+    'ms9ronaldo-h8',
+    'ronaldo',
+    'interactive',
+    '/work/ferretry',
+    { activity: undefined },
+    { mode: 'interactive' },
+  ),
   dashboardSession(
     'ms9mira-g7',
     'mira',
@@ -4350,7 +4361,7 @@ function HarnessAccountPicker({
             id={id}
             label="Account"
             onValueChange={onValueChange}
-            placeholder="claude-auto-studio"
+            placeholder="claude-default"
             source={pickerAccountSource(resolved)}
             value={value}
           />
@@ -5783,6 +5794,14 @@ function Shell() {
     {
       label: 'Warden configuration',
       render: () => <HarnessWardenConfig />,
+    },
+    {
+      label: 'Warden configuration — unknown login',
+      render: () => <HarnessWardenConfig view={WARDEN_FIXTURE_CONFIG_UNKNOWN_LOGIN} />,
+    },
+    {
+      label: 'Warden configuration — no login set',
+      render: () => <HarnessWardenConfig view={WARDEN_FIXTURE_CONFIG_NO_LOGIN} />,
     },
     {
       label: 'Analytics cost chart',

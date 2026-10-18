@@ -1,14 +1,5 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import {
-  AlertOctagon,
-  AlertTriangle,
-  ArrowRight,
-  CircleHelp,
-  LoaderCircle,
-  RefreshCw,
-  ServerCog,
-  ShieldAlert,
-} from 'lucide-react';
+import { AlertOctagon, AlertTriangle, ArrowRight, LoaderCircle, RefreshCw, ServerCog, ShieldAlert } from 'lucide-react';
 import {
   type FormEvent,
   type ReactNode,
@@ -39,7 +30,6 @@ import {
   migrationFailure,
   migrationHasRuntimeChange,
   migrationModelSuggestions,
-  migrationRoutingCaution,
   migrationTarget,
   oneMillionVariant,
 } from './migrate-model.ts';
@@ -292,7 +282,6 @@ export function MigrateSheet({
     ],
     [chosenAccount, connection, agent, currentModel],
   );
-  const caution = migrationRoutingCaution(agent);
   const terminal = TERMINAL_STATUSES.has(state.status);
   const busy = statusMark(view).klass === 'active';
   const quota = useCachedAccountUsage(usage, connection, open && canMutate && accountPicker !== undefined);
@@ -455,7 +444,7 @@ export function MigrateSheet({
                       autoCorrect="off"
                       className="kt-input !min-h-[44px] w-full mono"
                       onChange={event => editAgent(event.target.value)}
-                      placeholder="codex-auto-atomi"
+                      placeholder="claude-default"
                       required
                       spellCheck={false}
                       value={agent}
@@ -485,7 +474,7 @@ export function MigrateSheet({
                       offerHealthCheck={true}
                       onAccountChosen={chooseAccount}
                       onValueChange={editAgent}
-                      placeholder="codex-auto-atomi"
+                      placeholder="claude-default"
                       store={accountPicker}
                       usage={quota.rows}
                       usageError={quota.error}
@@ -495,12 +484,6 @@ export function MigrateSheet({
                   </div>
                 </>
               )}
-              {caution ? (
-                <p className="mt-2 flex items-start gap-xs text-ui leading-base text-warn">
-                  <CircleHelp aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-                  {caution}
-                </p>
-              ) : null}
             </section>
 
             <section aria-labelledby={`${headingId}-model-heading`}>

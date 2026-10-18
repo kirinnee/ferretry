@@ -26,6 +26,7 @@ import {
   attachSubsystem,
   attentionService,
   CREDENTIALS,
+  configChangeSubsystem,
   consoleSubsystem,
   emptyFeed,
   FakeBrowserLogin,
@@ -39,13 +40,13 @@ import {
   FakeTaskBoards,
   FakeTerminals,
   FakeWarden,
-  configChangeSubsystem,
   fleetEventSubsystem,
   grantSubsystem,
   healthSubsystem,
   human,
   learningSubsystem,
   nameSubsystem,
+  permissionSubsystem,
   pinService,
   recommendSubsystem,
   secretSubsystem,
@@ -553,6 +554,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   ),
   sessionAttach: attachSubsystem(),
   sessionConsole: consoleSubsystem(),
+  sessionPermission: permissionSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   configChanges: configChangeSubsystem(),
   grants: grantSubsystem(),
@@ -604,6 +606,7 @@ describe('the mounted daemon surface', () => {
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
+      1 + // the permission prompt's answer: a digit or Escape into the same pane, governed the same way
       1 + // an agent's rename: a new first name or task title
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
@@ -885,6 +888,7 @@ describe('the mounted daemon surface', () => {
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
       'POST /v1/sessions/:sessionId/console/input',
+      'POST /v1/sessions/:sessionId/permission',
     ]);
   });
 

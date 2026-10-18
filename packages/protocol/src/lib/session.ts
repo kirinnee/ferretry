@@ -3,6 +3,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { SessionLiveActivitySchema } from './session-live.ts';
+import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
 
@@ -494,9 +495,14 @@ export const SessionStateSchema = z.object({
   /**
    * What the agent's screen is asking, in the words a person is shown for it, while `turnState` is
    * `needs-input` because a harness dialog is up ("Make auto mode your default permission mode?").
-   * Absent for every other turn, and for a permission prompt, which the conversation itself shows.
+   * Absent for every other turn, and for a permission prompt, which `permissionRequest` carries.
    */
   turnPrompt: z.string().min(1).max(200).optional(),
+  /**
+   * The tool-permission prompt the agent's pane is parked on while `turnState` is `needs-input`: what it
+   * wants to do and the choices its harness offered. Absent for every other turn.
+   */
+  permissionRequest: PermissionRequestSchema.optional(),
   waiting: DeclaredWaitSchema.optional(),
   waitingCreditSeconds: NonNegativeFiniteSchema.optional(),
 });

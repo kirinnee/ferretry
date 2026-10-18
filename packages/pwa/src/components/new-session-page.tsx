@@ -126,7 +126,7 @@ interface ChosenAccount {
  * Two things have to agree before a single model is offered, and a WRAPPER NAME
  * IS NOT ONE OF THEM ON ITS OWN:
  *
- *   1. THE SAME PAIRING. `claude-auto-studio` on a laptop and on a workstation
+ *   1. THE SAME PAIRING. `claude-studio` on a laptop and on a workstation
  *      are unrelated accounts that happen to share a string, and a re-paired
  *      daemon keeps its id while everything the browser proved about it expires.
  *      So the choice carries its connection and is compared with

@@ -36,6 +36,7 @@ import {
   type WardenConfigPatch,
   WardenConfigPatchSchema,
   WardenConfigSchema,
+  type WardenLogin,
 } from '@ferretry/protocol';
 import type { WardenDetectOptions } from './detect.ts';
 import { normalizeWardenAccounts, type WardenAccount } from './failover.ts';
@@ -121,35 +122,71 @@ export function parseWardenConfigPatch(value: unknown): WardenConfigPatch {
   return WardenConfigPatchSchema.parse(value);
 }
 
+/** The investigation login in effect, and the failover order it heads. */
+export interface ResolvedWardenLogin {
+  /** What the Warden selects from: the stored order, the machine's default runtime, or nothing. */
+  readonly accounts: readonly WardenAccount[];
+  readonly login: WardenLogin;
+  /** At least one of {@link accounts} is a login this machine has — or the inventory is unreadable. */
+  readonly usable: boolean;
+}
+
+/**
+ * Which login an investigation runs on, decided at READ time.
+ *
+ * NOTHING IS COMPILED IN. The owner's own failover order wins; an empty one means they never chose, so
+ * the machine's default runtime — whatever `machine.yaml` names today — stands in, and is never
+ * written back, so changing the default later moves the Warden with it. With neither, the login is
+ * `not_set` and nothing is invented: a name from somebody else's machine is worse than no name,
+ * because it fails only once money is about to be spent.
+ *
+ * A named login this machine does not have is `unknown`. It stays in the owner's file untouched and is
+ * skipped by selection, which already refuses an account the inventory omits. An EMPTY inventory
+ * condemns nobody: it means the inventory is unreadable, not that every login vanished.
+ */
+export function resolveWardenLogin(
+  config: WardenConfig,
+  installedAgents: readonly string[],
+  defaultRuntime: string | undefined,
+): ResolvedWardenLogin {
+  const configured = normalizeWardenAccounts(config.accounts);
+  const fallback = defaultRuntime?.trim() ?? '';
+  const source: WardenLogin['source'] =
+    configured.length > 0 ? 'configured' : fallback === '' ? 'not_set' : 'machine_default';
+  const accounts = source === 'machine_default' ? [{ agent: fallback }] : configured;
+  const known = (agent: string): boolean => installedAgents.length === 0 || installedAgents.includes(agent);
+  return {
+    accounts,
+    login: {
+      source,
+      unknown: accounts.filter(account => !known(account.agent)).map(account => account.agent),
+      available: [...installedAgents],
+    },
+    usable: accounts.some(account => known(account.agent)),
+  };
+}
+
 /**
  * What an operator should know about the configuration they have.
  *
- * An account missing from the host WARNS and is never rejected: the fleet
- * installer may be about to create it, and refusing the configuration would
- * order-couple two tools that have no reason to know about each other. An EMPTY
- * inventory warns about nobody — it means the inventory is unreadable, which is
- * evidence about the host rather than about any account.
+ * An unknown login WARNS and is never rejected: the fleet installer may be about
+ * to create it, and refusing the configuration would order-couple two tools that
+ * have no reason to know about each other. Nor is it rewritten away: the owner
+ * chooses another in Settings › Warden.
  */
-export function wardenConfigWarnings(config: WardenConfig, installedAgents: readonly string[]): readonly string[] {
-  const accounts = normalizeWardenAccounts(config.accounts);
+export function wardenConfigWarnings(config: WardenConfig, resolved: ResolvedWardenLogin): readonly string[] {
   const warnings: string[] = [];
-  if (accounts.length === 0) warnings.push('no warden accounts are configured, so no check can ever run');
-  if (installedAgents.length > 0) {
-    for (const account of accounts) {
-      if (!installedAgents.includes(account.agent))
-        warnings.push(`account ${account.agent} is not installed on this host (it will be skipped until it appears)`);
-    }
-    if (accounts.length > 0 && accounts.every(account => !installedAgents.includes(account.agent)))
-      warnings.push('every configured warden account is missing from this host, so no check can run');
-  }
+  if (resolved.login.source === 'not_set')
+    warnings.push(
+      'no investigation login is set and this machine has no default runtime, so LLM triage is unavailable — choose a login in Settings › Warden',
+    );
+  for (const agent of resolved.login.unknown)
+    warnings.push(`unknown login '${agent}' — choose one in Settings › Warden (it is skipped until it exists here)`);
+  if (resolved.accounts.length > 0 && !resolved.usable)
+    warnings.push('no investigation login exists on this machine, so LLM triage is unavailable');
   if (!config.enabled)
     warnings.push('the Warden is off (enabled=false); detection still runs, but nothing is triaged or acted on');
   return warnings;
-}
-
-/** The effective ordered account list this configuration selects from. */
-export function wardenAccountsOf(config: WardenConfig): readonly WardenAccount[] {
-  return normalizeWardenAccounts(config.accounts);
 }
 
 /**

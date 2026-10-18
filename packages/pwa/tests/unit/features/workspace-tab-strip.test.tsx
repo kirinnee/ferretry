@@ -129,6 +129,28 @@ describe('WorkspaceTabStrip — workspace pane', () => {
     await strip.unmount();
   });
 
+  it('closes a workspace tab on a middle-click, never an agent tab, and holds off autoscroll', async () => {
+    const mouse = (target: HTMLElement, type: string, button: number): MouseEvent => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button });
+      target.dispatchEvent(event);
+      return event;
+    };
+    const strip = await render();
+    expect(mouse(strip.tab(login.id), 'mousedown', 1).defaultPrevented).toBe(true);
+    expect(mouse(strip.tab(login.id), 'mousedown', 0).defaultPrevented).toBe(false);
+    await interact(() => mouse(strip.tab(login.id), 'auxclick', 1));
+    // A right button's auxclick is the context menu's, not a close.
+    await interact(() => mouse(strip.tab(dev.id), 'auxclick', 2));
+    expect(strip.calls.closed).toEqual([login.id]);
+    await strip.unmount();
+
+    const agent = await render({ agentPane: true, tabs: agentTabs, active: 'chat' });
+    expect(mouse(agent.tab('chat'), 'mousedown', 1).defaultPrevented).toBe(false);
+    await interact(() => mouse(agent.tab('console'), 'auxclick', 1));
+    expect(agent.calls.closed).toEqual([]);
+    await agent.unmount();
+  });
+
   it('makes the first tab the focus stop when nothing is selected', async () => {
     const strip = await render({ active: null });
     expect(strip.tab(dev.id).tabIndex).toBe(0);

@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import should from 'should';
 import {
   paneBlockingPrompt,
@@ -219,5 +221,26 @@ describe('paneBlockingPrompt', () => {
     // The `❯ Yes, set auto mode…` row matches the prompt shape, and the daemon used to type into it.
     should(promptIsReady(AUTO_NUDGE)).be.false();
     should(promptIsReady(AUTO_NUDGE, 4, 3)).be.false();
+  });
+});
+
+describe('pane readiness under a permission prompt', () => {
+  const FIXTURES = join(import.meta.dir, '../../fixtures/permission-prompts');
+
+  it('should never call a pane ready while it shows a permission prompt, wherever tmux puts the cursor', () => {
+    for (const name of readdirSync(FIXTURES)) {
+      const frame = readFileSync(join(FIXTURES, name), 'utf8');
+      const rows = frame.split('\n').length;
+      should([promptIsReady(frame), promptIsReady(frame, rows - 1, 0), promptIsReady(frame, 0, 0)]).deepEqual(
+        [false, false, false],
+        name,
+      );
+    }
+  });
+
+  it('should still call a pane ready when a numbered question in the agent’s own words sits above its composer', () => {
+    // The agent asked in prose and is idle: this is the person's turn, not a permission prompt.
+    const frame = '● Would you like to proceed?\n  1. Ship it\n  2. Hold off\n\n────────\n❯ \n────────';
+    should(promptIsReady(frame, 5, 2)).be.true();
   });
 });

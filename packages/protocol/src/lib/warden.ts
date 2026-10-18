@@ -105,7 +105,10 @@ export type WardenEventTrigger = keyof WardenEventTriggers;
 export const WardenEffortSchema = z.enum(['low', 'medium', 'high']);
 export type WardenEffort = z.infer<typeof WardenEffortSchema>;
 
-/** The investigation's own knobs. Its login and model are `accounts[0]`, the head of the failover list. */
+/**
+ * The investigation's own knobs. Its login and model are `accounts[0]`, the head of the failover list —
+ * or, when `accounts` is empty, this machine's default runtime (see {@link WardenLoginSchema}).
+ */
 export const WardenInvestigationConfigSchema = z.object({
   effort: WardenEffortSchema,
 });
@@ -119,7 +122,8 @@ export const WardenConfigSchema = z.object({
   mayActAlone: WardenMayActAloneSchema,
   events: WardenEventTriggersSchema,
   investigation: WardenInvestigationConfigSchema,
-  accounts: z.array(WardenAccountSchema).min(1),
+  /** The owner's failover order. EMPTY means "not chosen": the machine's default runtime, resolved at read time. */
+  accounts: z.array(WardenAccountSchema),
   failover: WardenFailoverConfigSchema,
   providerOutage: ProviderOutageConfigSchema,
   intervalMinutes: WardenSweepIntervalSchema,
@@ -141,7 +145,8 @@ export const WardenConfigPatchSchema = z.strictObject({
   mayActAlone: WardenMayActAloneSchema.strict().partial().optional(),
   events: WardenEventTriggersSchema.strict().partial().optional(),
   investigation: WardenInvestigationConfigSchema.strict().partial().optional(),
-  accounts: z.array(WardenAccountSchema).min(1).optional(),
+  /** `[]` hands the choice back to the machine's default runtime. */
+  accounts: z.array(WardenAccountSchema).optional(),
   failover: WardenFailoverConfigSchema.partial().optional(),
   providerOutage: ProviderOutageConfigSchema.partial().optional(),
   intervalMinutes: WardenSweepIntervalSchema.optional(),
@@ -263,10 +268,37 @@ export const WardenFailoverStatusSchema = z.object({
 });
 export type WardenFailoverStatus = z.infer<typeof WardenFailoverStatusSchema>;
 
+/**
+ * Where the investigation's login came from.
+ *
+ * NO LOGIN IS EVER COMPILED IN. `configured` is the owner's own `accounts`; `machine_default` is the
+ * default runtime `machine.yaml` names, read fresh, because the owner never chose one for the Warden;
+ * `not_set` is a machine with neither, where LLM triage is unavailable and says so rather than falling
+ * back to a name nobody here has.
+ */
+export const WardenLoginSourceSchema = z.enum(['configured', 'machine_default', 'not_set']);
+export type WardenLoginSource = z.infer<typeof WardenLoginSourceSchema>;
+
+export const WardenLoginSchema = z.object({
+  source: WardenLoginSourceSchema,
+  /**
+   * Named logins this machine does not have — a `warden.yaml` written on another machine, say. Shown as
+   * "unknown login — choose one" and never used. The owner's file is never rewritten to hide them.
+   */
+  unknown: z.array(z.string().min(1)),
+  /** The logins the Warden could run on here, for the picker. Empty when the inventory is unreadable. */
+  available: z.array(z.string().min(1)),
+});
+export type WardenLogin = z.infer<typeof WardenLoginSchema>;
+
 export const WardenConfigViewSchema = z.object({
+  /** As stored: `accounts` may be empty. */
   config: WardenConfigSchema,
-  accounts: z.array(WardenAccountSchema).min(1),
+  /** The failover order in effect: the stored one, or the machine's default runtime, or none. */
+  accounts: z.array(WardenAccountSchema),
   warnings: z.array(z.string()),
+  /** Absent from a daemon that predates it, which always had a stored login. */
+  login: WardenLoginSchema.optional(),
 });
 export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;
 
@@ -334,6 +366,8 @@ export const WardenTriageReasonSchema = z.enum([
   'jev_cap',
   /** Today's investigation spend reached its cap: rules until midnight UTC. */
   'investigation_cap',
+  /** No usable investigation login: none was chosen and the machine has no default runtime, or every one named is unknown here. */
+  'no_login',
 ]);
 export type WardenTriageReason = z.infer<typeof WardenTriageReasonSchema>;
 
@@ -473,6 +507,8 @@ export const WardenStatusViewSchema = z.object({
   lastSpawnAt: InstantSchema.optional(),
   lastReport: z.object({ reportId: z.string().min(1), head: z.string() }).optional(),
   failover: WardenFailoverStatusSchema.optional(),
+  /** Where the investigation's login came from. Absent from a daemon that predates it. */
+  login: WardenLoginSchema.optional(),
   triage: WardenTriageStatusSchema,
   spend: WardenSpendSchema,
   savings: WardenSavingsSchema,

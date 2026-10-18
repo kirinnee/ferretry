@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionTurnState } from '@ferretry/protocol';
+import type { PermissionRequest, SessionTurnState } from '@ferretry/protocol';
 import should from 'should';
 import type { TurnPaneEvidence } from '../../../../src/lib/session/turn/policy.ts';
 import {
@@ -45,7 +45,12 @@ const ports = (world: World): SessionTurnPorts => ({
     world.recorded.push({ id, change });
     const state = world.states.get(id);
     if (state !== undefined)
-      world.states.set(id, { ...state, turnState: change.to as SessionTurnState, turnPrompt: change.prompt });
+      world.states.set(id, {
+        ...state,
+        turnState: change.to as SessionTurnState,
+        turnPrompt: change.prompt,
+        permissionRequest: change.request,
+      });
     return true;
   },
   clock: { now: () => '2026-10-16T08:00:00.000Z' },
@@ -83,6 +88,47 @@ describe('SessionTurnWatcher', () => {
       { from: undefined, to: 'needs-input', prompt: 'Make auto mode your default permission mode?' },
       { from: 'needs-input', to: 'needs-input', prompt: 'Try the new fullscreen renderer?' },
       { from: 'needs-input', to: 'your-turn' },
+    ]);
+  });
+
+  it('should record a permission request, a new one beside the same needs-input, and not a cursor move', async () => {
+    const w = world();
+    w.states.set(A, { status: 'running', turn: 1 });
+    const request = (id: string, selected = 1): PermissionRequest => ({
+      id,
+      harness: 'claude',
+      tool: 'Bash',
+      action: 'run',
+      what: 'ls',
+      question: 'Do you want to proceed?',
+      options: [
+        { number: 1, label: 'Yes', kind: 'allow' },
+        { number: 2, label: 'No', kind: 'deny' },
+      ],
+      selected,
+    });
+    const asking = (value: PermissionRequest): TurnPaneEvidence => ({
+      working: false,
+      atPrompt: false,
+      permission: true,
+      request: value,
+    });
+    w.panes.set(A, asking(request('aaaaaaaaaaaaaaaa')));
+    const watcher = new SessionTurnWatcher(ports(w));
+
+    await watcher.tick();
+    // Somebody at the terminal moved the cursor: the same request, nothing to record.
+    w.panes.set(A, asking(request('aaaaaaaaaaaaaaaa', 2)));
+    await watcher.tick();
+    w.panes.set(A, asking(request('bbbbbbbbbbbbbbbb')));
+    await watcher.tick();
+    w.panes.set(A, BUSY);
+    await watcher.tick();
+
+    should(w.recorded.map(entry => entry.change)).deepEqual([
+      { from: undefined, to: 'needs-input', request: request('aaaaaaaaaaaaaaaa') },
+      { from: 'needs-input', to: 'needs-input', request: request('bbbbbbbbbbbbbbbb') },
+      { from: 'needs-input', to: 'working' },
     ]);
   });
 

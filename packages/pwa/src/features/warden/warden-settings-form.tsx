@@ -20,6 +20,7 @@ import {
   type WardenConfig,
   type WardenEffort,
   type WardenEventTrigger,
+  type WardenLogin,
   type WardenMayActAlone,
   type WardenTriage,
 } from '@ferretry/protocol';
@@ -45,6 +46,10 @@ export interface WardenSettingsFormProps {
   readonly errors: WardenFormErrors;
   /** Logins the owner may pick for investigations, beyond those already in the failover order. */
   readonly loginOptions?: readonly WardenAccount[];
+  /** Where the daemon says the login comes from, and which named logins this machine lacks. */
+  readonly login?: WardenLogin;
+  /** The machine default runtime an empty failover order runs on, when the daemon stood one in. */
+  readonly machineDefault?: string;
   /** Settings › Speed-ups, where the Jev key is added. */
   readonly speedupsHref?: string;
   readonly onNavigate?: (to: string) => void;
@@ -227,12 +232,26 @@ export function WardenSettingsForm({
   jevKey,
   errors,
   loginOptions = [],
+  login,
+  machineDefault,
   speedupsHref,
   onNavigate,
 }: WardenSettingsFormProps) {
   const name = useId();
   const ai = value.triage !== 'rules';
   const head = value.accounts[0];
+  // The login a model is pinned on: the chosen head, else the machine default it stands in for.
+  const base = head ?? (machineDefault === undefined ? undefined : { agent: machineDefault });
+  const unknown = (
+    value.accounts.length > 0 ? value.accounts.map(account => account.agent) : (login?.unknown ?? [])
+  ).filter(agent => login?.unknown.includes(agent) === true);
+  const notSet = value.accounts.length === 0 && login?.source === 'not_set';
+  const unchosen =
+    machineDefault !== undefined
+      ? `Machine default — ${machineDefault}`
+      : notSet
+        ? 'Not set — choose a login'
+        : 'The machine’s default runtime';
   const logins = [
     ...value.accounts,
     ...loginOptions.filter(option => !value.accounts.some(account => account.agent === option.agent)),
@@ -369,7 +388,7 @@ export function WardenSettingsForm({
             </label>
           )}
           <p className="m-0 text-meta leading-base text-muted" data-warden-privacy="">
-            {wardenPrivacyNote(value.triage, head?.agent ?? 'no login')}
+            {wardenPrivacyNote(value.triage, base?.agent ?? 'no login')}
           </p>
         </Card>
 
@@ -390,10 +409,13 @@ export function WardenSettingsForm({
                   className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
                   value={head?.agent ?? ''}
                   onChange={event => {
+                    // The empty option hands the choice back to the machine's default runtime.
+                    if (event.target.value === '') return onChange({ ...value, accounts: [] });
                     const picked = logins.find(account => account.agent === event.target.value);
                     if (picked !== undefined) onChange(withLogin(value, picked));
                   }}
                 >
+                  <option value="">{unchosen}</option>
                   {logins.map(account => (
                     <option key={account.agent} value={account.agent}>
                       {account.agent}
@@ -408,14 +430,27 @@ export function WardenSettingsForm({
                   placeholder="the login’s default"
                   className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
                   value={head?.model ?? ''}
+                  disabled={base === undefined}
                   onChange={event => {
                     const model = event.target.value.trim();
-                    const { model: _old, ...agent } = head ?? { agent: '' };
+                    const { model: _old, ...agent } = base ?? { agent: '' };
                     onChange(withLogin(value, model === '' ? agent : { ...agent, model }));
                   }}
                 />
               </label>
             </div>
+            {unknown.map(agent => (
+              <p key={agent} role="alert" className="m-0 text-meta leading-base text-warn" data-warden-unknown-login="">
+                Unknown login ‘{agent}’ — choose one. This machine has no login by that name, so the Warden does not use
+                it.
+              </p>
+            ))}
+            {notSet && (
+              <p role="alert" className="m-0 text-meta leading-base text-warn" data-warden-login-not-set="">
+                No login is set and this machine has no default runtime, so LLM triage is unavailable. Choose a login
+                above.
+              </p>
+            )}
             <Segments
               label="Effort"
               name={`${name}-effort`}
@@ -428,35 +463,42 @@ export function WardenSettingsForm({
               <span className="text-cell font-medium text-fg">
                 Failover order for the warden’s own login (strikes and cooldowns)
               </span>
-              <ol className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Failover order">
-                {value.accounts.map((account, index) => (
-                  <li
-                    key={account.agent}
-                    className="flex min-w-0 items-center gap-sm rounded-control border border-border-strong bg-surface-2 px-cell-x py-1"
-                  >
-                    <span className="mono text-meta text-faint">{index + 1}</span>
-                    <span className="mono min-w-0 flex-1 break-all text-ui text-fg">{account.agent}</span>
-                    <button
-                      type="button"
-                      className="kt-btn kt-btn--sm min-h-[44px] min-w-[44px]"
-                      aria-label={`Move ${account.agent} up`}
-                      disabled={index === 0}
-                      onClick={() => onChange(movedAccount(value, index, -1))}
+              {value.accounts.length === 0 && (
+                <p className="m-0 text-meta leading-base text-muted">
+                  None chosen: investigations run on this machine’s default runtime, whatever it is when they start.
+                </p>
+              )}
+              {value.accounts.length > 0 && (
+                <ol className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Failover order">
+                  {value.accounts.map((account, index) => (
+                    <li
+                      key={account.agent}
+                      className="flex min-w-0 items-center gap-sm rounded-control border border-border-strong bg-surface-2 px-cell-x py-1"
                     >
-                      <ArrowUp size={14} aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      className="kt-btn kt-btn--sm min-h-[44px] min-w-[44px]"
-                      aria-label={`Move ${account.agent} down`}
-                      disabled={index === value.accounts.length - 1}
-                      onClick={() => onChange(movedAccount(value, index, 1))}
-                    >
-                      <ArrowDown size={14} aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-              </ol>
+                      <span className="mono text-meta text-faint">{index + 1}</span>
+                      <span className="mono min-w-0 flex-1 break-all text-ui text-fg">{account.agent}</span>
+                      <button
+                        type="button"
+                        className="kt-btn kt-btn--sm min-h-[44px] min-w-[44px]"
+                        aria-label={`Move ${account.agent} up`}
+                        disabled={index === 0}
+                        onClick={() => onChange(movedAccount(value, index, -1))}
+                      >
+                        <ArrowUp size={14} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        className="kt-btn kt-btn--sm min-h-[44px] min-w-[44px]"
+                        aria-label={`Move ${account.agent} down`}
+                        disabled={index === value.accounts.length - 1}
+                        onClick={() => onChange(movedAccount(value, index, 1))}
+                      >
+                        <ArrowDown size={14} aria-hidden="true" />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
             <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
               <NumberField
@@ -553,7 +595,7 @@ export function WardenSettingsForm({
       </fieldset>
 
       <p aria-live="polite" className="m-0 text-ui leading-base text-fg-soft" data-warden-summary="">
-        {wardenSummary(value, jevKey.state === 'set')}
+        {wardenSummary(value, jevKey.state === 'set', machineDefault)}
       </p>
     </div>
   );

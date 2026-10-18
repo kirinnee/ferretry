@@ -384,6 +384,31 @@ function fail(message: string): never {
 }
 
 /**
+ * The full-screen browser frame's box, measured once its own transitions have finished.
+ *
+ * The harness runs under `prefers-reduced-motion: reduce`, and `styles/index.css` answers that with
+ * `transition-duration: 1ms` on every element — while `transition-property` still defaults to `all`.
+ * So the frame's move from the 520px pane to the full viewport is a real 1ms transition, and a
+ * measurement that lands in the frame where it starts reads the OLD width (520 at a 1440 viewport) on a
+ * loaded runner. `getAnimations()` flushes style first, so the transition is registered before this
+ * waits on it; a frame that genuinely stays 520 wide still fails, it just fails after settling.
+ */
+async function measureFullBrowserFrame(exitBrowser: Locator) {
+  return exitBrowser.evaluate(async button => {
+    const frame = button.closest('aside')?.parentElement;
+    await Promise.all((frame?.getAnimations() ?? []).map(animation => animation.finished.catch(() => undefined)));
+    const box = frame?.getBoundingClientRect();
+    return {
+      fixed: frame === null || frame === undefined ? false : getComputedStyle(frame).position === 'fixed',
+      width: box === undefined ? null : Math.round(box.width),
+      height: box === undefined ? null : Math.round(box.height),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    };
+  });
+}
+
+/**
  * THE PAGE BODY MUST NEVER SCROLL SIDEWAYS, checked rather than eyeballed.
  *
  * This is the failure that a screenshot is worst at showing: a capture is clipped to the viewport, so a
@@ -3399,17 +3424,7 @@ try {
           await page.getByLabel('Expand browser to fill the viewport').click();
           const exitBrowser = page.getByLabel('Exit full-screen browser');
           await exitBrowser.waitFor({ state: 'visible' });
-          const fullBrowserGeometry = await exitBrowser.evaluate(button => {
-            const frame = button.closest('aside')?.parentElement;
-            const box = frame?.getBoundingClientRect();
-            return {
-              fixed: frame === null || frame === undefined ? false : getComputedStyle(frame).position === 'fixed',
-              width: box === undefined ? null : Math.round(box.width),
-              height: box === undefined ? null : Math.round(box.height),
-              viewportWidth: window.innerWidth,
-              viewportHeight: window.innerHeight,
-            };
-          });
+          const fullBrowserGeometry = await measureFullBrowserFrame(exitBrowser);
           if (
             !fullBrowserGeometry.fixed ||
             fullBrowserGeometry.width !== fullBrowserGeometry.viewportWidth ||

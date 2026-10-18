@@ -2,7 +2,6 @@
 
 import { FolderGit2 } from 'lucide-react';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
-import { cn } from '../lib/class-names.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
@@ -115,6 +114,8 @@ export interface LeanDensityGroupsProps extends NavigationProps {
   readonly mode: DashboardView;
   readonly density: Exclude<Density, 'full'>;
   readonly scoped: boolean;
+  /** Injected clock for each row's age. */
+  readonly now: number;
 }
 
 /** Compact/minimal groups use either a dense table or one shared phone panel. */
@@ -124,6 +125,7 @@ export function LeanDensityGroups({
   mode,
   density,
   scoped,
+  now,
   onFocus,
   onNavigate,
 }: LeanDensityGroupsProps) {
@@ -131,7 +133,7 @@ export function LeanDensityGroups({
   const widths = DENSITY_COLUMN_WIDTHS[density];
   const hues = groupHueVars(groups);
   return (
-    <div className="space-y-3">
+    <div className="fy-session-groups">
       {groups.map((group, index) =>
         mode === 'cards' ? (
           <LeanGroupPanel
@@ -140,6 +142,7 @@ export function LeanDensityGroups({
             group={group}
             hue={hues[index] ?? groupHueVar(group.path || group.name)}
             key={group.path || group.name}
+            now={now}
             onFocus={onFocus}
             onNavigate={onNavigate}
             scoped={scoped}
@@ -184,29 +187,42 @@ export interface LeanGroupPanelProps extends NavigationProps {
   readonly hue: string;
   readonly density: Exclude<Density, 'full'>;
   readonly scoped: boolean;
+  readonly now: number;
 }
 
 /**
- * One project panel with a hoisted majority status where visible. LIGHT ON PURPOSE: the project's hue
- * marks its folder icon only — a 3px coloured rail on every panel plus a ruled header made a page of
- * nested boxes, where the sessions are the content. The header is a plain row on the panel itself.
+ * One project: a small heading (folder, name, a muted count) OVER one container of its sessions, a
+ * hairline between them. The heading sits on the page, not in a box of its own, so a project is one
+ * frame rather than a box with a ruled header box inside it — the sessions are the content. The
+ * container is the theme's panel, so Neo's heavy frame and offset shadow land once per project and
+ * never on a row (session-screens.css "SESSION GROUPS").
  */
-export function LeanGroupPanel({ daemonId, group, hue, density, scoped, onFocus, onNavigate }: LeanGroupPanelProps) {
+export function LeanGroupPanel({
+  daemonId,
+  group,
+  hue,
+  density,
+  scoped,
+  now,
+  onFocus,
+  onNavigate,
+}: LeanGroupPanelProps) {
   const found = !scoped && density === 'compact' ? hoistedStatus(group.rows) : null;
   // A hoisted "run" is the routine again, said once for the whole folder: the dots already say it.
   const hoisted = found !== null && routineStatus(found.status) ? null : found;
   return (
-    <section className="kt-panel overflow-hidden">
+    <section aria-label={`Sessions in ${group.name}`} className="fy-session-group">
       {!scoped && (
         <button
           aria-label={`Focus folder ${group.name}`}
-          className="flex min-h-[44px] w-full min-w-0 items-center gap-sm px-panel pt-1 text-left hover:bg-surface-2"
+          className="fy-session-group__head"
           onClick={() => onFocus(group.path)}
           title={`Focus folder ${group.name}`}
           type="button"
         >
           <FolderGit2 aria-hidden="true" className="shrink-0" size={13} style={{ color: hue }} />
           <span className="min-w-0 truncate text-ui font-semibold text-fg">{group.name}</span>
+          <span className="mono shrink-0 text-meta text-faint">{group.rows.length}</span>
           {group.path && (
             <span className="mono hidden min-w-0 truncate text-meta text-faint sm:inline">{group.path}</span>
           )}
@@ -219,15 +235,15 @@ export function LeanGroupPanel({ daemonId, group, hue, density, scoped, onFocus,
               {hoisted.uniform ? statusWord(hoisted.status) : `${hoisted.count}× ${statusWord(hoisted.status)}`}
             </span>
           )}
-          <span className={cn('mono shrink-0 text-meta text-faint', !hoisted && 'ml-auto')}>{group.rows.length}</span>
         </button>
       )}
-      <div className="divide-y divide-border-soft">
+      <div className="kt-panel fy-session-group__list">
         {group.rows.map(view => (
           <LeanSessionCard
             daemonId={daemonId}
             density={density}
             key={`${daemonId}:${view.config.id}`}
+            now={now}
             onNavigate={onNavigate}
             statusHoisted={hoisted !== null && view.state.status === hoisted.status}
             view={view}

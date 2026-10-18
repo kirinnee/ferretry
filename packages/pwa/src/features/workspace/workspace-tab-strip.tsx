@@ -11,7 +11,7 @@
  *                   other pane", the keyboard alternative to dragging).
  *
  * A real WAI-ARIA tablist: roving tabindex, wrap-around arrows, Home / End,
- * Delete closes a workspace tab. The ✕ lives inside the tab (a nested button is
+ * Delete or a middle-click closes a workspace tab. The ✕ lives inside the tab (a nested button is
  * invalid in role=tab), so the tab's click handler tells the two apart.
  *
  * Presentational: the workspace view owns the layout and maps every intent to
@@ -276,6 +276,16 @@ export function WorkspaceTabStrip(props: WorkspaceTabStripProps) {
                 props.onDragTab(tab.id);
               }}
               onDragEnd={() => props.onDragTab(null)}
+              // A middle-click closes, as it does on a browser's own tabs; the press is held off so it
+              // never starts the browser's autoscroll over the pane.
+              onMouseDown={event => {
+                if (closable && event.button === 1) event.preventDefault();
+              }}
+              onAuxClick={event => {
+                if (!closable || event.button !== 1) return;
+                event.preventDefault();
+                props.onClose(tab.id);
+              }}
               onClick={event => {
                 if ((event.target as HTMLElement).closest('[data-tab-close]') !== null) {
                   event.stopPropagation();

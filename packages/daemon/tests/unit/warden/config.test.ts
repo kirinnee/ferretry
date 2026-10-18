@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import { DEFAULT_WARDEN_ACCOUNT } from '@ferretry/protocol';
 import should from 'should';
 import {
   applyWardenConfigPatch,
@@ -10,11 +9,11 @@ import {
   MINIMUM_UNATTENDED_MS,
   parseStoredWardenConfig,
   parseWardenConfigPatch,
+  resolveWardenLogin,
   spawnGapMs,
   sweepIntervalMs,
   unattendedWindowMs,
   type WardenConfig,
-  wardenAccountsOf,
   wardenConfigWarnings,
   wardenDetectOptions,
 } from '../../../src/lib/warden/index.ts';
@@ -29,12 +28,9 @@ describe('the shipped warden defaults', () => {
     should(defaultWardenConfig.mayActAlone.stop).be.false();
   });
 
-  it('should configure exactly one triage-tier account with no pinned model', () => {
-    // Arrange / Act
-    const accounts = wardenAccountsOf(defaultWardenConfig);
-
-    // Assert
-    should(accounts).deepEqual([{ agent: DEFAULT_WARDEN_ACCOUNT }]);
+  it('should name no login at all, so the machine default decides at read time', () => {
+    // Arrange / Act / Assert: a login name compiled in is somebody else's machine.
+    should(defaultWardenConfig.accounts).deepEqual([]);
   });
 
   it('should cap the whole fleet at one live warden', () => {
@@ -137,7 +133,18 @@ describe('applying an operator patch', () => {
 
   it('should refuse a merge that would produce a document the loader could not read back', () => {
     // Arrange / Act / Assert
-    should(() => applyWardenConfigPatch(defaultWardenConfig, { accounts: [] })).throw();
+    should(() => applyWardenConfigPatch(defaultWardenConfig, { accounts: [{ agent: '' }] })).throw();
+  });
+
+  it('should hand the login back to the machine default when the patch empties the order', () => {
+    // Arrange
+    const chosen = applyWardenConfigPatch(defaultWardenConfig, { accounts: [{ agent: 'a' }] });
+
+    // Act
+    const actual = applyWardenConfigPatch(chosen, { accounts: [] });
+
+    // Assert
+    should(actual.accounts).deepEqual([]);
   });
 
   it('should refuse a patch naming a field that does not exist', () => {
@@ -154,60 +161,148 @@ describe('applying an operator patch', () => {
   });
 });
 
+describe('which login an investigation runs on', () => {
+  it("should run on the owner's own order when they chose one", () => {
+    // Arrange
+    const subject = config({ accounts: [{ agent: 'a', model: 'm' }, { agent: 'b' }] });
+
+    // Act
+    const actual = resolveWardenLogin(subject, ['a', 'b', 'claude-default'], 'claude-default');
+
+    // Assert
+    should(actual).deepEqual({
+      accounts: [{ agent: 'a', model: 'm' }, { agent: 'b' }],
+      login: { source: 'configured', unknown: [], available: ['a', 'b', 'claude-default'] },
+      usable: true,
+    });
+  });
+
+  it('should stand in the machine default runtime when the owner chose none', () => {
+    // Arrange / Act
+    const actual = resolveWardenLogin(defaultWardenConfig, ['claude-default'], ' claude-default ');
+
+    // Assert
+    should(actual.accounts).deepEqual([{ agent: 'claude-default' }]);
+    should(actual.login.source).equal('machine_default');
+    should(actual.usable).be.true();
+  });
+
+  it('should say not set, and never invent a name, when the machine has no default either', () => {
+    // Arrange / Act
+    const actual = resolveWardenLogin(defaultWardenConfig, ['claude-default'], undefined);
+
+    // Assert
+    should(actual).deepEqual({
+      accounts: [],
+      login: { source: 'not_set', unknown: [], available: ['claude-default'] },
+      usable: false,
+    });
+  });
+
+  it('should treat a blank default runtime as none', () => {
+    // Arrange / Act
+    const actual = resolveWardenLogin(defaultWardenConfig, [], '  ');
+
+    // Assert
+    should(actual.login.source).equal('not_set');
+  });
+
+  it('should report a login written on another machine as unknown and leave it in place', () => {
+    // Arrange: a warden.yaml from the old default.
+    const subject = config({ accounts: [{ agent: 'legacy-wrapper' }] });
+
+    // Act
+    const actual = resolveWardenLogin(subject, ['claude-default'], 'claude-default');
+
+    // Assert: no silent swap to the default — the owner chooses.
+    should(actual.accounts).deepEqual([{ agent: 'legacy-wrapper' }]);
+    should(actual.login).deepEqual({
+      source: 'configured',
+      unknown: ['legacy-wrapper'],
+      available: ['claude-default'],
+    });
+    should(actual.usable).be.false();
+  });
+
+  it('should call a default runtime the inventory lacks unknown too', () => {
+    // Arrange / Act
+    const actual = resolveWardenLogin(defaultWardenConfig, ['other'], 'claude-default');
+
+    // Assert
+    should(actual.login.unknown).deepEqual(['claude-default']);
+    should(actual.usable).be.false();
+  });
+
+  it('should condemn nobody when the inventory is unreadable', () => {
+    // Arrange / Act
+    const actual = resolveWardenLogin(config({ accounts: [{ agent: 'a' }] }), [], undefined);
+
+    // Assert
+    should(actual.login.unknown).be.empty();
+    should(actual.usable).be.true();
+  });
+});
+
 describe('what an operator is warned about', () => {
+  const warningsFor = (subject: WardenConfig, installed: readonly string[], defaultRuntime?: string) =>
+    wardenConfigWarnings(subject, resolveWardenLogin(subject, installed, defaultRuntime));
+
   it('should warn that the Warden is off while detection still runs', () => {
     // Arrange / Act
-    const actual = wardenConfigWarnings(config({ enabled: false }), [DEFAULT_WARDEN_ACCOUNT]);
+    const actual = warningsFor(config({ enabled: false }), ['claude-default'], 'claude-default');
 
     // Assert
     should(actual).matchAny(/the Warden is off/u);
   });
 
-  it('should say nothing when an enabled configuration names an installed account', () => {
+  it('should say nothing when an enabled configuration runs on an installed login', () => {
     // Arrange / Act
-    const actual = wardenConfigWarnings(config({ enabled: true }), [DEFAULT_WARDEN_ACCOUNT]);
+    const actual = warningsFor(config({ enabled: true }), ['claude-default'], 'claude-default');
 
     // Assert
     should(actual).be.empty();
   });
 
-  it('should warn about an account this host does not have', () => {
+  it('should name an unknown login and say LLM triage is unavailable when it is the only one', () => {
     // Arrange / Act
-    const actual = wardenConfigWarnings(config({ enabled: true }), ['some-other-agent']);
+    const actual = warningsFor(config({ enabled: true, accounts: [{ agent: 'legacy-wrapper' }] }), ['other']);
 
     // Assert
-    should(actual).matchAny(/is not installed on this host/u);
-    should(actual).matchAny(/every configured warden account is missing/u);
+    should(actual).deepEqual([
+      "unknown login 'legacy-wrapper' — choose one in Settings › Warden (it is skipped until it exists here)",
+      'no investigation login exists on this machine, so LLM triage is unavailable',
+    ]);
   });
 
   it('should not warn about anybody when the host inventory is unreadable', () => {
     // Arrange: an empty inventory is evidence about the host, never about an account.
-    const actual = wardenConfigWarnings(config({ enabled: true }), []);
+    const actual = warningsFor(config({ enabled: true, accounts: [{ agent: 'a' }] }), []);
 
     // Assert
     should(actual).be.empty();
   });
 
-  it('should warn when one of several accounts is missing without declaring total loss', () => {
+  it('should warn when one of several logins is unknown without declaring total loss', () => {
     // Arrange
     const subject = config({ enabled: true, accounts: [{ agent: 'a' }, { agent: 'b' }] });
 
     // Act
-    const actual = wardenConfigWarnings(subject, ['a']);
+    const actual = warningsFor(subject, ['a']);
 
     // Assert
-    should(actual).deepEqual(['account b is not installed on this host (it will be skipped until it appears)']);
+    should(actual).deepEqual([
+      "unknown login 'b' — choose one in Settings › Warden (it is skipped until it exists here)",
+    ]);
   });
 
-  it('should warn when no account is configured at all', () => {
-    // Arrange: only reachable by bypassing the schema, which the loader never does.
-    const subject = { ...defaultWardenConfig, enabled: true, accounts: [] } as WardenConfig;
-
-    // Act
-    const actual = wardenConfigWarnings(subject, ['a']);
+  it('should warn when no login is set and the machine has no default runtime', () => {
+    // Arrange / Act
+    const actual = warningsFor(config({ enabled: true }), ['a'], undefined);
 
     // Assert
-    should(actual).deepEqual(['no warden accounts are configured, so no check can ever run']);
+    should(actual).deepEqual([
+      'no investigation login is set and this machine has no default runtime, so LLM triage is unavailable — choose a login in Settings › Warden',
+    ]);
   });
 });
 

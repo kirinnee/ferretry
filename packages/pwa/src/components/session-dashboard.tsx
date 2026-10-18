@@ -19,18 +19,21 @@ import {
   WardenVerdicts,
   type WardenVerdictView,
 } from '../features/warden/warden-verdicts.tsx';
-import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import { useDashboardNarrow } from '../hooks/use-dashboard-view.ts';
 import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
+import type { PickerAccount } from '../lib/account-picker-catalog.ts';
+import type { AllMachinesView } from '../lib/all-machines.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
 import type { SessionQuotaResolver } from '../lib/usage.ts';
+import { type NewSessionMachine, NewSessionMenu } from '../shell/new-session-menu.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
 import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
+import { AllMachinesGroups } from './session-dashboard-machines.tsx';
 import {
   dashboardEmptyMessage,
   dashboardMode,
@@ -78,7 +81,24 @@ export interface SessionDashboardProps {
   readonly onNavigate?: (path: string) => void;
   /** Harness/test override; production follows the live 900px crossing. */
   readonly narrow?: boolean;
+  /**
+   * Every paired machine's sessions, when the Sessions list setting is All machines and no folder is
+   * focused. The page then lists Needs you and every machine instead of `groups`.
+   */
+  readonly allMachines?: AllMachinesView;
+  /** Focus a folder on another machine: that machine's page, at that folder. */
+  readonly onFocusMachine?: (daemonId: DaemonId, path: string) => void;
+  /** The machines "+ New" may start on. With more than one it asks which; the default is this one. */
+  readonly newSessionMachines?: readonly NewSessionMachine[];
 }
+
+/** How many rows the all-machines list draws: Needs you, plus every machine's groups. */
+const allMachinesShown = (view: AllMachinesView): number =>
+  view.needsYou.length +
+  view.machines.reduce(
+    (count, machine) => count + machine.groups.reduce((rows, group) => rows + group.rows.length, 0),
+    0,
+  );
 
 export function SessionDashboard({
   connection,
@@ -101,13 +121,21 @@ export function SessionDashboard({
   onOpenWardenReport,
   onNavigate,
   narrow: narrowOverride,
+  allMachines,
+  onFocusMachine,
+  newSessionMachines,
 }: SessionDashboardProps) {
   const headingId = useId();
   const viewportNarrow = useDashboardNarrow();
   const narrow = narrowOverride ?? viewportNarrow;
   const mode = dashboardMode(dashboardView, narrow);
-  const visibleCount = groups.reduce((count, group) => count + group.rows.length, 0);
-  const totalCount = sessions?.length ?? 0;
+  const visibleCount =
+    allMachines === undefined
+      ? groups.reduce((count, group) => count + group.rows.length, 0)
+      : allMachinesShown(allMachines);
+  const totalCount = allMachines?.total ?? sessions?.length ?? 0;
+  // Across machines the list is "read" once any machine has answered; one machine at a time, once it has.
+  const read = allMachines === undefined ? sessions !== null : allMachines.loaded;
   const pullMarker = { [PULL_TO_PALETTE_ATTR]: '' };
 
   const leaveScope = (path: string): void => {
@@ -121,12 +149,7 @@ export function SessionDashboard({
       className="flex h-full min-h-0 w-full flex-col px-3 pb-2 sm:px-0"
       data-density={density}
     >
-      <div
-        className={cn(
-          'mt-0.5 mb-1 flex items-center justify-between gap-2 sm:mt-2 sm:mb-2',
-          scope === null && 'flex-wrap',
-        )}
-      >
+      <div className={cn('fy-sessions-head flex items-center justify-between gap-2', scope === null && 'flex-wrap')}>
         {scope === null ? (
           <h1
             className="sr-only m-0 font-display text-display font-bold tracking-display sm:not-sr-only"
@@ -160,14 +183,14 @@ export function SessionDashboard({
           </div>
         )}
 
-        {sessions !== null && scope === null ? (
+        {read && scope === null ? (
           <span className="mono text-meta text-faint sm:hidden" title="visible / total sessions">
             {visibleCount}/{totalCount}
           </span>
         ) : null}
 
         <div className="ml-auto flex shrink-0 items-center gap-sm">
-          {sessions !== null && scope === null ? (
+          {read && scope === null ? (
             <span className="mono hidden text-meta text-faint sm:inline" title="visible / total sessions">
               {visibleCount}/{totalCount}
             </span>
@@ -183,17 +206,31 @@ export function SessionDashboard({
           ) : null}
           {/* A compact "+ New" pill on a phone, on the count's line — never a filled 44px square — and the
               full "New session" from `sm` up. The pill keeps its 44px tap height through its hit area. */}
-          <RouteLink
-            aria-label="New session"
-            className="kt-btn kt-btn--sm fy-new-session"
-            data-variant="primary"
-            onNavigate={onNavigate}
-            to={daemonNewSessionPath(connection.daemonId)}
-          >
-            <Plus aria-hidden="true" size={13} />
-            <span className="sm:hidden">New</span>
-            <span className="hidden sm:inline">New session</span>
-          </RouteLink>
+          {newSessionMachines !== undefined && newSessionMachines.length > 1 && onNavigate !== undefined ? (
+            <NewSessionMenu
+              className="kt-btn kt-btn--sm fy-new-session"
+              current={connection.daemonId}
+              machines={newSessionMachines}
+              onNavigate={onNavigate}
+              variant="primary"
+            >
+              <Plus aria-hidden="true" size={13} />
+              <span className="sm:hidden">New</span>
+              <span className="hidden sm:inline">New session</span>
+            </NewSessionMenu>
+          ) : (
+            <RouteLink
+              aria-label="New session"
+              className="kt-btn kt-btn--sm fy-new-session"
+              data-variant="primary"
+              onNavigate={onNavigate}
+              to={daemonNewSessionPath(connection.daemonId)}
+            >
+              <Plus aria-hidden="true" size={13} />
+              <span className="sm:hidden">New</span>
+              <span className="hidden sm:inline">New session</span>
+            </RouteLink>
+          )}
         </div>
       </div>
 
@@ -223,13 +260,28 @@ export function SessionDashboard({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-thin"
         data-density-region="dashboard-scroller"
       >
-        {sessions === null ? <SkeletonRows /> : null}
-        {sessions !== null && visibleCount === 0 ? (
+        {read ? null : <SkeletonRows />}
+        {allMachines !== undefined && read ? (
+          <AllMachinesGroups
+            accounts={accounts}
+            daemonId={connection.daemonId}
+            density={density}
+            mode={mode}
+            now={now}
+            onFocus={(daemon, path) =>
+              daemon === connection.daemonId ? onEnterScope(path) : onFocusMachine?.(daemon, path)
+            }
+            onNavigate={onNavigate}
+            usage={usage}
+            view={allMachines}
+          />
+        ) : null}
+        {allMachines === undefined && sessions !== null && visibleCount === 0 ? (
           <div className="rounded-panel border border-dashed border-border bg-surface-2 px-4 py-10 text-center text-muted">
             {dashboardEmptyMessage(scope)}
           </div>
         ) : null}
-        {sessions !== null && visibleCount > 0 ? (
+        {allMachines === undefined && sessions !== null && visibleCount > 0 ? (
           density === 'full' ? (
             <FullDensityGroups
               daemonId={connection.daemonId}
@@ -248,6 +300,7 @@ export function SessionDashboard({
               density={density}
               groups={groups}
               mode={mode}
+              now={now}
               onFocus={onEnterScope}
               onNavigate={onNavigate}
               scoped={scope !== null}

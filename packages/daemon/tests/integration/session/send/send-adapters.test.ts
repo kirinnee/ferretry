@@ -577,6 +577,19 @@ describe('the tmux send terminal', () => {
     should((await terminal(new ScriptedTmux(['❯ '])).observe(ID)).blockingPrompt).be.undefined();
   });
 
+  it('should name a tool-permission prompt as what blocks a send, so nothing is typed into its choices', async () => {
+    // Arrange — a permission prompt, whose rows a typed message starting with a digit would pick.
+    const tmux = new ScriptedTmux([
+      ' Read file\n  Read(/etc/hostname)\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, allow reading from /etc during this session\n   3. No',
+    ]);
+
+    // Act
+    const actual = await terminal(tmux).observe(ID);
+
+    // Assert
+    should(actual.blockingPrompt).equal('Permission prompt — Read /etc/hostname: Do you want to proceed?');
+  });
+
   it('should press Escape and re-read the pane when a caller ends the active turn', async () => {
     // Escape is the safe stop-the-turn key in both harness TUIs; `C-c` is the QUIT path. Exactly one
     // keystroke per call, with no internal retries.

@@ -1,12 +1,13 @@
 /**
- * A small browser-local choice from the session redesign: whether this device always reduces motion.
+ * Small browser-local choices: whether this device always reduces motion (from the session redesign),
+ * and whether the session list shows every paired machine or only the one on screen.
  *
- * The value lives in `lib/controls.ts`; this surface holds no state of its own. (It once shared the
+ * The values live in `lib/controls.ts`; this surface holds no state of its own. (It once shared the
  * file with "Show details", which went when the transcript stopped showing daemon bookkeeping.)
  */
 
 import { cn } from '../../lib/class-names.ts';
-import type { MotionPreference } from '../../lib/controls.ts';
+import { type MotionPreference, SESSIONS_LIST_SCOPES, type SessionsListScope } from '../../lib/controls.ts';
 
 interface Choice<Value extends string> {
   readonly value: Value;
@@ -72,5 +73,36 @@ export function MotionSetting({
 }) {
   return (
     <ChoiceGroup choices={MOTION} legend="Motion" name="appearance-motion" onSelect={onChange} selected={motion} />
+  );
+}
+
+const SESSIONS_LIST: Readonly<Record<SessionsListScope, Choice<SessionsListScope>>> = {
+  all: {
+    value: 'all',
+    label: 'All machines',
+    detail: 'Every paired machine in one list, with everything that needs you at the top.',
+  },
+  current: {
+    value: 'current',
+    label: 'Current machine only',
+    detail: 'Only the machine you are on. Switch machines from the machine menu.',
+  },
+};
+
+export function SessionsListSetting({
+  scope,
+  onChange,
+}: {
+  readonly scope: SessionsListScope;
+  readonly onChange: (scope: SessionsListScope) => void;
+}) {
+  return (
+    <ChoiceGroup
+      choices={SESSIONS_LIST_SCOPES.map(value => SESSIONS_LIST[value])}
+      legend="Sessions list"
+      name="behaviour-sessions-list"
+      onSelect={onChange}
+      selected={scope}
+    />
   );
 }

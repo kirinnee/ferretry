@@ -503,3 +503,21 @@
 .fy-ws-split-child[hidden] {
   display: none;
 }
+
+/* The phone chip's ✕ (phone-chip-row.tsx): drawn small, hit wide. It spans the chip's full height and
+   the touch floor's width, so a thumb aimed at the 12px glyph lands; the chip row stays the slim switch
+   it was made (the row's own exemption from the 44px floor is in styles/index.css). */
+.fy-phone-chip-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex-shrink: 0;
+  width: max(28px, var(--target-floor));
+  margin-inline-start: calc(-1 * var(--gap-xs));
+  border-radius: var(--radius-control);
+  color: var(--muted);
+}
+.fy-phone-chip-close:hover {
+  color: var(--fg);
+}

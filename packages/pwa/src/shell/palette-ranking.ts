@@ -99,7 +99,7 @@ const isWordStart = (haystack: string, at: number): boolean => at === 0 || SEPAR
 /**
  * `WORD_START_SCORE` if any occurrence begins a word, `SUBSTRING_SCORE` if it
  * occurs at all, 0 if it does not. Every occurrence is checked, not just the
- * first: `nitroso` inside `/home/k/Workspace/atomi/nitroso` is a word start even
+ * first: `nitroso` inside `/home/k/Workspace/acme/nitroso` is a word start even
  * though the first `n` in the path is not.
  */
 const substringScore = (haystack: string, needle: string): number => {

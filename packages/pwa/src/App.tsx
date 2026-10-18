@@ -93,13 +93,15 @@ import { WardenOverviewSurface } from './features/warden/warden-overview-surface
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
-import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
-import { useFleetPoll } from './hooks/use-fleet-poll.ts';
+import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
+import { useLiveClock } from './hooks/use-live-clock.ts';
+import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
+import { useMachinesPoll } from './hooks/use-machines-poll.ts';
 import {
   type NotificationControlsHost,
   useNotificationControls,
@@ -116,6 +118,7 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
+import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
@@ -628,6 +631,7 @@ function SetupGuide() {
 function SessionsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
+  const allMachines = useContext(AllMachinesContext);
   const readWardenStatus = useCallback(
     async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
     [store.clients],
@@ -643,6 +647,9 @@ function SessionsRoute({ connection }: DaemonPageProps) {
       wardenStatus={readWardenStatus}
       onOpenWardenReport={() => navigate(daemonWardenPath(connection.daemonId))}
       onNavigate={navigate}
+      {...(allMachines === undefined
+        ? {}
+        : { machineSources: allMachines.sources, newSessionMachines: allMachines.machines })}
     />
   );
 }
@@ -677,6 +684,21 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
  * `null` wherever there is no drawer to open — every width but a phone.
  */
 const SessionsDrawerContext = createContext<(() => void) | null>(null);
+
+/**
+ * Every paired machine, for the one session list across them (Settings › Behaviour › Sessions list: All
+ * machines) — or `undefined`, when the list shows the machine on screen alone: the reader chose that,
+ * or there is only one machine. Read once by the shell, which also keeps each machine's list fresh.
+ */
+interface AllMachinesList {
+  readonly sources: readonly MachineSource[];
+  readonly machines: readonly { readonly daemonId: DaemonId; readonly name: string }[];
+}
+
+const AllMachinesContext = createContext<AllMachinesList | undefined>(undefined);
+
+/** The sidebar's "last seen" clock: a minute is its smallest step, so a 30s tick is plenty. */
+const MACHINE_CLOCK_MS = 30_000;
 
 /** The sessions bar's reload offer, worded exactly as the app bar's chip always was. */
 export const updateOffer = (reason: UpdateReason): SessionsBarUpdate => ({
@@ -730,7 +752,8 @@ function ShellSessionsBar({
   const store = useAppStore();
   const { navigate } = useRouter();
   const { connections } = useConnectionSnapshot();
-  useFleetPoll(store.fleet, connection);
+  const allMachines = useContext(AllMachinesContext);
+  const now = useLiveClock({ intervalMs: MACHINE_CLOCK_MS });
   const fleet = useSyncExternalStore(
     listener => store.fleet.subscribe(listener),
     () => store.fleet.getSnapshot(),
@@ -763,6 +786,7 @@ function ShellSessionsBar({
       learningPassive={learning.passive}
       projects={projects}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
+      {...(allMachines === undefined ? {} : { machineSources: allMachines.sources, now })}
       {...(search === undefined ? {} : { search })}
       {...(onClose === undefined ? {} : { onClose })}
       {...(shape === 'column'
@@ -1590,6 +1614,48 @@ export function AppShell() {
   // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
   useConfigChangeFeed(store, connection);
   /*
+   * ONE SESSION LIST ACROSS EVERY MACHINE, unless the reader chose the machine on screen alone. Each
+   * machine's list is read through its own pairing — its own device key — at a slower beat for the
+   * machines not on screen, and not at all while the app is hidden (`useMachinesPoll`). Only the
+   * session lists: transcripts, terminals and browsers stay with the one session that is open.
+   */
+  const layoutPhone = layout === 'drawer';
+  const sessionsList = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot()).device
+    .sessionsList;
+  const everyMachine = sessionsList === 'all' && connectionSnapshot.connections.length > 1 && connection !== undefined;
+  const listedMachines = useMemo<readonly ListedMachine[]>(
+    () =>
+      connection === undefined || !everyMachine
+        ? []
+        : machineDisplayOrder(connectionSnapshot.connections, connection.daemonId).map(record => ({
+            connection: record,
+            name: distinctDaemonName(record, connectionSnapshot.connections),
+          })),
+    [connection, connectionSnapshot.connections, everyMachine],
+  );
+  const polled = useMemo<readonly DaemonConnection[]>(
+    () =>
+      connection === undefined || pageRoute.kind === 'machine-setup'
+        ? []
+        : everyMachine
+          ? listedMachines.map(machine => machine.connection)
+          : [connection],
+    [connection, everyMachine, listedMachines, pageRoute.kind],
+  );
+  useMachinesPoll(store.fleet, polled, connection?.daemonId ?? null, layoutPhone);
+  const lockedMachines = useLockedMachines(store.unlockGate);
+  const machineSources = useMachineSources(store, listedMachines, lockedMachines);
+  const allMachines = useMemo<AllMachinesList | undefined>(
+    () =>
+      everyMachine
+        ? {
+            sources: machineSources,
+            machines: listedMachines.map(machine => ({ daemonId: machine.connection.daemonId, name: machine.name })),
+          }
+        : undefined,
+    [everyMachine, listedMachines, machineSources],
+  );
+  /*
    * A PASSKEY PROMPT COMES FROM THE MACHINE ON SCREEN: the one the route names, or — on setup and the
    * picker, which name none — the one just paired or chosen. Every other machine's background reads wait
    * for it, and the machine list shows them locked, rather than raising a prompt over this machine's page.
@@ -2055,42 +2121,46 @@ export function AppShell() {
   };
 
   return (
-    <NotificationControlsContext.Provider value={notificationControlsHost}>
-      <ThemeFollower />
-      <MotionFollower />
-      {/* The install offer shares the release notice's pinned dock, so the page starts below both
+    <AllMachinesContext.Provider value={allMachines}>
+      <NotificationControlsContext.Provider value={notificationControlsHost}>
+        <ThemeFollower />
+        <MotionFollower />
+        {/* The install offer shares the release notice's pinned dock, so the page starts below both
           rather than under either. Phone only: a desktop browser keeps its own install control in the
           address bar, and Settings › This device carries the offer at every width. */}
-      {release.notice === null && !installDue ? null : (
-        <ReleaseNoticeDock>
-          {release.notice === null ? null : <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />}
-          <InstallBannerSlot phone={layout === 'drawer'} />
-        </ReleaseNoticeDock>
-      )}
-      {/*
+        {release.notice === null && !installDue ? null : (
+          <ReleaseNoticeDock>
+            {release.notice === null ? null : (
+              <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
+            )}
+            <InstallBannerSlot phone={layout === 'drawer'} />
+          </ReleaseNoticeDock>
+        )}
+        {/*
         FIRST IN DOM ORDER, so the Tab that follows a route change lands on the
         new page's own chrome rather than back at the top of the old one.
         `tabIndex={-1}` makes it programmatically focusable without adding a tab
         stop of its own, and `sr-only` keeps it out of the visual design.
       */}
-      <p
-        ref={routeAnnouncer}
-        tabIndex={-1}
-        className="sr-only"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        data-route={pageKey}
-      >
-        {routeAnnouncement(effectiveRoute)}
-      </p>
-      {content}
-      {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
+        <p
+          ref={routeAnnouncer}
+          tabIndex={-1}
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-route={pageKey}
+        >
+          {routeAnnouncement(effectiveRoute)}
+        </p>
+        {content}
+        {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
-      <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
-      {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
-      <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
-    </NotificationControlsContext.Provider>
+        <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
+        {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
+        <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
+      </NotificationControlsContext.Provider>
+    </AllMachinesContext.Provider>
   );
 }
 

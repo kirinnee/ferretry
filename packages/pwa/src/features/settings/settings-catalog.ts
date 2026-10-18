@@ -23,7 +23,8 @@ export type SettingId =
   | 'composer-suggestions'
   | 'dictation'
   | 'notifications'
-  | 'install-app';
+  | 'install-app'
+  | 'sessions-list';
 
 export type SettingsSectionId = 'appearance' | 'behaviour' | 'device' | 'machines';
 
@@ -241,6 +242,23 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'sessions-list',
+    label: 'Sessions list',
+    description:
+      'Show the sessions of every paired machine in one list — everything that needs you pinned at the top, then each machine — or only the machine you are on.',
+    keywords: [
+      'sessions',
+      'list',
+      'sidebar',
+      'machines',
+      'all machines',
+      'current machine',
+      'needs you',
+      'combined',
+      'mix',
+    ],
+  },
+  {
     id: 'motion',
     label: 'Motion',
     description: 'Follow this device’s reduced-motion setting, or always keep spinners and transitions still here.',
@@ -283,8 +301,15 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     id: 'behaviour',
     label: 'Behaviour',
-    description: 'How composing, dictation, and notifications behave on this device.',
-    settingIds: ['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications'],
+    description: 'How the session list, composing, dictation, and notifications behave on this device.',
+    settingIds: [
+      'sessions-list',
+      'composer-markdown',
+      'composer-enter-key',
+      'composer-suggestions',
+      'dictation',
+      'notifications',
+    ],
   },
   {
     id: 'device',

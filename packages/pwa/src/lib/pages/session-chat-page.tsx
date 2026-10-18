@@ -35,6 +35,7 @@ import {
 import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
 import { FilesTab } from '../../components/files-tab.tsx';
+import { ApprovalCard, type PermissionAnswerApi } from '../../features/permission-request/approval-card.tsx';
 import { ActionToast } from '../../features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../features/session-actions/actions-menu.tsx';
 import { AddMcpForm, type AddMcpPorts } from '../../features/session-actions/add-mcp-form.tsx';
@@ -86,6 +87,7 @@ import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import type { LiveActivityFeed } from '../live-activity-feed.ts';
+import { answerPermissionRequest } from '../permission-requests.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
@@ -597,6 +599,20 @@ export function SessionChatPage({
     [client, connection, publish],
   );
 
+  // A harness permission prompt is answered through the daemon's own route; the deny note rides the
+  // Composer's send, so the agent reads it as an ordinary message.
+  const permissionApi = useMemo<PermissionAnswerApi>(
+    () => ({
+      answer: async (daemon, at, answer) => await answerPermissionRequest(daemon, at, answer, referenceFetch),
+      note: async (daemon, at, message) => {
+        if (!sameDaemonConnection(daemon, connection))
+          throw new Error('the note belongs to a different daemon pairing');
+        return await client.send(at.sessionId, { message, now: false });
+      },
+    }),
+    [client, connection, referenceFetch],
+  );
+
   const runAction = async (action: SessionAction): Promise<void> => {
     if (action === 'stop' && !confirmStop) {
       setConfirmStop(true);
@@ -674,6 +690,8 @@ export function SessionChatPage({
   const runtimeSwitchBusy = isPromptKnownBusy(session.state);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
+  // The tool-permission prompt the agent's pane is parked on, answerable only while the session is live.
+  const permissionRequest = TERMINAL_STATUSES.has(session.state.status) ? undefined : session.state.permissionRequest;
   const compact = presentation === 'sheet';
   const chatSurface = useRef<HTMLDivElement | null>(null);
   useChatScrollbarGutter(chatSurface, session.config.id);
@@ -1111,6 +1129,17 @@ export function SessionChatPage({
       </div>
       <div className="fy-chat-input" data-session-input="">
         <div className="fy-chat-input__column">
+          {permissionRequest === undefined || !canControl ? null : (
+            <ApprovalCard
+              agentName={sessionDisplayName(session)}
+              api={permissionApi}
+              daemon={connection}
+              key={`${connection.daemonId}:${session.config.id}:${permissionRequest.id}`}
+              onSettled={onRefresh}
+              request={permissionRequest}
+              scope={scope}
+            />
+          )}
           {question !== null && canControl ? (
             <QuestionForm
               api={questionApi}

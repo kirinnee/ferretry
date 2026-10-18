@@ -236,7 +236,14 @@ describe('SettingsPage sections', () => {
     expect(shownSection(view.container)).toBe('behaviour');
     expect(
       [...view.container.querySelectorAll('[data-setting-id]')].map(node => node.getAttribute('data-setting-id')),
-    ).toEqual(['composer-markdown', 'composer-enter-key', 'composer-suggestions', 'dictation', 'notifications']);
+    ).toEqual([
+      'sessions-list',
+      'composer-markdown',
+      'composer-enter-key',
+      'composer-suggestions',
+      'dictation',
+      'notifications',
+    ]);
     expect(view.container.querySelector('[data-settings-section="appearance"]')).toBeNull();
     expect(
       sidebar(view.container).querySelector('[data-settings-section-choice="behaviour"]')?.getAttribute('aria-current'),
@@ -284,6 +291,10 @@ describe('SettingsPage sections', () => {
         .findAll(node => node.type === 'input' && node.props.name === name && node.props.value === value)[0];
     run(() => radio('composer-enter-key', 'composer-phone-enter-key', 'send')?.props.onChange());
     expect(controls.snapshot().device.composerPhoneEnterKey).toBe('send');
+
+    // The session list can show the machine on screen alone, on this device.
+    run(() => radio('sessions-list', 'behaviour-sessions-list', 'current')?.props.onChange());
+    expect(controls.snapshot().device.sessionsList).toBe('current');
 
     // Both are properties of this screen: they survive a reload and read the
     // same for a daemon this page never named.

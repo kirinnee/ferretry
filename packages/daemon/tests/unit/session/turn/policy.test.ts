@@ -1,8 +1,10 @@
 import { describe, it } from 'bun:test';
+import type { PermissionRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   isTurnStatus,
   observeTurn,
+  settlePermissionRequest,
   settleTurnPrompt,
   settleTurnState,
   type TurnEvidence,
@@ -193,5 +195,43 @@ describe('turnStatePatch', () => {
       turnState: undefined,
       turnStateAt: undefined,
     });
+  });
+});
+
+describe('a tool-permission prompt read as data', () => {
+  const REQUEST: PermissionRequest = {
+    id: '0123456789abcdef',
+    harness: 'claude',
+    tool: 'Read',
+    action: 'read',
+    what: '/etc/hostname',
+    question: 'Do you want to proceed?',
+    options: [
+      { number: 1, label: 'Yes', kind: 'allow' },
+      { number: 2, label: 'No', kind: 'deny' },
+    ],
+    selected: 1,
+  };
+  const ON_SCREEN: TurnPaneEvidence = { working: false, atPrompt: false, permission: true, request: REQUEST };
+
+  it('should call it needs-input on sight, and carry the request with the observation', () => {
+    should(observeTurn(evidence({ pane: ON_SCREEN }))).deepEqual({
+      state: 'needs-input',
+      confirmed: true,
+      request: REQUEST,
+    });
+  });
+
+  it('should record the request only beside needs-input, and keep it while nothing decides the turn', () => {
+    const seen = observeTurn(evidence({ pane: ON_SCREEN }));
+    should(settlePermissionRequest(undefined, 'needs-input', seen)).equal(REQUEST);
+    // Nothing to look at, or a weak your-turn not yet confirmed: what was recorded stands.
+    should(settlePermissionRequest(REQUEST, 'needs-input', undefined)).equal(REQUEST);
+    should(settlePermissionRequest(REQUEST, 'needs-input', { state: 'your-turn', confirmed: false })).equal(REQUEST);
+    // A dialog that is not a tool permission replaces it.
+    should(settlePermissionRequest(REQUEST, 'needs-input', { state: 'needs-input', confirmed: true })).be.undefined();
+    // Answered: the turn moved on, and the request goes with it.
+    should(settlePermissionRequest(REQUEST, 'working', observeTurn(evidence({ pane: IDLE })))).be.undefined();
+    should(settlePermissionRequest(REQUEST, undefined, undefined)).be.undefined();
   });
 });

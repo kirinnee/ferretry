@@ -2,9 +2,11 @@
  * One push worker per machine: which machine a registration serves, and what its notifications may
  * say and open (docs/cross-daemon.md §4a–§4c).
  */
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, test } from 'bun:test';
 import type { PushNotificationPayload } from '@ferretry/protocol';
-import { daemonId } from '../../src/lib/daemon-connection.ts';
+import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { buildNotification } from '../../src/lib/notification-ledger.ts';
 import {
   FILTERED_PUSH_TAG_PREFIX,
   filteredPushNotification,
@@ -18,6 +20,7 @@ import {
   unreadablePushTitle,
   unverifiedNotification,
 } from '../../src/lib/push-scope.ts';
+import { sessionView } from '../support/sessions.ts';
 
 const ORIGIN = 'https://ferretry.example.test';
 const WORK = { daemonId: 'sha256:work/one', label: 'Work laptop' };
@@ -166,5 +169,26 @@ describe('unverifiedNotification (review M3)', () => {
       url: `${ORIGIN}/app/`,
     });
     expect(shown.tag.startsWith('fy-push:')).toBe(false);
+  });
+});
+
+describe('a tap opens the machine the notification came from', () => {
+  test('a session on the other machine opens that machine’s session, and never this one’s', () => {
+    const origin = 'https://app.example.test';
+    const studio = { daemonId: 'studio', label: 'studio' };
+    const laptop = { daemonId: 'laptop', label: 'laptop' };
+    // The same session id on both machines: the URL is what keeps them apart.
+    const spec = buildNotification(
+      daemonSessionScope(
+        daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.test', deviceId: 'd' }),
+        's-1',
+      ),
+      sessionView('s-1'),
+      'question',
+    );
+    expect(spec.url).toBe('/d/laptop/session/s-1');
+    expect(notificationUrl(spec.url, origin, laptop)).toBe(`${origin}/d/laptop/session/s-1`);
+    // Studio's worker refuses to open the laptop's page, and falls back to its own sessions.
+    expect(notificationUrl(spec.url, origin, studio)).toBe(`${origin}/d/studio`);
   });
 });
