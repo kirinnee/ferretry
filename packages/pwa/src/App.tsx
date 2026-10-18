@@ -815,8 +815,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       browserTerminalDeckDependencies(
         store.carrier.fetch,
         async (daemon, request) => await store.carrier.openStream(daemon, request),
+        (daemon, listener) => store.connectionHealth.onRecovered(daemon.daemonId, listener),
       ),
-    [store.carrier],
+    [store.carrier, store.connectionHealth],
   );
   const { navigate } = useRouter();
   const layout = useLayoutMode();
