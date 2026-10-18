@@ -80,6 +80,8 @@ export * from '../features/browser/use-session-browser.ts';
 export * from '../features/carrier/active-carrier-card.tsx';
 export * from '../features/config-files/config-files-api.ts';
 export * from '../features/config-files/config-files-settings.tsx';
+export * from '../features/connection/connection-copy.ts';
+export * from '../features/connection/connection-health-notice.tsx';
 export * from '../features/context-rail/context-rail-body.tsx';
 export * from '../features/context-rail/context-rail-lists.tsx';
 export * from '../features/context-rail/context-rail-mcp.tsx';

@@ -34,6 +34,7 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
+import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
@@ -1178,6 +1179,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           composerFetch={store.carrier.fetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
+          connectionState={connectionHealth}
           context={sessionContext}
           workspaceLayouts={store.workspaceLayouts}
           // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,
@@ -1954,6 +1956,11 @@ export function AppShell() {
                   tabBarShown={showsTabBar(pageRoute)}
                 />
               ) : null}
+              <ConnectionHealthNotice
+                health={store.connectionHealth}
+                daemonId={connection.daemonId}
+                machineName={machineName}
+              />
               <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
               {pageRoute.kind === 'settings' ? null : (
                 <PasskeyNudge
