@@ -7530,7 +7530,7 @@ const WORKSPACE_CLIENT: SessionChatClient = {
   send: async () =>
     new URLSearchParams(window.location.search).has('slow-send')
       ? await new Promise<never>(() => undefined)
-      : (({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never),
+      : ({ ...WORKSPACE_SESSION, disposition: 'queued' } as never),
   stop: async () => WORKSPACE_SESSION,
 };
 
