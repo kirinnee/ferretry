@@ -146,7 +146,7 @@ describe('composer auto-grow', () => {
     }
   });
 
-  it('stacks the phone controls in one column after the field, and keeps attach inline on a desktop', async () => {
+  it("lays the phone row out like kteam's: attach and mic left, Interrupt's slot over Send right", async () => {
     const phone = await mount(
       <Composer
         api={api}
@@ -154,6 +154,16 @@ describe('composer auto-grow', () => {
         daemon={daemon}
         draftStore={new DaemonDraftStore(memoryStorage())}
         sessionId="dock-phone"
+      />,
+    );
+    const busy = await mount(
+      <Composer
+        api={api}
+        busy
+        compact
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(memoryStorage())}
+        sessionId="dock-busy"
       />,
     );
     const desktop = await mount(
@@ -166,20 +176,39 @@ describe('composer auto-grow', () => {
     );
     try {
       const phoneForm = must(phone.container.querySelector('form'), 'the phone composer');
-      const phoneDock = must(phone.container.querySelector('[data-composer-dock]'), 'the phone dock');
       should(phoneForm.getAttribute('data-composer-layout')).equal('phone');
-      // Attach heads the column and Send closes it, nearest the thumb; the field is not in it.
-      should(phoneDock.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
-      should(phoneDock.lastElementChild?.hasAttribute('data-composer-send')).be.true();
-      should(phoneDock.querySelector('textarea')).be.null();
+      const phoneRow = must(phone.container.querySelector('.fy-composer-row'), 'the phone row');
+      const start = must(phone.container.querySelector('[data-composer-dock="start"]'), 'the left column');
+      const end = must(phone.container.querySelector('[data-composer-dock=""]'), 'the right column');
+      // Left column first, right column last, the field between them and in neither.
+      should(phoneRow.firstElementChild).equal(start);
+      should(phoneRow.lastElementChild).equal(end);
+      should(start.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
+      should(start.querySelector('textarea')).be.null();
+      should(end.querySelector('textarea')).be.null();
+      // Idle: Interrupt's place is held by an empty, hidden slot, so Send never moves.
+      should(end.children.length).equal(2);
+      should(end.firstElementChild?.getAttribute('aria-hidden')).equal('true');
+      should(end.firstElementChild?.hasAttribute('data-composer-interrupt-slot')).be.true();
+      should(end.lastElementChild?.hasAttribute('data-composer-send')).be.true();
+
+      // Working: the same two slots, Interrupt & send in the first.
+      const busyEnd = must(busy.container.querySelector('[data-composer-dock=""]'), 'the busy right column');
+      should(busyEnd.children.length).equal(2);
+      should(busyEnd.firstElementChild?.hasAttribute('data-composer-interrupt')).be.true();
+      should(busyEnd.lastElementChild?.hasAttribute('data-composer-send')).be.true();
+      should(busy.container.querySelector('[data-composer-interrupt-slot]')).be.null();
 
       const desktopForm = must(desktop.container.querySelector('form'), 'the desktop composer');
       const desktopRow = must(desktop.container.querySelector('.fy-composer-row'), 'the desktop row');
       should(desktopForm.hasAttribute('data-composer-layout')).be.false();
       should(desktopRow.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
       should(desktop.container.querySelector('[data-composer-dock] [data-composer-attach]')).be.null();
+      // A desktop holds no slot: its row simply gains Interrupt & send when a turn runs.
+      should(desktop.container.querySelector('[data-composer-interrupt-slot]')).be.null();
     } finally {
       await phone.unmount();
+      await busy.unmount();
       await desktop.unmount();
     }
   });

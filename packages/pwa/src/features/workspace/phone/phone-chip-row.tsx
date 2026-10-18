@@ -114,10 +114,8 @@ function PhoneChip({
       onClick={() => onSelect(tab.id)}
       onKeyDown={onKeyDown}
       className={cn(
-        'flex h-7 max-w-[14rem] shrink-0 items-center gap-xs rounded-control border px-control-x text-cell font-medium leading-none transition-colors',
-        active
-          ? 'border-accent-border bg-accent-soft text-fg'
-          : 'border-border-soft bg-surface-2 text-muted hover:border-accent-border hover:text-fg',
+        'flex h-7 max-w-[14rem] shrink-0 items-center gap-xs rounded-control px-3 text-cell font-medium leading-none transition-colors',
+        active ? 'bg-surface text-fg shadow-[inset_0_0_0_1px_var(--border-strong)]' : 'text-muted hover:text-fg',
       )}
     >
       <Icon size={14} aria-hidden="true" className={cn('shrink-0', active && 'text-accent')} />
@@ -176,8 +174,12 @@ export function PhoneChipRow({ rowId, tabs, activeId, onSelect, ...actions }: Ph
   };
 
   return (
+    // ONE SEGMENTED ROW: the tabs sit on a single soft track, evenly padded and one height, and the
+    // row's side padding is the conversation's own 12px gutter (`--chat-gutter-x`), so "Chat" starts on
+    // the same line as the text under it. The track scrolls sideways when the tabs outgrow it; "+"
+    // stays put at the right edge.
     <div
-      className="flex min-w-0 items-center gap-xs border-b border-border-soft bg-surface px-panel py-0.5"
+      className="flex min-w-0 items-center gap-sm border-b border-border-soft bg-surface px-3 py-0.5"
       data-phone-tab-row=""
     >
       <div
@@ -186,7 +188,7 @@ export function PhoneChipRow({ rowId, tabs, activeId, onSelect, ...actions }: Ph
         aria-label="Tabs"
         aria-orientation="horizontal"
         data-tab-swipe-ignore=""
-        className="flex min-w-0 flex-1 items-center gap-xs overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-control bg-surface-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {tabs.map(tab => (
           <PhoneChip
@@ -211,7 +213,7 @@ export function PhoneChipRow({ rowId, tabs, activeId, onSelect, ...actions }: Ph
           aria-haspopup="menu"
           aria-expanded={menu !== null}
           onClick={openMenu}
-          className="flex h-7 w-9 shrink-0 items-center justify-center rounded-control border border-border-soft bg-surface-2 text-muted hover:border-accent-border hover:text-fg"
+          className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg"
         >
           <Plus size={16} aria-hidden="true" />
         </button>

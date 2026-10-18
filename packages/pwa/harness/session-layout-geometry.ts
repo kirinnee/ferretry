@@ -15,6 +15,12 @@
  *      chat — its text, its composer, its scroller — ends at the agent pane's right edge, and the pane
  *      itself overflows nothing. A centred surface sized to its content used to stay ~280px wide in a
  *      237px pane and draw the conversation underneath the terminal beside it.
+ *   5. THE PHONE'S COMFORT LAYOUT, in a working session. The composer runs nearly edge to edge (8px from
+ *      each side); its row is kteam's — attach and mic in a left column, Interrupt & send over Send in a
+ *      right one — and the field between them is the SAME box with the agent idle and working, because a
+ *      box that resized under the thumb when Interrupt appeared was the owner's complaint. The status line
+ *      under it stays one line, the bar's Interrupt is an icon no wider than ⓘ, and the Chat / Console
+ *      tabs start on the conversation's own text edge in a strip no taller than the old 33px one.
  *   4. A PHONE WITH WIDE CONTENT. At 390px, with a code block, a table, a long URL and a tool result in the
  *      transcript, the chat column, the composer and every one of its buttons (Send among them) sit inside
  *      the viewport, nothing scrolls sideways, and focusing the composer scrolls nothing sideways either.
@@ -45,8 +51,8 @@ const COLUMN_CAP: Readonly<Record<ChatWidth, number>> = {
 /** Sub-pixel rounding between two boxes laid out in one pass. */
 const EPSILON = 1;
 
-/** Per family: Compact at 1440 (width + tabs), the split at 1100 (overlap + tabs) and the wide phone. Plus four in Studio. */
-export const SESSION_LAYOUT_GEOMETRY_CHECKS = THEME_FAMILIES.length * 5 + 4;
+/** Per family: Compact at 1440 (width + tabs), the split at 1100 (overlap + tabs), the wide phone and the phone comfort layout. Plus four in Studio. */
+export const SESSION_LAYOUT_GEOMETRY_CHECKS = THEME_FAMILIES.length * 6 + 4;
 
 const DESKTOP = { width: 1_440, height: 900 } as const;
 /** Wide enough that 1200px and Full are different widths beside the sessions column. */
@@ -300,7 +306,85 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
     checks += 1;
   };
 
+  /** 5. The phone comfort layout, read idle and then working, so the field's box can be compared. */
+  const readComfort = async (page: Page) =>
+    await page.evaluate(() => {
+      const box = (selector: string) => {
+        const element = document.querySelector(selector);
+        if (element === null) return null;
+        const r = element.getBoundingClientRect();
+        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+      };
+      return {
+        width: window.innerWidth,
+        composer: box('[data-session-input] form .fy-composer-row'),
+        field: box('[data-session-input] .fy-composer-input-layer'),
+        start: box('[data-session-input] [data-composer-dock="start"]'),
+        end: box('[data-session-input] [data-composer-dock=""]'),
+        attach: box('[data-session-input] [data-composer-dock="start"] [data-composer-attach]'),
+        send: box('[data-session-input] [data-composer-dock=""] [data-composer-send]'),
+        interrupt: box('[data-session-input] [data-composer-dock=""] [data-composer-interrupt]'),
+        status: box('[data-session-input] .fy-composer-actions'),
+        barAction: box('[data-session-bar] [data-session-action="interrupt"]'),
+        info: box('[data-session-bar] [data-session-info-toggle]'),
+        tabs: box('[data-phone-tab-row]'),
+        firstTab: box('[data-phone-tab-row] [role="tab"]'),
+        text: (() => {
+          const content = document.querySelector('.fy-transcript-content');
+          if (content === null) return null;
+          const left = content.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(content).paddingLeft);
+          return left;
+        })(),
+      };
+    });
+  const assertPhoneComfort = async (family: string): Promise<void> => {
+    let idle: Awaited<ReturnType<typeof readComfort>> | null = null;
+    await open('phone', family, 'turn=your-turn&pickers&chat-width=readable', async page => {
+      idle = await readComfort(page);
+    });
+    await open('phone', family, 'turn=working&pickers&chat-width=readable', async (page, where) => {
+      const r = await readComfort(page);
+      const before = idle as Awaited<ReturnType<typeof readComfort>> | null;
+      if (before === null) fail(`${where}: the idle comfort reading never ran`);
+      const { composer, field, start, end, attach, send, interrupt, status, barAction, info, tabs, firstTab, text } = r;
+      if (composer === null || field === null || start === null || end === null || attach === null || send === null)
+        fail(`${where}: the phone composer is not kteam's two-column row`);
+      if (interrupt === null) fail(`${where}: a working session shows no Interrupt & send in the right column`);
+      if (composer.left > 8 + EPSILON || composer.right < r.width - 8 - EPSILON)
+        fail(
+          `${where}: the composer spans [${composer.left}, ${composer.right}], not within 8px of the ${r.width}px phone's edges`,
+        );
+      if (!(start.right <= field.left + EPSILON && field.right <= end.left + EPSILON))
+        fail(`${where}: the field is not between the attach/mic column and the Send column`);
+      if (!near(interrupt.left, send.left) || interrupt.bottom > send.top + EPSILON)
+        fail(`${where}: Interrupt & send does not sit over Send in one column`);
+      if (before.field === null || !near(before.field.width, field.width) || !near(before.field.height, field.height))
+        fail(
+          `${where}: the field is ${field.width}×${field.height} working and ${before.field?.width}×${before.field?.height} idle — it must not resize`,
+        );
+      if (status !== null && status.height > 46)
+        fail(`${where}: the composer's status line is ${status.height}px — it wrapped onto a second row`);
+      if (barAction === null || info === null || barAction.width > info.width + EPSILON)
+        fail(`${where}: the bar's Interrupt is not an icon the size of ⓘ (${barAction?.width}px vs ${info?.width}px)`);
+      if (
+        tabs === null ||
+        firstTab === null ||
+        text === null ||
+        tabs.height > 33 + EPSILON ||
+        !near(firstTab.left, text, 4)
+      )
+        fail(
+          `${where}: the Chat / Console strip is ${tabs?.height}px tall and its first tab starts at ${firstTab?.left}px, the text at ${text}px`,
+        );
+      process.stdout.write(
+        `   session layout ${where}: composer ${(composer.right - composer.left).toFixed(0)}px wide, field ${field.width.toFixed(0)}×${field.height.toFixed(0)} idle and working\n`,
+      );
+      checks += 1;
+    });
+  };
+
   for (const { id: family } of THEME_FAMILIES) {
+    await assertPhoneComfort(family);
     await open('phone', family, 'wide&chat-width=readable', assertPhoneFits);
     await open(DESKTOP, family, 'chat-width=readable', async (page, where) => {
       await assertColumn(page, where, 'readable');

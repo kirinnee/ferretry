@@ -135,8 +135,21 @@ export const runtimeControlUnavailableMessage = (control: 'model' | 'effort'): s
  * choice can be sent; spelling the same tri-state twice is exactly how a chip
  * that opens onto a sheet that can only refuse — or worse, the reverse — gets
  * built. One predicate, read from both ends, and the rationale lives here.
+ *
+ * THE TURN WATCHER'S `turnState` WINS WHEN THE DAEMON SENT ONE. `promptReady`
+ * is written `false` by every send that starts a turn and nothing writes it back
+ * when that turn ends — the daemon's turn watcher owns `turnState` and leaves
+ * `promptReady` alone. Read on its own, the stored `false` therefore outlived its
+ * turn: after the first message of a session both chips stayed disabled forever,
+ * and on a phone, where a disabled button's reason is only a tooltip, tapping
+ * "claude-opus-5-5 ⌃" or "default ⌃" did nothing at all. A daemon with the
+ * watcher says `your-turn` the moment the harness is back at its prompt, which
+ * is the one state a runtime command can land in; `working` and `needs-input`
+ * (a dialog on screen) are both known-busy. Only a daemon that predates the
+ * watcher falls back to the stored `promptReady`.
  */
-export const isPromptKnownBusy = (state: SessionView['state']): boolean => state.promptReady === false;
+export const isPromptKnownBusy = (state: SessionView['state']): boolean =>
+  state.turnState === undefined ? state.promptReady === false : state.turnState !== 'your-turn';
 
 const failureMessage = (failure: unknown): string => {
   if (failure instanceof Error) return failure.message;

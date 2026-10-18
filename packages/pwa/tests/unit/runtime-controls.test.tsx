@@ -134,6 +134,14 @@ describe('isPromptKnownBusy', () => {
     expect(isPromptKnownBusy(view({ state: { promptReady: true } }).state)).toBe(false);
     expect(isPromptKnownBusy(view({ state: { promptReady: undefined } }).state)).toBe(false);
   });
+
+  test("the turn watcher's turnState wins over the stale promptReady every send leaves behind", () => {
+    // The shipping state after the first message: the send wrote `promptReady: false`, the turn
+    // ended, and the watcher said `your-turn` — the chips must open again.
+    expect(isPromptKnownBusy(view({ state: { promptReady: false, turnState: 'your-turn' } }).state)).toBe(false);
+    expect(isPromptKnownBusy(view({ state: { promptReady: true, turnState: 'working' } }).state)).toBe(true);
+    expect(isPromptKnownBusy(view({ state: { turnState: 'needs-input' } }).state)).toBe(true);
+  });
 });
 
 describe('codexPickerFallbackNeeded', () => {

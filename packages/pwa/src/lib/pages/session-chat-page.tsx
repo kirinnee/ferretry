@@ -1,4 +1,5 @@
 import type { AttentionId, AttentionItem, AttentionSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
+import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
@@ -717,6 +718,27 @@ export function SessionChatPage({
         Cancel
       </Button>
     </>
+  ) : compact ? (
+    // A PHONE'S LIFECYCLE BUTTON IS AN ICON, the same size and weight as ⓘ and Actions beside it: the
+    // outlined "Interrupt" box was the fattest thing in the bar and pushed the agent's name aside. The
+    // word moves to the label and the tooltip; the glyph (⏸ / ▶) carries the action.
+    barActions.map(spec => {
+      const Icon = spec.action === 'resume' ? Play : Pause;
+      return (
+        <button
+          aria-label={pendingAction === spec.action ? `${barLabel(spec)}…` : spec.label}
+          className="fy-session-bar__icon"
+          data-session-action={spec.action}
+          disabled={pendingAction !== null}
+          key={spec.action}
+          onClick={() => void runAction(spec.action)}
+          title={spec.label}
+          type="button"
+        >
+          <Icon aria-hidden="true" size={18} />
+        </button>
+      );
+    })
   ) : (
     barActions.map(spec => (
       <Button

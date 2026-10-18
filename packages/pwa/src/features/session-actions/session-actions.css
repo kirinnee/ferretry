@@ -390,3 +390,17 @@
     height: 44px;
   }
 }
+
+/* On the phone's session bar the trigger is an icon like ⓘ and ⏸ beside it — no outline. `.kt-btn`'s
+   own border is set at the theme's specificity, so the bar scopes this one to win it back. */
+.fy-session-bar[data-compact] .fy-actions-trigger--compact {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.fy-session-bar[data-compact] .fy-actions-trigger--compact:hover,
+.fy-session-bar[data-compact] .fy-actions-trigger--compact[aria-expanded='true'] {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}

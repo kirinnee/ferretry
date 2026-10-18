@@ -27,7 +27,7 @@ import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
-import { activityLine, dashboardTone, sessionAge, statusWord } from './session-dashboard-model.ts';
+import { activityLine, dashboardTone, routineStatus, sessionAge, statusWord } from './session-dashboard-model.ts';
 
 interface SessionNavigationProps {
   readonly daemonId: DaemonId;
@@ -290,13 +290,12 @@ export const SessionCard = memo(function SessionCard({
       className="kt-panel group block p-panel transition-colors hover:border-accent active:bg-surface-2"
     >
       <div className="flex items-center gap-sm">
+        <StatusMark view={view} />
         <span className="min-w-0 truncate text-row font-semibold text-fg group-hover:text-accent">
           {displayCallsign(cfg.teammate) || cfg.id}
         </span>
         <span className="ml-auto" />
-        <Badge tone={dashboardTone(state.status)} className="shrink-0">
-          {state.status}
-        </Badge>
+        <StatusWord status={state.status} />
       </div>
       <div className="mt-1">
         <TaskName name={cfg.name} size="md" className="max-w-full" />
@@ -316,10 +315,13 @@ export const SessionCard = memo(function SessionCard({
           </>
         )}
       </div>
-      <div className="mt-1.5 flex flex-wrap items-center gap-sm">
-        <ModeBadge mode={cfg.mode} />
-        <RcBadge remoteControl={cfg.remoteControl} url={state.remoteControlUrl} />
-      </div>
+      {/* Interactive is how a session normally runs, so only the exceptions (auto, remote control) earn a badge. */}
+      {cfg.mode === 'interactive' && !cfg.remoteControl ? null : (
+        <div className="mt-1.5 flex flex-wrap items-center gap-sm">
+          {cfg.mode === 'interactive' ? null : <ModeBadge mode={cfg.mode} />}
+          <RcBadge remoteControl={cfg.remoteControl} url={state.remoteControlUrl} />
+        </div>
+      )}
       <div className="mt-1.5">
         <ActivityLine view={view} className="w-full text-cell" />
       </div>
@@ -333,6 +335,24 @@ export const SessionCard = memo(function SessionCard({
     </RouteLink>
   );
 });
+
+/**
+ * The status as a short coloured word beside the dot, and NOTHING when the agent is simply running
+ * (`routineStatus`): no chip box, no capitals, so the exceptions are the only words in the list.
+ */
+export function StatusWord({ status }: { readonly status: string }) {
+  if (routineStatus(status)) return null;
+  return (
+    <span
+      className="max-w-full shrink-0 truncate text-meta font-medium"
+      data-status-word={status}
+      style={{ color: `var(--${dashboardTone(status)})` }}
+      title={status}
+    >
+      {statusWord(status)}
+    </span>
+  );
+}
 
 /** A 44px reduced-density row for its group's panel. */
 export const LeanSessionCard = memo(function LeanSessionCard({
@@ -361,11 +381,7 @@ export const LeanSessionCard = memo(function LeanSessionCard({
       <TaskName name={cfg.name} teammate={cfg.teammate} size="md" className="min-w-0 grow" />
       {density === 'compact' && (
         <span className="ml-auto flex shrink-0 items-center gap-xs">
-          {!statusHoisted && !view.state.waiting && (
-            <Badge tone={dashboardTone(view.state.status)} title={view.state.status} className="max-w-full truncate">
-              {statusWord(view.state.status)}
-            </Badge>
-          )}
+          {!statusHoisted && !view.state.waiting && <StatusWord status={view.state.status} />}
           <AttentionFlags view={view} />
         </span>
       )}
