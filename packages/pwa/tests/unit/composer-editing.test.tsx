@@ -298,9 +298,10 @@ describe('the Notion-style composer keys', () => {
 });
 
 describe('transcript labels and folding', () => {
-  test('labels assistant rows with the agent, keeping the daemon’s clock', () => {
-    const entry: TranscriptEntry = { id: 'a', kind: 'assistant', text: 'hi', label: 'Assistant · 10:11:12' };
-    expect(withAgentName(entry, 'Hadi').label).toBe('Hadi · 10:11:12');
+  test('labels assistant rows with the agent’s name and leaves the row’s instant alone', () => {
+    const at = Date.UTC(2026, 9, 18, 1, 45, 44);
+    const entry: TranscriptEntry = { id: 'a', kind: 'assistant', text: 'hi', label: 'Assistant', at };
+    expect(withAgentName(entry, 'Hadi')).toEqual({ ...entry, label: 'Hadi' });
     expect(withAgentName({ ...entry, label: 'mylie' }, 'Hadi').label).toBe('Hadi');
     expect(withAgentName(entry, '')).toBe(entry);
     expect(withAgentName({ id: 'u', kind: 'user', text: 'x' }, 'Hadi').label).toBeUndefined();

@@ -3,7 +3,8 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { MessageFooter } from '../../src/components/send-receipt.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
-import { clockOfInstant, clockOfLabel, type SendReceiptKind, sendReceipt } from '../../src/lib/send-receipt.ts';
+import { clockOfInstant } from '../../src/lib/message-clock.ts';
+import { RECEIPT_LEGEND, type SendReceiptKind, sendReceipt } from '../../src/lib/send-receipt.ts';
 import { type TranscriptEntry, transcriptItems } from '../../src/lib/session-screens.ts';
 import { render, runAsync } from '../support/react.ts';
 
@@ -39,7 +40,7 @@ describe('sendReceipt', () => {
       ['held while queued', record({ fate: 'queued', held: true }), false, 'held', 'Held for revive', undefined],
       ['queued', record({ fate: 'queued' }), false, 'queued', 'Queued', undefined],
       ['delivered', record({ fate: 'delivered' }), false, 'delivered', 'Delivered', undefined],
-      ['delivered, then answered', record({ fate: 'delivered' }), true, 'read', 'Read', undefined],
+      ['delivered, then answered', record({ fate: 'delivered' }), true, 'answered', 'Answered', undefined],
       ['unaccounted', record({ fate: 'unaccounted' }), false, 'unconfirmed', 'Unconfirmed', 'unconfirmed'],
       ['timed out', record({ fate: 'timed_out' }), false, 'failed', 'Not delivered', 'not delivered'],
       // A settled fate outranks `held`, exactly as the badge's order has it.
@@ -61,26 +62,37 @@ describe('sendReceipt', () => {
     }
   });
 
-  test('a reply after a send is not evidence about an unsettled one — only a delivered send reads as read', () => {
+  test('a reply after a send is not evidence about an unsettled one — only a delivered send reads as answered', () => {
     expect(sendReceipt(record({ fate: 'queued' }), true).kind).toBe('queued');
     expect(sendReceipt(record({ fate: 'unaccounted' }), true).kind).toBe('unconfirmed');
     expect(sendReceipt(record({ fate: 'delivered' }), true).detail).toContain('the agent has replied since');
   });
 });
 
-describe('message clocks', () => {
-  test('reads an instant as local HH:MM, with the seconds kept for the tooltip', () => {
-    const at = new Date(2026, 6, 31, 9, 8, 7);
-    expect(clockOfInstant(at.getTime())).toEqual({ short: '09:08', full: '09:08:07' });
-    expect(clockOfInstant(at.toISOString())).toEqual({ short: '09:08', full: '09:08:07' });
-    expect(clockOfInstant(undefined)).toBeUndefined();
-    expect(clockOfInstant('not a date')).toBeUndefined();
-  });
-
-  test('lifts the daemon-printed clock off a transcript label', () => {
-    expect(clockOfLabel('You · 13:58:44')).toEqual({ short: '13:58', full: '13:58:44' });
-    expect(clockOfLabel('You')).toBeUndefined();
-    expect(clockOfLabel(undefined)).toBeUndefined();
+describe('the legend', () => {
+  test('names every mark once, in the words the tooltips use, and omits none a reader can meet but held', () => {
+    expect(RECEIPT_LEGEND.map(row => row.kind)).toEqual([
+      'sending',
+      'queued',
+      'delivered',
+      'answered',
+      'unconfirmed',
+      'failed',
+    ]);
+    const records: readonly [LedgerSendRecord, boolean][] = [
+      [record(), false],
+      [record({ fate: 'queued' }), false],
+      [record({ fate: 'delivered' }), false],
+      [record({ fate: 'delivered' }), true],
+      [record({ fate: 'unaccounted' }), false],
+      [record({ fate: 'timed_out' }), false],
+    ];
+    RECEIPT_LEGEND.forEach((row, index) => {
+      const [sent, answered] = records[index] as [LedgerSendRecord, boolean];
+      expect(sendReceipt(sent, answered).kind).toBe(row.kind);
+      expect(sendReceipt(sent, answered).name).toBe(row.name);
+      expect(row.meaning.length).toBeGreaterThan(10);
+    });
   });
 });
 
@@ -90,11 +102,22 @@ describe('MessageFooter', () => {
   });
 
   test('draws a bare faded time when the message has no ledger send', () => {
-    const footer = render(<MessageFooter clock={{ short: '13:58', full: '13:58:44' }} />);
-    const time = footer.root.findByType('time');
-    expect(time.props.title).toBe('13:58:44');
+    const footer = render(<MessageFooter clock={{ short: '13:58', full: '18 Oct 2026, 13:58:44 JST' }} />);
+    expect(footer.root.findAllByType('svg')).toHaveLength(0);
     expect(textOf(footer)).toBe('13:58');
-    expect(footer.root.findAllByType('button')).toHaveLength(0);
+    const time = footer.root.findByType('button');
+    expect(time.props.title).toBe('18 Oct 2026, 13:58:44 JST');
+    expect(time.props['aria-label']).toBe('Sent 18 Oct 2026, 13:58:44 JST');
+  });
+
+  test('a tap on a bare time reads out the full local date and time, and a second tap hides it', async () => {
+    const footer = render(<MessageFooter clock={{ short: '13:58', full: '18 Oct 2026, 13:58:44 JST' }} side="other" />);
+    expect(footer.root.findAllByProps({ 'data-time-full': '' })).toHaveLength(0);
+    await runAsync(async () => footer.root.findByType('button').props.onClick());
+    expect(footer.root.findByProps({ 'data-time-full': '' }).children).toEqual(['18 Oct 2026, 13:58:44 JST']);
+    expect(footer.root.findByProps({ 'data-time-full': '' }).props['data-side']).toBe('other');
+    await runAsync(async () => footer.root.findByType('button').props.onClick());
+    expect(footer.root.findAllByProps({ 'data-time-full': '' })).toHaveLength(0);
   });
 
   test('is one tappable receipt — the time and the mark — that reads out the time to the second and why', async () => {
@@ -102,17 +125,19 @@ describe('MessageFooter', () => {
       <MessageFooter answered clock={{ short: '14:02', full: '14:02:55' }} record={record({ fate: 'delivered' })} />,
     );
     const receipt = receiptButton(footer);
-    expect(receipt.props['data-send-receipt']).toBe('read');
-    expect(receipt.props['aria-label']).toBe('Read, sent 14:02:55');
-    expect(receipt.props.title).toContain('Read\n');
+    expect(receipt.props['data-send-receipt']).toBe('answered');
+    expect(receipt.props['aria-label']).toBe('Answered, sent 14:02:55');
+    expect(receipt.props.title).toContain('Answered\n');
     expect(receipt.props.title).toContain('sent 14:02:55');
     expect(receipt.props['aria-expanded']).toBe(false);
-    expect(footer.root.findAllByProps({ 'data-send-chip': 'read' })).toHaveLength(0);
+    expect(footer.root.findAllByProps({ 'data-send-chip': 'answered' })).toHaveLength(0);
 
     await runAsync(async () => receipt.props.onClick());
 
     expect(receiptButton(footer).props['aria-expanded']).toBe(true);
-    expect(footer.root.findByProps({ 'data-send-reason': '' }).children.join('')).toContain('Read · sent 14:02:55 — ');
+    expect(footer.root.findByProps({ 'data-send-reason': '' }).children.join('')).toContain(
+      'Answered · sent 14:02:55 — ',
+    );
   });
 
   test('names a send with no known time by its state alone, and keeps a word for a state that needs the reader', async () => {
@@ -128,25 +153,27 @@ describe('MessageFooter', () => {
   });
 });
 
+const AT = Date.UTC(2026, 9, 18, 1, 45, 44);
+
 describe('the reader’s own row', () => {
   test('has no "You" header, and wears its time and receipt at its foot', () => {
     const row = render(
       <TranscriptRow
         answered
-        entry={{ id: 'u', kind: 'user', text: 'ship it', label: 'You · 13:58:44', send: record({ fate: 'delivered' }) }}
+        entry={{ at: AT, id: 'u', kind: 'user', text: 'ship it', send: record({ fate: 'delivered' }) }}
       />,
     );
     expect(row.root.findAllByType('header')).toHaveLength(0);
-    expect(receiptButton(row).props['data-send-receipt']).toBe('read');
-    expect(receiptButton(row).props['aria-label']).toBe('Read, sent 13:58:44');
+    expect(receiptButton(row).props['data-send-receipt']).toBe('answered');
+    expect(receiptButton(row).props['aria-label']).toBe(`Answered, sent ${clockOfInstant(AT)?.full}`);
   });
 
-  test('prefers the row’s own instant over the label’s printed clock', () => {
-    const at = new Date(2026, 6, 31, 9, 8, 7).getTime();
+  test('prints the row’s instant on the reader’s clock and ignores any clock a label carries', () => {
     const row = render(
-      <TranscriptRow entry={{ at, id: 'u', kind: 'user', text: 'ship it', label: 'You · 13:58:44' }} />,
+      <TranscriptRow entry={{ at: AT, id: 'u', kind: 'user', text: 'ship it', label: 'You · 01:45:44' }} />,
     );
-    expect(row.root.findByType('time').props.title).toBe('09:08:07');
+    expect(row.root.findByType('time').children).toEqual([clockOfInstant(AT)?.short ?? '']);
+    expect(row.root.findAllByType('time')).toHaveLength(1);
   });
 });
 

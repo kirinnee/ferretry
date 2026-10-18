@@ -37,14 +37,12 @@ export interface TranscriptProps {
   readonly pinSignal?: number;
 }
 /**
- * An assistant row labelled with the agent's name — "Hadi · 10:11:13" rather than "Assistant", the
- * harness, or the runtime's account. The clock the daemon printed is kept.
+ * An assistant row labelled with the agent's name — "Hadi" rather than "Assistant", the harness, or the
+ * runtime's account. The row's time is not part of the label: it is the row's own instant, drawn at the
+ * foot of the message on the reader's clock.
  */
-export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry => {
-  if (entry.kind !== 'assistant' || agentName === '') return entry;
-  const clock = /\u00b7\s*(\d{2}:\d{2}:\d{2})$/u.exec(entry.label ?? '')?.[1];
-  return { ...entry, label: clock === undefined ? agentName : `${agentName} · ${clock}` };
-};
+export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry =>
+  entry.kind !== 'assistant' || agentName === '' ? entry : { ...entry, label: agentName };
 
 /** The selection surface needed to decide whether transcript prose is quotable. */
 export interface QuoteSelectionLike {
