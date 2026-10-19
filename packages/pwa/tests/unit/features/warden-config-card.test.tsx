@@ -173,6 +173,29 @@ const client = (overrides: Partial<Client> = {}): Client => ({
 });
 
 describe('WardenConfigSurface', () => {
+  it("should read the runtimes too, so the model field can list the chosen login's catalog", async () => {
+    // Arrange — the daemon answers the runtime list as well as the speed-ups
+    const runtimes = {
+      format: 'version-2',
+      runtimes: [],
+    };
+    const reading = client({
+      request: (async (path: string) => {
+        if (path === SPEEDUPS_PATH) return speedups(false);
+        if (path === '/v1/fleet/runtimes') return runtimes;
+        throw new Error(`unexpected ${path}`);
+      }) as Client['request'],
+    });
+
+    // Act
+    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => reading} />);
+    await settle();
+
+    // Assert — it still renders the settings with an empty runtime list
+    expect(json(renderer)).toContain('codex-default');
+    run(() => renderer.unmount());
+  });
+
   it('should load the settings, the key status and the logins the daemon knows', async () => {
     // Arrange + Act
     const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => client()} />);

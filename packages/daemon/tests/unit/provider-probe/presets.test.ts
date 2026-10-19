@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { builtInPresets, type ProviderPreset } from '@ferretry/fleet';
+import { builtInModelCatalogs, builtInPresets, type ProviderPreset } from '@ferretry/fleet';
 import { FleetProviderPresetCatalogSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ProviderPresetService, presetTestAct, presetView } from '../../../src/lib/provider-probe/presets.ts';
@@ -46,7 +46,7 @@ describe('presetView', () => {
       unavailable: 'Not here.',
     };
     should(presetView(hidden).offered).deepEqual({ available: false, reason: 'Not here.' });
-    should(presetView(hidden).halves).deepEqual([
+    should(presetView(hidden, builtInModelCatalogs()).halves).deepEqual([
       { harness: 'codex', offered: { available: false, reason: 'Not here.' }, models: ['gpt-oss:20b', 'gpt-oss:120b'] },
     ]);
   });
@@ -114,5 +114,28 @@ describe('ProviderPresetService', () => {
   it('should take the built-ins it is given', async () => {
     const service = new ProviderPresetService({ presets: async () => ({}) }, [preset('kimi')]);
     should((await service.presets()).map(entry => entry.id)).deepEqual(['kimi']);
+  });
+
+  it("should show each preset's models from its model catalog, and a file's own list when it names none", async () => {
+    // Arrange — a machine preset with no catalog, listing its own models the way presets used to
+    const own = {
+      ...preset('custom-gateway'),
+      id: 'mine',
+      catalog: undefined,
+      halves: { claude: { env: {}, models: ['my-model'] } },
+    };
+    const service = new ProviderPresetService(
+      { presets: async () => ({ mine: own as ProviderPreset }) },
+      [preset('zai-glm')],
+      async () => builtInModelCatalogs(),
+    );
+
+    // Act
+    const actual = FleetProviderPresetCatalogSchema.parse(await service.catalog());
+
+    // Assert
+    should(actual.presets[0]?.models).deepEqual(['glm-5.3', 'glm-5.3-flash']);
+    should(actual.presets[0]?.halves?.[0]?.models).deepEqual(['glm-5.3', 'glm-5.3-flash']);
+    should(actual.presets[1]?.models).deepEqual(['my-model']);
   });
 });

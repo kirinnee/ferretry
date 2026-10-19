@@ -423,6 +423,45 @@ export const FleetRuntimeModelSetSchema = z.discriminatedUnion('source', [
 ]);
 export type FleetRuntimeModelSet = z.infer<typeof FleetRuntimeModelSetSchema>;
 
+/** One model a runtime offers, as its login's model catalog describes it (docs/model-catalog.md). */
+export const FleetRuntimeModelChoiceSchema = z.strictObject({
+  /** The value the CLI is handed: `--model`, `/model`. */
+  id: NonEmptyStringSchema,
+  label: NonEmptyStringSchema,
+  tier: z.enum(['best', 'balanced', 'fast']).optional(),
+  /** The context window, in tokens. */
+  context: z.number().int().positive().optional(),
+  /** Whether it reasons at all; `efforts` lists the levels it takes, empty when it cannot be adjusted. */
+  reasoning: z.boolean().optional(),
+  efforts: z.array(NonEmptyStringSchema).readonly(),
+  defaultEffort: NonEmptyStringSchema.optional(),
+  note: NonEmptyStringSchema.optional(),
+  available: z.boolean(),
+});
+export type FleetRuntimeModelChoice = z.infer<typeof FleetRuntimeModelChoiceSchema>;
+
+/**
+ * What a runtime offers when its login reads a model catalog: exactly that catalog's models for the
+ * runtime's CLI, and the one it launches with. Absent for a login with no catalog, whose runtimes offer
+ * their profile's model set (`modelSet`).
+ */
+export const FleetRuntimeModelsSchema = z.strictObject({
+  catalog: z.strictObject({
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema,
+    /** Which copy is in effect: this machine's own file, the published catalog, or this build's. */
+    origin: z.enum(['file', 'published', 'built-in']),
+    /** Whether the provider takes ids beyond these, so a picker offers "Custom id…". */
+    customIds: z.boolean(),
+    docs: NonEmptyStringSchema,
+    /** Where a picker may also read the models a local server reports. */
+    detect: z.enum(['ollama']).optional(),
+  }),
+  choices: z.array(FleetRuntimeModelChoiceSchema).readonly(),
+  default: NonEmptyStringSchema.optional(),
+});
+export type FleetRuntimeModels = z.infer<typeof FleetRuntimeModelsSchema>;
+
 /** The locked layer an agent runtime gets last (F1–F3), and the user values it overrides (E24). */
 export const FleetFixedLayerViewSchema = z.strictObject({
   agentPermissions: z.enum(['auto', 'skip']),
@@ -457,6 +496,8 @@ export const FleetRuntimeViewSchema = z.strictObject({
   agent: z.boolean(),
   stack: FleetStackViewSchema,
   modelSet: FleetRuntimeModelSetSchema,
+  /** What the runtime offers from its login's model catalog, when the login reads one. Wins over `modelSet`. */
+  models: FleetRuntimeModelsSchema.optional(),
   /** Agent runtimes only. */
   fixedLayer: FleetFixedLayerViewSchema.optional(),
   /** Whether it can launch now; when not, `reason` is the button's words ("Sign in to launch"). */

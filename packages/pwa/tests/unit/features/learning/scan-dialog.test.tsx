@@ -172,6 +172,27 @@ describe('the scan dialog', () => {
     await view.unmount();
   });
 
+  it("lists a catalog login's models by tier, the default marked, and estimates on the one chosen", async () => {
+    const catalogued: PickerAccount = {
+      ...(ACCOUNTS[0] as PickerAccount),
+      defaultModel: 'claude-opus-5-5',
+      models: [
+        { id: 'claude-opus-5-5', label: 'Opus 5.5', tier: 'best', available: true, efforts: [] },
+        { id: 'claude-haiku-5-5', label: 'Haiku 5.5', tier: 'fast', available: true, efforts: [] },
+      ],
+      modelCatalog: { id: 'anthropic', label: 'Anthropic', customIds: false },
+    };
+    const { view, daemon } = await dialog({ accounts: [catalogued] });
+    await waitFor(() => estimates(daemon).length === 1, 'the first estimate');
+    const model = must(view.container.querySelectorAll('select')[1], 'model');
+    expect([...model.querySelectorAll('optgroup')].map(group => group.label)).toEqual(['Most capable', 'Fast']);
+    expect(model.options[0]?.textContent).toBe('Login’s default (Opus 5.5)');
+    await choose(model, 'claude-haiku-5-5');
+    await waitFor(() => estimates(daemon).length === 2, 'a second estimate');
+    expect(estimates(daemon).at(-1)).toMatchObject({ model: 'claude-haiku-5-5' });
+    await view.unmount();
+  });
+
   it('builds a date range, a project list and a ferret list into the scope it estimates', async () => {
     const { view, daemon } = await dialog({ projects: [{ name: 'ferretry', path: '/work/ferretry' }] });
     await waitFor(() => estimates(daemon).length === 1, 'the first estimate');

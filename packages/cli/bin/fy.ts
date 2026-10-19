@@ -101,6 +101,13 @@ import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
 import { registerHistoryCommands } from '../src/lib/history/commands';
 import { HistoryController } from '../src/lib/history/controller';
+import {
+  ContinueSessionController,
+  ImportController,
+  ProtocolImportGateway,
+  registerImportCommands,
+  registerNewCommand,
+} from '../src/lib/import/index.ts';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
@@ -954,6 +961,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // `daemon setup` and `daemon import <tool>` mount onto the daemon group above, so they come after it: a
   // booting daemon never sets a machine up, and these are how a person (or a script) does.
   ({ program, world, client }) => registerSetupCommands(program, accountCommandDeps(world, client)),
+  // `fy import conversations` and `fy new --continue`: existing Claude Code/Codex conversations, kept on as ferrets.
+  ({ program, world, client }) => {
+    const gateway = new ProtocolImportGateway(client);
+    const context = { now: () => Date.now(), binaryName: BINARY_NAME };
+    registerImportCommands(program, new ImportController(gateway, world.io, context));
+    registerNewCommand(
+      program,
+      new ContinueSessionController(gateway, world.io, world.prompt, { ...context, interactive: world.interactive }),
+    );
+  },
 ];
 
 /**

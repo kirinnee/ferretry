@@ -1,0 +1,42 @@
+# DeepSeek's models, for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint).
+label: DeepSeek
+docs: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
+verified: '2026-10-18'
+claude:
+  tiers:
+    opus: deepseek-flash[1m]
+    sonnet: deepseek-flash[1m]
+    haiku: deepseek-flash
+    subagent: deepseek-flash
+  models:
+    - id: deepseek-v4-pro
+      suffix: '[1m]'
+      label: DeepSeek V4 Pro
+      tier: best
+      context: 1000000
+      efforts: [low, high, max]
+      defaultEffort: high
+    - id: deepseek-flash
+      suffix: '[1m]'
+      label: DeepSeek Flash
+      tier: fast
+      context: 1000000
+      efforts: [low, high, max]
+      defaultEffort: max
+      default: true
+codex:
+  docs: https://api-docs.deepseek.com/quick_start/agent_integrations/codex
+  models:
+    - id: deepseek-v4-pro
+      label: DeepSeek V4 Pro
+      tier: best
+      context: 1000000
+      efforts: [low, high, max]
+      defaultEffort: high
+    - id: deepseek-flash
+      label: DeepSeek Flash
+      tier: fast
+      context: 1000000
+      efforts: [low, high, max]
+      defaultEffort: high
+      default: true

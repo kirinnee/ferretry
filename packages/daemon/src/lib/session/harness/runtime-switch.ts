@@ -16,7 +16,13 @@ import type { HarnessKind } from '../../core/inventory.ts';
 import { harnessQuirks } from './quirks.ts';
 
 /** Reasoning levels a harness with a native effort command accepts. */
-export const RUNTIME_EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh'];
+export const RUNTIME_EFFORT_LEVELS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * A model id a person typed ("Custom id…"), as one word the pane can take after `/model`: no
+ * whitespace, no control character, nothing a terminal reads as a command. The model catalog's own grammar.
+ */
+const CUSTOM_MODEL_ID = /^[A-Za-z0-9~][A-Za-z0-9._:~/@+-]{0,159}(?:\[[a-z0-9]{1,8}\])?$/u;
 
 /**
  * Efforts that only exist behind Codex's Advanced Reasoning submenu. Their
@@ -80,6 +86,8 @@ export interface HarnessRuntimeSwitchContext {
   /** Models the wrapper permits mid-session, for a harness that switches by
    *  command. An empty list means the wrapper supports no switching at all. */
   readonly allowedModels?: readonly string[];
+  /** Whether the login's model catalog takes ids beyond `allowedModels` ("Custom id…", docs/model-catalog.md). */
+  readonly acceptsCustomModels?: boolean;
   /** The wrapper the session runs, named in refusals so the operator knows which
    *  account could not serve the request. */
   readonly wrapper: string;
@@ -205,7 +213,9 @@ export function planRuntimeSwitch(
     if (allowed.length === 0) {
       return refused(`in-session model switching is not supported for wrapper ${context.wrapper}`);
     }
-    if (!allowed.includes(model)) return refused(`model ${model} is not available on wrapper ${context.wrapper}`);
+    if (!allowed.includes(model) && !(context.acceptsCustomModels === true && CUSTOM_MODEL_ID.test(model))) {
+      return refused(`model ${model} is not available on wrapper ${context.wrapper}`);
+    }
     return { kind: 'inject', command: `/model ${model}`, requestedModel: model, claimsOutcome: true };
   }
 

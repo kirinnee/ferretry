@@ -5,12 +5,12 @@ summary: Codex on a model Ollama serves on this machine, through Codex's own Oll
 group: self-hosted
 docs: https://docs.ollama.com/integrations/codex
 verified: '2026-10-16'
+catalog: ollama
 unverified:
   - Ollama's Responses API is stateless, so Codex features that resume a response on the server do not work.
 codexProvider:
   id: ollama
   model: gpt-oss:20b
-models: [gpt-oss:20b, gpt-oss:120b]
 test:
   kind: local
   url: http://localhost:11434/api/tags

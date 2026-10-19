@@ -20,6 +20,7 @@ export * from './client.ts';
 export * from './common.ts';
 export * from './config-changes.ts';
 export * from './config-files.ts';
+export * from './conversation-import.ts';
 export * from './daemon-update.ts';
 export * from './doctor.ts';
 export * from './fleet-catalog.ts';

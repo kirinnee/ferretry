@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  FleetLayeredProfileCatalogSchema,
   type FleetLayeredProfileView,
   type FleetMachineView,
   type FleetSetupScan,
-  FleetLayeredProfileCatalogSchema,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { useState } from 'react';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
-import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
-import { OnboardingHarnessStep, providerProfile } from '../../../../../src/features/fleet/setup/harness-step.tsx';
-import type { HarnessAnswers } from '../../../../../src/features/fleet/setup/harness-import-model.ts';
-import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
 import type { MachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
+import type { HarnessAnswers } from '../../../../../src/features/fleet/setup/harness-import-model.ts';
+import { OnboardingHarnessStep, providerProfile } from '../../../../../src/features/fleet/setup/harness-step.tsx';
+import type { SetupHarness } from '../../../../../src/features/fleet/setup/setup-words.ts';
+import type { MachineTabProps } from '../../../../../src/features/fleet/shell/machines-surface.tsx';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { profile as profileView } from '../account-support.ts';
 import { PROVIDERS } from '../credentials/environment-support.ts';
@@ -1120,6 +1120,48 @@ describe('OnboardingHarnessStep: Use a provider key instead', () => {
       expect(s.q('[data-setup-note="provider-runtime-ready"]')).toBeNull();
       expect(s.q('[data-provider-runtime-name]')).not.toBeNull();
       expect(s.ready).toHaveLength(readsBefore);
+    } finally {
+      await s.view.unmount();
+    }
+  });
+});
+
+describe('OnboardingHarnessStep — your conversations', () => {
+  it('offers the conversation picker once the CLI has a runtime, and not before', async () => {
+    const none = await start(daemon());
+    try {
+      expect(none.q('[data-setup-section="conversations"]')).toBeNull();
+    } finally {
+      await none.view.unmount();
+    }
+
+    const s = await start(
+      daemon({
+        [RUNTIMES_PATH]: runtimes([runtimeView('claude-default')]),
+        '/v1/imports/conversations?harness=claude&limit=5000': {
+          conversations: [
+            {
+              id: 'shop-cart',
+              harness: 'claude',
+              project: '/work/shop',
+              preview: 'Fix the cart',
+              lastActivityAt: '2026-10-12T08:00:00.000Z',
+              turns: 3,
+            },
+          ],
+          matched: 1,
+          skipped: 0,
+        },
+      }),
+    );
+    try {
+      expect(s.text('[data-setup-section="conversations"]')).toContain(
+        'Keep earlier Claude Code conversations as ferrets that resume where they left off.',
+      );
+      await clickOn(s.q('[data-harness-conversations]'), 'choose conversations');
+      await until(() => s.q('[data-conversations-found]') !== null, 'the picker');
+      expect(s.text('[data-conversations-found]')).toBe('Found 1 conversation');
+      expect(s.q('[data-conversation-row="shop-cart"]')).not.toBeNull();
     } finally {
       await s.view.unmount();
     }

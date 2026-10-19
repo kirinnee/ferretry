@@ -167,6 +167,54 @@ describe('pickerAccount', () => {
     expect(account.defaultModel).toBeNull();
   });
 
+  it("offers exactly the login's catalog when it reads one, with each model's name, tier and efforts", () => {
+    const account = pickerAccount(
+      runtimeView({
+        wrapper: 'claude-auto-a',
+        models: {
+          catalog: { id: 'zai', label: 'GLM / Z.ai', origin: 'built-in', customIds: false, docs: 'https://docs.z.ai' },
+          choices: [
+            {
+              id: 'glm-5.3',
+              label: 'GLM-5.3',
+              tier: 'best',
+              context: 1_000_000,
+              efforts: ['low'],
+              defaultEffort: 'low',
+              available: true,
+            },
+            { id: 'glm-x', label: 'GLM X', efforts: [], available: false },
+          ],
+          default: 'glm-5.3',
+        },
+      }),
+    );
+    expect(account.defaultModel).toBe('glm-5.3');
+    expect(account.modelCatalog).toEqual({ id: 'zai', label: 'GLM / Z.ai', customIds: false });
+    expect(account.models).toEqual([
+      {
+        id: 'glm-5.3',
+        available: true,
+        label: 'GLM-5.3',
+        tier: 'best',
+        context: 1_000_000,
+        efforts: ['low'],
+        defaultEffort: 'low',
+      },
+      { id: 'glm-x', available: false, label: 'GLM X', efforts: [] },
+    ]);
+    const unset = pickerAccount(
+      runtimeView({
+        wrapper: 'claude-auto-a',
+        models: {
+          catalog: { id: 'zai', label: 'GLM / Z.ai', origin: 'file', customIds: true, docs: 'https://docs.z.ai' },
+          choices: [],
+        },
+      }),
+    );
+    expect(unset.defaultModel).toBeNull();
+  });
+
   it('carries the machine’s own reason a runtime cannot launch', () => {
     const account = pickerAccount(
       runtimeView({ wrapper: 'claude-auto-a', launch: { available: false, reason: 'Sign in to launch' } }),

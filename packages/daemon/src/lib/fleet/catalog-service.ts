@@ -43,6 +43,7 @@ import {
   type FleetProvisioner,
   type HarnessKind,
   type MaterialiseBodies,
+  type ModelCatalogSources,
   materialiseFleet,
   type ProviderPreset,
   parseSettings,
@@ -204,6 +205,10 @@ export interface FleetCatalogServiceDeps {
   readonly acceptsAutoPermissionMode: boolean;
   /** The provider presets this machine offers, for a login made from one (docs/provider-presets.md). */
   presets?(): Promise<readonly ProviderPreset[]>;
+  /** The model catalogs and presets in effect (docs/model-catalog.md): what each runtime offers and pins. */
+  modelCatalogs?(): Promise<ModelCatalogSources>;
+  /** The fleet manifest as it is published now, unparsed; `undefined` when there is none. */
+  publishedManifest?(): Promise<unknown>;
   /** The first-run import and clone executors. Absent means "not available on this machine yet". */
   readonly executors?: {
     readonly setup?: AccountChangeExecutor<SetupChange>;
@@ -240,6 +245,17 @@ const SESSION_RUNNING: { readonly [K in SessionStatus]: boolean } = {
 /** How many of these sessions are still running. */
 export const countRunningSessions = (statuses: readonly SessionStatus[]): number =>
   statuses.filter(status => SESSION_RUNNING[status]).length;
+
+/**
+ * Whether a planned manifest says what the published one already says, the moment it was made
+ * aside. Anything else that differs — a model, a default, a catalog — is worth publishing again.
+ */
+export function sameManifest(planned: { readonly generatedAt: string }, published: unknown): boolean {
+  if (published === null || typeof published !== 'object') return false;
+  const { generatedAt: _planned, ...next } = planned;
+  const { generatedAt: _published, ...current } = published as { readonly generatedAt?: unknown };
+  return JSON.stringify(next) === JSON.stringify(current);
+}
 
 // ── Component bodies ─────────────────────────────────────────────────────────────────────────────
 
@@ -373,6 +389,46 @@ export class FleetCatalogService {
   async runtimes(): Promise<FleetRuntimeCatalog> {
     const reading = await this.#read();
     return runtimeCatalog(reading.model, await this.#facts(reading));
+  }
+
+  /**
+   * Publish the configuration AS IT ALREADY IS again, when what it publishes would now read differently
+   * (docs/model-catalog.md): a model catalog changed — a newer one was fetched, `config/models/` was
+   * edited, or this build carries a newer built-in one — so the runtimes' models, defaults and tier
+   * pins move with it, and no login has to be edited. No configuration file is written, and a fleet
+   * whose manifest would be identical is left exactly as it is.
+   *
+   * Answers what it did. A machine with no fleet yet, or one wired without catalogs, has nothing to do.
+   */
+  async republish(): Promise<'applied' | 'unchanged' | 'skipped'> {
+    const reading = await this.#read();
+    const sources = await this.#modelCatalogs();
+    if (reading.format === 'none' || sources.modelCatalogs === undefined) return 'skipped';
+    let plan: FleetModelApplyPlan;
+    try {
+      plan = materialiseFleet({
+        model: reading.model,
+        layout: this.deps.layout,
+        ids: (await this.deps.ids()) ?? EMPTY_RUNTIME_IDS,
+        mint: () => this.deps.mint(),
+        generatedAt: new Date(this.deps.now()).toISOString(),
+        bodies: await this.#bodies(reading.model),
+        claudeStatusline: this.deps.claudeStatusline,
+        fyCommand: this.deps.fyCommand,
+        ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
+        acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+        ...sources,
+      });
+    } catch (error) {
+      throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
+    }
+    if (sameManifest(plan.manifest, await this.deps.publishedManifest?.())) return 'unchanged';
+    try {
+      await this.deps.provisioner.apply(plan, []);
+    } catch (error) {
+      throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
+    }
+    return 'applied';
   }
 
   /** `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved. Writes nothing. */
@@ -521,7 +577,14 @@ export class FleetCatalogService {
       missingCommands,
       credentialStatus: await this.#credentialStatus(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+      ...(await this.#modelCatalogs()),
     };
+  }
+
+  /** The catalogs an apply and the runtime list read, or nothing on a machine wired without them. */
+  async #modelCatalogs(): Promise<{ readonly modelCatalogs?: ModelCatalogSources }> {
+    const sources = await this.deps.modelCatalogs?.();
+    return sources === undefined ? {} : { modelCatalogs: sources };
   }
 
   /** Each runtime's id by name, from `ids.json`. A machine with none yet has no ids to report. */
@@ -587,6 +650,7 @@ export class FleetCatalogService {
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
+        ...(await this.#modelCatalogs()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
       });
       preview = await this.deps.provisioner.preview(plan);

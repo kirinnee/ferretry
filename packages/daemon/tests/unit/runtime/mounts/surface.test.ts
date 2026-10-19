@@ -265,6 +265,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
   fleetRefresh: { run: async () => undefined },
+  conversationImport: {
+    list: async () => ({ conversations: [], matched: 0, skipped: 0 }),
+    adopt: async () => ({ adopted: [], refused: [] }),
+  },
   foreignHistory: {
     list: async () => ({
       conversations: [
@@ -626,6 +630,7 @@ describe('the mounted daemon surface', () => {
       3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      2 + // existing conversations kept as ferrets: the listing and the adoption
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
@@ -751,6 +756,10 @@ describe('the mounted daemon surface', () => {
       // daemon journal, lifecycle, pane, or resume/send control.
       'GET /v1/imports/history',
       'GET /v1/imports/history/:importId',
+      // Existing conversations kept as ferrets: listed and searched, then adopted into sessions that
+      // RESUME them. Both are fleet.configure; neither returns a transcript or a file path.
+      'GET /v1/imports/conversations',
+      'POST /v1/imports/conversations/adopt',
       'GET /v1/gc',
       'POST /v1/gc',
       // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is

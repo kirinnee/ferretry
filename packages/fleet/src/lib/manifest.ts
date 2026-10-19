@@ -63,20 +63,43 @@ export type AccountMode = z.infer<typeof AccountModeSchema>;
  * One model an account may be asked to serve. `available` is mandatory and explicit — there is no
  * "probably fine" default — and an unavailable entry must say why.
  */
+/**
+ * What a model catalog says about a model (docs/model-catalog.md), carried so a picker reads one record:
+ * its tier, context window and the reasoning efforts it takes. Absent for a model no catalog describes.
+ */
+const CATALOG_MODEL_SHAPE = {
+  tier: z.enum(['best', 'balanced', 'fast']).optional(),
+  context: z.number().int().positive().optional(),
+  reasoning: z.boolean().optional(),
+  efforts: z.array(NonEmptyString).readonly().optional(),
+  defaultEffort: NonEmptyString.optional(),
+};
+
 export const FleetManifestModelSchema = z.discriminatedUnion('available', [
   z.strictObject({
     id: NonEmptyString,
     displayName: NonEmptyString.optional(),
+    ...CATALOG_MODEL_SHAPE,
     available: z.literal(true),
   }),
   z.strictObject({
     id: NonEmptyString,
     displayName: NonEmptyString.optional(),
+    ...CATALOG_MODEL_SHAPE,
     available: z.literal(false),
     unavailableReason: NonEmptyString,
   }),
 ]);
 export type FleetManifestModel = z.infer<typeof FleetManifestModelSchema>;
+
+/** The catalog a runtime's models came from (docs/model-catalog.md). */
+export const FleetManifestModelCatalogSchema = z.strictObject({
+  id: NonEmptyString,
+  label: NonEmptyString,
+  /** Whether the provider serves ids beyond the list, so a picker offers "Custom id…". */
+  customIds: z.boolean(),
+});
+export type FleetManifestModelCatalog = z.infer<typeof FleetManifestModelCatalogSchema>;
 
 const accountShape = {
   id: AccountIdSchema,
@@ -98,6 +121,8 @@ const accountShape = {
   /** Model this account serves when a caller names none. `null` when it names none. */
   defaultModel: NonEmptyString.nullable(),
   models: z.array(FleetManifestModelSchema).readonly(),
+  /** The model catalog the models came from, when the login has one: what a picker names and whether it takes any id. */
+  modelCatalog: FleetManifestModelCatalogSchema.optional(),
   available: z.boolean(),
   /** Required when `available` is false, `null` otherwise. */
   unavailableReason: NonEmptyString.nullable(),

@@ -86,10 +86,14 @@ export class TranscriptProvenanceCapture {
     private readonly environment: Readonly<Record<string, string | undefined>>,
   ) {}
 
+  /** The harness home a runtime's wrapper exports, or nothing when it declares none it can resolve. */
+  async home(harness: Harness, executable: string): Promise<string | undefined> {
+    const source = await this.wrappers.read(executable);
+    return source === undefined ? undefined : harnessHomeFromWrapper(source, harness, this.environment);
+  }
+
   async capture(request: TranscriptCaptureRequest): Promise<TranscriptCapture> {
-    const source = await this.wrappers.read(request.executable);
-    if (source === undefined) return NOTHING;
-    const home = harnessHomeFromWrapper(source, request.harness, this.environment);
+    const home = await this.home(request.harness, request.executable);
     if (home === undefined) return NOTHING;
     return request.harness === 'claude' ? this.mint(home, request) : await this.baseline(home, request);
   }

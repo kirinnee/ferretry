@@ -151,3 +151,75 @@ describe('the runtime model catalog', () => {
     });
   });
 });
+
+describe('the runtime model catalog from a login catalog (docs/model-catalog.md)', () => {
+  const catalogued = account({
+    defaultModel: 'glm-5.3',
+    modelCatalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
+    models: [
+      {
+        id: 'glm-5.3',
+        displayName: 'GLM-5.3',
+        tier: 'best',
+        context: 1_000_000,
+        reasoning: true,
+        efforts: ['low', 'high', 'max'],
+        defaultEffort: 'max',
+        available: true,
+      },
+      {
+        id: 'glm-5.3-flash',
+        displayName: 'GLM-5.3-Flash',
+        tier: 'fast',
+        reasoning: true,
+        efforts: [],
+        available: true,
+      },
+    ],
+  });
+
+  it("should carry each model's tier, context window and the efforts it takes, and name the catalog", () => {
+    // Act
+    const catalog = RuntimeModelCatalogSchema.parse(claudeRuntimeCatalog(catalogued));
+
+    // Assert
+    should(catalog.catalog).deepEqual({ id: 'zai', label: 'GLM / Z.ai', customIds: false });
+    should(catalog.choices[0]).match({
+      value: 'glm-5.3',
+      label: 'GLM-5.3',
+      tier: 'best',
+      context: 1_000_000,
+      isDefault: true,
+      reasoningEfforts: [{ value: 'low' }, { value: 'high' }, { value: 'max' }],
+      defaultReasoningEffort: 'max',
+    });
+    should(catalog.choices[1]).match({ tier: 'fast', reasoningEfforts: [] });
+  });
+
+  it('should give an advertised Codex choice the tier and name its catalog describes', () => {
+    // Arrange
+    const codex = {
+      models: [{ id: 'gpt-6.1-sol', displayName: 'GPT-6.1 Sol', tier: 'balanced' as const, available: true as const }],
+      modelCatalog: { id: 'openai', label: 'OpenAI', customIds: false },
+    };
+
+    // Act
+    const catalog = codexRuntimeCatalog(
+      [
+        { value: 'gpt-6.1-sol', label: 'gpt-6.1-sol', reasoningEfforts: [{ value: 'medium' }] },
+        { value: 'gpt-unknown', label: 'Unknown', reasoningEfforts: [] },
+      ],
+      codex,
+    );
+
+    // Assert
+    should(catalog.choices[0]).match({
+      label: 'GPT-6.1 Sol',
+      tier: 'balanced',
+      reasoningEfforts: [{ value: 'medium' }],
+    });
+    should(catalog.choices[1]).deepEqual({ value: 'gpt-unknown', label: 'Unknown', reasoningEfforts: [] });
+    should(catalog.catalog?.id).equal('openai');
+    should(codexRuntimeCatalog([], { models: [] }).catalog).be.undefined();
+  });
+});

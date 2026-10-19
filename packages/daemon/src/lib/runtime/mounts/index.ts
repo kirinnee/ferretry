@@ -38,6 +38,7 @@ import { carrierRoutes } from './carriers.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
+import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
 import { daemonUpdateRoutes } from './daemon-update.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
@@ -189,6 +190,8 @@ export interface MountedSubsystems {
   readonly fleetRefresh: FleetRefreshLoop;
   /** Read-only Claude/Codex conversations that existed before Ferretry. */
   readonly foreignHistory: ForeignHistorySubsystem;
+  /** Existing Claude/Codex conversations the owner may keep as ferrets: listed, searched and adopted. */
+  readonly conversationImport: ConversationImportSubsystem;
   readonly attention: AttentionService;
   /** Audited direct and committed-Attention presentation through the sole push fan-out. */
   readonly notifications: DirectNotificationSubsystem;
@@ -445,6 +448,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
         // looking like one.
         ...foreignHistoryRoutes(subsystems.foreignHistory),
+        ...conversationImportRoutes(subsystems.conversationImport),
         ...scratchGcRoutes(subsystems.scratchGc),
         // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
         // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide

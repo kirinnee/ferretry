@@ -1,0 +1,31 @@
+# Anthropic's own Claude models, for a Claude account sign-in and an Anthropic API key.
+# How to change this list: docs/model-catalog.md. A machine overrides it with config/models/anthropic.yaml.
+label: Anthropic
+docs: https://platform.claude.com/docs/en/about-claude/models/overview
+verified: '2026-10-18'
+claude:
+  docs: https://code.claude.com/docs/en/model-config
+  tiers:
+    opus: claude-opus-5-5
+    sonnet: claude-sonnet-5-5
+    haiku: claude-haiku-5-5
+  models:
+    - id: claude-opus-5-5
+      label: Opus 5.5
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
+    - id: claude-sonnet-5-5
+      label: Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+    - id: claude-haiku-5-5
+      label: Haiku 5.5
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

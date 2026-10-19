@@ -174,6 +174,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     event: 'fleet.configured',
     detail: { action: 'install-tool' },
   },
+  // Keeping existing conversations as ferrets (`mounts/conversation-import.ts`): it creates sessions that can
+  // launch agents, so it is recorded as fleet configuration. The record names no conversation and no folder.
+  {
+    method: 'POST',
+    path: '/v1/imports/conversations/adopt',
+    event: 'fleet.configured',
+    detail: { action: 'adopt-conversations' },
+  },
   // Adding an MCP server for one ferret (`mounts/session-mcp.ts`): the session and the server's NAME, never
   // its command, address or environment. Both change what agents launch with, the project file for
   // everyone on the repository and the login for every ferret on it, so both are recorded as fleet
