@@ -40,7 +40,12 @@ import { type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } f
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.ts';
-import { FY_RENDER_FENCE_ATTRIBUTE, parseFyRender, remarkFyRenderFences } from '../lib/fy-render.ts';
+import {
+  FY_RENDER_FENCE_ATTRIBUTE,
+  type FyRenderWorkspaceReader,
+  parseFyRender,
+  remarkFyRenderFences,
+} from '../lib/fy-render.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { trustedHighlight } from '../lib/trusted-types.ts';
 import { MarkdownTable } from './markdown-table.tsx';
@@ -157,6 +162,13 @@ export interface MarkdownProps {
    * Exactly one production call site sets it, and a unit test holds it to one.
    */
   readonly enableFyRender?: boolean;
+  /**
+   * Reads a workspace file for a `fy-render` media block's `src: @path`, as the reader. Only
+   * meaningful where `enableFyRender` is set; without it a workspace `src:` shows a card saying the
+   * view cannot read the workspace. A path goes in and bytes or a refusal come out — never a
+   * connection, URL or token (`fy-render-block.tsx`).
+   */
+  readonly readWorkspaceMedia?: FyRenderWorkspaceReader;
   /** Proves `:callsign` against one daemon's live fleet. Without it, prose. */
   readonly agentReferenceResolver?: AgentReferenceResolver;
   /** Proves `&task` against the daemon's board. Syntax alone never links. */
@@ -187,6 +199,7 @@ export const Markdown = memo(function Markdown({
   text,
   className,
   enableFyRender = false,
+  readWorkspaceMedia,
   agentReferenceResolver,
   taskReferenceResolver,
   attentionReferenceResolver,
@@ -450,7 +463,8 @@ export const Markdown = memo(function Markdown({
           pre: ({ node, children, ...rest }) => {
             const body = enableFyRender ? fyRenderFenceBody(node) : null;
             const parsed = body === null ? null : parseFyRender(body);
-            if (parsed?.ok === true) return <FyRenderBlock block={parsed.block} />;
+            if (parsed?.ok === true)
+              return <FyRenderBlock block={parsed.block} readWorkspaceMedia={readWorkspaceMedia} />;
             return <pre {...rest}>{children}</pre>;
           },
           // A phone reads a table as cards or as the real table, its own choice (`markdown-table.tsx`).

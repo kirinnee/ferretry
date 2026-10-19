@@ -3,9 +3,17 @@ import type { ElementType } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
-import { type FyRenderBlock as ParsedBlock, FY_RENDER_LIMITS, parseFyRender } from '../../src/lib/fy-render.ts';
+import { FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
+import { FyRenderMedia } from '../../src/components/fy-render-media.tsx';
+import type { FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
+import {
+  FY_RENDER_LIMITS,
+  type FyRenderWorkspaceReader,
+  type FyRenderBlock as ParsedBlock,
+  parseFyRender,
+} from '../../src/lib/fy-render.ts';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
-import { render, run } from '../support/react.ts';
+import { render, run, runAsync } from '../support/react.ts';
 
 /**
  * Rendered, not grepped. Every assertion below inspects the tree the component
@@ -86,6 +94,16 @@ const PIXEL_PNG = (() => {
 const svgBlock = (): ParsedBlock => parsed('type: svg', 'alt: A ten by ten square', '---', SQUARE);
 const imageBlock = (): ParsedBlock => parsed('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL_PNG);
 const htmlBlock = (): ParsedBlock => parsed('type: html', 'alt: A counter widget', '---', '<button>count</button>');
+const mermaidBlock = (): ParsedBlock => parsed('type: mermaid', 'alt: A flow', '---', 'graph TD; A-->B;');
+const workspaceImageBlock = (): ParsedBlock => parsed('type: image', 'alt: A chart', 'src: @docs/chart.png', '---');
+const linkedVideoBlock = (): ParsedBlock =>
+  parsed('type: video', 'alt: A clip', 'src: https://media.example.com/clip.mp4', '---');
+const linkedPdfBlock = (): ParsedBlock =>
+  parsed('type: pdf', 'alt: A paper', 'src: https://papers.example.org/a.pdf', '---');
+
+/** The interactive sentence, verbatim: the consequence pressing Render has for an `html` page. */
+const INTERACTIVE_SENTENCE =
+  "Rendering starts only when you choose. It runs this page's own scripts in an isolated frame that cannot reach the app or this session, and may use substantial browser resources.";
 
 const textOf = (node: ReactTestInstance): string =>
   node.children.map(child => (typeof child === 'string' ? child : textOf(child as ReactTestInstance))).join('');
@@ -119,9 +137,63 @@ const approve = (tree: { root: ReactTestInstance }): void => {
   run(() => tree.root.findByProps({ 'data-fy-render-consent-action': 'true' }).props.onClick());
 };
 
+/** The consent sentence the stage offers, as a string. */
+const consentNote = (tree: { root: ReactTestInstance }): string =>
+  textOf(tree.root.findByProps({ 'data-fy-render-consent': 'true' })).trim();
+
+/** The Render control's accessible name, as a string. */
+const consentName = (tree: { root: ReactTestInstance }): string =>
+  String(
+    tree.root.findAllByType('button').find(button => button.props['data-fy-render-consent-action'] === 'true')?.props[
+      'aria-label'
+    ],
+  );
+
+/** The one stage element's kind. */
+const stageKind = (tree: { root: ReactTestInstance }): string =>
+  String(
+    tree.root.findAll(node => typeof node.props['data-fy-render-stage'] === 'string')[0]?.props['data-fy-render-stage'],
+  );
+
+/**
+ * The status region's phase, text and tone — strings only, never the instance,
+ * for the reason `count` gives.
+ */
+const status = (tree: { root: ReactTestInstance }): { phase: string; text: string; tone: string | undefined } => {
+  const regions = tree.root.findAll(node => typeof node.props['data-fy-render-sandbox-status'] === 'string');
+  if (regions.length !== 1) throw new Error(`expected exactly one status region, found ${regions.length}`);
+  const region = regions[0] as ReactTestInstance;
+  return {
+    phase: region.props['data-fy-render-sandbox-status'] as string,
+    text: textOf(region),
+    tone: region.props['data-tone'] as string | undefined,
+  };
+};
+
+/** The mounted html frame's props — the callbacks the real frame would call. */
+const htmlFrame = (tree: { root: ReactTestInstance }) =>
+  tree.root.findByType(FyRenderHtmlFrame).props as {
+    readonly fullscreen: boolean;
+    readonly onEscape: () => void;
+    readonly onFailed: (failure: FyRenderSandboxFailure) => void;
+    readonly onRendered: () => void;
+  };
+
+const sourcePanels = (tree: { root: ReactTestInstance }): number =>
+  tree.root.findAllByProps({ 'data-fy-render-source': 'true' }).length;
+
+const dialogs = (tree: { root: ReactTestInstance }): number => tree.root.findAllByProps({ role: 'dialog' }).length;
+
+/** Lets a media stage's mount effect settle inside `act`. */
+const settle = async (): Promise<void> => {
+  await runAsync(async () => {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  });
+};
+
 describe('FyRenderBlock execution surface', () => {
   test('should contain no element capable of executing an author payload, for any type', () => {
-    for (const block of [svgBlock(), imageBlock(), htmlBlock()]) {
+    for (const block of [svgBlock(), imageBlock(), mermaidBlock(), htmlBlock()]) {
       // Act
       const tree = render(<FyRenderBlock block={block} />);
 
@@ -137,15 +209,23 @@ describe('FyRenderBlock execution surface', () => {
     }
   });
 
-  test('should print an HTML payload as escaped text rather than mounting it', () => {
-    // Arrange — a payload that would be unmistakable if it were ever live.
+  test('should run an HTML payload only inside its sandboxed frame, never in this document', () => {
+    // Arrange — a payload that would be unmistakable if it were ever live here.
     const block = parsed('type: html', 'alt: A hostile widget', '---', '<script>globalThis.pwned = true</script>');
-
-    // Act
     const tree = render(<FyRenderBlock block={block} />);
 
-    // Assert
-    should(count(tree.root, 'script')).equal(0);
+    // Act — the reader consents, and opens the source.
+    approve(tree);
+    run(() => buttonNamed(tree.root, 'Source')?.props.onClick());
+
+    // Assert — the ONLY frame is the opaque-origin one, and no other sink exists.
+    should(count(tree.root, 'iframe')).equal(1);
+    should(tree.root.findByType('iframe').props.sandbox).equal('allow-scripts');
+    for (const forbidden of ['script', 'object', 'embed', 'canvas'] as const) {
+      should(count(tree.root, forbidden)).equal(0);
+    }
+    should(tree.root.findAll(node => node.props?.dangerouslySetInnerHTML !== undefined).length).equal(0);
+    // The payload reaches this document only as escaped text in the source panel.
     should(allText(tree.root)).containEql('<script>globalThis.pwned = true</script>');
     run(() => tree.unmount());
   });
@@ -222,11 +302,13 @@ describe('FyRenderBlock consent', () => {
     run(() => tree.unmount());
   });
 
-  test('should offer fullscreen for a decode failure and for a source-only type', () => {
-    // Arrange — both have something to show even though neither has a picture.
-    const sourceOnly = render(<FyRenderBlock block={htmlBlock()} />);
-    should(buttonNamed(sourceOnly.root, 'Fullscreen')).not.be.undefined();
-    run(() => sourceOnly.unmount());
+  test('should offer fullscreen for a decode failure and for a running html page', () => {
+    // Arrange — an unconsented page has nothing to enlarge; a running one does.
+    const page = render(<FyRenderBlock block={htmlBlock()} />);
+    should(buttonNamed(page.root, 'Fullscreen')).be.undefined();
+    approve(page);
+    should(buttonNamed(page.root, 'Fullscreen')).not.be.undefined();
+    run(() => page.unmount());
 
     const failing = render(<FyRenderBlock block={svgBlock()} />);
     approve(failing);
@@ -299,13 +381,29 @@ describe('FyRenderBlock consent', () => {
     run(() => tree.unmount());
   });
 
-  test('should offer no gate for a type that never reaches a decoder', () => {
+  test('should gate an html page and say that pressing Render runs its scripts', () => {
     // Act
     const tree = render(<FyRenderBlock block={htmlBlock()} />);
 
-    // Assert
-    should(tree.root.findAllByProps({ 'data-fy-render-consent-action': 'true' }).length).equal(0);
-    should(allText(tree.root)).not.containEql('Rendering starts only when you choose');
+    // Assert — the one type whose author code runs says so before it does, and
+    // nothing is framed until the reader asks.
+    should(consentControls(tree.root)).equal(1);
+    should(consentNote(tree)).equal(INTERACTIVE_SENTENCE);
+    should(consentName(tree)).equal('Render illustration (HTML, 22 bytes)');
+    should(count(tree.root, 'iframe')).equal(0);
+    should(stageKind(tree)).equal('note');
+    run(() => tree.unmount());
+  });
+
+  test('should name the renderer download for a sandbox type and price nothing', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={mermaidBlock()} />);
+
+    // Assert — the honest cost of a sandbox type is the renderer, not the source.
+    should(consentNote(tree)).equal(
+      'Rendering starts only when you choose. It may download the Mermaid renderer on first use — cached bytes are revalidated — and may use substantial browser resources.',
+    );
+    should(consentName(tree)).equal('Render illustration (Mermaid)');
     run(() => tree.unmount());
   });
 
@@ -435,23 +533,181 @@ describe('FyRenderBlock static types', () => {
   });
 });
 
-describe('FyRenderBlock source-only types', () => {
-  test('should say plainly that this build does not run the payload', () => {
-    // `html` is the only type left on this path, and that is the declared gap.
-    // `mermaid` and `lottie` moved to the sandbox and are covered by their own
-    // describe below; if either ever comes back here, that is a regression in
-    // the feature rather than in this test.
-    for (const [block, label] of [[htmlBlock(), 'HTML']] as const) {
-      // Act
-      const tree = render(<FyRenderBlock block={block} />);
+/**
+ * `html` EXECUTES, after consent, in `FyRenderHtmlFrame`. The frame's own
+ * bridge is proven in `fy-render-html-frame.test.tsx`; this describe proves what
+ * the BLOCK does with what the frame reports, by calling the frame's props as
+ * the mounted frame would.
+ */
+describe('FyRenderBlock interactive html', () => {
+  test('should mount the sandboxed html frame on a sandbox stage once approved', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
 
-      // Assert — no "preparing", no spinner, no implication that something is
-      // about to happen. The limitation is the state.
-      should(allText(tree.root)).containEql(`This build does not run ${label} illustrations`);
-      should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' })).have.length(1);
-      should(tree.root.findByProps({ 'data-fy-render-stage': 'note' })).be.ok();
-      run(() => tree.unmount());
-    }
+    // Act
+    approve(tree);
+
+    // Assert
+    should(count(tree.root, FyRenderHtmlFrame)).equal(1);
+    const frame = tree.root.findByType('iframe');
+    should(frame.props.sandbox).equal('allow-scripts');
+    should(frame.props.title).equal('Interactive HTML illustration');
+    should(stageKind(tree)).equal('sandbox');
+    should(tree.root.findByProps({ 'data-fy-render-type': 'html' }).props['data-fy-render-presentation']).equal(
+      'interactive',
+    );
+    run(() => tree.unmount());
+  });
+
+  test('should say the page is starting, then that it is running', () => {
+    // Arrange — the region exists, empty, before consent.
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+    should(status(tree)).match({ phase: 'idle', text: '' });
+
+    // Act
+    approve(tree);
+
+    // Assert
+    should(status(tree)).match({ phase: 'preparing', text: 'Starting the interactive page…' });
+
+    // Act — the frame reports the page in.
+    run(() => htmlFrame(tree).onRendered());
+
+    // Assert
+    should(status(tree)).match({ phase: 'ready', text: 'The interactive page is running.' });
+    run(() => tree.unmount());
+  });
+
+  test('should stop a page that navigated and open the source beneath the sentence', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+    approve(tree);
+
+    // Act
+    run(() => htmlFrame(tree).onFailed({ detail: null, kind: 'navigation' }));
+
+    // Assert
+    should(status(tree)).match({
+      phase: 'failed',
+      text: 'The interactive page tried to navigate away, so it was stopped. The authored source is shown below.',
+      tone: 'err',
+    });
+    should(count(tree.root, FyRenderHtmlFrame)).equal(0);
+    should(sourcePanels(tree)).equal(1);
+    run(() => tree.unmount());
+  });
+
+  test('should present the ten-minute lifetime as a status with no source panel', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+    approve(tree);
+
+    // Act
+    run(() => htmlFrame(tree).onFailed({ detail: null, kind: 'lifetime' }));
+
+    // Assert — a designed bound, not a breakage.
+    should(status(tree).text).equal('The interactive page was stopped after ten minutes. Reload to run it again.');
+    should(status(tree).tone).be.undefined();
+    should(sourcePanels(tree)).equal(0);
+    should(buttonNamed(tree.root, 'Reload')).not.be.undefined();
+    run(() => tree.unmount());
+  });
+
+  test('should close fullscreen when Escape is pressed inside the frame', () => {
+    // Arrange — the app's own Escape listener cannot hear a key pressed inside
+    // a separate document, so the frame forwards it.
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+    approve(tree);
+    run(() => buttonNamed(tree.root, 'Fullscreen')?.props.onClick());
+    should(dialogs(tree)).equal(1);
+    should(htmlFrame(tree).fullscreen).be.true();
+
+    // Act
+    run(() => htmlFrame(tree).onEscape());
+
+    // Assert
+    should(dialogs(tree)).equal(0);
+    should(htmlFrame(tree).fullscreen).be.false();
+    run(() => tree.unmount());
+  });
+});
+
+/**
+ * `src:` BLOCKS name their bytes elsewhere, so the offer says where pressing
+ * Render reaches — the reader's workspace with their own access, or a stranger's
+ * server that will see their address — and only then mounts `FyRenderMedia`.
+ */
+describe('FyRenderBlock media blocks', () => {
+  test('should say a workspace file is read with the reader’s own access', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={workspaceImageBlock()} />);
+
+    // Assert
+    should(consentNote(tree)).equal(
+      "Rendering starts only when you choose. It then reads docs/chart.png from this session's workspace with your own access.",
+    );
+    should(consentName(tree)).equal('Render illustration (image, from the workspace)');
+    should(count(tree.root, FyRenderMedia)).equal(0);
+    run(() => tree.unmount());
+  });
+
+  test('should say a linked video is fetched from a host that will see the reader’s address', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={linkedVideoBlock()} />);
+
+    // Assert
+    should(consentNote(tree)).equal(
+      'Rendering starts only when you choose. Your browser then fetches it from media.example.com, which will see your address.',
+    );
+    should(consentName(tree)).equal('Render illustration (video, from media.example.com)');
+    should(count(tree.root, 'video')).equal(0);
+    run(() => tree.unmount());
+  });
+
+  test('should say a linked PDF is offered as a link to open', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={linkedPdfBlock()} />);
+
+    // Assert
+    should(consentNote(tree)).equal(
+      'Rendering starts only when you choose. It then offers this PDF on papers.example.org as a link to open.',
+    );
+    should(consentName(tree)).equal('Render illustration (PDF, from papers.example.org)');
+    run(() => tree.unmount());
+  });
+
+  test('should mount the media stage after Render and hand it the workspace reader', async () => {
+    // Arrange — a read that never answers, so the stage stays in its own loading state.
+    const reader: FyRenderWorkspaceReader = () => new Promise(() => {});
+    const tree = render(<FyRenderBlock block={workspaceImageBlock()} readWorkspaceMedia={reader} />);
+
+    // Act
+    approve(tree);
+    await settle();
+
+    // Assert
+    should(stageKind(tree)).equal('media');
+    should(count(tree.root, FyRenderMedia)).equal(1);
+    should(tree.root.findByType(FyRenderMedia).props.readWorkspaceMedia === reader).be.true();
+    // No status region: a media stage owns its own loading and refusal states.
+    should(tree.root.findAll(node => typeof node.props['data-fy-render-sandbox-status'] === 'string').length).equal(0);
+    run(() => tree.unmount());
+  });
+
+  test('should pass no reader at all when the view has none', async () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={linkedVideoBlock()} />);
+
+    // Act
+    approve(tree);
+    await settle();
+
+    // Assert — omitted, not `undefined`: the media stage tells the two apart by presence.
+    should(stageKind(tree)).equal('media');
+    should(Object.hasOwn(tree.root.findByType(FyRenderMedia).props, 'readWorkspaceMedia')).be.false();
+    should(count(tree.root, 'video')).equal(1);
+    should(count(tree.root, 'iframe')).equal(0);
+    run(() => tree.unmount());
   });
 });
 
@@ -608,57 +864,84 @@ describe('FyRenderBlock failure fallback', () => {
   });
 
   /**
-   * THE PANEL IS RE-DERIVED WHEN THE KIND OF BLOCK CHANGES, and only then.
+   * NEW BYTES KEEP THE READER'S PANEL AND DROP THE FAILURE'S.
    *
-   * `sourcePanel` is seeded from the mount-time presentation, so a block that
-   * becomes source-only while its panel is closed — the default for a visual
-   * type — otherwise shows "the authored source is shown below" above nothing at
-   * all. Reachable when a transcript entry with a stable id is rewritten rather
-   * than appended to.
+   * Every type is offered now, so there is no source-only kind left to
+   * re-derive a panel for; what survives new bytes is decided by who opened the
+   * panel. Reachable when a transcript entry with a stable id is rewritten rather
+   * than appended to, and on every streamed message.
    */
-  test('should open the panel when a visual block becomes source-only', () => {
-    // Arrange — a visual block, panel closed by default.
-    const tree = render(<FyRenderBlock block={svgBlock()} />);
-    should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' }).length).equal(0);
-
-    // Act — `html` is the remaining source-only type.
-    run(() => tree.update(<FyRenderBlock block={htmlBlock()} />));
-
-    // Assert — the note says the source is shown below, so it had better be.
-    should(allText(tree.root)).containEql('This build does not run HTML illustrations');
-    should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' })).have.length(1);
-    run(() => tree.unmount());
-  });
-
-  test('should close the panel when a source-only block becomes visual', () => {
-    // Arrange — source-only opens its panel by default.
+  test('should close a failure-opened panel when the page’s bytes change', () => {
+    // Arrange — a running page navigated, and the failure opened the source.
     const tree = render(<FyRenderBlock block={htmlBlock()} />);
-    should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' })).have.length(1);
+    approve(tree);
+    run(() => htmlFrame(tree).onFailed({ detail: null, kind: 'navigation' }));
+    should(sourcePanels(tree)).equal(1);
 
-    // Act
-    run(() => tree.update(<FyRenderBlock block={svgBlock()} />));
-
-    // Assert — a visual block starts with its illustration alone.
-    should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' }).length).equal(0);
-    run(() => tree.unmount());
-  });
-
-  test('should keep a reader-closed panel across new bytes of the same kind', () => {
-    // Arrange — the reader deliberately closed a source-only block's panel.
-    const tree = render(<FyRenderBlock block={htmlBlock()} />);
-    run(() => buttonNamed(tree.root, 'Source')?.props.onClick());
-    should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' }).length).equal(0);
-
-    // Act — the message grows; the KIND of block does not change.
+    // Act — the message is rewritten.
     run(() =>
       tree.update(
         <FyRenderBlock block={parsed('type: html', 'alt: A counter widget', '---', '<button>more</button>')} />,
       ),
     );
 
-    // Assert — re-deriving on every source change would reopen it and undo the
-    // reader's decision, which is why the trigger is the presentation.
-    should(tree.root.findAllByProps({ 'data-fy-render-source': 'true' }).length).equal(0);
+    // Assert — scaffolding for that failure goes with it, and so does consent.
+    should(sourcePanels(tree)).equal(0);
+    should(status(tree).phase).equal('idle');
+    should(consentNote(tree)).equal(INTERACTIVE_SENTENCE);
+    run(() => tree.unmount());
+  });
+
+  test('should keep a reader-opened panel when the page’s bytes change', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+    run(() => buttonNamed(tree.root, 'Source')?.props.onClick());
+
+    // Act
+    run(() =>
+      tree.update(
+        <FyRenderBlock block={parsed('type: html', 'alt: A counter widget', '---', '<button>more</button>')} />,
+      ),
+    );
+
+    // Assert
+    should(sourcePanels(tree)).equal(1);
+    should(allText(tree.root)).containEql('<button>more</button>');
+    run(() => tree.unmount());
+  });
+
+  test('should keep a reader-closed panel closed when a block changes kind', () => {
+    // Arrange — the panel is closed by default for every type now.
+    const tree = render(<FyRenderBlock block={svgBlock()} />);
+    should(sourcePanels(tree)).equal(0);
+
+    // Act
+    run(() => tree.update(<FyRenderBlock block={htmlBlock()} />));
+
+    // Assert — the new kind is offered, not unfurled.
+    should(sourcePanels(tree)).equal(0);
+    should(consentNote(tree)).equal(INTERACTIVE_SENTENCE);
+    run(() => tree.unmount());
+  });
+
+  test('should close fullscreen and stop the page when its bytes change', () => {
+    // Arrange — a running page, in fullscreen.
+    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+    approve(tree);
+    run(() => buttonNamed(tree.root, 'Fullscreen')?.props.onClick());
+    should(dialogs(tree)).equal(1);
+
+    // Act
+    run(() =>
+      tree.update(
+        <FyRenderBlock block={parsed('type: html', 'alt: A counter widget', '---', '<button>more</button>')} />,
+      ),
+    );
+
+    // Assert — consent was to the old bytes, so the frame goes and so does the overlay.
+    should(dialogs(tree)).equal(0);
+    should(count(tree.root, FyRenderHtmlFrame)).equal(0);
+    should(buttonNamed(tree.root, 'Fullscreen')).be.undefined();
     run(() => tree.unmount());
   });
 
@@ -681,8 +964,10 @@ describe('FyRenderBlock failure fallback', () => {
     const payload = 'x'.repeat(FY_RENDER_LIMITS.sourcePreviewCharacters + 10);
     const block = parsed('type: html', 'alt: A long widget', '---', payload);
 
-    // Act
     const tree = render(<FyRenderBlock block={block} />);
+
+    // Act
+    run(() => buttonNamed(tree.root, 'Source')?.props.onClick());
 
     // Assert
     should(textOf(tree.root.findByType('code'))).have.length(FY_RENDER_LIMITS.sourcePreviewCharacters);

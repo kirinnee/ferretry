@@ -353,3 +353,30 @@ describe('sessionReferenceSurface', () => {
     should(readSidePaneTabsState(scope).active).equal(null);
   });
 });
+
+describe('sessionReferenceSurface workspace media', () => {
+  test('should read a media block’s workspace file through the given fetcher for the given session', async () => {
+    // Arrange
+    const requested: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      cwd: '/repo',
+      fetcher: async url => {
+        requested.push(String(url));
+        return new Response(JSON.stringify({ base64: 'AAEC', path: 'assets/a.png', size: 3 }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    });
+
+    // Act
+    const read = await surface.readWorkspaceMedia?.('/repo/assets/a.png', new AbortController().signal);
+
+    // Assert — the session's own preview route, for the session-relative path.
+    should(requested).deepEqual([
+      'https://daemon.invalid/v1/sessions/session-1/fs/file?format=base64&path=assets%2Fa.png',
+    ]);
+    should(read?.ok === true ? [...read.bytes] : null).deepEqual([0, 1, 2]);
+  });
+});
