@@ -256,6 +256,19 @@ A few commands take you from a fresh install to a phone watching an agent work. 
    registers a passkey, and the dangerous acts it can do later ask for that passkey. If the machine is not set up yet, the app
    asks step 2's questions as soon as the phone is paired.
 
+   `fy pair` waits up to two minutes for the scan. From a script or an agent, `--no-wait` prints the
+   QR code and the link and exits instead:
+
+   ```bash
+   fy pair --no-wait
+   ```
+
+   When you are sitting at this machine, add `--open` to hand the link to its browser too:
+
+   ```bash
+   fy pair --open --no-wait
+   ```
+
 5. **Start a session** on an agent runtime (the ones the setup made are):
 
    ```bash
@@ -301,6 +314,6 @@ fy daemon reset
 ```
 
 The landing page's `/get-started` guide (`packages/pwa/get-started/index.html`) shows commands from
-this document. Every command it shows must appear here, in a fenced block, exactly as written —
+this document, and its "Let your agent set it up" prompt is assembled from those same lines in the browser. Every command it shows must appear here, in a fenced block, exactly as written —
 `scripts/validate/cli-contracts.sh installation-parity` refuses one that does not, so change a
 command here first.

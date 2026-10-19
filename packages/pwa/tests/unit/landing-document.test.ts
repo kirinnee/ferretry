@@ -69,7 +69,8 @@ describe('the static landing document', () => {
     const scripts = [...landing.matchAll(/<script>([\s\S]*?)<\/script>/g)].flatMap(match =>
       match[1] === undefined ? [] : [match[1]],
     );
-    expect(scripts).toHaveLength(1);
+    // The pairing-marker redirect in the head, then the floating-button watcher at the end of the body.
+    expect(scripts).toHaveLength(2);
     const redirectScript = scripts[0] ?? '';
     expect(redirectScript).toContain("localStorage.getItem('fy-has-pairings-v1') === '1'");
     expect(redirectScript).toContain("has('stay')");
@@ -82,6 +83,28 @@ describe('the static landing document', () => {
       const hash = createHash('sha256').update(script).digest('base64');
       expect(headers).toContain(`'sha256-${hash}'`);
     }
+  });
+
+  it('keeps the two entry points apart: Get started sets up a new computer, Open the app goes to your machines', () => {
+    expect(landing).toContain('New here? Set up a computer, then pair your phone.');
+    expect(landing).toContain('Already set up? Go to your machines.');
+    // Both notes sit under their button in the hero and again in the closing.
+    expect(landing.match(/New here\? Set up a computer/g)).toHaveLength(2);
+    expect(landing.match(/Already set up\? Go to your machines\./g)).toHaveLength(3);
+  });
+
+  it('never lets the floating Get started button sit on another button', () => {
+    // Hidden unless the script shows it, and the script hides it whenever a CTA row, the nav CTA or the footer is on screen.
+    expect(landing).toMatch(/\.persistent-start \{[^}]*visibility: hidden;/);
+    expect(landing).toContain('.persistent-start.is-visible');
+    const [, watcher = ''] = [...landing.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1] ?? '');
+    expect(watcher).toContain("querySelectorAll('[data-hides-start]')");
+    expect(watcher).toContain("classList.toggle('is-visible', seen.size === 0)");
+    expect(landing.match(/ data-hides-start/g)).toHaveLength(4);
+    // One fixed button, inset from the notch and the home indicator.
+    expect(landing.match(/position: fixed/g)).toHaveLength(2);
+    expect(landing).toContain('bottom: max(18px, env(safe-area-inset-bottom))');
+    expect(landing).toContain('right: max(18px, env(safe-area-inset-right))');
   });
 
   it('routes both app navigation and QR pairing deep links to the PWA entry', () => {

@@ -261,8 +261,21 @@
       .cta-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 14px 18px;
+        gap: 22px 18px;
         margin-top: 33px;
+      }
+      .cta {
+        display: grid;
+        flex: 0 1 auto;
+        max-width: 330px;
+        align-content: start;
+        gap: 12px;
+        min-width: 0;
+      }
+      .cta-note {
+        margin: 0;
+        color: var(--muted);
+        font: 600 12px/1.45 var(--mono);
       }
       .button.secondary {
         background: transparent;
@@ -277,9 +290,10 @@
       .persistent-start {
         position: fixed;
         z-index: 10;
-        right: 18px;
-        bottom: 18px;
+        right: max(18px, env(safe-area-inset-right));
+        bottom: max(18px, env(safe-area-inset-bottom));
         display: inline-flex;
+        visibility: hidden;
         min-height: 43px;
         align-items: center;
         padding: 0 15px;
@@ -291,6 +305,12 @@
         letter-spacing: 0.07em;
         text-decoration: none;
         text-transform: uppercase;
+      }
+      /* Shown by the script at the end of the body, only while no other Get started / Open the app
+         button and no footer is on screen, so it can never sit on top of one. Without the script it stays
+         hidden: the nav and the hero already carry both steps. */
+      .persistent-start.is-visible {
+        visibility: visible;
       }
       .persistent-start:hover {
         transform: translate(2px, 2px);
@@ -928,8 +948,12 @@
           text-align: left;
         }
         .persistent-start {
-          right: 12px;
-          bottom: 12px;
+          right: max(12px, env(safe-area-inset-right));
+          bottom: max(12px, env(safe-area-inset-bottom));
+        }
+        .cta {
+          flex: 1 1 100%;
+          max-width: none;
         }
       }
       @media (max-width: 480px) {
@@ -1015,6 +1039,10 @@
           background: var(--lime);
           color: #17200f;
         }
+        .persistent-start {
+          border-color: var(--lime);
+          color: #17200f;
+        }
         .nav-app:focus-visible,
         .nav-cta:focus-visible {
           outline-color: var(--lime);
@@ -1044,8 +1072,8 @@
         <a class="brand" href="/?stay" aria-label="Ferretry home"><img src="./fleet-grid.svg" alt="" />Ferretry</a>
         <span class="topline">A control room for agent work</span>
         <nav class="topnav" aria-label="Primary">
-          <a class="nav-app" href="/app">Open the app</a>
-          <a class="nav-cta" href="/get-started/">Get started</a>
+          <a class="nav-app" href="/app" title="Already set up? Go to your machines.">Open the app</a>
+          <a class="nav-cta" href="/get-started/" data-hides-start>Get started</a>
         </nav>
       </div>
     </header>
@@ -1060,9 +1088,15 @@
                 Ferretry runs on your own computers and puts every Claude Code and Codex session they run on your phone
                 and desktop — approve, steer and dictate from anywhere.
               </p>
-              <div class="cta-row">
-                <a class="button" href="/get-started/">Get started</a>
-                <a class="button secondary" href="/app">Open the app</a>
+              <div class="cta-row" data-hides-start>
+                <div class="cta">
+                  <a class="button" href="/get-started/">Get started</a>
+                  <p class="cta-note">New here? Set up a computer, then pair your phone.</p>
+                </div>
+                <div class="cta">
+                  <a class="button secondary" href="/app">Open the app</a>
+                  <p class="cta-note">Already set up? Go to your machines.</p>
+                </div>
               </div>
             </div>
             <p class="truth"><strong>Runs on your machines.</strong> No Ferretry server ever holds your work.</p>
@@ -1300,20 +1334,43 @@
             <p class="segment-label">Your machines, amplified</p>
             <h2 id="closing-title">Keep the harnesses. Gain the fleet.</h2>
             <p>Claude and Codex stay themselves. Ferretry gives their work a place to operate together.</p>
-            <div class="cta-row">
-              <a class="button" href="/get-started/">Get started</a>
-              <a class="button secondary" href="/app">Open the app</a>
+            <div class="cta-row" data-hides-start>
+              <div class="cta">
+                <a class="button" href="/get-started/">Get started</a>
+                <p class="cta-note">New here? Set up a computer, then pair your phone.</p>
+              </div>
+              <div class="cta">
+                <a class="button secondary" href="/app">Open the app</a>
+                <p class="cta-note">Already set up? Go to your machines.</p>
+              </div>
             </div>
           </div>
         </div>
       </section>
     </main>
-    <footer class="footer">
+    <footer class="footer" data-hides-start>
       <div class="frame">
         <span class="footer-brand"><img src="./fleet-grid.svg" alt="" />Ferretry</span
         ><span class="footer-note">Claude and Codex, at fleet scale · v%FY_RELEASE_VERSION%</span>
       </div>
     </footer>
+    <script>
+      !(function () {
+        var start = document.querySelector('.persistent-start');
+        if (!start || !window.IntersectionObserver) return;
+        var seen = new Set();
+        var watcher = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) seen.add(entry.target);
+            else seen.delete(entry.target);
+          });
+          start.classList.toggle('is-visible', seen.size === 0);
+        });
+        document.querySelectorAll('[data-hides-start]').forEach(function (element) {
+          watcher.observe(element);
+        });
+      })();
+    </script>
     <noscript
       ><p style="margin: 0; padding: 12px; background: #15151a; color: white; font-family: sans-serif">
         JavaScript is optional here. <a href="/get-started/" style="color: white">Get started</a>
