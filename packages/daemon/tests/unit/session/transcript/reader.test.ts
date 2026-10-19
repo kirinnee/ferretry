@@ -45,6 +45,26 @@ const digestJournal = (calls: string[] = []): TranscriptDigestJournal => ({
   },
 });
 
+describe('SessionTranscriptReader.bound', () => {
+  it('should say whether the session has a transcript it can name, a failed resolution included', async () => {
+    // Arrange
+    const target = { sessionId: 'session-1', harness: 'codex' as const };
+    const failing: TranscriptFileResolver = {
+      file: async () => {
+        throw new Error('home unmounted');
+      },
+    };
+
+    // Act
+    const named = await new SessionTranscriptReader([], resolving('/h/rollout.jsonl')).bound(target);
+    const unproven = await new SessionTranscriptReader([], resolving(undefined)).bound(target);
+    const failed = await new SessionTranscriptReader([], failing).bound(target);
+
+    // Assert
+    should([named, unproven, failed]).eql([true, false, false]);
+  });
+});
+
 describe('SessionTranscriptReader', () => {
   it('should read the file the resolver names, through the source for that harness', async () => {
     // Arrange

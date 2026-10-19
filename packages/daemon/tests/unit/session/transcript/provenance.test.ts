@@ -77,7 +77,8 @@ describe('TranscriptProvenanceCapture', () => {
       baseline: ['rollout-a', 'rollout-b'],
       correlationToken: '/state/sessions/session-1',
     });
-    should(captured.launchArguments).eql([]);
+    // On the argv, so the rollout carries the token even when every send is one typed line.
+    should(captured.launchArguments).eql(['--add-dir', '/state/sessions/session-1/codex-correlation']);
   });
 
   it('should capture nothing when the wrapper cannot be read', async () => {

@@ -66,6 +66,7 @@ import {
   type SessionLifecycleRecord,
 } from '../../lib/session/lifecycle/types.ts';
 import { claudeSessionArguments, claudeTranscriptFile } from '../../lib/session/transcript/claude-path.ts';
+import { codexCorrelationArguments } from '../../lib/session/transcript/codex-rollout.ts';
 import type { SessionLifecycleService } from '../../lib/session/lifecycle/service.ts';
 import { type SessionId, tryParseSessionId } from '../../lib/session-id.ts';
 import type { TranscriptProvenanceCapture } from '../../lib/session/transcript/provenance.ts';
@@ -1008,9 +1009,17 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       );
     const argv = Array.isArray(command) ? (command as readonly unknown[]) : [];
     const mints = !harnessQuirks(shape.account.kind).mintsOwnSessionIds;
-    const expected = mints
-      ? [...shape.command, ...claudeSessionArguments(recorded.harnessSessionId ?? '')]
-      : shape.command;
+    // Codex's argv carries the correlation root its capture declares. A target captured before
+    // launches declared one carries the bare command, and is still this fork's own record.
+    const accepted = mints
+      ? [[...shape.command, ...claudeSessionArguments(recorded.harnessSessionId ?? '')]]
+      : [
+          ...(recorded.correlationToken === undefined
+            ? []
+            : [[...shape.command, ...codexCorrelationArguments(recorded.correlationToken)]]),
+          shape.command,
+        ];
+    const expected = accepted[0] as readonly string[];
     const disagreements = [
       mints
         ? agree('recorded transcript identity', recorded.identity, 'minted')
@@ -1029,7 +1038,10 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
           )
         : undefined,
       demand(
-        expected.length === argv.length && expected.every((argument, index) => argv[index] === argument),
+        accepted.some(
+          candidate =>
+            candidate.length === argv.length && candidate.every((argument, index) => argv[index] === argument),
+        ),
         `its launch command ${JSON.stringify(argv)} is not the authorized base command with the arguments that ` +
           `record would need (${JSON.stringify(expected)})`,
       ),

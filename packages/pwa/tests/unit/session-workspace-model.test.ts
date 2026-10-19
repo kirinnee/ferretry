@@ -330,6 +330,42 @@ describe('startSessionWorkspaceRefresh', () => {
 
     expect(sends).toEqual([[row]]);
   });
+  test('says when the daemon can prove no transcript is this session’s, apart from other failures', async () => {
+    const browser = environment();
+    const unbound: boolean[] = [];
+    let failure: unknown = Object.assign(new Error('session s-1 has no transcript this daemon can prove is its own'), {
+      code: 'no_transcript',
+    });
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => {
+          if (failure !== undefined) throw failure;
+          return 'assistant/message: hello';
+        },
+        get: async () => sessionView('s-1'),
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+      onTranscriptUnbound: value => unbound.push(value),
+      quiet: reason => reason === 'outage',
+    });
+
+    await control.initial;
+    failure = new Error('the file vanished');
+    await control.refresh();
+    failure = 'outage';
+    await control.refresh();
+    failure = undefined;
+    await control.refresh();
+    control.stop();
+
+    // An outage said elsewhere neither sets nor clears it.
+    expect(unbound).toEqual([true, false, false]);
+  });
+
   test('loads transcript and session immediately, then clears a previous error', async () => {
     const browser = environment();
     const transcript: unknown[] = [];
