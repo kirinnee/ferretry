@@ -931,6 +931,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The daemon can prove no transcript is this session's: Chat cannot fill and no send can be confirmed. */
+  const [transcriptUnbound, setTranscriptUnbound] = useState(false);
   /** The highest event sequence this browser has actually received. `0` means none yet. */
   const [liveCursor, setLiveCursor] = useState(0);
   /**
@@ -1040,6 +1042,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     let current = true;
     let control: SessionWorkspaceRefreshControl | null = null;
     setError(null);
+    setTranscriptUnbound(false);
     setEntries([]);
     setSends([]);
     setClient(null);
@@ -1069,6 +1072,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,
           onError: setError,
+          onTranscriptUnbound: setTranscriptUnbound,
           quiet: isCarrierOutage,
         });
         refreshControl.current = control;
@@ -1271,6 +1275,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
           pins={store.pins}
           refreshError={sessionIssue}
+          transcriptUnbound={transcriptUnbound}
           session={session}
           surfaceEvents={surfaceEvents}
           liveActivity={liveActivity}

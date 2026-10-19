@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
-import { LedgerMessage, RESEND_RISK_COPY, runResendOnce } from '../../src/components/ledger-message.tsx';
+import {
+  LedgerMessage,
+  RESEND_RISK_COPY,
+  runResendOnce,
+  UNBOUND_SEND_COPY,
+} from '../../src/components/ledger-message.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import {
   type LedgerBlockPlacement,
@@ -357,6 +362,43 @@ describe('LedgerMessage', () => {
     await click(buttonLabelled(row, 'Send again anyway'));
 
     expect(attempts).toEqual([['send-1', true]]);
+  });
+
+  test('offers no resend for a send whose session has no provable transcript, and says why', () => {
+    // The owner's Codex session: the agent answered in its pane, and nothing could ever confirm it.
+    const row = render(
+      <LedgerMessage
+        onRetry={async () => true}
+        record={record({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' })}
+      />,
+    );
+
+    expect(textOf(row)).toContain(UNBOUND_SEND_COPY);
+    expect(textOf(row)).not.toContain(RESEND_RISK_COPY);
+    expect(row.root.findAll(node => node.type === 'button')).toHaveLength(1);
+    expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' })).detail).toContain(
+      'can’t find a transcript it can prove is this session’s',
+    );
+  });
+
+  test('drops "Sending again" once the attempt it described has settled, so it never sticks', async () => {
+    const first = record({ fate: 'unaccounted', unaccountedReason: 'timeout' });
+    const row = render(<LedgerMessage onRetry={async () => true} record={first} />);
+    await click(buttonLabelled(row, 'Send again anyway'));
+    expect(textOf(row)).toContain('Sending again — this row updates');
+
+    // Still in flight under the new attempt: the word stays.
+    await runAsync(async () => {
+      row.update(<LedgerMessage onRetry={async () => true} record={{ ...first, fate: 'accepted', attempt: 2 }} />);
+    });
+    expect(textOf(row)).toContain('Sending again — this row updates');
+
+    // The new attempt settled unconfirmed: the row says that instead, and offers its own choice again.
+    await runAsync(async () => {
+      row.update(<LedgerMessage onRetry={async () => true} record={{ ...first, attempt: 2 }} />);
+    });
+    expect(textOf(row)).not.toContain('Sending again — this row updates');
+    expect(textOf(row)).toContain(RESEND_RISK_COPY);
   });
 
   test('reports a refused or thrown retry as an alert and leaves the control for another try', async () => {

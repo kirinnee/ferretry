@@ -15,7 +15,8 @@
  *     the transcript path follows from it. There is no discovery step and therefore no way to be
  *     wrong.
  *   * CODEX is BASELINED. The daemon records which rollouts existed before the launch and the
- *     unique string it is about to inject into the session, and correlates later against both.
+ *     unique string it is about to inject into the session — on the launch argv, so it reaches the
+ *     rollout whatever the person types — and correlates later against both.
  *   * ANYTHING ELSE gets NOTHING. A session whose wrapper declares no resolvable harness home, and
  *     a Codex session with no injected token to correlate against, carry no transcript record at
  *     all. That is the deliberate answer: no transcript is recoverable, a guessed one is not.
@@ -23,6 +24,7 @@
 
 import type { Harness, TranscriptProvenance } from '@ferretry/protocol';
 import { claudeSessionArguments, claudeTranscriptFile } from './claude-path.ts';
+import { codexCorrelationArguments } from './codex-rollout.ts';
 import type { HarnessWrapperSource } from './wrapper-home.ts';
 import { harnessHomeFromWrapper } from './wrapper-home.ts';
 
@@ -46,9 +48,10 @@ export interface TranscriptCaptureRequest {
   /**
    * A string this session — and only this session — will contain.
    *
-   * The composition root passes the session's own directory, which the opening turn instructs the
-   * agent to read, so the token reaches the transcript as ordinary session content rather than as
-   * something extra the daemon had to arrange.
+   * The composition root passes the session's own directory. For Codex it is a path, not just a
+   * string: the launch declares a folder inside it as a workspace root, and Codex records that root
+   * in the rollout before the first turn. Waiting for it to arrive as conversation content left a
+   * session spoken to only in single typed lines with nothing that could ever prove its rollout.
    */
   readonly correlationToken: string;
   readonly at: string;
@@ -58,7 +61,7 @@ export interface TranscriptCaptureRequest {
 export interface TranscriptCapture {
   /** Absent when this session's transcript is genuinely not locatable. */
   readonly provenance?: TranscriptProvenance;
-  /** Appended to the launch argv. Empty for a harness that names its own session. */
+  /** Appended to the launch argv: the minted session for Claude, the correlation root for Codex. */
   readonly launchArguments: readonly string[];
 }
 
@@ -130,7 +133,7 @@ export class TranscriptProvenanceCapture {
         baseline: [...(await this.baselines.ids(home))],
         correlationToken: request.correlationToken,
       },
-      launchArguments: [],
+      launchArguments: codexCorrelationArguments(request.correlationToken),
     };
   }
 }

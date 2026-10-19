@@ -68,6 +68,7 @@ import {
 } from '../../../src/adapters/worktrees/index.ts';
 import { FileAttachmentOriginals } from '../../../src/adapters/attachments/index.ts';
 import { attachmentDirectory, SessionAttachmentStore } from '../../../src/lib/attachments/session-attachments.ts';
+import { codexCorrelationArguments } from '../../../src/lib/session/transcript/codex-rollout.ts';
 import { SessionForkRequestConflictError } from '../../../src/lib/fork/failures.ts';
 import { type SessionForkCommand, type SessionForkKey, sessionForkKey } from '../../../src/lib/fork/identity.ts';
 import { SessionForkService } from '../../../src/lib/fork/service.ts';
@@ -1093,10 +1094,15 @@ describe('the fork journey over real storage', () => {
     should(config.transferredFrom?.cutMessagePoint).eql(CUT);
     should(config.transcript?.identity).equal('undiscovered');
     should(config.transcript?.correlationToken).equal(subject.directory(outcome.targetSessionId));
-    // The wrapper and the resolved model alone: Codex has no remote-control surface and names its own
-    // session, so neither the Claude remote-control arguments nor a minted `--session-id` reach it,
-    // and the dropped Claude flag is not translated into one it might accept.
-    should(held.config.command).eql([subject.executable, ...startupModelArguments('gpt-5.6-terra')]);
+    // The wrapper, the resolved model and the correlation root that lets the target prove its own
+    // rollout: Codex has no remote-control surface and names its own session, so neither the Claude
+    // remote-control arguments nor a minted `--session-id` reach it, and the dropped Claude flag is not
+    // translated into one it might accept.
+    should(held.config.command).eql([
+      subject.executable,
+      ...startupModelArguments('gpt-5.6-terra'),
+      ...codexCorrelationArguments(subject.directory(outcome.targetSessionId)),
+    ]);
     should(subject.happened.filter(step => step.startsWith('runtime:'))).eql([
       `runtime:{"action":"model","model":"gpt-5.6-terra","effort":"high"}:${outcome.plan.planId}:startup-runtime`,
     ]);
