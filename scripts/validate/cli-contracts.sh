@@ -347,7 +347,7 @@ installation-parity)
     sed -E 's/^<code[^>]*>//; s/<\/code>$//; s/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g')
   [ "${#page_commands[@]}" -lt 5 ] && echo "❌ ${get_started} shows fewer than 5 data-command lines" >&2 && exit 1
   doc_lines="$(awk '/^ *```/ { fenced = !fenced; next } fenced { sub(/^ +/, ""); print }' INSTALLATION.md)"
-  for command in "${page_commands[@]}" "${name} daemon install" "${name} pair"; do
+  for command in "${page_commands[@]}" "${name} daemon install" "${name} daemon status" "${name} pair" "${name} pair --no-wait" "${name} pair --open --no-wait"; do
     grep -qxF -- "${command}" <<<"${doc_lines}" || {
       echo "❌ ${get_started}: command not in a fenced block of INSTALLATION.md: ${command}" >&2
       exit 1
