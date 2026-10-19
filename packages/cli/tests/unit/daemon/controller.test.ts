@@ -24,6 +24,7 @@ import {
   FakeResetInventory,
   FakeResetTrees,
   FakeRetiredArtifacts,
+  FakeSessionTerminals,
   FakeStateHomeClaim,
   FakeSupervisor,
   failedReport,
@@ -49,6 +50,8 @@ interface Harness {
   readonly lifecycle: FakeLifecycleLock;
   readonly resetTrees: FakeResetTrees;
   readonly prompt: FakePrompt;
+  readonly terminals: FakeSessionTerminals;
+  readonly claims: FakeStateHomeClaim;
 }
 
 function harness(options: {
@@ -69,6 +72,7 @@ function harness(options: {
   prompt?: FakePrompt;
   interactive?: boolean;
   claims?: FakeStateHomeClaim;
+  terminals?: FakeSessionTerminals;
   overrides?: Partial<DaemonControllerDeps>;
 }): Harness {
   const service = new FakeSupervisor('systemd', options.serviceFallback ?? runningReport);
@@ -85,6 +89,8 @@ function harness(options: {
   const lifecycle = options.lifecycle ?? new FakeLifecycleLock();
   const resetTrees = options.resetTrees ?? new FakeResetTrees();
   const prompt = options.prompt ?? new FakePrompt();
+  const terminals = options.terminals ?? new FakeSessionTerminals();
+  const claims = options.claims ?? new FakeStateHomeClaim();
   const controller = new DaemonController({
     layout: layout(),
     service: options.withoutService === true ? undefined : service,
@@ -99,7 +105,8 @@ function harness(options: {
     // `in` rather than `??`: an explicit `undefined` is the meaningful case — a daemon that is up but
     // will not answer the inventory routes — so it must not fall back to the default counts.
     resetInventory: new FakeResetInventory('inventory' in options ? options.inventory : { secrets: 3, devices: 2 }),
-    claims: options.claims ?? new FakeStateHomeClaim(),
+    sessionTerminals: terminals,
+    claims,
     prompt,
     interactive: () => options.interactive ?? true,
     clientName: 'fy',
@@ -110,7 +117,21 @@ function harness(options: {
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, clock, nix, retired, lifecycle, resetTrees, prompt };
+  return {
+    controller,
+    out,
+    service,
+    direct,
+    logs,
+    clock,
+    nix,
+    retired,
+    lifecycle,
+    resetTrees,
+    prompt,
+    terminals,
+    claims,
+  };
 }
 
 /** A host with no daemon executable: the resolver refuses, as it does for a relative FY_DAEMON_BIN. */
@@ -548,6 +569,128 @@ describe('daemon reset', () => {
     should(subject.out.text).containEql(`removed ${resolved.stateHome}`);
     should(subject.out.text).containEql(`removed ${resolved.stateArtifactRoot}`);
     should(subject.out.text).containEql('removed 2 path(s), 52 files, 100.0MB');
+  });
+
+  it('should end every session agent after the daemon is down and before anything is removed', async () => {
+    // Arrange — the reported defect: the agents run under the daemon's private tmux server, which a
+    // stop leaves running, so they wrote into the home the moment it was removed and the next install
+    // refused it. They have to be gone before the removal, and only once the daemon is.
+    const trail: string[] = [];
+    const resolved = layout();
+    const terminals = new FakeSessionTerminals(trail);
+    terminals.answer = { kind: 'ended' };
+    const subject = resetSubject({
+      resetTrees: populatedTrees(trail),
+      terminals,
+      probes: [health(), undefined],
+      serviceReports: [runningReport, stoppedReport],
+    });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(terminals.ended).deepEqual([resolved.sessionTerminalSocket]);
+    should(subject.service.calls.indexOf('stop')).be.above(-1);
+    should(trail.indexOf(`end-terminals:${resolved.sessionTerminalSocket}`)).be.below(
+      trail.indexOf(`remove:${resolved.stateHome}`),
+    );
+    should(subject.out.text).containEql(
+      `ended every fyd session's running agent (terminal server ${resolved.sessionTerminalSocket})`,
+    );
+    should(subject.out.text).containEql("every session's running agent, which is ended");
+  });
+
+  it('should say nothing about agents when no session terminal server was running', async () => {
+    // Arrange — the ordinary case for a machine with no live session.
+    const subject = resetSubject({ resetTrees: populatedTrees() });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.terminals.ended).have.length(1);
+    should(subject.out.text).not.containEql('ended every');
+    should(subject.out.text).not.containEql('could not end');
+  });
+
+  it('should still reset, and name the command, when the session terminal server could not be ended', async () => {
+    // Arrange — the owner authorized the removal and the daemon is already down; stopping here would
+    // strand them on the half-state the verb exists to remove.
+    const resolved = layout();
+    const terminals = new FakeSessionTerminals();
+    terminals.answer = { kind: 'failed', reason: 'tmux was not found on PATH' };
+    const subject = resetSubject({ resetTrees: populatedTrees(), terminals });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.resetTrees.removed).have.length(2);
+    should(subject.out.text).containEql(
+      `could not end the fyd session terminal server at ${resolved.sessionTerminalSocket} (tmux was not found on PATH)`,
+    );
+    should(subject.out.text).containEql(`\`tmux -S ${resolved.sessionTerminalSocket} kill-server\``);
+  });
+
+  it('should claim the removed state home again, empty, so nothing written later leaves it unmarked', async () => {
+    // Arrange
+    const trail: string[] = [];
+    const resolved = layout();
+    const subject = resetSubject({ resetTrees: populatedTrees(trail), claims: new FakeStateHomeClaim(trail) });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert — claimed after BOTH removals, and said.
+    should(subject.claims.claimed).deepEqual([resolved.stateHome]);
+    should(trail.indexOf(`claim:${resolved.stateHome}`)).be.above(
+      trail.indexOf(`remove:${resolved.stateArtifactRoot}`),
+    );
+    should(subject.out.text).containEql(`claimed ${resolved.stateHome} again, empty, exactly as a fresh install does`);
+  });
+
+  it('should not create a state home a reset found absent', async () => {
+    // Arrange — only the artifact tree is there. A reset is not an install.
+    const resolved = layout();
+    const trees = new FakeResetTrees();
+    trees.answers.set(resolved.stateArtifactRoot, { kind: 'measured', files: 1, bytes: 10, escapingLinks: [] });
+    const subject = resetSubject({ resetTrees: trees });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.claims.claimed).be.empty();
+    should(subject.out.text).not.containEql('again, empty');
+  });
+
+  it('should report, never throw, when something wrote into the home before it could be claimed again', async () => {
+    // Arrange — the removal already happened; failing the verb now would misreport what was done.
+    const claims = new FakeStateHomeClaim();
+    claims.refusal = new Error('refusing to write into /tmp/fy-home/.ferretry: it already holds stray');
+    const subject = resetSubject({ resetTrees: populatedTrees(), claims });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.resetTrees.removed).have.length(2);
+    should(subject.out.text).containEql('as it was removed, so it could not be claimed again: refusing to write into');
+    should(subject.out.text).not.containEql('again, empty');
+  });
+
+  it('should report a refusal that is not an Error in its own words', async () => {
+    // Arrange
+    const claims = new FakeStateHomeClaim();
+    claims.claim = () => Promise.reject('disk on fire');
+    const subject = resetSubject({ resetTrees: populatedTrees(), claims });
+
+    // Act
+    await subject.controller.reset({ yes: true });
+
+    // Assert
+    should(subject.out.text).containEql('could not be claimed again: disk on fire');
   });
 
   it('should show the paths, the sizes and the unrecoverable counts BEFORE it destroys anything', async () => {
@@ -1653,6 +1796,7 @@ describe('daemon controller defaults', () => {
       retired: new FakeRetiredArtifacts(),
       resetTrees: new FakeResetTrees(),
       resetInventory: new FakeResetInventory(undefined),
+      sessionTerminals: new FakeSessionTerminals(),
       claims: new FakeStateHomeClaim(),
       prompt: new FakePrompt(),
       interactive: () => false,

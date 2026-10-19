@@ -19,6 +19,7 @@ import {
   FakeResetInventory,
   FakeResetTrees,
   FakeRetiredArtifacts,
+  FakeSessionTerminals,
   FakeStateHomeClaim,
   FakeSupervisor,
   health,
@@ -59,7 +60,7 @@ function run(
   const adoptController = (): StateHomeController =>
     new StateHomeController(
       new StateHomeClaimService(
-        new FakeStateHomeFiles([{ name: 'layout-version', directory: false }], '1\n'),
+        new FakeStateHomeFiles([{ name: 'layout-version', directory: false, regularFile: true }], '1\n'),
         'fy daemon adopt',
       ),
       '/tmp/fy-home/.ferretry',
@@ -83,6 +84,7 @@ function run(
         retired: new FakeRetiredArtifacts(),
         resetTrees,
         resetInventory: new FakeResetInventory({ secrets: 1, devices: 1 }),
+        sessionTerminals: new FakeSessionTerminals(),
         claims: new FakeStateHomeClaim(),
         prompt,
         // No terminal, so `reset` routes here and then refuses unless `--yes` was passed. That is what
