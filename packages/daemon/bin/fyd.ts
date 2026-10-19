@@ -7962,7 +7962,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
-    sttEnhancement: new SttEnhancementService(outboundAuthorizer, speedupStopwatch),
+    sttEnhancement: new SttEnhancementService(outboundAuthorizer, speedupStopwatch, {
+      cleanup: () => configFiles.current().evaluation.effective.voice.postProcessing,
+    }),
     untilShutdown: untilTerminated,
   };
 }
