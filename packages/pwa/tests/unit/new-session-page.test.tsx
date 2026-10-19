@@ -1,5 +1,5 @@
-import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import { afterEach, describe, expect, it } from 'bun:test';
+import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 
@@ -1030,5 +1030,49 @@ describe('NewSessionPage initialAgent', () => {
       await live?.unmount();
       live = undefined;
     }
+  });
+});
+
+describe('NewSessionPage › Continue a conversation', () => {
+  it('offers no switch without a fleet client', async () => {
+    await show({ connection, startSession: async () => ({ config: { id: 'x' } }), onNavigate: () => undefined });
+    expect(root().querySelector('[data-segmented="new-session-kind"]')).toBeNull();
+  });
+
+  it('swaps the form for the conversation search and back, keeping the draft', async () => {
+    const paths: string[] = [];
+    const client = {
+      request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
+        paths.push(path);
+        if (path.startsWith('/v1/imports/conversations'))
+          return schema.parse({ conversations: [], matched: 0, skipped: 0 });
+        throw new Error(`no route ${path}`);
+      },
+    };
+    await show({
+      connection,
+      startSession: async () => ({ config: { id: 'x' } }),
+      onNavigate: () => undefined,
+      createFleetClient: async () => client as never,
+    });
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(box('fy-new-session-agent'), 'claude-default');
+      box('fy-new-session-agent').dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const kind = (id: string): HTMLElement =>
+      must(root().querySelector<HTMLElement>(`[data-segmented="new-session-kind"] [data-segment="${id}"]`), id);
+    expect(kind('new').getAttribute('aria-pressed')).toBe('true');
+    await interact(() => kind('continue').click());
+    await interact(async () => {
+      for (let turn = 0; turn < 6; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(root().querySelector('[data-continue-conversation]')).not.toBeNull();
+    expect(box('fy-new-session-agent').closest('[hidden]')).not.toBeNull();
+    expect(paths.some(path => path.startsWith('/v1/imports/conversations'))).toBe(true);
+    await interact(() => kind('new').click());
+    expect(root().querySelector('[data-continue-conversation]')).toBeNull();
+    expect(box('fy-new-session-agent').closest('[hidden]')).toBeNull();
+    expect(box('fy-new-session-agent').value).toBe('claude-default');
   });
 });

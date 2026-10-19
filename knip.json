@@ -36,6 +36,7 @@
         "harness/receipts-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
+        "harness/conversation-picker-screenshot.tsx",
         "harness/app-screenshot.ts",
         "harness/main.tsx",
         "harness/tasks-pane-benchmark.tsx",

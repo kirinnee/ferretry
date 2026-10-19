@@ -38,6 +38,7 @@ import { ConnectionHealthNotice } from './features/connection/connection-health-
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
+import type { FleetClientFactory } from './features/fleet/fleet-client.ts';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
@@ -664,9 +665,12 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const record = useConnectionSnapshot().connections.find(candidate => candidate.daemonId === connection.daemonId);
+  // "Continue a conversation" reads and adopts through the same fleet client as Settings; one stable factory.
+  const createFleetClient = useCallback<FleetClientFactory>(daemon => store.clients.client(daemon), [store.clients]);
   return (
     <NewSessionPage
       accounts={store.accountPicker}
+      createFleetClient={createFleetClient}
       connection={connection}
       machineName={daemonDisplayName(record ?? connection)}
       fleet={store.fleet}

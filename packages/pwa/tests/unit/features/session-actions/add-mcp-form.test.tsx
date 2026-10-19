@@ -567,10 +567,9 @@ describe('AddMcpForm — signing an added server in', () => {
     baseUrl: 'https://studio.example.test',
     deviceId: 't',
   });
-  // A week after the wall clock: soon enough that the expiry timer's duration stays a plain 32-bit
-  // number (setTimeout overflows past ~24.8 days), and relative to now so it never expires under the
-  // test — a fixed date did, the day it arrived.
-  const FAR_FUTURE = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  // A week from the real "now": a fixed instant expired at midnight and failed this test, and a week
+  // keeps the expiry timer's duration a plain 32-bit number (setTimeout overflows past ~24.8 days).
+  const FAR_FUTURE = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const addedLoginUrlServer = async (signIn: ContextMcpSignInHost | undefined, oauthChecked = true) => {
     const result = await openForm({

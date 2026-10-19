@@ -253,11 +253,13 @@ const RetryPolicySchema = z.object({
  * transcript's name was decided before the harness ran. Nothing was inferred.
  * `correlated` — the harness named its own session, and the daemon proved which one by finding a
  * string only this session could contain in a rollout that did not exist before the launch.
+ * `adopted` — the conversation existed before this session did, and the owner chose to keep it as a
+ * ferret (`conversation-import.ts`). Its id is the CLI's own, read from the file the session resumes.
  * `undiscovered` — neither proof is available yet. A session in this state has NO transcript, which
  * is the point: attributing one by working directory or recency silently hands one agent's
  * transcript to another session and the mistake is invisible.
  */
-export const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'undiscovered']);
+export const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'adopted', 'undiscovered']);
 export type TranscriptIdentity = z.infer<typeof TranscriptIdentitySchema>;
 
 /**
