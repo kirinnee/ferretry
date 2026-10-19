@@ -647,7 +647,7 @@ export function UnifiedBrowserSurface({
         {error !== null && (
           <div
             role="alert"
-            className="mt-1 rounded-control border border-err/30 bg-err-soft px-2 py-1.5 text-meta text-err"
+            className="mt-1 rounded-control border border-err/30 bg-err-bg px-2 py-1.5 text-meta text-err"
           >
             {error}
           </div>
