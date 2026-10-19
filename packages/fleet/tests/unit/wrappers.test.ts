@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CLAUDE_NO_QUESTIONS_FLAG, CODEX_QUESTIONS_FEATURE } from '../../src/lib/account/fixed-layer.ts';
 import type { HarnessKind } from '../../src/lib/manifest.ts';
 import {
   envReferenceName,
@@ -286,6 +287,57 @@ describe('renderRuntimeWrapperScript', () => {
     // Assert
     should(actual).containEql('export CLAUDE_CONFIG_DIR=');
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
+  });
+});
+
+/** What the wrapper's question line leaves in "$@" for a launch with the given mode, run for real in sh. */
+const argumentsAfterQuestionLine = (wrapper: string, mode: string | undefined, launchArgs: readonly string[]) => {
+  const line = wrapper.split('\n').find(candidate => candidate.includes('FY_SESSION_MODE'));
+  if (line === undefined) return undefined;
+  const { stdout } = Bun.spawnSync(['sh', '-c', `${line}\nprintf '%s\\n' "$@"`, 'wrapper', ...launchArgs], {
+    env: mode === undefined ? {} : { FY_SESSION_MODE: mode },
+  });
+  return stdout.toString().trimEnd().split('\n');
+};
+
+describe('the question tool, per ferret (O3)', () => {
+  it("should withhold Claude's question tool, before the prompt, unless the ferret is interactive", () => {
+    // Arrange
+    const wrapper = render(account({ flags: [CLAUDE_NO_QUESTIONS_FLAG, '--model', 'x'] }));
+
+    // Act + Assert
+    should(wrapper).not.containEql(`'${CLAUDE_NO_QUESTIONS_FLAG}'`);
+    should(argumentsAfterQuestionLine(wrapper, 'auto', ['do the thing'])).deepEqual([
+      CLAUDE_NO_QUESTIONS_FLAG,
+      'do the thing',
+    ]);
+    should(argumentsAfterQuestionLine(wrapper, undefined, ['do the thing'])).deepEqual([
+      CLAUDE_NO_QUESTIONS_FLAG,
+      'do the thing',
+    ]);
+    should(argumentsAfterQuestionLine(wrapper, 'interactive', ['do the thing'])).deepEqual(['do the thing']);
+  });
+
+  it("should enable Codex's question feature only for an interactive ferret", () => {
+    // Arrange
+    const wrapper = render(account({ kind: 'codex' }));
+
+    // Act + Assert
+    should(argumentsAfterQuestionLine(wrapper, 'interactive', ['task'])).deepEqual([
+      '--enable',
+      CODEX_QUESTIONS_FEATURE,
+      'task',
+    ]);
+    should(argumentsAfterQuestionLine(wrapper, 'auto', ['task'])).deepEqual(['task']);
+    should(argumentsAfterQuestionLine(wrapper, undefined, ['task'])).deepEqual(['task']);
+  });
+
+  it("should leave a non-agent runtime alone: it behaves like the person's own CLI", () => {
+    // Arrange
+    const wrapper = render({ ...account(), agent: false });
+
+    // Act + Assert
+    should(argumentsAfterQuestionLine(wrapper, 'auto', ['task'])).be.undefined();
   });
 });
 

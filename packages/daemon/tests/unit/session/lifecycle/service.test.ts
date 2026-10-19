@@ -392,7 +392,7 @@ describe('SessionLifecycleService', () => {
     // The record is what every reader of the session document gets, so the SECRET must not be
     // anywhere in it — only the hash the task-board domain keys its grants on.
     should(JSON.stringify(repository.current())).not.containEql(CAPABILITY);
-    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
   });
 
   it('should publish no credential hash when the durable environment write fails, and allow a clean retry', async () => {
@@ -414,7 +414,7 @@ describe('SessionLifecycleService', () => {
     should(retried.config.sessionCapabilityHash).equal(HASH);
     should(credentials.issues).equal(2);
     should(repository.reservations).deepEqual([ID, ID]);
-    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
   });
 
   it('should overwrite a staged plaintext with a fresh matching credential when record publication fails', async () => {
@@ -428,13 +428,16 @@ describe('SessionLifecycleService', () => {
     // Act + Assert
     await should(subject.create(input())).be.rejectedWith('config write failed');
     should(repository.documents.size).equal(0);
-    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: 'first-capability' });
+    should(environment.written.get(ID)).deepEqual({
+      FY_SESSION_BOARD_CAPABILITY: 'first-capability',
+      FY_SESSION_MODE: 'auto',
+    });
 
     repository.writeFailure = undefined;
     const retried = await subject.create(input());
     should(retried.config.sessionCapabilityHash).equal(HASH);
     should(repository.current().config.sessionCapabilityHash).equal(HASH);
-    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
     should(credentials.issues).equal(2);
     should(repository.reservations).deepEqual([ID, ID]);
   });
@@ -454,10 +457,10 @@ describe('SessionLifecycleService', () => {
     // Assert — any reader that can already see the hash can also read its exact plaintext. A retry
     // refuses the existing record without minting or overwriting that credential.
     should(repository.current().config.sessionCapabilityHash).equal(HASH);
-    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
     await should(subject.create(input())).be.rejectedWith(`session already exists: ${ID}`);
     should(credentials.issues).equal(1);
-    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY, FY_SESSION_MODE: 'auto' });
   });
 
   it('should refuse credential issuance when no durable environment store is wired', async () => {
@@ -496,7 +499,7 @@ describe('SessionLifecycleService', () => {
     should([...environment.written.keys()]).deepEqual([]);
   });
 
-  it('should leave the session and its environment untouched when no credential issuer is wired', async () => {
+  it('should record only the session mode in the environment when no credential issuer is wired', async () => {
     // Arrange
     const environment = new RecordingEnvironmentStore();
     const { repository, subject } = harness({ environment });
@@ -506,7 +509,19 @@ describe('SessionLifecycleService', () => {
 
     // Assert
     should(repository.current().config.sessionCapabilityHash).be.undefined();
-    should([...environment.written.keys()]).deepEqual([]);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_MODE: 'auto' });
+  });
+
+  it('should record an interactive session as interactive so its wrapper keeps the question tool', async () => {
+    // Arrange
+    const environment = new RecordingEnvironmentStore();
+    const { subject } = harness({ environment });
+
+    // Act
+    await subject.create(input({ mode: 'interactive' }));
+
+    // Assert
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_MODE: 'interactive' });
   });
 
   it('should not write an environment for a create refused by a live terminal collision', async () => {
