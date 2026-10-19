@@ -467,10 +467,8 @@ describe('ContinueConversation over Ferretry sessions', () => {
     await click('[data-segmented="continue-source"] [data-segment="conversations"]');
     expect(listed(sent)).toEqual([KEPT, ALL]);
     expect(view?.container.querySelector('[data-continue-preview]')).toBeNull();
-    expect(find<HTMLInputElement>('[data-continue-search]').placeholder).toBe('Words from a message, or a folder');
+    expect(find<HTMLInputElement>('[data-continue-search]').placeholder).toBe('Words or folder');
     await click('[data-segmented="continue-source"] [data-segment="sessions"]');
-    expect(find<HTMLInputElement>('[data-continue-search]').placeholder).toBe(
-      'A name, words from a message, or a folder',
-    );
+    expect(find<HTMLInputElement>('[data-continue-search]').placeholder).toBe('Name, words or folder');
   });
 });

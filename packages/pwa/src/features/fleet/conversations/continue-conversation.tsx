@@ -20,9 +20,8 @@ import type {
   ImportableConversation,
   SessionView,
 } from '@ferretry/protocol';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
-import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../../../lib/pages/routes.ts';
 import { relativeTime, sessionStatusLabel } from '../../../lib/session-screens.ts';
@@ -388,9 +387,7 @@ export function ContinueConversation({
         id={searchId}
         type="search"
         className="kt-input w-full"
-        placeholder={
-          source === 'sessions' ? 'A name, words from a message, or a folder' : 'Words from a message, or a folder'
-        }
+        placeholder={source === 'sessions' ? 'Name, words or folder' : 'Words or folder'}
         autoComplete="off"
         data-continue-search=""
         value={text}
@@ -510,11 +507,11 @@ function ContinueRow({
         {...data}
       >
         <span className="fy-convo-main">{lines}</span>
-        <ChevronDown
-          size={16}
-          aria-hidden="true"
-          className={cn('shrink-0 text-faint transition-transform', open && 'rotate-180')}
-        />
+        {open ? (
+          <ChevronUp size={16} aria-hidden="true" className="shrink-0 text-faint" />
+        ) : (
+          <ChevronDown size={16} aria-hidden="true" className="shrink-0 text-faint" />
+        )}
       </button>
       {open ? (
         <div id={panelId} className="fy-convo-preview" data-continue-preview={rowKey}>

@@ -2046,7 +2046,7 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   line-height: 1.35;
 }
 .fy-convo-exchange__who {
-  flex: 0 0 3.25rem;
+  flex: 0 0 2.75rem;
   color: var(--faint, var(--fy-muted));
   font-weight: 600;
 }
