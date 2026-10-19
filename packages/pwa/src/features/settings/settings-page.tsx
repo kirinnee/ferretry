@@ -466,7 +466,9 @@ export function SettingsPage({
       ),
       theme: <ThemeSettings theme={theme} />,
       'install-app': <InstallAppSetting />,
-      dictation: <DictationSettings {...dictation} />,
+      dictation: (
+        <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
+      ),
       notifications: notifications ?? (
         <p role="status" className="m-0 text-cell leading-base text-muted">
           Notification delivery is unavailable until this page is composed with the paired daemon’s push-subscription
@@ -478,7 +480,17 @@ export function SettingsPage({
     // very same device object for a patch that changed nothing, so depending on
     // the whole record is as cheap as listing four of its fields and cannot fall
     // behind the next one that is added.
-    [controls, density, densityState.explicit, densityState.setDensity, device, dictation, notifications, theme],
+    [
+      controls,
+      density,
+      densityState.explicit,
+      densityState.setDensity,
+      device,
+      dictation,
+      notifications,
+      selectedRecord,
+      theme,
+    ],
   );
 
   /**

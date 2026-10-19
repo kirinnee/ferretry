@@ -60,6 +60,8 @@ export const SttEnhancementResultSchema = z.object({
   provider: SttEnhancementProviderSchema,
   model: z.string().min(1),
   latencyMs: NonNegativeFiniteSchema,
+  /** Present when the daemon refused the model's reply and returned the transcript untouched. */
+  kept: z.literal('raw').optional(),
 });
 export type SttEnhancementResult = z.infer<typeof SttEnhancementResultSchema>;
 

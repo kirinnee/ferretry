@@ -16,11 +16,12 @@
  * nodes, and the host drops them wherever it likes. `DictationControl` is the
  * simple wrapper for mounting them together.
  *
- * THE ONE OUTPUT IS THE DRAFT. `useDictation` owns insertion: on Stop it
- * transcribes once, enhances once, and calls `onDraft` exactly once with the
- * complete next draft placed at the caret. There is no review step and no manual
- * Insert. This bundle forwards `draft`/`selectionRef`, adapts the result to the
- * host's `onDraftChange`, and closes the panel once the single insertion lands.
+ * THE ONE OUTPUT IS THE DRAFT, AND ONLY ON INSERT. On Stop `useDictation` transcribes once,
+ * cleans up once, and parks the result as a review: the panel turns into a mini box and the draft is
+ * untouched. Insert calls `onDraft` exactly once with the complete next draft placed at the caret
+ * as it is THEN; Discard drops the take. This bundle forwards `draft`/`selectionRef`, adapts the
+ * result to the host's `onDraftChange`, closes the panel once the insertion lands, and reopens a
+ * hidden panel when a take arrives so a finished transcript is never stranded.
  *
  * UNAVAILABLE IS VISIBLE. A browser without recognition still gets the mic
  * control; tapping it opens the same panel with an actionable "unavailable
@@ -34,15 +35,16 @@
  * bundle only says which one is listening.
  */
 
-import { useMachineVoiceEngine } from '../features/fleet/setup/voice-default.ts';
 import type { IFyApiClient } from '@ferretry/protocol';
 import { Mic } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMachineVoiceEngine } from '../features/fleet/setup/voice-default.ts';
 import {
   type DictationShortcutBinding,
   dictationShortcutAria,
   dictationShortcutLabel,
 } from '../features/settings/dictation-shortcut.ts';
+import { useMachineVoiceCleanup } from '../features/settings/use-machine-voice-cleanup.ts';
 import {
   type DictationDraftResult,
   type DictationHandle,
@@ -54,10 +56,10 @@ import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
-import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
-import type { SttSettings } from '../lib/stt/stt-settings.ts';
-import { Button } from '../shell/primitives.tsx';
 import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
+import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
+import { isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
+import { Button } from '../shell/primitives.tsx';
 import { DictationSheet, type DictationStage, dictationStage } from './dictation-sheet.tsx';
 import type { InputWaveformRuntime } from './input-waveform.tsx';
 
@@ -81,7 +83,7 @@ export interface DictationControlProps {
   readonly selectionRef?: { readonly current: SelectionLike | null };
   /**
    * Receives the COMPLETE next draft plus where the caret should sit. Called
-   * exactly once, automatically, after the recording is transcribed.
+   * exactly once, when the person presses Insert on the reviewed transcript.
    */
   onDraftChange(result: DictationDraftResult): void;
   readonly settings: SttSettings;
@@ -131,6 +133,8 @@ export function dictationStatusCopy(
       return 'Recording…';
     case 'transcribing':
       return engine === 'parakeet' ? 'Transcribing on this device…' : 'Finishing in your browser…';
+    case 'review':
+      return 'Review the text, then insert it.';
     case 'error':
       return errorMessage ?? 'Dictation failed.';
     case 'idle':
@@ -190,6 +194,9 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   } = props;
   // A device that has not picked an engine dictates with its machine's default (voice.yaml), if it names one.
   const machineEngine = useMachineVoiceEngine(deviceSettings.engine === null ? props.daemon : undefined);
+  const voiceCleanup = useMachineVoiceCleanup(
+    isRemoteEnhancementProvider(deviceSettings.enhancementProvider) ? props.daemon : undefined,
+  ).cleanup;
   const settings = useMemo(
     () =>
       deviceSettings.engine === null && machineEngine !== null
@@ -201,7 +208,6 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const [open, setOpen] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [wasCapturing, setWasCapturing] = useState(false);
-  const [postInsertError, setPostInsertError] = useState<DictationDraftResult['enhancementError']>(undefined);
   const startedAt = useRef(0);
   const nowRef = useRef(now);
   nowRef.current = now;
@@ -223,7 +229,6 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     setOpen(false);
     setElapsedMs(0);
     setWasCapturing(false);
-    setPostInsertError(undefined);
   }, []);
 
   useEffect(() => {
@@ -237,29 +242,32 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     draft,
     ...(props.selectionRef === undefined ? {} : { selectionRef: props.selectionRef }),
     settings,
+    voiceCleanup,
     ...(props.recognition === undefined ? {} : { recognition: props.recognition }),
     ...(props.meter === undefined ? {} : { meter: props.meter }),
     ...(props.enhancementFetch === undefined ? {} : { enhancementFetch: props.enhancementFetch }),
     disabled: effectiveDisabled,
     onDraft: result => {
-      // The single, final output. A clean pass closes the panel immediately; a
-      // non-fatal correction failure keeps only the status strip open, after the
-      // raw words have already landed. There is no transcript review stage.
+      // The single, final output, reached only through Insert on the review box.
       onDraftChange(result);
-      if (result.enhancementError) setPostInsertError(result.enhancementError);
-      else closePanel();
+      closePanel();
     },
   });
 
   const phase = dictation.phase;
-  const visibleError = postInsertError ?? dictation.error;
-  const hasError = visibleError !== null && visibleError !== undefined;
+  const visibleError = dictation.error;
+  const hasError = visibleError !== null;
 
   // Once a capturing phase has been passed through, a return to idle with no
   // insertion is a too-short clip — a dead end worth naming ("didn't catch
   // that"), not the fresh-open state.
   useEffect(() => {
     if (phase === 'requesting' || phase === 'recording' || phase === 'transcribing') setWasCapturing(true);
+  }, [phase]);
+
+  // A take that lands while the panel is hidden brings it back: the transcript is waiting on a decision.
+  useEffect(() => {
+    if (phase === 'review') setOpen(true);
   }, [phase]);
 
   // The elapsed clock runs only while the microphone is open, and is cleared the
@@ -281,7 +289,6 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     setElapsedMs(0);
     setWasCapturing(false);
     startedAt.current = nowRef.current();
-    setPostInsertError(undefined);
     dictation.dismissError();
     dictation.start();
   }, [dictation]);
@@ -342,7 +349,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
                   : dictation.engine === 'browser'
                     ? 'Your browser’s speech service transcribes it'
                     : 'Choose a voice engine in Settings › Voice first'
-              }; it only updates your draft.`
+              }; you review the text before it reaches your draft.`
             : 'Dictation is unavailable here. Open this control for the browser-specific reason.'
       }
       onClick={openAndRecord}
@@ -365,8 +372,11 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
       {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
       {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
       {...(visibleError?.message ? { errorMessage: visibleError.message } : {})}
+      review={dictation.review}
       onDismiss={dismissPanel}
       onStop={dictation.stop}
+      onInsert={dictation.insert}
+      onDiscard={reset}
       onCancel={reset}
       onRetry={beginRecording}
     />
