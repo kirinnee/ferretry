@@ -3,9 +3,7 @@
 This document is the contract for how a Ferretry daemon decides where `claude` and `codex` live on
 the host it is running on, what an operator may say about that, and what it reports back.
 
-It is about **discovery only**. Nothing here changes how a session launches: a start still resolves
-an account to the **absolute wrapper path the fleet manifest publishes** and launches that, never a
-harness command. See [CLAUDE.md](../CLAUDE.md) for why that rule exists.
+It is about **where the harnesses are**, and — since the wrapper pins the answer — **which one a session runs**. A start still resolves an account to the **absolute wrapper path the fleet manifest publishes** and launches that, never a harness command. See [CLAUDE.md](../CLAUDE.md) for why that rule exists. What changed is the last step: the wrapper itself no longer runs the harness by name (see "Which one a session runs" below).
 
 ## The bug this exists for
 
@@ -82,6 +80,19 @@ change when the daemon is restarted, exactly like every other value in that docu
 harness is installed _right now_ is asked at the moment of the lookup, so a harness installed after
 the daemon came up is still found.
 
+## Which one a session runs
+
+The wrapper a session launches through ends in `exec <harness>`, and that word used to be the bare name
+`claude` or `codex`, looked up on the **session's** `PATH`. So the file the operator configured, and the
+one the import found, could differ from the one a session ran: a different `claude` earlier on `PATH`
+won silently. The same resolution rule above now decides it. When the daemon writes a wrapper it resolves
+the harness (`FY_CLAUDE_BIN` / `FY_CODEX_BIN`, `harness.paths`, search paths, then `PATH`) and writes
+the **absolute path** into the `exec`. A decoy `claude` earlier on `PATH` is not run;
+`packages/fleet/tests/integration/wrapper-harness-path.test.ts` proves it with a real shell.
+
+A republish whose manifest is unchanged still rewrites a wrapper whose resolved path moved: the manifest
+does not record the path, so the daemon also compares each wrapper on disk with the one it would write.
+
 ## What it reports
 
 Every surface reports **which harnesses were found, the absolute path each resolved to, and which
@@ -114,11 +125,7 @@ provider.
 
 ## Declared GAPs
 
-- **The launch half is untouched.** A published wrapper runs `claude` from _its own_ inherited
-  environment when a session starts, and a declared path or search directory does not reach that
-  wrapper. Discovery now reports the truth about a service-managed host; making a session inherit
-  the same declarations is a separate change to how sessions launch, which this one deliberately
-  does not make.
+- **A harness installed after the wrappers were written is picked up at the next republish.** The wrapper bakes in the path the daemon resolved when it was written. A boot (and every catalog change) republishes the fleet and rewrites any wrapper whose path moved, but a harness installed or an override edited while the daemon runs is not seen by a running daemon's wrappers until then. A harness that was not located when the wrapper was written is exec'd by name, which is the old behaviour and the only case where a decoy earlier on `PATH` can win.
 - **There is no way to set this without editing a file.** Both surfaces are hand-edited — a JSON
   document or a unit file. A route and a settings panel would need the mutation machinery the grant
   surface has and this one does not; the daemon at least _reports_ what it read, from three places.
