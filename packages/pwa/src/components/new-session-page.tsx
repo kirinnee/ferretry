@@ -23,6 +23,7 @@ import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
+import { ModelSelect } from './model-select.tsx';
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
 
@@ -382,21 +383,35 @@ export function NewSessionPage({
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <SessionField hint="blank = account default" inputId={fieldId('model')} label="Model override">
-              {models.length === 0 ? null : (
-                <datalist id={MODEL_LIST_ID}>
-                  {models.map(model => (
-                    <option key={model} value={model} />
-                  ))}
-                </datalist>
+              {chosen?.modelCatalog === undefined ? (
+                <>
+                  {models.length === 0 ? null : (
+                    <datalist id={MODEL_LIST_ID}>
+                      {models.map(model => (
+                        <option key={model} value={model} />
+                      ))}
+                    </datalist>
+                  )}
+                  <input
+                    className="kt-input w-full font-mono"
+                    id={fieldId('model')}
+                    list={models.length === 0 ? undefined : MODEL_LIST_ID}
+                    onChange={event => update('model', event.target.value)}
+                    placeholder={modelPlaceholder(chosen)}
+                    value={draft.model}
+                  />
+                </>
+              ) : (
+                // A login with a model catalog (docs/model-catalog.md): exactly its models, by tier.
+                <ModelSelect
+                  customIds={chosen.modelCatalog.customIds}
+                  defaultModel={chosen.defaultModel}
+                  id={fieldId('model')}
+                  models={chosen.models}
+                  onChange={value => update('model', value)}
+                  value={draft.model}
+                />
               )}
-              <input
-                className="kt-input w-full font-mono"
-                id={fieldId('model')}
-                list={models.length === 0 ? undefined : MODEL_LIST_ID}
-                onChange={event => update('model', event.target.value)}
-                placeholder={modelPlaceholder(chosen)}
-                value={draft.model}
-              />
             </SessionField>
 
             <fieldset>

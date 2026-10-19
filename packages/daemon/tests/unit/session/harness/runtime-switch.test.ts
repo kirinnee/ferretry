@@ -94,7 +94,7 @@ describe('planRuntimeSwitch on a command harness', () => {
     const plan = planRuntimeSwitch({ harness: 'claude', effort: 'ludicrous' }, claudeContext);
 
     // Assert
-    should(plan).eql({ kind: 'refused', reason: 'effort must be one of low, medium, high, xhigh' });
+    should(plan).eql({ kind: 'refused', reason: 'effort must be one of low, medium, high, xhigh, max' });
   });
 
   it('should refuse a model the wrapper does not serve', () => {
@@ -267,5 +267,24 @@ describe('planRuntimeSwitch on a picker harness', () => {
 
     // Assert
     should(plan).eql({ kind: 'drive_picker', target: { model: 'gpt-5-pro', effort: 'high' } });
+  });
+});
+
+describe('planRuntimeSwitch with a custom model id (docs/model-catalog.md)', () => {
+  const openCatalog: HarnessRuntimeSwitchContext = { ...claudeContext, acceptsCustomModels: true };
+
+  it('should type an id beyond the list when the login takes any id, context suffix and all', () => {
+    should(planRuntimeSwitch({ harness: 'claude', model: '~openai/gpt-sol-latest[1m]' }, openCatalog)).eql({
+      kind: 'inject',
+      command: '/model ~openai/gpt-sol-latest[1m]',
+      requestedModel: '~openai/gpt-sol-latest[1m]',
+      claimsOutcome: true,
+    });
+  });
+
+  it('should still refuse an id a pane could not take as one word, and any id where the login takes none', () => {
+    should(planRuntimeSwitch({ harness: 'claude', model: 'two words' }, openCatalog)).match({ kind: 'refused' });
+    should(planRuntimeSwitch({ harness: 'claude', model: 'x;rm' }, openCatalog)).match({ kind: 'refused' });
+    should(planRuntimeSwitch({ harness: 'claude', model: 'other-model' }, claudeContext)).match({ kind: 'refused' });
   });
 });

@@ -59,6 +59,8 @@ coverage variants `task test:coverage`.
 
 See [README.md](README.md#releasing) and [INSTALLATION.md](INSTALLATION.md).
 Repo invariants live in [scripts/validate/](scripts/validate/) and run from pre-commit.
+How an installed daemon learns of and applies a newer release, per install method (Homebrew, nix
+profile, nix shell, modules, deb/rpm, standalone), is [docs/updating.md](docs/updating.md).
 
 ## Layout
 
@@ -235,6 +237,10 @@ The runbook — key custody, rotation, compromise, and exactly what this does no
 The **reader-facing security model** — every layer and what it stops, the threat table (one compromised
 machine included), recovery steps and what is not protected — is [docs/security.md](docs/security.md). It
 summarises the contracts above and owns none of them: when one of them moves, correct that page too.
+
+When a setting reaches a running ferret — live, on restart, or only for new ferrets — and how every launch
+argv is built (one builder for start, Restart CLI, migrate and revive; a revive never replays):
+[docs/launch-settings.md](docs/launch-settings.md).
 
 ## Migration context
 

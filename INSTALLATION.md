@@ -94,12 +94,32 @@ Chrome is not installed on this machine: install it with `brew install --cask go
 into the daemon's X display when it has one and runs headless when it does not (a server or an
 SSH-only box), so no display server is required.
 
+## Updating
+
+```bash
+fy daemon update --check   # how this host installed Ferretry, the latest release, what updating takes
+fy daemon update           # update the way it was installed, restart, and roll back if it does not come up
+```
+
+Homebrew and nix profile installs, and standalone binaries, update themselves: `fy daemon update`
+runs `brew upgrade --cask ferretry` or `nix profile upgrade`, restarts the daemon, and checks that the
+new version serves within 30 seconds — rolling back the nix profile or the previous binary when it does
+not. A daemon running from a temporary `nix shell` is offered a switch to a nix profile install, which
+fixes updates for good (`fy daemon update --switch-to-profile`; `fy daemon install` offers the same).
+home-manager, nix-darwin, NixOS and apt/dnf installs are shown the exact steps instead: their version
+is pinned by your own configuration, or needs `sudo`.
+
+`fy daemon status` says how the daemon was installed and when an update is available, and the app
+shows the same under Settings › Machines › About with a one-click Update. The whole design, including
+the standalone signing setup, is [docs/updating.md](docs/updating.md).
+
 ## Which daemon runs
 
 Ferretry runs the `fyd` this host has installed. `fy daemon install`, `start` and `restart` resolve it
 — `FY_DAEMON_BIN` first, then `PATH` — and record that absolute path in the systemd unit or launchd
 agent. Upgrading is your package manager's job; `fy daemon restart` picks the new one up. Rolling back
-is the same operation in reverse: install the version you want and restart.
+is the same operation in reverse: install the version you want and restart. `fy daemon update` does
+both for you where the install method allows it (see [Updating](#updating)).
 
 ```bash
 fy daemon which           # installed and running identities, and whether they agree
@@ -182,11 +202,14 @@ A few commands take you from a fresh install to a phone watching an agent work. 
 1. **Start the daemon.**
 
    ```bash
-   fy daemon start
+   fy daemon install
    ```
 
+   This installs a user service (launchd on macOS, systemd on Linux), starts the daemon under it, and
+   brings it back after a restart. `fy daemon start` runs it once without a service instead.
+
    Starting the daemon sets nothing up by itself. A new machine is **not set up** until you choose
-   what to bring in, and the start ends with one line saying so. `fy doctor` checks what else the
+   what to bring in. `fy doctor` checks what else the
    host is missing, and says what each missing program stops.
 
 2. **Set the machine up.** Ferretry asks, one question at a time, whether to use what it found:
@@ -248,3 +271,36 @@ The hosted app at `https://ferretry.pages.dev` is the only browser origin a daem
 If you serve the PWA yourself, add that page's origin to `corsOrigins` in
 `${FY_HOME:-~/.ferretry}/config/daemon.json` and restart the daemon, or the browser's requests are
 refused.
+
+## Troubleshooting
+
+Whether the daemon is serving, and what supervises it:
+
+```bash
+fy daemon status
+```
+
+The daemon's log (add `--follow` to keep streaming it):
+
+```bash
+fy daemon logs
+```
+
+macOS refuses to open `fy` or `fyd`: the binaries are not code-signed. The Homebrew cask clears the
+quarantine flag for you; after any other install, clear it once:
+
+```bash
+xattr -d com.apple.quarantine "$(command -v fy)"
+```
+
+Start over completely. This removes ALL of Ferretry's data on this machine — configuration, sessions
+and transcripts, stored secrets and paired devices — after listing what will go and asking first:
+
+```bash
+fy daemon reset
+```
+
+The landing page's `/get-started` guide (`packages/pwa/get-started/index.html`) shows commands from
+this document. Every command it shows must appear here, in a fenced block, exactly as written —
+`scripts/validate/cli-contracts.sh installation-parity` refuses one that does not, so change a
+command here first.

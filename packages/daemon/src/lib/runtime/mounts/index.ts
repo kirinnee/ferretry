@@ -26,6 +26,7 @@ import type { SessionRuntimeSubsystem } from '../../session/runtime-control/type
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { TurnWatchLoop } from '../../session/turn/service.ts';
 import type { StepUpService } from '../../step-up/index.ts';
+import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
@@ -38,6 +39,7 @@ import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
 import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
+import { daemonUpdateRoutes } from './daemon-update.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
@@ -316,6 +318,9 @@ export interface MountedSubsystems {
   /** Optional provider keys (Jev, Groq, Cerebras): which are set, and a Test that spends one once through
    *  the daemon's outbound holder. No key travels on either route — see `mounts/speedups.ts`. */
   readonly speedups: SpeedupsSubsystem;
+  /** How this machine's daemon was installed, the latest release, and starting an update. The
+   *  subsystem owns its check loop as well as its routes — see `mounts/daemon-update.ts`. */
+  readonly daemonUpdate: DaemonUpdateSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -538,6 +543,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...sttEnhancementRoutes(subsystems.sttEnhancement),
         // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
         ...speedupRoutes(subsystems.speedups),
+        // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
+        ...daemonUpdateRoutes(subsystems.daemonUpdate),
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.

@@ -333,3 +333,22 @@ export const attachmentView = {
   sha256: 'a'.repeat(64),
   createdAt: INSTANT,
 } satisfies AttachmentView;
+
+export const daemonUpdateView = {
+  current: '4.28.0',
+  method: { kind: 'homebrew', cask: 'ferretry' },
+  plan: {
+    kind: 'self',
+    steps: [{ command: 'brew upgrade --cask ferretry' }, { command: 'fy daemon restart' }],
+    rollback: 'none',
+  },
+  check: {
+    state: 'ok',
+    checkedAt: '2026-10-18T09:00:00.000Z',
+    latest: { version: '4.29.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v4.29.0' },
+  },
+  available: true,
+  midTurn: 0,
+  autoInstall: false,
+  job: null,
+} as const;

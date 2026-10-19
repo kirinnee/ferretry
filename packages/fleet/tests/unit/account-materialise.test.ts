@@ -12,6 +12,8 @@ import {
 } from '../../src/lib/account/materialise.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../src/lib/account/schema.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../src/lib/provisioning.ts';
+import { builtInModelCatalogs } from '../../src/lib/models/catalog.ts';
+import { builtInPresets } from '../../src/lib/presets/catalog.ts';
 import { MANAGED_MARKER } from '../../src/lib/wrappers.ts';
 
 const LAYOUT: FleetLayout = {
@@ -924,6 +926,62 @@ describe('materialiseFleet', () => {
       // Assert
       should(error.problems).have.length(1);
       should(error.problems[0]).match({ runtime: 'claude-default', message: /^profile "gone" cannot be read: / });
+    });
+  });
+
+  describe('with model catalogs (docs/model-catalog.md)', () => {
+    const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets() };
+    const glmModel = (env: Record<string, string>) =>
+      modelOf({
+        credentials: {
+          'claude-you': {
+            harness: 'claude',
+            store: 'environment',
+            preset: 'zai-glm',
+            env: {
+              ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+              ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}',
+              ...env,
+            },
+          },
+          'codex-work': { harness: 'codex', store: 'ferretry' },
+        },
+      });
+
+    it("should offer the login's catalog, launch on its default and pin the tier slots over a stale copy", () => {
+      // Act — the login file still holds the tier pin an older preset copied into it
+      const result = plan(glmModel({ ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-4.6' }), { modelCatalogs: sources });
+
+      // Assert
+      const wrapper = wrapperOf(result, 'claude-default');
+      should(wrapper).containEql("export ANTHROPIC_DEFAULT_OPUS_MODEL='glm-5.3'");
+      should(wrapper).containEql("export ANTHROPIC_DEFAULT_HAIKU_MODEL='glm-5.3-flash'");
+      should(wrapper).not.containEql('glm-4.6');
+      should(wrapper).containEql("'--model' 'glm-5.3'");
+      const account = result.manifest.accounts[0];
+      should(account?.modelCatalog).eql({ id: 'zai', label: 'GLM / Z.ai', customIds: false });
+      should(account?.defaultModel).equal('glm-5.3');
+      should(account?.models[0]).match({
+        id: 'glm-5.3',
+        displayName: 'GLM-5.3',
+        tier: 'best',
+        efforts: ['low', 'high', 'max'],
+      });
+      // A sign-in Codex login reads OpenAI's catalog.
+      should(result.manifest.accounts[1]?.modelCatalog?.id).equal('openai');
+      should(result.manifest.accounts[1]?.defaultModel).equal('gpt-6.1-sol');
+    });
+
+    it('should mark a catalog model the login cannot use, as it marks a model set’s', () => {
+      // Act
+      const result = plan(glmModel({}), {
+        modelCatalogs: sources,
+        availableModels: { 'claude-you': ['glm-5.3-flash'] },
+      });
+
+      // Assert
+      should(result.manifest.accounts[0]?.models[0]).match({ id: 'glm-5.3', available: false });
+      should(result.manifest.accounts[0]?.defaultModel).equal('glm-5.3-flash');
     });
   });
 });

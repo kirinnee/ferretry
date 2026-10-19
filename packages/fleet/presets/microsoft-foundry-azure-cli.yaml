@@ -5,6 +5,7 @@ summary: Claude Code through your Microsoft Foundry resource, signed in with the
 group: cloud
 docs: https://code.claude.com/docs/en/microsoft-foundry
 verified: '2026-10-16'
+catalog: microsoft-foundry
 env:
   CLAUDE_CODE_USE_FOUNDRY:
     value: '1'
@@ -12,18 +13,17 @@ env:
     value: ''
     description: the resource name only, not a URL
   ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: claude-opus-4-8
+    value: claude-opus-5-5
     description: your Opus deployment name
   ANTHROPIC_DEFAULT_SONNET_MODEL:
-    value: claude-sonnet-5
+    value: claude-sonnet-5-5
     description: your Sonnet deployment name
   ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: claude-haiku-4-5
+    value: claude-haiku-5-5
     description: your Haiku deployment name
 cloudCredential:
   kinds: [azure-cli]
   suggested: azure-cli
-models: [claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5]
 test:
   kind: none
   reason: An Entra sign-in needs a token from the Azure CLI, which Ferretry does not mint. Check it with `az account get-access-token`.

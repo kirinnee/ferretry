@@ -70,10 +70,12 @@ import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
+import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
+import { useMachineUpdates } from './features/settings/machine-updates.ts';
 import { NotificationFilterSettingsView } from './features/settings/notification-filter-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import {
@@ -174,6 +176,7 @@ import {
   StoreProvider,
   useAppStore,
   useConnectionSnapshot,
+  useDaemonClient,
   useDaemonFetch,
   useLockedMachines,
 } from './lib/store.tsx';
@@ -188,6 +191,7 @@ import {
   UPDATE_CHIP,
   type UpdateReason,
 } from './shell/app-bar.tsx';
+import { AppUpdatedToast } from './shell/app-updated-toast.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
@@ -765,6 +769,12 @@ function ShellSessionsBar({
   const projects = useProjects(store.projects, connection);
   // Which ferrets are instructed to learn, for their "Learning: passive" chip.
   const learning = usePassiveLearning(connection, useDaemonFetch());
+  // The machine menu's update dot: each paired machine asked once, through the app's client pool.
+  const updates = useMachineUpdates({
+    connections,
+    createClient: useDaemonClient(),
+    locked: useLockedMachines(store.unlockGate),
+  });
   const collapsed = useSyncExternalStore(store.controls.subscribe, () =>
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
@@ -780,6 +790,7 @@ function ShellSessionsBar({
       machines={connections.map(candidate => ({
         daemonId: candidate.daemonId,
         name: distinctDaemonName(candidate, connections),
+        updateAvailable: updates.has(candidate.daemonId),
       }))}
       {...(updateReady === null ? {} : { update: updateOffer(updateReady), onApplyUpdate })}
       onAddMachine={() => navigate(connectionPickerPath())}
@@ -1367,6 +1378,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       securityLogSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
       { ...LEARNING_SETTINGS_TAB, Surface: LearningSettingsTabSurface },
+      // What this machine runs and getting it up to date (docs/updating.md).
+      aboutSettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
   );
@@ -1386,6 +1399,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       daemonSettingsTabs={daemonSettingsTabs}
       // The same pool as every other daemon call, so a machine read rides the measured carrier.
       createMachineClient={createDaemonClient}
+      createUpdateClient={createDaemonClient}
       lockedMachines={lockedMachines}
       machineTabs={MACHINE_TAB_SURFACES}
       onRenameDaemon={(daemonId, label) => {
@@ -2129,6 +2143,7 @@ export function AppShell() {
       <NotificationControlsContext.Provider value={notificationControlsHost}>
         <ThemeFollower />
         <MotionFollower />
+        <AppUpdatedToast />
         {/* The install offer shares the release notice's pinned dock, so the page starts below both
           rather than under either. Phone only: a desktop browser keeps its own install control in the
           address bar, and Settings › This device carries the offer at every width. */}

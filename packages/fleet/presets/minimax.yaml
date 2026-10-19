@@ -4,8 +4,7 @@ summary: Claude Code and Codex on MiniMax models with one Token Plan subscriptio
 group: popular
 docs: https://platform.minimax.io/docs/api-reference/text-anthropic-api.md
 verified: '2026-10-16'
-unverified:
-  - MiniMax publishes no mapping of its models onto Claude Code's opus, sonnet and haiku; the ones filled in are a suggestion.
+catalog: minimax
 claude:
   env:
     ANTHROPIC_BASE_URL:
@@ -13,12 +12,6 @@ claude:
     ANTHROPIC_API_KEY:
       secretName: MINIMAX_API_KEY
       description: the Token Plan key, sent as x-api-key as MiniMax documents
-    ANTHROPIC_MODEL:
-      value: MiniMax-M3
-    ANTHROPIC_DEFAULT_HAIKU_MODEL:
-      value: MiniMax-M3.1-Flash-Preview
-      required: false
-  models: [MiniMax-M3, MiniMax-M3.1-Flash-Preview, MiniMax-M2.7]
 codex:
   docs: https://platform.minimax.io/docs/token-plan/codex.md
   env:
@@ -30,7 +23,6 @@ codex:
     baseUrl: https://api.minimax.io/v1
     keyVariable: MINIMAX_API_KEY
     model: MiniMax-M3.1-Flash-Preview
-  models: [MiniMax-M3.1-Flash-Preview, MiniMax-M3]
 test:
   kind: request
   url: https://www.minimax.io/v1/token_plan/remains

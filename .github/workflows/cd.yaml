@@ -22,3 +22,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FURY_PUSH_TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
         run: nix develop .#releaser -c ./scripts/release/publish.sh
+  # Signs checksums.txt so a standalone install can verify a self-update (docs/updating.md). The key
+  # lives ONLY in this environment; restrict its deployment refs to `v*.*.*` tags in the repository
+  # settings. Until the owner creates DAEMON_RELEASE_SIGNING_KEY this job says so and signs nothing,
+  # and standalone self-updates refuse — every other install method is unaffected.
+  sign:
+    name: Sign daemon release
+    needs: goreleaser
+    environment: daemon-release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      # Only for scripts/ci/sign-daemon-release.sh and the trusted key list; nothing is installed.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # The key reaches the signer on STDIN: `printf` is a shell builtin, so no process's arguments
+      # carry it, and the signer itself runs without it in its environment.
+      - name: Sign checksums.txt and attach the signature
+        env:
+          DAEMON_RELEASE_SIGNING_KEY: ${{ secrets.DAEMON_RELEASE_SIGNING_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ -z ${DAEMON_RELEASE_SIGNING_KEY} ]]; then
+            echo "::notice::DAEMON_RELEASE_SIGNING_KEY is not set; standalone self-updates will refuse this release"
+            exit 0
+          fi
+          dist="${RUNNER_TEMP}/dist"
+          mkdir -p "${dist}"
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt --dir "${dist}"
+          key="${DAEMON_RELEASE_SIGNING_KEY}"
+          unset DAEMON_RELEASE_SIGNING_KEY
+          printf '%s\n' "${key}" | ./scripts/ci/sign-daemon-release.sh "${dist}"
+          gh release upload "${TAG}" "${dist}/checksums.txt.sig" --repo "${GITHUB_REPOSITORY}" --clobber

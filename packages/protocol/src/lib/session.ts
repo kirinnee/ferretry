@@ -146,6 +146,10 @@ export type RuntimeReasoningChoice = z.infer<typeof RuntimeReasoningChoiceSchema
 
 export const RuntimeModelChoiceSchema = RuntimeModelOptionSchema.extend({
   description: z.string().optional(),
+  /** Where the login's model catalog puts it (docs/model-catalog.md): a picker groups by it. */
+  tier: z.enum(['best', 'balanced', 'fast']).optional(),
+  /** The context window, in tokens, when the catalog says. */
+  context: z.number().int().positive().optional(),
   isDefault: z.literal(true).optional(),
   reasoningEfforts: z.array(RuntimeReasoningChoiceSchema),
   defaultReasoningEffort: z.string().min(1).optional(),
@@ -156,6 +160,11 @@ export const RuntimeModelCatalogSchema = z.object({
   harness: HarnessSchema,
   source: z.enum(['wrapper-inventory', 'codex-app-server']),
   choices: z.array(RuntimeModelChoiceSchema),
+  /**
+   * The login's model catalog, when it reads one. With it, each choice's `reasoningEfforts` is what that
+   * model takes — empty means none — and `customIds` says the session may be switched to any id.
+   */
+  catalog: z.object({ id: z.string().min(1), label: z.string().min(1), customIds: z.boolean() }).optional(),
 });
 export type RuntimeModelCatalog = z.infer<typeof RuntimeModelCatalogSchema>;
 
@@ -344,6 +353,13 @@ export const SessionConfigSchema = z.object({
    * anything the harness later reports. Absent means the harness's own default.
    */
   launchReasoningEffort: z.string().min(1).optional(),
+  /**
+   * A digest of the FLEET settings this session's process was launched under: its wrapper and the
+   * fixed settings file beside it. Compared with the same digest taken now to say whether the running
+   * process is on older settings than a relaunch would give it. Absent for a session launched before
+   * this was recorded, which a relaunch then records.
+   */
+  launchSettings: z.string().min(1).optional(),
   mode: InteractionModeSchema,
   remoteControl: z.boolean(),
   harnessFlags: z.array(z.string()),
@@ -519,6 +535,24 @@ export type SessionView = z.infer<typeof SessionViewSchema>;
 
 export const SessionListSchema = z.array(SessionViewSchema);
 export type SessionList = z.infer<typeof SessionListSchema>;
+
+/**
+ * Why a running session is on older settings than a relaunch would give it.
+ *
+ *   arguments  the daemon-owned launch arguments a relaunch builds now differ from the ones it runs
+ *              with — a `Read(...)` rule it predates, a remote-control surface, the owner's flags
+ *   settings   the fleet settings it launched under changed since — permission mode, profile, the
+ *              fixed layer
+ */
+export const SessionRelaunchDriftSchema = z.enum(['arguments', 'settings']);
+export type SessionRelaunchDrift = z.infer<typeof SessionRelaunchDriftSchema>;
+
+/** Whether a running session is on the settings a relaunch would give it, and if not, why. */
+export const SessionRelaunchSettingsSchema = z.object({
+  current: z.boolean(),
+  reasons: z.array(SessionRelaunchDriftSchema),
+});
+export type SessionRelaunchSettings = z.infer<typeof SessionRelaunchSettingsSchema>;
 
 /**
  * The exact tmux process a daemon proved belongs to one managed session.

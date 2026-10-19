@@ -1,0 +1,35 @@
+# The Vercel AI Gateway's Claude models, as its claude-code endpoint names them in Claude Code's picker.
+label: Vercel AI Gateway
+docs: https://vercel.com/docs/ai-gateway/coding-agents/claude-code
+verified: '2026-10-18'
+unverified:
+  - Vercel's guide shows claude-code/anthropic/claude-opus-5; the 5.5 ids here follow its documented format and were not read on that page.
+customIds: true
+claude:
+  tiers:
+    opus: claude-code/anthropic/claude-opus-5.5[1m]
+    sonnet: claude-code/anthropic/claude-sonnet-5.5[1m]
+    haiku: claude-code/anthropic/claude-haiku-5.5[1m]
+  models:
+    - id: claude-code/anthropic/claude-opus-5.5
+      suffix: '[1m]'
+      label: Opus 5.5
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
+    - id: claude-code/anthropic/claude-sonnet-5.5
+      suffix: '[1m]'
+      label: Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+    - id: claude-code/anthropic/claude-haiku-5.5
+      suffix: '[1m]'
+      label: Haiku 5.5
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

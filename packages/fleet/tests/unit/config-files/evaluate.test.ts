@@ -847,4 +847,28 @@ describe('evaluateConfigFiles: provider presets (docs/provider-presets.md)', () 
     should(actual.effective.presets).deepEqual({});
     should(actual.issues.map(issue => issue.path)).containEql('presets/broken.yaml');
   });
+
+  it("should put a machine's own model catalog in effect by its file name (docs/model-catalog.md)", () => {
+    // Arrange
+    const CATALOG = [
+      'label: Pinned GLM',
+      'docs: https://docs.z.ai/devpack/tool/claude',
+      "verified: '2026-10-18'",
+      'claude:',
+      '  models:',
+      '    - id: glm-5.3',
+      '      label: GLM-5.3',
+      '      tier: best',
+      '      default: true',
+      '',
+    ].join('\n');
+
+    // Act
+    const actual = evaluate([file('models/zai.yaml', CATALOG), file('models/broken.yaml', 'label: Broken\n')]);
+
+    // Assert
+    should(actual.effective.modelCatalogs.zai).containDeep({ id: 'zai', origin: 'file', label: 'Pinned GLM' });
+    should(actual.effective.modelCatalogs).not.have.property('broken');
+    should(actual.files.find(entry => entry.path === 'models/zai.yaml')).containDeep({ kind: 'models', state: 'ok' });
+  });
 });

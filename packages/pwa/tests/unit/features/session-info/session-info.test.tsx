@@ -9,6 +9,7 @@ import type {
   AnalyticsResponse,
   BrowserStatus,
   ManagedWorktreeView,
+  SessionRelaunchSettings,
   TerminalListView,
   WardenVerdict,
 } from '@ferretry/protocol';
@@ -302,6 +303,52 @@ describe('SessionInfo — runtimeControls and the phone sheet', () => {
     await interact(() => placement?.setTab('runtime'));
     await settle();
     expect(root.textContent).toContain('On · instructed to file lessons');
+  });
+
+  it('reads the Settings row on Runtime, restarts from it, and re-reads after the restart', async () => {
+    const stale: SessionRelaunchSettings = { current: false, reasons: ['settings'] };
+    const current: SessionRelaunchSettings = { current: true, reasons: [] };
+    let reads = 0;
+    const relaunch = counted(async () => {
+      reads += 1;
+      return reads === 1 ? stale : current;
+    });
+    const restarts: string[] = [];
+    const root = await show({
+      ports: portsOf({ relaunch }),
+      onRestart: async () => {
+        restarts.push('restart');
+      },
+    });
+    expect(relaunch.calls).toBe(0);
+    await interact(() => placement?.setTab('runtime'));
+    await settle();
+    expect(root.textContent).toContain('Running with older settings — Restart to apply');
+
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-info-restart]'), 'restart').click());
+    await settle();
+    expect(restarts).toEqual(['restart']);
+    expect(relaunch.calls).toBe(2);
+  });
+
+  it('says why the Settings row could not be read', async () => {
+    const root = await show({
+      ports: portsOf({
+        relaunch: async () => {
+          throw new Error('no session s1');
+        },
+      }),
+    });
+    await interact(() => placement?.setTab('runtime'));
+    await settle();
+    expect(root.textContent).toContain('Couldn’t check: no session s1');
+  });
+
+  it('draws no Settings row for a host without the read', async () => {
+    const root = await show();
+    await interact(() => placement?.setTab('runtime'));
+    await settle();
+    expect(root.querySelector('[data-info-row="Settings"]')).toBeNull();
   });
 
   it('offers the half/full sheet control only in the sheet presentation', async () => {

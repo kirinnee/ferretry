@@ -73,6 +73,8 @@ export interface AccountPickerOption {
   readonly credentialId: string;
   readonly defaultModel: string | null;
   readonly models: PickerAccount['models'];
+  /** The login's model catalog, when it reads one (docs/model-catalog.md). */
+  readonly modelCatalog?: PickerAccount['modelCatalog'];
   readonly available: boolean;
   readonly unavailableReason: string | null;
   /** The cached quota row joined by `wrapper`, or `null` when the feed has none. */
@@ -147,6 +149,7 @@ const accountPickerOption = (
   credentialId: account.credentialId,
   defaultModel: account.defaultModel,
   models: account.models,
+  ...(account.modelCatalog === undefined ? {} : { modelCatalog: account.modelCatalog }),
   available: account.available,
   unavailableReason: account.unavailableReason,
   quota: usage.find(row => row.agent === account.wrapper) ?? null,

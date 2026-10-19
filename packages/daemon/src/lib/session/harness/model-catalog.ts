@@ -14,15 +14,15 @@
  *     catalog that could not be read is an ERROR rather than an empty list — the browser's native
  *     picker fallback fires on both, but only one of them is honest about why.
  *
- * A Claude choice advertises NO reasoning levels, and that absence is load-bearing rather than a
- * gap. Claude sets effort with a native command that takes any of its levels whatever the model is,
- * so the levels are not a property OF a model and publishing them per choice would state a
- * dependency that does not exist. Codex's levels genuinely are per model — its picker offers a
- * different submenu for each — which is why only that side carries them.
+ * EFFORTS FOLLOW THE CATALOG. An account whose login reads a model catalog (docs/model-catalog.md)
+ * publishes, per model, the efforts that model takes — an empty list means none, and the picker offers
+ * none — and its tier, so the picker groups the list. An account WITHOUT a catalog publishes no levels,
+ * and the browser reads that as "use Claude Code's own levels", which take any model. Codex's levels
+ * come from its own app-server per model, and the catalog adds only the tier where an id matches.
  */
 
 import type { RuntimeModelCatalog, RuntimeModelChoice } from '@ferretry/protocol';
-import { type CoreAccount, servableModels } from '../../core/inventory.ts';
+import { type CoreAccount, type CoreAccountModel, servableModels } from '../../core/inventory.ts';
 
 /**
  * What one Claude account may be switched to mid-session.
@@ -37,15 +37,42 @@ export function claudeRuntimeCatalog(account: CoreAccount): RuntimeModelCatalog 
     choices: servableModels(account).map(model => ({
       value: model.id,
       label: model.displayName ?? model.id,
+      ...catalogFacts(model),
       ...(account.defaultModel === model.id ? { isDefault: true as const } : {}),
-      reasoningEfforts: [],
+      reasoningEfforts: (model.efforts ?? []).map(value => ({ value })),
+      ...(model.defaultEffort === undefined ? {} : { defaultReasoningEffort: model.defaultEffort }),
     })),
+    ...(account.modelCatalog === undefined ? {} : { catalog: { ...account.modelCatalog } }),
   };
 }
 
-/** What one Codex account advertised, restated as the wire catalog. */
-export function codexRuntimeCatalog(choices: readonly RuntimeModelChoice[]): RuntimeModelCatalog {
-  return { harness: 'codex', source: 'codex-app-server', choices: [...choices] };
+/** The tier and context window a catalog gave a model, for the picker to group and describe by. */
+const catalogFacts = (model: CoreAccountModel): Pick<RuntimeModelChoice, 'tier' | 'context'> => ({
+  ...(model.tier === undefined ? {} : { tier: model.tier }),
+  ...(model.context === undefined ? {} : { context: model.context }),
+});
+
+/**
+ * What one Codex account advertised, restated as the wire catalog. The app-server's list is the only
+ * one Codex's own picker can switch to, so it stays the list; where the account's catalog describes an
+ * advertised id, the choice gains that model's tier and label for the picker to group by.
+ */
+export function codexRuntimeCatalog(
+  choices: readonly RuntimeModelChoice[],
+  account?: Pick<CoreAccount, 'models' | 'modelCatalog'>,
+): RuntimeModelCatalog {
+  const described = new Map((account?.models ?? []).map(model => [model.id, model]));
+  return {
+    harness: 'codex',
+    source: 'codex-app-server',
+    choices: choices.map(choice => {
+      const model = described.get(choice.value);
+      return model === undefined
+        ? choice
+        : { ...choice, label: model.displayName ?? choice.label, ...catalogFacts(model) };
+    }),
+    ...(account?.modelCatalog === undefined ? {} : { catalog: { ...account.modelCatalog } }),
+  };
 }
 
 /** The model and effort values a Codex catalog offers, for a switch that must name an exact target. */

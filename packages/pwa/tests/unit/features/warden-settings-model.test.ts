@@ -4,12 +4,15 @@ import {
   hasWardenFormErrors,
   movedAccount,
   WARDEN_FORM_LIMITS,
+  WARDEN_EFFORTS,
   wardenConfigPatchFrom,
+  wardenEfforts,
   wardenFormErrors,
   wardenMachineDefaultLogin,
   wardenSummary,
   withLogin,
 } from '../../../src/features/warden/warden-settings-model.ts';
+import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { wardenConfig } from '../../support/warden.ts';
 
 const jev = (overrides: Partial<WardenConfig> = {}): WardenConfig => wardenConfig({ triage: 'jev', ...overrides });
@@ -212,5 +215,36 @@ describe('failover order helpers', () => {
     expect(movedAccount(config, 1, -1).accounts).toEqual([{ agent: 'b' }, { agent: 'a' }]);
     expect(movedAccount(config, 0, -1)).toBe(config);
     expect(movedAccount(config, 1, 1)).toBe(config);
+  });
+});
+
+describe('wardenEfforts', () => {
+  const runtime = (modelCatalog?: PickerAccount['modelCatalog']): PickerAccount => ({
+    id: 'rt',
+    wrapper: 'claude-glm',
+    displayName: 'claude-glm',
+    kind: 'claude',
+    agent: true,
+    credentialId: 'glm',
+    defaultModel: 'glm-5.3',
+    models: [
+      { id: 'glm-5.3', label: 'GLM-5.3', available: true, efforts: ['low', 'high', 'max'] },
+      { id: 'glm-5.3-flash', available: true, efforts: [] },
+    ],
+    ...(modelCatalog === undefined ? {} : { modelCatalog }),
+    available: true,
+    unavailableReason: null,
+  });
+  const catalog = { id: 'zai', label: 'GLM / Z.ai', customIds: false };
+
+  it("should offer the Warden's levels the model takes, by its catalog", () => {
+    expect(wardenEfforts(runtime(catalog), undefined)).toEqual({ efforts: ['low', 'high'], modelName: 'GLM-5.3' });
+    expect(wardenEfforts(runtime(catalog), 'glm-5.3-flash')).toEqual({ efforts: [], modelName: 'glm-5.3-flash' });
+  });
+
+  it('should offer every level when no catalog says, or the model is one it does not list', () => {
+    expect(wardenEfforts(runtime(), 'glm-5.3').efforts).toEqual(WARDEN_EFFORTS);
+    expect(wardenEfforts(runtime(catalog), 'custom-model').efforts).toEqual(WARDEN_EFFORTS);
+    expect(wardenEfforts(undefined, undefined)).toEqual({ efforts: WARDEN_EFFORTS, modelName: 'This model' });
   });
 });

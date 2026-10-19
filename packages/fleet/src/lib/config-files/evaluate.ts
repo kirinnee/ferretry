@@ -36,6 +36,7 @@ import {
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { AccountModel } from '../account/schema.ts';
+import type { ModelCatalog, ModelCatalogFile } from '../models/schema.ts';
 import { type ProviderPreset, type ProviderPresetFile, presetFromFile } from '../presets/schema.ts';
 import { type CheckedConfigFile, checkConfigFile, schemaIssues } from './check.ts';
 import { configLoosening, SINGLETON_DEFAULTS, type SingletonKind } from './kinds.ts';
@@ -84,6 +85,8 @@ export interface EffectiveConfig {
   readonly voice: VoiceConfig;
   /** This machine's own provider presets (`presets/<id>.yaml`), by id. The built-ins are not here. */
   readonly presets: Readonly<Record<string, ProviderPreset>>;
+  /** This machine's own model catalogs (`models/<id>.yaml`), by id: each wins over the published and built-in one. */
+  readonly modelCatalogs: Readonly<Record<string, ModelCatalog>>;
 }
 
 export interface ConfigEvaluation {
@@ -229,6 +232,14 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
           if (address.kind !== 'preset') return [];
           const preset = candidate.checked.value as ProviderPresetFile;
           return [[address.name, presetFromFile(address.name, preset, 'file')]];
+        }),
+      ),
+      modelCatalogs: Object.fromEntries(
+        [...effective.values()].flatMap(candidate => {
+          const address = candidate.checked.address;
+          if (address.kind !== 'models') return [];
+          const catalog = candidate.checked.value as ModelCatalogFile;
+          return [[address.name, { ...catalog, id: address.name, origin: 'file' as const }]];
         }),
       ),
     },

@@ -339,6 +339,24 @@ installation-parity)
   rg -qF 'https://yum.fury.io/kirinnee97/' INSTALLATION.md
   rg -qF "apt install ${name}" INSTALLATION.md
   rg -qF "dnf install ${name}" INSTALLATION.md
+  # The public /get-started guide copies its commands out of INSTALLATION.md, which owns them. Every
+  # `<code data-command>` line on the page must equal a line inside one of the doc's fenced blocks
+  # (leading indentation dropped), so a command changed in only one of the two fails here.
+  get_started="packages/pwa/get-started/index.html"
+  mapfile -t page_commands < <(rg -o --no-filename '<code[^>]* data-command>[^<]*</code>' "${get_started}" |
+    sed -E 's/^<code[^>]*>//; s/<\/code>$//; s/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&#39;/'"'"'/g; s/&amp;/\&/g')
+  [ "${#page_commands[@]}" -lt 5 ] && echo "❌ ${get_started} shows fewer than 5 data-command lines" >&2 && exit 1
+  doc_lines="$(awk '/^ *```/ { fenced = !fenced; next } fenced { sub(/^ +/, ""); print }' INSTALLATION.md)"
+  for command in "${page_commands[@]}" "${name} daemon install" "${name} pair"; do
+    grep -qxF -- "${command}" <<<"${doc_lines}" || {
+      echo "❌ ${get_started}: command not in a fenced block of INSTALLATION.md: ${command}" >&2
+      exit 1
+    }
+    printf '%s\n' "${page_commands[@]}" | grep -qxF -- "${command}" || {
+      echo "❌ ${get_started} does not show: ${command}" >&2
+      exit 1
+    }
+  done
   ;;
 release-daemon)
   # A release archive, package, and cask must carry EVERY independently declared executable: the CLI,

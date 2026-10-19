@@ -68,6 +68,8 @@ const FILTER_ORDER: readonly SessionsBarFilter[] = ['all', 'needs-you', 'running
 export interface SessionsBarMachine {
   readonly daemonId: DaemonId;
   readonly name: string;
+  /** Its daemon said a newer release exists (`useMachineUpdates`): a dot in the machine menu. */
+  readonly updateAvailable?: boolean;
 }
 
 export type SessionsBarPresentation = 'column' | 'rail' | 'drawer';
@@ -146,7 +148,19 @@ const machineMenuItems = ({
   ...machines.map(machine => ({
     key: String(machine.daemonId),
     label: machine.name,
-    ...(machine.daemonId === daemonId ? { detail: 'this one' } : {}),
+    ...(machine.daemonId === daemonId || machine.updateAvailable === true
+      ? {
+          detail: [
+            machine.daemonId === daemonId ? 'this one' : '',
+            machine.updateAvailable === true ? 'update available' : '',
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        }
+      : {}),
+    ...(machine.updateAvailable === true
+      ? { icon: <span aria-hidden="true" className="kt-dot bg-accent" data-machine-menu-update="" /> }
+      : {}),
     onSelect: () => onNavigate(daemonSessionsPath(machine.daemonId)),
   })),
   ...(onPairPhone === undefined
@@ -176,6 +190,7 @@ function MachineSwitcher(
   >,
 ) {
   const { machineName, onPairPhone } = props;
+  const anyUpdate = props.machines.some(machine => machine.updateAvailable === true);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const { touchAffected } = useInputModality();
@@ -198,7 +213,7 @@ function MachineSwitcher(
       <button
         aria-expanded={anchor !== null}
         aria-haspopup="menu"
-        aria-label={`Machine: ${machineName}. Switch machine`}
+        aria-label={`Machine: ${machineName}. Switch machine${anyUpdate ? '. An update is available' : ''}`}
         className="fy-sbar__machine"
         data-sbar-machine=""
         onClick={() => {
@@ -209,6 +224,14 @@ function MachineSwitcher(
         type="button"
       >
         <span className="fy-sbar__machine-name">{machineName}</span>
+        {anyUpdate ? (
+          <span
+            aria-hidden="true"
+            className="kt-dot bg-accent"
+            data-sbar-machine-update=""
+            title="An update is available"
+          />
+        ) : null}
         <ChevronDown aria-hidden="true" size={14} />
       </button>
       <ContextMenu

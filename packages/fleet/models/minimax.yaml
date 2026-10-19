@@ -1,0 +1,40 @@
+# MiniMax models on the Token Plan, for Claude Code (its Anthropic-compatible endpoint) and Codex.
+label: MiniMax
+docs: https://platform.minimax.io/docs/coding-plan/claude-code
+verified: '2026-10-18'
+unverified:
+  - MiniMax maps every Claude Code slot to MiniMax-M3.1-Flash-Preview; MiniMax-M3's reasoning controls are not documented on that page.
+claude:
+  tiers:
+    opus: MiniMax-M3.1-Flash-Preview[1m]
+    sonnet: MiniMax-M3.1-Flash-Preview[1m]
+    haiku: MiniMax-M3.1-Flash-Preview[1m]
+  models:
+    - id: MiniMax-M3
+      label: MiniMax M3
+      tier: best
+      context: 1000000
+    - id: MiniMax-M3.1-Flash-Preview
+      suffix: '[1m]'
+      label: MiniMax M3.1 Flash (preview)
+      tier: fast
+      context: 1000000
+      reasoning: true
+      default: true
+    - id: MiniMax-M2.7
+      label: MiniMax M2.7 (retires 2026-11-18)
+      tier: balanced
+      context: 200000
+codex:
+  docs: https://platform.minimax.io/docs/token-plan/codex.md
+  models:
+    - id: MiniMax-M3.1-Flash-Preview
+      label: MiniMax M3.1 Flash (preview)
+      tier: fast
+      context: 1000000
+      reasoning: true
+      default: true
+    - id: MiniMax-M3
+      label: MiniMax M3
+      tier: best
+      context: 1000000

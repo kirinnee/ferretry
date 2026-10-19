@@ -33,7 +33,14 @@
  */
 import { secretReferencesIn } from '@ferretry/protocol';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
-import { buildFleetManifest, type FleetManifestModel, type HarnessKind } from '../manifest.ts';
+import {
+  buildFleetManifest,
+  type FleetManifestModel,
+  type FleetManifestModelCatalog,
+  type HarnessKind,
+} from '../manifest.ts';
+import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
+import { type RuntimeModels, runtimeModels } from '../models/runtime.ts';
 import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { type SettingsObject, serializeSettings } from '../settings.ts';
@@ -62,7 +69,7 @@ import {
 } from './credentials.ts';
 import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
-import { HARNESS_DISPLAY_NAMES, type ResolvedProfile, resolveProfile } from './layering.ts';
+import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
 import { runtimeHarness } from './scope.ts';
 
@@ -126,6 +133,11 @@ export interface MaterialiseInput {
   readonly acceptsAutoPermissionMode: boolean;
   /** The model ids each credential can use (E23), by credential id. Absent means all of them. */
   readonly availableModels?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The model catalogs and presets in effect (docs/model-catalog.md). A runtime whose login names a
+   * catalog offers its models and gets its tier pins; absent, every runtime offers its profile's model set.
+   */
+  readonly modelCatalogs?: ModelCatalogSources;
 }
 
 /** One reason a runtime, or the fleet, cannot be planned. */
@@ -156,6 +168,7 @@ interface PlannedRuntime {
   readonly home: string;
   readonly wrapper: string;
   readonly models: readonly FleetManifestModel[];
+  readonly modelCatalog?: FleetManifestModelCatalog;
   readonly defaultModel: string | null;
   readonly secretEnv: Readonly<Record<string, string>>;
   /** Why it cannot launch, when it cannot. */
@@ -167,20 +180,33 @@ const sorted = (record: Readonly<Record<string, string>>): Readonly<Record<strin
 
 const UNAVAILABLE_MODEL_REASON = 'Not available on this login';
 
-/** The runtime's models and default as the manifest publishes them (K8, E23). */
-function publishedModels(resolved: ResolvedProfile | undefined): {
+/** The runtime's models and default as the manifest publishes them (K8, E23, docs/model-catalog.md). */
+function publishedModels(derived: RuntimeModels): {
   readonly models: readonly FleetManifestModel[];
+  readonly modelCatalog?: FleetManifestModelCatalog;
   readonly defaultModel: string | null;
 } {
-  const set = resolved?.modelSet;
-  if (set === undefined || set.source === 'harness-default') return { models: [], defaultModel: null };
   return {
-    models: set.models.map(model =>
-      model.available
-        ? { id: model.id, available: true as const }
-        : { id: model.id, available: false as const, unavailableReason: UNAVAILABLE_MODEL_REASON },
-    ),
-    defaultModel: set.default ?? null,
+    models: derived.models.map(model => {
+      const described = {
+        id: model.id,
+        ...(derived.catalog === undefined ? {} : { displayName: model.label }),
+        ...(model.tier === undefined ? {} : { tier: model.tier }),
+        ...(model.context === undefined ? {} : { context: model.context }),
+        ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
+        ...(derived.catalog === undefined ? {} : { efforts: model.efforts }),
+        ...(model.defaultEffort === undefined ? {} : { defaultEffort: model.defaultEffort }),
+      };
+      return model.available
+        ? { ...described, available: true as const }
+        : { ...described, available: false as const, unavailableReason: UNAVAILABLE_MODEL_REASON };
+    }),
+    ...(derived.catalog === undefined
+      ? {}
+      : {
+          modelCatalog: { id: derived.catalog.id, label: derived.catalog.label, customIds: derived.catalog.customIds },
+        }),
+    defaultModel: derived.default ?? null,
   };
 }
 
@@ -341,11 +367,18 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The launch environment: the credential's, the profile's, the MCP servers' forwarded secrets,
     // then Ferretry's own. A refused variable is a configuration to fix, never silently dropped.
+    const derived = runtimeModels({
+      harness,
+      modelSet: resolved.modelSet,
+      ...(availableModels === undefined ? {} : { availableModels }),
+      ...(input.modelCatalogs === undefined ? {} : loginModelCatalog(credential, harness, input.modelCatalogs)),
+    });
     const profileEnv = Object.fromEntries(
       Object.entries(resolved.env).map(([variable, { value }]) => [variable, value]),
     );
     const env: Record<string, string> = {
       ...credentialLaunchEnvironment(store),
+      ...derived.env,
       ...profileEnv,
       ...adapted.launchEnv,
     };
@@ -375,7 +408,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       fixed?.claudeSettingsOverlay === undefined
         ? []
         : ['--settings', joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), FIXED_SETTINGS_FILE)];
-    const { models, defaultModel } = publishedModels(resolved);
+    const { models, modelCatalog, defaultModel } = publishedModels(derived);
     const blocked = reasons.length === 0 ? undefined : reasons.join('; ');
     operations.push({
       kind: 'file',
@@ -411,6 +444,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       home,
       wrapper,
       models,
+      ...(modelCatalog === undefined ? {} : { modelCatalog }),
       defaultModel,
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
@@ -448,6 +482,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         displayName: runtime.name,
         defaultModel: runtime.defaultModel,
         models: runtime.models,
+        ...(runtime.modelCatalog === undefined ? {} : { modelCatalog: runtime.modelCatalog }),
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,

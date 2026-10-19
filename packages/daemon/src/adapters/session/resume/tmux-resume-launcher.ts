@@ -16,7 +16,15 @@ import type { AgentLaunchWrapper } from '../lifecycle/tmux-session-lifecycle-lau
 export interface ResumeLaunchSpec {
   readonly tmuxSession: string;
   readonly cwd: string;
+  /** The argv the session's document records, ready to replay. */
   readonly command: readonly string[];
+  /**
+   * The argv to relaunch with, BUILT at launch from current settings rather than replayed.
+   *
+   * Asked only by `relaunch`, never by the reads that merely address the pane, because building it
+   * records what it built. Absent means `command` is replayed.
+   */
+  readonly relaunch?: () => Promise<readonly string[]>;
   /**
    * The session's stored environment — its board capability, and any variable a grant delivered.
    *
@@ -124,7 +132,8 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     const account = spec.agent === undefined ? {} : ((await this.accountEnvironment?.forWrapper(spec.agent)) ?? {});
     // Resolve from the CURRENT saved resource-limit document, but never bake the transient wrapper
     // into the durable spec. A later relaunch after disabling must recover the same direct command.
-    const wrapped = (await this.limits?.command(id, spec.command)) ?? spec.command;
+    const command = spec.relaunch === undefined ? spec.command : await spec.relaunch();
+    const wrapped = (await this.limits?.command(id, command)) ?? command;
     const [program, ...arguments_] = wrapped;
     if (program === undefined) throw new Error(`session ${id} has an empty command and cannot be relaunched`);
     // An executable this daemon does not publish is not a fleet account, and a spec with none names

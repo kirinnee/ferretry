@@ -5,6 +5,7 @@ summary: Claude Code through Amazon Bedrock with a Bedrock API key, which skips 
 group: cloud
 docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-16'
+catalog: amazon-bedrock
 unverified:
   - No free read is documented for a Bedrock API key; CountTokens does not support every Claude model.
 env:
@@ -16,16 +17,6 @@ env:
   AWS_BEARER_TOKEN_BEDROCK:
     secretName: AWS_BEARER_TOKEN_BEDROCK
     description: the Bedrock API key
-  ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: us.anthropic.claude-opus-5-5
-    required: false
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: us.anthropic.claude-haiku-4-5-20251001-v1:0
-    required: false
-models:
-  - us.anthropic.claude-opus-5-5
-  - us.anthropic.claude-sonnet-4-6
-  - us.anthropic.claude-haiku-4-5-20251001-v1:0
 test:
   kind: none
   reason: Bedrock documents no free read for an API key, so Ferretry does not spend one to test it. Start an agent on it to check.

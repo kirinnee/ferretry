@@ -3,6 +3,7 @@ import type { SessionView } from '@ferretry/protocol';
 import {
   CLAUDE_EFFORT_LEVELS,
   ClaudeEffortChoices,
+  claudeEffortLevels,
   codexPickerFallbackNeeded,
   effortDisplayName,
   isEffortActionUnsupported,
@@ -650,14 +651,15 @@ describe('RuntimeEffortControls', () => {
     await screen.unmount();
   });
 
-  test('never reads a catalog for a Claude session', async () => {
+  test('reads a Claude session catalog, and offers Claude Code levels when its login has none', async () => {
     let loads = 0;
     const catalogs = source(() => {
       loads += 1;
       return Promise.resolve(claudeCatalog);
     });
     const screen = await mount(<RuntimeEffortControls {...props({ catalogs })} />);
-    expect(loads).toBe(0);
+    expect(loads).toBe(1);
+    expect(byLabel(screen.container, 'Set reasoning effort to xhigh')).toBeDefined();
     await screen.unmount();
   });
 
@@ -966,5 +968,123 @@ describe('popover presentation', () => {
     );
     expect(byLabel(screen.container, 'Set GPT-5.6 reasoning to Medium').textContent).toContain('balanced');
     await screen.unmount();
+  });
+});
+
+/** A GLM login's catalog (docs/model-catalog.md): tiers, a context window, efforts per model, no custom ids. */
+const glmCatalog: RuntimeModelCatalog = {
+  harness: 'claude',
+  source: 'wrapper-inventory',
+  catalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
+  choices: [
+    {
+      value: 'glm-5.3-flash',
+      label: 'GLM-5.3-Flash',
+      tier: 'fast',
+      context: 1_000_000,
+      reasoningEfforts: [],
+    },
+    {
+      value: 'glm-5.3',
+      label: 'GLM-5.3',
+      tier: 'best',
+      context: 1_000_000,
+      isDefault: true,
+      reasoningEfforts: [{ value: 'low' }, { value: 'high' }, { value: 'max' }],
+      defaultReasoningEffort: 'max',
+    },
+  ],
+};
+
+const typeInto = (field: HTMLInputElement, value: string) =>
+  interact(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
+describe('pickers on a login with a model catalog', () => {
+  const modelProps = (overrides: Partial<Parameters<typeof RuntimeModelControls>[0]> = {}) => ({
+    api: recorder().api,
+    canControl: true,
+    catalogs: resolved(glmCatalog),
+    daemon: alpha,
+    newRequestId: nextRequestId,
+    onClose: () => undefined,
+    open: true,
+    view: view({ config: { harness: 'claude', model: 'glm-5.3' } }),
+    ...overrides,
+  });
+
+  test('groups the models by tier, most capable first, with the context window under each', async () => {
+    const screen = await mount(<RuntimeModelControls {...modelProps()} />);
+    const groups = [...screen.container.querySelectorAll('fieldset')].map(group => group.getAttribute('aria-label'));
+    expect(groups).toEqual(['Most capable', 'Fast']);
+    expect(screen.container.textContent).toContain('1M context');
+    expect(screen.container.textContent).not.toContain('Custom id…');
+    await screen.unmount();
+  });
+
+  test('switches to a custom id the person types, and refuses one a pane could not take', async () => {
+    const { api, sent } = recorder();
+    const open = { ...glmCatalog, catalog: { id: 'openrouter', label: 'OpenRouter', customIds: true } };
+    const screen = await mount(<RuntimeModelControls {...modelProps({ api, catalogs: resolved(open) })} />);
+    await click(byText(screen.container, 'Custom id…'));
+    const field = must(
+      screen.container.querySelector<HTMLInputElement>('input[aria-label="Custom model id"]'),
+      'the custom id box',
+    );
+    await typeInto(field, 'two words');
+    expect(screen.container.textContent).toContain('One word');
+    expect(byText(screen.container, 'Switch').disabled).toBe(true);
+    await typeInto(field, '~openai/gpt-sol-latest');
+    await interact(() => field.form?.requestSubmit());
+    expect(sent[0]!.command).toEqual({ action: 'model', model: '~openai/gpt-sol-latest' });
+    await screen.unmount();
+  });
+
+  const effortProps = (overrides: Partial<Parameters<typeof RuntimeEffortControls>[0]> = {}) => ({
+    api: recorder().api,
+    canControl: true,
+    catalogs: resolved(glmCatalog),
+    daemon: alpha,
+    newRequestId: nextRequestId,
+    onClose: () => undefined,
+    view: view(),
+    ...overrides,
+  });
+
+  test('offers only the efforts the model in force takes, and says max is for this session', async () => {
+    const { api, sent } = recorder();
+    const screen = await mount(
+      <RuntimeEffortControls
+        {...effortProps({ api, view: view({ config: { harness: 'claude', model: 'glm-5.3' } }) })}
+      />,
+    );
+    await interact(() => undefined);
+    expect(byLabel(screen.container, 'Set reasoning effort to max')).toBeDefined();
+    expect(
+      buttonsOf(screen.container).some(button => button.getAttribute('aria-label') === 'Set reasoning effort to xhigh'),
+    ).toBe(false);
+    await click(byLabel(screen.container, 'Set reasoning effort to max'));
+    expect(sent[0]!.command).toEqual({ action: 'effort', effort: 'max' });
+    expect(screen.container.textContent).toContain('for this session');
+    await screen.unmount();
+  });
+
+  test('says a model that takes no effort has nothing to set', async () => {
+    const screen = await mount(
+      <RuntimeEffortControls
+        {...effortProps({ view: view({ config: { harness: 'claude', model: 'glm-5.3-flash' } }) })}
+      />,
+    );
+    await interact(() => undefined);
+    expect(screen.container.textContent).toContain('GLM-5.3-Flash takes no reasoning effort');
+    await screen.unmount();
+  });
+
+  test('falls back to Claude Code’s own levels for a model its catalog does not list, and before it answers', () => {
+    expect(claudeEffortLevels(glmCatalog, 'something-else')).toEqual(CLAUDE_EFFORT_LEVELS);
+    expect(claudeEffortLevels(null, 'glm-5.3')).toEqual(CLAUDE_EFFORT_LEVELS);
+    expect(claudeEffortLevels(glmCatalog, 'glm-5.3')).toEqual(['low', 'high', 'max']);
   });
 });

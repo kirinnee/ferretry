@@ -1,0 +1,39 @@
+# Kimi (Moonshot AI) models, for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint).
+label: Kimi / Moonshot
+docs: https://platform.kimi.ai/docs/guide/claude-code-kimi
+verified: '2026-10-18'
+unverified:
+  - Kimi's guide says kimi-k2.7-code always thinks, while its model table says it does not; Ferretry offers no effort choice for it.
+claude:
+  tiers:
+    opus: kimi-k3[1m]
+    sonnet: kimi-k3[1m]
+    haiku: kimi-k2.7-code
+    subagent: kimi-k3[1m]
+  models:
+    - id: kimi-k3
+      suffix: '[1m]'
+      label: Kimi K3
+      tier: best
+      context: 1000000
+      reasoning: true
+      default: true
+    - id: kimi-k2.7-code
+      label: Kimi K2.7 Code
+      tier: fast
+      context: 256000
+      reasoning: true
+    - id: kimi-k2.7-code-highspeed
+      label: Kimi K2.7 Code (high speed)
+      tier: fast
+      context: 256000
+      reasoning: true
+codex:
+  docs: https://platform.kimi.ai/docs/guide/codex-kimi
+  models:
+    - id: kimi-k3
+      label: Kimi K3
+      tier: best
+      context: 1000000
+      reasoning: true
+      default: true

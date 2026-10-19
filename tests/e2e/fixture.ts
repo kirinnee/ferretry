@@ -549,6 +549,8 @@ export class E2eEnvironment {
       FY_E2E_HARNESS_INVOCATIONS: this.paths.harnessInvocations,
       PATH: `${this.paths.bin}${delimiter}${process.env.PATH ?? ''}`,
       NO_COLOR: '1',
+      // A compiled daemon asks GitHub for the latest release at boot; a suite never dials out.
+      FY_UPDATE_CHECK: 'off',
     });
     delete env.TMUX;
     delete env.TMUX_PANE;

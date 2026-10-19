@@ -12,6 +12,7 @@
 import type { LearningScanEstimate, LearningScanRequest, LearningScanScope, SessionView } from '@ferretry/protocol';
 import { ScanSearch, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ModelSelect } from '../../components/model-select.tsx';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -387,21 +388,37 @@ function ScanForm({
               ))}
             </select>
           </label>
-          <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
-            Model
-            <select
-              className="kt-input min-h-[44px]"
-              value={draft.model}
-              onChange={event => update({ model: event.target.value })}
-            >
-              <option value="">Login’s default{login?.defaultModel ? ` (${login.defaultModel})` : ''}</option>
-              {models.map(model => (
-                <option key={model.id} value={model.id}>
-                  {model.id}
-                </option>
-              ))}
-            </select>
-          </label>
+          {login?.modelCatalog === undefined ? (
+            <label className="flex min-w-0 flex-col gap-1 text-meta text-muted">
+              Model
+              <select
+                className="kt-input min-h-[44px]"
+                value={draft.model}
+                onChange={event => update({ model: event.target.value })}
+              >
+                <option value="">Login’s default{login?.defaultModel ? ` (${login.defaultModel})` : ''}</option>
+                {models.map(model => (
+                  <option key={model.id} value={model.id}>
+                    {model.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            // A login with a model catalog (docs/model-catalog.md): its models by tier, the default marked.
+            <div className="flex min-w-0 flex-col gap-1 text-meta text-muted">
+              <label htmlFor={`${formId}-model`}>Model</label>
+              <ModelSelect
+                customIds={login.modelCatalog.customIds}
+                defaultLabel="Login’s default"
+                defaultModel={login.defaultModel}
+                id={`${formId}-model`}
+                models={login.models}
+                onChange={model => update({ model })}
+                value={draft.model}
+              />
+            </div>
+          )}
         </div>
         <ScanEstimate
           problem={typeof scope === 'string' ? scope : null}
