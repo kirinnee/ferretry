@@ -17,16 +17,34 @@ The daemon and `fy` classify the same facts with the same pure function
 the app can never disagree about what a machine is.
 
 The facts are: the path the daemon was **launched as** (what the unit file or `PATH` names), the same
-path with **symbolic links resolved**, the user's home, the platform, the nix profile element that
-holds the resolved store path (from `nix profile list --json`), and whether a system package manager
-owns the file.
+path with **symbolic links resolved**, the **chain of links between the two**, the user's home, the
+platform, the nix profile element that holds a store path on that chain (from `nix profile list
+--json`), and whether a system package manager owns the file.
+
+**Read the chain, not just the end of it.** The `ferretry` flake package is a symlink join:
+`~/.nix-profile/bin/fyd` → `/nix/store/<hash>-ferretry/bin/fyd` → `/nix/store/<hash>-fyd-<version>/bin/fyd`.
+The profile element holds the OUTER path, which the fully resolved file is not under — so an element is
+matched against every store path the launched path passes through, never against the resolved file
+alone. The `home-manager-path` element is home-manager's own generation; it is never "the element".
+
+**How home-manager is told apart from a system install.** home-manager always builds a package
+environment named `<hash>-home-manager-path`, and every executable it installs is linked through it.
+Walking the launched path's links therefore shows it (`passes through home-manager-path`) with no
+`sudo` and no command: a single `readlink` per component. That one fact separates the two things
+`/etc/profiles/per-user/<user>/bin` can be:
+
+- **home-manager inside nix-darwin or NixOS** (`home-manager.useUserPackages = true`): the chain
+  passes through `home-manager-path`. Reported as **home-manager (via nix-darwin|NixOS)**.
+- **a package the system itself puts in the user's profile** (`users.users.<u>.packages`), and
+  anything under `/run/current-system/sw/bin` (`environment.systemPackages`): no `home-manager-path`
+  on the chain. Reported as a **nix-darwin** or **NixOS** module.
 
 | method           | how it is recognised                                                              | update                                                          |
 | ---------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `homebrew`       | the resolved path is under `…/Caskroom/<product>/`                                | **self**: `brew upgrade --cask <product>`, then restart         |
 | `nix-profile`    | a store path reached through the user's nix profile, held by a profile element    | **self**: `nix profile upgrade <element>`, then restart         |
 | `nix-shell`      | the launched path is itself a `/nix/store/…` path (an ephemeral `nix shell`)      | **switch**: offer a nix profile install; never silently         |
-| `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS                    | **manual**: bump the flake input, then switch                   |
+| `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS (see above)        | **manual**: bump the flake input, then switch                   |
 | `system-package` | `dpkg` or `rpm` owns the file (`/usr/bin/<daemon>` from the deb/rpm)              | **manual**: the exact `sudo apt`/`sudo dnf` command             |
 | `standalone`     | a release archive or `install.sh` binary anywhere else                            | **self**: download, verify the signature, swap, keep a rollback |
 | `unknown`        | a development build (`bun …/fyd.ts`) or anything the rules above do not recognise | **manual**: none — said so                                      |
@@ -35,7 +53,10 @@ Two things deliberately do NOT self-update:
 
 - **A home-manager / nix-darwin / NixOS module** is pinned by the flake input in someone's own
   configuration. Changing that pin is changing their configuration, which is theirs. The app shows
-  `nix flake update <input>` and the one switch command for that flavour.
+  `nix flake update <input>` and the one switch command for that flavour. When home-manager runs
+  inside nix-darwin or NixOS the switch is the **system** rebuild (`darwin-rebuild switch --flake .` /
+  `sudo nixos-rebuild switch --flake .`) — there is no separate `home-manager switch`, and the
+  step says so. Standalone home-manager uses `home-manager switch --flake .`.
 - **A deb or rpm** needs `sudo`, and the daemon never asks for root. The app shows the command.
 
 ## Why the nix profile, and never a store path

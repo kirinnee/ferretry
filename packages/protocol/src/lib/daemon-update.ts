@@ -55,11 +55,19 @@ export type SystemPackageManager = z.infer<typeof SystemPackageManagerSchema>;
 export const NixModuleManagerSchema = z.enum(['home-manager', 'nix-darwin', 'nixos']);
 export type NixModuleManager = z.infer<typeof NixModuleManagerSchema>;
 
+/** The system-wide manager that applies a home-manager generation when home-manager runs inside it. */
+export const NixSystemManagerSchema = z.enum(['nix-darwin', 'nixos']);
+export type NixSystemManager = z.infer<typeof NixSystemManagerSchema>;
+
 export const InstallMethodSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('homebrew'), cask: z.string().min(1) }),
   z.strictObject({ kind: z.literal('nix-profile'), element: z.string().min(1) }),
   z.strictObject({ kind: z.literal('nix-shell'), storePath: z.string().min(1) }),
-  z.strictObject({ kind: z.literal('nix-module'), manager: NixModuleManagerSchema }),
+  z.strictObject({
+    kind: z.literal('nix-module'),
+    manager: NixModuleManagerSchema,
+    via: NixSystemManagerSchema.optional(),
+  }),
   z.strictObject({ kind: z.literal('system-package'), manager: SystemPackageManagerSchema }),
   z.strictObject({ kind: z.literal('standalone'), directory: z.string().min(1) }),
   z.strictObject({ kind: z.literal('unknown'), reason: z.string().min(1) }),
@@ -83,6 +91,8 @@ export interface InstallFacts {
   readonly nixProfileElement?: string | undefined;
   /** Whether the user's nix profile is a home-manager generation (`home-manager-path` element). */
   readonly homeManagerProfile?: boolean | undefined;
+  /** Whether the launched path's symbolic-link chain passes through a `home-manager-path` store path. */
+  readonly viaHomeManagerPath?: boolean | undefined;
   /** The system package manager that owns the resolved file (`dpkg -S` / `rpm -qf`), when one does. */
   readonly systemPackage?: SystemPackageManager | undefined;
 }
@@ -123,13 +133,18 @@ export function classifyInstallMethod(facts: InstallFacts): InstallMethod {
       const storePath = launched.slice(0, launched.indexOf('/', STORE_PREFIX.length));
       return { kind: 'nix-shell', storePath };
     }
-    const systemManager: NixModuleManager = facts.platform === 'darwin' ? 'nix-darwin' : 'nixos';
+    const systemManager: NixSystemManager = facts.platform === 'darwin' ? 'nix-darwin' : 'nixos';
+    if (launched.startsWith('/etc/profiles/per-user/') && facts.viaHomeManagerPath === true) {
+      return { kind: 'nix-module', manager: 'home-manager', via: systemManager };
+    }
     if (launched.startsWith('/run/current-system/') || launched.startsWith('/etc/profiles/per-user/')) {
       return { kind: 'nix-module', manager: systemManager };
     }
     if (userProfileRoots(facts.homeDirectory).some(root => launched.startsWith(root))) {
       if (facts.nixProfileElement !== undefined) return { kind: 'nix-profile', element: facts.nixProfileElement };
-      if (facts.homeManagerProfile === true) return { kind: 'nix-module', manager: 'home-manager' };
+      if (facts.homeManagerProfile === true || facts.viaHomeManagerPath === true) {
+        return { kind: 'nix-module', manager: 'home-manager' };
+      }
       return { kind: 'unknown', reason: 'this nix profile has no element for it; it may have come from nix-env' };
     }
     return { kind: 'unknown', reason: `${launched} leads into the Nix store by a path Ferretry does not recognise` };
@@ -158,7 +173,7 @@ export function describeInstallMethod(method: InstallMethod): string {
     case 'nix-shell':
       return `nix shell store path ${method.storePath}`;
     case 'nix-module':
-      return `${method.manager} module`;
+      return method.via === undefined ? `${method.manager} module` : `${method.manager} (via ${method.via}) module`;
     case 'system-package':
       return `${method.manager} package`;
     case 'standalone':
@@ -240,21 +255,37 @@ export function planUpdate(method: InstallMethod, context: UpdatePlanContext): U
         ],
       };
     case 'nix-module': {
+      const switcher = method.via ?? method.manager;
       const switchCommand =
-        method.manager === 'home-manager'
+        switcher === 'home-manager'
           ? 'home-manager switch --flake .'
-          : method.manager === 'nix-darwin'
+          : switcher === 'nix-darwin'
             ? 'darwin-rebuild switch --flake .'
             : 'sudo nixos-rebuild switch --flake .';
+      const inside =
+        method.via === undefined
+          ? 'your home-manager configuration'
+          : `your home-manager configuration, which ${method.via} applies`;
       return {
         kind: 'manual',
-        explanation: `This daemon comes from your ${method.manager} configuration, which pins the version in its flake. Bump the input there, then switch.`,
+        explanation:
+          method.manager === 'home-manager'
+            ? `This daemon comes from ${inside}, which pins the version in its flake. Bump the input there, then switch.`
+            : `This daemon comes from your ${method.manager} configuration, which pins the version in its flake. Bump the input there, then switch.`,
         steps: [
           {
             command: `nix flake update ${context.product}`,
-            note: 'in your configuration flake; the input may have another name',
+            note:
+              method.via === undefined
+                ? 'in your configuration flake; the input may have another name'
+                : 'in the flake that holds your home-manager configuration; the input may have another name',
           },
-          { command: switchCommand },
+          method.via === undefined
+            ? { command: switchCommand }
+            : {
+                command: switchCommand,
+                note: `home-manager is applied by this ${method.via} rebuild; there is no separate home-manager switch`,
+              },
           restart,
         ],
       };
@@ -447,32 +478,89 @@ const NixProfileListSchema = z.looseObject({
   elements: z.union([z.record(z.string(), NixProfileElementSchema), z.array(NixProfileElementSchema)]),
 });
 
-/** What a nix profile says about one resolved executable. */
+/** What a nix profile says about one executable. */
 export interface NixProfileFacts {
-  /** The element whose store paths contain the executable, as `nix profile upgrade` names it. */
+  /** The element whose store paths lead to the executable, as `nix profile upgrade` names it. */
   readonly element?: string | undefined;
   /** Whether the profile is a home-manager generation. */
   readonly homeManager: boolean;
 }
 
+const HOME_MANAGER_PATH = /^\/nix\/store\/[0-9a-z]{32}-home-manager-path(?:\/|$)/u;
+const isHomeManagerPath = (storePath: string): boolean => /-home-manager-path$/u.test(storePath);
+
 /**
- * The profile element holding `resolvedPath`, from `nix profile list --json`.
+ * The profile element that holds the executable, from `nix profile list --json`.
+ *
+ * `candidates` is every store path the launched path leads through — the first hop out of the profile
+ * AND the final resolved file. A package that is itself a symbolic-link join (`<hash>-ferretry/bin/fyd`
+ * → `<hash>-fyd-4.31.0/bin/fyd`) is held by the element under its OUTER path, which the resolved file
+ * is not under. The home-manager element is never "the element": it is what `homeManager` reports.
  *
  * Both shapes Nix has shipped are read: version 3 keys elements by NAME, which is what
  * `nix profile upgrade` takes; version 2 is an array, whose INDEX is what an older `nix profile
  * upgrade` takes. Anything that is not either answers "no element", never a guess.
  */
-export function parseNixProfileList(value: unknown, resolvedPath: string): NixProfileFacts {
+export function parseNixProfileList(value: unknown, candidates: readonly string[]): NixProfileFacts {
   const parsed = NixProfileListSchema.safeParse(value);
   if (!parsed.success) return { homeManager: false };
   const entries: [string, z.infer<typeof NixProfileElementSchema>][] = Array.isArray(parsed.data.elements)
     ? parsed.data.elements.map((element, index) => [String(index), element])
     : Object.entries(parsed.data.elements);
-  const holds = (storePath: string): boolean => resolvedPath === storePath || resolvedPath.startsWith(`${storePath}/`);
-  const element = entries.find(([, entry]) => (entry.storePaths ?? []).some(holds))?.[0];
-  const homeManager = entries.some(
-    ([name, entry]) =>
-      name === 'home-manager-path' || (entry.storePaths ?? []).some(path => /-home-manager-path$/u.test(path)),
-  );
-  return { element, homeManager };
+  const holds = (storePath: string): boolean =>
+    candidates.some(path => path === storePath || path.startsWith(`${storePath}/`));
+  const isHomeManager = ([name, entry]: [string, z.infer<typeof NixProfileElementSchema>]): boolean =>
+    name === 'home-manager-path' || (entry.storePaths ?? []).some(isHomeManagerPath);
+  const element = entries.find(entry => !isHomeManager(entry) && (entry[1].storePaths ?? []).some(holds))?.[0];
+  return { element, homeManager: entries.some(isHomeManager) };
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Reading the symbolic-link chain
+// ---------------------------------------------------------------------------------------------------
+
+/** Link hops are capped at the kernel's own limit, so a loop ends instead of spinning. */
+const MAX_LINK_HOPS = 40;
+
+/**
+ * Every symbolic link met on the way from `path` to the file it names, each as an absolute target.
+ *
+ * `readLink` answers a link's target, or `undefined` when the path is not a link (or is not there):
+ * the filesystem stays the adapter's, so this stays pure. Directory links count — `~/.nix-profile/bin`
+ * is often itself a link into a store path — so the walk goes component by component.
+ */
+export async function symlinkHops(
+  path: string,
+  readLink: (path: string) => Promise<string | undefined>,
+): Promise<readonly string[]> {
+  const hops: string[] = [];
+  let pending = path.split('/').filter(part => part !== '');
+  let resolved = '';
+  while (pending.length > 0 && hops.length < MAX_LINK_HOPS) {
+    const [name = '', ...rest] = pending;
+    pending = rest;
+    if (name === '.') continue;
+    if (name === '..') {
+      resolved = parentDirectory(resolved) === '/' ? '' : parentDirectory(resolved);
+      continue;
+    }
+    const candidate = `${resolved}/${name}`;
+    const target = await readLink(candidate);
+    if (target === undefined) {
+      resolved = candidate;
+      continue;
+    }
+    const absolute = target.startsWith('/') ? target : `${resolved}/${target}`;
+    hops.push(absolute);
+    pending = [...absolute.split('/').filter(part => part !== ''), ...pending];
+    resolved = '';
+  }
+  return hops;
+}
+
+/** The store paths a link chain leads through, in order. */
+export const storePathHops = (hops: readonly string[]): readonly string[] => hops.filter(isStorePath);
+
+/** Whether a link chain passes through a `home-manager-path` store path — home-manager's own generation. */
+export const passesThroughHomeManagerPath = (hops: readonly string[]): boolean =>
+  hops.some(hop => HOME_MANAGER_PATH.test(hop));
