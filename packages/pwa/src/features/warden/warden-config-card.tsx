@@ -20,6 +20,7 @@ import type {
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { type PickerAccount, readAccountPickerCatalog } from '../../lib/account-picker-catalog.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { useConfigChangeEffect, useDaemonClient } from '../../lib/store.tsx';
@@ -48,6 +49,8 @@ export interface WardenConfigCardProps {
   readonly onChange: (next: WardenConfig) => void;
   readonly jevKey: JevKeyStatus;
   readonly loginOptions?: readonly WardenAccount[];
+  /** The runtimes and their models, for the model field (docs/model-catalog.md). */
+  readonly runtimes?: readonly PickerAccount[];
   readonly speedupsHref?: string;
   readonly onNavigate?: (to: string) => void;
   readonly saving?: boolean;
@@ -62,6 +65,7 @@ export function WardenConfigCard({
   onChange,
   jevKey,
   loginOptions = [],
+  runtimes = [],
   speedupsHref,
   onNavigate,
   saving = false,
@@ -80,6 +84,7 @@ export function WardenConfigCard({
         jevKey={jevKey}
         errors={errors}
         loginOptions={loginOptions}
+        runtimes={runtimes}
         {...(view.login === undefined ? {} : { login: view.login })}
         {...(wardenMachineDefaultLogin(view) === undefined ? {} : { machineDefault: wardenMachineDefaultLogin(view) })}
         {...(speedupsHref === undefined ? {} : { speedupsHref })}
@@ -138,6 +143,8 @@ interface Loaded {
   readonly draft: WardenConfig;
   readonly jevKey: JevKeyStatus;
   readonly loginOptions: readonly WardenAccount[];
+  /** The runtimes and the models each offers (docs/model-catalog.md), for the model field; empty when unread. */
+  readonly runtimes: readonly PickerAccount[];
 }
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
@@ -173,10 +180,15 @@ export function WardenConfigSurface({
     setLoadFailure(null);
     void createClient(connection)
       .then(async client => {
-        const [view, status, speedups] = await Promise.all([
+        const [view, status, speedups, runtimes] = await Promise.all([
           client.wardenConfig(),
           client.wardenStatus().catch(() => null),
           readSpeedups(client).catch(() => null),
+          // The model field lists the chosen login's catalog; without the list it is a plain text box.
+          readAccountPickerCatalog(client).then(
+            catalog => catalog.accounts,
+            () => [],
+          ),
         ]);
         if (!current) return;
         setLoaded({
@@ -190,6 +202,7 @@ export function WardenConfigSurface({
           loginOptions: (view.login?.available ?? status?.failover?.accounts.map(account => account.agent) ?? []).map(
             agent => ({ agent }),
           ),
+          runtimes,
         });
       })
       .catch(() => {
@@ -262,6 +275,7 @@ export function WardenConfigSurface({
       }}
       jevKey={loaded.jevKey}
       loginOptions={loaded.loginOptions}
+      runtimes={loaded.runtimes}
       speedupsHref={`${daemonSettingsPath(connection.daemonId)}#speedups`}
       {...(onNavigate === undefined ? {} : { onNavigate })}
       saving={saving}

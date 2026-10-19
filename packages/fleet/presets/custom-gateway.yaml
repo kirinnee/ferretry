@@ -5,6 +5,7 @@ summary: Claude Code through any gateway that speaks the Anthropic Messages API.
 group: self-hosted
 docs: https://code.claude.com/docs/en/llm-gateway
 verified: '2026-10-16'
+catalog: gateway
 env:
   ANTHROPIC_BASE_URL:
     value: ''
@@ -18,7 +19,6 @@ env:
   ANTHROPIC_MODEL:
     value: ''
     required: false
-models: []
 test:
   kind: request
   url: '{ANTHROPIC_BASE_URL}/v1/models'

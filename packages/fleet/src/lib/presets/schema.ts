@@ -188,6 +188,14 @@ export const ProviderPresetFileSchema = z
       .optional(),
     test: PresetTestSchema,
     quota: z.strictObject({ source: ProviderQuotaSourceSchema, note: Text }),
+    /**
+     * The model catalog (`../models/`) a login made from it offers and pins Claude Code's tier slots
+     * from, by id. Read at apply time, so a login follows the catalog as it changes.
+     */
+    catalog: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{0,63}$/u)
+      .optional(),
     /** The pricing table equivalent cost is computed from, by name, when there is one. */
     pricing: z.string().min(1).max(64).optional(),
     /** Set when the preset cannot be used to add a login: why, and what to use instead. */
@@ -299,6 +307,7 @@ export interface ProviderPreset {
   readonly cloudCredential?: ProviderPresetFile['cloudCredential'];
   readonly test: PresetTest;
   readonly quota: ProviderPresetFile['quota'];
+  readonly catalog?: string;
   readonly pricing?: string;
   readonly unavailable?: string;
   readonly detect: PresetDetect;
@@ -345,6 +354,7 @@ export function presetFromFile(id: string, file: ProviderPresetFile, origin: Pro
     ...(file.cloudCredential === undefined ? {} : { cloudCredential: file.cloudCredential }),
     test: file.test,
     quota: file.quota,
+    ...(file.catalog === undefined ? {} : { catalog: file.catalog }),
     ...(file.pricing === undefined ? {} : { pricing: file.pricing }),
     ...(unavailable === undefined ? {} : { unavailable }),
     detect: file.detect ?? { hosts: [], variables: [], keyPrefixes: [] },

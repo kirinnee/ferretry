@@ -1,6 +1,7 @@
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
+import { asModelTier, type ModelTier } from './model-tiers.ts';
 
 export interface RuntimeReasoningChoice {
   readonly value: string;
@@ -11,6 +12,10 @@ export interface RuntimeModelChoice {
   readonly value: string;
   readonly label: string;
   readonly description?: string;
+  /** Where the login's model catalog puts it (docs/model-catalog.md). */
+  readonly tier?: ModelTier;
+  /** The context window, in tokens. */
+  readonly context?: number;
   readonly isDefault?: boolean;
   readonly reasoningEfforts: readonly RuntimeReasoningChoice[];
   readonly defaultReasoningEffort?: string;
@@ -20,6 +25,11 @@ export interface RuntimeModelCatalog {
   readonly harness: 'claude' | 'codex';
   readonly source: 'wrapper-inventory' | 'codex-app-server';
   readonly choices: readonly RuntimeModelChoice[];
+  /**
+   * The login's model catalog, when it reads one: each choice's `reasoningEfforts` is then what that
+   * model takes (empty means none), and `customIds` lets the picker offer "Custom id…".
+   */
+  readonly catalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
 }
 
 export class DaemonResponseError extends Error {
@@ -93,16 +103,30 @@ export const parseRuntimeModelCatalog = (value: unknown): RuntimeModelCatalog =>
     }
     const description = asNonEmptyString(choice.description);
     const defaultReasoningEffort = asNonEmptyString(choice.defaultReasoningEffort);
+    const tier = asModelTier(choice.tier);
+    const context = typeof choice.context === 'number' && choice.context > 0 ? choice.context : undefined;
     choices.push({
       value: model,
       label,
       ...(description ? { description } : {}),
+      ...(tier ? { tier } : {}),
+      ...(context ? { context } : {}),
       ...(choice.isDefault === true ? { isDefault: true } : {}),
       reasoningEfforts,
       ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     });
   }
-  return { harness, source, choices };
+  const rawCatalog = asObject(root.catalog);
+  const catalogId = asNonEmptyString(rawCatalog?.id);
+  const catalogLabel = asNonEmptyString(rawCatalog?.label);
+  return {
+    harness,
+    source,
+    choices,
+    ...(catalogId && catalogLabel
+      ? { catalog: { id: catalogId, label: catalogLabel, customIds: rawCatalog?.customIds === true } }
+      : {}),
+  };
 };
 
 export const requireRuntimeModelCatalogHarness = (

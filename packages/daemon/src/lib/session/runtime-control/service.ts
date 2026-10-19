@@ -187,7 +187,9 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     const choices = await this.ports.catalog.get(launch.agent, launch.cwd).catch((error: unknown) => {
       throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
     });
-    return codexRuntimeCatalog(choices);
+    // The catalog only describes what the app-server advertised; an account it cannot find adds nothing.
+    const published = await this.ports.accounts.accounts().catch(() => []);
+    return codexRuntimeCatalog(choices, findAccountByAgent(published, current.config.agent));
   }
 
   /** Types one native command, and refuses if the harness read it as a turn instead of a command. */
@@ -268,11 +270,15 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     }
 
     const wanted = switchRequest(current, request);
+    const account = current.config.harness === 'codex' ? undefined : await this.#accountFor(current.config.agent);
     const plan = this.ports.harness.planSwitch(wanted, {
       wrapper: current.config.agent,
-      ...(current.config.harness === 'codex'
+      ...(account === undefined
         ? {}
-        : { allowedModels: servableModels(await this.#accountFor(current.config.agent)).map(model => model.id) }),
+        : {
+            allowedModels: servableModels(account).map(model => model.id),
+            ...(account.modelCatalog?.customIds === true ? { acceptsCustomModels: true } : {}),
+          }),
       ...(needsLiveCatalog(wanted) ? { catalog: codexSwitchContext(await this.#catalogFor(id)) } : {}),
     });
 

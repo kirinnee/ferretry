@@ -1,0 +1,29 @@
+# A gateway you run (LiteLLM, or any Anthropic-compatible proxy) serves the names it is configured with.
+# These are Anthropic's model ids, which a gateway in front of Claude usually keeps; type any other.
+label: Your gateway
+docs: https://code.claude.com/docs/en/llm-gateway
+verified: '2026-10-18'
+unverified:
+  - A gateway serves whatever names its owner configured; these are Anthropic's ids, which a gateway may rename.
+customIds: true
+claude:
+  models:
+    - id: claude-opus-5-5
+      label: Opus 5.5
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+    - id: claude-sonnet-5-5
+      label: Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+      default: true
+    - id: claude-haiku-5-5
+      label: Haiku 5.5
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

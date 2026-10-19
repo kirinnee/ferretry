@@ -523,6 +523,7 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  ModelCatalogService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -713,7 +714,7 @@ import {
   wardenEventTrigger,
   wardenTriggerEnabled,
 } from '../src/lib/index.ts';
-import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
+import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
@@ -4080,6 +4081,11 @@ function createConfigFilesSubsystem(input: {
   readonly agentControl: AgentControlPolicy;
   readonly identities: CredentialAgentIdentities;
   readonly notices: BootNoticePort;
+  /**
+   * Run after the first load and after every change: the fleet is republished when a model catalog
+   * moved what its runtimes offer (docs/model-catalog.md). It must never throw.
+   */
+  readonly afterLoad?: () => Promise<void>;
 }): MountedSubsystems['configFiles'] {
   return {
     service: input.service,
@@ -4088,10 +4094,12 @@ function createConfigFilesSubsystem(input: {
     arm: async () => {
       await input.service.load();
       await input.service.publishSchemas(configJsonSchemaFiles());
+      await input.afterLoad?.();
       return watchConfigFiles({
         fingerprint: async () => await input.service.fingerprint(),
         onChange: async () => {
           await input.service.load();
+          await input.afterLoad?.();
         },
         onError: error =>
           input.notices.state(`config watcher: ${error instanceof Error ? error.message : String(error)}`),
@@ -6704,8 +6712,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Environment logins (docs/provider-presets.md): the built-in provider presets with this machine's
       // own preset files laid over them, and a Test that spends a login's key once through the outbound
       // holder above — never handed a value, and only to where the login itself sends that key.
-      const providerPresets = new ProviderPresetService({
-        presets: async () => (await configFiles.load()).evaluation.effective.presets,
+      const providerPresets = new ProviderPresetService(
+        { presets: async () => (await configFiles.load()).evaluation.effective.presets },
+        undefined,
+        async () => await modelCatalogService.catalogs(),
+      );
+      // Model catalogs (docs/model-catalog.md): this build's, then this machine's own
+      // config/models/<id>.yaml over them. What every runtime on a login offers and pins.
+      const modelCatalogService = new ModelCatalogService({
+        files: async () => (await configFiles.load()).evaluation.effective.modelCatalogs,
+        presets: async () => await providerPresets.presets(),
       });
       const providerProbe = new ProviderProbeService({
         probe: new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport()),
@@ -6761,21 +6777,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
-      const fleetCatalogDeps = fileFleetCatalogDeps({
-        paths,
-        userHome,
-        ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-        sessionStates: async () =>
-          await Promise.all(
-            storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
-          ),
-        credentials: fleetCredentials,
-        locate: locateHarness,
-        machineName: () => hostname(),
-        clientName: CLIENT_NAME,
-        config: configFiles,
-        configDirectory: paths.config,
-      });
+      const fleetCatalogDeps = {
+        ...fileFleetCatalogDeps({
+          paths,
+          userHome,
+          ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
+          sessionStates: async () =>
+            await Promise.all(
+              storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
+            ),
+          credentials: fleetCredentials,
+          locate: locateHarness,
+          machineName: () => hostname(),
+          clientName: CLIENT_NAME,
+          config: configFiles,
+          configDirectory: paths.config,
+        }),
+        modelCatalogs: async () => await modelCatalogService.sources(),
+        publishedManifest: async () => await publishedManifest(),
+      };
       /**
        * First-run import, Import again, tool install, and the Clone export and import
        * (docs/design/account-model.md §4.3, §4.7). A package manager runs only inside an install
@@ -6954,6 +6974,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         createSessionTranscriptTail(storage),
         clock,
       );
+      // The catalogue runs the setup service's import and clone as two of its reviewed changes.
+      const fleetCatalog = new FleetCatalogService({
+        ...fleetCatalogDeps,
+        executors: fleetSetup.executors,
+        presets: async () => await providerPresets.presets(),
+      });
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -7000,12 +7026,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return await fleetCredentials.list();
           },
         },
-        // The catalogue runs the setup service's import and clone as two of its reviewed changes.
-        fleetCatalog: createFleetCatalogSubsystem({
-          ...fleetCatalogDeps,
-          executors: fleetSetup.executors,
-          presets: async () => await providerPresets.presets(),
-        }),
+        fleetCatalog,
         // Unit M's rebase target: the same single reader every other in-process consumer of this
         // document shares, so this never disagrees with what the catalogue or a start just read.
         agentControl,
@@ -7228,6 +7249,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           agentControl,
           identities: agentIdentities(storage),
           notices: bootNotices,
+          // A build with newer built-in model catalogs, or a config/models/ file edited, moves every
+          // runtime's models, defaults and tier pins now rather than at the next change somebody makes.
+          // No configuration file is written, and an identical manifest is left alone.
+          afterLoad: async () => {
+            await fleetCatalog.republish().then(
+              outcome => {
+                if (outcome === 'applied')
+                  bootNotices.state('model catalogs moved what runtimes offer; fleet republished');
+              },
+              (error: unknown) =>
+                bootNotices.state(
+                  `could not republish the fleet for its model catalogs: ${error instanceof Error ? error.message : String(error)}`,
+                ),
+            );
+          },
         }),
         names: createNameSubsystem(storage),
         learning,

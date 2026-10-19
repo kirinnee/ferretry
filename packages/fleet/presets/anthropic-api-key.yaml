@@ -5,11 +5,11 @@ summary: Claude Code with an API key from the Claude Platform console, billed pe
 group: popular
 docs: https://code.claude.com/docs/en/model-config
 verified: '2026-10-16'
+catalog: anthropic
 env:
   ANTHROPIC_API_KEY:
     secretName: ANTHROPIC_API_KEY
     description: the API key, sent as x-api-key
-models: [opus, sonnet, haiku]
 test:
   kind: request
   url: https://api.anthropic.com/v1/models

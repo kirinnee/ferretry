@@ -4,6 +4,7 @@ harness: claude
 summary: Claude Code through the Vercel AI Gateway, which lists the gateway's models in the model picker.
 docs: https://vercel.com/docs/ai-gateway/coding-agents/claude-code
 verified: '2026-10-16'
+catalog: vercel-ai-gateway
 unverified:
   - The credits address the Test and usage read was found in search results, not read in Vercel's documentation.
 env:
@@ -18,7 +19,6 @@ env:
   CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:
     value: '1'
     required: false
-models: [claude-code/anthropic/claude-opus-5]
 test:
   kind: request
   url: https://ai-gateway.vercel.sh/v1/credits

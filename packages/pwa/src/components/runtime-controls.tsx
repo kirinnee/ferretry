@@ -48,6 +48,7 @@ import {
   type RuntimeModelChoice,
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
+import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '../lib/model-tiers.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import { launchedModel, type RuntimeSwitchLifecycle } from './composer-runtime.tsx';
 
@@ -57,7 +58,20 @@ import { launchedModel, type RuntimeSwitchLifecycle } from './composer-runtime.t
  * deliberately absent — this surface only offers what persists as a default.
  */
 export const CLAUDE_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh'] as const;
-export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
+
+/**
+ * The effort levels a Claude session's model in force takes: what its login's model catalog says
+ * that model takes (empty means none) when the login reads one, Claude Code's own levels otherwise —
+ * and before the catalog has answered.
+ */
+export const claudeEffortLevels = (
+  catalog: RuntimeModelCatalog | null,
+  model: string | undefined,
+): readonly string[] => {
+  if (catalog?.catalog === undefined) return CLAUDE_EFFORT_LEVELS;
+  const choice = catalog.choices.find(entry => entry.value === model);
+  return choice === undefined ? CLAUDE_EFFORT_LEVELS : choice.reasoningEfforts.map(effort => effort.value);
+};
 
 /** What the component asks a daemon to do. The host adapter turns this into the
  *  protocol request; keeping it structural is what lets the same body drive both
@@ -426,6 +440,11 @@ export function RuntimeModelControls({
             if (config.harness === 'codex') setSelectedCodexModel(choice);
             else void runModelCommand(choice.value);
           }}
+          onCustom={
+            config.harness === 'claude' && catalog?.catalog?.customIds === true
+              ? model => void runModelCommand(model)
+              : undefined
+          }
           presentation={presentation}
           submittingModel={submittingTarget?.model}
         />
@@ -518,8 +537,21 @@ export interface RuntimeChoiceItem {
   readonly detail?: string;
   /** The catalog's own one-line description, when it has one. */
   readonly description?: string;
+  /** The heading of the group it is listed under (a model catalog's tier); items of one group are adjacent. */
+  readonly group?: string;
   readonly onSelect: () => void;
 }
+
+/** Adjacent items under one heading, in order; one headless run when no item has a group. */
+const menuGroups = (items: readonly RuntimeChoiceItem[]): readonly { group?: string; items: RuntimeChoiceItem[] }[] => {
+  const groups: { group?: string; items: RuntimeChoiceItem[] }[] = [];
+  for (const item of items) {
+    const last = groups[groups.length - 1];
+    if (last !== undefined && last.group === item.group) last.items.push(item);
+    else groups.push({ ...(item.group === undefined ? {} : { group: item.group }), items: [item] });
+  }
+  return groups;
+};
 
 export interface RuntimeChoiceMenuProps {
   readonly ariaLabel: string;
@@ -598,45 +630,56 @@ export function RuntimeChoiceMenu({ ariaLabel, items, disabled, presentation = '
       ref={listRef}
       role="menu"
     >
-      {items.map(item => (
-        <button
-          aria-busy={item.pending || undefined}
-          aria-checked={item.checked}
-          aria-label={item.ariaLabel}
-          className={cn(
-            'flex w-full items-center gap-sm rounded-control px-cell-x text-left',
-            dense ? 'min-h-[34px] py-1' : 'min-h-[44px] py-1.5',
-            'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-            'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
-            item.checked ? 'text-fg' : 'text-fg-soft',
-          )}
-          disabled={disabled}
-          key={item.key}
-          onClick={item.onSelect}
-          onFocus={() => setActiveKey(item.key)}
-          role="menuitemradio"
-          tabIndex={item.key === stop ? 0 : -1}
-          title={item.description}
-          type="button"
-        >
-          <span aria-hidden="true" className="flex w-4 shrink-0 justify-center text-accent">
-            {item.checked ? <Check size={14} /> : null}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-sm">
-              <span className="truncate font-semibold text-ui">{item.label}</span>
-              {item.badge ? <span className="kt-label shrink-0">{item.badge}</span> : null}
-              {item.detail ? (
-                <span className="mono ml-auto min-w-0 truncate text-meta text-muted">{item.detail}</span>
+      {menuGroups(items).map(({ group, items: grouped }) => {
+        const buttons = grouped.map(item => (
+          <button
+            aria-busy={item.pending || undefined}
+            aria-checked={item.checked}
+            aria-label={item.ariaLabel}
+            className={cn(
+              'flex w-full items-center gap-sm rounded-control px-cell-x text-left',
+              dense ? 'min-h-[34px] py-1' : 'min-h-[44px] py-1.5',
+              'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+              item.checked ? 'text-fg' : 'text-fg-soft',
+            )}
+            disabled={disabled}
+            key={item.key}
+            onClick={item.onSelect}
+            onFocus={() => setActiveKey(item.key)}
+            role="menuitemradio"
+            tabIndex={item.key === stop ? 0 : -1}
+            title={item.description}
+            type="button"
+          >
+            <span aria-hidden="true" className="flex w-4 shrink-0 justify-center text-accent">
+              {item.checked ? <Check size={14} /> : null}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex min-w-0 items-center gap-sm">
+                <span className="truncate font-semibold text-ui">{item.label}</span>
+                {item.badge ? <span className="kt-label shrink-0">{item.badge}</span> : null}
+                {item.detail ? (
+                  <span className="mono ml-auto min-w-0 truncate text-meta text-muted">{item.detail}</span>
+                ) : null}
+              </span>
+              {item.description ? (
+                <span className="block truncate text-meta text-muted leading-base">{item.description}</span>
               ) : null}
             </span>
-            {item.description ? (
-              <span className="block truncate text-meta text-muted leading-base">{item.description}</span>
-            ) : null}
-          </span>
-          {item.pending ? <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} /> : null}
-        </button>
-      ))}
+            {item.pending ? <LoaderCircle aria-hidden="true" className="shrink-0 animate-spin" size={15} /> : null}
+          </button>
+        ));
+        if (group === undefined) return buttons;
+        return (
+          <fieldset aria-label={group} className="m-0 grid min-w-0 gap-px border-0 p-0" key={group}>
+            <div aria-hidden="true" className="kt-label px-cell-x pt-1.5 pb-0.5">
+              {group}
+            </div>
+            {buttons}
+          </fieldset>
+        );
+      })}
     </div>
   );
 }
@@ -649,6 +692,8 @@ export interface RuntimeModelChoicesProps {
   readonly submittingModel?: string;
   readonly disabled: boolean;
   readonly onChoose: (model: RuntimeModelChoice) => void;
+  /** Offered when the login's provider takes ids beyond its catalog: sends the typed id. */
+  readonly onCustom?: ((model: string) => void) | undefined;
   readonly presentation?: RuntimePickerPresentation;
 }
 
@@ -660,6 +705,7 @@ export function RuntimeModelChoices({
   error,
   harness,
   onChoose,
+  onCustom,
   presentation = 'sheet',
   submittingModel,
 }: RuntimeModelChoicesProps) {
@@ -700,23 +746,90 @@ export function RuntimeModelChoices({
       <RuntimeChoiceMenu
         ariaLabel={`Switch ${harness} model in place`}
         disabled={disabled}
-        items={choices.map(choice => {
-          const current = choice.value === currentModel;
-          return {
-            key: choice.value,
-            label: choice.label,
-            ariaLabel: `Switch model in place to ${choice.label}${current ? ', current' : ''}`,
-            checked: current,
-            pending: choice.value === submittingModel,
-            ...(!current && choice.isDefault ? { badge: 'Default' } : {}),
-            ...(choice.label === choice.value ? {} : { detail: choice.value }),
-            ...(choice.description ? { description: choice.description } : {}),
-            onSelect: () => onChoose(choice),
-          };
-        })}
+        items={groupByTier(choices).flatMap(group =>
+          group.items.map(choice => {
+            const current = choice.value === currentModel;
+            const description = choice.description ?? contextWords(choice.context);
+            return {
+              key: choice.value,
+              label: choice.label,
+              ariaLabel: `Switch model in place to ${choice.label}${current ? ', current' : ''}`,
+              checked: current,
+              pending: choice.value === submittingModel,
+              ...(group.heading === undefined ? {} : { group: group.heading }),
+              ...(!current && choice.isDefault ? { badge: 'Default' } : {}),
+              ...(choice.label === choice.value ? {} : { detail: choice.value }),
+              ...(description ? { description } : {}),
+              onSelect: () => onChoose(choice),
+            };
+          }),
+        )}
         presentation={presentation}
       />
+      {onCustom ? <CustomModelForm disabled={disabled} onSubmit={onCustom} presentation={presentation} /> : null}
     </div>
+  );
+}
+
+/**
+ * "Custom id…": for a login whose provider serves ids beyond its catalog (docs/model-catalog.md). The
+ * id is checked as one word a CLI takes after `/model` before it is sent; the daemon checks it again.
+ */
+export function CustomModelForm({
+  disabled,
+  onSubmit,
+  presentation = 'sheet',
+}: {
+  readonly disabled: boolean;
+  readonly onSubmit: (model: string) => void;
+  readonly presentation?: RuntimePickerPresentation;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const id = value.trim();
+  const valid = CUSTOM_MODEL_ID.test(id);
+  const dense = presentation === 'popover';
+  if (!open)
+    return (
+      <button
+        className={cn(
+          'mt-1 flex w-full items-center rounded-control px-cell-x text-left text-fg-soft text-ui hover:bg-surface-2',
+          dense ? 'min-h-[34px]' : 'min-h-[44px]',
+        )}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+        type="button"
+      >
+        <span className="w-4 shrink-0" />
+        <span className="pl-sm">Custom id…</span>
+      </button>
+    );
+  return (
+    <form
+      className="mt-1 flex flex-wrap items-center gap-sm border-border-soft border-t px-cell-x pt-2"
+      onSubmit={event => {
+        event.preventDefault();
+        if (valid) onSubmit(id);
+      }}
+    >
+      <input
+        aria-describedby={id.length > 0 && !valid ? 'custom-model-id-problem' : undefined}
+        aria-label="Custom model id"
+        className="kt-input mono min-h-[36px] min-w-0 flex-1"
+        onChange={event => setValue(event.target.value)}
+        placeholder="provider/model-id"
+        spellCheck={false}
+        value={value}
+      />
+      <button className="kt-btn min-h-[36px]" disabled={disabled || !valid} type="submit">
+        Switch
+      </button>
+      {id.length > 0 && !valid ? (
+        <p className="m-0 w-full text-err text-meta" id="custom-model-id-problem">
+          One word: letters, digits and . _ : ~ / @ + - (a context suffix such as [1m] is fine).
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -836,14 +949,28 @@ export function RuntimeReasoningChoices({
 export function ClaudeEffortChoices({
   current,
   disabled,
+  levels = CLAUDE_EFFORT_LEVELS,
+  model,
   onChoose,
   presentation = 'sheet',
 }: {
   readonly current?: string | undefined;
   readonly disabled: boolean;
-  readonly onChoose: (level: ClaudeEffortLevel) => void;
+  /** The levels the model in force takes, from its login's model catalog; Claude Code's own when it has none. */
+  readonly levels?: readonly string[];
+  /** The model in force, named when it takes no effort at all. */
+  readonly model?: string | undefined;
+  readonly onChoose: (level: string) => void;
   readonly presentation?: RuntimePickerPresentation | undefined;
 }) {
+  if (levels.length === 0)
+    return (
+      <p
+        className={cn('text-meta text-muted leading-base', presentation === 'popover' ? 'm-0 px-cell-x py-1' : 'mt-3')}
+      >
+        {model ?? 'This model'} takes no reasoning effort, so there is nothing to set.
+      </p>
+    );
   return (
     <div className={presentation === 'popover' ? undefined : 'mt-3'}>
       {presentation === 'popover' ? null : (
@@ -855,7 +982,7 @@ export function ClaudeEffortChoices({
       <RuntimeChoiceMenu
         ariaLabel="Set Claude reasoning effort"
         disabled={disabled}
-        items={CLAUDE_EFFORT_LEVELS.map(level => ({
+        items={levels.map(level => ({
           key: level,
           label: effortDisplayName(level),
           ariaLabel: `Set reasoning effort to ${level}`,
@@ -908,7 +1035,7 @@ export function RuntimeEffortControls({
     catalogs,
     daemon,
     config.id,
-    canControl && !terminal && config.harness === 'codex',
+    canControl && !terminal,
     config.harness,
   );
 
@@ -924,6 +1051,7 @@ export function RuntimeEffortControls({
 
   const runningModel = runtimeModelInForce(view);
   const currentCodexModel = catalog?.choices.find(choice => choice.value === runningModel);
+  const claudeLevels = claudeEffortLevels(catalog, runningModel);
   const codexPickerFallback =
     config.harness === 'codex' && codexPickerFallbackNeeded(catalog, catalogError, currentCodexModel, true);
 
@@ -936,7 +1064,11 @@ export function RuntimeEffortControls({
     try {
       await api.runtime(daemon, config.id, { action: 'effort', effort: level }, newRequestId());
       onClaudeEffortSent?.(level);
-      setNotice(`Effort set to ${level}. Saved as this account’s default for new sessions, and the next turn uses it.`);
+      setNotice(
+        level === 'max'
+          ? 'Effort set to max for this session. Claude Code does not save max as a default; the next turn uses it.'
+          : `Effort set to ${level}. Saved as this account’s default for new sessions, and the next turn uses it.`,
+      );
     } catch (cause) {
       if (isRuntimeEndpointUnavailable(cause) || isEffortActionUnsupported(cause)) {
         setRuntimeControlUnavailable(true);
@@ -1036,6 +1168,8 @@ export function RuntimeEffortControls({
         <ClaudeEffortChoices
           current={claudeEffort}
           disabled={submitting || promptRefused}
+          levels={claudeLevels}
+          model={currentCodexModel?.label ?? runningModel}
           onChoose={level => void runEffortCommand(level)}
           presentation={presentation}
         />

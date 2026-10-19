@@ -735,3 +735,43 @@ describe('a picker drive that failed part way', () => {
     });
   });
 });
+
+describe('a login with a model catalog (docs/model-catalog.md)', () => {
+  it('should switch a Claude session to a typed id when its login takes any id', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({ views: [CLAUDE_VIEW(), CLAUDE_VIEW()] });
+    const accounts = new FakeAccounts([
+      account({ modelCatalog: { id: 'openrouter', label: 'OpenRouter', customIds: true } }),
+    ]) as never;
+    const { subject, injector } = subjectWith({ repository, accounts });
+
+    // Act
+    await subject.control('s1', { action: 'model', model: '~openai/gpt-sol-latest' }, 'req-1');
+
+    // Assert
+    should(injector.delivered).deepEqual([['fy-s1', '/model ~openai/gpt-sol-latest']]);
+  });
+
+  it("should give a Codex session's advertised models their catalog tier, and nothing when no account is found", async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({ views: [CODEX_VIEW(), CODEX_VIEW()] });
+    const catalog = catalogCache(async () => [{ value: 'gpt-6.1-sol', label: 'sol', reasoningEfforts: [] }]);
+    const described = new FakeAccounts([
+      account({
+        agent: 'codex-auto',
+        models: [{ id: 'gpt-6.1-sol', displayName: 'GPT-6.1 Sol', tier: 'balanced', available: true }],
+        modelCatalog: { id: 'openai', label: 'OpenAI', customIds: false },
+      }),
+    ]) as never;
+    const broken = new FakeAccounts(new Error('manifest unreadable')) as never;
+
+    // Act
+    const answer = await subjectWith({ repository, catalog, accounts: described }).subject.models('s1');
+    const plain = await subjectWith({ repository, catalog, accounts: broken }).subject.models('s1');
+
+    // Assert
+    should(answer.choices[0]).match({ label: 'GPT-6.1 Sol', tier: 'balanced' });
+    should(answer.catalog?.id).equal('openai');
+    should(plain.choices[0]).deepEqual({ value: 'gpt-6.1-sol', label: 'sol', reasoningEfforts: [] });
+  });
+});

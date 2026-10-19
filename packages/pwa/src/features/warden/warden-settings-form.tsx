@@ -18,7 +18,6 @@ import {
   WARDEN_SWEEP_INTERVALS,
   type WardenAccount,
   type WardenConfig,
-  type WardenEffort,
   type WardenEventTrigger,
   type WardenLogin,
   type WardenMayActAlone,
@@ -27,6 +26,8 @@ import {
 import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 
+import { ModelSelect } from '../../components/model-select.tsx';
+import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 import { cn } from '../../lib/class-names.ts';
 import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -35,6 +36,7 @@ import {
   movedAccount,
   WARDEN_FORM_LIMITS,
   type WardenFormErrors,
+  wardenEfforts,
   wardenSummary,
   withLogin,
 } from './warden-settings-model.ts';
@@ -46,6 +48,8 @@ export interface WardenSettingsFormProps {
   readonly errors: WardenFormErrors;
   /** Logins the owner may pick for investigations, beyond those already in the failover order. */
   readonly loginOptions?: readonly WardenAccount[];
+  /** The runtimes and the models each offers (docs/model-catalog.md): the model field lists the chosen login's. */
+  readonly runtimes?: readonly PickerAccount[];
   /** Where the daemon says the login comes from, and which named logins this machine lacks. */
   readonly login?: WardenLogin;
   /** The machine default runtime an empty failover order runs on, when the daemon stood one in. */
@@ -65,8 +69,6 @@ const TRIAGE_OPTIONS: readonly { readonly id: WardenTriage; readonly label: stri
   { id: 'llm', label: 'LLM only', detail: 'The kteam behaviour: every flag gets a full investigation.' },
   { id: 'rules', label: 'Rules only', detail: 'Flags are shown to you. No AI and no spend.' },
 ];
-
-const EFFORTS: readonly WardenEffort[] = ['low', 'medium', 'high'];
 
 const EVENTS: readonly { readonly id: WardenEventTrigger; readonly label: string }[] = [
   { id: 'turnEnd', label: 'Turn end' },
@@ -232,6 +234,7 @@ export function WardenSettingsForm({
   jevKey,
   errors,
   loginOptions = [],
+  runtimes = [],
   login,
   machineDefault,
   speedupsHref,
@@ -258,6 +261,14 @@ export function WardenSettingsForm({
   ];
   const keyPill = KEY_PILL[jevKey.state];
   const set = (patch: Partial<WardenConfig>) => onChange({ ...value, ...patch });
+  // The chosen login's runtime, for its model catalog (docs/model-catalog.md).
+  const runtime = runtimes.find(candidate => candidate.wrapper === base?.agent);
+  const { efforts, modelName } = wardenEfforts(runtime, head?.model);
+  const setModel = (typed: string) => {
+    const model = typed.trim();
+    const { model: _old, ...agent } = base ?? { agent: '' };
+    onChange(withLogin(value, model === '' ? agent : { ...agent, model }));
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-warden-form="">
@@ -423,21 +434,33 @@ export function WardenSettingsForm({
                   ))}
                 </select>
               </label>
-              <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-                Model
-                <input
-                  type="text"
-                  placeholder="the login’s default"
-                  className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
-                  value={head?.model ?? ''}
-                  disabled={base === undefined}
-                  onChange={event => {
-                    const model = event.target.value.trim();
-                    const { model: _old, ...agent } = base ?? { agent: '' };
-                    onChange(withLogin(value, model === '' ? agent : { ...agent, model }));
-                  }}
-                />
-              </label>
+              {runtime?.modelCatalog === undefined ? (
+                <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+                  Model
+                  <input
+                    type="text"
+                    placeholder="the login’s default"
+                    className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
+                    value={head?.model ?? ''}
+                    disabled={base === undefined}
+                    onChange={event => setModel(event.target.value)}
+                  />
+                </label>
+              ) : (
+                <div className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
+                  <label htmlFor={`${name}-model`}>Model</label>
+                  <ModelSelect
+                    customIds={runtime.modelCatalog.customIds}
+                    defaultLabel="The login’s default"
+                    defaultModel={runtime.defaultModel}
+                    disabled={base === undefined}
+                    id={`${name}-model`}
+                    models={runtime.models}
+                    onChange={setModel}
+                    value={head?.model ?? ''}
+                  />
+                </div>
+              )}
             </div>
             {unknown.map(agent => (
               <p key={agent} role="alert" className="m-0 text-meta leading-base text-warn" data-warden-unknown-login="">
@@ -451,14 +474,20 @@ export function WardenSettingsForm({
                 above.
               </p>
             )}
-            <Segments
-              label="Effort"
-              name={`${name}-effort`}
-              options={EFFORTS}
-              value={value.investigation.effort}
-              format={effort => effort}
-              onChange={effort => set({ investigation: { ...value.investigation, effort } })}
-            />
+            {efforts.length === 0 ? (
+              <p className="m-0 text-meta leading-base text-muted" data-warden-no-effort="">
+                {modelName} takes no reasoning effort, so the investigation runs at the model’s own.
+              </p>
+            ) : (
+              <Segments
+                label="Effort"
+                name={`${name}-effort`}
+                options={efforts}
+                value={value.investigation.effort}
+                format={effort => effort}
+                onChange={effort => set({ investigation: { ...value.investigation, effort } })}
+              />
+            )}
             <div className="flex min-w-0 flex-col gap-1">
               <span className="text-cell font-medium text-fg">
                 Failover order for the warden’s own login (strikes and cooldowns)

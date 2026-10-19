@@ -8,7 +8,14 @@
  * accepted by the protocol schema the route will answer with.
  */
 import { describe, it } from 'bun:test';
-import { type AccountModel, type HarnessKind, parseAccountModel, type SettingsObject } from '@ferretry/fleet';
+import {
+  type AccountModel,
+  builtInModelCatalogs,
+  builtInPresets,
+  type HarnessKind,
+  parseAccountModel,
+  type SettingsObject,
+} from '@ferretry/fleet';
 import {
   FleetComponentCatalogSchema,
   FleetLayeredProfileCatalogSchema,
@@ -985,6 +992,47 @@ describe('runtimeCatalog', () => {
       ['on-codex', 'codex'],
       ['scoped-claude', 'claude'],
     ]);
+  });
+
+  it('should list catalog models only for a login that reads a catalog', () => {
+    // Arrange — the same two-CLI environment login, made by hand: it names no preset, so no catalog
+    const model = parseAccountModel({
+      version: 2,
+      credentials: {
+        dual: {
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_BASE_URL: 'https://example.invalid' } },
+          codex: { codexProvider: { id: 'ollama' } },
+        },
+        glm: {
+          harness: 'claude',
+          store: 'environment',
+          preset: 'zai-glm',
+          env: { ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
+        },
+      },
+      components: COMPONENTS,
+      profiles: PROFILES,
+      runtimes: {
+        'by-hand': { credential: 'dual', profile: 'base' },
+        'on-glm': { credential: 'glm', profile: 'base' },
+      },
+    });
+
+    // Act
+    const actual = runtimeCatalog(
+      model,
+      withReadFacts({ modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets() } }),
+    );
+
+    // Assert
+    should(actual.runtimes.find(runtime => runtime.name === 'by-hand')?.models).be.undefined();
+    should(actual.runtimes.find(runtime => runtime.name === 'on-glm')?.models).match({
+      catalog: { id: 'zai', customIds: false },
+      default: 'glm-5.3',
+    });
+    FleetRuntimeCatalogSchema.parse(actual);
   });
 
   it('should name each runtime by its ids.json id, falling back to its name, with a wrapper of the same name', () => {

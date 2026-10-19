@@ -13,8 +13,10 @@ import type {
   WardenConfig,
   WardenConfigPatch,
   WardenConfigView,
+  WardenEffort,
   WardenMayActAlone,
 } from '@ferretry/protocol';
+import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 
 /** Whether the Jev key is in this machine's secret store. `unknown` when that could not be read. */
 export type JevKeyState = 'set' | 'missing' | 'unknown';
@@ -146,3 +148,26 @@ export const movedAccount = (config: WardenConfig, index: number, delta: -1 | 1)
   [accounts[index], accounts[target]] = [accounts[target] as WardenAccount, accounts[index] as WardenAccount];
   return { ...config, accounts };
 };
+
+/** The investigation efforts the Warden can be given, lowest first. */
+export const WARDEN_EFFORTS: readonly WardenEffort[] = ['low', 'medium', 'high'];
+
+/**
+ * The efforts an investigation on this login's model can run at (docs/model-catalog.md): the Warden's
+ * levels that the chosen model takes, when its login's catalog says — none for a model that takes no
+ * effort — and all of them when no catalog says. `modelName` names the model in the sentence that
+ * says so.
+ */
+export function wardenEfforts(
+  runtime: PickerAccount | undefined,
+  model: string | undefined,
+): { readonly efforts: readonly WardenEffort[]; readonly modelName: string } {
+  const id = model ?? runtime?.defaultModel ?? undefined;
+  const chosen = runtime?.models.find(entry => entry.id === id);
+  const modelName = chosen?.label ?? id ?? 'This model';
+  const takes = runtime?.modelCatalog === undefined ? undefined : chosen?.efforts;
+  return {
+    efforts: takes === undefined ? WARDEN_EFFORTS : WARDEN_EFFORTS.filter(effort => takes.includes(effort)),
+    modelName,
+  };
+}

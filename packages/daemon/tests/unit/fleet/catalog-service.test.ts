@@ -8,11 +8,15 @@
 import { describe, it } from 'bun:test';
 import {
   type AccountModel,
+  builtInModelCatalogs,
+  builtInPresets,
   FleetApplyFailureError,
   type FleetApplyPlan,
   type FleetDocumentWrite,
   type FleetLayout,
+  type FleetModelApplyPlan,
   parseAccountModel,
+  type RuntimeIds,
   RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
 } from '@ferretry/fleet';
@@ -37,6 +41,7 @@ import {
   FleetCatalogService,
   type FleetCatalogServiceDeps,
   machineAuthority,
+  sameManifest,
 } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
 import { configReading } from '../../support/config-reading.ts';
@@ -968,5 +973,94 @@ describe('component content and the draft-profile preview', () => {
     should(draft.refusal).equal('no MCP server ghost exists on this machine');
     should(draft.harnesses.map(stack => stack.harness)).deepEqual(['claude', 'codex']);
     await unreadable;
+  });
+});
+
+describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () => {
+  const sources = async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() });
+
+  it("should list each runtime's catalog models, by tier, beside its model set", async () => {
+    // Arrange
+    const { service } = world({ modelCatalogs: sources });
+
+    // Act
+    const catalog = FleetRuntimeCatalogSchema.parse(await service.runtimes());
+
+    // Assert — a Claude sign-in reads Anthropic's catalog, a Codex sign-in OpenAI's
+    const claude = catalog.runtimes.find(runtime => runtime.name === 'claude-default');
+    should(claude?.models?.catalog).containDeep({ id: 'anthropic', origin: 'built-in', customIds: false });
+    should(claude?.models?.choices.map(choice => choice.tier)).deepEqual(['best', 'balanced', 'fast']);
+    should(claude?.models?.default).equal('claude-opus-5-5');
+    should(catalog.runtimes.find(runtime => runtime.name === 'codex-default')?.models?.default).equal('gpt-6.1-sol');
+  });
+
+  it('should show no catalog models on a machine wired without catalogs', async () => {
+    const catalog = FleetRuntimeCatalogSchema.parse(await world().service.runtimes());
+    should(catalog.runtimes.every(runtime => runtime.models === undefined)).be.true();
+  });
+
+  it('should republish when the manifest would read differently, and leave an identical one alone', async () => {
+    // Arrange
+    let published: unknown;
+    let ids: RuntimeIds | undefined;
+    const { service, applied } = world({
+      modelCatalogs: sources,
+      publishedManifest: async () => published,
+      ids: async () => ids,
+    });
+
+    // Act — nothing is published yet, so the first republish applies
+    const first = await service.republish();
+    published = applied[0]?.plan.manifest;
+    ids = (applied[0]?.plan as FleetModelApplyPlan | undefined)?.ids;
+    const second = await service.republish();
+
+    // Assert — no configuration file is written by either
+    should(first).equal('applied');
+    should(applied[0]?.documents).deepEqual([]);
+    should(second).equal('unchanged');
+    should(applied).have.length(1);
+  });
+
+  it('should skip a machine with no fleet, or one wired without catalogs', async () => {
+    // Arrange
+    const empty = world({ modelCatalogs: sources });
+    empty.state.reading = configReading(MODEL(), 'rev-1', 'none');
+
+    // Act / Assert
+    should(await empty.service.republish()).equal('skipped');
+    should(await world().service.republish()).equal('skipped');
+  });
+
+  it('should refuse a republish whose plan cannot be made, or whose apply fails', async () => {
+    // Arrange — two runtimes cannot share one config directory, so that fleet cannot be planned
+    const home = (id: string) => ({ id, formerNames: [], home: 'shared' });
+    const broken = world({
+      modelCatalogs: sources,
+      ids: async () => ({
+        version: 1,
+        runtimes: {
+          'claude-default': home('00000000-0000-4000-8000-0000000000a1'),
+          'codex-default': home('00000000-0000-4000-8000-0000000000a2'),
+        },
+      }),
+    });
+    const failing = world({ modelCatalogs: sources });
+    failing.state.apply = async () => {
+      throw new Error('disk full');
+    };
+
+    // Act / Assert
+    const refused = await broken.service.republish().catch((error: unknown) => error);
+    const failed = await failing.service.republish().catch((error: unknown) => error);
+    should(refused).be.instanceOf(FleetCatalogRefusal).and.have.property('code', 'fleet_change_refused');
+    should(failed).be.instanceOf(FleetCatalogRefusal).and.have.property('code', 'fleet_change_failed');
+  });
+
+  it('should tell a planned manifest from the published one only by what it says', () => {
+    should(sameManifest({ generatedAt: 'a', version: 1 } as never, { generatedAt: 'b', version: 1 })).be.true();
+    should(sameManifest({ generatedAt: 'a', version: 1 } as never, { generatedAt: 'a', version: 2 })).be.false();
+    should(sameManifest({ generatedAt: 'a' }, undefined)).be.false();
+    should(sameManifest({ generatedAt: 'a' }, 'text')).be.false();
   });
 });

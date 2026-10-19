@@ -3,6 +3,7 @@ import type { WardenAccount, WardenConfig, WardenLogin } from '@ferretry/protoco
 import { useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 
+import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { WardenSettingsForm, wardenPrivacyNote } from '../../../src/features/warden/warden-settings-form.tsx';
 import { type JevKeyStatus, wardenFormErrors } from '../../../src/features/warden/warden-settings-model.ts';
 import { render, run } from '../../support/react.ts';
@@ -12,6 +13,7 @@ interface HarnessProps {
   readonly initial: WardenConfig;
   readonly jevKey?: JevKeyStatus;
   readonly loginOptions?: readonly WardenAccount[];
+  readonly runtimes?: readonly PickerAccount[];
   readonly login?: WardenLogin;
   readonly machineDefault?: string;
   readonly speedupsHref?: string;
@@ -24,6 +26,7 @@ function Harness({
   initial,
   jevKey = { state: 'set' },
   loginOptions,
+  runtimes,
   login,
   machineDefault,
   speedupsHref,
@@ -41,6 +44,7 @@ function Harness({
       jevKey={jevKey}
       errors={wardenFormErrors(value)}
       {...(loginOptions === undefined ? {} : { loginOptions })}
+      {...(runtimes === undefined ? {} : { runtimes })}
       {...(login === undefined ? {} : { login })}
       {...(machineDefault === undefined ? {} : { machineDefault })}
       {...(speedupsHref === undefined ? {} : { speedupsHref })}
@@ -294,6 +298,42 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     control(renderer, 'Login', 'select')
       .findAllByType('option')
       .map(node => String(node.children.join('')));
+
+  it("should list the chosen login's catalog for its model, and offer only the efforts that model takes", () => {
+    // Arrange — a GLM login (docs/model-catalog.md): GLM-5.3 takes low and high of the Warden's levels
+    const glm: PickerAccount = {
+      id: 'rt-glm',
+      wrapper: 'claude-glm',
+      displayName: 'claude-glm',
+      kind: 'claude',
+      agent: true,
+      credentialId: 'glm',
+      defaultModel: 'glm-5.3',
+      models: [
+        { id: 'glm-5.3', label: 'GLM-5.3', tier: 'best', available: true, efforts: ['low', 'high', 'max'] },
+        { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash', tier: 'fast', available: true, efforts: [] },
+      ],
+      modelCatalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
+      available: true,
+      unavailableReason: null,
+    };
+    const changes: WardenConfig[] = [];
+    const renderer = render(
+      <Harness
+        initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-glm' }] })}
+        runtimes={[glm]}
+        changes={changes}
+      />,
+    );
+
+    // Assert — the model is a select of the catalog, and medium is not offered
+    const select = renderer.root.find(node => node.type === 'select' && String(node.props.id).endsWith('-model'));
+    expect(() => option(renderer, 'medium')).toThrow();
+    run(() => select.props.onChange({ target: { value: 'glm-5.3-flash' } }));
+    expect(last(changes).accounts[0]).toEqual({ agent: 'claude-glm', model: 'glm-5.3-flash' });
+    expect(text(renderer)).toContain('takes no reasoning effort, so the investigation');
+    run(() => renderer.unmount());
+  });
 
   it('should run on the machine default, and let a model be pinned on it', () => {
     // Arrange

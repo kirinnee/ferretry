@@ -490,6 +490,7 @@ const CANONICAL_PATHS: Readonly<Record<ConfigSchemaId, string>> = {
   learning: 'learning.yaml',
   voice: 'voice.yaml',
   preset: 'presets/my-preset.yaml',
+  models: 'models/my-provider.yaml',
   ...Object.fromEntries(CONFIG_COMPONENT_KINDS.map(kind => [`component-${kind}`, `components/${kind}/main.yaml`])),
 } as Record<ConfigSchemaId, string>;
 

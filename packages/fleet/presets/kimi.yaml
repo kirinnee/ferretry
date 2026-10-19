@@ -4,26 +4,16 @@ summary: Claude Code and Codex on Kimi models with one Moonshot platform key (pl
 group: popular
 docs: https://platform.kimi.ai/docs/guide/claude-code-kimi
 verified: '2026-10-16'
+catalog: kimi
 claude:
   env:
     ANTHROPIC_BASE_URL:
       value: https://api.moonshot.ai/anthropic
     ANTHROPIC_AUTH_TOKEN:
       secretName: MOONSHOT_API_KEY
-    ANTHROPIC_MODEL:
-      value: kimi-k3[1m]
-    ANTHROPIC_DEFAULT_OPUS_MODEL:
-      value: kimi-k3[1m]
-    ANTHROPIC_DEFAULT_SONNET_MODEL:
-      value: kimi-k3[1m]
-    ANTHROPIC_DEFAULT_HAIKU_MODEL:
-      value: kimi-k2.7-code
-    CLAUDE_CODE_SUBAGENT_MODEL:
-      value: kimi-k3[1m]
     CLAUDE_CODE_AUTO_COMPACT_WINDOW:
       value: '1000000'
       required: false
-  models: [kimi-k3, kimi-k2.7-code]
 codex:
   docs: https://platform.kimi.ai/docs/guide/codex-kimi
   env:
@@ -35,7 +25,6 @@ codex:
     baseUrl: https://api.moonshot.ai/v1
     keyVariable: KIMI_API_KEY
     model: kimi-k3
-  models: [kimi-k3]
 test:
   kind: request
   url: https://api.moonshot.ai/v1/models

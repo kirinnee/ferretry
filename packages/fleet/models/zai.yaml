@@ -1,0 +1,24 @@
+# Z.ai's GLM Coding Plan models, through its Anthropic-compatible endpoint.
+label: GLM / Z.ai
+docs: https://docs.z.ai/devpack/tool/claude
+verified: '2026-10-18'
+unverified:
+  - Z.ai's Claude Code page shows two mappings; this one (GLM-5.3 for opus and sonnet, GLM-5.3-Flash for haiku) is its manual setup.
+claude:
+  tiers:
+    opus: glm-5.3
+    sonnet: glm-5.3
+    haiku: glm-5.3-flash
+  models:
+    - id: glm-5.3
+      label: GLM-5.3
+      tier: best
+      context: 1000000
+      efforts: [low, high, max]
+      defaultEffort: max
+      default: true
+    - id: glm-5.3-flash
+      label: GLM-5.3-Flash
+      tier: fast
+      context: 1000000
+      reasoning: true
