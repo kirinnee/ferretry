@@ -24,10 +24,10 @@ export const RECENT_LIMIT = 20;
 
 export type DateFilter = 'any' | '7d' | '30d';
 
-export const DATE_FILTERS: readonly { readonly id: DateFilter; readonly label: string }[] = [
-  { id: 'any', label: 'Any time' },
-  { id: '7d', label: 'Last 7 days' },
-  { id: '30d', label: 'Last 30 days' },
+export const DATE_FILTERS: readonly { readonly id: DateFilter; readonly label: string; readonly title: string }[] = [
+  { id: 'any', label: 'Any', title: 'Any time' },
+  { id: '7d', label: '7d', title: 'Last 7 days' },
+  { id: '30d', label: '30d', title: 'Last 30 days' },
 ];
 
 const FILTER_DAYS: Readonly<Record<Exclude<DateFilter, 'any'>, number>> = { '7d': 7, '30d': 30 };
@@ -83,16 +83,10 @@ export const visibleConversations = (
   return { rows: shown, hidden: matching.length - shown.length };
 };
 
-export interface ProjectGroup {
-  readonly project: string;
-  readonly rows: readonly ImportableConversation[];
-}
-
-/** Rows under their project folder, the folder with the newest conversation first. Rows keep their order. */
-export const groupConversationsByProject = (rows: readonly ImportableConversation[]): readonly ProjectGroup[] => {
-  const groups = new Map<string, ImportableConversation[]>();
-  for (const row of newestFirst(rows)) groups.set(row.project, [...(groups.get(row.project) ?? []), row]);
-  return [...groups].map(([project, grouped]) => ({ project, rows: grouped }));
+/** The last two segments of a folder, which is as much of the path as a row has room to say. */
+export const folderLabel = (project: string): string => {
+  const segments = project.split(/[\\/]+/u).filter(segment => segment !== '');
+  return segments.length === 0 ? project : segments.slice(-2).join('/');
 };
 
 /** "Found 12 conversations · 2 already kept". */
@@ -183,7 +177,7 @@ export type HarnessFilter = 'all' | Harness;
 
 export const HARNESS_FILTERS: readonly { readonly id: HarnessFilter; readonly label: string }[] = [
   { id: 'all', label: 'All' },
-  { id: 'claude', label: 'Claude Code' },
+  { id: 'claude', label: 'Claude' },
   { id: 'codex', label: 'Codex' },
 ];
 

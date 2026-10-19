@@ -101,20 +101,21 @@ const listed = (sent: readonly Sent[]): readonly string[] =>
   sent.filter(call => call.path.startsWith(CONVERSATION_IMPORT_PATH) && call.body === undefined).map(call => call.path);
 
 describe('ContinueConversation search', () => {
-  it('lists the most recent conversations with their folder, preview, latest, CLI and model', async () => {
+  it('lists the most recent conversations as two-line rows: preview and age, then folder, CLI, turns and model', async () => {
     const sent: Sent[] = [];
     await open({ sent });
     expect(listed(sent)).toEqual([ALL]);
     expect(text('[data-continue-count]')).toBe('3 matches');
     const row = text('[data-continue-row="shop-cart"]');
-    expect(row).toContain('/work/shop');
-    expect(row).toContain('Fix the shop-cart page');
-    expect(row).toContain('Latest: and now the tests');
-    expect(row).toContain('Claude Code');
-    expect(row).toContain('Sonnet 5.5');
+    expect(row).toContain('Fix the shop-cart page1d ago');
+    expect(row).toContain('work/shop· Claude · 4 turns· Sonnet 5.5');
     expect(row).toContain('Continue');
-    expect(text('[data-continue-row="api-codex"]')).toContain('Codex');
-    expect(text('[data-continue-row="api-codex"]')).not.toContain('Latest:');
+    expect(find('[data-continue-row="shop-cart"] [title="and now the tests"]').textContent).toBe(
+      'Fix the shop-cart page',
+    );
+    expect(view?.container.querySelectorAll('[data-continue-row]')).toHaveLength(3);
+    expect(text('[data-continue-row="api-codex"]')).toContain('· Codex ·');
+    expect(text('[data-continue-row="api-codex"]')).not.toContain('Sonnet');
     expect(text('[data-continue-row="notes-kept"]')).toContain('Open notes-ferret');
   });
 
