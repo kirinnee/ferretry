@@ -11,9 +11,10 @@ import {
   type PinSnapshot,
   type SecretName,
   type SendRecord,
-  type SessionHandoff,
   type SendResult,
   SessionConfigSchema,
+  type SessionHandoff,
+  type SessionRelaunchSettings,
   SessionStateSchema,
   type SessionView,
   type SignalSessionRequest,
@@ -32,13 +33,12 @@ import {
   type WardenAttentionView,
   type WardenConfigView,
   type WardenInvestigateRequest,
+  type WardenInvestigateView,
   type WardenLeaveRequest,
   type WardenLeaveView,
-  type WardenInvestigateView,
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
-  type SessionRelaunchSettings,
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
@@ -139,6 +139,7 @@ import {
 } from '../../../../src/lib/secrets/index.ts';
 import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
 import { SessionConsoleService } from '../../../../src/lib/session/console/index.ts';
+import { SessionDialogService } from '../../../../src/lib/session/dialog/index.ts';
 import { FleetEventStreamService } from '../../../../src/lib/session/events/index.ts';
 import {
   defaultSessionHealthSettings,
@@ -1974,6 +1975,54 @@ export function permissionSubsystem(
   const capture = new ProvedPaneCapture(attach, { execute });
   const typing = new SessionConsoleService(attach, { execute });
   return new SessionPermissionService(
+    {
+      capture: async sessionId => await capture.capture(sessionId),
+      write: async (sessionId, bytes) => await typing.write(sessionId, bytes),
+    },
+    async () => undefined,
+  );
+}
+
+/** The captured pane of Codex 0.156.1's "Hooks need review" dialog, cursor on the first row. */
+export const DIALOG_FRAME = readFileSync(
+  new URL('../../../fixtures/harness-dialogs/codex-0.156.1-hooks-review.txt', import.meta.url),
+  'utf8',
+);
+
+/** The same dialog after one Down: the cursor on the second row, everything else unchanged. */
+export const DIALOG_MOVED_FRAME = readFileSync(
+  new URL('../../../fixtures/harness-dialogs/codex-0.156.1-hooks-review-moved.txt', import.meta.url),
+  'utf8',
+);
+
+/** The pane after the dialog was answered: the agent back at its input box. */
+const DIALOG_CLEARED_FRAME = '  Hooks reviewed.\n\n› \n';
+
+/**
+ * The REAL dialog service over the REAL attach proof, pane capture and Console: only tmux is scripted,
+ * as {@link permissionSubsystem} does. `frames` defaults to the dialog, the cursor moved one row, then
+ * the cleared pane.
+ */
+export function dialogSubsystem(
+  world: AttachWorld = {},
+  tmux: PermissionTmux = permissionTmux(),
+  frames: readonly string[] = [DIALOG_FRAME, DIALOG_MOVED_FRAME, DIALOG_CLEARED_FRAME],
+): SessionDialogService {
+  const attach = attachSubsystem(world);
+  let shown = 0;
+  const execute = async (command: readonly string[]) => {
+    if (command[0] === 'capture-pane') {
+      tmux.captures.push(command);
+      const frame = frames[Math.min(shown, frames.length - 1)] ?? '';
+      shown += 1;
+      return { code: tmux.captureCode, stdout: frame, stderr: tmux.captureCode === 0 ? '' : 'no such pane' };
+    }
+    tmux.commands.push(command);
+    return { code: tmux.code, stdout: '', stderr: tmux.stderr };
+  };
+  const capture = new ProvedPaneCapture(attach, { execute });
+  const typing = new SessionConsoleService(attach, { execute });
+  return new SessionDialogService(
     {
       capture: async sessionId => await capture.capture(sessionId),
       write: async (sessionId, bytes) => await typing.write(sessionId, bytes),

@@ -22,6 +22,7 @@ import {
   type LandingEvidence,
   landingEvidence,
   nextReadinessStep,
+  paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
   retryDelays,
@@ -95,7 +96,8 @@ export class TmuxPaneDelivery {
     let blocked: string | undefined;
     for (let attempt = 0; attempt < delays.length; ) {
       const frame = await this.frame(session);
-      blocked = paneBlockingPrompt(frame.visible) ?? paneBlockingPermission(frame.visible);
+      blocked =
+        paneBlockingPrompt(frame.visible) ?? paneBlockingPermission(frame.visible) ?? paneBlockingDialog(frame.visible);
       const step = nextReadinessStep(frame, attemptsByKind, options);
       if (step.kind === 'ready') return;
       if (step.kind === 'exited' || step.kind === 'stuck')
