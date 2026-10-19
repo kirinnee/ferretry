@@ -8,7 +8,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { FileInformation, FileSystemPort } from '../../../src/lib/ports.ts';
-import { decideRelayCarrier, relayRedialDelayMs, relaySocketIsStale } from '../../../src/lib/relay/carrier.ts';
+import {
+  decideRelayCarrier,
+  relayDialUrl,
+  relayRedialDelayMs,
+  relaySocketIsStale,
+} from '../../../src/lib/relay/carrier.ts';
 import { DAEMON_IDENTITY_FILE_MODE, readDaemonRelayIdentity } from '../../../src/lib/relay/identity.ts';
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
 
@@ -80,6 +85,13 @@ describe('the relay carrier decision', () => {
       relayOrigin: 'https://relay.example:8443',
       reconnectMs: 45_000,
     });
+  });
+
+  it('should ask a rendezvous for the claim probe in the query, leaving the route untouched', () => {
+    const route = 'wss://relay.example/hosted/v1/rendezvous/fy_daemon_x/daemon';
+    const dialled = new URL(relayDialUrl(route));
+    should(`${dialled.origin}${dialled.pathname}`).equal(route);
+    should(dialled.search).equal('?features=claim-probe');
   });
 
   it('should read silence as death rather than waiting for a close that never comes', () => {

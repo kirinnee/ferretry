@@ -11,7 +11,7 @@
  * compiles one in on either end.
  */
 
-import { connectionSocketUrl, HEARTBEAT_GRACE_SECONDS } from '@ferretry/relay';
+import { connectionSocketUrl, HEARTBEAT_GRACE_SECONDS, RELAY_FEATURES_PARAM } from '@ferretry/relay';
 import type { DaemonRelayConfig } from '../runtime/config.ts';
 
 /**
@@ -29,6 +29,18 @@ export const RELAY_SILENCE_LIMIT_MS = HEARTBEAT_GRACE_SECONDS * 1_000;
  * deployment nothing.
  */
 export const RELAY_KEEPALIVE_MS = 20_000;
+
+/**
+ * The address actually dialled: the rendezvous route, asking for `claim-probe` (§5).
+ *
+ * In the query, not the path, because a rendezvous that does not speak it must not notice it was asked:
+ * an older one ignores the query and answers a plain `claimed`, and this daemon then never probes.
+ */
+export const relayDialUrl = (socketUrl: string): string => {
+  const url = new URL(socketUrl);
+  url.searchParams.set(RELAY_FEATURES_PARAM, 'claim-probe');
+  return url.toString();
+};
 
 /** How long a dial may take to open before it is abandoned and redialled. */
 export const RELAY_CONNECT_DEADLINE_MS = 15_000;

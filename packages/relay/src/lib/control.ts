@@ -19,7 +19,10 @@ import {
   MAX_FRAME_BYTES,
   MAX_SESSIONS_PER_RENDEZVOUS,
   NONCE_BYTES,
+  RELAY_FEATURES,
+  RELAY_FEATURES_PARAM,
   RELAY_PROTOCOL_ID,
+  type RelayFeature,
 } from './constants.ts';
 
 /** base64url of a known byte length, which is how every binary field travels inside JSON. */
@@ -66,8 +69,21 @@ export const ControlMessageSchema = z.discriminatedUnion('t', [
     publicKey: base64UrlOfBytes(ED25519_SPKI_BYTES),
     signature: base64UrlOfBytes(ED25519_SIGNATURE_BYTES),
   }),
-  /** Rendezvous → daemon: the slot is held, these are the limits. */
-  z.strictObject({ t: z.literal('claimed'), protocol: ProtocolIdSchema, limits: RelayLimitsSchema }),
+  /**
+   * Rendezvous → daemon: the slot is held, these are the limits. `features` echoes the ones the daemon
+   * asked for that this rendezvous speaks, and is absent — never empty — for a daemon that asked none,
+   * so an older daemon's strict parse never meets a key it does not know.
+   */
+  z.strictObject({
+    t: z.literal('claimed'),
+    protocol: ProtocolIdSchema,
+    limits: RelayLimitsSchema,
+    features: z.array(z.enum(RELAY_FEATURES)).min(1).max(RELAY_FEATURES.length).readonly().optional(),
+  }),
+  /** Daemon → rendezvous (`claim-probe` only): does the rendezvous's own state still name this socket? */
+  z.strictObject({ t: z.literal('probe') }),
+  /** Rendezvous → daemon (`claim-probe` only): yes. "No" is the `4410` close, never a message. */
+  z.strictObject({ t: z.literal('held') }),
   /** Rendezvous → client: a session identifier was assigned and the daemon is present. */
   z.strictObject({ t: z.literal('ready'), protocol: ProtocolIdSchema, limits: RelayLimitsSchema }),
   /** Rendezvous → daemon: a client arrived on the session this frame is addressed to. */
@@ -78,6 +94,12 @@ export const ControlMessageSchema = z.discriminatedUnion('t', [
   z.strictObject({ t: z.literal('error'), code: z.number().int().min(4000).max(4999), reason: z.string().max(200) }),
 ]);
 export type ControlMessage = z.infer<typeof ControlMessageSchema>;
+
+/** The features a daemon asked for in its route's query, ignoring any this version does not speak. */
+export function requestedRelayFeatures(search: URLSearchParams): readonly RelayFeature[] {
+  const asked = (search.get(RELAY_FEATURES_PARAM) ?? '').split(',');
+  return RELAY_FEATURES.filter(feature => asked.includes(feature));
+}
 
 export function encodeControlMessage(message: ControlMessage): Uint8Array {
   return utf8Bytes(JSON.stringify(message));

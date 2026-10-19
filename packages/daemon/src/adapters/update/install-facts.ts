@@ -1,6 +1,13 @@
-import { realpath } from 'node:fs/promises';
+import { readlink, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
-import { type InstallFacts, parseNixProfileList, type SystemPackageManager } from '@ferretry/protocol';
+import {
+  type InstallFacts,
+  parseNixProfileList,
+  passesThroughHomeManagerPath,
+  type SystemPackageManager,
+  storePathHops,
+  symlinkHops,
+} from '@ferretry/protocol';
 import type { InstallFactsSource } from '../../lib/index.ts';
 
 /** How long one fact-finding command may take before its answer is "no". */
@@ -29,6 +36,8 @@ export interface InstallFactsSeams {
   /** Run a command, bounded; `undefined` when it is not installed or did not finish. */
   readonly run?: (argv: readonly string[], timeoutMs: number) => Promise<FactCommandResult | undefined>;
   readonly realpath?: (path: string) => Promise<string>;
+  /** A link's target, or `undefined` when the path is not a link. */
+  readonly readLink?: (path: string) => Promise<string | undefined>;
 }
 
 async function runBounded(argv: readonly string[], timeoutMs: number): Promise<FactCommandResult | undefined> {
@@ -54,17 +63,20 @@ async function runBounded(argv: readonly string[], timeoutMs: number): Promise<F
 export class HostInstallFacts implements InstallFactsSource {
   private readonly run: NonNullable<InstallFactsSeams['run']>;
   private readonly resolveLink: NonNullable<InstallFactsSeams['realpath']>;
+  private readonly readLink: NonNullable<InstallFactsSeams['readLink']>;
 
   constructor(private readonly seams: InstallFactsSeams) {
     this.run = seams.run ?? runBounded;
     this.resolveLink = seams.realpath ?? (async path => await realpath(path));
+    this.readLink = seams.readLink ?? (async path => await readlink(path).catch(() => undefined));
   }
 
   async facts(): Promise<InstallFacts> {
     const launchedPath = this.launchedPath();
     const resolvedPath = await this.resolveLink(this.seams.execPath).catch(() => this.seams.execPath);
+    const hops = await symlinkHops(launchedPath, this.readLink);
     const [profile, systemPackage] = await Promise.all([
-      this.nixProfile(resolvedPath),
+      this.nixProfile([resolvedPath, ...storePathHops(hops)]),
       this.systemPackage(resolvedPath),
     ]);
     return {
@@ -76,6 +88,7 @@ export class HostInstallFacts implements InstallFactsSource {
       platform: this.seams.platform,
       nixProfileElement: profile.element,
       homeManagerProfile: profile.homeManager,
+      viaHomeManagerPath: passesThroughHomeManagerPath(hops),
       systemPackage,
     };
   }
@@ -87,12 +100,14 @@ export class HostInstallFacts implements InstallFactsSource {
     return this.seams.which(argv0) ?? this.seams.execPath;
   }
 
-  private async nixProfile(resolvedPath: string): Promise<{ element?: string | undefined; homeManager: boolean }> {
-    if (!resolvedPath.startsWith('/nix/store/')) return { homeManager: false };
+  private async nixProfile(
+    candidates: readonly string[],
+  ): Promise<{ element?: string | undefined; homeManager: boolean }> {
+    if (!candidates[0]?.startsWith('/nix/store/')) return { homeManager: false };
     const listed = await this.run(['nix', 'profile', 'list', '--json'], FACT_COMMAND_TIMEOUT_MS);
     if (listed === undefined || listed.code !== 0) return { homeManager: false };
     try {
-      return parseNixProfileList(JSON.parse(listed.stdout), resolvedPath);
+      return parseNixProfileList(JSON.parse(listed.stdout), candidates);
     } catch {
       return { homeManager: false };
     }
