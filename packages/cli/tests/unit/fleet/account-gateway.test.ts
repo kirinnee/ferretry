@@ -113,10 +113,12 @@ describe('ProtocolAccountGateway', () => {
     fake.sent.length = 0;
     const answers = client({ '/v1/fleet/login/flow-1': { outcome: 'refused', reason: 'Codex takes no code.' } });
     await new ProtocolAccountGateway(answers).submitSignInCode('flow-1', 'abc');
+    await new ProtocolAccountGateway(answers).recheckSignIn('flow-1');
     await gateway.cancelSignIn('flow-1');
 
     // Assert
     should(body(answers.sent[0])).eql({ code: 'abc' });
+    should(body(answers.sent[1])).eql({ method: 'recheck' });
     should(fake.sent[0]?.init?.method).equal('DELETE');
   });
 });

@@ -12,11 +12,11 @@
  * whatever the child is doing, so a browser never holds one request open across a sign-in.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { AccountModel } from '@ferretry/fleet';
-import { PlatformFleetCredentialStore, StoredCredentialClassifier } from '@ferretry/fleet/adapters';
+import { PlatformFleetCredentialStore } from '@ferretry/fleet/adapters';
 import type { HarnessLoginFlow } from '@ferretry/protocol';
 import should from 'should';
 import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../src/adapters/fleet-login/login-child.ts';
@@ -59,11 +59,10 @@ async function linuxMachine(binary: string = FAKE_CLAUDE): Promise<Machine> {
     keychainAccount: 'nobody',
     defaultClaudeHome: join(home, '.claude'),
   });
-  const classifier = new StoredCredentialClassifier({ credentials: store, now: () => Date.now() });
   const catalog = new FleetCredentialCatalog({
     document: async () => MODEL as unknown as AccountModel,
     paths: { fleetRoot: join(root, 'fy', 'fleet'), userHome: home },
-    classify: async resolution => await classifier.classify(resolution),
+    inspect: async resolution => await store.inspectStored(resolution),
     ensureDirectory: async () => undefined,
   });
   const service = new HarnessLoginService({
@@ -155,6 +154,52 @@ describe('signing the host Claude Code login in on Linux', () => {
     should(answeredIn).be.below(1_000);
     should(waiting).have.property('state', 'starting');
     should(cancelled).have.property('state', 'failed');
+  });
+
+  it('should say where it looked when the login was not written, and find it on a second look', async () => {
+    // Arrange — a `claude` that offers the link, takes the code and exits 0 WITHOUT writing a login: the
+    // shape of a login that lands late, or somewhere the first read could not see.
+    const root = await mkdtemp(join(tmpdir(), 'fy-claude-late-'));
+    temporaryDirectories.push(root);
+    const late = join(root, 'claude');
+    await writeFile(
+      late,
+      [
+        '#!/bin/sh',
+        "printf 'If the browser didn'\"'\"'t open, visit: https://claude.com/cai/oauth/authorize?code=true&state=late\\n'",
+        "printf 'Paste code here if prompted > '",
+        'read -r pasted',
+        'exit 0',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await chmod(late, 0o700);
+    const { service, home } = await linuxMachine(late);
+    const file = join(home, '.claude', '.credentials.json');
+    const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
+    await pollPast(service, started.flowId, 'starting');
+    await service.submit(started.flowId, { code: 'fake-code#fake-state' });
+
+    // Act
+    const ended = await pollPast(service, started.flowId, 'awaiting-code');
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'late-access', refreshToken: 'late-refresh', expiresAt: Date.now() + 3_600_000 },
+      }),
+    );
+    const rechecked = await service.submit(started.flowId, { method: 'recheck' });
+
+    // Assert
+    should(ended).match({
+      state: 'failed',
+      reason: `the sign-in finished, but no usable login was found for this credential. Checked the file ${file} — nothing there.`,
+      recheck: true,
+    });
+    should(rechecked).match({ outcome: 'accepted', flow: { state: 'complete' } });
+    should(JSON.stringify([ended, rechecked])).not.match(/late-access|late-refresh/u);
   });
 
   it('should say why when the harness exits without offering a link', async () => {

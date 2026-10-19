@@ -15,7 +15,11 @@ import should from 'should';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { type CredentialSignInTarget, FleetCredentialRefusal } from '../../../src/lib/fleet/credentials-service.ts';
+import {
+  type CredentialSignInTarget,
+  FleetCredentialRefusal,
+  type SignInCheck,
+} from '../../../src/lib/fleet/credentials-service.ts';
 import type { CodexCallbackDelivery } from '../../../src/lib/fleet-login/codex-link.ts';
 import type { CallbackPortHolder } from '../../../src/lib/fleet-login/port-holders.ts';
 import type {
@@ -30,6 +34,7 @@ import {
   HARNESS_LOGIN_WINDOW_MINUTES,
   HarnessLoginRefusal,
   HarnessLoginService,
+  NO_USABLE_LOGIN,
 } from '../../../src/lib/fleet-login/service.ts';
 import { harnessLoginRoutes } from '../../../src/lib/runtime/mounts/fleet-login.ts';
 import { jsonBody, request } from '../api/support.ts';
@@ -76,6 +81,12 @@ afterEach(async () => {
 
 type StoreTarget = Extract<CredentialSignInTarget, { kind: 'store' }>;
 
+/** What a store check found, as the catalog words it: where it looked, never a value. */
+const MISSING_FINDING = 'Checked the keychain item "Claude Code-credentials-0a1b2c3d" (account "sam") — nothing there.';
+
+const checkOf = (signedIn: boolean): SignInCheck =>
+  signedIn ? { signedIn: true } : { signedIn: false, finding: MISSING_FINDING };
+
 /** A credential's store sign-in, recording what it was asked to do. */
 function storeTarget(overrides: Partial<Omit<StoreTarget, 'kind'>> = {}): StoreTarget {
   return {
@@ -88,7 +99,7 @@ function storeTarget(overrides: Partial<Omit<StoreTarget, 'kind'>> = {}): StoreT
     },
     arguments: overrides.arguments ?? [],
     prepare: overrides.prepare ?? (async () => undefined),
-    signedIn: overrides.signedIn ?? (async () => true),
+    check: overrides.check ?? (async () => ({ signedIn: true })),
   };
 }
 
@@ -193,7 +204,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
         prepare: async () => {
           prepared.push(id);
         },
-        signedIn: async () => logins.has(id),
+        check: async () => checkOf(logins.has(id)),
       });
     }
     if (id === CODEX_CREDENTIAL) {
@@ -205,7 +216,7 @@ function fixture(options: FixtureOptions = {}): Fixture {
         prepare: async () => {
           prepared.push(id);
         },
-        signedIn: async () => logins.has(id),
+        check: async () => checkOf(logins.has(id)),
       });
     }
     if (id === ENVIRONMENT_CREDENTIAL) return { kind: 'refused', credentialId: id, reason: ENVIRONMENT_REASON };
@@ -703,11 +714,11 @@ describe('the Claude leg', () => {
   it('should report `unconfirmed` when the child has already exited and the store is still being read', async () => {
     // Arrange — the window between the child exiting and the store being proved: the flow still
     // shows a link, and there is no child left to take a code.
-    const proving = held(true);
+    const proving = held<SignInCheck>({ signedIn: true });
     const subject = fixture({
       target: (id, fallback) => {
         const target = fallback(id) as StoreTarget;
-        return { ...target, signedIn: () => proving.promise };
+        return { ...target, check: () => proving.promise };
       },
     });
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
@@ -929,10 +940,140 @@ describe('a login that cannot run', () => {
     child.exit(0);
     await subject.settle();
 
-    // Assert
+    // Assert — it says where it looked and what was there, and offers to look again.
     should(await subject.service.status(started.flowId)).match({
       state: 'failed',
-      reason: 'the sign-in finished, but no usable login was written for this credential',
+      reason: `${NO_USABLE_LOGIN} ${MISSING_FINDING}`,
+      recheck: true,
+    });
+  });
+
+  describe('looking for the login again', () => {
+    /** A Claude flow whose harness exited 0 with nothing in the store. */
+    async function missingLogin(subject: Fixture): Promise<string> {
+      const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+      const child = await subject.child();
+      child.emit(CLAUDE_URL_LINE);
+      child.exit(0);
+      await subject.settle();
+      return started.flowId;
+    }
+
+    it('should complete the flow, launching nothing, when the login has landed since', async () => {
+      // Arrange
+      const subject = fixture();
+      const flowId = await missingLogin(subject);
+      subject.logins.add(CLAUDE_CREDENTIAL);
+
+      // Act
+      const actual = await subject.service.submit(flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).match({ outcome: 'accepted', flow: { state: 'complete' } });
+      should(actual).not.have.propertyByPath('flow', 'recheck');
+      should(subject.children).have.length(1);
+      should(subject.signedIn).deepEqual([CLAUDE_CREDENTIAL]);
+      should(await subject.service.status(flowId)).have.property('state', 'complete');
+    });
+
+    it('should refuse with what this read found, and keep offering, when the login is still not there', async () => {
+      // Arrange
+      let finding = MISSING_FINDING;
+      const subject = fixture({
+        target: () => storeTarget({ check: async () => ({ signedIn: false, finding }) }),
+      });
+      const flowId = await missingLogin(subject);
+      finding = 'Checked the file /fy/fleet/credentials/work/.credentials.json — nothing there.';
+
+      // Act
+      const actual = await subject.service.submit(flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).deepEqual({ outcome: 'refused', reason: `${NO_USABLE_LOGIN} ${finding}` });
+      should(await subject.service.status(flowId)).match({
+        state: 'failed',
+        reason: `${NO_USABLE_LOGIN} ${finding}`,
+        remedy: `sign this login in on the host with \`fy credential signin ${CLAUDE_CREDENTIAL}\``,
+        recheck: true,
+      });
+      should(subject.signedIn).be.empty();
+    });
+
+    it('should read a store that throws as not found, rather than fail the request', async () => {
+      // Arrange
+      let reads = 0;
+      const subject = fixture({
+        target: () =>
+          storeTarget({
+            check: async () => {
+              reads += 1;
+              if (reads > 1) throw new Error('the keychain went away');
+              return checkOf(false);
+            },
+          }),
+      });
+      const flowId = await missingLogin(subject);
+
+      // Act
+      const actual = await subject.service.submit(flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).deepEqual({
+        outcome: 'refused',
+        reason: `${NO_USABLE_LOGIN} The store this login is kept in could not be read.`,
+      });
+    });
+
+    it('should refuse a recheck on a flow that is still running', async () => {
+      // Arrange
+      const subject = fixture();
+      const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+
+      // Act
+      const actual = await subject.service.submit(started.flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).deepEqual({
+        outcome: 'conflict',
+        reason: 'this sign-in is still running, so there is nothing to look for yet',
+      });
+    });
+
+    it('should refuse a recheck on a flow that failed for another reason, and offer none', async () => {
+      // Arrange
+      const subject = fixture();
+      const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+      const child = await subject.child();
+      child.emit(CLAUDE_URL_LINE);
+      child.exit(2);
+      await subject.settle();
+
+      // Act
+      const actual = await subject.service.submit(started.flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).deepEqual({
+        outcome: 'conflict',
+        reason: 'this sign-in did not end with a login to look for again; start a new sign-in instead',
+      });
+      should(await subject.service.status(started.flowId)).not.have.property('recheck');
+    });
+
+    it('should look again for a Codex sign-in too', async () => {
+      // Arrange
+      const subject = fixture();
+      const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+      const child = await subject.child();
+      child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+      child.exit(0);
+      await subject.settle();
+      subject.logins.add(CODEX_CREDENTIAL);
+
+      // Act
+      const actual = await subject.service.submit(started.flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).match({ outcome: 'accepted', flow: { harness: 'codex', state: 'complete' } });
     });
   });
 
@@ -1126,8 +1267,8 @@ describe('a login’s lifetime', () => {
   it('should keep a cancelled ending when the store is proved after the cancel', async () => {
     // Arrange — the child exited and the store is being read when the person cancels. A usable
     // login turning up afterwards must not overwrite the ending they chose.
-    const proving = held(true);
-    const subject = fixture({ target: () => storeTarget({ signedIn: () => proving.promise }) });
+    const proving = held<SignInCheck>({ signedIn: true });
+    const subject = fixture({ target: () => storeTarget({ check: () => proving.promise }) });
     const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
     const child = await subject.child();
     child.emit(CLAUDE_URL_LINE);
@@ -1144,6 +1285,27 @@ describe('a login’s lifetime', () => {
       state: 'failed',
       reason: 'this sign-in was cancelled',
     });
+  });
+
+  it('should not offer to look again on a flow cancelled while its store was being read', async () => {
+    // Arrange — the same race, with a store that turns out empty: the ending is still the cancel.
+    const proving = held<SignInCheck>({ signedIn: false, finding: MISSING_FINDING });
+    const subject = fixture({ target: () => storeTarget({ check: () => proving.promise }) });
+    const started = await subject.service.start({ credentialId: CLAUDE_CREDENTIAL }, HOST);
+    const child = await subject.child();
+    child.emit(CLAUDE_URL_LINE);
+    child.exit(0);
+    await subject.settle();
+
+    // Act
+    await subject.service.cancel(started.flowId);
+    proving.release();
+    await subject.settle();
+
+    // Assert
+    const actual = await subject.service.status(started.flowId);
+    should(actual).match({ state: 'failed', reason: 'this sign-in was cancelled' });
+    should(actual).not.have.property('recheck');
   });
 
   it('should let a new sign-in start once the previous one is cancelled', async () => {

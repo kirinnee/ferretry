@@ -154,6 +154,30 @@ describe('harness-login schemas', () => {
     ]);
   });
 
+  it('should offer, and accept, a second look for a login that was not found', () => {
+    assertRoundTrips([
+      {
+        name: 'claude ended with nothing found, can look again',
+        schema: harnessLogin.ClaudeLoginFlowSchema,
+        value: { ...claudeFailed, recheck: true },
+      },
+      {
+        name: 'codex ended with nothing found, can look again',
+        schema: harnessLogin.CodexLoginFlowSchema,
+        value: { ...claudeFailed, harness: 'codex', identity: 'codex:kirin', recheck: true },
+      },
+      { name: 'look again', schema: harnessLogin.HarnessLoginSubmitRequestSchema, value: { method: 'recheck' } },
+    ]);
+    assertRejects([
+      rejects('an offer that is not `true`', harnessLogin.ClaudeLoginFlowSchema, { ...claudeFailed, recheck: false }),
+      rejects('an offer on a running flow', harnessLogin.ClaudeLoginFlowSchema, { ...claudeAwaiting, recheck: true }),
+      rejects('a second look carrying a code', harnessLogin.HarnessLoginSubmitRequestSchema, {
+        method: 'recheck',
+        code: 'x',
+      }),
+    ]);
+  });
+
   it('should round-trip every public schema', () => {
     assertRoundTrips(schemaCases);
     assertCoversEverySchema(harnessLogin, schemaCases);

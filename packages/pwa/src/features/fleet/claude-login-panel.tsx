@@ -35,7 +35,7 @@
  */
 
 import type { ClaudeLoginFlow, HarnessLoginLastCode } from '@ferretry/protocol';
-import { CheckCircle2, KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
@@ -58,6 +58,11 @@ export interface ClaudeLoginPanelProps {
   readonly onCancel: () => void;
   /** End this sign-in and start a fresh one. Offered while one is running; absent where nothing can. */
   readonly onStartOver?: () => void;
+  /**
+   * Look in the credential's store again, launching nothing. Offered only on a sign-in whose harness
+   * finished but whose login was not found (`recheck`): it may have landed late.
+   */
+  readonly onRecheck?: () => void;
   readonly copy?: ClipboardWriter;
   /** What one sign-in covers, and what to say once it is done. */
   readonly wording: LoginPanelWording;
@@ -98,6 +103,7 @@ export function ClaudeLoginPanel({
   onSubmitCode,
   onCancel,
   onStartOver,
+  onRecheck,
   copy = browserClipboardWriter(),
   wording,
   className,
@@ -249,10 +255,18 @@ export function ClaudeLoginPanel({
               {codeEnding(flow.lastCode)?.sentence ?? flow.reason}
             </p>
             <p className="m-0 text-meta leading-base">{codeEnding(flow.lastCode)?.next ?? flow.remedy}</p>
-            <Button type="button" variant="outline" onClick={onStart} disabled={busy}>
-              <Link2 size={16} aria-hidden="true" />
-              {codeEnding(flow.lastCode)?.action ?? 'Start a new sign-in'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {onRecheck === undefined ? null : (
+                <Button type="button" variant="primary" onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
+                  <RefreshCw size={16} aria-hidden="true" />
+                  {busy ? 'Looking…' : 'Look for the login again'}
+                </Button>
+              )}
+              <Button type="button" variant="outline" onClick={onStart} disabled={busy}>
+                <Link2 size={16} aria-hidden="true" />
+                {codeEnding(flow.lastCode)?.action ?? 'Start a new sign-in'}
+              </Button>
+            </div>
           </div>
         ) : null}
       </div>

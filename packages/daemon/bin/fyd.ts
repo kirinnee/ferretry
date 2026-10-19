@@ -10,7 +10,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { hostname, tmpdir } from 'node:os';
+import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   CredentialStatusService,
@@ -34,11 +34,11 @@ import {
 import {
   AnthropicUsageProbe,
   CodexUsageProbe,
+  claudeKeychainAccount,
   FileConversationLeaseStore,
   FilePassiveUsageStore,
   type FleetBinaryLookup,
   fetchQuota,
-  harnessKeychainAccount,
   newestRolloutRateLimits,
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
@@ -5756,7 +5756,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     platform: process.platform,
     command: new SpawnCredentialCommand(),
     now: () => millisecondClock.now(),
-    keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
+    // Claude's own rule, never LOGNAME: under launchd or systemd USER can be unset, and Claude then
+    // names its item after the OS login name — which is what this must ask for too.
+    keychainAccount: claudeKeychainAccount(process.env.USER, () => userInfo().username),
     // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no
     // suffix. Spelled from `userHome` because the fleet layout owns the same join.
     defaultClaudeHome: join(userHome, '.claude'),
@@ -5847,7 +5849,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       userHome,
       ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
     },
-    classify: async resolution => await credentialClassifier.classify(resolution),
+    inspect: async resolution => await harnessCredentials.inspectStored(resolution),
     ensureDirectory: ensurePrivateDirectory,
   });
   const locateHarness = (kind: HarnessKind): string | undefined => harnessBinary(HARNESS_BINARIES[kind]);

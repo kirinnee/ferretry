@@ -190,6 +190,14 @@ export class ProtocolAccountGateway implements IAccountGateway {
     );
   }
 
+  async recheckSignIn(flowId: string): Promise<HarnessLoginSubmission> {
+    return await this.client.request(
+      `${FLEET_LOGIN_PATH}/${segment(flowId)}`,
+      HarnessLoginSubmissionSchema,
+      post(HarnessLoginSubmitRequestSchema.parse(RECHECK)),
+    );
+  }
+
   async cancelSignIn(flowId: string): Promise<HarnessLoginFlow> {
     return await this.client.request(`${FLEET_LOGIN_PATH}/${segment(flowId)}`, HarnessLoginFlowSchema, {
       method: 'DELETE',
@@ -198,6 +206,9 @@ export class ProtocolAccountGateway implements IAccountGateway {
 }
 
 const GET: RequestInit = { method: 'GET' };
+
+/** A second look at a sign-in's store — a submission BODY, whose `method` is the sign-in's, never HTTP's. */
+const RECHECK = { method: 'recheck' } as const;
 
 const post = (body: unknown): RequestInit => ({
   method: 'POST',

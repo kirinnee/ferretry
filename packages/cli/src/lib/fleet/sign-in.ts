@@ -38,7 +38,10 @@ export async function runSignIn(
 ): Promise<boolean> {
   await requireMayApply(deps);
   let attempt = await attemptSignIn(deps, credentialId, undefined, options.force === true);
-  if (attempt.kind === 'failed' && attempt.device && deps.interactive) {
+  // A harness that FINISHED but left nothing to find did not fail at its device code: look again instead.
+  if (attempt.kind === 'failed' && attempt.flow.recheck === true && deps.interactive)
+    attempt = await lookAgain(deps, attempt);
+  else if (attempt.kind === 'failed' && attempt.device && deps.interactive) {
     deps.out.warn(`The device code did not work: ${attempt.flow.reason}`);
     const answer = (await deps.prompt.ask('Sign in with a link instead? [y/N]')).trim().toLowerCase();
     if (answer === 'y' || answer === 'yes') attempt = await attemptSignIn(deps, credentialId, 'link');
@@ -53,6 +56,27 @@ export async function runSignIn(
     deps.out.setExitCode(1);
   }
   return false;
+}
+
+/**
+ * The harness finished but its login was not found: say where the daemon looked, and offer to look
+ * again — launching nothing — for as long as the person wants. A login that landed late, or that the
+ * keychain would not hand over a moment ago, then counts. Declining keeps the failure as it was.
+ */
+async function lookAgain(deps: AccountCommandDeps, failed: Extract<Attempt, { kind: 'failed' }>): Promise<Attempt> {
+  deps.out.warn(failed.flow.reason);
+  const wanted = async (): Promise<boolean> =>
+    ['', 'y', 'yes'].includes(
+      (await deps.prompt.ask('Look for the login again, without signing in again? [Y/n]')).trim().toLowerCase(),
+    );
+  while (await wanted()) {
+    const looked = await deps.gateway.recheckSignIn(failed.flow.flowId);
+    // Refused is "still not there", with what this look found; anything else is not worth asking again.
+    if (looked.outcome !== 'refused')
+      return looked.outcome === 'accepted' && looked.flow.state === 'complete' ? { kind: 'signed-in' } : failed;
+    deps.out.warn(looked.reason);
+  }
+  return failed;
 }
 
 /** Run one sign-in to its end, showing what it needs as it goes. */

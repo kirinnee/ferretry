@@ -94,6 +94,22 @@ resolved absolute one. It is present only when the harness was launched with `CL
 so this host's DEFAULT Claude home is stored under the bare name and `keychainServices` offers that
 name for that one home and no other. Files are written `0600`.
 
+**The item is named by a PAIR, and both halves are the harness's rule** (claude-code 2.1.281 and the
+macOS 2.1.303 build that Homebrew installs read identically): `svce` from
+`CLAUDE_SECURESTORAGE_CONFIG_DIR` as above, and `acct` = `$USER`, else the OS login name
+(`os.userInfo().username`), else `claude-code-user`. A daemon under launchd or systemd may have no
+`USER`, so the daemon derives `acct` with `claudeKeychainAccount` — the same rule — and never from
+`LOGNAME`. The darwin store also reads past `security` exit 36 (locked, or an approval no window can
+show) to the file, because Claude itself does. Pinned per version in
+`packages/fleet/tests/integration/credential-store-macos-signin.test.ts`.
+
+**A sign-in that exits 0 with no usable login says where it looked.** The post-check reads the store
+with its trail (`inspectStored`): each place — the keychain item by name and account, then the file by
+path — and what it held (nothing; could not be read, with `security`'s exit named; or a login that cannot
+be used, and why). Never a value. The failed flow carries `recheck: true`, and a `{ method: 'recheck' }`
+submission reads the store again without launching anything — a login that landed late completes the
+flow. The PWA shows it as **Look for the login again**; `fy credential signin` asks.
+
 **Material never leaves that adapter** (`:16-18`). `read` returns a classification, `clone` copies end
 to end, and the only method that yields bytes — `material` (`:194-206`) — is documented
 adapter-to-adapter and exists because the usage probe genuinely needs a bearer token to ask a
