@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetCredentialView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { useState } from 'react';
-import { AddLoginStep, addLoginFlowInput } from '../../../../../src/features/fleet/credentials/add-login.tsx';
+import { EnvironmentLogin } from '../../../../../src/features/fleet/credentials/environment-login.tsx';
 import { secretRef } from '../../../../../src/features/fleet/credentials/environment-model.ts';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { useMachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
-import { MachineStepper } from '../../../../../src/features/fleet/shell/machine-stepper.tsx';
-import { type StepperState, startStepper } from '../../../../../src/features/fleet/shell/stepper-model.ts';
 import { LONG_PRESS_MS } from '../../../../../src/shell/agent-sidebar-model.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
 import { localModelsFixture } from '../../../../support/local-models.ts';
@@ -18,7 +15,6 @@ import {
   CHANGE_ID,
   CREDENTIALS,
   credential,
-  machine,
   READS,
   STUDIO,
   scripted,
@@ -60,43 +56,27 @@ const click = async (element: Element | null, what: string): Promise<void> => {
 };
 
 function Host({
-  initial,
   harness,
   createClient,
   added,
 }: {
-  readonly initial: StepperState;
   readonly harness?: 'claude' | 'codex';
   readonly createClient: () => Promise<FleetClient>;
   readonly added: string[];
 }) {
-  const [state, setState] = useState<StepperState>(initial);
   const { data, reload } = useMachineData(STUDIO, createClient);
   const changes = useAccountChanges({ connection: STUDIO, createClient });
   return (
-    <MachineStepper
-      state={state}
-      onChange={next => {
-        if (next !== null) setState(next);
-      }}
+    <EnvironmentLogin
+      {...(harness === undefined ? {} : { harness })}
       machineName="studio-mac"
-      online
-      onRetry={() => undefined}
-    >
-      <AddLoginStep
-        state={state}
-        onChange={setState}
-        onAdded={id => added.push(id)}
-        {...(harness === undefined ? {} : { harness })}
-        machine={machine()}
-        machineName="studio-mac"
-        connection={STUDIO}
-        createClient={createClient}
-        data={data}
-        reload={reload}
-        changes={changes}
-      />
-    </MachineStepper>
+      connection={STUDIO}
+      createClient={createClient}
+      data={data}
+      reload={reload}
+      changes={changes}
+      onAdded={id => added.push(id)}
+    />
   );
 }
 
@@ -131,14 +111,8 @@ const open = async (routes: Record<string, unknown> = {}, harness?: 'claude' | '
   );
   const added: string[] = [];
   const view = await mount(
-    <Host
-      initial={startStepper(addLoginFlowInput(harness === undefined ? {} : { harness }))}
-      {...(harness === undefined ? {} : { harness })}
-      createClient={async () => client}
-      added={added}
-    />,
+    <Host {...(harness === undefined ? {} : { harness })} createClient={async () => client} added={added} />,
   );
-  await click(view.container.querySelector('[data-add-login-kind-option="environment"] input'), 'Environment');
   return { view, calls, added };
 };
 
@@ -157,7 +131,7 @@ const pointer = (target: HTMLElement, type: string, pointerType: string): void =
 const sent = (calls: readonly Call[], route: string) =>
   calls.filter(call => `${call.method} ${call.path}` === route).map(call => call.body);
 
-describe('AddLoginStep · Environment · providers', () => {
+describe('EnvironmentLogin · providers', () => {
   it('files a tile per provider under its heading, nothing picked, the gateway and Paste last, with scope chips', async () => {
     const { view } = await open();
     await until(() => grid(view.container) !== null, 'the grid');
@@ -193,9 +167,6 @@ describe('AddLoginStep · Environment · providers', () => {
     expect(chip('deepseek-mirror')).toBe('claude');
     expect(chip('azure-openai')).toBe('codex');
     expect(chip('zai-glm-codex')).toBe('codex');
-    expect(c.querySelector('[data-stepper-position]')?.textContent).toBe('Step 1 of 2 · Environment');
-    await click(c.querySelector('[data-add-login-kind-option="signin"] input'), 'Sign in');
-    expect(c.querySelector('[data-add-login-step="tool"]')).not.toBeNull();
     await view.unmount();
   });
 
@@ -348,7 +319,6 @@ describe('AddLoginStep · Environment · providers', () => {
     expect(c.textContent).not.toContain('a-pasted-deepseek-key');
     expect(c.innerHTML).not.toContain('a-pasted-deepseek-key');
     expect(c.textContent).toContain('Added deepseek from DeepSeek');
-    expect(c.querySelector('[data-stepper-position]')?.textContent).toBe('Step 2 of 2 · Test');
     await click(c.querySelector('[data-step-next]'), 'Done');
     expect(added).toEqual(['deepseek']);
     await view.unmount();
@@ -496,7 +466,7 @@ describe('AddLoginStep · Environment · providers', () => {
   });
 });
 
-describe('AddLoginStep · Environment · Paste variables', () => {
+describe('EnvironmentLogin · Paste variables', () => {
   const paste = async (c: HTMLElement, text: string): Promise<void> => {
     await type(c.querySelector('[data-paste-input]'), text);
     await click(c.querySelector('[data-paste-read]'), 'Read');

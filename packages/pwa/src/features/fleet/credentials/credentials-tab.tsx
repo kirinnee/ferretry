@@ -20,10 +20,8 @@ import { type MachineData, machineDetailHash, useMachineData, useMachineDetail }
 import { AccountStatus, ProviderQuota } from '../shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
-import { MachineStepper } from '../shell/machine-stepper.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { type StepperState, startStepper } from '../shell/stepper-model.ts';
-import { AddLoginStep, addLoginFlowInput } from './add-login.tsx';
+import { AddLogin } from './add-login.tsx';
 import { CredentialEnvironment, environmentChip } from './credential-environment.tsx';
 import { CredentialSignIn } from './credential-sign-in.tsx';
 import {
@@ -453,35 +451,31 @@ export function CredentialsTab({
   const { state, data, reload } = useMachineData(connection, createClient);
   const changes = useAccountChanges({ connection, createClient });
   const [detail, openDetail] = useMachineDetail(machineName, 'credentials');
-  const [flow, setFlow] = useState<StepperState | null>(null);
+  const [adding, setAdding] = useState(false);
 
-  if (flow !== null)
+  if (adding)
     return (
-      <MachineStepper
-        state={flow}
-        onChange={setFlow}
+      <AddLogin
+        machine={machine}
         machineName={machineName}
         online={online}
         checking={checking}
         onRetry={onRetry}
-      >
-        <AddLoginStep
-          state={flow}
-          onChange={setFlow}
-          onAdded={(id, next) => {
-            setFlow(next);
-            openDetail(id);
-          }}
-          machine={machine}
-          machineName={machineName}
-          connection={connection}
-          createClient={createClient}
-          data={data}
-          reload={reload}
-          changes={changes}
-          {...(pollMs === undefined ? {} : { pollMs })}
-        />
-      </MachineStepper>
+        connection={connection}
+        createClient={createClient}
+        data={data}
+        reload={reload}
+        changes={changes}
+        onAdded={id => {
+          setAdding(false);
+          openDetail(id);
+        }}
+        onLeave={() => {
+          changes.clear();
+          setAdding(false);
+        }}
+        {...(pollMs === undefined ? {} : { pollMs })}
+      />
     );
 
   if (data === null)
@@ -517,7 +511,7 @@ export function CredentialsTab({
 
   const startAdd = (): void => {
     changes.clear();
-    setFlow(startStepper(addLoginFlowInput()));
+    setAdding(true);
   };
 
   return (

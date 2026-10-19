@@ -52,35 +52,18 @@ type Loaded =
   | { readonly kind: 'failed'; readonly sentence: string }
   | { readonly kind: 'ready'; readonly presets: readonly FleetProviderPresetView[] };
 
-/** Which screen of the Environment path is up. */
-type Screen =
-  | { readonly kind: 'grid' }
-  | { readonly kind: 'paste' }
-  | { readonly kind: 'form'; readonly presetId: string; readonly prefill?: Prefill }
-  | { readonly kind: 'added'; readonly presetId: string; readonly credentialId: string };
+/** The providers this machine offers, and the secret NAMES its store already holds. */
+export interface ProviderCatalog {
+  readonly loaded: Loaded;
+  readonly stored: ReadonlySet<string>;
+  /** A secret was stored: its NAME. */
+  readonly onStored: (name: string) => void;
+}
 
-export function EnvironmentLogin({
-  harness,
-  machineName,
-  connection,
-  createClient,
-  data,
-  reload,
-  changes,
-  onAdded,
-  onSaved,
-}: EnvironmentLoginProps) {
+/** Read the providers and the stored secret names once per connection. */
+export function useProviderCatalog(connection: DaemonConnection, createClient: FleetClientFactory): ProviderCatalog {
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const [stored, setStored] = useState<ReadonlySet<string>>(new Set());
-  const [screen, setScreen] = useState<Screen>({ kind: 'grid' });
-  // One read of Ollama when this flow opens and it offers the Ollama tile; then only on Check again.
-  const local = useLocalModels({
-    connection,
-    createClient,
-    enabled:
-      loaded.kind === 'ready' &&
-      presetsFor(loaded.presets, harness).some(candidate => candidate.id === OLLAMA_PRESET_ID),
-  });
 
   useEffect(() => {
     let live = true;
@@ -105,6 +88,38 @@ export function EnvironmentLogin({
       live = false;
     };
   }, [connection, createClient]);
+
+  return { loaded, stored, onStored: name => setStored(previous => new Set([...previous, name])) };
+}
+
+/** Which screen of the Environment path is up. */
+type Screen =
+  | { readonly kind: 'grid' }
+  | { readonly kind: 'paste' }
+  | { readonly kind: 'form'; readonly presetId: string; readonly prefill?: Prefill }
+  | { readonly kind: 'added'; readonly presetId: string; readonly credentialId: string };
+
+export function EnvironmentLogin({
+  harness,
+  machineName,
+  connection,
+  createClient,
+  data,
+  reload,
+  changes,
+  onAdded,
+  onSaved,
+}: EnvironmentLoginProps) {
+  const { loaded, stored, onStored } = useProviderCatalog(connection, createClient);
+  const [screen, setScreen] = useState<Screen>({ kind: 'grid' });
+  // One read of Ollama when this flow opens and it offers the Ollama tile; then only on Check again.
+  const local = useLocalModels({
+    connection,
+    createClient,
+    enabled:
+      loaded.kind === 'ready' &&
+      presetsFor(loaded.presets, harness).some(candidate => candidate.id === OLLAMA_PRESET_ID),
+  });
 
   if (loaded.kind === 'loading')
     return (
@@ -174,7 +189,7 @@ export function EnvironmentLogin({
         key={preset.id}
         preset={preset}
         stored={stored}
-        onStored={name => setStored(previous => new Set([...previous, name]))}
+        onStored={onStored}
         {...(screen.prefill === undefined ? {} : { prefill: screen.prefill })}
         list={data?.credentials ?? null}
         machineName={machineName}

@@ -30,10 +30,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
-      - nscloud-cache-tag-ferretry-nix
+    # GitHub, not Namespace: a few seconds of bash with no nix shell. Namespace bills it a whole minute
+    # and attaches the cache volume for nothing, and here it is free.
+    runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
@@ -60,15 +59,18 @@ jobs:
     # `ubuntu-latest` ships the Google Chrome the journeys launch and the tmux their agent sessions
     # live in, exactly as the int tier and the Settings geometry gate already rely on. The timeout stops
     # a wedged browser from holding the runner for the default six hours.
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
+    # A shard drives one journey at a time: measured at about one busy core and under 2GB, so 2x4.
     runs-on:
-      - nscloud-ubuntu-24.04-amd64-4x8-with-cache
+      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
       - nscloud-cache-tag-ferretry-nix
+      - nscloud-cache-size-10gb
+      - nscloud-cache-allow-commit-from-main
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -115,10 +117,9 @@ jobs:
     if: ${{ !cancelled() }}
     permissions:
       contents: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
-      - nscloud-cache-tag-ferretry-nix
+    # GitHub, not Namespace: a few seconds of bash with no nix shell. Namespace bills it a whole minute
+    # and attaches the cache volume for nothing, and here it is free.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -138,4 +139,4 @@ jobs:
           RELEVANCE: ${{ needs.relevance.result }}
           RUN: ${{ needs.relevance.outputs.run }}
           SHARDS: ${{ needs.journeys.result }}
-        run: ./scripts/ci/e2e-summary.sh "${{ runner.temp }}/e2e-shards" 4
+        run: ./scripts/ci/e2e-summary.sh "${{ runner.temp }}/e2e-shards" 3

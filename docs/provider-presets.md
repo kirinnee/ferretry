@@ -139,7 +139,7 @@ added, like any other.
 
 ## One-click add
 
-- **Settings › Logins › Add login › Environment** is a grid of compact provider tiles, one per preset,
+- **Settings › Logins › Add a login** shows them, under its two sign-in tiles, as a grid of compact provider tiles, one per preset,
   each with its name and scope chip, filed under the heading its preset's `group` names — **Popular**,
   **Cloud**, **Self-hosted**; a preset with no group (a machine's own file, Qwen, Vercel) is listed under
   **More providers**, after the clouds. Two tiles to a row on a phone, three or four on a desktop. More
@@ -150,7 +150,8 @@ added, like any other.
   secret NAME, however many variables carry it, "set ✓" when the store already has it — plus a required
   value the preset cannot know (an Azure resource, a gateway's address) and a cloud reference where one
   is taken. Everything else comes from the preset. **Add** stores each secret through `POST /v1/secrets`,
-  adds the login as a reviewed change, then offers **Test**.
+  adds the login as a reviewed change (and, from Add a login, its runtime when none runs that CLI —
+  docs/design/account-model.md §4.6), then offers **Test**.
 - **CLI:** `fy login add glm` (a preset id, or a word of one: `glm`, `kimi`, `deepseek`, `bedrock`…) asks
   for each missing secret with a hidden prompt, or reads it from stdin off a terminal — never from argv,
   so never from shell history — stores it, and adds the login. `--from-env` imports from the current
