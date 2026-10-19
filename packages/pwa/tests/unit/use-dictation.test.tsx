@@ -909,7 +909,7 @@ describe('useDictation with the machine’s cleanup settings', () => {
     });
     await record(view, provider);
     await interact(() => provider.speak('raw words'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     const text = view.drafts[0]?.text;
     await view.unmount();
     return { sent, history, text };
