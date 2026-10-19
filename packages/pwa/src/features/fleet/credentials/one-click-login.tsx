@@ -11,7 +11,7 @@
 
 import type { FleetCredentialList, FleetProviderPresetView } from '@ferretry/protocol';
 import { ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { useId, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { putSecret } from '../../secrets/secrets-api.ts';
@@ -71,8 +71,12 @@ export interface OneClickLoginProps {
   readonly createClient: FleetClientFactory;
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
-  /** Back to the providers. */
-  readonly onBack: () => void;
+  /** Back to the providers. Left out where the providers stay on the same screen (Add a login). */
+  readonly onBack?: () => void;
+  /** The button's words. Defaults to "Add". */
+  readonly submitLabel?: string;
+  /** What sits just above the button (Add a login's runtime choice). */
+  readonly children?: ReactNode;
   /** The login is added: its id. */
   readonly onSaved: (credentialId: string) => void;
 }
@@ -90,6 +94,8 @@ export function OneClickLogin({
   reload,
   onBack,
   onSaved,
+  submitLabel = 'Add',
+  children,
 }: OneClickLoginProps) {
   const ids = useId();
   const [draft, setDraft] = useState<EnvironmentDraft>(() => oneClickDraft(preset, list, prefill));
@@ -210,20 +216,22 @@ export function OneClickLogin({
   const others = preset.variables.filter(variable => variable.kind === 'plain' && !asked.has(variable.name));
   return (
     <div className="flex min-w-0 flex-col gap-3" data-env-login="form" data-one-click={preset.id}>
-      <div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="kt-btn--flush-start"
-          data-one-click-back=""
-          onClick={onBack}
-        >
-          <ChevronLeft size={16} aria-hidden="true" />
-          All providers
-        </Button>
-        <h4 className="m-0 mt-1 text-title font-semibold text-fg">{preset.label}</h4>
-      </div>
+      {onBack === undefined ? null : (
+        <div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="kt-btn--flush-start"
+            data-one-click-back=""
+            onClick={onBack}
+          >
+            <ChevronLeft size={16} aria-hidden="true" />
+            All providers
+          </Button>
+          <h4 className="m-0 mt-1 text-title font-semibold text-fg">{preset.label}</h4>
+        </div>
+      )}
       {prefill === undefined ? null : (
         <p className="m-0 text-cell leading-base text-fg" data-one-click-prefilled="">
           Filled in from what you pasted. Check it, then Add.
@@ -293,6 +301,7 @@ export function OneClickLogin({
       {/* What the provider is comes after its key: tapping a tile lands on the field to paste into. */}
       <PresetFacts preset={preset} />
 
+      {children}
       {storeError === null ? null : (
         <p role="alert" className="m-0 text-cell leading-base text-err" data-env-store-error="">
           {storeError}
@@ -309,7 +318,7 @@ export function OneClickLogin({
         busy={changes.busy || storing}
         busyLabel={storing ? 'Storing the key…' : 'Adding…'}
         refusal={changes.refusal}
-        submitLabel="Add"
+        submitLabel={submitLabel}
         disabled={problem !== null || !preset.offered.available}
         onSubmit={() => void add()}
       />
