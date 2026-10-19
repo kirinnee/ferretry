@@ -1,3 +1,4 @@
+export * from './cleanup-guard.ts';
 export * from './enhancement.ts';
 export * from './enhancer.ts';
 export * from './errors.ts';
