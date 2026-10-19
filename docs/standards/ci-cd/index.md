@@ -16,6 +16,21 @@ and every job is reproducible on a laptop.
 If a workflow step contains repository logic beyond that shape, the logic is in the wrong place
 — move it into a script ([Shell Script Conventions](../shell-scripts/index.md)).
 
+## Runners
+
+GitHub's free hosted runners cap how many jobs run at once, and a busy day queues pull requests
+behind each other. The heaviest Linux jobs therefore run on **Namespace** runners
+(`nscloud-ubuntu-24.04-amd64-4x8-with-cache`): `PWA Settings Geometry` / `Full Gallery`, `Unit Tests`,
+`Integration Tests` and the `E2E Shard`s. They add capacity rather than replace it — every other job,
+and every macOS job, stays on GitHub, where a public repository's minutes are free and the macOS jobs
+never queue.
+
+- **One cache volume, tag `ferretry-nix`.** `namespacelabs/nscloud-cache-action` with `cache: nix`
+  mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell is already built
+  when the job starts. The order is load-bearing: installing Nix first would populate a fresh store.
+- **Moving a job back is one label.** Replace the two `nscloud-*` labels with `ubuntu-latest` and
+  drop the cache step; nothing else in the job depends on the runner vendor.
+
 ## Workflow split
 
 | Workflow   | Trigger                                                                                   | Responsibility                                                     |
