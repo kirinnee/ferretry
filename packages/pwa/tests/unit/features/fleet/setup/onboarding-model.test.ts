@@ -14,6 +14,7 @@ import {
   ONBOARDING_TASKS,
   onboardingDoneRows,
   onboardingLaterHref,
+  onboardingNeedsRuntime,
   onboardingRailMarker,
   onboardingSetCount,
   onboardingSkippedSteps,
@@ -362,5 +363,20 @@ describe('the Warden step’s starting draft', () => {
     const config = wardenConfig({ enabled: true, triage: 'rules' });
     wardenStartingDraft(config, true);
     expect(config.triage).toBe('rules');
+  });
+});
+
+describe('onboardingNeedsRuntime', () => {
+  it('says nothing while the machine has not answered', () => {
+    expect(onboardingNeedsRuntime({})).toBe(false);
+  });
+
+  it('needs a runtime when neither CLI has one', () => {
+    expect(onboardingNeedsRuntime({ runtimes: { claude: [], codex: [] } })).toBe(true);
+    expect(onboardingNeedsRuntime({ runtimes: {} })).toBe(true);
+  });
+
+  it('is satisfied by a runtime on either CLI', () => {
+    expect(onboardingNeedsRuntime({ runtimes: { claude: [], codex: ['codex-default'] } })).toBe(false);
   });
 });

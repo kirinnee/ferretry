@@ -46,6 +46,7 @@ import { landingAfterPairing } from './features/fleet/setup/first-run-landing.ts
 import { isMachineSetupStepId } from './features/fleet/setup/onboarding-model.ts';
 import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
+import { machineHash } from './features/fleet/shell/machine-route.ts';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
 import { InstallBannerSlot } from './features/install/install-app.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
@@ -105,6 +106,7 @@ import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import { useLiveClock } from './hooks/use-live-clock.ts';
 import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
 import { useMachinesPoll } from './hooks/use-machines-poll.ts';
+import { useNeedsRuntime } from './hooks/use-needs-runtime.ts';
 import {
   type NotificationControlsHost,
   useNotificationControls,
@@ -767,6 +769,8 @@ function ShellSessionsBar({
     () => store.fleet.getSnapshot(),
   );
   const projects = useProjects(store.projects, connection);
+  const clientFor = useDaemonClient();
+  const needsRuntime = useNeedsRuntime(connection, clientFor);
   // Which ferrets are instructed to learn, for their "Learning: passive" chip.
   const learning = usePassiveLearning(connection, useDaemonFetch());
   // The machine menu's update dot: each paired machine asked once, through the app's client pool.
@@ -781,12 +785,16 @@ function ShellSessionsBar({
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
   // The desktop column, folded to its icon rail only when the reader folded it.
   const shape: SessionsBarPresentation = presentation === 'column' && collapsed ? 'rail' : presentation;
+  const machineName = record === undefined ? daemonDisplayName(connection) : distinctDaemonName(record, connections);
   return (
     <SessionsBar
       active={sessionsBarPlace(route)}
       activeSessionId={route.kind === 'session' ? route.sessionId : null}
       daemonId={connection.daemonId}
-      machineName={record === undefined ? daemonDisplayName(connection) : distinctDaemonName(record, connections)}
+      machineName={machineName}
+      {...(needsRuntime
+        ? { createRuntimeHref: `${daemonSettingsPath(connection.daemonId)}${machineHash(machineName, 'runtimes')}` }
+        : {})}
       machines={connections.map(candidate => ({
         daemonId: candidate.daemonId,
         name: distinctDaemonName(candidate, connections),

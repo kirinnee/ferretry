@@ -250,6 +250,7 @@ export * from '../hooks/use-app-viewport.ts';
 export * from '../hooks/use-attention.ts';
 export * from '../hooks/use-chat-scrollbar-gutter.ts';
 export * from '../hooks/use-config-change-feed.ts';
+export * from '../hooks/use-needs-runtime.ts';
 export * from '../hooks/use-connection-health.ts';
 export * from '../hooks/use-dashboard-view.ts';
 export * from '../hooks/use-debounce.ts';

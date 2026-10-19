@@ -126,6 +126,21 @@ describe('SessionsBar as a column', () => {
     expect(view.container.textContent).toContain('No sessions running.');
   });
 
+  test('leads an empty list with Create a runtime while the machine has none, and nowhere else', async () => {
+    const { calls, element } = bar({ sessions: [], createRuntimeHref: '#settings/work-mac/runtimes' });
+    view = await mount(element);
+    expect(view.container.textContent).toContain('nothing can start until this machine has a runtime');
+    const link = view.container.querySelector<HTMLElement>('[data-sessions-create-runtime]');
+    expect(link?.textContent).toBe('Create a runtime');
+    await click(link, 'Create a runtime');
+    expect(calls).toContain('navigate:#settings/work-mac/runtimes');
+
+    await view.render(bar({ sessions: [], createRuntimeHref: '#settings/work-mac/runtimes' }).element);
+    await click(view.container.querySelector('[data-sbar-filter="needs-you"]'), 'the Needs you filter');
+    expect(view.container.querySelector('[data-sessions-create-runtime]')).toBeNull();
+    expect(view.container.textContent).toContain('No sessions match Needs you.');
+  });
+
   test('navigates from a row, a foot place and the new-session button', async () => {
     const { calls, element } = bar({ active: 'insights' });
     view = await mount(element);

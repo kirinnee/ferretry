@@ -117,6 +117,8 @@ export interface SessionsBarProps {
   readonly onPairPhone?: () => void;
   /** Sessions instructed to file lessons, which carry a "Learning: passive" chip. */
   readonly learningPassive?: ReadonlySet<string>;
+  /** Present only while this machine has no runtime: the empty list then leads with creating one. */
+  readonly createRuntimeHref?: string;
   /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
   readonly rails?: WorkspaceRailPreferenceStore;
   /**
@@ -350,9 +352,26 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
             Reading sessions…
           </p>
         ) : view.groups.length === 0 ? (
-          <p className="fy-sbar__empty">
-            {filter === 'all' ? 'No sessions running.' : `No sessions match ${FILTER_LABEL[filter]}.`}
-          </p>
+          <div className="fy-sbar__empty">
+            <p className="m-0">
+              {filter !== 'all'
+                ? `No sessions match ${FILTER_LABEL[filter]}.`
+                : props.createRuntimeHref === undefined
+                  ? 'No sessions running.'
+                  : 'No sessions yet, and nothing can start until this machine has a runtime.'}
+            </p>
+            {filter === 'all' && props.createRuntimeHref !== undefined && (
+              <RouteLink
+                className="kt-btn mt-2"
+                data-variant="primary"
+                data-sessions-create-runtime=""
+                onNavigate={navigate}
+                to={props.createRuntimeHref}
+              >
+                Create a runtime
+              </RouteLink>
+            )}
+          </div>
         ) : (
           view.groups.map(group => (
             <section aria-label={group.name} className="fy-sbar__group" key={group.path || group.name}>
