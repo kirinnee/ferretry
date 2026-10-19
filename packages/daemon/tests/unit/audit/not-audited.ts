@@ -83,6 +83,7 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/agent/lessons': 'a ferret filing a lesson into the inbox for the owner to review; reaches nobody',
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',
   'POST /v1/stt/enhance': 'a read with a body: tidies dictated text',
+  'POST /v1/models/refresh': 'asks the hosted app for a newer model catalog; labels and ids, grants nothing',
 };
 
 /** Protocol-switching routes the log does not record. */

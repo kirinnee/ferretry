@@ -14,6 +14,7 @@ export * from './learning/index.ts';
 export * from './mcp-oauth/index.ts';
 export * from './migrate/bun-process-inventory.ts';
 export * from './migrate/file-migration-report.ts';
+export * from './models/index.ts';
 export * from './names/index.ts';
 export * from './notifications/index.ts';
 export * from './pairing/index.ts';

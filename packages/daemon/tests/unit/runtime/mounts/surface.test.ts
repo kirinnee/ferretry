@@ -522,6 +522,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   recommend: recommendSubsystem(),
   sttEnhancement: new FakeSttEnhancer(),
   speedups: new FakeSpeedups(),
+  models: {
+    view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),
+    refresh: async () => ({ outcome: 'disabled' as const }),
+  },
   daemonUpdate: {
     view: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -632,6 +636,7 @@ describe('the mounted daemon surface', () => {
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       2 + // existing conversations kept as ferrets: the listing and the adoption
+      2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
@@ -883,6 +888,9 @@ describe('the mounted daemon surface', () => {
       // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
+      // The model catalogs: the list and a check for a newer published catalog. Fixed literals, no other user.
+      'GET /v1/models',
+      'POST /v1/models/refresh',
       // Updating this daemon: the view, starting an update, and the automatic-install setting.
       'GET /v1/daemon/update',
       'POST /v1/daemon/update',

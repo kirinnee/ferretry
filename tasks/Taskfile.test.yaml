@@ -13,12 +13,12 @@ tasks:
     internal: true
     desc: 'Run {{.MODE}} tests'
     cmds:
-      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}}
+      - ./scripts/test/swept.sh bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}}
   coverage:
     internal: true
     desc: 'Run {{.MODE}} tests with coverage (lcov + text artifacts)'
     cmds:
-      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}} --coverage
+      - ./scripts/test/swept.sh bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}} --coverage
   watch:
     internal: true
     desc: 'Run {{.MODE}} tests in watch mode'

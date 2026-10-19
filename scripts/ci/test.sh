@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Tests run offline (packages/daemon/tests/support/offline-environment.ts preloads the same): no booted
+# daemon follows the published model catalog, asks the hosted relay directory or checks for updates.
+export FY_MODEL_CATALOG="${FY_MODEL_CATALOG:-off}"
+export FY_RELAY_DIRECTORY_ORIGIN="${FY_RELAY_DIRECTORY_ORIGIN:-off}"
+export FY_UPDATE_CHECK="${FY_UPDATE_CHECK:-off}"
+
 mode="${1:-}"
 group="${2:-}"
 [[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" ]] && echo "❌ usage: $0 <unit|int|sit> [group]" >&2 && exit 2
@@ -28,7 +34,7 @@ if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
   [[ -n ${CLI_BIN:-} ]] && chmod +x "${CLI_BIN}"
   echo "🧪 Running sit tests..."
-  SIT_DRIVER=binary bun test --config=bunfig.sit.toml "${timeout_flag[@]}"
+  SIT_DRIVER=binary ./scripts/test/swept.sh bun test --config=bunfig.sit.toml "${timeout_flag[@]}"
   echo "✅ sit tests passed"
   exit 0
 fi
@@ -77,10 +83,12 @@ rm -f "${coverage_file}"
 coverage_dir="${coverage_file%/*}"
 mkdir -p "${coverage_dir}"
 set +e
-bun test --config="${config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${coverage_dir}/junit.xml" "${files[@]}" 2>&1 | tee "${coverage_dir}/console.log"
+# `swept.sh` gives each run its own TMPDIR and FERRETRY_TEST=1, and fails it if a tmux server outlives
+# it — see the script. The quarantine rerun below is a second run, so it is swept on its own.
+./scripts/test/swept.sh bun test --config="${config}" "${timeout_flag[@]}" --coverage --reporter=junit --reporter-outfile="${coverage_dir}/junit.xml" "${files[@]}" 2>&1 | tee "${coverage_dir}/console.log"
 # A red run whose every failure is a quarantined flake reruns those files once, and its exit is the
 # run's from here on: 0 when green or rescued, the original status otherwise — see the script.
-bun scripts/ci/quarantine.ts "${mode}" "${PIPESTATUS[0]}" "${config}" "${coverage_dir}" "${coverage_dir}/console.log" "${timeout_flag[@]}"
+./scripts/test/swept.sh bun scripts/ci/quarantine.ts "${mode}" "${PIPESTATUS[0]}" "${config}" "${coverage_dir}" "${coverage_dir}/console.log" "${timeout_flag[@]}"
 test_status=$?
 set -e
 

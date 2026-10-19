@@ -68,11 +68,11 @@ cleanup() {
   set +e
 
   if [ -n "${run_root}" ] && [ "${run_root}" != "/" ] && [ -d "${run_root}" ]; then
-    while IFS= read -r -d '' socket; do
-      case "${socket}" in
-      "${run_root}"/*) "${real_tmux}" -S "${socket}" kill-server >/dev/null 2>&1 ;;
-      esac
-    done < <(find "${run_root}" -type s -name 'tmux*.sock' -print0)
+    # By process, not by socket file: a journey's own cleanup removes its root, socket included, and a
+    # server it never killed then survives every `kill-server` — which is how a daemon's private tmux,
+    # and the real Claude Code in its pane, ran on for days. Every journey kills its own servers, so
+    # one still running here is a fixture bug and fails the tier.
+    bun scripts/test/tmux-sweep.ts --fail-on-leak "${run_root}" || { [ "${status}" -eq 0 ] && status=1; }
     rm -rf -- "${run_root}"
   fi
 
@@ -90,6 +90,8 @@ esac
 [ "${run_root}" = "/" ] && echo "❌ refusing to use the filesystem root as the E2E suite root" >&2 && exit 1
 
 export FY_E2E_RUN_ROOT="${run_root}"
+# Every daemon a journey boots refuses to launch a real harness (packages/daemon/src/lib/tmux/harness-guard.ts).
+export FERRETRY_TEST=1
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM

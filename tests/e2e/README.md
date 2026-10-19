@@ -53,9 +53,26 @@ journey must inspect the isolated tmux server directly.
 Every environment owns a temporary `HOME`, `FY_HOME`, XDG state, fake-agent
 binary, dedicated real tmux socket, and independently reserved loopback ports.
 Resolved paths into live fleet or Ferretry state are rejected. Cleanup stops the
-daemon, kills the dedicated tmux server, releases ports, and removes temp state
-on success or failure; the suite runner also handles interrupts. Never bypass
-these helpers or reuse their resources across journeys.
+daemon, kills the dedicated tmux server AND the daemon's own `<FY_HOME>/tmux.sock`
+server, sweeps any other tmux process under the journey root by pid
+(`scripts/test/tmux-sweep.ts`), releases ports, and removes temp state on success
+or failure. A journey that times out never reaches its cleanup, so the fixture
+also sweeps every undisposed root when the test process exits or is signalled,
+and `run-e2e.sh` fails the tier if a tmux server is still running under its run
+root at the end. Never bypass these helpers or reuse their resources across
+journeys.
+
+**No journey may launch a real harness.** Every environment writes fake `claude`
+and `codex` into `paths.harnessBin`, which is first on every child's PATH —
+including a daemon started with `useDaemonPrivateTmux`, which gets no `bin`
+router. That matters because a generated runtime wrapper ends in `exec claude`
+by NAME: before `harnessBin`, `attention-lifecycle.e2e.test.ts` resolved that
+name on the host PATH and ran the developer's real Claude Code in a tmux server
+nothing killed. Children also get `FERRETRY_TEST=1`, which turns on the daemon's
+launch guard (`packages/daemon/src/lib/tmux/harness-guard.ts`): a session whose
+wrapper, `claude` or `codex` resolves into a real install fails with
+`test mode refused to launch a real harness`. Install a journey-specific fake
+with `installFakeHarness(name)` (scenario-driven) or write into `harnessBin`.
 
 Run the tier with `task test:e2e`. It typechecks the harness and runs without a
 coverage ledger. CI runs it as the `E2E` workflow (`scripts/ci/e2e.sh`), split

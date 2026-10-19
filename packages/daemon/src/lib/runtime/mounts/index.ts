@@ -82,6 +82,7 @@ import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
+import { type ModelsSubsystem, modelRoutes } from './models.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
@@ -318,6 +319,8 @@ export interface MountedSubsystems {
   /** Optional provider keys (Jev, Groq, Cerebras): which are set, and a Test that spends one once through
    *  the daemon's outbound holder. No key travels on either route — see `mounts/speedups.ts`. */
   readonly speedups: SpeedupsSubsystem;
+  /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). */
+  readonly models: ModelsSubsystem;
   /** How this machine's daemon was installed, the latest release, and starting an update. The
    *  subsystem owns its check loop as well as its routes — see `mounts/daemon-update.ts`. */
   readonly daemonUpdate: DaemonUpdateSubsystem;
@@ -543,6 +546,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...sttEnhancementRoutes(subsystems.sttEnhancement),
         // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
         ...speedupRoutes(subsystems.speedups),
+        // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
+        ...modelRoutes(subsystems.models),
         // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
         ...daemonUpdateRoutes(subsystems.daemonUpdate),
         // The working-tree read registers last among the per-session subsystems: three of its four paths are

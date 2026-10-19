@@ -499,13 +499,12 @@ export interface FakeTools {
  *
  * The daemon locates a harness through `FY_CLAUDE_BIN`/`FY_CODEX_BIN`, then PATH. Both are pinned
  * here, because the probe that built this module found the host's REAL `codex` on PATH: without the
- * pin, "Sign in now" would have launched the owner's codex. The directory is also prepended to this
- * process's PATH, which is what the daemon inherits under `useDaemonPrivateTmux`, because a
- * generated runtime wrapper execs `claude` by NAME.
+ * pin, "Sign in now" would have launched the owner's codex. They are written into the environment's
+ * `harnessBin`, which is first on every child's PATH — the daemon's too, under `useDaemonPrivateTmux`
+ * — because a generated runtime wrapper execs `claude` by NAME.
  */
 export async function installFakeTools(environment: E2eEnvironment): Promise<FakeTools> {
-  const directory = join(environment.paths.root, 'tools');
-  await mkdir(directory, { recursive: true });
+  const directory = environment.paths.harnessBin;
   const claude = join(directory, 'claude');
   const codex = join(directory, 'codex');
   await writeFile(claude, await readFile(join(REPOSITORY_ROOT, 'scripts', 'test', 'fake-claude-tui.sh'), 'utf8'), {
@@ -528,8 +527,6 @@ export async function installFakeTools(environment: E2eEnvironment): Promise<Fak
     }),
     'utf8',
   );
-  if (!(process.env.PATH ?? '').split(':').includes(directory))
-    process.env.PATH = `${directory}:${process.env.PATH ?? ''}`;
   return {
     directory,
     claude,

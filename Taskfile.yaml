@@ -118,7 +118,7 @@ tasks:
     desc: Run black-box journeys through the freshly compiled binary
     deps: [compile]
     cmds:
-      - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} bun test --config=bunfig.sit.toml
+      - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} ./scripts/test/swept.sh bun test --config=bunfig.sit.toml
 
   test:e2e:
     desc: Run isolated end-to-end journeys through the freshly compiled binary
@@ -147,7 +147,7 @@ tasks:
     desc: Run SIT journeys in-process and emit the full-system ledger
     cmds:
       - rm -rf coverage/sit
-      - SIT_DRIVER=inprocess bun test --config=bunfig.sit.toml --coverage
+      - SIT_DRIVER=inprocess ./scripts/test/swept.sh bun test --config=bunfig.sit.toml --coverage
       - test -f coverage/sit/lcov.info
 
   test:gate:
