@@ -36,6 +36,7 @@ import {
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
+  type SessionRelaunchSettings,
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
@@ -1475,6 +1476,17 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
     // The agent the caller asked for, in the view: a migration that answered with the old account
     // would be indistinguishable from a read.
     return sessionView(sessionId, { agent: request.agent }, { status: 'running', turn: 2 });
+  }
+
+  /** Every session asked about, in order. */
+  readonly relaunchReads: string[] = [];
+
+  async relaunchSettings(sessionId: string): Promise<SessionRelaunchSettings> {
+    this.relaunchReads.push(sessionId);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionMigrateError('not_found', `no session ${sessionId}`);
+    return { current: false, reasons: ['settings'] };
   }
 }
 

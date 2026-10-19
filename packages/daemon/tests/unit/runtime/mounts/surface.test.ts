@@ -613,6 +613,7 @@ describe('the mounted daemon surface', () => {
       2 + // the speed-up keys: their status read and one provider's Test
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
@@ -759,6 +760,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
+      'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/migrate',
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',

@@ -217,6 +217,15 @@
   background: var(--surface-2);
   color: var(--fg);
 }
+/* The one action the Settings row offers, so it reads as an action rather than as more text. */
+.fy-info-inline-action[data-info-restart] {
+  border: var(--stroke) solid var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-info-inline-action[data-info-restart]:disabled {
+  opacity: 0.6;
+}
 .fy-info-meter-row {
   display: inline-flex;
   flex: 1 1 160px;

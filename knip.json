@@ -32,6 +32,7 @@
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
         "harness/release-notice-screenshot.tsx",
+        "harness/relaunch-settings-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",

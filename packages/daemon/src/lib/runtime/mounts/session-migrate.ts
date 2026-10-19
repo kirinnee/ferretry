@@ -1,4 +1,9 @@
-import { FY_REQUEST_ID_HEADER, MigrateSessionRequestSchema, type SessionView } from '@ferretry/protocol';
+import {
+  FY_REQUEST_ID_HEADER,
+  MigrateSessionRequestSchema,
+  type SessionRelaunchSettings,
+  type SessionView,
+} from '@ferretry/protocol';
 import {
   MIGRATION_REPLAY_MAX_ENTRIES,
   MigrationReplayCapacityError,
@@ -100,6 +105,11 @@ export interface SessionMigrateSubsystem {
     sessionId: string,
     request: { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean },
   ): Promise<SessionView>;
+  /**
+   * Whether the session's process runs on the settings a Restart would relaunch it with — the
+   * question Info › Runtime answers with "Running with older settings — Restart to apply".
+   */
+  relaunchSettings(sessionId: string): Promise<SessionRelaunchSettings>;
 }
 
 /** The HTTP status and code each refusal answers with. */
@@ -236,6 +246,16 @@ export function sessionMigrateRoutes(
   // recognise nothing, which is the bug this route had.
   const guard = new MigrationReplayGuard(committedAfterDestruction, maxReplayEntries);
   return [
+    {
+      // A read of what a Restart (a migration onto the same account) would change, so it lives with
+      // the migration. `operator`, as the migration is: the answer describes how this session's
+      // process was launched, which is the migration's own business.
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/relaunch-settings',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => jsonResponse(await subsystem.relaunchSettings(pathSessionId(context)).catch(refuse)),
+    },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/migrate',

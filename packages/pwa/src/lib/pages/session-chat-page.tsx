@@ -49,6 +49,7 @@ import { type SessionActionContribution, sessionActionSections } from '../../fea
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
+import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
 import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
 import type { InfoTab } from '../../features/session-info/info-model.ts';
@@ -1002,6 +1003,7 @@ export function SessionChatPage({
       verdicts: async () => await (await routedClient(connection)).wardenVerdicts(),
       analytics: async () =>
         await fetchSessionAnalytics(connection, scope, `sum ${analyticsIdQuery(scope.sessionId)}`, referenceFetch),
+      relaunch: async signal => await readRelaunchSettings(connection, scope, referenceFetch, signal),
       folder: {
         agentName,
         signals: attentionSignalsPort(contextDependencies.attention, connection, scope),
@@ -1073,6 +1075,7 @@ export function SessionChatPage({
                 : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
               {...(infoControls === undefined ? {} : { runtimeControls: infoControls })}
               {...(infoLearning === undefined ? {} : { learning: infoLearning })}
+              {...(canControl && !TERMINAL_STATUSES.has(session.state.status) ? { onRestart: restart } : {})}
             />
           ),
         };
