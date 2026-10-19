@@ -1,10 +1,12 @@
 /**
- * Dictation: one recognition session, one transcript, and exactly one way for
+ * Dictation: one recognition session, one transcript held for review, and exactly one way for
  * text to leave it.
  *
  * There is no `onSubmit`, no `onSend`, and no path from recognised words to a
- * message being sent. `onDraft` is called once, after recognition finishes and
- * optional correction has run, with the COMPLETE next draft and caret.
+ * message being sent. On Stop the hook transcribes once and cleans up once, then PARKS the result
+ * as `review` (phase `review`) — nothing reaches the draft yet. `insert(text)` is the only way
+ * out: it calls `onDraft` once with the COMPLETE next draft and caret, placed where the caret
+ * is at THAT moment (so typing while the box was open is preserved). `discard()` drops it.
  *
  * TWO ENGINES, CHOSEN BY THE PERSON (`settings.engine`), neither a fallback for
  * the other:
@@ -67,7 +69,7 @@ import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
  * enhancement round trip this hook runs after the browser has settled its
  * words, which the port itself knows nothing about.
  */
-export type DictationPhase = 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error';
+export type DictationPhase = 'idle' | 'requesting' | 'recording' | 'transcribing' | 'review' | 'error';
 
 export interface DictationError {
   readonly code: string;
@@ -79,7 +81,18 @@ export interface DictationDraftResult {
   readonly text: string;
   /** Where the caret should sit afterwards. */
   readonly caret: number;
-  /** Raw words already landed; only optional correction failed. */
+}
+
+/**
+ * A finished take waiting for the person's decision. `cleaned` equals `raw` when cleanup was off,
+ * changed nothing, or failed (`enhancementError` then says why); the box offers the raw words
+ * beside the cleaned ones only when they differ. `id` is new for every take, so UI state keyed on
+ * it cannot leak from one take into the next.
+ */
+export interface DictationReview {
+  readonly id: number;
+  readonly raw: string;
+  readonly cleaned: string;
   readonly enhancementError?: DictationError;
 }
 
@@ -195,12 +208,18 @@ export interface DictationHandle {
   /** The open microphone’s level tap while recording, for the input meter; `null` when there is none. */
   readonly inputMonitor: CaptureMonitor | null;
   readonly error: DictationError | null;
+  /** The finished take awaiting Insert or Discard; `null` outside phase `review`. */
+  readonly review: DictationReview | null;
   readonly busy: boolean;
   /** Call synchronously from the reader gesture. */
   start(): void;
   stop(): void;
   cancel(): void;
   dismissError(): void;
+  /** Put `text` (the transcript as the person left it) into the draft at the caret, then clear the review. */
+  insert(text: string): void;
+  /** Drop the review; the draft is untouched. */
+  discard(): void;
 }
 
 /** The preview state: the whole line, its provisional tail, and whether near-live words paused. */
@@ -242,6 +261,8 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [error, setError] = useState<DictationError | null>(null);
+  const [review, setReview] = useState<DictationReview | null>(null);
+  const reviewIdRef = useRef(0);
   const [live, setLive] = useState<LiveWords>(NO_LIVE_WORDS);
   const [inputMonitor, setInputMonitor] = useState<CaptureMonitor | null>(null);
   const meterRef = useRef<MicMeter | null>(null);
@@ -308,17 +329,18 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     invalidate();
     setLive(NO_LIVE_WORDS);
     setError(null);
+    setReview(null);
     setPhase('idle');
   }, [disabled, invalidate]);
 
-  const commit = useCallback((transcript: string, enhancementError?: DictationError) => {
+  const commit = useCallback((transcript: string) => {
     const spoken = transcript.trim();
     if (spoken.length === 0) return;
     const current = optionsRef.current;
     const [start, end] = readSelection(current.selectionRef?.current, current.draft);
     const result = insertTranscript(current.draft, start, end, spoken);
     // THE ONLY OUTPUT.
-    current.onDraft({ ...result, ...(enhancementError ? { enhancementError } : {}) });
+    current.onDraft(result);
   }, []);
 
   /**
@@ -411,14 +433,15 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           enhancementFailure = failure;
         });
         if (!isCurrent(token)) return;
-        commit(text, enhancementFailure ?? undefined);
-        if (enhancementFailure !== null) {
-          setError(enhancementFailure);
-          setPhase('error');
-        } else {
-          setLive(NO_LIVE_WORDS);
-          setPhase('idle');
-        }
+        reviewIdRef.current += 1;
+        setReview({
+          id: reviewIdRef.current,
+          raw: raw.trim(),
+          cleaned: text.trim(),
+          ...(enhancementFailure === null ? {} : { enhancementError: enhancementFailure }),
+        });
+        setLive(NO_LIVE_WORDS);
+        setPhase('review');
       } catch (failure) {
         if (!isCurrent(token)) return;
         const recognitionFailure = browserRecognitionErrorFrom(failure);
@@ -439,7 +462,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         if (isCurrent(token)) controllerRef.current = null;
       }
     },
-    [commit, enhanceTranscript, isCurrent, releaseMeter],
+    [enhanceTranscript, isCurrent, releaseMeter],
   );
 
   const start = useCallback(() => {
@@ -449,6 +472,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     const token = invalidate();
     setLive(NO_LIVE_WORDS);
     setError(null);
+    setReview(null);
     setPhase('requesting');
 
     if (engine === null) {
@@ -528,6 +552,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           invalidate();
           setLive(NO_LIVE_WORDS);
           setError(null);
+          setReview(null);
           setPhase('idle');
         },
         onLimit: () => {
@@ -571,8 +596,19 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     invalidate();
     setLive(NO_LIVE_WORDS);
     setError(null);
+    setReview(null);
     setPhase('idle');
   }, [invalidate]);
+
+  const insert = useCallback(
+    (text: string) => {
+      if (phase !== 'review') return;
+      commit(text);
+      setReview(null);
+      setPhase('idle');
+    },
+    [commit, phase],
+  );
 
   const dismissError = useCallback(() => {
     setError(null);
@@ -590,9 +626,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     inputMonitor,
     busy: phase === 'transcribing',
     error,
+    review,
     start,
     stop,
     cancel,
     dismissError,
+    insert,
+    discard: cancel,
   };
 }
