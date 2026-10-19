@@ -35,6 +35,7 @@
         "harness/relaunch-settings-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/model-catalog-screenshot.tsx",
+        "harness/local-models-screenshot.tsx",
         "harness/runtime-switch-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",

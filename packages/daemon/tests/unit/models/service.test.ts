@@ -19,6 +19,29 @@ describe('ModelCatalogService', () => {
     should(sources.presets.length).be.above(0);
   });
 
+  it('should carry what the last read of Ollama found, and nothing when none was read', async () => {
+    // Arrange
+    const local = {
+      provider: 'ollama' as const,
+      baseUrl: 'http://127.0.0.1:11434',
+      state: 'none-pulled' as const,
+      models: [],
+      checkedAt: '2026-10-19T00:00:00.000Z',
+      message: 'Ollama is running, but no model is installed yet. Run: ollama pull gpt-oss:20b',
+      pullCommand: 'ollama pull gpt-oss:20b',
+    };
+    const read = new ModelCatalogService({ files: async () => ({}), presets: async () => [], ollama: () => local });
+    const unread = new ModelCatalogService({
+      files: async () => ({}),
+      presets: async () => [],
+      ollama: () => undefined,
+    });
+
+    // Act / Assert
+    should((await read.sources()).local).eql({ ollama: local });
+    should((await unread.sources()).local).be.undefined();
+  });
+
   it('should lay the published catalog over the built-in one, and this machine’s file over both', async () => {
     // Arrange
     const published = { ...zai, origin: 'published' as const, label: 'Published' };

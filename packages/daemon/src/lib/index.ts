@@ -37,6 +37,7 @@ export * from './migrate/command-classifier.ts';
 export * from './migrate/command-tables.ts';
 export * from './migrate/harness-compatibility.ts';
 export * from './migrate/inflight-report.ts';
+export * from './local-models/index.ts';
 export * from './migrate/outcome-render.ts';
 export * from './migrate/preflight-service.ts';
 export * from './migrate/process-inventory-port.ts';

@@ -424,6 +424,7 @@ export function NewSessionPage({
                   customIds={chosen.modelCatalog.customIds}
                   defaultModel={chosen.defaultModel}
                   id={fieldId('model')}
+                  local={chosen.modelCatalog.local}
                   models={chosen.models}
                   onChange={value => update('model', value)}
                   value={draft.model}

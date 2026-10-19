@@ -43,7 +43,7 @@ codex: # what Codex is given, the same shape without tiers
 - `suffix: "[1m]"` on a Claude Code model is the context suffix the provider tells Claude Code to use;
   it is part of the value the picker sends and the wrapper passes (`--model deepseek-flash[1m]`).
 - A tier slot holds a model id, optionally with a context suffix, and must name one of the half's models.
-- `detect: ollama` marks a local server whose own model list a picker may read (see the gaps).
+- `detect: ollama` marks a local server whose own model list the daemon reads (§ Local models).
 
 The check is the fleet library's zod schema (`packages/fleet/src/lib/models/schema.ts`), the same one
 `fy config schema models` prints. The test suite refuses a build in which any provider preset lacks a
@@ -134,7 +134,7 @@ reads.
 
 **Switches.** `FY_MODEL_CATALOG=off` follows no published catalog; `FY_MODEL_CATALOG_ORIGIN=<origin>`
 reads it from another origin (a self-hosted app built from this repository). Every test tier runs with
-`FY_MODEL_CATALOG=off`, `FY_RELAY_DIRECTORY_ORIGIN=off` and `FY_UPDATE_CHECK=off` (`packages/daemon/tests/support/offline-environment.ts`,
+`FY_MODEL_CATALOG=off`, `FY_LOCAL_MODELS=off`, `FY_RELAY_DIRECTORY_ORIGIN=off` and `FY_UPDATE_CHECK=off` (`packages/daemon/tests/support/offline-environment.ts`,
 preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferretry-hosted origin or GitHub's release API.
 
 ### How to update the model list
@@ -147,11 +147,45 @@ preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferret
    its next check (at most six hours, or now with `fy models refresh`). The next release also builds it
    in.
 
+## Local models
+
+A catalog with `detect: ollama` (the Ollama one) also offers what Ollama has **installed on this machine**.
+
+**Reading.** `GET <address>/api/tags` — the same list `ollama list` prints — through the keyless, loopback-only
+read a login Test makes (`ProviderProbePort`, a `local` plan): no credential, no cookie, no inference, nothing
+spent. The address is `OLLAMA_HOST` in the forms Ollama itself takes (`127.0.0.1:11434`, `:9999`, `0.0.0.0`,
+`http://localhost:12345`), or `http://127.0.0.1:11434`. **Only a server on this machine is ever read**: any
+other address is answered `refused` and nothing is sent.
+
+**When it reads.** Never on a timer. The daemon reads once at boot (so a fleet that starts with models
+installed publishes them), and again when something asks: `POST /v1/models/local/refresh` — which the app calls
+when Add a login or a login's settings opens, and from "Check again". Callers that arrive during a read share
+it. The last answer is held in memory only, so a restart forgets it and the next read restores it.
+`FY_LOCAL_MODELS=off` reads nothing (every test tier sets it; the answer is `disabled`).
+
+**What it answers** (`LocalModels`): `state` — `found`, `none-pulled` (Ollama runs, nothing installed),
+`not-running`, `unreadable` (something answered, not as Ollama does), `refused`, `disabled` — the models
+(`id`, size, parameter size, quantization, family, when changed), one actionable `message`, and `pullCommand`,
+the exact command that installs the catalog's default (`ollama pull gpt-oss:20b`). A server that is down is an
+answer, never an error.
+
+**What a runtime gets.** `runtimeModels` folds the answer in, so every picker and the launch agree:
+
+- `found` — the runtime offers exactly the installed models, each marked `local`. The catalog still describes a
+  model it knows (tier, context, efforts); a model it does not know is listed by id; a catalog model that is not
+  installed is left out, because it could not launch. The default is the catalog's when installed, else the first
+  installed model.
+- any other state — the catalog's suggestions stay, and the runtime carries the snapshot (`models.local`) so a
+  picker can say what is wrong and show the command.
+
+A read that changes what a runtime offers republishes the fleet (as a newer catalog does); one that does not
+changes nothing.
+
 ## Declared gaps
 
-- **Ollama's detected models are not read yet.** The Ollama catalog lists the gpt-oss models Ollama's
-  Codex guide suggests and offers "Custom id…"; a live Codex session's picker already lists what Codex
-  itself reports. Reading `localhost:11434/api/tags` into the other pickers is not built.
+- **Only Ollama on this machine is detected.** Another host (a GPU box on the network) is refused, not
+  dialled, and LM Studio and other local servers are not read. The address comes from the daemon's own
+  `OLLAMA_HOST`, which a service started outside a shell may not have.
 - **A live Codex session's list is Codex's own.** Codex switches models only through its own picker, so a
   running Codex session offers exactly what its app-server reports; the catalog adds the tier and name
   where an id matches.

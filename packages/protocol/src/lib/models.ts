@@ -75,3 +75,49 @@ export const ModelCatalogsViewSchema = z.strictObject({
   catalogs: z.array(ModelCatalogViewSchema).readonly(),
 });
 export type ModelCatalogsView = z.infer<typeof ModelCatalogsViewSchema>;
+
+// ── Models installed on this machine ─────────────────────────────────────────────────────────────
+
+/** `POST`: read the models a local server (Ollama) reports it has, now. Spends nothing. */
+export const LOCAL_MODELS_REFRESH_PATH = '/v1/models/local/refresh';
+
+/**
+ * What the last read of the local server found. `not-running` and `unreadable` are the two ways a
+ * server that should be there is not usable; `refused` is an address that is not this machine's;
+ * `disabled` is a daemon told to read none (`FY_LOCAL_MODELS=off`).
+ */
+export const LocalModelsStateSchema = z.enum([
+  'found',
+  'none-pulled',
+  'not-running',
+  'unreadable',
+  'refused',
+  'disabled',
+]);
+export type LocalModelsState = z.infer<typeof LocalModelsStateSchema>;
+
+/** One model the local server has installed. The id is what the CLI is handed (`gpt-oss:20b`). */
+export const LocalModelSchema = z.strictObject({
+  id: NonEmpty,
+  label: NonEmpty,
+  sizeBytes: z.number().int().nonnegative().optional(),
+  parameterSize: NonEmpty.optional(),
+  quantization: NonEmpty.optional(),
+  family: NonEmpty.optional(),
+  modifiedAt: InstantSchema.optional(),
+});
+export type LocalModel = z.infer<typeof LocalModelSchema>;
+
+export const LocalModelsSchema = z.strictObject({
+  provider: z.literal('ollama'),
+  /** The address that was read, without a trailing slash. */
+  baseUrl: NonEmpty,
+  state: LocalModelsStateSchema,
+  models: z.array(LocalModelSchema).readonly(),
+  checkedAt: InstantSchema,
+  /** One sentence a person can act on, for every state. */
+  message: NonEmpty,
+  /** The exact command that installs a model, e.g. `ollama pull gpt-oss:20b`. */
+  pullCommand: NonEmpty,
+});
+export type LocalModels = z.infer<typeof LocalModelsSchema>;

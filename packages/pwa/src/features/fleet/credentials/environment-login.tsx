@@ -15,6 +15,7 @@ import type { FleetProviderPresetView } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
+import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { listSecrets } from '../../secrets/secrets-api.ts';
 import { readFleetPresets } from '../credentials-api.ts';
@@ -29,6 +30,7 @@ import { OneClickLogin } from './one-click-login.tsx';
 import { PasteVariables } from './paste-variables.tsx';
 import { ProviderGrid } from './provider-grid.tsx';
 import type { Prefill } from './provider-model.ts';
+import { useLocalModels } from './use-local-models.ts';
 
 export interface EnvironmentLoginProps {
   /** Set when the flow was opened for one harness: only presets with a half for it are offered. */
@@ -71,6 +73,14 @@ export function EnvironmentLogin({
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const [stored, setStored] = useState<ReadonlySet<string>>(new Set());
   const [screen, setScreen] = useState<Screen>({ kind: 'grid' });
+  // One read of Ollama when this flow opens and it offers the Ollama tile; then only on Check again.
+  const local = useLocalModels({
+    connection,
+    createClient,
+    enabled:
+      loaded.kind === 'ready' &&
+      presetsFor(loaded.presets, harness).some(candidate => candidate.id === OLLAMA_PRESET_ID),
+  });
 
   useEffect(() => {
     let live = true;
@@ -171,6 +181,7 @@ export function EnvironmentLogin({
         connection={connection}
         createClient={createClient}
         changes={changes}
+        local={preset.id === OLLAMA_PRESET_ID ? local : undefined}
         reload={reload}
         onBack={backToGrid}
         onSaved={credentialId => {
@@ -187,6 +198,7 @@ export function EnvironmentLogin({
       </p>
       <ProviderGrid
         presets={presets}
+        local={local}
         onPick={presetId => {
           changes.clear();
           setScreen({ kind: 'form', presetId });

@@ -577,6 +577,7 @@ function modelsView(
       catalog: derived.catalog,
       choices: derived.models.map(model => ({ ...model, efforts: [...model.efforts] })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
+      ...(derived.local === undefined ? {} : { local: derived.local }),
     },
   };
 }

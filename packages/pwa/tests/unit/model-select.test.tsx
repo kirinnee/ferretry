@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ModelSelect } from '../../src/components/model-select.tsx';
 import type { PickerModel } from '../../src/lib/account-picker-catalog.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { localModelsFixture, PULL } from '../support/local-models.ts';
 
 const MODELS: readonly PickerModel[] = [
   { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash', tier: 'fast', available: true, efforts: [] },
@@ -86,5 +87,58 @@ describe('ModelSelect', () => {
     expect(flat.container.querySelectorAll('optgroup')).toHaveLength(0);
     expect(must(flat.container.querySelector('select'), 'select').options[0]?.textContent).toBe('Login default');
     await flat.unmount();
+  });
+});
+
+describe('ModelSelect · models installed on this machine', () => {
+  const INSTALLED: readonly PickerModel[] = [
+    { id: 'gpt-oss:20b', label: 'gpt-oss:20b', tier: 'best', available: true, efforts: [], local: true },
+    { id: 'qwen3-coder:30b', label: 'qwen3-coder:30b', available: true, efforts: [], local: true },
+  ];
+
+  test('marks an installed model "installed here" and adds no note when models were found', async () => {
+    const screen = await mount(
+      <ModelSelect
+        customIds={true}
+        defaultModel="gpt-oss:20b"
+        id="m"
+        local={localModelsFixture('found')}
+        models={INSTALLED}
+        onChange={() => undefined}
+        value=""
+      />,
+    );
+    const select = must(screen.container.querySelector('select'), 'select');
+    expect([...select.options].map(option => option.textContent)).toEqual([
+      'Login default (gpt-oss:20b)',
+      'gpt-oss:20b · default · installed here',
+      'qwen3-coder:30b · installed here',
+      'Custom id…',
+    ]);
+    expect(select.getAttribute('aria-describedby')).toBeNull();
+    expect(screen.container.querySelector('[data-local-models-note]')).toBeNull();
+    await screen.unmount();
+  });
+
+  test('describes the select by the note when Ollama is not usable, joined to the caller’s own description', async () => {
+    const screen = await mount(
+      <ModelSelect
+        aria-describedby="hint"
+        customIds={true}
+        defaultModel={null}
+        id="m"
+        local={localModelsFixture('not-running')}
+        models={[{ id: 'gpt-oss:20b', label: 'gpt-oss:20b', available: true, efforts: [] }]}
+        onChange={() => undefined}
+        value=""
+        write={async () => undefined}
+      />,
+    );
+    const select = must(screen.container.querySelector('select'), 'select');
+    const note = must(screen.container.querySelector('[data-local-models-note="not-running"]'), 'the note');
+    expect(select.getAttribute('aria-describedby')).toBe(`hint ${note.id}`);
+    expect(note.textContent).toContain('Ollama is not running');
+    expect(note.querySelector('[data-local-models-command]')?.textContent).toBe(PULL);
+    await screen.unmount();
   });
 });

@@ -86,6 +86,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/recommend': 'a read with a body: recommends a model for a task',
   'POST /v1/stt/enhance': 'a read with a body: tidies dictated text',
   'POST /v1/models/refresh': 'asks the hosted app for a newer model catalog; labels and ids, grants nothing',
+  'POST /v1/models/local/refresh':
+    'reads the model names Ollama has installed on this machine, as `ollama list` does; spends and changes nothing',
 };
 
 /** Protocol-switching routes the log does not record. */

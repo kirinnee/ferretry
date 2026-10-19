@@ -6,6 +6,7 @@
  * A catalog is data — labels, model ids, tiers — and never a credential or a permission, so the whole
  * set may travel to any caller with `fleet.use`.
  */
+import type { LocalModels } from '@ferretry/protocol';
 import {
   builtInModelCatalogs,
   type ModelCatalog,
@@ -21,6 +22,8 @@ export interface ModelCatalogServiceDeps {
   published?(): Promise<Readonly<Record<string, ModelCatalog>> | undefined>;
   /** The provider presets in effect: a login reads its catalog through its preset. */
   presets(): Promise<readonly ProviderPreset[]>;
+  /** What the last read of Ollama found; no IO. Absent when this machine reads none. */
+  ollama?(): LocalModels | undefined;
 }
 
 export class ModelCatalogService {
@@ -42,6 +45,7 @@ export class ModelCatalogService {
   /** What an apply reads to decide each runtime's models. */
   async sources(): Promise<ModelCatalogSources> {
     const [catalogs, presets] = await Promise.all([this.catalogs(), this.deps.presets()]);
-    return { catalogs, presets };
+    const ollama = this.deps.ollama?.();
+    return { catalogs, presets, ...(ollama === undefined ? {} : { local: { ollama } }) };
   }
 }

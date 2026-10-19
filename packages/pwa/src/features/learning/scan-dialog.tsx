@@ -413,6 +413,7 @@ function ScanForm({
                 defaultLabel="Login’s default"
                 defaultModel={login.defaultModel}
                 id={`${formId}-model`}
+                local={login.modelCatalog.local}
                 models={login.models}
                 onChange={model => update({ model })}
                 value={draft.model}
