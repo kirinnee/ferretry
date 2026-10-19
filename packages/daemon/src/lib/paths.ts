@@ -80,6 +80,13 @@ export interface SessionPaths {
   readonly events: string;
   readonly lastSnapshot: string;
   readonly terminalPane: string;
+  /**
+   * Where the session's agent puts media it made to SHOW the person — a chart, a recording, a report.
+   * Inside the daemon's own session state rather than the working tree, so a generated file never
+   * dirties a repository and no repository's ignore rules decide whether it can be shown. Handed to
+   * the pane as `FY_MEDIA_DIR` and read back by `/fs/file?scope=media` (docs/hypermedia.md).
+   */
+  readonly media: string;
 }
 
 export function createFoundationPaths(home: StateHome): FoundationPaths {
@@ -120,6 +127,7 @@ export function createSessionPaths(paths: FoundationPaths, sessionId: SessionId)
     events: join(directory, 'events.jsonl'),
     lastSnapshot: join(directory, 'last-snapshot.txt'),
     terminalPane: join(directory, 'terminal-pane.json'),
+    media: join(directory, 'media'),
   };
 }
 

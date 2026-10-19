@@ -9,6 +9,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -5756,6 +5757,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const sessionCredentials = new NodeSessionCredentialIssuer();
   const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
+  // Where a session's agent puts media it made to show the person, created per launch so a pane is never
+  // handed a folder that does not exist. Owner-only, like the rest of the session's state.
+  const sessionMedia = async (id: SessionId): Promise<string> => {
+    const directory = createSessionPaths(paths, id).media;
+    await mkdir(directory, { mode: 0o700, recursive: true });
+    return directory;
+  };
   // ONE durable owner for every irreversible pane effect in this daemon. Lifecycle turn delivery
   // and runtime controls deliberately share it so neither can mint a second replay vocabulary.
   const sessionEffects = new FileSessionEffectLedger(id => createSessionPaths(paths, id).directory);
@@ -6074,6 +6082,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // And the same chance to renew it. A recovered agent holding an expired access token is a
       // revive that restored the pane and not the session.
       accountLaunchRenewal,
+      sessionMedia,
     );
   };
   /**
@@ -6239,6 +6248,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Attended renewal's second door: a person started this session, so the account's credential is
         // given its chance to rotate while somebody is still here to be told it could not.
         accountLaunchRenewal,
+        // The pane's own media folder, `FY_MEDIA_DIR` (docs/hypermedia.md).
+        sessionMedia,
       ),
       codexAppServers,
       { text: async record => (await launchTmux.state(record.config.tmuxSession)).visible },
@@ -7848,6 +7859,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
         sessionFilesystem: new SessionFilesystem(sessionRootPinner(), new RunnerSessionGit(new BunGitRunner())),
+        // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
+        sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
         scratchGc,
         secrets,
         warden: createWardenSubsystem({

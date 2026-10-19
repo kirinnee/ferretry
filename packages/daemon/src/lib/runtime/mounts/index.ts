@@ -69,7 +69,7 @@ import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-atta
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
-import { sessionFilesystemRoutes } from './session-filesystem.ts';
+import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
@@ -330,6 +330,8 @@ export interface MountedSubsystems {
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
+  /** Names a session's media folder, which `/fs/file?scope=media` reads. Absent: no such folder. */
+  readonly sessionMediaRoot?: SessionMediaRoot;
   /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
   readonly scratchGc: ScratchGcSubsystem;
   /** The daemon's secret store, and the use-without-read primitive that is the point of it: an agent
@@ -559,7 +561,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.
-        ...sessionFilesystemRoutes(subsystems.sessionFilesystem, subsystems.sessions),
+        ...sessionFilesystemRoutes(subsystems.sessionFilesystem, subsystems.sessions, subsystems.sessionMediaRoot),
         // Every warden path is under `/v1/warden`, which no other subsystem uses, so this table can
         // neither shadow nor be shadowed by anything above it.
         ...wardenRoutes(subsystems.warden),

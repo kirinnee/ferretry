@@ -113,13 +113,17 @@ export type FyRenderMediaType = (typeof FY_RENDER_MEDIA_TYPES)[number];
  * `workspace` is an `@path` written and parsed exactly as an `@file` reference
  * is (`parseReferenceToken`), minus a line suffix — a picture has no line 12.
  * It is resolved against the session's folder at read time, by the reader's own
- * grants, never here. `https` is a URL the reader's browser fetches after the
- * gesture. There is no third kind: no `http:`, no `data:`, no `blob:`, no
- * daemon URL, because each of those is either a downgrade, a second inline
- * grammar, or a credential-shaped address.
+ * grants, never here. `media` is `media:<path>`: a file in the session's MEDIA
+ * folder (`FY_MEDIA_DIR`), where an agent puts what it made to show the person —
+ * outside any repository, so no ignore rule decides whether it can be shown, and
+ * read by the same grant. `https` is a URL the reader's browser fetches once the
+ * block is near. Nothing else: no `http:`, no `data:`, no `blob:`, no daemon
+ * URL, because each of those is either a downgrade, a second inline grammar, or a
+ * credential-shaped address.
  */
 export type FyRenderSource =
   | { readonly kind: 'workspace'; readonly path: string }
+  | { readonly kind: 'media'; readonly path: string }
   | { readonly kind: 'https'; readonly url: string };
 
 /**
@@ -706,6 +710,8 @@ interface FyRenderHeaders {
 }
 
 const HEADER_KEYS: readonly string[] = ['type', 'alt', 'mime', 'src'];
+/** The session media folder's `src:` prefix — see `FyRenderSource`. */
+const MEDIA_PREFIX = 'media:';
 const isMediaType = (type: FyRenderType): type is FyRenderMediaType =>
   FY_RENDER_MEDIA_TYPES.some(media => media === type);
 
@@ -732,7 +738,21 @@ function parseSource(value: string): FyRenderSource | string {
       return 'A workspace src must be an @path to a file, without a line number';
     return { kind: 'workspace', path: reference.path };
   }
-  if (!value.startsWith('https://')) return 'The src header must be an @path or an https:// URL';
+  if (value.startsWith(MEDIA_PREFIX)) {
+    const path = value.slice(MEDIA_PREFIX.length);
+    // A name inside the folder, nothing that could leave it. The daemon refuses these too; refusing them
+    // here means a bad block is an ordinary fence rather than a request that was always going to fail.
+    if (
+      path === '' ||
+      path.startsWith('/') ||
+      /[\s\\]/u.test(path) ||
+      hasControlCharacter(path) ||
+      path.split('/').some(segment => segment === '' || segment === '.' || segment === '..')
+    )
+      return 'A media src must be media:<file> inside the session media folder';
+    return { kind: 'media', path };
+  }
+  if (!value.startsWith('https://')) return 'The src header must be an @path, media:<file> or an https:// URL';
   if (/\s/u.test(value) || hasControlCharacter(value)) return 'The src URL must not contain whitespace';
   let url: URL;
   try {
@@ -1148,9 +1168,21 @@ export function fyRenderMediaMime(type: FyRenderMediaType, path: string): string
  */
 export type FyRenderWorkspaceRead =
   | { readonly ok: true; readonly bytes: Uint8Array<ArrayBuffer> }
-  | { readonly ok: false; readonly reason: 'missing' | 'denied' | 'not-served' | 'too-large' | 'unavailable' };
+  | {
+      readonly ok: false;
+      readonly reason: 'missing' | 'denied' | 'not-served' | 'too-large' | 'unavailable';
+      /** WHICH rule refused it, in the daemon's words — said to the reader, never folded away. */
+      readonly rule?: string;
+    };
 
-export type FyRenderWorkspaceReader = (path: string, signal: AbortSignal) => Promise<FyRenderWorkspaceRead>;
+/** Where the path is read from: the session's working tree, or its media folder (`media:`). */
+export type FyRenderWorkspaceScope = 'workspace' | 'media';
+
+export type FyRenderWorkspaceReader = (
+  path: string,
+  signal: AbortSignal,
+  scope?: FyRenderWorkspaceScope,
+) => Promise<FyRenderWorkspaceRead>;
 
 /**
  * Reads one fence body. Never throws, never executes, never reaches the network:

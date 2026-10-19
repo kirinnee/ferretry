@@ -1,6 +1,6 @@
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
-import { sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
+import { type SessionMediaDirectory, sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
 import {
   type PaneObservation,
   type ResumeLauncher,
@@ -101,6 +101,8 @@ export class TmuxResumeLauncher implements ResumeLauncher {
      * environment above is resolved here to avoid.
      */
     private readonly accountRenewal?: AccountLaunchRenewal,
+    /** The same media folder the first launch handed the pane, so a revive keeps it. */
+    private readonly media?: SessionMediaDirectory,
   ) {}
 
   async observe(id: SessionId): Promise<PaneObservation> {
@@ -143,7 +145,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
       session: spec.tmuxSession,
       cwd: spec.cwd,
       command: [program, ...arguments_],
-      env: sessionPaneEnvironment(id, launchEnvironment(account, spec.env ?? {})),
+      env: sessionPaneEnvironment(id, launchEnvironment(account, spec.env ?? {}), await this.media?.(id)),
     });
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.

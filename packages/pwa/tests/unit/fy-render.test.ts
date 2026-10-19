@@ -1221,7 +1221,31 @@ describe('fy-render src headers', () => {
       'chart.png',
       'HTTPS://a.com/x',
     ])
-      should(reasonOf(media('image', src))).equal('The src header must be an @path or an https:// URL');
+      should(reasonOf(media('image', src))).equal('The src header must be an @path, media:<file> or an https:// URL');
+  });
+
+  test('should read media:<file> as a file in the session media folder', () => {
+    for (const [src, path] of [
+      ['media:card.png', 'card.png'],
+      ['media:charts/q3.png', 'charts/q3.png'],
+    ] as const) {
+      const result = parseFyRender(['type: image', 'alt: A chart', `src: ${src}`, '---'].join('\n'));
+      should(result.ok && 'src' in result.block ? result.block.src : null).eql({ kind: 'media', path });
+    }
+  });
+
+  test('should refuse a media path that could leave the folder or is not a name', () => {
+    for (const src of [
+      'media:',
+      'media:/etc/passwd',
+      'media:../x.png',
+      'media:a//b.png',
+      'media:./x.png',
+      'media:a b.png',
+      'media:a\\b.png',
+      'media:a\u0001.png',
+    ])
+      should(reasonOf(media('image', src))).equal('A media src must be media:<file> inside the session media folder');
   });
 
   test('should refuse whitespace or a control character inside the URL', () => {

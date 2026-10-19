@@ -10,6 +10,7 @@ import {
   type CreateSessionLifecycleRequest,
   type LifecycleSessionStatus,
   SESSION_ID_VARIABLE,
+  SESSION_MEDIA_VARIABLE,
   type SessionLifecycleEvent,
   type SessionLifecycleRecord,
   SessionLifecycleRecordSchema,
@@ -138,13 +139,25 @@ export function firstTurnInstruction(taskFile: string): string {
  * HYPERMEDIA DEFAULTS ON, written FIRST so a stored switch wins: a ferret whose switch was never written —
  * every ferret that existed before it did — is told it may use hypermedia at its next launch, and only
  * an explicit `0` the owner set turns it off (docs/hypermedia.md).
+ *
+ * THE MEDIA FOLDER IS DERIVED TOO, and written last for the same reason as the id: a stored variable
+ * must not be able to point an agent's "show this" files somewhere the media route does not read.
  */
 export function sessionPaneEnvironment(
   id: SessionId,
   stored: Readonly<Record<string, string>>,
+  media?: string,
 ): Readonly<Record<string, string>> {
-  return { [HYPERMEDIA_ENV]: '1', ...stored, [SESSION_ID_VARIABLE]: id };
+  return {
+    [HYPERMEDIA_ENV]: '1',
+    ...stored,
+    [SESSION_ID_VARIABLE]: id,
+    ...(media === undefined ? {} : { [SESSION_MEDIA_VARIABLE]: media }),
+  };
 }
+
+/** Creates (if needed) and names one session's media folder; see `SessionPaths.media`. */
+export type SessionMediaDirectory = (id: SessionId) => Promise<string>;
 
 /** Everything the daemon had to resolve before a record could be built. */
 export interface SessionRecordContext {
