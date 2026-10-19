@@ -29,7 +29,8 @@ import {
  * real Chrome. The shell URLs are READ OUT OF THE BUILT BUNDLE rather than restated, so a component
  * that starts pointing somewhere else is followed here too. Service workers are blocked, so the
  * frames take the network path a first visit takes; the worker serves the same `_headers` rules for
- * the requested path itself.
+ * the requested path itself. The same page proves the production policy lets the `html` fragment
+ * sanitizer create its one `fy-fragment` Trusted Types policy — and no other.
  */
 
 /** Never a real service: the bundle's relay discovery points at a closed loopback port. */
@@ -82,13 +83,30 @@ const drive = (shellPath: string, command: Record<string, unknown>, library: str
   });
 })()`;
 
+/**
+ * The slice of `playwright-core` this journey uses, hand-written because the package is not
+ * resolvable from `tests/` for the typechecker — the same stance `relay-harness.ts` takes.
+ */
+interface JourneyPage {
+  goto(url: string, options?: { timeout?: number; waitUntil?: string }): Promise<unknown>;
+  evaluate<T>(expression: string): Promise<T>;
+  on(event: 'console', handler: (message: { text(): string }) => void): void;
+}
+interface JourneyBrowser {
+  newContext(options?: Record<string, unknown>): Promise<{ newPage(): Promise<JourneyPage> }>;
+  close(): Promise<void>;
+}
+interface Playwright {
+  readonly chromium: { launch(options: Record<string, unknown>): Promise<JourneyBrowser> };
+}
+
 interface Drive {
   readonly ready: boolean;
   readonly replies: readonly { readonly kind?: string; readonly svg?: string; readonly message?: string }[];
 }
 
 describe('fy-render shells on Cloudflare Pages', () => {
-  it('should frame both sandbox shells from the production bundle under production headers', () =>
+  it('should frame the sandbox shell and allow the fragment policy, from the production bundle under production headers', () =>
     retryOnLostBrowser('fy-render-pages', async () => {
       const teardown = harnessTeardown();
       try {
@@ -97,7 +115,8 @@ describe('fy-render shells on Cloudflare Pages', () => {
           const root = environment.paths.root;
           const dist = await viteBuild(join(root, 'vite'), DEAD_DIRECTORY);
           const shells = await shellPathsInBundle(dist);
-          should(shells).deepEqual(['/fy-render-html.html', '/fy-render-sandbox.html']);
+          // One shell: an `html` block is a static fragment now, so the html shell is gone.
+          should(shells).deepEqual(['/fy-render-sandbox.html']);
           const { origin } = await startPagesDev(dist, join(root, 'wrangler'), teardown);
 
           // Assert — the document each shell URL finally resolves to may be framed by this origin.
@@ -109,7 +128,7 @@ describe('fy-render shells on Cloudflare Pages', () => {
             should(policy).equal("frame-ancestors 'self'; sandbox allow-scripts");
           }
 
-          const playwright = (await import(resolvePlaywright())) as typeof import('playwright-core');
+          const playwright = (await import(resolvePlaywright())) as Playwright;
           const browser = await launchChromiumWithRetry(() =>
             playwright.chromium.launch({
               args: ['--no-sandbox', '--disable-dev-shm-usage'],
@@ -128,7 +147,8 @@ describe('fy-render shells on Cloudflare Pages', () => {
           // The app's own page: its origin, its policy, its document.
           await page.goto(`${origin}/app/`, { timeout: 60_000, waitUntil: 'load' });
 
-          // Act — a diagram through the library shell, and a page through the html shell.
+          // Act — a diagram through the library shell, and the Trusted Types policy an html fragment's
+          // sanitizer parses under, asked for on the production page.
           const mermaid = (await page.evaluate(
             drive(
               '/fy-render-sandbox.html',
@@ -136,25 +156,19 @@ describe('fy-render shells on Cloudflare Pages', () => {
               '/fy-render-mermaid.js',
             ),
           )) as Drive;
-          const html = (await page.evaluate(
-            drive(
-              '/fy-render-html.html',
-              {
-                kind: 'render-html',
-                paint: null,
-                source: '<p id="ok">ran</p><script>document.getElementById("ok").textContent = "ran script";</script>',
-                theme: 'dark',
-              },
-              null,
-            ),
-          )) as Drive;
+          const policies = await page.evaluate<{ fragment: string; stranger: string; raw: string }>(`(() => {
+            const attempt = name => { try { trustedTypes.createPolicy(name, { createHTML: s => s }); return 'created'; } catch (e) { return 'refused'; } };
+            let raw = 'assigned';
+            try { document.createElement('div').innerHTML = '<b>x</b>'; } catch (e) { raw = 'refused'; }
+            return { fragment: attempt('fy-fragment'), stranger: attempt('fy-stranger'), raw };
+          })()`);
 
-          // Assert — both shells announced themselves and did their work.
+          // Assert — the shell announced itself and compiled; the production policy names the one
+          // fragment policy, refuses any other name, and still refuses a raw string at a sink.
           should(mermaid.ready).be.true();
           should(mermaid.replies.find(reply => reply.kind === 'mermaid-svg')?.svg ?? '').match(/^<svg/u);
-          should(html.ready).be.true();
-          should(html.replies.some(reply => reply.kind === 'rendered')).be.true();
-          should(refusals).deepEqual([]);
+          should(policies).deepEqual({ fragment: 'created', raw: 'refused', stranger: 'refused' });
+          should(refusals.filter(line => !/fy-stranger|TrustedHTML/u.test(line))).deepEqual([]);
         });
       } finally {
         await teardown.closeAll();

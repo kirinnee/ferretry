@@ -164,6 +164,21 @@
   margin-bottom: 0.2em;
 }
 
+/* ---- html fragments ----------------------------------------------------------
+   A static fragment lives in a closed shadow root on this host (`fy-render-fragment.tsx`), so its
+   own styles reach nothing outside. The host adds the containment the shadow boundary does not give:
+   `contain: layout paint` makes it the containing block of every positioned descendant, so a
+   `position: fixed` overlay is fixed to the fragment and clipped by it rather than covering the app,
+   and the height is bounded like any other picture in the column. Custom properties still inherit,
+   which is how the theme tokens reach inside. */
+.fy-render-fragment {
+  position: relative;
+  display: block;
+  max-height: min(70dvh, 900px);
+  overflow: auto;
+  contain: layout paint;
+}
+
 /* ---- frames ------------------------------------------------------------------
    THE LIBRARY FRAME is sized by this stylesheet and never by a message from
    inside it: a frame that could ask the page for more room could ask for all

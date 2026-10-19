@@ -315,11 +315,11 @@ describe('fy-render presentation', () => {
     // Act
     const presentation = blocks.map(block => [block.type, fyRenderPresentation(block)]);
 
-    // Assert — `html` is `interactive`: the one type whose author code runs,
-    // in its own frame. A type moving between these means a different execution
+    // Assert — `html` is a `fragment`: static markup, sanitized, where nothing an author
+    // wrote runs. A type moving between these means a different execution
     // surface and wants the threat model re-read.
     should(presentation).eql([
-      ['html', 'interactive'],
+      ['html', 'fragment'],
       ['svg', 'visual'],
       ['lottie', 'sandbox'],
       ['mermaid', 'sandbox'],

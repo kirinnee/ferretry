@@ -11,17 +11,16 @@
  * directly. `mermaid` and `lottie` are handed as DATA to a trusted library
  * running inside an opaque-origin sandbox frame — Mermaid compiles to an SVG
  * which is re-admitted through `fyRenderMermaidSvg` and then reaches the same
- * `<img>` sink, Lottie plays live inside the frame. `html` EXECUTES: it is the
- * one type whose author code runs, inside its own opaque-origin frame with its
- * own policy (`fy-render-html-frame.tsx`). `image`, `video`, `audio` and `pdf`
+ * `<img>` sink, Lottie plays live inside the frame. `html` is a STATIC FRAGMENT:
+ * sanitized by DOMPurify against a strict allowlist and rendered into a closed
+ * shadow root (`fy-render-fragment.tsx`) — no script, no handler, no frame, no
+ * remote load. `image`, `video`, `audio` and `pdf`
  * with a `src:` header name bytes that live somewhere else — the session's
  * workspace or an https URL — and carry no payload at all.
  *
- * `html` RUNNING IS A DECISION, NOT AN OVERSIGHT, and it does not close the
- * residual `docs/fy-render.md` gap 1 measures: an opaque frame that runs author
- * script can self-navigate, prerender and open WebRTC, and no browser bounds a
- * frame's CPU or memory. What the frame cannot reach is this app — its storage,
- * its document, its daemon tokens. Nothing in THIS module runs anything.
+ * `html` DOES NOT RUN, by the owner's decision: an interactive page in an opaque
+ * frame could still self-navigate, prerender and open WebRTC, and a fragment
+ * cannot. Nothing in THIS module runs anything either.
  *
  * THE VALIDATION HERE IS A BOUND, NOT A SANITISER, and not a promise of a
  * precise refusal either. It rejects a few obviously unsupported constructs and
@@ -185,15 +184,16 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  * `visual` blocks reach an `<img>` directly. `sandbox` blocks are interpreted by
  * a trusted library inside the opaque sandbox frame — Mermaid compiles to an SVG
  * that then reaches the same `<img>` sink, Lottie plays live inside the frame.
- * `interactive` is `html`: author code running in its own opaque frame. `media`
- * is any block with a `src:` — its bytes are read or fetched after the gesture.
+ * `fragment` is `html`: static markup, sanitized and rendered in a closed shadow
+ * root, where nothing an author wrote runs. `media` is any block with a `src:` —
+ * its bytes are read or fetched once the block is near.
  *
  * Decided by the BLOCK rather than the type, because `image` is two things: an
  * inline base64 payload that is admitted at parse time, and a `src:` whose
  * bytes do not exist yet. The switch is exhaustive on purpose: a new type is a
  * compile error here rather than a silent fallthrough into the last branch.
  */
-export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox' | 'interactive' | 'media' {
+export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox' | 'fragment' | 'media' {
   if (isFyRenderMediaBlock(block)) return 'media';
   switch (block.type) {
     case 'svg':
@@ -203,7 +203,7 @@ export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox'
     case 'lottie':
       return 'sandbox';
     case 'html':
-      return 'interactive';
+      return 'fragment';
   }
 }
 
@@ -1354,17 +1354,7 @@ export type FyRenderSandboxMessage =
   | { readonly kind: 'mermaid-svg'; readonly svg: string; readonly theme: FyRenderSandboxTheme }
   | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
   | { readonly kind: 'playing'; readonly playing: boolean }
-  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass }
-  /**
-   * The `html` shell's two messages. `height` is the page's own scroll height,
-   * which the parent clamps — author code can make it say anything within the
-   * dimension bound, so it is a layout hint and never a decision. `escape` is a
-   * keydown forwarded from inside the frame, because a separate document's keys
-   * never reach the app's Escape listener and a reader in fullscreen must be
-   * able to leave.
-   */
-  | { readonly kind: 'height'; readonly height: number }
-  | { readonly kind: 'escape' };
+  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass };
 
 /** Which way the shell was told to paint, echoed back on the compiled diagram. */
 export type FyRenderSandboxTheme = 'dark' | 'light';
@@ -1435,13 +1425,6 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
       if (width === null || height === null) return null;
       return { height, kind: 'rendered', width };
     }
-    case 'height': {
-      if (!hasExactKeys(message, ['kind', 'height'])) return null;
-      const height = boundedDimension(message.height);
-      return height === null ? null : { height, kind: 'height' };
-    }
-    case 'escape':
-      return hasExactKeys(message, ['kind']) ? { kind: 'escape' } : null;
     case 'playing': {
       if (!hasExactKeys(message, ['kind', 'playing'])) return null;
       if (typeof message.playing !== 'boolean') return null;

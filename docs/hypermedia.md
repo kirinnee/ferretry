@@ -1,7 +1,7 @@
 # Hypermedia
 
 A ferret explains with more than words when words are not enough: a Mermaid diagram of a flow, an
-SVG drawing, a small interactive HTML page, or a video, recording, PDF or picture from its workspace,
+SVG drawing, a static HTML fragment, or a video, recording, PDF or picture it made or found,
 rendered inline in the Chat transcript. **Hypermedia** is the per-ferret switch that tells a ferret it
 may — and should, when an idea is not straightforward — communicate that way.
 
@@ -55,8 +55,8 @@ in every turn's context, so it is kept short; change it there and here together.
 Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).
 - svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.
-- html: one self-contained interactive page with inline CSS and JS; it runs sandboxed, so load nothing from the network.
-- image, video, audio, pdf: put `src: @path/in/your/workspace` or `src: https://…` before `---`, and no payload.
+- html: a static HTML fragment (tables, lists, details, inline SVG, inline CSS); no scripts or event handlers — they are stripped, and nothing runs.
+- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.
 Example:
 ```fy-render
 type: mermaid
@@ -65,7 +65,7 @@ alt: How a request reaches the daemon
 flowchart LR
   Phone --> Relay --> Daemon
 ```
-The reader taps Render to show it. Chat only: never write fy-render into files, docs, commits or PR text.
+It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PR text.
 ````
 
 ## The supported forms
@@ -79,13 +79,18 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
 | --------- | ----------------------------------- | ---------------------------------------------------------------------------- |
 | `mermaid` | Mermaid source                      | a diagram, compiled in the sandbox frame, theme following light/dark         |
 | `svg`     | one `<svg>` document                | a picture through the measured `<img>` sink — never inline SVG               |
-| `html`    | one self-contained page             | an interactive page in an opaque-origin sandbox frame with its own policy    |
+| `html`    | one static fragment                 | sanitized markup in a closed shadow root — no script, no handler, no frame   |
 | `image`   | `src:` — or `mime:` + base64 inline | a picture; an https image needs CORS from its host, else a link row          |
 | `video`   | `src:`                              | the browser's native player (https plays directly)                           |
 | `audio`   | `src:`                              | the browser's native player (https plays directly)                           |
 | `pdf`     | `src:`                              | a file row with Open / Download; an https PDF is a link (no in-frame viewer) |
 
-`src:` is one of two things, and nothing else:
+`src:` is one of three things, and nothing else:
+
+- **`media:<file>`** — a file in the session's MEDIA folder, `$FY_MEDIA_DIR` in the agent's pane
+  (`state/sessions/<id>/media` under `FY_HOME`). It is where an agent puts what it MADE to show the
+  person: outside any repository, so no ignore rule decides whether it can be shown, and read through
+  the same route and grant as a workspace file (`scope=media`), never secrets.
 
 - **`@path`** — a file in the ferret's workspace, written and resolved exactly as an `@file`
   reference is: session-relative, `./`-relative, or absolute inside the session's folder. It is read
@@ -97,7 +102,8 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
 - **`https://…`** — a link the reader's browser fetches as soon as the block is near the screen.
 
 A file that is missing, unreadable, over its cap or denied to this reader renders a file row that
-says which — never a broken player and never the denied bytes.
+says which — and for a file the daemon will not serve, WHICH RULE refused it (the ignore file, line
+and pattern, a Git failure, or the denied name) — never a broken player and never the denied bytes.
 
 ## Security
 
