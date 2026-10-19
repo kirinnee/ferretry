@@ -278,7 +278,7 @@ describe('first install with the real daemon', () => {
         await stopEverything(environment);
       }
     });
-  }, 480_000);
+  });
 
   /**
    * PRODUCT BUG (reported to the e2e lead, severity major): the CLI cannot find a daemon whose bind is
@@ -329,7 +329,7 @@ describe('first install with the real daemon', () => {
       should(actual.code).equal(0, `${actual.out}\n${actual.err}`);
       should((JSON.parse(actual.out) as { reachability: string }).reachability).equal('serving');
     });
-  }, 240_000);
+  });
 
   /**
    * PRODUCT BUG (reported to the e2e lead): the daemon `fy daemon start` launches dies with the
@@ -374,5 +374,5 @@ describe('first install with the real daemon', () => {
         await stopEverything(environment);
       }
     });
-  }, 480_000);
+  });
 });
