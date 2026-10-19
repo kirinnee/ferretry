@@ -5,7 +5,10 @@ import type { TriageDecision } from '../../../src/lib/speedups/jev.ts';
 import {
   averageInvestigationUsd,
   DEFAULT_GUARD_BACKOFF_MS,
-  effectiveTriage,
+  effectiveLayers,
+  forgetPassedOn,
+  passedOnKey,
+  prunePassedOn,
   guardBackingOff,
   guardHealthAfter,
   guardOutcome,
@@ -95,6 +98,7 @@ describe('today’s spend', () => {
       investigationUsd: 0.4,
       investigationCapUsd: 2,
       pendingInvestigations: 1,
+      capsHit: [],
       investigationsLastHour: 2,
       maxInvestigationsPerHour: 6,
     });
@@ -108,11 +112,11 @@ describe('today’s spend', () => {
     const actual = wardenSpend({ caps: CAPS, today: TODAY, records, average: { count: 2, totalUsd: 1 }, nowMs: NOW });
 
     // Assert
-    should(actual.capHit).equal('investigation');
+    should(actual.capsHit).deepEqual(['investigation']);
     should(actual.investigationUsd).equal(1.5);
   });
 
-  it('should report the Jev cap first when both are reached', () => {
+  it('should report both caps when both are reached: each stops its own layer', () => {
     // Act
     const actual = wardenSpend({
       caps: CAPS,
@@ -122,7 +126,7 @@ describe('today’s spend', () => {
     });
 
     // Assert
-    should(actual.capHit).equal('jev');
+    should(actual.capsHit).deepEqual(['jev', 'investigation']);
   });
 
   it('should count investigations inside the last hour only', () => {
@@ -144,20 +148,59 @@ describe('today’s spend', () => {
   });
 });
 
-describe('the triage in effect', () => {
+describe('the layers in effect', () => {
+  const on = { configured: true, active: true, reason: 'configured' } as const;
+  const off = { configured: false, active: false, reason: 'configured' } as const;
+  const stopped = (reason: string) => ({ configured: true, active: false, reason });
+
   it.each([
-    ['off', 'llm', false, undefined, 'rules', 'disabled'],
-    ['rules', 'rules', true, 'investigation', 'rules', 'configured'],
-    ['an investigation cap under llm', 'llm', true, 'investigation', 'rules', 'investigation_cap'],
-    ['a Jev cap under jev', 'jev', true, 'jev', 'rules', 'jev_cap'],
-    ['a Jev cap under llm, which never asks Jev', 'llm', true, 'jev', 'llm', 'configured'],
-    ['nothing in the way', 'jev', true, undefined, 'jev', 'configured'],
-  ] as const)('should answer %s', (_label, configured, enabled, capHit, effective, reason) => {
+    ['the Warden off', { jev: true, llm: true }, false, [], true, stopped('disabled'), stopped('disabled')],
+    ['both layers off', { jev: false, llm: false }, true, ['jev', 'investigation'], true, off, off],
+    ['the Jev cap, which stops only Jev', { jev: true, llm: true }, true, ['jev'], true, stopped('jev_cap'), on],
+    [
+      'the investigation cap, which stops only investigations',
+      { jev: true, llm: true },
+      true,
+      ['investigation'],
+      true,
+      on,
+      stopped('investigation_cap'),
+    ],
+    ['no login, which Jev does not need', { jev: true, llm: true }, true, [], false, on, stopped('no_login')],
+    ['nothing in the way', { jev: false, llm: true }, true, [], true, off, on],
+  ] as const)('should answer %s', (_label, layers, enabled, capsHit, hasLogin, jev, llm) => {
     // Act
-    const actual = effectiveTriage(configured, enabled, capHit === undefined ? {} : { capHit });
+    const actual = effectiveLayers(layers, enabled, { capsHit: [...capsHit] }, hasLogin);
 
     // Assert
-    should(actual).deepEqual({ effective, reason });
+    should(actual).deepEqual({ jev, llm });
+  });
+});
+
+describe('the flags Jev passed on', () => {
+  const flag = (sessionId: string, status: 'awaiting_user' | 'running' = 'awaiting_user') =>
+    ({ kind: 'unattended_question', sessionId, status, detail: 'd' }) as const;
+
+  it('should keep only the flags that still stand in the same status', () => {
+    // Arrange
+    const passed = [passedOnKey(flag('s1')), passedOnKey(flag('s2')), passedOnKey(flag('s3'))];
+
+    // Act
+    const actual = prunePassedOn(passed, [flag('s1'), flag('s2', 'running')]);
+
+    // Assert
+    should(actual).deepEqual([passedOnKey(flag('s1'))]);
+  });
+
+  it('should forget one ferret and keep the others', () => {
+    // Arrange
+    const passed = [passedOnKey(flag('s1')), passedOnKey(flag('s12'))];
+
+    // Act
+    const actual = forgetPassedOn(passed, 's1');
+
+    // Assert
+    should(actual).deepEqual([passedOnKey(flag('s12'))]);
   });
 });
 

@@ -4,19 +4,22 @@ import { SessionStatusSchema } from './session.ts';
 
 /**
  * THE WARDEN WIRE — the supervisor that watches every ferret, and everything a client reads or sends
- * about it: its settings, its status, the "who needs you" feed and the owner's manual request.
+ * about it: its settings, its status, the "who needs you" feed and the owner's manual requests.
  *
- * THREE TIERS, AND ONLY ONE OF THEM ACTS. A free deterministic sweep flags anomalies. A TRIAGE tier
- * decides what happens to a flag: `rules` shows it to the owner and spends nothing, `llm` sends it to a
- * full investigation (kteam's behaviour), and `jev` asks Jev — TypeSafe AI's cheap decision model —
- * whether the flag deserves one. JEV IS ONLY A GUARD: its whole answer is `skip` (healthy: bless the
- * anomaly for a while) or `investigate`, and anything below the owner's threshold, or any failure,
- * counts as `investigate`. Every real action — nudge, resume, fail over, stop — comes from the verdict
- * of a read-only assigned warden, filtered by what the owner let it do alone, and stop is never on that
- * list unless the owner put it there.
+ * LAYERS, AND ONLY ONE OF THEM ACTS. Free deterministic RULES flag anomalies whenever the Warden is on.
+ * Two optional layers decide what becomes of a flag: JEV — TypeSafe AI's cheap decision model — clears
+ * the flags it is confident are healthy, and an LLM INVESTIGATION by an assigned warden looks at the
+ * rest. JEV IS ONLY A GUARD: its whole answer is `skip` (healthy: bless the anomaly for a while) or
+ * `investigate`, and anything below the owner's threshold, or any failure, passes the flag on. With
+ * investigations off, a flag Jev did not clear goes to the owner, never to a spawn. Every real action —
+ * nudge, resume, fail over, stop — comes from the verdict of a read-only assigned warden, filtered by
+ * what the owner let it do alone, and stop is never on that list unless the owner put it there.
  *
- * SPEND IS CAPPED PER UTC DAY, Jev and investigations separately. A cap that is hit drops the Warden to
- * rules until midnight, and the status says so: no unattended spend by surprise.
+ * A CLEARED FLAG IS LEFT ALONE FOR A WHILE, and each consecutive re-clear doubles the while, up to four
+ * hours; the owner can leave a ferret alone for longer still.
+ *
+ * SPEND IS CAPPED PER UTC DAY, per layer. A cap that is hit turns off only its own layer until
+ * midnight, and the status says so: no unattended spend by surprise.
  */
 
 // ── Settings ────────────────────────────────────────────────────────────────────────────────────
@@ -45,11 +48,57 @@ export const ProviderOutageConfigSchema = z.object({
 export type ProviderOutageConfig = z.infer<typeof ProviderOutageConfigSchema>;
 
 /**
- * How a flag is judged. `rules` is the default on a new daemon because it is the only tier that cannot
- * spend: each of the other two is an explicit opt-in with its own daily cap.
+ * The two triage LAYERS a flag can pass through after the free rules have raised it. Rules are not a
+ * layer here because they cannot be switched off: whenever the Warden is on, its rules flag and spend
+ * nothing. Each layer is its own opt-in with its own daily cap:
+ *
+ * - `jev` — Jev, TypeSafe AI's cheap decision model, looks at a flag first. A confident "healthy"
+ *   clears it; anything else passes it on.
+ * - `llm` — a full investigation by an assigned warden, rotated across the configured logins.
+ *
+ * A flag Jev did not clear goes to an investigation when `llm` is on, and to the owner when it is off —
+ * never to a spawn the owner did not switch on. Both off is the default: rules only, nothing spent.
  */
-export const WardenTriageSchema = z.enum(['rules', 'llm', 'jev']);
-export type WardenTriage = z.infer<typeof WardenTriageSchema>;
+export const WardenLayersSchema = z.object({
+  jev: z.boolean(),
+  llm: z.boolean(),
+});
+export type WardenLayers = z.infer<typeof WardenLayersSchema>;
+export type WardenLayer = keyof WardenLayers;
+
+/**
+ * The single `triage` choice the layers replaced, as an older `warden.yaml` or daemon still says it.
+ * Read, never written: `rules` was both layers off, `llm` an investigation of every flag, and `jev` the
+ * guard in front of an investigation — both on.
+ */
+export const LegacyWardenTriageSchema = z.enum(['rules', 'llm', 'jev']);
+export type LegacyWardenTriage = z.infer<typeof LegacyWardenTriageSchema>;
+
+export const LEGACY_TRIAGE_LAYERS: Readonly<Record<LegacyWardenTriage, WardenLayers>> = {
+  rules: { jev: false, llm: false },
+  llm: { jev: false, llm: true },
+  jev: { jev: true, llm: true },
+};
+
+/**
+ * A settings document with the legacy `triage` restated as `layers`. TOLERANT ON READ: an explicit
+ * `layers` wins over a legacy `triage` field by field, and an unrecognised `triage` is left for the
+ * schema to refuse. Anything that is not an object passes through untouched.
+ */
+export function migrateLegacyWardenTriage(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || !('triage' in value)) return value;
+  const { triage, ...rest } = value as Record<string, unknown>;
+  const legacy = LegacyWardenTriageSchema.safeParse(triage);
+  if (!legacy.success) return value;
+  const stated = rest.layers;
+  return {
+    ...rest,
+    layers: {
+      ...LEGACY_TRIAGE_LAYERS[legacy.data],
+      ...(typeof stated === 'object' && stated !== null ? stated : {}),
+    },
+  };
+}
 
 /** The sweep cadences a person can pick. The sweep itself is free; only what a flag leads to costs. */
 export const WARDEN_SWEEP_INTERVALS = [1, 2, 5, 10, 15] as const;
@@ -114,9 +163,9 @@ export const WardenInvestigationConfigSchema = z.object({
 });
 export type WardenInvestigationConfig = z.infer<typeof WardenInvestigationConfigSchema>;
 
-export const WardenConfigSchema = z.object({
+const WardenConfigShape = z.object({
   enabled: z.boolean(),
-  triage: WardenTriageSchema,
+  layers: WardenLayersSchema,
   guard: WardenGuardConfigSchema,
   caps: WardenCapsSchema,
   mayActAlone: WardenMayActAloneSchema,
@@ -133,13 +182,23 @@ export const WardenConfigSchema = z.object({
   susSubprocessSeconds: PositiveIntegerSchema,
   maxAssignedWardens: PositiveIntegerSchema,
   assignedCooldownMinutes: NonNegativeIntegerSchema,
+  /** How long a cleared flag is left alone the first time. Each consecutive re-clear doubles it, up to {@link WARDEN_BLESSING_CEILING_MINUTES}. */
   blessMinutes: NonNegativeIntegerSchema,
 });
-export type WardenConfig = z.infer<typeof WardenConfigSchema>;
+
+/**
+ * The Warden settings. A document still carrying the legacy `triage` is read as its `layers`
+ * ({@link migrateLegacyWardenTriage}); nothing ever writes `triage` again.
+ */
+export const WardenConfigSchema = z.preprocess(migrateLegacyWardenTriage, WardenConfigShape);
+export type WardenConfig = z.infer<typeof WardenConfigShape>;
+
+/** The longest a run of re-clears can leave a flag alone: four hours. */
+export const WARDEN_BLESSING_CEILING_MINUTES = 240;
 
 export const WardenConfigPatchSchema = z.strictObject({
   enabled: z.boolean().optional(),
-  triage: WardenTriageSchema.optional(),
+  layers: WardenLayersSchema.strict().partial().optional(),
   guard: WardenGuardConfigSchema.strict().partial().optional(),
   caps: WardenCapsSchema.strict().partial().optional(),
   mayActAlone: WardenMayActAloneSchema.strict().partial().optional(),
@@ -162,6 +221,7 @@ export type WardenConfigPatch = z.infer<typeof WardenConfigPatchSchema>;
 
 /** The nested sections a patch merges into rather than replaces. */
 export const WARDEN_CONFIG_SECTIONS = [
+  'layers',
   'guard',
   'caps',
   'mayActAlone',
@@ -355,16 +415,18 @@ export type WardenVerdictsView = z.infer<typeof WardenVerdictsViewSchema>;
 // ── Status ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Why the triage in effect is not the one configured. `configured` means it is; every other value is a
- * fallback the status line must say out loud.
+ * Why a layer in effect is not the one configured. `configured` means it is — on or off as the owner
+ * set it; every other value switched an ENABLED layer off, and the status line must say so out loud.
+ * A cap turns off only its own layer: the Jev cap leaves investigations running, and the investigation
+ * cap leaves Jev clearing flags.
  */
 export const WardenTriageReasonSchema = z.enum([
   'configured',
   /** The Warden is off: nothing is triaged and nothing is spent. */
   'disabled',
-  /** Today's Jev spend reached its cap: rules until midnight UTC. */
+  /** Today's Jev spend reached its cap: Jev is off until midnight UTC. */
   'jev_cap',
-  /** Today's investigation spend reached its cap: rules until midnight UTC. */
+  /** Today's investigation spend reached its cap: investigations are off until midnight UTC. */
   'investigation_cap',
   /** No usable investigation login: none was chosen and the machine has no default runtime, or every one named is unknown here. */
   'no_login',
@@ -389,32 +451,74 @@ export const WardenGuardFailureCodeSchema = z.enum([
 ]);
 export type WardenGuardFailureCode = z.infer<typeof WardenGuardFailureCodeSchema>;
 
-export const WardenTriageStatusSchema = z.object({
-  configured: WardenTriageSchema,
-  effective: WardenTriageSchema,
+/** One layer: what the owner set, whether it runs right now, and why not when it does not. */
+export const WardenLayerStatusSchema = z.object({
+  configured: z.boolean(),
+  active: z.boolean(),
   reason: WardenTriageReasonSchema,
-  /** The Jev guard's last failure, when its last answer was not a real one. Every flag it saw went to an investigation. */
-  guardFailure: z.object({ code: WardenGuardFailureCodeSchema, at: InstantSchema }).optional(),
-  /** Set while the guard is backing off after a rate limit or an overload: flags go straight to investigation. */
-  guardBackoffUntil: InstantSchema.optional(),
 });
+export type WardenLayerStatus = z.infer<typeof WardenLayerStatusSchema>;
+
+/**
+ * A daemon from before the layers answered one `{configured, effective, reason}` triage. Read as the
+ * two layers it meant, so a newer browser can still show an older machine.
+ */
+function migrateLegacyTriageStatus(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || !('effective' in value)) return value;
+  const { configured, effective, reason, ...rest } = value as Record<string, unknown>;
+  const was = LegacyWardenTriageSchema.safeParse(configured);
+  const is = LegacyWardenTriageSchema.safeParse(effective);
+  if (!was.success || !is.success) return value;
+  const layer = (name: WardenLayer): WardenLayerStatus => {
+    const on = LEGACY_TRIAGE_LAYERS[was.data][name];
+    const active = LEGACY_TRIAGE_LAYERS[is.data][name];
+    return { configured: on, active, reason: on === active ? 'configured' : (reason as WardenTriageReason) };
+  };
+  return { ...rest, jev: layer('jev'), llm: layer('llm') };
+}
+
+export const WardenTriageStatusSchema = z.preprocess(
+  migrateLegacyTriageStatus,
+  z.object({
+    jev: WardenLayerStatusSchema,
+    llm: WardenLayerStatusSchema,
+    /** The Jev guard's last failure, when its last answer was not a real one. Every flag it saw was passed on. */
+    guardFailure: z.object({ code: WardenGuardFailureCodeSchema, at: InstantSchema }).optional(),
+    /** Set while the guard is backing off after a rate limit or an overload: flags are passed on without asking. */
+    guardBackoffUntil: InstantSchema.optional(),
+  }),
+);
 export type WardenTriageStatus = z.infer<typeof WardenTriageStatusSchema>;
 
 /** A UTC calendar day, `YYYY-MM-DD`: the day every cap counts against. */
 export const WardenSpendDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
-export const WardenSpendSchema = z.object({
-  day: WardenSpendDaySchema,
-  jevUsd: NonNegativeFiniteSchema,
-  jevCapUsd: NonNegativeFiniteSchema,
-  /** Known investigation spend. An investigation whose cost is not priced yet is counted in `pendingInvestigations`. */
-  investigationUsd: NonNegativeFiniteSchema,
-  investigationCapUsd: NonNegativeFiniteSchema,
-  pendingInvestigations: NonNegativeIntegerSchema,
-  capHit: z.enum(['jev', 'investigation']).optional(),
-  investigationsLastHour: NonNegativeIntegerSchema,
-  maxInvestigationsPerHour: PositiveIntegerSchema,
-});
+export const WardenCapSchema = z.enum(['jev', 'investigation']);
+export type WardenCap = z.infer<typeof WardenCapSchema>;
+
+/** An older daemon named at most one cap it hit; read as the list it was. */
+function migrateLegacyCapHit(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || 'capsHit' in value) return value;
+  const { capHit, ...rest } = value as Record<string, unknown>;
+  return { ...rest, capsHit: capHit === undefined ? [] : [capHit] };
+}
+
+export const WardenSpendSchema = z.preprocess(
+  migrateLegacyCapHit,
+  z.object({
+    day: WardenSpendDaySchema,
+    jevUsd: NonNegativeFiniteSchema,
+    jevCapUsd: NonNegativeFiniteSchema,
+    /** Known investigation spend. An investigation whose cost is not priced yet is counted in `pendingInvestigations`. */
+    investigationUsd: NonNegativeFiniteSchema,
+    investigationCapUsd: NonNegativeFiniteSchema,
+    pendingInvestigations: NonNegativeIntegerSchema,
+    /** Every cap today's spend reached. Each one turns off only its own layer. */
+    capsHit: z.array(WardenCapSchema),
+    investigationsLastHour: NonNegativeIntegerSchema,
+    maxInvestigationsPerHour: PositiveIntegerSchema,
+  }),
+);
 export type WardenSpend = z.infer<typeof WardenSpendSchema>;
 
 /** Today's flags and what became of them — the savings line. */
@@ -460,6 +564,10 @@ export const WardenInvestigationSchema = z.object({
 });
 export type WardenInvestigation = z.infer<typeof WardenInvestigationSchema>;
 
+/** Who cleared a flag: an investigation, Jev's confident skip, or the owner leaving it alone. */
+export const WardenClearedBySchema = z.enum(['jev', 'warden', 'owner']);
+export type WardenClearedBy = z.infer<typeof WardenClearedBySchema>;
+
 export const WardenActionKindSchema = z.enum(['bless', 'nudge', 'resume', 'stop', 'failover']);
 export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
 
@@ -475,8 +583,8 @@ export const WardenActionSchema = z.object({
   sessionId: z.string().min(1),
   action: WardenActionKindSchema,
   outcome: WardenActionOutcomeSchema,
-  /** `jev` only ever blesses. Every other action is an investigation's verdict. */
-  by: z.enum(['jev', 'warden']),
+  /** `jev` only ever blesses, and so does `owner` (Leave it longer). Every other action is an investigation's verdict. */
+  by: WardenClearedBySchema,
   anomalyKind: WardenAnomalyKindSchema.optional(),
   /** One plain sentence: what happened and why. */
   detail: z.string().min(1),
@@ -492,7 +600,14 @@ export const WardenBlessingViewSchema = z.object({
   sessionId: z.string().min(1),
   kinds: z.array(WardenAnomalyKindSchema),
   expiresAt: InstantSchema,
-  by: z.enum(['jev', 'warden']),
+  by: WardenClearedBySchema,
+  /**
+   * How many times in a row these flags were cleared before this one, while the ferret held its status.
+   * Each re-clear doubles how long the flag is left alone. Absent on a first clear.
+   */
+  streak: PositiveIntegerSchema.optional(),
+  /** The owner asked to leave it alone until its status changes, rather than for a while. */
+  untilChange: z.literal(true).optional(),
 });
 export type WardenBlessingView = z.infer<typeof WardenBlessingViewSchema>;
 
@@ -559,6 +674,32 @@ export const WardenInvestigateViewSchema = z.object({
   message: z.string().min(1),
 });
 export type WardenInvestigateView = z.infer<typeof WardenInvestigateViewSchema>;
+
+// ── Leave it longer ─────────────────────────────────────────────────────────────────────────────
+
+export const WARDEN_LEAVE_PATH = '/v1/warden/leave';
+
+/** How long the owner can leave a ferret's flags alone: an hour, four, or until its status changes. */
+export const WARDEN_LEAVE_DURATIONS = ['1h', '4h', 'until_change'] as const;
+export const WardenLeaveDurationSchema = z.enum(WARDEN_LEAVE_DURATIONS);
+export type WardenLeaveDuration = z.infer<typeof WardenLeaveDurationSchema>;
+
+/**
+ * The owner leaving a flagged or cleared ferret alone for longer than the Warden would. NARROW like
+ * every blessing: it covers the kinds flagged or cleared on that ferret now, so a new kind of trouble
+ * still raises a flag, and any change of status ends it. `until_change` is bounded at a week.
+ */
+export const WardenLeaveRequestSchema = z.strictObject({
+  sessionId: z.string().trim().min(1),
+  duration: WardenLeaveDurationSchema,
+});
+export type WardenLeaveRequest = z.infer<typeof WardenLeaveRequestSchema>;
+
+export const WardenLeaveViewSchema = z.object({
+  blessing: WardenBlessingViewSchema,
+  message: z.string().min(1),
+});
+export type WardenLeaveView = z.infer<typeof WardenLeaveViewSchema>;
 
 // ── Who needs you ───────────────────────────────────────────────────────────────────────────────
 

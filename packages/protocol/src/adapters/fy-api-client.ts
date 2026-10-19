@@ -109,6 +109,11 @@ import {
 import {
   WARDEN_ATTENTION_PATH,
   WARDEN_INVESTIGATE_PATH,
+  WARDEN_LEAVE_PATH,
+  type WardenLeaveRequest,
+  WardenLeaveRequestSchema,
+  type WardenLeaveView,
+  WardenLeaveViewSchema,
   type WardenAttentionView,
   WardenAttentionViewSchema,
   type WardenConfigPatch,
@@ -481,6 +486,14 @@ export class FyApiClient implements IFyApiClient {
       WARDEN_INVESTIGATE_PATH,
       WardenInvestigateViewSchema,
       jsonRequest('POST', WardenInvestigateRequestSchema, request),
+    );
+  }
+
+  wardenLeave(request: WardenLeaveRequest): Promise<WardenLeaveView> {
+    return this.request(
+      WARDEN_LEAVE_PATH,
+      WardenLeaveViewSchema,
+      jsonRequest('POST', WardenLeaveRequestSchema, request),
     );
   }
 

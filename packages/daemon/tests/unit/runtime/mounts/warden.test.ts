@@ -3,6 +3,7 @@ import {
   WardenAttentionViewSchema,
   WardenConfigViewSchema,
   WardenInvestigateViewSchema,
+  WardenLeaveViewSchema,
   WardenRunViewSchema,
   WardenStatusViewSchema,
   WardenVerdictsViewSchema,
@@ -327,6 +328,65 @@ describe('asking for an investigation', () => {
     // Act
     const response = await subject.dispatch(
       send('POST', '/v1/warden/investigate', JSON.stringify({ sessionId: 's1' })),
+    );
+
+    // Assert
+    should(response.status).equal(status);
+    should(JSON.parse(response.body)).match({ code, error: `refused: ${failure}` });
+  });
+});
+
+describe('leaving a ferret alone longer', () => {
+  it('should hand the owner’s choice to the subsystem and answer the blessing it made', async () => {
+    // Arrange
+    const subsystem = new FakeWarden();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      send('POST', '/v1/warden/leave', JSON.stringify({ sessionId: 's1', duration: 'until_change' })),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(subsystem.leaves).deepEqual([{ sessionId: 's1', duration: 'until_change' }]);
+    should(() => WardenLeaveViewSchema.parse(JSON.parse(response.body))).not.throw();
+  });
+
+  it('should refuse a warden-scoped caller, which must not switch off its own supervision', async () => {
+    // Arrange
+    const subsystem = new FakeWarden();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      send('POST', '/v1/warden/leave', JSON.stringify({ sessionId: 's1', duration: '1h' }), warden),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+    should(subsystem.leaves).deepEqual([]);
+  });
+
+  it('should refuse a duration nobody can pick', async () => {
+    // Act
+    const response = await dispatcher().dispatch(
+      send('POST', '/v1/warden/leave', JSON.stringify({ sessionId: 's1', duration: 'forever' })),
+    );
+
+    // Assert
+    should(response.status).equal(400);
+  });
+
+  it.each([
+    ['not_found', 404, 'not-found'],
+    ['finished', 409, 'session_finished'],
+    ['not_flagged', 409, 'warden_nothing_flagged'],
+  ] as const)('should answer a %s refusal with %d %s', async (failure, status, code) => {
+    // Arrange
+    const subject = dispatcher(new FakeWarden(new WardenRequestError(failure, `refused: ${failure}`)));
+
+    // Act
+    const response = await subject.dispatch(
+      send('POST', '/v1/warden/leave', JSON.stringify({ sessionId: 's1', duration: '4h' })),
     );
 
     // Assert

@@ -57,7 +57,7 @@ describe('the investigation login when the owner chose none', () => {
 });
 
 describe('a machine with no investigation login at all', () => {
-  it('should fall back to rules and say why, spawning nothing', async () => {
+  it('should turn investigations off and say why, spawning nothing', async () => {
     // Arrange
     const subject = harness({ config: enabled(), fleet: [triageable('s1')], defaultRuntime: noDefault });
 
@@ -67,10 +67,10 @@ describe('a machine with no investigation login at all', () => {
 
     // Assert
     should(actual.message).equal(
-      'no investigation login exists on this machine: rules only until one is chosen in Settings › Warden',
+      'no investigation login exists on this machine: 1 flag waits for you until one is chosen in Settings › Warden',
     );
     should(subject.spawns).be.empty();
-    should(status.triage).match({ configured: 'llm', effective: 'rules', reason: 'no_login' });
+    should(status.triage.llm).deepEqual({ configured: true, active: false, reason: 'no_login' });
     should(status.login).deepEqual({ source: 'not_set', unknown: [], available: ['claude-default'] });
   });
 

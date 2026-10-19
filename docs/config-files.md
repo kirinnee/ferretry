@@ -16,7 +16,7 @@ wire).
 | `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                                                                                                      |
 | `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                                                                                                       |
 | `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                                                                                                       |
-| `warden.yaml`                   | the Warden: on, rules-only triage and its caps — see [The Warden](#the-warden); the rest default                                                                                                    |
+| `warden.yaml`                   | the Warden: on, its layers (rules always; Jev and LLM opt-in) and their caps — see [The Warden](#the-warden)                                                                                        |
 | `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                          |
 | `voice.yaml`                    | who cleans up dictated text, and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device |
 | `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                   |
@@ -40,7 +40,7 @@ that is not there). Three rules, in order:
    daemon accepted before stays in effect. Nothing half-applies. When the fleet does not assemble, every
    fleet change of that round is held back and the machine keeps the fleet it had.
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
-   is HELD and the tighter version stays in effect: a Warden triage that spends more (rules → Jev → LLM),
+   is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
    a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; an agent control turned on (Ferretry
    settings included); Agent permissions set to `skip`; dictated text sent to a provider. Tightening always
    applies at once. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
@@ -102,70 +102,101 @@ else's is written and held. An agent never confirms.
 
 ## The Warden
 
-`warden.yaml` decides how the supervisor watches every ferret and what it may spend. The sweep that flags
-anomalies is deterministic and free; what a flag leads to is the **triage**:
+`warden.yaml` decides how the supervisor watches every ferret and what it may spend. A flag passes through
+**layers**, cheapest first:
 
-| `triage` | What happens to a flag                                                                              | Spends                 |
-| -------- | --------------------------------------------------------------------------------------------------- | ---------------------- |
-| `rules`  | shown to you in Insights › Warden › Needs you. The default on a new machine.                        | nothing                |
-| `llm`    | a read-only LLM investigation (an assigned warden on `accounts[0]`, with failover), as kteam does   | investigations         |
-| `jev`    | Jev guards first: a confident `skip` blesses the flag; anything else is investigated as under `llm` | Jev and investigations |
+| Layer             | Key          | What it does to a flag                                                                   | Spends         |
+| ----------------- | ------------ | ---------------------------------------------------------------------------------------- | -------------- |
+| Rules             | — (always)   | deterministic checks raise it; shown to you in Insights › Warden › Needs you             | nothing        |
+| Jev               | `layers.jev` | Jev looks first: a confident `skip` clears it; anything else is passed on                | Jev            |
+| LLM investigation | `layers.llm` | a read-only investigation (an assigned warden), rotated across `accounts`, as kteam does | investigations |
+
+The rules always run while `enabled` is on. Jev and the LLM investigation are switched on independently, and
+both are off on a new machine. A flag Jev did not clear — or every flag, with Jev off — goes to an
+investigation while `layers.llm` is on, and **to you** while it is off: never to a spend you did not switch on.
+Jev is asked once about a flag and remembered for as long as that flag stands in the same status, so a flag
+waiting for you is not paid for every sweep.
+
+**Older files.** A `warden.yaml` from before the layers says `triage:`. It is still read: `rules` is both
+layers off, `llm` is `layers.llm` alone, and `jev` is both on (Jev in front of an investigation). An explicit
+`layers:` wins over it field by field, and the next write leaves `triage` out.
 
 **Jev is only a guard.** Its whole answer is `skip` or `investigate`. A skip below `guard.threshold`
 (0.70–0.95, default 0.85) counts as investigate, and so does every failure — no key, a timeout, a refusal, an
-answer it cannot read — so an unsure or broken guard costs money and never hides a stuck ferret. Jev never
-acts on a ferret. Without a Jev key every flag is investigated.
+answer it cannot read — so an unsure or broken guard costs money or your attention and never hides a stuck
+ferret. Jev never acts on a ferret. Without a Jev key every flag is passed on.
 
-**What leaves the machine.** Under `jev`, a short summary of the flagged ferret — the anomaly, the sweep's
+**What leaves the machine.** With Jev on, a short summary of the flagged ferret — the anomaly, the sweep's
 one sentence, its recent transcript lines and the tail of its screen — is sent to TypeSafe AI (Jev). Every
 string in it passes the vault redactor first, the same one every operator read uses, and a snapshot that
-cannot be redacted is never sent (that flag is investigated instead). The Jev key itself is spent only
+cannot be redacted is never sent (that flag is passed on instead). The Jev key itself is spent only
 through the outbound holder ([docs/secrets.md](secrets.md)); `guard.endpoint` cannot move it to another host.
-Investigations run on your own login and read the transcript, pane, diffs and CI. `rules` sends nothing.
+Investigations run on your own login and read the transcript, pane, diffs and CI. The rules send nothing.
 
 **Only an investigation acts.** Its explicit `Verdict:` line is what acts — never prose — and only as far as
 `mayActAlone` allows: `nudge`, `resume` and `failover` default on, **`stop` defaults off**. An act it may not
 do alone is held and listed under Needs you for you to decide. Every act and every Jev skip is listed under
 Recent actions with who decided it.
 
-**Which login investigates.** `accounts` is the failover order, head first. Ferretry compiles no login in:
-a file that leaves `accounts` out (or sets it to `[]`) runs investigations on this machine's **default runtime**
-— whatever `machine.yaml` names when the investigation starts — and never writes that name back, so changing
-the default moves the Warden with it. A machine with neither has **no investigation login**: LLM and Jev triage
-fall back to `rules`, the status says `no_login`, and Settings › Warden asks you to choose one. A login named
-here that this machine does not have — a `warden.yaml` copied from another machine — is shown as
-**unknown login '‹name›' — choose one** and is skipped; the file is never rewritten to hide it.
+**Which login investigates.** `accounts` is the order of logins, head first, and `failover.policy` says how
+they share the work: `fallback` uses the first and moves on only when it is unhealthy, `round_robin` takes
+turns — across logins on different providers too. A login that fails to start an investigation hands it to
+the next one within the same sweep (at most three tries), and each failure still counts against its login.
+Ferretry compiles no login in: a file that leaves `accounts` out (or sets it to `[]`) runs investigations on
+this machine's **default runtime** — whatever `machine.yaml` names when the investigation starts — and never
+writes that name back, so changing the default moves the Warden with it. A machine with neither has **no
+investigation login**: the LLM layer is off, the status says `no_login`, and Settings › Warden asks you to
+choose one (Jev needs no login). A login named here that this machine does not have — a `warden.yaml` copied
+from another machine — is shown as **unknown login '‹name›' — choose one** and is skipped; the file is never
+rewritten to hide it.
 
-**Caps, per UTC day.** `caps.jevUsdPerDay` (default $0.50) and `caps.investigationUsdPerDay` (default $2)
-are separate; `caps.maxInvestigationsPerHour` (default 6) spaces investigations. When a cap is reached the
-Warden falls back to `rules` until midnight UTC and the Warden page says so. Jev is priced at
+**Caps, per UTC day, per layer.** `caps.jevUsdPerDay` (default $0.50) is Jev's and
+`caps.investigationUsdPerDay` (default $2) the investigations'; `caps.maxInvestigationsPerHour` (default 6)
+spaces investigations. A cap that is reached turns off **only its own layer** until midnight UTC — with the
+Jev cap hit, flags go straight to an investigation; with the investigation cap hit, Jev still clears what it
+can and the rest wait for you — and the Warden page says so. Jev is priced at
 `guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
 priced from its own transcript once analytics has read it; until then it counts at the average priced
 investigation, for the cap only. The status's savings line — skips × that average, minus Jev's own cost —
 appears only once an investigation has been priced.
 
+**A cleared flag stays quiet, longer each time.** When Jev or an investigation clears a flag, that kind of
+anomaly on that ferret is left alone for `blessMinutes` (default 15). Each consecutive re-clear of the same
+kind on the same ferret doubles it — 15, 30, 60, 120 — up to **4 hours**. The run starts again when the
+ferret changes status (which also ends the quiet at once), or when the flag stops being raised. A different
+kind of trouble on the same ferret is never covered.
+
+**Leave it longer.** On a flagged or cleared ferret, Insights › Warden offers _Leave it longer_: an hour,
+four, or until its status changes (at most a week). It covers the kinds flagged or cleared there now, never
+shortens a quiet stretch already in force, takes the ferret out of the investigation queue, and counts into
+no streak. It is `POST /v1/warden/leave {sessionId, duration}` — `warden.configure`, because it switches the
+Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
+
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
 a question is waiting or a pane dies (`events.turnEnd`, `events.question`, `events.paneDied`), at most one
-extra sweep a minute. A blessing (`blessMinutes`, default 15) stops the same anomaly being re-flagged on the
-same ferret while its status holds.
+extra sweep a minute.
 
 ```yaml
 # yaml-language-server: $schema=.schema/warden.json
 enabled: true
-triage: jev # rules | llm | jev
+layers: { jev: true, llm: true }
 guard: { threshold: 0.85 }
 caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2 }
 mayActAlone: { stop: false }
 investigation: { effort: low }
+failover: { policy: round_robin }
+blessMinutes: 15
 accounts:
   - agent: claude-default
     model: claude-haiku-5-5
+  - agent: codex-default
 ```
 
 `POST /v1/warden/investigate {sessionId, note?}` is the owner asking for an investigation: it skips Jev
 and the blessing, joins the queue ahead of the sweep's own flags, and still waits for a slot and counts
-against today's cap. `GET /v1/warden/attention` is the Needs-you feed: the session attention boards, the
-verdicts that ask for you, the flags nothing has judged and the acts held for you.
+against today's cap — even with the LLM layer off, because the owner asked. `GET /v1/warden/attention` is
+the Needs-you feed: the session attention boards, the verdicts that ask for you, the flags nothing has
+cleared and the acts held for you.
 
 ## Copy and Export
 

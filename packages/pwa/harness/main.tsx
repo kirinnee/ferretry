@@ -2120,6 +2120,15 @@ const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
     position: 1,
     message: 'Queued: next in line for an investigation.',
   }),
+  wardenLeave: async ({ sessionId }: { readonly sessionId: string }) => ({
+    blessing: {
+      sessionId,
+      kinds: ['sus_thinking' as const],
+      expiresAt: new Date(WARDEN_FIXTURE_NOW + 4 * 3_600_000).toISOString(),
+      by: 'owner' as const,
+    },
+    message: 'Left alone for 4 h. A new kind of trouble, or a change of status, still raises a flag.',
+  }),
   wardenReport: async (reportPath: string) => `# Verdict: KILL\n\nEvidence from ${reportPath}.`,
 });
 
@@ -5398,6 +5407,7 @@ function Shell() {
             settingsHref="#warden"
             onSweep={() => {}}
             onInvestigate={() => {}}
+            onLeave={() => {}}
             onOpenReport={() => {}}
           />
         </div>

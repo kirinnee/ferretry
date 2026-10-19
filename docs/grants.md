@@ -91,6 +91,12 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
 
+**Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
+or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).
+It is not an investigation request (`warden.use`): it switches supervision of that ferret off for a while,
+which is how the Warden behaves on this host — so a governed device steps up for it, and a remote warden,
+which can never step up, can never quiet its own supervision or anyone else's.
+
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
