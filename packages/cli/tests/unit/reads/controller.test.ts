@@ -1,7 +1,9 @@
 import { describe, it } from 'bun:test';
+import type { SessionResult } from '@ferretry/protocol';
 import { FyTransportError } from '@ferretry/protocol/client';
 import should from 'should';
 import { ReadsController } from '../../../src/lib/reads/controller.ts';
+import type { IWaitResults } from '../../../src/lib/reads/ports.ts';
 import {
   attachTarget,
   CapturingReadsIo,
@@ -532,5 +534,206 @@ describe('fy wait', () => {
 
     // Assert
     should(refusal).be.instanceof(Error).and.have.property('exitCode', 2);
+  });
+});
+
+class RecordingResults implements IWaitResults {
+  readonly asked: string[] = [];
+  readonly stopped: Array<{ id: string; reason: string }> = [];
+
+  constructor(
+    private readonly answer: SessionResult | Error | undefined,
+    private readonly stopFailure?: Error,
+  ) {}
+
+  async result(id: string): Promise<SessionResult | undefined> {
+    this.asked.push(id);
+    if (this.answer instanceof Error) throw this.answer;
+    return this.answer;
+  }
+
+  async stop(id: string, reason: string): Promise<void> {
+    this.stopped.push({ id, reason });
+    if (this.stopFailure !== undefined) throw this.stopFailure;
+  }
+}
+
+function buildWithResults(
+  script: ConstructorParameters<typeof ScriptedReadsGateway>[0],
+  results: IWaitResults,
+  markerAnswers: boolean[] = [],
+) {
+  const io = new CapturingReadsIo();
+  return {
+    io,
+    controller: new ReadsController(
+      new ScriptedReadsGateway(script),
+      io,
+      new FakeClock(),
+      new ScriptedMarker(markerAnswers),
+      new RecordingAttacher(),
+      'foo',
+      results,
+    ),
+  };
+}
+
+const finishedResult = (summary?: string): SessionResult => ({
+  id: 's1',
+  status: 'completed',
+  finished: true,
+  ...(summary === undefined ? {} : { summary }),
+});
+
+describe('fy wait collects the result', () => {
+  it('should print the summary under the status line for a completed ferret', async () => {
+    // Arrange
+    const results = new RecordingResults(finishedResult('Done: 3 files changed.'));
+    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+
+    // Act
+    await controller.wait('s1', {});
+
+    // Assert
+    should(io.out).eql(['s1 is completed\n\nDone: 3 files changed.']);
+    should(io.exitCode).equal(0);
+    should(results.asked).eql(['s1']);
+    should(results.stopped).be.empty();
+  });
+
+  it('should carry the summary as a result field in --json', async () => {
+    // Arrange
+    const results = new RecordingResults(finishedResult('all good'));
+    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+
+    // Act
+    await controller.wait('s1', { json: true });
+
+    // Assert
+    should(io.out).have.length(1);
+    should(JSON.parse(io.out[0] ?? '')).have.properties({ status: 'completed', result: 'all good' });
+  });
+
+  it('should print the status alone when the ferret reported no summary', async () => {
+    // Arrange
+    const results = new RecordingResults(finishedResult());
+    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+
+    // Act
+    await controller.wait('s1', { json: true });
+    const human = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+    await human.controller.wait('s1', {});
+
+    // Assert
+    should(JSON.parse(io.out[0] ?? '')).not.have.property('result');
+    should(human.io.out).eql(['s1 is completed']);
+  });
+
+  it('should ignore a result read that fails', async () => {
+    // Arrange
+    const results = new RecordingResults(new Error('result route gone'));
+    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+
+    // Act
+    await controller.wait('s1', {});
+
+    // Assert
+    should(io.out).eql(['s1 is completed']);
+    should(io.exitCode).equal(0);
+    should(io.err).be.empty();
+  });
+
+  it('should ignore a result that cannot be read at all', async () => {
+    // Arrange
+    const results = new RecordingResults(undefined);
+    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+
+    // Act
+    await controller.wait('s1', {});
+
+    // Assert
+    should(io.out).eql(['s1 is completed']);
+    should(results.stopped).be.empty();
+  });
+
+  it('should stop a running ferret whose marker settled the wait, and say so on stderr', async () => {
+    // Arrange
+    const results = new RecordingResults({ id: 's1', status: 'running', finished: false });
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'running' }))] },
+      results,
+      [true],
+    );
+
+    // Act
+    await controller.wait('s1', { untilMarker: 'done.md' });
+
+    // Assert
+    should(io.exitCode).equal(0);
+    should(results.stopped).eql([{ id: 's1', reason: 'its result was collected' }]);
+    should(io.err.join('\n')).match(/^foo wait: stopped s1 now its result is collected \(--keep leaves it running\)/m);
+  });
+
+  it('should still report the stop when stopping fails', async () => {
+    // Arrange
+    const results = new RecordingResults({ id: 's1', status: 'running', finished: false }, new Error('already gone'));
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'running' }))] },
+      results,
+      [true],
+    );
+
+    // Act
+    await controller.wait('s1', { untilMarker: 'done.md' });
+
+    // Assert
+    should(io.exitCode).equal(0);
+    should(io.err.join('\n')).match(/stopped s1/);
+  });
+
+  it('should leave a running ferret alone under --keep', async () => {
+    // Arrange
+    const results = new RecordingResults({ id: 's1', status: 'running', finished: false });
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'running' }))] },
+      results,
+      [true],
+    );
+
+    // Act
+    await controller.wait('s1', { untilMarker: 'done.md', keep: true });
+
+    // Assert
+    should(results.stopped).be.empty();
+    should(io.err).be.empty();
+    should(io.exitCode).equal(0);
+  });
+
+  it('should not read a result when the wait did not settle', async () => {
+    // Arrange
+    const results = new RecordingResults(finishedResult('x'));
+    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'failed' }))] }, results);
+
+    // Act
+    await controller.wait('s1', {});
+
+    // Assert
+    should(results.asked).be.empty();
+    should(io.out).eql(['s1 is failed']);
+    should(io.exitCode).equal(1);
+  });
+
+  it('should leave the old output unchanged when no results port is given', async () => {
+    // Arrange
+    const { controller, io } = build({
+      views: [sessionView(sessionState({ status: 'running' })), sessionView(sessionState({ status: 'completed' }))],
+    });
+
+    // Act
+    await controller.wait('s1', { keep: true });
+
+    // Assert
+    should(io.out).eql(['s1 is completed']);
+    should(io.err).be.empty();
   });
 });
