@@ -551,6 +551,37 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     ],
   },
   {
+    // The feature's own name, and the words for what it does: delegating, sub-agents, picking a model.
+    id: 'pack',
+    label: 'Pack mode',
+    description:
+      'Whether ferrets may start sub-ferrets and pick the model each runs on: the switch, who decides (the agent or Jev), how many may run and how deep, and the models guide. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#pack`,
+    keywords: [
+      'pack',
+      'pack mode',
+      'sub-ferret',
+      'sub-ferrets',
+      'subagent',
+      'sub-agent',
+      'delegate',
+      'delegation',
+      'spawn',
+      'children',
+      'parallel',
+      'models guide',
+      'model guide',
+      'which model',
+      'pick model',
+      'use case',
+      'jev',
+      'depth',
+      'limit',
+      'pack.yaml',
+      'models-guide.yaml',
+    ],
+  },
+  {
     // What a person types to go through setup again: the step names, and "onboarding" and "wizard".
     id: 'machine-setup',
     label: 'New machine setup',
