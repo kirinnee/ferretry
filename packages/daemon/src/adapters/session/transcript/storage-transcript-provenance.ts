@@ -51,7 +51,9 @@ export class StorageTranscriptClaims implements TranscriptClaims {
       this.storage.listSessions().map(async (indexed): Promise<string | undefined> => {
         if (indexed.id === except) return undefined;
         const provenance = storedTranscriptProvenance(await this.storage.readConfig(indexed.id).catch(() => undefined));
-        return provenance?.identity === 'correlated' ? provenance.harnessSessionId : undefined;
+        return provenance?.identity === 'correlated' || provenance?.identity === 'adopted'
+          ? provenance.harnessSessionId
+          : undefined;
       }),
     );
     return ids.filter((id): id is string => id !== undefined);

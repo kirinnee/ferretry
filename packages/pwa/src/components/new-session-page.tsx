@@ -1,6 +1,9 @@
 import type { StartSessionRequest } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { ContinueConversation } from '../features/fleet/conversations/continue-conversation.tsx';
+import { Segmented } from '../features/fleet/conversations/conversation-picker.tsx';
+import type { FleetClientFactory } from '../features/fleet/fleet-client.ts';
 import { machineHash } from '../features/fleet/shell/machine-route.ts';
 import { daemonDisplayName } from '../features/settings/daemon-settings.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
@@ -30,6 +33,12 @@ import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
  * pulls Node modules into a browser bundle. `new-session-page.test.tsx` holds this to that function.
  */
 const FIRST_RUN_RUNTIME = 'claude-default';
+
+/** The page's two ways in: a fresh session, or one carried on from a conversation already on the machine. */
+const NEW_SESSION_KINDS = [
+  { id: 'new', label: 'New' },
+  { id: 'continue', label: 'Continue a conversation' },
+] as const;
 
 export interface NewSessionPageProps {
   /** The concrete daemon selected by pairing and matched by the current route. */
@@ -86,6 +95,11 @@ export interface NewSessionPageProps {
    * has read a session for is not a folder anybody used.
    */
   readonly fleet?: DaemonFleetStore;
+  /**
+   * Present means the page also offers "Continue a conversation": search the Claude Code and Codex
+   * conversations already on this machine and carry one on as a ferret. Absent keeps the form alone.
+   */
+  readonly createFleetClient?: FleetClientFactory;
 }
 
 type TextDraftField = Exclude<keyof NewSessionDraft, 'mode'>;
@@ -237,12 +251,14 @@ export function NewSessionPage({
   projects,
   fleet,
   initialAgent,
+  createFleetClient,
 }: NewSessionPageProps) {
   const [draft, setDraft] = useState<NewSessionDraft>(emptyNewSessionDraft);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chosenAccount, setChosenAccount] = useState<ChosenAccount | null>(null);
   const [noRunnableAccount, setNoRunnableAccount] = useState(false);
+  const [continuing, setContinuing] = useState(false);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
@@ -289,7 +305,25 @@ export function NewSessionPage({
         </h1>
       </div>
 
-      <Card>
+      {createFleetClient === undefined ? null : (
+        <div className="mb-3">
+          <Segmented<'new' | 'continue'>
+            label="Start"
+            name="new-session-kind"
+            options={NEW_SESSION_KINDS}
+            value={continuing ? 'continue' : 'new'}
+            onChoose={kind => setContinuing(kind === 'continue')}
+          />
+        </div>
+      )}
+      {createFleetClient === undefined || !continuing ? null : (
+        <Card>
+          <PanelBody>
+            <ContinueConversation connection={connection} createClient={createFleetClient} onNavigate={onNavigate} />
+          </PanelBody>
+        </Card>
+      )}
+      <Card hidden={continuing}>
         <PanelBody className="space-y-5">
           <SessionField hint="the account that will run this session" inputId={fieldId('agent')} label="Account">
             {accounts === undefined ? (

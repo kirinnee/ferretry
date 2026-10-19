@@ -516,3 +516,24 @@ describe('Launch', () => {
     await view.unmount();
   });
 });
+
+describe('Runtimes tab › Import conversations', () => {
+  it('swaps to the picker next to Add runtime, and Back returns to the list', async () => {
+    const view = await open({
+      routes: {
+        ...reads(),
+        'GET /v1/imports/conversations?harness=claude&limit=5000': { conversations: [], matched: 0, skipped: 0 },
+      },
+    });
+    expect(text(view.container, '[data-import-conversations-open]')).toBe('Import conversations…');
+    await click(view.container, '[data-import-conversations-open]');
+    await settle();
+    expect(text(view.container, '[data-import-conversations] h3')).toBe('Import conversations');
+    expect(text(view.container, '[data-setup-note="conversations-empty"]')).toBe(
+      'No Claude Code conversations on this machine.',
+    );
+    await click(view.container, '[data-import-conversations] [data-page-back]');
+    expect(view.container.querySelector('[data-runtimes-tab]')).not.toBeNull();
+    await view.unmount();
+  });
+});

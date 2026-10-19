@@ -15,6 +15,7 @@ import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonNewSessionPath } from '../../../lib/pages/routes.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
+import { ImportConversations } from '../conversations/conversation-picker.tsx';
 import { credentialEmail } from '../credentials/credentials-model.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { useAccountChanges } from '../shell/apply-change-panel.tsx';
@@ -354,6 +355,7 @@ export function RuntimesTab({
   const changes = useAccountChanges({ connection, createClient });
   const [detail, openDetail] = useMachineDetail(machineName, 'runtimes');
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   // M3: a machine that is not set up has no runtimes; the banner above the tabs resumes its setup.
   if (machine !== null && !machine.setUp)
@@ -393,6 +395,16 @@ export function RuntimesTab({
           setAdding(false);
           openDetail(open);
         }}
+      />
+    );
+
+  if (importing)
+    return (
+      <ImportConversations
+        connection={connection}
+        createClient={createClient}
+        runtimes={data.runtimes.runtimes}
+        onBack={() => setImporting(false)}
       />
     );
 
@@ -444,10 +456,15 @@ export function RuntimesTab({
             <p className="m-0 text-cell text-muted">
               {runtimes.length} {runtimes.length === 1 ? 'runtime' : 'runtimes'} on {machineName}
             </p>
-            <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
-              <Plus size={16} aria-hidden="true" />
-              Add runtime
-            </Button>
+            <span className="flex flex-wrap gap-2">
+              <Button type="button" data-import-conversations-open="" onClick={() => setImporting(true)}>
+                Import conversations…
+              </Button>
+              <Button type="button" variant="primary" data-add-runtime="" onClick={start}>
+                <Plus size={16} aria-hidden="true" />
+                Add runtime
+              </Button>
+            </span>
           </div>
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {runtimes.map(item => (
