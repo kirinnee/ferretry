@@ -81,8 +81,9 @@ async function bootRealSession(environment: E2eEnvironment): Promise<RealSession
     // The daemon drives tmux on its own private socket; the fixture's PATH router refuses that.
     useDaemonPrivateTmux: true,
     // Relay discovery pointed at a closed loopback port: nothing here needs a carrier. Claude is located
-    // through FY_CLAUDE_BIN because `useDaemonPrivateTmux` drops the fixture's bin from PATH: without it
-    // a CI runner has no Claude at all, and a developer machine quietly imported its REAL `claude`.
+    // through FY_CLAUDE_BIN for the import, and the session's wrapper execs `claude` BY NAME, which finds
+    // the same fake because `harnessBin` is first on the daemon's PATH. Before it was, this journey
+    // launched the developer's REAL Claude Code in a tmux server nothing ever killed.
     env: { FY_RELAY_DIRECTORY_ORIGIN: 'http://127.0.0.1:9', FY_CLAUDE_BIN: fakeClaude },
   });
   const token = await waitForFile(join(environment.paths.fyHome, 'api-token'), 10_000);

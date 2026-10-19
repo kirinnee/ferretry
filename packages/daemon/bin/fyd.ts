@@ -9,7 +9,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
-import { hostname } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   CredentialStatusService,
@@ -330,7 +330,7 @@ import {
   type TerminalStreamScheduler,
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
-import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
+import { BunTmuxProcess, RealHarnessLaunchGuard, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   FileSessionAttachmentCopier,
@@ -521,6 +521,7 @@ import {
   LessonsService,
   LiveDeviceConnections,
   type LogLevel,
+  launchGuardActive,
   launchReasoningEffort,
   locateHarnessCommand,
   type ManagedWorktreeOperations,
@@ -705,6 +706,7 @@ import {
   type TaskBoardTaskActionAuthorizer,
   TaskError,
   type TaskSubsystem,
+  TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
   TeamAdvisor,
   TerminalMountError,
@@ -713,6 +715,7 @@ import {
   type TerminalSessionResolver,
   type TerminalSubsystem,
   TmuxController,
+  type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
   TranscriptProvenanceCapture,
@@ -779,6 +782,30 @@ const CLIENT_NAME = 'fy';
  */
 function sessionRootPinner(): SessionRootPinner {
   return process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
+}
+
+/**
+ * The guard that keeps a daemon a test booted from ever launching a real harness, or nothing.
+ *
+ * On when the runner exported `FERRETRY_TEST=1`, or when the state home sits under a temporary
+ * directory — which is where every suite in this repository builds one. Off for a person's own
+ * daemon, which launches whatever runtime they configured. See `lib/tmux/harness-guard.ts`.
+ */
+function testHarnessLaunchGuard(home: string): TmuxLaunchGuard | undefined {
+  const canonical = (path: string): string => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  };
+  const temporaryRoots = [tmpdir(), '/tmp', '/var/folders'].map(canonical);
+  const active = launchGuardActive({
+    flag: process.env[TEST_MODE_VARIABLE],
+    home: canonical(home),
+    temporaryRoots,
+  });
+  return active ? new RealHarnessLaunchGuard(() => process.env.PATH) : undefined;
 }
 
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
@@ -5120,6 +5147,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     lastSweepAt: undefined,
   };
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
+  const launchGuard = testHarnessLaunchGuard(paths.home);
   const stateFiles = new StateFileSystem(paths, undefined, {
     hostCodexAuth: hostCodexCredentialFile(process.env.CODEX_HOME, userHome),
   });
@@ -5849,7 +5877,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     storage: DaemonStorage,
     relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
   ): ResumeLauncher => {
-    const controller = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
+    const controller = new TmuxController(
+      new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')),
+      launchGuard,
+    );
     const registrar = new DurableTerminalPaneRegistrar(paths.home, controller, stateFiles, paths);
     return new TmuxResumeLauncher(
       controller,
@@ -5899,7 +5930,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * impossible for a future edit to point delivery at a different pane than the launch created.
    */
   const launchTmuxCommands = new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'));
-  const launchTmux = new TmuxController(launchTmuxCommands);
+  const launchTmux = new TmuxController(launchTmuxCommands, launchGuard);
   /**
    * The per-harness workarounds, held as a local because TWO things read them: the world publishes
    * it, and the runtime-control subsystem below plans every switch through it. A second construction

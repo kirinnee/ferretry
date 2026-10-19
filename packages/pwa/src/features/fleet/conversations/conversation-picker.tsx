@@ -14,7 +14,8 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { relativeTime, sessionStatusLabel } from '../../../lib/session-screens.ts';
-import { Badge, Button } from '../../../shell/primitives.tsx';
+import { Button } from '../../../shell/primitives.tsx';
+import { HARNESS_SHORT } from '../credentials/credentials-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { useSetupAccess } from '../setup/setup-access.ts';
 import { SetupNote } from '../setup/setup-ui.tsx';
@@ -25,8 +26,8 @@ import {
   type DateFilter,
   EMPTY_FILTER,
   EMPTY_SELECTION,
+  folderLabel,
   foundLine,
-  groupConversationsByProject,
   keepButtonLabel,
   type PickerFilter,
   type PickerSelection,
@@ -50,29 +51,34 @@ export function Segmented<T extends string>({
   value,
   onChoose,
   name,
+  fit = false,
 }: {
   readonly label: string;
-  readonly options: readonly { readonly id: T; readonly label: string }[];
+  readonly options: readonly { readonly id: T; readonly label: string; readonly title?: string }[];
   readonly value: T;
   readonly onChoose: (value: T) => void;
   readonly name: string;
+  /** Segments take the width their words need instead of sharing the row equally. */
+  readonly fit?: boolean;
 }) {
   return (
     <div
       role="toolbar"
       aria-label={label}
       data-segmented={name}
-      className="flex min-w-0 flex-wrap gap-1 rounded-control border border-border bg-surface-2 p-0.5"
+      className="flex min-w-0 gap-1 rounded-control border border-border bg-surface-2 p-0.5"
     >
       {options.map(option => (
         <button
           key={option.id}
           type="button"
           aria-pressed={option.id === value}
+          title={option.title}
           data-segment={option.id}
           onClick={() => onChoose(option.id)}
           className={cn(
-            'h-control-sm flex-1 whitespace-nowrap rounded-control px-2 text-ui font-medium transition-colors',
+            'h-control-sm min-w-0 whitespace-nowrap rounded-control px-2 text-ui font-medium transition-colors',
+            fit ? 'flex-auto' : 'flex-1',
             option.id === value ? 'bg-surface text-fg shadow-control' : 'text-muted hover:text-fg',
           )}
         >
@@ -83,16 +89,33 @@ export function Segmented<T extends string>({
   );
 }
 
-/** The meta line under a conversation: when, how long, which model. */
-export function ConversationMeta({ row, now }: { readonly row: ImportableConversation; readonly now: number }) {
+/**
+ * A conversation in two lines, shared by the picker and the Continue search. First: what it began with
+ * (one line, ellipsised) and how long ago it last moved. Second, muted: its folder (the last two segments,
+ * which give way first), the CLI, the turns and the model.
+ */
+export function ConversationLines({ row, now }: { readonly row: ImportableConversation; readonly now: number }) {
+  const turns = `${row.turns} ${row.turns === 1 ? 'turn' : 'turns'}`;
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-meta text-muted">
-      <span>{relativeTime(row.lastActivityAt, now)}</span>
-      <span>
-        · {row.turns} {row.turns === 1 ? 'turn' : 'turns'}
+    <>
+      <span className="flex min-w-0 items-baseline gap-sm">
+        <span className="min-w-0 flex-1 truncate text-row text-fg" title={row.latest ?? undefined}>
+          {previewText(row)}
+        </span>
+        <span className="mono shrink-0 text-meta text-faint" data-conversation-age="">
+          {relativeTime(row.lastActivityAt, now)}
+        </span>
       </span>
-      {row.model === undefined ? null : <Badge className="max-w-full truncate font-mono">{row.model}</Badge>}
-    </span>
+      <span className="flex min-w-0 items-baseline gap-1 overflow-hidden text-meta text-muted">
+        <span className="max-w-[45%] shrink-0 truncate font-mono" title={row.project}>
+          {folderLabel(row.project)}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">
+          · {HARNESS_SHORT[row.harness]} · {turns}
+        </span>
+        {row.model === undefined ? null : <span className="min-w-0 truncate">· {row.model}</span>}
+      </span>
+    </>
   );
 }
 
@@ -225,14 +248,17 @@ export function ConversationPicker({
           value={filter.text}
           onChange={event => set({ text: event.target.value })}
         />
-        <Segmented<DateFilter>
-          label="Last active"
-          name="date"
-          options={DATE_FILTERS}
-          value={filter.date}
-          onChoose={date => set({ date })}
-        />
-        <div className="flex min-w-0 flex-wrap gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="w-40 min-w-0">
+            <Segmented<DateFilter>
+              fit
+              label="Last active"
+              name="date"
+              options={DATE_FILTERS}
+              value={filter.date}
+              onChoose={date => set({ date })}
+            />
+          </div>
           <Button
             type="button"
             size="sm"
@@ -260,25 +286,20 @@ export function ConversationPicker({
           No conversation matches.
         </p>
       ) : (
-        groupConversationsByProject(visible.rows).map(group => (
-          <section key={group.project} className="flex min-w-0 flex-col gap-1" data-conversation-group={group.project}>
-            <h5 className="m-0 break-all font-mono text-meta font-semibold text-muted">{group.project}</h5>
-            <ul className="m-0 flex list-none flex-col gap-1 p-0">
-              {group.rows.map(row => (
-                <ConversationRow
-                  key={row.id}
-                  row={row}
-                  now={at}
-                  kept={selection.keep.includes(row.id)}
-                  starting={selection.start.includes(row.id)}
-                  startFull={startFull}
-                  onKeep={on => keep(row, on)}
-                  onStart={on => start(row.id, on)}
-                />
-              ))}
-            </ul>
-          </section>
-        ))
+        <ul className="kt-panel fy-session-group__list fy-convo-list" data-conversation-list="">
+          {visible.rows.map(row => (
+            <ConversationRow
+              key={row.id}
+              row={row}
+              now={at}
+              kept={selection.keep.includes(row.id)}
+              starting={selection.start.includes(row.id)}
+              startFull={startFull}
+              onKeep={on => keep(row, on)}
+              onStart={on => start(row.id, on)}
+            />
+          ))}
+        </ul>
       )}
 
       <div className="flex min-w-0 flex-col gap-2 border-t border-border pt-3">
@@ -339,62 +360,60 @@ function ConversationRow({
   const id = useId();
   return (
     <li
-      className={cn('kt-panel flex min-w-0 flex-col gap-2 p-panel', kept && 'border-accent', adopted && 'opacity-70')}
+      className={cn('fy-convo-item fy-convo-pick', kept && 'bg-accent-soft', adopted && 'opacity-70')}
       data-conversation-row={row.id}
     >
-      <label htmlFor={id} className="flex min-h-control min-w-0 cursor-pointer items-start gap-3">
+      <label htmlFor={id} className="fy-convo-main cursor-pointer">
+        <ConversationLines row={row} now={now} />
+      </label>
+      <div className="fy-convo-controls">
+        {adopted ? (
+          <span className="[overflow-wrap:anywhere] text-meta text-muted" data-conversation-adopted={row.adoptedBy}>
+            Kept as <span className="font-mono">{row.adoptedBy}</span>
+          </span>
+        ) : null}
+        {kept ? (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={starting}
+            disabled={!starting && startFull}
+            data-conversation-start={row.id}
+            onClick={() => onStart(!starting)}
+            className={cn(
+              'flex min-h-control items-center gap-2 rounded-control border px-2 py-1 text-left',
+              starting ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
+              !starting && startFull ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
+            )}
+          >
+            <span className={cn('text-meta font-semibold', starting ? 'text-accent' : 'text-fg')}>Start now</span>
+            <span
+              aria-hidden="true"
+              className={cn(
+                'relative h-5 w-9 shrink-0 rounded-full border',
+                starting ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+              )}
+            >
+              <span
+                className={cn(
+                  'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg',
+                  starting ? 'right-0.5' : 'left-0.5',
+                )}
+              />
+            </span>
+          </button>
+        ) : null}
         <input
           id={id}
           type="checkbox"
-          className="mt-1 shrink-0"
+          className="shrink-0"
+          title="Keep as a ferret"
           checked={kept}
           disabled={adopted}
           data-conversation-keep={row.id}
           onChange={event => onKeep(event.target.checked)}
         />
-        <span className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="[overflow-wrap:anywhere] text-row text-fg">{previewText(row)}</span>
-          <ConversationMeta row={row} now={now} />
-          {adopted ? (
-            <span className="[overflow-wrap:anywhere] text-meta text-muted" data-conversation-adopted={row.adoptedBy}>
-              Kept as <span className="font-mono">{row.adoptedBy}</span>
-            </span>
-          ) : (
-            <span className="text-meta text-muted">Keep as a ferret</span>
-          )}
-        </span>
-      </label>
-      {kept ? (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={starting}
-          disabled={!starting && startFull}
-          data-conversation-start={row.id}
-          onClick={() => onStart(!starting)}
-          className={cn(
-            'flex min-h-control w-full items-center justify-between gap-2 rounded-control border px-2 py-1 text-left',
-            starting ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2',
-            !starting && startFull ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
-          )}
-        >
-          <span className={cn('text-meta font-semibold', starting ? 'text-accent' : 'text-fg')}>Start now</span>
-          <span
-            aria-hidden="true"
-            className={cn(
-              'relative h-5 w-9 shrink-0 rounded-full border',
-              starting ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-            )}
-          >
-            <span
-              className={cn(
-                'absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg',
-                starting ? 'right-0.5' : 'left-0.5',
-              )}
-            />
-          </span>
-        </button>
-      ) : null}
+      </div>
     </li>
   );
 }
