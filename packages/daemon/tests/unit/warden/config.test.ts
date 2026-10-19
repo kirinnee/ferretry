@@ -24,7 +24,7 @@ describe('the shipped warden defaults', () => {
   it('should watch with rules only, so a fresh daemon never spends on its own', () => {
     // Arrange / Act / Assert
     should(defaultWardenConfig.enabled).be.true();
-    should(defaultWardenConfig.triage).equal('rules');
+    should(defaultWardenConfig.layers).deepEqual({ jev: false, llm: false });
     should(defaultWardenConfig.mayActAlone.stop).be.false();
   });
 
@@ -85,7 +85,7 @@ describe('reading a persisted warden configuration', () => {
     const actual = parseStoredWardenConfig({ triage: 'llm' });
 
     // Assert
-    should(actual.config.triage).equal('rules');
+    should(actual.config.layers).deepEqual({ jev: false, llm: false });
   });
 
   it('should name the whole document when the failure has no field path', () => {
@@ -246,6 +246,8 @@ describe('which login an investigation runs on', () => {
 describe('what an operator is warned about', () => {
   const warningsFor = (subject: WardenConfig, installed: readonly string[], defaultRuntime?: string) =>
     wardenConfigWarnings(subject, resolveWardenLogin(subject, installed, defaultRuntime));
+  const investigating = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
+    config({ layers: { jev: false, llm: true }, ...overrides });
 
   it('should warn that the Warden is off while detection still runs', () => {
     // Arrange / Act
@@ -263,14 +265,14 @@ describe('what an operator is warned about', () => {
     should(actual).be.empty();
   });
 
-  it('should name an unknown login and say LLM triage is unavailable when it is the only one', () => {
+  it('should name an unknown login and say LLM investigations are unavailable when it is the only one', () => {
     // Arrange / Act
-    const actual = warningsFor(config({ enabled: true, accounts: [{ agent: 'legacy-wrapper' }] }), ['other']);
+    const actual = warningsFor(investigating({ enabled: true, accounts: [{ agent: 'legacy-wrapper' }] }), ['other']);
 
     // Assert
     should(actual).deepEqual([
       "unknown login 'legacy-wrapper' — choose one in Settings › Warden (it is skipped until it exists here)",
-      'no investigation login exists on this machine, so LLM triage is unavailable',
+      'no investigation login exists on this machine, so LLM investigations are unavailable',
     ]);
   });
 
@@ -284,7 +286,7 @@ describe('what an operator is warned about', () => {
 
   it('should warn when one of several logins is unknown without declaring total loss', () => {
     // Arrange
-    const subject = config({ enabled: true, accounts: [{ agent: 'a' }, { agent: 'b' }] });
+    const subject = investigating({ enabled: true, accounts: [{ agent: 'a' }, { agent: 'b' }] });
 
     // Act
     const actual = warningsFor(subject, ['a']);
@@ -295,13 +297,21 @@ describe('what an operator is warned about', () => {
     ]);
   });
 
+  it('should say nothing about the login while investigations are off: nothing needs one', () => {
+    // Arrange / Act
+    const actual = warningsFor(config({ enabled: true, accounts: [{ agent: 'legacy-wrapper' }] }), ['other']);
+
+    // Assert
+    should(actual).be.empty();
+  });
+
   it('should warn when no login is set and the machine has no default runtime', () => {
     // Arrange / Act
-    const actual = warningsFor(config({ enabled: true }), ['a'], undefined);
+    const actual = warningsFor(investigating({ enabled: true }), ['a'], undefined);
 
     // Assert
     should(actual).deepEqual([
-      'no investigation login is set and this machine has no default runtime, so LLM triage is unavailable — choose a login in Settings › Warden',
+      'no investigation login is set and this machine has no default runtime, so LLM investigations are unavailable — choose a login in Settings › Warden',
     ]);
   });
 });

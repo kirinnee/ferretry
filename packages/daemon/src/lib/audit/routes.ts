@@ -292,6 +292,8 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   { method: 'POST', path: '/v1/warden/run', event: 'warden.ran' },
   // An owner's request spends an investigation, so it is recorded as a run of its own kind.
   { method: 'POST', path: '/v1/warden/investigate', event: 'warden.ran', detail: { action: 'investigate' } },
+  // Leaving a ferret alone switches its supervision off for a while: a change to how the Warden behaves.
+  { method: 'POST', path: '/v1/warden/leave', event: 'warden.configured', detail: { action: 'leave' } },
   { method: 'PATCH', path: '/v1/warden/config', event: 'warden.configured' },
   // The configuration files (docs/config-files.md). Nothing from the body — no path, no text — is
   // recorded: which file changed is the file's own business, and its text may be what was wrong.

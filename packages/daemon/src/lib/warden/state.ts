@@ -23,13 +23,14 @@ import {
   SessionStatusSchema,
   type WardenAction,
   WardenActionSchema,
+  WardenClearedBySchema,
   WardenGuardFailureCodeSchema,
   type WardenInvestigationOrigin,
   WardenInvestigationOriginSchema,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { Blessing, BlessingStore } from './bless.ts';
+import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
 import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
@@ -93,8 +94,15 @@ const BlessingSchema = z.object({
   blessedAt: Instant,
   expiresAt: Instant,
   wardenId: z.string().min(1).optional(),
-  by: z.enum(['jev', 'warden']).optional(),
+  by: WardenClearedBySchema.optional(),
+  streak: z.number().int().min(1).optional(),
+  untilChange: z.literal(true).optional(),
 }) satisfies z.ZodType<unknown, Blessing>;
+
+const ClearStreakSchema = z.object({
+  status: SessionStatusSchema,
+  counts: z.partialRecord(AnomalyKindSchema, z.number().int().min(1)),
+}) satisfies z.ZodType<unknown, ClearStreak>;
 
 /**
  * One live assigned warden, keyed in the state by the TARGET it investigates.
@@ -236,6 +244,10 @@ export interface WardenRuntimeState {
    */
   readonly lastAnomalies?: readonly WardenAnomaly[];
   readonly blessings?: BlessingStore;
+  /** How many times in a row each flag on a ferret was cleared, so the next clear lasts longer. */
+  readonly clearStreaks?: ClearStreakStore;
+  /** The flags Jev passed on that still stand (`passedOnKey` in `triage.ts`), so it is not asked about them again. */
+  readonly passedOn?: readonly string[];
   /** Live assigned wardens, keyed by target session id. */
   readonly assignments?: Readonly<Record<string, WardenAssignmentRecord>>;
   /** When each target's assigned warden finished, starting its cooldown. */
@@ -265,6 +277,8 @@ const RuntimeStateSchema = z.object({
   recoveryGeneration: z.number().int().min(0).optional(),
   lastAnomalies: z.array(AnomalySchema).optional(),
   blessings: z.record(z.string(), BlessingSchema).optional(),
+  clearStreaks: z.record(z.string(), ClearStreakSchema).optional(),
+  passedOn: z.array(z.string().min(1)).optional(),
   assignments: z.record(z.string(), AssignmentSchema).optional(),
   assignedCooldowns: z.record(z.string(), Instant).optional(),
   assignedQueue: z.array(AnomalySchema).optional(),

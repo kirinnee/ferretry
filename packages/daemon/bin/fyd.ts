@@ -3333,6 +3333,9 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       await loop.run(false).catch(() => undefined);
       return await service.investigationStatus(request.sessionId);
     },
+    // Inside the sweep chain, like every other write of the durable state.
+    leave: async request =>
+      await loop.exclusive(async () => await service.leaveAlone(request.sessionId, request.duration)),
     lastSweepAt: async () => await service.lastSweepAt(),
     intervalMs: async () => await service.intervalMs(),
     arm: async () => {

@@ -111,7 +111,7 @@ describe('reading the warden configuration', () => {
     should(actual.accounts).deepEqual([{ agent: 'claude-default' }]);
   });
 
-  it('should carry both the loader warning and the configuration warnings', async () => {
+  it('should carry the loader warning, and no login warning while the defaults keep investigations off', async () => {
     // Arrange
     const subject = harness({ config: { enabled: true }, installed: async () => ['someone-else'] });
 
@@ -120,7 +120,7 @@ describe('reading the warden configuration', () => {
 
     // Assert
     should(actual.warnings).matchAny(/did not validate/u);
-    should(actual.warnings).matchAny(/unknown login 'claude-default'/u);
+    should(actual.warnings).have.length(1);
   });
 
   it('should warn about nobody when the host inventory cannot be read', async () => {

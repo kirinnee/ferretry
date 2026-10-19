@@ -25,6 +25,7 @@
  * Pure: no IO, no clock, no globals.
  */
 
+import { WARDEN_BLESSING_CEILING_MINUTES, type WardenClearedBy } from '@ferretry/protocol';
 import type { WardenAnomalyKind } from './detect.ts';
 import { instantMs, isoFromMs } from './time.ts';
 import type { WardenSessionStatus } from './types.ts';
@@ -42,8 +43,12 @@ export interface Blessing {
   readonly expiresAt: string;
   /** The warden that issued the clearance, for provenance in the journal. */
   readonly wardenId?: string;
-  /** Who judged it healthy: an investigation, or the Jev guard's confident skip. Absent means a warden. */
-  readonly by?: 'jev' | 'warden';
+  /** Who judged it healthy: an investigation, Jev's confident skip, or the owner. Absent means a warden. */
+  readonly by?: WardenClearedBy;
+  /** How many clears of these flags in a row came before this one: its lifetime doubled that often. */
+  readonly streak?: number;
+  /** The owner left it alone until its status changes; {@link expiresAt} is only the outer bound. */
+  readonly untilChange?: true;
 }
 
 /** At most one active blessing per session. A later clearance replaces it. */
@@ -92,7 +97,9 @@ export interface BlessingRequest {
   readonly kinds: readonly WardenAnomalyKind[];
   readonly status: WardenSessionStatus;
   readonly wardenId?: string;
-  readonly by?: 'jev' | 'warden';
+  readonly by?: WardenClearedBy;
+  readonly streak?: number;
+  readonly untilChange?: true;
 }
 
 /**
@@ -118,6 +125,8 @@ export function recordBlessing(
       expiresAt: isoFromMs(nowMs + Math.max(MINIMUM_BLESSING_MS, ttlMs)),
       ...(request.wardenId === undefined ? {} : { wardenId: request.wardenId }),
       ...(request.by === undefined ? {} : { by: request.by }),
+      ...(request.streak === undefined || request.streak <= 0 ? {} : { streak: request.streak }),
+      ...(request.untilChange === true ? { untilChange: true } : {}),
     },
   };
 }
@@ -163,4 +172,113 @@ export function reconcileBlessings(
   }
 
   return { store: next, revoked, expired };
+}
+
+// ── Growing cooldown ─────────────────────────────────────────────────────────────────────────────
+
+/** The longest a run of re-clears leaves a flag alone. */
+export const BLESSING_CEILING_MS = WARDEN_BLESSING_CEILING_MINUTES * 60_000;
+
+/**
+ * How long a clear leaves a flag alone after `streak` clears of it in a row: the configured lifetime,
+ * doubled per re-clear, up to four hours. A configured lifetime already above four hours is kept as it
+ * is — the ceiling bounds the GROWTH, it never shortens what the owner chose.
+ */
+export function growingBlessingMs(baseMinutes: number, streak: number): number {
+  const base = blessingTtlMs(baseMinutes);
+  const doublings = Math.max(0, Math.min(Math.floor(Number.isFinite(streak) ? streak : 0), 16));
+  return Math.min(Math.max(base, BLESSING_CEILING_MS), base * 2 ** doublings);
+}
+
+/**
+ * How many times in a row each flag on one ferret has been cleared, while it held one status.
+ *
+ * A SEPARATE RECORD FROM THE BLESSING because it must outlive it: the blessing lapses, the flag comes
+ * back, and the next clear is a RE-clear only if something remembers the last one. It resets exactly
+ * when a blessing is revoked — the ferret changed status or vanished — and for one kind when that flag
+ * stops being raised while nothing blesses it: trouble that went away and came back is not consecutive.
+ */
+export interface ClearStreak {
+  readonly status: WardenSessionStatus;
+  readonly counts: Readonly<Partial<Record<WardenAnomalyKind, number>>>;
+}
+
+export type ClearStreakStore = Readonly<Record<string, ClearStreak>>;
+
+/** The clears in a row that came before this one: the longest among the kinds being cleared now. */
+export function clearStreak(
+  store: ClearStreakStore,
+  sessionId: string,
+  kinds: readonly WardenAnomalyKind[],
+  status: WardenSessionStatus,
+): number {
+  const streak = store[sessionId];
+  if (streak === undefined || streak.status !== status) return 0;
+  return Math.max(0, ...kinds.map(kind => streak.counts[kind] ?? 0));
+}
+
+/** Count one clear of each kind. A ferret in a new status starts every count afresh. */
+export function recordClears(
+  store: ClearStreakStore,
+  sessionId: string,
+  kinds: readonly WardenAnomalyKind[],
+  status: WardenSessionStatus,
+): ClearStreakStore {
+  if (kinds.length === 0) return store;
+  const previous = store[sessionId];
+  const counts: Partial<Record<WardenAnomalyKind, number>> = previous?.status === status ? { ...previous.counts } : {};
+  for (const kind of new Set(kinds)) counts[kind] = (counts[kind] ?? 0) + 1;
+  return { ...store, [sessionId]: { status, counts } };
+}
+
+/**
+ * Sweep housekeeping for the streaks: a ferret that is gone or changed status loses all of them, and a
+ * kind that is neither flagged now nor blessed loses its own.
+ */
+export function reconcileClearStreaks(
+  store: ClearStreakStore,
+  statusById: ReadonlyMap<string, WardenSessionStatus>,
+  flagged: readonly { readonly sessionId: string; readonly kind: WardenAnomalyKind }[],
+  blessings: BlessingStore,
+  nowMs: number,
+): ClearStreakStore {
+  const next: Record<string, ClearStreak> = {};
+  for (const [sessionId, streak] of Object.entries(store)) {
+    if (statusById.get(sessionId) !== streak.status) continue;
+    const blessed = activeBlessing(blessings, sessionId, nowMs)?.kinds ?? [];
+    const counts: Partial<Record<WardenAnomalyKind, number>> = {};
+    for (const [kind, count] of Object.entries(streak.counts) as [WardenAnomalyKind, number][]) {
+      const standing = blessed.includes(kind) || flagged.some(f => f.sessionId === sessionId && f.kind === kind);
+      if (standing) counts[kind] = count;
+    }
+    if (Object.keys(counts).length > 0) next[sessionId] = { status: streak.status, counts };
+  }
+  return next;
+}
+
+/**
+ * A blessing over `kinds` merged into the active one the ferret already holds in the same status: the
+ * kinds are joined and the LATER expiry wins, so clearing one more flag never shortens how long an
+ * earlier clear leaves the others alone.
+ */
+export function mergeBlessing(
+  store: BlessingStore,
+  request: BlessingRequest,
+  nowMs: number,
+  ttlMs: number,
+): BlessingStore {
+  const current = activeBlessing(store, request.sessionId, nowMs);
+  const same = current !== undefined && current.status === request.status ? current : undefined;
+  const next = recordBlessing(store, { ...request, kinds: [...(same?.kinds ?? []), ...request.kinds] }, nowMs, ttlMs);
+  const merged = next[request.sessionId];
+  const keep = instantMs(same?.expiresAt) ?? 0;
+  if (merged === undefined || same === undefined || keep <= (instantMs(merged.expiresAt) ?? 0)) return next;
+  return {
+    ...next,
+    [request.sessionId]: {
+      ...merged,
+      expiresAt: same.expiresAt,
+      ...(same.untilChange === true ? { untilChange: true } : {}),
+    },
+  };
 }

@@ -118,10 +118,10 @@ describe('what the status already refuses', () => {
 
   it('refuses once today’s investigation cap is hit, but not for the Jev cap', () => {
     const status = wardenStatus();
-    expect(askWardenBlocker({ ...status, spend: { ...status.spend, capHit: 'investigation' } })).toBe(
+    expect(askWardenBlocker({ ...status, spend: { ...status.spend, capsHit: ['investigation'] } })).toBe(
       'Today’s $2.00 investigation cap is reached. Raise it in Settings › Warden.',
     );
-    expect(askWardenBlocker({ ...status, spend: { ...status.spend, capHit: 'jev' } })).toBeNull();
+    expect(askWardenBlocker({ ...status, spend: { ...status.spend, capsHit: ['jev'] } })).toBeNull();
   });
 
   it('refuses when this machine has no investigation login, naming an unknown one', () => {

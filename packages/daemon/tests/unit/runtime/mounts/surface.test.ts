@@ -634,6 +634,7 @@ describe('the mounted daemon surface', () => {
       3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      1 + // the owner leaving a ferret alone for longer than the Warden would
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       2 + // existing conversations kept as ferrets: the listing and the adoption
       2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
@@ -911,6 +912,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/warden/run',
       'GET /v1/warden/attention',
       'POST /v1/warden/investigate',
+      'POST /v1/warden/leave',
       'GET /v1/warden/config',
       'PATCH /v1/warden/config',
       // The operator reads: the history the daemon recorded, the screen the agent is looking at, and
