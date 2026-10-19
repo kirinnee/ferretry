@@ -402,6 +402,7 @@ describe('ContinueSessionController.run', () => {
 
     // Assert
     should(gateway.queries[0]).eql({
+      source: 'ferretry',
       harness: 'claude',
       q: 'login bug',
       since: new Date(NOW_MS - 2 * 3_600_000).toISOString(),

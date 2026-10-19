@@ -200,6 +200,7 @@ export const listingQuery = (
 /** The listing's address: the path, and a query string only when something narrows it. */
 export const listingPath = (query: ConversationImportQuery): string => {
   const params = new URLSearchParams();
+  if (query.source !== undefined) params.set('source', query.source);
   if (query.harness !== undefined) params.set('harness', query.harness);
   if (query.q !== undefined) params.set('q', query.q);
   if (query.since !== undefined) params.set('since', query.since);
