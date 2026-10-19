@@ -1484,7 +1484,8 @@ describe('one browser, two machines', () => {
           signal: AbortSignal.timeout(3_000),
         }).then(
           response => String(response.status),
-          (error: unknown) => `DEAD (${String((error as Error).message).slice(0, 60)})`,
+          (error: unknown) =>
+            `DEAD (${String((error as Error).message).slice(0, 60)}); last requests: ${JSON.stringify(product.origin.requests().slice(-25))}`,
         );
         await recordStep({ journey: 'harness', step: `diag:origin-after:${label}`, status: 'FLAG', evidence: answer });
       };
