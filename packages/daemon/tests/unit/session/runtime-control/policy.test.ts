@@ -143,7 +143,7 @@ describe('translating a control into a switch request', () => {
 });
 
 describe('deciding whether the live catalog is needed', () => {
-  it('should need it for a targeted Codex switch and for nothing else', () => {
+  it('should need it for a targeted Codex switch, with or without a level, and for nothing else', () => {
     // Probing for a bare picker open would break the manual escape hatch exactly when the catalog is
     // the thing that is broken.
     // Act
@@ -156,6 +156,6 @@ describe('deciding whether the live catalog is needed', () => {
     ];
 
     // Assert
-    should(actual).deepEqual([true, false, false, false, false]);
+    should(actual).deepEqual([true, true, false, false, false]);
   });
 });

@@ -123,6 +123,12 @@ const accountShape = {
   models: z.array(FleetManifestModelSchema).readonly(),
   /** The model catalog the models came from, when the login has one: what a picker names and whether it takes any id. */
   modelCatalog: FleetManifestModelCatalogSchema.optional(),
+  /**
+   * The format of the Codex model catalog file this runtime is launched with (`CODEX_CATALOG_FORMAT`), when
+   * it has one. Published so that a republish notices a runtime that should have a file and has none, or
+   * has a file in an older format — nothing else in the manifest would differ.
+   */
+  codexCatalog: z.number().int().positive().optional(),
   available: z.boolean(),
   /** Required when `available` is false, `null` otherwise. */
   unavailableReason: NonEmptyString.nullable(),

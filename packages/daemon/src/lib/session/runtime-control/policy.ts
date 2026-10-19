@@ -89,5 +89,5 @@ export function switchRequest(
  * escape hatch exists for.
  */
 export function needsLiveCatalog(wanted: HarnessRuntimeSwitchRequest): boolean {
-  return wanted.harness === 'codex' && wanted.model !== undefined && wanted.effort !== undefined;
+  return wanted.harness === 'codex' && wanted.model !== undefined;
 }
