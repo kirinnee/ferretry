@@ -30,6 +30,8 @@ export interface ILatestReleasePort {
  * anything without this interface saying so.
  */
 export interface IPackageManagerPort {
+  /** Bring the tap clone up to date, tapping it first when it is missing. */
+  brewRefresh(tap: string, url: string): Promise<CommandOutcome>;
   brewUpgrade(cask: string): Promise<CommandOutcome>;
   nixProfileUpgrade(element: string): Promise<CommandOutcome>;
   nixProfileRollback(): Promise<CommandOutcome>;

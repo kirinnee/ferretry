@@ -14,6 +14,8 @@ import {
   planUpdate,
   releaseDownloadBase,
   releaseFlakeReference,
+  releaseTapName,
+  releaseTapUrl,
 } from '../../src/lib/daemon-update.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
@@ -302,6 +304,8 @@ describe('descriptions', () => {
 
   it('builds the release addresses from the product', () => {
     should(releaseFlakeReference('ferretry')).equal('github:kirinnee/ferretry');
+    should(releaseTapName('ferretry')).equal('kirinnee/ferretry');
+    should(releaseTapUrl('ferretry')).equal('https://github.com/kirinnee/ferretry');
     should(latestReleaseApiUrl('ferretry')).equal('https://api.github.com/repos/kirinnee/ferretry/releases/latest');
     should(releaseDownloadBase('ferretry', '4.29.0')).equal(
       'https://github.com/kirinnee/ferretry/releases/download/v4.29.0',

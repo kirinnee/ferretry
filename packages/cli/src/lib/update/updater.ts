@@ -7,6 +7,8 @@ import {
   ProtocolVersionSchema,
   planUpdate,
   RELEASE_OWNER,
+  releaseTapName,
+  releaseTapUrl,
   UPDATE_HEALTH_TIMEOUT_MS,
   type UpdateOutcome,
   type UpdatePlan,
@@ -217,7 +219,7 @@ export class DaemonUpdater {
     }
     if (intent.running) await this.#awaitConsentToInterrupt(options);
     await this.#confirm(intent, options);
-    const applied = await this.#upgrade(intent);
+    const applied = await this.#upgrade(intent, options);
     if (applied.kind === 'failed') return { outcome: 'failed', message: applied.message };
     return await this.#prove(intent, applied);
   }
@@ -265,19 +267,37 @@ export class DaemonUpdater {
     }
   }
 
+  /** The exact commands that recover a Homebrew install by hand, for every message that says it failed. */
+  #brewRecovery(cask: string): string {
+    const tap = releaseTapName(this.deps.product);
+    const client = this.deps.clientName;
+    return `To recover by hand run: brew update && brew upgrade --cask ${cask} && ${client} daemon restart; if the tap is wedged: brew untap ${tap} && brew tap ${tap} ${releaseTapUrl(this.deps.product)} && brew reinstall --cask ${cask}`;
+  }
+
   /** Run the method's own upgrade. Answers how to undo it, or why it did not happen. */
-  async #upgrade(intent: UpdateIntent): Promise<Applied> {
+  async #upgrade(intent: UpdateIntent, options: DaemonUpdateOptions): Promise<Applied> {
     const { method, daemon } = intent;
     const packages = this.deps.packages;
     switch (method.kind) {
       case 'homebrew': {
+        const recovery = this.#brewRecovery(method.cask);
+        const tap = releaseTapName(this.deps.product);
+        if (options.json !== true) {
+          this.deps.out.warn(`refreshing the Homebrew tap ${tap} so brew can see ${intent.target} (brew update)`);
+        }
+        const refreshed = await packages.brewRefresh(tap, releaseTapUrl(this.deps.product));
+        if (refreshed.code !== 0) {
+          return failedCommand('brew update', refreshed.stderr, refreshed.code, recovery);
+        }
         const outcome = await packages.brewUpgrade(method.cask);
-        if (outcome.code !== 0)
-          return failedCommand(`brew upgrade --cask ${method.cask}`, outcome.stderr, outcome.code);
+        if (outcome.code !== 0) {
+          return failedCommand(`brew upgrade --cask ${method.cask}`, outcome.stderr, outcome.code, recovery);
+        }
         return {
           kind: 'applied',
           daemonPath: daemon.path,
-          undo: () => Promise.resolve('Homebrew keeps no previous version, so this could not be rolled back'),
+          undo: () =>
+            Promise.resolve(`Homebrew keeps no previous version, so this could not be rolled back. ${recovery}`),
         };
       }
       case 'nix-profile': {
@@ -437,10 +457,11 @@ export function renderPlan(plan: UpdatePlan, clientName: string): string[] {
   ];
 }
 
-function failedCommand(command: string, stderr: string, code: number): Applied {
+function failedCommand(command: string, stderr: string, code: number, hint?: string): Applied {
+  const what = `${command} failed, and nothing changed: ${lastLine(stderr) ?? `exit ${String(code)}`}`;
   return {
     kind: 'failed',
-    message: `${command} failed, and nothing changed: ${lastLine(stderr) ?? `exit ${String(code)}`}`,
+    message: hint === undefined ? what : `${what}. ${hint}`,
   };
 }
 
