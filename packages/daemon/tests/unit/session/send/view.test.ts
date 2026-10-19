@@ -89,12 +89,13 @@ describe('transcript evidence for the tracker', () => {
 
   it('is readable only when nothing blinded the read to its newest records', async () => {
     const reads: string[] = [];
-    const subject = (result: TranscriptBatch | undefined, known = true) =>
+    const subject = (result: TranscriptBatch | undefined, known = true, bound = true) =>
       new TranscriptSendEvidence(async id => (known ? { sessionId: id, harness: 'claude' } : undefined), {
         read: async target => {
           reads.push(target.sessionId);
           return result;
         },
+        bound: async () => bound,
       });
 
     const clean = await subject(batch([])).read(ID);
@@ -105,14 +106,17 @@ describe('transcript evidence for the tracker', () => {
       batch([{ harness: 'claude', code: 'invalid-json', message: 'bad line', recoverable: true }]),
     ).read(ID);
     const unresolved = await subject(undefined).read(ID);
+    const unbound = await subject(undefined, true, false).read(ID);
     const unknown = await subject(batch([]), false).read(ID);
 
     should(clean).match({ readable: true, inputs: [{ proofKey: 'k' }] });
     should(truncated.readable).be.false();
     should(recoverable.readable).be.true();
     should(unresolved).deepEqual({ readable: false, inputs: [] });
+    // No transcript this daemon can prove: said as itself, because waiting never makes it readable.
+    should(unbound).deepEqual({ readable: false, unbound: true, inputs: [] });
     should(unknown.readable).be.false();
-    should(reads).eql([ID, ID, ID, ID]);
+    should(reads).eql([ID, ID, ID, ID, ID]);
   });
 });
 
@@ -130,6 +134,19 @@ describe('telling an agent its message did not arrive', () => {
     should(
       sendFailureNotice('hadi', record({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable' }), 'fy'),
     ).match(/\(pane unreadable\)/);
+  });
+
+  it('says a message to a session with no provable transcript reached its terminal, and not to resend', () => {
+    const notice = sendFailureNotice(
+      'zarah',
+      record({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' }),
+      'fy',
+    );
+
+    should(notice).match(/was typed into zarah’s terminal/);
+    should(notice).match(/no transcript Ferretry can prove is zarah’s/);
+    should(notice).match(/Do not send it again/);
+    should(notice).not.match(/did not reach it/);
   });
 
   it('sends the notice into the sender’s own session, as the daemon, keyed by the failed send', async () => {

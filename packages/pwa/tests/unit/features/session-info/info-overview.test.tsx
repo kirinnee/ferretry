@@ -119,7 +119,7 @@ describe('InfoOverview', () => {
   it('names a parent not among the sessions read as a bare mono id', async () => {
     const view = sessionView('child', { config: { parent: 'ghost' } });
     const { root } = await show({ view, sessions: [view] });
-    const parentRow = must(root.querySelector('[data-info-row="Parent"]'), 'the parent row');
+    const parentRow = must(root.querySelector('[data-info-row="Started by"]'), 'the parent row');
     expect(parentRow.textContent).toContain('ghost');
     expect(parentRow.querySelector('.font-mono')?.textContent).toBe('ghost');
   });
@@ -150,6 +150,16 @@ describe('InfoOverview', () => {
     const plain = await show({ view: child, sessions: [parent, child, kid] });
     expect(plain.root.querySelector('[data-info-session-link]')).toBeNull();
     expect(plain.root.textContent).toContain('Parent one');
+  });
+
+  it('counts the sub-ferrets in the label', async () => {
+    const parent = sessionView('parent-a');
+    const kids = [
+      sessionView('k1', { config: { parent: 'parent-a' } }),
+      sessionView('k2', { config: { parent: 'parent-a' } }),
+    ];
+    const { root } = await show({ view: parent, sessions: [parent, ...kids] });
+    expect(root.querySelector('[data-info-row="Sub-ferrets (2)"]')).not.toBeNull();
   });
 
   it('says None when a ferret has started no children', async () => {

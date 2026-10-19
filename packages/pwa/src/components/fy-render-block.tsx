@@ -22,10 +22,10 @@
  * NOTHING IN THIS COMPONENT EXECUTES AUTHOR-SUPPLIED CODE IN THIS DOCUMENT, and
  * the way it avoids doing so is structural. There is no `srcdoc`, no
  * `dangerouslySetInnerHTML`, no `eval`, no `Function`, and no script element
- * anywhere below. The one type whose author code runs at all — `html` — runs in
- * `FyRenderHtmlFrame`, a separate opaque-origin document with its own policy,
- * reached only as data over a message port. The only frames this file mounts are
- * that one and the library sandbox; every authored source reaches a `<pre>` as
+ * anywhere below. No author code runs at all: `html` is a static fragment,
+ * sanitized and rendered into a closed shadow root by `FyRenderFragment`, and
+ * the only frame this file mounts is the library sandbox, where a trusted library
+ * interprets Lottie or Mermaid data. Every authored source reaches a `<pre>` as
  * escaped text through React's own escaping.
  *
  * THE `<img>` SINK IS A SECURITY INVARIANT, not an implementation detail. An
@@ -52,7 +52,7 @@
  * have been without this feature, with no sentence in the app's voice. The
  * classified reason travels as `data-fy-render-failure` and the raw library
  * wording as a `title`, for whoever is debugging. The one designed bound that is
- * not a failure — a Lottie or `html` frame reaching its wall-clock life — keeps
+ * not a failure — a Lottie frame reaching its wall-clock life — keeps
  * its place with one muted line and a way to run it again.
  */
 
@@ -68,7 +68,7 @@ import {
   isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
-import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from './fy-render-html-frame.tsx';
+import { FyRenderFragment } from './fy-render-fragment.tsx';
 import { FyRenderMedia } from './fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
 
@@ -101,39 +101,9 @@ const prefersReducedMotion = (): boolean => {
   }
 };
 
-/** The app's theme name. Any change to it may repaint an `html` page; only dark/light matters to Mermaid. */
+/** The app's theme name. Only its dark/light half matters, to Mermaid. */
 const themeName = (): string =>
   typeof document === 'undefined' ? '' : (document.documentElement.getAttribute('data-theme') ?? '');
-
-/** Mermaid needs to be told which way the page is painted; it cannot see it. */
-const documentTheme = (): FyRenderSandboxTheme => (themeName().includes('light') ? 'light' : 'dark');
-
-const TRANSPARENT = new Set(['', 'transparent', 'rgba(0, 0, 0, 0)']);
-
-/**
- * WHAT AN `html` PAGE PAINTS ITSELF WITH, so a frameless page reads as part of
- * the message rather than as a window into another one. The background is the
- * first painted ancestor's, because the message column may sit on any surface;
- * the colour and font are the column's own. These are three CSS values handed
- * to the shell as data — nothing of the app beyond what is already on screen.
- */
-const paintFrom = (element: HTMLElement | null): FyRenderHtmlPaint => {
-  const scheme = documentTheme();
-  const unpainted = { background: '', color: '', font: '', scheme };
-  if (element === null) return unpainted;
-  try {
-    const own = getComputedStyle(element);
-    let background = '';
-    for (let at: Element | null = element; at !== null && background === ''; at = at.parentElement) {
-      const value = getComputedStyle(at).backgroundColor;
-      if (!TRANSPARENT.has(value)) background = value;
-    }
-    return { background, color: own.color, font: own.fontFamily, scheme };
-  } catch {
-    // Not a laid-out element — the page then keeps the shell's own system colours.
-    return unpainted;
-  }
-};
 
 /**
  * A percent-encoded `data:` URL rather than base64: it is correct for any
@@ -181,8 +151,8 @@ const useViewportPresence = (ref: RefObject<HTMLElement | null>): { near: boolea
  *
  * A transcript row re-renders as the assistant emits it, so this block sees a
  * half-written payload before the whole one. Re-rendering per chunk would decode
- * a partial SVG over and over, recompile a diagram per token, and restart an
- * `html` page with every character. So the first bytes render at once — a
+ * a partial SVG over and over, recompile a diagram per token, and re-sanitize an
+ * `html` fragment with every character. So the first bytes render at once — a
  * finished message from history must not wait — and later bytes replace them
  * only once they have stopped changing. A change of TYPE is not something to
  * wait out, so it takes effect immediately.
@@ -237,7 +207,7 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
   /** Shown by a long press on touch, where there is no hover to reveal the corner tools. */
   const [toolsShown, setToolsShown] = useState(false);
   const [fallback, setFallback] = useState<Fallback | null>(null);
-  /** A Lottie or `html` frame reached its wall-clock life — a designed stop, not a failure. */
+  /** A Lottie frame reached its wall-clock life — a designed stop, not a failure. */
   const [stopped, setStopped] = useState(false);
   /** Remounting the stage is what "run again" means: there is no `iframe.terminate()`. */
   const [revision, setRevision] = useState(0);
@@ -297,12 +267,6 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
   }, [near]);
   const mode: FyRenderSandboxTheme = theme.includes('light') ? 'light' : 'dark';
 
-  const [paint, setPaint] = useState<FyRenderHtmlPaint>(() => paintFrom(null));
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `theme` is the repaint trigger; the read is the DOM's
-  useEffect(() => {
-    if (presentation === 'interactive' && near) setPaint(paintFrom(hostRef.current));
-  }, [presentation, near, theme]);
-
   const collapse = useCallback(() => setFullscreen(false), []);
   const focus = useDialogFocus(fullscreen, hostRef, collapse, { autoFocus: false });
 
@@ -348,10 +312,6 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
   );
 
   const noop = useCallback((): void => undefined, []);
-  const [htmlReady, setHtmlReady] = useState(false);
-  const onHtmlRendered = useCallback((): void => setHtmlReady(true), []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: a new page or a run-again is a new frame, not yet painted
-  useEffect(() => setHtmlReady(false), [source, revision]);
 
   const live = near && fallback === null && !stopped;
   const mermaid = presentation === 'sandbox' && block.type === 'mermaid';
@@ -365,7 +325,7 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
     live && mermaid && (compiled === null || compiled.source !== source || (compiled.theme !== mode && visible));
   const diagram = mermaid && fallback === null && compiled !== null;
   const lottie = live && presentation === 'sandbox' && block.type === 'lottie';
-  const interactive = live && presentation === 'interactive';
+  const fragment = live && presentation === 'fragment';
   const media = near && presentation === 'media' && isFyRenderMediaBlock(block);
   const picture = live && presentation === 'visual';
   /**
@@ -378,11 +338,11 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
     !stopped &&
     !mediaRow &&
     block.type !== 'audio' &&
-    (picture || diagram || lottie || interactive || media);
+    (picture || diagram || lottie || fragment || media);
 
   /**
    * THE LONG PRESS, on touch only. A tap belongs to the content — a video's
-   * controls, an `html` page's buttons — so it is a press held still for a moment
+   * controls, a link in an `html` fragment — so it is a press held still for a moment
    * that reveals the corner tools, and a second one that hides them.
    */
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -457,9 +417,9 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
 
   const stage = stopped ? (
     <p className="fy-render-stopped" data-fy-render-stopped="true">
-      {block.type === 'html' ? 'This interactive page stopped after ten minutes.' : 'This animation stopped.'}{' '}
+      This animation stopped.{' '}
       <button className="fy-render-quiet-action" onClick={runAgain} type="button">
-        <RotateCcw aria-hidden="true" size={12} /> {block.type === 'html' ? 'Run again' : 'Replay'}
+        <RotateCcw aria-hidden="true" size={12} /> Replay
       </button>
     </p>
   ) : media && isFyRenderMediaBlock(block) ? (
@@ -478,22 +438,13 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
       onError={onDecodeFailure(generation.current)}
       src={'mime' in block ? `data:${block.mime};base64,${block.payload}` : svgDataUrl(block.payload)}
     />
-  ) : interactive ? (
-    /**
-     * AUTHOR CODE RUNS HERE, in its own opaque frame with its own policy — see
-     * `fy-render-html-frame.tsx`. Frameless: it paints the column's background,
-     * colour and font, and takes the height it reports.
-     */
-    <FyRenderHtmlFrame
-      block={block}
-      fullscreen={fullscreen}
-      key={`html:${generation.current}:${revision}`}
-      onEscape={collapse}
-      onFailed={fail}
-      onRendered={onHtmlRendered}
-      paint={paint}
-      ready={htmlReady}
-      title={block.alt}
+  ) : fragment ? (
+    /** Static markup, sanitized into a closed shadow root — see `fy-render-fragment.tsx`. Nothing runs. */
+    <FyRenderFragment
+      alt={block.alt}
+      key={`fragment:${generation.current}:${revision}`}
+      source={block.payload}
+      {...(readWorkspaceMedia === undefined ? {} : { readWorkspaceMedia })}
     />
   ) : lottie ? (
     <FyRenderSandbox

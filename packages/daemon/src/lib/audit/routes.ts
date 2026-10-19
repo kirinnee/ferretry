@@ -220,6 +220,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { mode: 'permission' },
   },
+  // So is answering a harness dialog.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/dialog',
+    event: 'terminal.input',
+    subject: 'sessionId',
+    detail: { mode: 'dialog' },
+  },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
   // A speed-up Test spends one provider key on the operator's account; the secret's NAME is the subject.
   {
@@ -261,6 +269,9 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'control' },
   },
   { method: 'POST', path: '/v1/sessions', event: 'session.opened', detail: { action: 'start' } },
+  // A sub-ferret start goes through the same start (docs/pack-mode.md); its own action keeps it apart from
+  // a plain start, so the two never fold into one record.
+  { method: 'POST', path: '/v1/pack/new', event: 'session.opened', detail: { action: 'sub-ferret' } },
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/fork',

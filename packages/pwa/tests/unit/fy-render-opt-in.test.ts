@@ -56,15 +56,13 @@ describe('fy-render opt-in', () => {
     const files = mentioning('FyRenderBlock');
 
     // Assert — a further mounting site is a further thing to threat-model.
-    // `fy-render-sandbox.tsx` and `fy-render-html-frame.tsx` are on this list
-    // because each names the parsed-block TYPE in its props, not because either
-    // mounts the component: both frames are children of the renderer and have no
-    // second route into a transcript. `fy-render-media.tsx` takes the narrower
+    // `fy-render-sandbox.tsx` is on this list because it names the parsed-block
+    // TYPE in its props, not because it mounts the component: the frame is a child
+    // of the renderer and has no second route into a transcript. `fy-render-media.tsx` takes the narrower
     // `FyRenderMediaBlock` type, which does not contain this token; it is here
     // only because its header comment names the component it is mounted from.
     should(files).eql([
       'src/components/fy-render-block.tsx',
-      'src/components/fy-render-html-frame.tsx',
       'src/components/fy-render-media.tsx',
       'src/components/fy-render-sandbox.tsx',
       'src/components/markdown.tsx',
@@ -80,10 +78,7 @@ describe('fy-render opt-in', () => {
     // Assert — one mount site. `src/lib/fy-render.ts` is on the list for a
     // naming reason rather than a structural one: the shared wire types
     // (`FyRenderSandboxMessage`, the library descriptors) start with the
-    // component's name. It mounts nothing. `fy-render-html-frame.tsx` is on it
-    // for a type reason: it imports `FyRenderSandboxFailure` and its kind from
-    // the sandbox module so both frames report failures in one vocabulary. It
-    // imports types only and mounts no sandbox frame.
+    // component's name. It mounts nothing.
     //
     // The `sandbox` attribute itself is NOT asserted here, and deliberately.
     // This file's closing note is right: grepping the source for
@@ -94,21 +89,29 @@ describe('fy-render opt-in', () => {
     // `fy-render-sandbox.test.tsx`.
     should(files).eql([
       'src/components/fy-render-block.tsx',
-      'src/components/fy-render-html-frame.tsx',
       'src/components/fy-render-sandbox.tsx',
       'src/lib/fy-render.ts',
     ]);
   });
 
-  test('should reach the executing html frame from exactly one component', () => {
-    // Act
-    const files = mentioning('FyRenderHtmlFrame');
+  test('should have no executing html frame at all', () => {
+    // Assert — an `html` block is a static fragment now (the owner's decision); a mention of the
+    // old frame anywhere is a second place author code could run.
+    should(mentioning('FyRenderHtmlFrame')).eql([]);
+  });
 
-    // Assert — this is the frame where AUTHOR CODE RUNS, so its mount sites are
-    // the execution surface. `fy-render-html-frame.tsx` declares it;
-    // `fy-render-block.tsx` is the one component that mounts it, behind the
-    // consent gate. A third entry is a new place author code can run.
-    should(files).eql(['src/components/fy-render-block.tsx', 'src/components/fy-render-html-frame.tsx']);
+  test('should render an html fragment from exactly one component, through one parsing policy', () => {
+    // Assert — `fy-render-fragment.tsx` declares the renderer and `fy-render-block.tsx` mounts
+    // it. The `fy-fragment` Trusted Types policy passes markup through for DOMPurify to judge, so
+    // a second user of it would be a second unsanitized sink.
+    should(mentioning('FyRenderFragment')).eql([
+      'src/components/fy-render-block.tsx',
+      'src/components/fy-render-fragment.tsx',
+    ]);
+    should(mentioning('fragmentParsingPolicy')).eql([
+      'src/components/fy-render-fragment.tsx',
+      'src/lib/trusted-types.ts',
+    ]);
   });
 
   test('should reach the media stage from exactly one component', () => {
@@ -119,7 +122,7 @@ describe('fy-render opt-in', () => {
     // https URLs from the reader's browser, so a second mount site is a second
     // place that can spend the reader's grants or reveal their address.
     // `fy-render-media.tsx` declares it; `fy-render-block.tsx` is the one
-    // component that mounts it, behind the consent gate. `src/lib/fy-render.ts`
+    // component that mounts it, once the block is near. `src/lib/fy-render.ts`
     // is here for a naming reason only: `FyRenderMediaBlock` and
     // `FyRenderMediaType` share the prefix. It mounts nothing.
     should(files).eql([

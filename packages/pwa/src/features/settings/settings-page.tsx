@@ -90,6 +90,7 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   // Named by New machine setup's "Set up later" links and by the palette: two panels and two flows.
   'speedups',
   'learning',
+  'pack',
   'clone',
   'export',
   // Settings › Machine › About, named by the palette's Updates link.

@@ -490,6 +490,54 @@ describe('turn-boundary notifications', () => {
     });
   });
 
+  describe('a harness dialog', () => {
+    const parked = (id: string, teammate?: string): SessionView =>
+      sessionView('s1', {
+        ...(teammate === undefined ? {} : { config: { teammate } }),
+        state: {
+          status: 'running',
+          turn: 4,
+          turnState: 'needs-input',
+          turnStateAt: 't2',
+          turnPrompt: 'Hooks need review',
+          harnessDialog: {
+            id,
+            harness: 'codex',
+            kind: 'hooks-review',
+            title: 'Hooks need review',
+            options: [{ number: 1, label: 'Review hooks', grantsTrust: false }],
+            selected: 1,
+          },
+        },
+      });
+    const FIRST = '0123456789abcdef';
+    const SECOND = 'fedcba9876543210';
+
+    it('carries its dialog id on the boundary, and a new id on the same boundary is a new ask', () => {
+      should(turnBoundary(parked(FIRST))).deepEqual({ state: 'needs-input', at: 't2', dialog: FIRST });
+      const at = { state: 'needs-input', at: 't2' } as const;
+      should(classifyTurnTransition({ ...at, dialog: FIRST }, { ...at, dialog: FIRST })).be.null();
+      should(classifyTurnTransition({ ...at, dialog: FIRST }, { ...at, dialog: SECOND })).equal('question');
+      should(classifyTurnTransition(at, { ...at, dialog: FIRST })).equal('question');
+      should(classifyTurnTransition({ ...at, permission: FIRST }, { ...at, dialog: SECOND })).equal('question');
+      should(classifyTurnTransition({ ...at, dialog: FIRST }, at)).be.null();
+    });
+
+    it('notifies each dialog once, in plain words, keyed by its id', () => {
+      const ledger = new DaemonNotificationLedger();
+      poll(ledger, [turnView('working', 't1')]);
+      const asked = poll(ledger, [parked(FIRST, 'hadi')]);
+      should(kinds(asked)).deepEqual(['question']);
+      should(asked[0]?.body).equal('Hadi is waiting on Codex: Hooks need review');
+      should(asked[0]?.eventKey).containEql(FIRST);
+      should(poll(ledger, [parked(FIRST, 'hadi')], 2_000)).have.length(0);
+      const next = poll(ledger, [parked(SECOND)], 3_000);
+      should(next[0]?.body).equal('The agent is waiting on Codex: Hooks need review');
+      should(next[0]?.eventKey).containEql(SECOND);
+      should(poll(ledger, [parked(SECOND)], 4_000)).have.length(0);
+    });
+  });
+
   it("does not notify the status word a second time beside the turn fact, but keeps a session's ending", () => {
     const ledger = new DaemonNotificationLedger();
     poll(ledger, [turnView('working', 't1')]);

@@ -63,6 +63,7 @@ const open = async (
   view: View,
   machines: 'one' | 'two',
   theme: string,
+  tree = false,
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
   const phone = view === 'drawer';
   const context = await browser.newContext({
@@ -77,7 +78,7 @@ const open = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?view=${view}&machines=${machines}&theme=${theme}`);
+  await tab.goto(`${origin}/?view=${view}&machines=${machines}&theme=${theme}${tree ? '&tree=1' : ''}`);
   await tab.waitForSelector('[data-sbar-session]');
   return { context, tab };
 };
@@ -164,6 +165,42 @@ describe('the sessions list', () => {
       }
     }
   }, 120_000);
+
+  it('nests a pack under its lead: a fold with a rollup, a faint stub when the lead is filtered out', async () => {
+    for (const view of ['column', 'drawer'] as const) {
+      for (const theme of ['studio-light', 'studio-dark']) {
+        const { context, tab } = await open(view, 'one', theme, true);
+        try {
+          const tag = `${view}-${theme.replace('studio-', '')}`;
+          expect(await rowIds(tab)).toEqual(['p-lead', 'p-pim', 'p-ula', 'p-ada', 'p-kai', 'p-ora']);
+          expect(await texts(tab, '[data-sbar-fold]')).toEqual([
+            '4 sub-ferrets 1 needs you · 3 running',
+            '1 sub-ferret 1 running',
+          ]);
+          const indent = await tab.$$eval('[data-sbar-session]', nodes =>
+            nodes.map(node => Math.round(node.getBoundingClientRect().left)),
+          );
+          expect(indent[1]).toBeGreaterThan(indent[0] as number);
+          expect(indent[4]).toBeGreaterThan(indent[1] as number);
+          expect(await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+          await shot(tab, `sessions-tree-${tag}-expanded`);
+
+          await tab.click('[data-sbar-fold="p-lead"]');
+          expect(await rowIds(tab)).toEqual(['p-lead', 'p-ora']);
+          expect(await texts(tab, '[data-sbar-fold]')).toEqual(['4 sub-ferrets 1 needs you · 3 running']);
+          await shot(tab, `sessions-tree-${tag}-collapsed`);
+
+          await tab.click('[data-sbar-fold="p-lead"]');
+          await tab.click('[data-sbar-filter="auto"]');
+          expect(await rowIds(tab)).toEqual(['p-pim', 'p-ula', 'p-ada', 'p-kai']);
+          expect(await texts(tab, '.fy-sbar__stub-link')).toContain('Ivo · Session p-lead');
+          await shot(tab, `sessions-tree-${tag}-filtered`);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+  }, 180_000);
 
   it('keeps every label whole in a column dragged narrow, wrapping before it would clip', async () => {
     const { context, tab } = await open('column', 'one', 'studio-light');

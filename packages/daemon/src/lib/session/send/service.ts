@@ -7,6 +7,7 @@ import {
   endsPeerWait,
   isDirectPayload,
   isFileBackedQueue,
+  peerMessageKind,
   peerPreamble,
   queuedPayloadInstruction,
   routeSend,
@@ -162,7 +163,7 @@ export class SessionSendService {
           `${Math.round(this.settings.controlLaunchWaitMs / 1_000)}s; it is pending, not failed`,
       );
     const sender = await this.sender(request);
-    const payload = this.payload(request, sender);
+    const payload = await this.payload(request, sender);
     const locked = await this.ports.serial.run(request.id, async () => await this.locked(request, payload, sender));
     const settled = locked.kind === 'revive' ? await this.revive(request, payload, sender) : locked;
     // Only a NEW transport is tracked: a duplicate request found a send already being watched.
@@ -676,11 +677,18 @@ export class SessionSendService {
     return sender?.id === request.id ? undefined : sender;
   }
 
-  /** The text the agent actually reads: the message, with peer attribution when a peer sent it. */
-  private payload(request: SendMessageRequest, sender: SendTarget | undefined): string {
+  /**
+   * The text the agent actually reads: the message, with peer attribution when a peer sent it.
+   *
+   * The recipient is read only for a peer send, to tell a REPLY it is parked on from a new message; a
+   * recipient that cannot be read yet degrades to the plainer kind rather than failing the send.
+   */
+  private async payload(request: SendMessageRequest, sender: SendTarget | undefined): Promise<string> {
     const message = sendPayload(request.message);
     if (sender === undefined) return message;
-    return `${peerPreamble(sender, request.replyExpected === true, this.settings.clientName)}${message}`;
+    const recipient = await this.ports.repository.read(request.id).catch(() => undefined);
+    const kind = peerMessageKind(recipient, sender.id, request.replyExpected === true);
+    return `${peerPreamble(sender, kind, this.settings.clientName)}${message}`;
   }
 
   /** The sender's canonical identity, never the reference the caller supplied. */

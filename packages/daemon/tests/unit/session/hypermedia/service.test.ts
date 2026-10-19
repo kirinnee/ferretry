@@ -46,9 +46,9 @@ describe('SessionHypermediaService', () => {
     ]);
   });
 
-  it('should read a ferret from before the switch as on, so turning it on changes nothing', async () => {
+  it('should treat a ferret already on (by its mode default or its record) as unchanged by turning it on', async () => {
     // Arrange
-    const legacy = service({ enabled: undefined, running: true });
+    const legacy = service({ enabled: true, running: true });
 
     // Act
     const outcome = await legacy.subject.set('s1', true);

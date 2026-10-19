@@ -147,7 +147,7 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
 const NODE = 'flex min-w-0 flex-1 flex-col items-center gap-1 rounded-control border px-1 py-2 text-center';
 
 const NODE_TONE = {
-  focused: 'border-accent bg-accent-bg text-fg',
+  focused: 'border-accent bg-accent-soft text-fg',
   resting: 'border-border bg-surface-2 text-muted',
 } as const;
 

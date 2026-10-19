@@ -77,6 +77,16 @@ export class SessionTranscriptReader {
   }
 
   /**
+   * Whether this session has a transcript the daemon can name, discovering it when the record allows.
+   *
+   * `false` is the unresolved case `read` folds into "nothing": no file this daemon can prove is the
+   * session's own. A caller that must say WHY there is no evidence asks this rather than guessing.
+   */
+  async bound(target: TranscriptTarget): Promise<boolean> {
+    return (await this.resolver.file(target.sessionId).catch(() => undefined)) !== undefined;
+  }
+
+  /**
    * The same read, against a file the caller has ALREADY resolved.
    *
    * The resolution step is separated because it is not free of consequence: the discovering resolver

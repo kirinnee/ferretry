@@ -577,6 +577,21 @@ describe('the tmux send terminal', () => {
     should((await terminal(new ScriptedTmux(['❯ '])).observe(ID)).blockingPrompt).be.undefined();
   });
 
+  it("should name Codex's hooks-review dialog as what blocks a send, since its row reads as a composer line", async () => {
+    // Arrange — the pane Codex 0.156.1 really drew: `› 1. Review hooks` is shaped like a prompt.
+    const frame = await readFile(
+      join(import.meta.dir, '../../../fixtures/harness-dialogs/codex-0.156.1-hooks-review.txt'),
+      'utf8',
+    );
+
+    // Act
+    const actual = await terminal(new ScriptedTmux([frame])).observe(ID);
+
+    // Assert
+    should(actual.blockingPrompt).equal('Harness dialog — Hooks need review');
+    should(actual.promptReady).be.false();
+  });
+
   it('should name a tool-permission prompt as what blocks a send, so nothing is typed into its choices', async () => {
     // Arrange — a permission prompt, whose rows a typed message starting with a digit would pick.
     const tmux = new ScriptedTmux([

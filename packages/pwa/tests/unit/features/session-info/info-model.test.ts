@@ -12,6 +12,8 @@ import {
   lineage,
   loginScope,
   modelFacts,
+  packLabel,
+  packOn,
   worktreeFact,
 } from '../../../../src/features/session-info/info-model.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -214,8 +216,10 @@ describe('learningLabel', () => {
 });
 
 describe('hypermedia', () => {
-  it('reads a session from before the switch as on, and only an explicit false as off', () => {
-    expect(hypermediaOn(sessionView('legacy'))).toBe(true);
+  it('reads a session with no switch as its mode default (on interactive, off auto), and an explicit value as itself', () => {
+    expect(hypermediaOn(sessionView('legacy', { config: { mode: 'interactive' } }))).toBe(true);
+    expect(hypermediaOn(sessionView('legacy-auto', { config: { mode: 'auto' } }))).toBe(false);
+    expect(hypermediaOn(sessionView('forced', { config: { mode: 'auto', hypermedia: true } }))).toBe(true);
     expect(hypermediaOn(sessionView('on', { config: { hypermedia: true } }))).toBe(true);
     expect(hypermediaOn(sessionView('off', { config: { hypermedia: false } }))).toBe(false);
   });
@@ -224,5 +228,15 @@ describe('hypermedia', () => {
     expect(hypermediaLabel(true)).toBe('On · may explain with diagrams and media');
     expect(hypermediaLabel(false)).toBe('Off · plain text');
     expect(INFO_HINT.hypermedia).toContain('takes effect when it next starts');
+  });
+});
+
+describe('pack', () => {
+  it('reads a session from before the switch as on, and only an explicit false as off', () => {
+    expect(packOn(sessionView('legacy'))).toBe(true);
+    expect(packOn(sessionView('off', { config: { pack: false } }))).toBe(false);
+    expect(packLabel(true)).toBe('On · may delegate to sub-ferrets');
+    expect(packLabel(false)).toBe('Off · works alone');
+    expect(INFO_HINT.pack).toContain('next launch');
   });
 });

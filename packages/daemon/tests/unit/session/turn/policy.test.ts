@@ -1,9 +1,10 @@
 import { describe, it } from 'bun:test';
-import type { PermissionRequest } from '@ferretry/protocol';
+import type { HarnessDialog, PermissionRequest } from '@ferretry/protocol';
 import should from 'should';
 import {
   isTurnStatus,
   observeTurn,
+  settleHarnessDialog,
   settlePermissionRequest,
   settleTurnPrompt,
   settleTurnState,
@@ -233,5 +234,59 @@ describe('a tool-permission prompt read as data', () => {
     // Answered: the turn moved on, and the request goes with it.
     should(settlePermissionRequest(REQUEST, 'working', observeTurn(evidence({ pane: IDLE })))).be.undefined();
     should(settlePermissionRequest(REQUEST, undefined, undefined)).be.undefined();
+  });
+});
+
+describe('a harness dialog read as data', () => {
+  const DIALOG: HarnessDialog = {
+    id: '0123456789abcdef',
+    harness: 'codex',
+    kind: 'hooks-review',
+    title: 'Hooks need review',
+    options: [
+      { number: 1, label: 'Review hooks', grantsTrust: false },
+      { number: 2, label: 'Trust all and continue', grantsTrust: false },
+    ],
+    selected: 1,
+    escape: 'skip',
+  };
+  const ON_SCREEN: TurnPaneEvidence = { working: false, atPrompt: true, permission: false, dialog: DIALOG };
+
+  it('should call it needs-input on sight, even where the cursor row reads as a composer', () => {
+    should(observeTurn(evidence({ pane: ON_SCREEN }))).deepEqual({
+      state: 'needs-input',
+      confirmed: true,
+      dialog: DIALOG,
+    });
+  });
+
+  it('should carry the dialog alongside a blocking prompt line when the pane has both', () => {
+    should(observeTurn(evidence({ pane: { ...ON_SCREEN, prompt: 'Hooks need review' } }))).deepEqual({
+      state: 'needs-input',
+      confirmed: true,
+      dialog: DIALOG,
+      prompt: 'Hooks need review',
+    });
+  });
+
+  it('should rank a question above it, and a dialog above a working pane', () => {
+    should(observeTurn(evidence({ pane: ON_SCREEN, status: 'awaiting_question' }))).deepEqual({
+      state: 'needs-input',
+      confirmed: true,
+    });
+    should(observeTurn(evidence({ pane: { ...ON_SCREEN, working: true } }))?.dialog).equal(DIALOG);
+  });
+
+  it('should record the dialog only beside needs-input, and keep it while nothing decides the turn', () => {
+    const seen = observeTurn(evidence({ pane: ON_SCREEN }));
+    should(settleHarnessDialog(undefined, 'needs-input', seen)).equal(DIALOG);
+    // Nothing to look at, or a weak your-turn not yet confirmed: what was recorded stands.
+    should(settleHarnessDialog(DIALOG, 'needs-input', undefined)).equal(DIALOG);
+    should(settleHarnessDialog(DIALOG, 'needs-input', { state: 'your-turn', confirmed: false })).equal(DIALOG);
+    // A needs-input that is not a harness dialog replaces it.
+    should(settleHarnessDialog(DIALOG, 'needs-input', { state: 'needs-input', confirmed: true })).be.undefined();
+    // Answered: the turn moved on, and the dialog goes with it.
+    should(settleHarnessDialog(DIALOG, 'working', observeTurn(evidence({ pane: IDLE })))).be.undefined();
+    should(settleHarnessDialog(DIALOG, undefined, undefined)).be.undefined();
   });
 });

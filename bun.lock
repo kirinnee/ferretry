@@ -20,7 +20,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "4.17.0",
+      "version": "4.37.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -40,7 +40,7 @@
     },
     "packages/daemon": {
       "name": "@ferretry/daemon",
-      "version": "4.17.0",
+      "version": "4.37.0",
       "bin": {
         "fyd": "bin/fyd.ts",
         "fyd-browser-worker": "bin/browser-worker.ts",
@@ -80,6 +80,7 @@
         "@ferretry/relay": "workspace:*",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/xterm": "^6.0.0",
+        "dompurify": "3.4.13",
         "highlight.js": "^11.11.1",
         "lucide-react": "^0.468.0",
         "onnxruntime-web": "1.24.1",

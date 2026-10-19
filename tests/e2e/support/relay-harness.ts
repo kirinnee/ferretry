@@ -37,6 +37,7 @@ import type { Readable } from 'node:stream';
 // This stub plays the directory server, so it serves the server-owned public path. A literal here
 // would be a second spelling, and the resulting 404 reads as "discovery is switched off".
 import { HOSTED_RELAY_PUBLIC_PATH } from '@ferretry/relay/adapters';
+import { parseReleaseHeaders, releaseHeadersFor } from '../../../packages/pwa/src/lib/release-headers.ts';
 import { assertNoLiveStatePath } from '../fixture.ts';
 
 export { HOSTED_RELAY_PUBLIC_PATH };
@@ -594,8 +595,24 @@ async function contentSecurityPolicy(): Promise<string> {
   return line.trim().slice('Content-Security-Policy:'.length).trim();
 }
 
+/**
+ * THE SITE'S OWN `_headers`, applied per path the way Pages applies them — by the same reader the
+ * release worker uses (`release-headers.ts`), `!` detachment included. Every file used to get the `/*`
+ * policy, which is how a sandbox shell served with `frame-ancestors 'none'` stayed invisible to every
+ * journey: the shell's own rule never applied here either. Caching stays off and the content type
+ * stays the file's own, for the reasons below.
+ */
+async function headersFor(path: string, served: string): Promise<Record<string, string>> {
+  const rules = parseReleaseHeaders(await readFile(HEADERS_FILE, 'utf8'));
+  const headers: Record<string, string> = {};
+  for (const [name, value] of releaseHeadersFor(path, served, rules))
+    if (name.toLowerCase() !== 'content-type' && name.toLowerCase() !== 'cache-control') headers[name] = value;
+  return headers;
+}
+
 export async function startPwaOrigin(distDir: string, teardown: HarnessTeardown): Promise<PwaOrigin> {
-  const policy = await contentSecurityPolicy();
+  // Read once up front so a broken `_headers` fails the journey at its start, not mid-page.
+  await contentSecurityPolicy();
   const requests: { path: string; status: number }[] = [];
 
   const server = Bun.serve({
@@ -611,9 +628,7 @@ export async function startPwaOrigin(distDir: string, teardown: HarnessTeardown)
         requests.push({ path, status: 200 });
         return new Response(file, {
           headers: {
-            'Content-Security-Policy': policy,
-            'Referrer-Policy': 'no-referrer',
-            'X-Content-Type-Options': 'nosniff',
+            ...(await headersFor(path, candidate)),
             // No caching anywhere: two journeys in one suite must not share a bundle state, and a
             // stale document is the kind of failure that reads as an app defect.
             'Cache-Control': 'no-store, max-age=0',

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { HarnessDialog } from '@ferretry/protocol';
 import {
   nameToneClass,
   StatusMark,
@@ -185,6 +186,22 @@ describe('statusMark from the daemon turn fact', () => {
     );
     expect(approval).toMatchObject({ shape: 'diamond', klass: 'waiting', tone: 'accent', live: false });
     expect(approval.label).toBe('waiting — needs approval');
+  });
+
+  it('names a harness dialog as needing you at a dialog', () => {
+    const harnessDialog: HarnessDialog = {
+      id: '0123456789abcdef',
+      harness: 'codex',
+      kind: 'hooks-review',
+      title: 'Hooks need review',
+      options: [{ number: 1, label: 'Review hooks', grantsTrust: false }],
+      selected: 1,
+    };
+    const mark = statusMark(
+      sessionView('s', { state: { status: 'running', turnState: 'needs-input', harnessDialog } }),
+    );
+    expect(mark).toMatchObject({ shape: 'diamond', klass: 'waiting', tone: 'accent', live: false });
+    expect(mark.label).toBe('waiting — needs you at a dialog');
   });
 
   it('never lets a stale turn fact override a finished session or a declared park', () => {

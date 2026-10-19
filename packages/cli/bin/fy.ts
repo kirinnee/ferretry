@@ -1,13 +1,7 @@
 #!/usr/bin/env bun
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import {
-  HYPERMEDIA_ENV,
-  HYPERMEDIA_INSTRUCTION,
-  LESSONS_INSTRUCTION,
-  PASSIVE_LEARNING_ENV,
-  setUpFerretrySkill,
-} from '@ferretry/fleet';
+import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import { type AnalyticsResponse, CONFIG_DIRECTORY_NAME, type IFyApiClient, type SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -99,6 +93,7 @@ import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
 import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
 import type { AccountCommandDeps } from '../src/lib/fleet/account-ports';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
+import { PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { resolveFleetLayout } from '../src/lib/fleet/layout';
 import { RecommendController } from '../src/lib/fleet/recommend';
@@ -119,7 +114,7 @@ import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerLessonCommands } from '../src/lib/lesson/commands';
 import { LessonController } from '../src/lib/lesson/controller';
-import { McpServer, mcpInitializeInstructions, registerMcpCommands } from '../src/lib/mcp';
+import { McpServer, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
@@ -776,14 +771,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new McpServer(toolsClient, {
           name: PRODUCT_NAME,
           version: assertSemver(pkg.version),
-          // PASSIVE LEARNING (FY_LEARNING_PASSIVE=1) and HYPERMEDIA (FY_HYPERMEDIA=1) are per-ferret switches;
-          // the env reads stay here, in the composition root, and only the chosen texts cross into the
-          // pure joining function.
-          instructions: mcpInitializeInstructions({
-            skill: setUpFerretrySkill(BINARY_NAME),
-            ...(world.environment[PASSIVE_LEARNING_ENV] === '1' ? { lessons: LESSONS_INSTRUCTION(BINARY_NAME) } : {}),
-            ...(world.environment[HYPERMEDIA_ENV] === '1' ? { hypermedia: HYPERMEDIA_INSTRUCTION } : {}),
-          }),
+          // One line only. Every behavioural instruction — the tools, the settings rules, and each ferret's own
+          // hypermedia, Pack mode and lessons sections — is in the appended system prompt the runtime wrapper
+          // composes (fleet's fixed-layer.ts), which a harness weighs above a server's instructions.
+          instructions: TOOLS_SERVER_INSTRUCTIONS,
         }),
         Bun.stdin.stream(),
         line => {
@@ -878,6 +869,14 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new FileMarkerProbe(world.cwd),
         new ExactTmuxAttacher(new BunTmuxAttachProcess(), world.environment),
         BINARY_NAME,
+        // A settled wait hands back the ferret's result and stops one still running (docs/pack-mode.md).
+        (() => {
+          const pack = new ProtocolPackGateway(client);
+          return {
+            result: async (id: string) => await pack.result(id),
+            stop: async (id: string, reason: string) => await pack.stop(id, reason),
+          };
+        })(),
       ),
     ),
   // The daemon group manages a LOCAL PROCESS, so nothing in it may depend on a token existing: it has
@@ -974,9 +973,21 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     const gateway = new ProtocolImportGateway(client);
     const context = { now: () => Date.now(), binaryName: BINARY_NAME };
     registerImportCommands(program, new ImportController(gateway, world.io, context));
+    // Pack mode (docs/pack-mode.md): `fy recommend`, and `fy new` without --continue. Inside a ferret's pane
+    // FY_SESSION_ID names the ferret asking, which becomes the sub-ferret's parent.
+    const pack = new PackController({
+      gateway: new ProtocolPackGateway(client),
+      out: world.io,
+      parent: world.environment.FY_SESSION_ID?.trim() || undefined,
+      cwd: world.cwd,
+      readFile: async path => await Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
+      binaryName: BINARY_NAME,
+    });
+    registerRecommendCommand(program, pack, new SessionPresenter(world.io, new SystemClock()));
     registerNewCommand(
       program,
       new ContinueSessionController(gateway, world.io, world.prompt, { ...context, interactive: world.interactive }),
+      pack,
     );
   },
   // `fy models list` and `fy models refresh` (docs/model-catalog.md): the catalogs the daemon reads.

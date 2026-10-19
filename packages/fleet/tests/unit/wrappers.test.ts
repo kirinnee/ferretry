@@ -1,6 +1,17 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CLAUDE_NO_QUESTIONS_FLAG, CODEX_QUESTIONS_FEATURE } from '../../src/lib/account/fixed-layer.ts';
+import {
+  AGENT_INSTRUCTION,
+  AGENT_TOOLS_INSTRUCTION,
+  CLAUDE_NO_QUESTIONS_FLAG,
+  CODEX_QUESTIONS_FEATURE,
+  fixedLayerFor,
+  HYPERMEDIA_INSTRUCTION,
+  LESSONS_INSTRUCTION,
+  PACK_INSTRUCTION,
+  SET_UP_FERRETRY_INSTRUCTION,
+  TOOLS_SERVER_INSTRUCTIONS,
+} from '../../src/lib/account/fixed-layer.ts';
 import type { HarnessKind } from '../../src/lib/manifest.ts';
 import {
   envReferenceName,
@@ -139,6 +150,21 @@ describe('renderRuntimeWrapperScript', () => {
     should(actual).containEql(`# runtime claude-auto-kirin ${ID_ONE} (claude, agent)`);
     should(actual).containEql('export CLAUDE_CONFIG_DIR="$HOME/.state/fleet/homes/auto-kirin"');
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
+  });
+
+  it('should exec the resolved absolute harness path, and the bare name only when none was resolved', () => {
+    // Arrange
+    const subject = account();
+
+    // Act
+    const resolved = render({ ...subject, harnessCommand: '/opt/harnesses/claude' });
+    const underHome = render({ ...subject, harnessCommand: '~/.local/bin/claude' });
+    const unresolved = render({ ...subject, harnessCommand: undefined });
+
+    // Assert
+    should(resolved.trimEnd().endsWith(`exec '/opt/harnesses/claude' "$@"`)).be.true();
+    should(underHome.trimEnd().endsWith(`exec "$HOME/.local/bin/claude" "$@"`)).be.true();
+    should(unresolved.trimEnd().endsWith('exec claude "$@"')).be.true();
   });
 
   it('should use the codex home variable and binary for a codex account', () => {
@@ -549,5 +575,142 @@ describe('an account whose profile takes a variable from the secret store', () =
     );
     should(actual).containEql("export ANTHROPIC_BASE_URL='https://example.invalid'");
     should(actual).not.containEql('secret store');
+  });
+});
+
+/** The arguments the rendered wrapper would exec its harness with, run for real in sh with `env`. */
+const launchArguments = (wrapper: string, env: Readonly<Record<string, string>>): readonly string[] => {
+  const script = wrapper.replace(/^exec (?:claude|codex) /mu, "printf '%s\\0' ");
+  const { stdout } = Bun.spawnSync(['sh', '-c', script, 'wrapper', 'the task'], {
+    env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent', FY_SEED_FIRST_RUN: '0', ...env },
+  });
+  return stdout.toString().split('\0').slice(0, -1);
+};
+
+describe("each ferret's sections of the appended system prompt", () => {
+  const BASE = 'Ferretry tools: the base instruction.';
+
+  it('should append exactly the sections this ferret switched on, after a blank line, in the fixed order', () => {
+    // Arrange
+    const wrapper = render(account({ flags: [`--append-system-prompt=${BASE}`, '--model', 'x'] }));
+    const prompt = (env: Readonly<Record<string, string>>): string | undefined =>
+      launchArguments(wrapper, env).find(arg => arg.startsWith('--append-system-prompt='));
+
+    // Act
+    const none = prompt({});
+    const off = prompt({ FY_HYPERMEDIA: '0', FY_PACK: '0', FY_LEARNING_PASSIVE: '0' });
+    const pack = prompt({ FY_PACK: '1' });
+    const all = prompt({ FY_HYPERMEDIA: '1', FY_PACK: '1', FY_LEARNING_PASSIVE: '1' });
+
+    // Assert
+    should(none).equal(`--append-system-prompt=${BASE}`);
+    should(off).equal(none);
+    should(pack).startWith(`--append-system-prompt=${BASE}\n\nPack mode: `);
+    should(pack).not.containEql('Hypermedia:');
+    should(all?.indexOf('\n\nHypermedia:')).be.above(0);
+    should(all?.indexOf('\n\nPack mode:')).be.above(all?.indexOf('\n\nHypermedia:') ?? 0);
+    should(all?.indexOf('\n\nLessons:')).be.above(all?.indexOf('\n\nPack mode:') ?? 0);
+    should(all).containEql('`fy lesson suggest');
+  });
+
+  it("should put Codex's sections inside the TOML string, escaped for it", () => {
+    // Arrange
+    const wrapper = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
+
+    // Act
+    const args = launchArguments(wrapper, { FY_PACK: '1' });
+    const value = args.find(arg => arg.startsWith('developer_instructions='));
+
+    // Assert
+    should(value).startWith(`developer_instructions="${BASE}\\u000a\\u000aPack mode: `);
+    should(value).endWith('"');
+    should(value?.slice('developer_instructions='.length)).match(/^"(?:[^"\\]|\\.)*"$/u);
+    should(JSON.parse(value?.slice('developer_instructions='.length) ?? '')).containEql('\n\nPack mode: ');
+  });
+
+  it('should name the binary the runtime launches, and leave every other argument and a non-agent alone', () => {
+    // Arrange
+    const agent = {
+      ...account({ flags: [`--append-system-prompt=${BASE}`, '--other=x'] }),
+      fyCommand: '/opt/f/bin/zz',
+    };
+    const person = { ...agent, agent: false };
+
+    // Act
+    const prompt = launchArguments(render(agent), { FY_PACK: '1' }).find(arg => arg.startsWith('--append'));
+
+    // Assert
+    should(prompt).containEql('`zz recommend');
+    should(launchArguments(render(agent), {})).containEql('--other=x');
+    should(render(person)).not.containEql('_fy_sections');
+  });
+});
+
+describe('the appended system prompt of a real agent runtime, for every combination of switches', () => {
+  const FY = '/opt/f/bin/fy';
+  const SWITCHES = [
+    { env: 'FY_HYPERMEDIA', text: HYPERMEDIA_INSTRUCTION },
+    { env: 'FY_PACK', text: PACK_INSTRUCTION('fy') },
+    { env: 'FY_LEARNING_PASSIVE', text: LESSONS_INSTRUCTION('fy') },
+  ] as const;
+  const combinations = Array.from({ length: 2 ** SWITCHES.length }, (_, mask) =>
+    SWITCHES.filter((_switch, index) => (mask & (1 << index)) !== 0),
+  );
+  const wrapperFor = (harness: HarnessKind): string => {
+    const layer = fixedLayerFor({
+      harness,
+      agentPermissions: 'auto',
+      cwd: '/w',
+      fyCommand: FY,
+      acceptsAutoPermissionMode: true,
+    });
+    if (!layer.ok) throw new Error(layer.refusal.message);
+    return render({ ...account({ kind: harness, flags: layer.layer.args }), fyCommand: FY });
+  };
+
+  it.each(combinations.flatMap(on => (['claude', 'codex'] as const).map(harness => [harness, on] as const)))(
+    'should give a %s ferret exactly the sections switched on: %j',
+    (harness, on) => {
+      // Arrange
+      const env = Object.fromEntries(SWITCHES.map(section => [section.env, on.includes(section) ? '1' : '0']));
+      const expected = [AGENT_INSTRUCTION('fy'), ...on.map(section => section.text)].join('\n\n');
+
+      // Act
+      const args = launchArguments(wrapperFor(harness), env);
+      const prompt =
+        harness === 'claude'
+          ? args.find(arg => arg.startsWith('--append-system-prompt='))?.slice('--append-system-prompt='.length)
+          : JSON.parse(
+              args.find(arg => arg.startsWith('developer_instructions='))?.slice('developer_instructions='.length) ??
+                '""',
+            );
+
+      // Assert
+      should(prompt).equal(expected);
+      should(args.filter(arg => arg.includes('Pack mode:')).length).equal(on.some(s => s.env === 'FY_PACK') ? 1 : 0);
+    },
+  );
+
+  it('should keep every section out of the tools server, which says one line', () => {
+    // Assert
+    should(TOOLS_SERVER_INSTRUCTIONS).not.containEql('\n');
+    should(TOOLS_SERVER_INSTRUCTIONS.length).be.below(160);
+    for (const section of [...SWITCHES, { text: SET_UP_FERRETRY_INSTRUCTION('fy') }])
+      should(TOOLS_SERVER_INSTRUCTIONS).not.containEql(section.text.slice(0, 20));
+  });
+
+  it('should stay compact: the measured size of each section', () => {
+    // Act
+    const sizes = {
+      tools: AGENT_TOOLS_INSTRUCTION.length,
+      settings: SET_UP_FERRETRY_INSTRUCTION('fy').length,
+      hypermedia: HYPERMEDIA_INSTRUCTION.length,
+      pack: PACK_INSTRUCTION('fy').length,
+      lessons: LESSONS_INSTRUCTION('fy').length,
+    };
+
+    // Assert — the whole prompt, every section on, stays under 4 KB (docs/pack-mode.md records the sizes)
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0)).be.below(4_096);
+    should(sizes.settings).be.below(600);
   });
 });

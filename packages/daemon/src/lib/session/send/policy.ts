@@ -1,4 +1,9 @@
-import { peerEnvelopePreamble, queuedMessageInstruction, turnFileInstruction } from '@ferretry/protocol';
+import {
+  type PeerMessageKind,
+  peerEnvelopePreamble,
+  queuedMessageInstruction,
+  turnFileInstruction,
+} from '@ferretry/protocol';
 import type { SessionSendSettings } from './settings.ts';
 import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
 import {
@@ -79,21 +84,38 @@ export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRo
 }
 
 /**
- * The banner prepended to a message one SESSION sent to another.
+ * The banner prepended to a message one FERRET sent another.
  *
- * A teammate reads only the message TEXT, so attribution has to live inside it. Without this every
- * peer message reads as the human lead speaking — and a teammate that cannot tell a peer from its
- * lead cannot judge whether to comply, push back, or escalate.
+ * A ferret reads only the message TEXT, so attribution has to live inside it. Without this every
+ * peer message reads as the owner speaking — and a ferret that cannot tell a peer from its owner
+ * cannot judge whether to comply, push back, or escalate.
  *
  * The wording is the protocol's (`peerEnvelopePreamble`), because the app parses it back out of the
- * transcript to show the message as coming FROM the sender; this only says who the sender is.
+ * transcript to show the message as coming FROM the sender; this only says who the sender is and what
+ * kind of message it is (`peerMessageKind`).
  */
 export function peerPreamble(
   sender: Pick<SendTarget, 'id' | 'teammate'>,
-  replyExpected: boolean,
+  kind: PeerMessageKind,
   clientName: string,
 ): string {
-  return peerEnvelopePreamble({ name: sender.teammate ?? sender.id, sessionId: sender.id, replyExpected, clientName });
+  return peerEnvelopePreamble({ name: sender.teammate ?? sender.id, sessionId: sender.id, kind, clientName });
+}
+
+/**
+ * What one ferret's message to another is: the ANSWER the recipient is parked on (`reply`), a
+ * question its sender is parked on (`question`), or a note (`message`).
+ *
+ * A reply wins over a question: a ferret answering a question with one of its own is still, first, the
+ * answer the recipient was waiting for.
+ */
+export function peerMessageKind(
+  recipient: Pick<SendTarget, 'waiting'> | undefined,
+  senderId: string,
+  replyExpected: boolean,
+): PeerMessageKind {
+  if (recipient?.waiting?.peer === senderId) return 'reply';
+  return replyExpected ? 'question' : 'message';
 }
 
 /** The last C0 code point, and DEL. Everything at or below the first, plus the second, is a control. */

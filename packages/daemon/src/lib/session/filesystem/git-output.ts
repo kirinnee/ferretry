@@ -234,6 +234,21 @@ export function parseCheckIgnore(stdout: string): ReadonlySet<string> {
 }
 
 /**
+ * `check-ignore -v -z --stdin` prints four NUL-terminated fields per path — source, line number,
+ * pattern, path — and this names the first match as `<source>:<line>: <pattern>`. A negated
+ * pattern (`!x`) is reported by `-v` too, but it un-ignores, so it never names a refusal.
+ */
+export function parseCheckIgnoreRule(stdout: string): string | undefined {
+  const fields = stdout.split(NUL);
+  for (let at = 0; at + 3 < fields.length; at += 4) {
+    const [source, line, pattern] = [fields[at] ?? '', fields[at + 1] ?? '', fields[at + 2] ?? ''];
+    if (source === '' || pattern.startsWith('!')) continue;
+    return `${source}:${line}: ${pattern}`;
+  }
+  return undefined;
+}
+
+/**
  * Fix up the `diff --git` lines, the one place Git does not honour `--src-prefix`/`--dst-prefix`: it
  * derives BOTH names from whichever side exists, so a deleted file prints `diff --git a/x a/x` and an
  * added one `diff --git b/x b/x`.

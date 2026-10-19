@@ -4,6 +4,7 @@ export * from './composer.ts';
 export * from './contracts.ts';
 export * from './controller.ts';
 export * from './delivery.ts';
+export * from './harness-dialog.ts';
 export * from './harness-guard.ts';
 export * from './pane.ts';
 export * from './permission-prompt.ts';

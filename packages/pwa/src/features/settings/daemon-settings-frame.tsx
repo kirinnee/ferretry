@@ -20,6 +20,7 @@ import {
   GraduationCap,
   KeyRound,
   Lock,
+  PawPrint,
   Radar,
   Route,
   ScrollText,
@@ -94,6 +95,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   files: <FileCode2 size={16} aria-hidden="true" />,
   // What new ferrets are instructed to learn, and each ferret's own switch.
   learning: <GraduationCap size={16} aria-hidden="true" />,
+  // A paw print: a ferret and its pack of sub-ferrets, and the models guide they are picked from.
+  pack: <PawPrint size={16} aria-hidden="true" />,
   // A bolt, because the panel holds the optional keys that make the Warden and dictation faster.
   speedups: <Zap size={16} aria-hidden="true" />,
   // A circled arrow up: the version this machine runs, and moving it to a newer one.

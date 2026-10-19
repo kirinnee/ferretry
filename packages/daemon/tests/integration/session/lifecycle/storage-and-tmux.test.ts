@@ -434,7 +434,7 @@ describe('TmuxSessionLifecycleLauncher', () => {
         '-c',
         '/workspace/project',
         '-e',
-        'FY_HYPERMEDIA=1',
+        'FY_HYPERMEDIA=0',
         '-e',
         'FY_SESSION_ID=tmux-session',
         AGENT,
@@ -1302,6 +1302,54 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     should(launch).containDeep(['-e', 'FY_SESSION_ID=plain-session']);
     // Its own id, and the hypermedia default every pane carries (docs/hypermedia.md).
     should(launch?.filter(word => word === '-e')).have.length(2);
+  });
+
+  it('should hand the pane its media folder when one is wired', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const asked: string[] = [];
+    const subject = new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async id => {
+        asked.push(id);
+        return `/state/sessions/${id}/media`;
+      },
+    );
+
+    // Act
+    await subject.launch(record('media-session'));
+
+    // Assert — created per launch and handed over as FY_MEDIA_DIR (docs/hypermedia.md).
+    should(asked).deepEqual(['media-session']);
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', 'FY_MEDIA_DIR=/state/sessions/media-session/media']);
+  });
+
+  it('should launch an interactive ferret with hypermedia on and an auto one with it off', async () => {
+    // Arrange
+    const hypermediaOf = async (mode: 'auto' | 'interactive') => {
+      const port = new RecordingTmuxPort();
+      const controller = new TmuxController(port);
+      const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+      await subject.launch(record(`mode-${mode}`, { mode, ...(mode === 'interactive' ? { prompt: undefined } : {}) }));
+      return port.calls.filter(call => call[0] === 'new-session')[0];
+    };
+
+    // Act
+    const interactive = await hypermediaOf('interactive');
+    const auto = await hypermediaOf('auto');
+
+    // Assert
+    should(interactive).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+    should(auto).containDeep(['-e', 'FY_HYPERMEDIA=0']);
   });
 });
 

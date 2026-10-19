@@ -63,13 +63,18 @@ const BLIND: ReadonlySet<TranscriptIssueCode> = new Set([
 export class TranscriptSendEvidence implements SendEvidenceSource {
   constructor(
     private readonly target: (id: string) => Promise<TranscriptTarget | undefined>,
-    private readonly reader: Pick<SessionTranscriptReader, 'read'>,
+    private readonly reader: Pick<SessionTranscriptReader, 'read' | 'bound'>,
   ) {}
 
   async read(id: string): Promise<SendEvidenceReading> {
     const target = await this.target(id);
     const batch: TranscriptBatch | undefined = target === undefined ? undefined : await this.reader.read(target);
-    if (batch === undefined) return { readable: false, inputs: [] };
+    if (batch === undefined) {
+      // Told apart because the person's remedy differs: an unproven transcript never becomes readable
+      // by waiting, while a proved one that failed to read may on the next look.
+      const bound = target === undefined || (await this.reader.bound(target));
+      return bound ? { readable: false, inputs: [] } : { readable: false, unbound: true, inputs: [] };
+    }
     return { readable: !batch.issues.some(issue => BLIND.has(issue.code)), inputs: batch.observedInputs };
   }
 }

@@ -88,7 +88,7 @@ export function InfoOverview({
           {tree.kind === 'main' ? 'Main checkout' : <span className="fy-info-muted">Unknown</span>}
         </InfoRow>
       )}
-      <InfoRow hint={INFO_HINT.parent} label="Parent">
+      <InfoRow hint={INFO_HINT.parent} label="Started by">
         {family.parent === null ? (
           <span className="fy-info-muted">Started by you</span>
         ) : typeof family.parent === 'string' ? (
@@ -97,7 +97,7 @@ export function InfoOverview({
           link(family.parent)
         )}
       </InfoRow>
-      <InfoRow label="Children">
+      <InfoRow label={`Sub-ferrets (${family.children.length})`}>
         {family.children.length === 0 ? <span className="fy-info-muted">None</span> : family.children.map(link)}
       </InfoRow>
       <InfoRow copy={view.config.id} hint={INFO_HINT.sessionId} label="Session id" mono write={write}>

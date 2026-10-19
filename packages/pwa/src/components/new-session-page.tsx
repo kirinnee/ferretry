@@ -24,8 +24,9 @@ import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { projectPickerOptions } from './daemon-picker-model.ts';
-import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
+import { DaemonProjectPicker } from './daemon-pickers.tsx';
 import { ModelSelect } from './model-select.tsx';
+import { type ChosenRuntime, RuntimeButtons } from './runtime-buttons.tsx';
 
 /**
  * The agent runtime a first run makes for Claude Code — the example a person can actually type.
@@ -67,7 +68,7 @@ export interface NewSessionPageProps {
    */
   readonly resumeSession?: (connection: DaemonConnection, sessionId: string) => Promise<unknown>;
   /**
-   * The runtime a Launch button named (`?agent=` on this page's address). A HINT ONLY: the Account box
+   * The runtime a Launch button named (`?agent=` on this page's address). A HINT ONLY: the Runtime field
    * fills it in when it offers that runtime as usable and ignores it otherwise. Nothing starts from it.
    */
   readonly initialAgent?: string;
@@ -81,7 +82,7 @@ export interface NewSessionPageProps {
    * stores yet must all still be able to start a session by typing, so the
    * absence of a catalogue never takes the field away.
    *
-   * The roster. Present means the Account box offers this daemon's published
+   * The roster. Present means the Runtime field offers this daemon's published
    * accounts; absent means it is a wrapper name typed by hand.
    */
   readonly accounts?: DaemonAccountPickerStore;
@@ -124,17 +125,14 @@ const CREATE_BLOCKER_ID = 'fy-new-session-create-blocker';
 const TYPED_PATH_PLACEHOLDER = 'Full path, e.g. /home/you/my-project';
 const PICKED_PATH_PLACEHOLDER = 'Choose a folder, or type its full path';
 
+/** The Runtime label's id, which the button group (or its typed fallback) is named by. */
+const RUNTIME_LABEL_ID = 'fy-new-session-agent-label';
+
 /** The model box's suggestion list, referenced by the input's own `list`. */
 const MODEL_LIST_ID = 'fy-new-session-model-options';
 
 /** No cached feed at all: every row says `quota —`, which is the honest reading. */
 const NO_USAGE_ROWS: readonly AccountUsageRow[] = Object.freeze([]);
-
-/** A chosen row, and the pairing it was chosen on. Never one without the other. */
-interface ChosenAccount {
-  readonly connection: DaemonConnection;
-  readonly account: AccountPickerOption;
-}
 
 /**
  * WHAT A CHOSEN ACCOUNT MAY DO TO THE MODEL BOX, WHICH IS EXACTLY ONE THING.
@@ -163,7 +161,7 @@ interface ChosenAccount {
  * said they cannot serve.
  */
 const chosenForDraft = (
-  chosen: ChosenAccount | null,
+  chosen: ChosenRuntime | null,
   connection: DaemonConnection,
   agent: string,
 ): AccountPickerOption | null =>
@@ -213,7 +211,7 @@ const MODE_MEANING: Readonly<Record<NewSessionDraft['mode'], string>> = {
 const createBlocker = (draft: NewSessionDraft, submitting: boolean, noRunnableAccount: boolean): string | null => {
   if (submitting) return null;
   if (draft.agent.trim() === '') {
-    return noRunnableAccount ? 'No account can run a session yet — add one first.' : 'Choose an account first.';
+    return noRunnableAccount ? 'No runtime can run a session yet — add one first.' : 'Choose a runtime first.';
   }
   return draft.mode === 'auto' && draft.prompt.trim() === '' ? 'Say what you want the agent to do first.' : null;
 };
@@ -264,14 +262,14 @@ export function NewSessionPage({
   const [draft, setDraft] = useState<NewSessionDraft>(emptyNewSessionDraft);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [chosenAccount, setChosenAccount] = useState<ChosenAccount | null>(null);
+  const [chosenRuntime, setChosenRuntime] = useState<ChosenRuntime | null>(null);
   const [noRunnableAccount, setNoRunnableAccount] = useState(false);
   const [continuing, setContinuing] = useState(false);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
   const sessionsPath = daemonSessionsPath(connection.daemonId);
-  const chosen = chosenForDraft(chosenAccount, connection, draft.agent);
+  const chosen = chosenForDraft(chosenRuntime, connection, draft.agent);
   const models = modelSuggestions(chosen);
   const blocker = createBlocker(draft, submitting, noRunnableAccount);
   const noAccounts = (
@@ -343,7 +341,12 @@ export function NewSessionPage({
       )}
       <Card hidden={continuing}>
         <PanelBody className="space-y-5">
-          <SessionField hint="the account that will run this session" inputId={fieldId('agent')} label="Account">
+          <SessionField
+            hint="what will run this session"
+            inputId={fieldId('agent')}
+            label="Runtime"
+            labelId={RUNTIME_LABEL_ID}
+          >
             {accounts === undefined ? (
               <input
                 className="kt-input w-full font-mono"
@@ -353,9 +356,9 @@ export function NewSessionPage({
                 value={draft.agent}
               />
             ) : usage === undefined ? (
-              <AccountRosterField
+              <RuntimeField
                 connection={connection}
-                onAccountChosen={account => setChosenAccount({ account, connection })}
+                onChosen={setChosenRuntime}
                 noAccounts={noAccounts}
                 onValueChange={value => update('agent', value)}
                 {...(initialAgent === undefined ? {} : { preferred: initialAgent })}
@@ -365,10 +368,10 @@ export function NewSessionPage({
                 value={draft.agent}
               />
             ) : (
-              <QuotaAccountField
+              <QuotaRuntimeField
                 connection={connection}
                 noAccounts={noAccounts}
-                onAccountChosen={account => setChosenAccount({ account, connection })}
+                onChosen={setChosenRuntime}
                 onValueChange={value => update('agent', value)}
                 {...(initialAgent === undefined ? {} : { preferred: initialAgent })}
                 store={accounts}
@@ -548,52 +551,45 @@ interface ConnectedFieldProps {
   readonly onValueChange: (next: string) => void;
 }
 
-interface AccountRosterFieldProps extends ConnectedFieldProps {
+interface RuntimeFieldProps extends ConnectedFieldProps {
   readonly store: DaemonAccountPickerStore;
   readonly usage: readonly AccountUsageRow[];
   readonly usageError: string | null;
-  /** A CHOSEN row, so the model box can suggest. It never writes a model. */
-  readonly onAccountChosen: (account: AccountPickerOption) => void;
-  /** What the form says instead of an empty list. */
+  /** The runtime the draft names now, so the model box can suggest. It never writes a model. */
+  readonly onChosen: (chosen: ChosenRuntime | null) => void;
+  /** What the form says instead of the buttons. */
   readonly noAccounts: ReactNode;
   /** A Launch button's runtime, filled in only when offered and usable. */
   readonly preferred?: string;
 }
 
 /**
- * The Account box, naming the chosen account by the name its fleet gave it.
+ * The Runtime field: one button per runtime that can run a session, under Claude and Codex.
  *
- * It offers ONLY the accounts that can run a session. A fleet's terminal account
- * — the one a person runs by hand — is published too, often first, and the
- * daemon refuses to start a session on it in either mode; offering it would make
- * the most likely first choice a refusal. The first usable account is filled in
- * so a first-time reader starts on something that works.
+ * It offers ONLY the agent runtimes. A fleet's terminal runtime — the one a person runs by hand — is
+ * published too, often first, and the daemon refuses to start a session on it in either mode; offering
+ * it would make the most likely first choice a refusal. The first usable runtime is picked so a
+ * first-time reader starts on something that works.
  *
- * The box's value is the wrapper id, because that is what the daemon is sent, but
- * the picker shows the runtime's display name — as `fy runtimes` lists it — in
- * the box whenever it is not being edited.
+ * The value is the wrapper id, because that is what the daemon is sent; the buttons show the runtime's
+ * display name — as `fy runtimes` lists it.
  *
- * NO "CHECK NOW" HERE. Every row already carries the host's stored health verdict
- * and when it was established, so the re-check button added nothing a person
- * needs to START a session, and on a phone it pushed the rest of the form a
- * screen down with "0 accounts checked" — noise at exactly the first moment. The
- * control stays on the migrate sheet, where re-proving the target is the job.
- * Mounting this field starts no check of either kind beyond the
- * free stored-snapshot read the roster store makes on its own.
+ * NO "CHECK NOW" HERE. Every button already carries the host's stored health verdict, so a re-check
+ * added nothing a person needs to START a session and pushed the form a screen down on a phone. The
+ * control stays on the migrate sheet, where re-proving the target is the job. Mounting this field
+ * starts no check of either kind beyond the free stored-snapshot read the roster store makes itself.
  */
-function AccountRosterField({ store, usage, usageError, ...field }: AccountRosterFieldProps) {
+function RuntimeField({ store, usage, usageError, ...field }: RuntimeFieldProps) {
   return (
-    <DaemonAccountPicker
+    <RuntimeButtons
       connection={field.connection}
-      id={fieldId('agent')}
-      label="Account"
+      fallbackId={fieldId('agent')}
+      fallbackPlaceholder={`e.g. ${FIRST_RUN_RUNTIME}`}
+      labelId={RUNTIME_LABEL_ID}
       noAccounts={field.noAccounts}
-      onAccountChosen={field.onAccountChosen}
+      onChosen={field.onChosen}
       onValueChange={field.onValueChange}
-      placeholder={`e.g. ${FIRST_RUN_RUNTIME}`}
-      preselect={true}
       {...(field.preferred === undefined ? {} : { preferred: field.preferred })}
-      sessionCapableOnly={true}
       store={store}
       usage={usage}
       usageError={usageError}
@@ -602,28 +598,25 @@ function AccountRosterField({ store, usage, usageError, ...field }: AccountRoste
   );
 }
 
-interface QuotaAccountFieldProps extends Omit<AccountRosterFieldProps, 'usage' | 'usageError'> {
+interface QuotaRuntimeFieldProps extends Omit<RuntimeFieldProps, 'usage' | 'usageError'> {
   readonly usage: DaemonUsageStore;
 }
 
 /**
- * The same box, joined onto the daemon's own cached quota feed.
+ * The same field, joined onto the daemon's own cached quota feed.
  *
- * `useUsage` subscribes to the store that already polls it — there is one feed
- * per daemon and this field joins it rather than arming a second reader. It is a
- * separate component only because a store this surface was not handed cannot be
- * subscribed to conditionally, and quota is a decoration: an unread feed must
- * never decide whether the roster is offered.
+ * `useUsage` subscribes to the store that already polls it — there is one feed per daemon and this
+ * field joins it rather than arming a second reader. It is a separate component only because a store
+ * this surface was not handed cannot be subscribed to conditionally, and quota is a decoration: an
+ * unread feed must never decide whether the roster is offered.
  */
-function QuotaAccountField({ usage, ...field }: QuotaAccountFieldProps) {
+function QuotaRuntimeField({ usage, ...field }: QuotaRuntimeFieldProps) {
   const slice = useUsage(usage, field.connection);
-  return (
-    <AccountRosterField {...field} usage={slice.feed?.accounts ?? NO_USAGE_ROWS} usageError={quotaAdvisory(slice)} />
-  );
+  return <RuntimeField {...field} usage={slice.feed?.accounts ?? NO_USAGE_ROWS} usageError={quotaAdvisory(slice)} />;
 }
 
 /**
- * The Account box's place when the daemon has NO account that can run a session.
+ * The Runtime field's place when the daemon has NO runtime that can run a session.
  *
  * One sentence and one way forward, rather than an empty list: a new host whose
  * only account is the terminal one would otherwise offer nothing and say nothing
@@ -646,11 +639,11 @@ function NoSessionAccounts({
       className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 px-control-x py-row-y"
       data-new-session-no-accounts=""
     >
-      <p className="m-0 min-w-0 flex-1 text-ui leading-base text-fg-soft">
+      <p className="m-0 min-w-[14rem] flex-1 text-ui leading-base text-fg-soft">
         No runtime on this machine can run sessions yet. Add an agent runtime in Settings › Machines.
       </p>
-      <Button onClick={onOpenSettings} type="button">
-        Open Settings
+      <Button onClick={onOpenSettings} type="button" variant="primary">
+        Create a runtime
       </Button>
     </div>
   );
@@ -741,14 +734,16 @@ interface SessionFieldProps {
   readonly label: string;
   readonly hint: string;
   readonly inputId: string;
+  /** Set when something other than the input names itself by this label (a radio group). */
+  readonly labelId?: string;
   readonly children: ReactNode;
 }
 
-function SessionField({ label, hint, inputId, children }: SessionFieldProps) {
+function SessionField({ label, hint, inputId, labelId, children }: SessionFieldProps) {
   return (
     <div className="block">
       <span className="mb-1.5 flex items-baseline gap-2">
-        <label className="text-ui font-semibold text-fg" htmlFor={inputId}>
+        <label className="text-ui font-semibold text-fg" htmlFor={inputId} id={labelId}>
           {label}
         </label>
         <span className="text-meta text-faint">{hint}</span>

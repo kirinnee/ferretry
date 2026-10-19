@@ -1,7 +1,10 @@
 import { describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import should from 'should';
 import {
   classifySubmit,
+  codexUpdateAction,
   composerEvidence,
   composerHolds,
   composerTransport,
@@ -139,6 +142,94 @@ describe('startup dialogs', () => {
       gateWithoutRows: undefined,
       notADialog: undefined,
     });
+  });
+});
+
+describe('codex update prompt', () => {
+  const frame = (name: string): string =>
+    readFileSync(join(import.meta.dir, '../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
+  const UPDATES = ['codex-0.145.0-update', 'codex-0.156.1-update'];
+
+  /** The same prompt with its cursor on row `row`. */
+  const cursorOn = (pane: string, row: number): string =>
+    pane
+      .split('\n')
+      .map(line => line.replace(/^(\s*)[›>]\s+(\d)\./u, '$1  $2.'))
+      .map(line => line.replace(new RegExp(`^(\\s*)\\s\\s(${row})\\.`, 'u'), '$1› $2.'))
+      .join('\n');
+
+  it('should answer Skip on both versions’ prompts: Down to the second row, then Enter', () => {
+    // Act
+    const actual = UPDATES.map(name => codexUpdateAction(frame(name)));
+
+    // Assert — never "Update now", which runs a package manager, nor "Skip until next version".
+    should(actual).deepEqual(UPDATES.map(() => ({ kind: 'codex-update', keys: ['Down', 'Enter'] })));
+  });
+
+  it('should be what the startup answer picks for it', () => {
+    // Act
+    const actual = UPDATES.map(name => startupDialogAction(frame(name)));
+
+    // Assert
+    should(actual).deepEqual(UPDATES.map(() => ({ kind: 'codex-update', keys: ['Down', 'Enter'] })));
+  });
+
+  it('should press Enter alone when the cursor is already on Skip', () => {
+    // Act
+    const actual = UPDATES.map(name => codexUpdateAction(cursorOn(frame(name), 2)));
+
+    // Assert
+    should(actual).deepEqual(UPDATES.map(() => ({ kind: 'codex-update', keys: ['Enter'] })));
+  });
+
+  it('should move Up when the cursor is below Skip', () => {
+    // Act
+    const actual = codexUpdateAction(cursorOn(frame('codex-0.156.1-update'), 3));
+
+    // Assert
+    should(actual).deepEqual({ kind: 'codex-update', keys: ['Up', 'Enter'] });
+  });
+
+  it('should answer nothing for any other dialog or a plain prompt', () => {
+    // Act
+    const actual = [
+      codexUpdateAction(frame('codex-0.156.1-hooks-review')),
+      codexUpdateAction(frame('codex-0.156.1-sign-in')),
+      codexUpdateAction('> '),
+    ];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined, undefined]);
+  });
+
+  it('should answer nothing when the prompt offers no Skip row', () => {
+    // Arrange
+    const pane = frame('codex-0.156.1-update').replace('  2. Skip\n', '').replace('3. Skip until', '2. Skip until');
+
+    // Act
+    const actual = [codexUpdateAction(pane), startupDialogAction(pane)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should leave an update-shaped dialog of Claude alone', () => {
+    // Arrange
+    const pane = [
+      '─'.repeat(40),
+      '  Update available · 2.1.281 → 2.2.0',
+      '',
+      '❯ 1. Update now',
+      '  2. Skip',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+
+    // Act
+    const actual = [codexUpdateAction(pane), startupDialogAction(pane)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
   });
 });
 

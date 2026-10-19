@@ -176,6 +176,7 @@ const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'session_ended',
   'composer_discarded',
   'transcript_unreadable',
+  'transcript_unbound',
   'pane_unreadable',
   'blocked_by_prompt',
   'not_delivered',

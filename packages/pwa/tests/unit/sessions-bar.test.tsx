@@ -70,6 +70,21 @@ const click = async (element: Element | null, what: string): Promise<void> => {
 };
 
 describe('SessionsBar as a column', () => {
+  test('shows a one-line preview of the question a waiting ferret asks, on its row', async () => {
+    const asking = sessionView('asker-1', {
+      config: { teammate: 'asker', cwd: '/work/ferretry', mode: 'interactive' },
+      state: {
+        status: 'awaiting_question',
+        pendingQuestion: { toolUseId: 't1', questions: [{ question: 'Rebase onto main first?' }] },
+      },
+    });
+    view = await mount(bar({ sessions: [...SESSIONS, asking] }).element);
+    const row = must(view.container.querySelector('[data-sbar-session="asker-1"]'), 'the asking row');
+    expect(row.querySelector('[data-sbar-question]')?.textContent).toBe('Rebase onto main first?');
+    expect(row.getAttribute('title')).toContain('Rebase onto main first?');
+    expect(row.querySelector('[data-sbar-needs-you]')).not.toBeNull();
+  });
+
   test('lists sessions by project, marks the open one, and badges the one that needs the reader', async () => {
     const { element } = bar();
     view = await mount(element);
@@ -88,6 +103,8 @@ describe('SessionsBar as a column', () => {
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
     expect(view.container.querySelector('[data-sbar-session="maryah-1"] [data-sbar-needs-you]')).not.toBeNull();
     expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-needs-you]')).toBeNull();
+    // Only a session that is actually waiting on a question echoes it.
+    expect(view.container.querySelector('[data-sbar-question]')).toBeNull();
     // A session with no callsign and no label falls back to its id rather than an empty row.
     expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
   });

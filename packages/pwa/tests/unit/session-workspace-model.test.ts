@@ -330,6 +330,42 @@ describe('startSessionWorkspaceRefresh', () => {
 
     expect(sends).toEqual([[row]]);
   });
+  test('says when the daemon can prove no transcript is this session’s, apart from other failures', async () => {
+    const browser = environment();
+    const unbound: boolean[] = [];
+    let failure: unknown = Object.assign(new Error('session s-1 has no transcript this daemon can prove is its own'), {
+      code: 'no_transcript',
+    });
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => {
+          if (failure !== undefined) throw failure;
+          return 'assistant/message: hello';
+        },
+        get: async () => sessionView('s-1'),
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+      onTranscriptUnbound: value => unbound.push(value),
+      quiet: reason => reason === 'outage',
+    });
+
+    await control.initial;
+    failure = new Error('the file vanished');
+    await control.refresh();
+    failure = 'outage';
+    await control.refresh();
+    failure = undefined;
+    await control.refresh();
+    control.stop();
+
+    // An outage said elsewhere neither sets nor clears it.
+    expect(unbound).toEqual([true, false, false]);
+  });
+
   test('loads transcript and session immediately, then clears a previous error', async () => {
     const browser = environment();
     const transcript: unknown[] = [];
@@ -616,5 +652,69 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
     );
     expect(entry).toMatchObject({ kind: 'user', label: 'You', text: 'first line\nsecond line' });
     expect(entry).not.toHaveProperty('peer');
+  });
+});
+
+describe('transcriptEntriesFromLog · messages between ferrets', () => {
+  const turn = '/home/kirin/.ferretry/state/sessions/tanna/turns/turn-001.md';
+  const pointer = turnFileInstruction(turn);
+
+  test('a Claude receiver: the hand-off row stays and its own Read of the turn file is gone', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        `[10:00:00] user/message: ${pointer}`,
+        `[10:00:01] assistant/tool-call: Read(${JSON.stringify({ file_path: turn })})`,
+        '[10:00:01] tool/tool-result: [message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]',
+        '[10:00:05] assistant/message: Hi tomi!',
+      ].join('\n'),
+      NOW,
+    );
+    expect(entries.map(entry => entry.kind)).toEqual(['user', 'assistant']);
+    expect(entries[0]?.handoff?.name).toBe('turn-001');
+  });
+
+  test('a Codex receiver: its cat of the turn file is gone, and a FAILED read stays', () => {
+    const read = `[10:00:01] assistant/tool-call: exec_command(${JSON.stringify({ cmd: `cat ${turn}` })})`;
+    const ok = transcriptEntriesFromLog(
+      [`[10:00:00] user/message: ${pointer}`, read, '[10:00:01] tool/tool-result: Process exited with code 0'].join(
+        '\n',
+      ),
+      NOW,
+    );
+    expect(ok.map(entry => entry.kind)).toEqual(['user']);
+    const failed = transcriptEntriesFromLog(
+      [`[10:00:00] user/message: ${pointer}`, read, '[10:00:01] tool/tool-result: error No such file'].join('\n'),
+      NOW,
+    );
+    expect(failed.map(entry => entry.kind)).toEqual(['user', 'tool']);
+  });
+
+  test('a Claude sender: its fy send is a "sent" row, not a tool group', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        `[10:00:00] assistant/tool-call: Bash(${JSON.stringify({ command: 'fy send tanna "Hello from home-manager-fd"' })})`,
+        '[10:00:01] tool/tool-result: delivered',
+      ].join('\n'),
+      NOW,
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.sent).toEqual({
+      to: 'tanna',
+      body: 'Hello from home-manager-fd',
+      ask: false,
+      state: 'delivered',
+    });
+  });
+
+  test('a Codex sender, under a renamed binary', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        `[10:00:00] assistant/tool-call: exec_command(${JSON.stringify({ cmd: "ferret send tanna 'are you free?' --ask" })})`,
+        '[10:00:01] tool/tool-result: Process exited with code 0\nOutput:\nqueued in the agent’s own queue',
+      ].join('\n'),
+      NOW,
+      'ferret',
+    );
+    expect(entries[0]?.sent).toMatchObject({ to: 'tanna', body: 'are you free?', ask: true, state: 'queued' });
   });
 });

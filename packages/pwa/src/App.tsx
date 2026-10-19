@@ -48,12 +48,12 @@ import { browserSetupStorage } from './features/fleet/setup/setup-progress.ts';
 import { MachineSetupScreen } from './features/fleet/setup/setup-screen.tsx';
 import { machineHash } from './features/fleet/shell/machine-route.ts';
 import type { MachineTabSurfaces } from './features/fleet/shell/machines-surface.tsx';
+import { useHypermediaSessionActions } from './features/hypermedia/hypermedia-session-actions.tsx';
 import { InstallBannerSlot } from './features/install/install-app.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { useLearningSessionActions } from './features/learning/learning-session-actions.tsx';
 import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from './features/learning/learning-settings.tsx';
 import { usePassiveLearning } from './features/learning/passive-learning.tsx';
-import { useHypermediaSessionActions } from './features/hypermedia/hypermedia-session-actions.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
 import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
@@ -67,6 +67,8 @@ import {
 } from './features/onboarding/onboarding-progress.ts';
 import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
+import { usePackSessionActions } from './features/pack/pack-session-actions.tsx';
+import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
@@ -921,16 +923,25 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   });
   // Hypermedia's Actions-menu toggle, and the status line that says it takes effect at the next launch.
   const hypermediaActions = useHypermediaSessionActions({ connection, fetcher: useDaemonFetch() });
-  // Every feature's Actions-menu entries for this ferret: Warden, then Learning, then Hypermedia.
+  // Pack mode's Actions-menu toggle, and its status line: also read at the next launch.
+  const packActions = usePackSessionActions({ connection, fetcher: useDaemonFetch() });
+  // Every feature's Actions-menu entries for this ferret: Warden, Learning, Hypermedia, then Pack mode.
   const sessionActions = useMemo(
-    () => [...wardenActions, ...learningActions.contributions, ...hypermediaActions.contributions],
-    [wardenActions, learningActions.contributions, hypermediaActions.contributions],
+    () => [
+      ...wardenActions,
+      ...learningActions.contributions,
+      ...hypermediaActions.contributions,
+      ...packActions.contributions,
+    ],
+    [wardenActions, learningActions.contributions, hypermediaActions.contributions, packActions.contributions],
   );
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The daemon can prove no transcript is this session's: Chat cannot fill and no send can be confirmed. */
+  const [transcriptUnbound, setTranscriptUnbound] = useState(false);
   /** The highest event sequence this browser has actually received. `0` means none yet. */
   const [liveCursor, setLiveCursor] = useState(0);
   /**
@@ -1040,6 +1051,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     let current = true;
     let control: SessionWorkspaceRefreshControl | null = null;
     setError(null);
+    setTranscriptUnbound(false);
     setEntries([]);
     setSends([]);
     setClient(null);
@@ -1069,6 +1081,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,
           onError: setError,
+          onTranscriptUnbound: setTranscriptUnbound,
           quiet: isCarrierOutage,
         });
         refreshControl.current = control;
@@ -1224,6 +1237,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       </p>
       {learningActions.host}
       {hypermediaActions.host}
+      {packActions.host}
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
@@ -1271,6 +1285,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
           pins={store.pins}
           refreshError={sessionIssue}
+          transcriptUnbound={transcriptUnbound}
           session={session}
           surfaceEvents={surfaceEvents}
           liveActivity={liveActivity}
@@ -1391,6 +1406,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       securityLogSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
       { ...LEARNING_SETTINGS_TAB, Surface: LearningSettingsTabSurface },
+      // Sub-ferrets, who picks their model, and the models guide (docs/pack-mode.md).
+      PACK_SETTINGS_TAB,
       // What this machine runs and getting it up to date (docs/updating.md).
       aboutSettingsTab(createDaemonClient),
     ],

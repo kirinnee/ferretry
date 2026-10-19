@@ -79,6 +79,9 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'switches whether one ferret files lessons; changes no access, and its re-instruction is in its transcript',
   'PATCH /v1/sessions/:sessionId/hypermedia':
     'switches what one ferret is told about presentation at its next launch; changes no access',
+  'PATCH /v1/sessions/:sessionId/pack':
+    'switches whether one ferret is told about sub-ferrets at its next launch; it grants nothing a start could not',
+  'POST /v1/pack/recommend': 'a read with a body: lists the models usable now for a task',
   'POST /v1/learning/scan/estimate': 'a read with a body: counts what a scan would read and cost',
   'POST /v1/learning/scan': 'starts miners over transcripts the daemon already holds; reaches nobody',
   'POST /v1/learning/scan/cancel': 'stops the miners a scan started; removes work rather than adding access',

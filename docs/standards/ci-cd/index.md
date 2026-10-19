@@ -43,7 +43,7 @@ not lengthen the critical path, and nothing goes there that is free and as fast 
 | `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores               | `bun test` runs one file at a time                        |
 | `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores               | short builds                                              |
 | `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores               | well inside the critical path                             |
-| `PWA Full Gallery (dark)`                        | Namespace 4x8 | three browsers at once   | the longest Namespace job; a 2x4 would make it the path   |
+| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~1.4 cores, 3.3GB peak   | past a 2x4's memory; the longest Namespace job            |
 | `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB           | one journey at a time                                     |
 | `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores             | free, and five groups keep each under ~2.5 min            |
 | `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell    | billed a whole minute and a cache attachment on Namespace |
@@ -141,8 +141,8 @@ Notable details:
   the churn this shape chose over re-baselining a directory of images. The dark leg walks the whole
   gallery, so a later section that hangs or fails is red on the PR that broke it rather than on the
   next person who needs its frames — and it owes the same Settings tallies a dark `--settings-only`
-  leg would, which is why there is no such leg. The harness walks its two viewports at once, one child
-  process each, and the parent holds their summed tallies to the same constants.
+  leg would, which is why there is no such leg. The viewports are walked one after the other: walking
+  them at once, as three software-rendered Chromes on a 4x8, timed out in 3 of 7 runs under load.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives

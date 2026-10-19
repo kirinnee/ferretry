@@ -1,4 +1,5 @@
 import type { PaneMetadata } from './contracts.ts';
+import { parseHarnessDialog } from './harness-dialog.ts';
 import { parsePermissionPrompt } from './permission-prompt.ts';
 
 /**
@@ -173,6 +174,8 @@ export function promptIsReady(pane: string, cursorY?: number, cursorX?: number):
   if (STARTUP_BLOCKERS.some(marker => lower.includes(marker)) || paneShowsActiveWork(pane)) return false;
   // A permission prompt's cursor row reads as a prompt line, and a message typed into it picks a row.
   if (parsePermissionPrompt(pane) !== undefined) return false;
+  // So does a harness dialog's: Codex's `› 1. Review hooks` is shaped like a composer line.
+  if (parseHarnessDialog(pane) !== undefined) return false;
   if (lower.includes(INTERRUPTED_BANNER)) return true;
   const lines = pane.split('\n');
   if (cursorY !== undefined && cursorY >= 0 && cursorY < lines.length) {

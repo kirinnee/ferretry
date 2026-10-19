@@ -1,4 +1,5 @@
 import type { HandoffPointer } from '@ferretry/protocol';
+import { markReplies } from './peer-delivery.ts';
 import { peerFrom } from './peer-message.ts';
 import { foldLedgerSendRecords, type LedgerSendRecord } from './send-ledger.ts';
 import type { TranscriptEntry } from './session-screens.ts';
@@ -48,6 +49,9 @@ const handedOff = (pointer: HandoffPointer, record: LedgerSendRecord): boolean =
  * already proved; a row it cannot place stays unchipped rather than guessed. A send that settled
  * without arriving retires from view a day after it was sent, so an old failure does not sit under
  * the conversation forever; the ledger itself keeps it.
+ *
+ * Once every row wears its send, a message THIS ferret sent that its recipient has since answered reads
+ * `replied` (`markReplies`) — the answer is often a hand-off whose sender only its send names.
  */
 export const placeLedgerRows = (
   entries: readonly TranscriptEntry[],
@@ -76,7 +80,7 @@ export const placeLedgerRows = (
       return !Number.isFinite(at) || nowMs - at < SETTLED_ROW_LIFETIME_MS;
     })
     .reverse();
-  return [
+  return markReplies([
     ...entries.map((entry, index) => {
       const send = chips.get(index);
       return send === undefined ? entry : { ...entry, send };
@@ -90,5 +94,5 @@ export const placeLedgerRows = (
         placement: 'chronological',
       }),
     ),
-  ];
+  ]);
 };

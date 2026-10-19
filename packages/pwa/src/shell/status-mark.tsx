@@ -72,8 +72,10 @@ export function statusMark(view: SessionView): StatusMarkInfo {
   // request for a human, exactly as an unanswered question is. Only a working one breathes.
   const turn = TERMINAL_STATUSES.has(status) || parked ? undefined : view.state.turnState;
   if (turn === 'your-turn') return YOUR_TURN_MARK;
-  if (turn === 'needs-input')
-    return view.state.permissionRequest === undefined ? NEEDS_INPUT_MARK : NEEDS_APPROVAL_MARK;
+  if (turn === 'needs-input') {
+    if (view.state.permissionRequest !== undefined) return NEEDS_APPROVAL_MARK;
+    return view.state.harnessDialog === undefined ? NEEDS_INPUT_MARK : NEEDS_DIALOG_MARK;
+  }
 
   if (TERMINAL_STATUSES.has(status)) {
     const ok = status === 'completed';
@@ -142,6 +144,15 @@ export const NEEDS_INPUT_MARK: StatusMarkInfo = Object.freeze({
   klass: 'waiting',
   tone: 'accent',
   label: 'waiting — needs your input',
+  live: false,
+});
+
+/** Blocked on a harness's own dialog (hooks to review, a sign-in): named for what it needs, drawn like any needs-input. */
+export const NEEDS_DIALOG_MARK: StatusMarkInfo = Object.freeze({
+  shape: 'diamond',
+  klass: 'waiting',
+  tone: 'accent',
+  label: 'waiting — needs you at a dialog',
   live: false,
 });
 
