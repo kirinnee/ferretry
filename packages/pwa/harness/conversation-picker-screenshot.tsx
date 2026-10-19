@@ -138,7 +138,7 @@ const VIEWPORTS = {
 } as const;
 
 try {
-  for (const theme of ['studio-dark', 'neo-light'] as const) {
+  for (const theme of ['studio-light', 'studio-dark', 'neo-light', 'neo-dark'] as const) {
     for (const [vp, options] of Object.entries(VIEWPORTS)) {
       const context = await browser.newContext({
         ...options,

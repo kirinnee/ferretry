@@ -120,24 +120,23 @@ describe('ConversationPicker states', () => {
 });
 
 describe('ConversationPicker rows', () => {
-  it('groups rows under their folder, newest first, with nothing ticked and adopted rows disabled', async () => {
+  it('lists rows newest first in one container, with nothing ticked and adopted rows disabled', async () => {
     await open();
-    expect(all('[data-conversation-group]').map(group => group.getAttribute('data-conversation-group'))).toEqual([
-      '/work/notes',
-      '/work/shop',
-    ]);
+    expect(all('[data-conversation-list]')).toHaveLength(1);
     expect(all('[data-conversation-row]').map(row => row.getAttribute('data-conversation-row'))).toEqual([
       'notes-day',
-      'notes-kept',
       'shop-cart',
+      'notes-kept',
       'shop-old',
     ]);
     expect(all('input[type="checkbox"]:checked')).toHaveLength(0);
     expect(find<HTMLInputElement>('[data-conversation-keep="notes-kept"]').disabled).toBe(true);
     expect(text('[data-conversation-adopted="notes-ferret"]')).toBe('Kept as notes-ferret');
-    expect(text('[data-conversation-row="shop-cart"]')).toContain('1d ago· 4 turnsSonnet 5.5');
+    expect(text('[data-conversation-row="shop-cart"]')).toContain(
+      'Fix the shop-cart page1d agowork/shop· Claude · 4 turns· Sonnet 5.5',
+    );
     expect(text('[data-conversation-row="shop-old"]')).toContain('· 1 turn');
-    expect(find('[data-conversation-row="notes-day"]').querySelector('.kt-badge')).toBeNull();
+    expect(text('[data-conversation-row="notes-day"]')).not.toContain('Haiku');
     expect(find<HTMLButtonElement>('[data-conversations-keep]').disabled).toBe(true);
     expect(text('[data-conversations-keep]')).toBe('Keep 0 as ferrets');
     expect(view?.container.querySelector('[data-conversations-show-all]')).toBeNull();
