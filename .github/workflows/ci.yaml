@@ -114,18 +114,11 @@ jobs:
     name: PWA Static Bundle
     permissions:
       contents: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
-      - nscloud-cache-tag-ferretry-nix
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: cachix/install-nix-action@v31
       # The same gate the Pages deploy runs — but that workflow only fires on a push to `main`, so
       # until now the first thing to notice that the generated `fy-render` sandbox shell and its two

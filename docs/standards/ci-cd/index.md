@@ -22,10 +22,10 @@ GitHub's free hosted runners cap how many jobs run at once, and a busy day queue
 behind each other. The heaviest Linux jobs therefore run on **Namespace** runners
 (`nscloud-ubuntu-24.04-amd64-4x8-with-cache`): `PWA Settings Geometry` / `Full Gallery`, `Unit Tests` and the
 `E2E Shard`s. `Integration Tests` stay on GitHub: its real-Chrome browser journeys and its
-same-filesystem rename checks depend on the `ubuntu-latest` image. The light Linux jobs (pre-commit, compile, the bundles, the coverage ledgers, the E2E relevance and
+same-filesystem rename checks depend on the `ubuntu-latest` image. The light Linux jobs (pre-commit, compile, the Nix install bundle, the coverage ledgers, the E2E relevance and
 summary) run there too, on smaller `2x4`/`4x8` shapes, so they stop queueing behind GitHub's cap.
-They add capacity rather than replace it — `Integration Tests`, `SIT`, the
-harness contract, the smoke tests and every macOS job stay on GitHub, where a public repository's minutes are free and the macOS jobs
+They add capacity rather than replace it — `Integration Tests`, `SIT`, `PWA Static Bundle` (its Vite config load
+resolves the image's own Node), the harness contract, the smoke tests and every macOS job stay on GitHub, where a public repository's minutes are free and the macOS jobs
 never queue.
 
 - **One cache volume, tag `ferretry-nix`.** `namespacelabs/nscloud-cache-action` with `cache: nix`
