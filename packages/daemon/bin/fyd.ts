@@ -18,6 +18,7 @@ import {
   FleetTokenRefreshService,
   HARNESS_BINARIES,
   type HarnessKind,
+  HYPERMEDIA_ENV,
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
@@ -140,6 +141,7 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
+  FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -148,12 +150,11 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
-  FileModelCatalogCache,
   FileSpeedupTestLedger,
   FileUpdateDocuments,
   foreignHistoryRoots,
-  HostedModelCatalog,
   GitHubLatestRelease,
+  HostedModelCatalog,
   HostedRelayDirectory,
   HostInstallFacts,
   HttpUsageSource,
@@ -415,11 +416,6 @@ import {
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
-  buildLaunchArgv,
-  canServeModel,
-  currentLaunchEffort,
-  currentLaunchModel,
-  SessionLaunchService,
   type BootNoticePort,
   type BootRefusal,
   type BrowserLoginLifecycle,
@@ -428,6 +424,7 @@ import {
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
+  buildLaunchArgv,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -444,6 +441,7 @@ import {
   type ConversationLinker,
   CredentialAgentIdentities,
   CredentialUsageSource,
+  canServeModel,
   childGrantRequester,
   chooseRelayCarrierSources,
   claimStartName,
@@ -456,6 +454,8 @@ import {
   createMountedSocketDispatcher,
   createSessionPaths,
   createWardenPaths,
+  currentLaunchEffort,
+  currentLaunchModel,
   type DaemonConfig,
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
@@ -503,6 +503,7 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
+  HOSTED_APP_ORIGIN,
   handoffFolders,
   handoffView,
   harnessAbsentWarning,
@@ -531,9 +532,11 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
+  ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
   messageWithAttachments,
+  modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
   type NameAllocationResult,
@@ -551,17 +554,14 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
-  HOSTED_APP_ORIGIN,
-  ModelCatalogService,
-  modelCatalogsView,
   PinService,
-  PublishedModelCatalogService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
   ProviderQuotaService,
+  PublishedModelCatalogService,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -644,8 +644,11 @@ import {
   SessionHandoverService,
   SessionHealthService,
   type SessionHealthSettings,
+  SessionHypermediaService,
+  type SessionHypermediaSubsystem,
   type SessionId,
   type SessionIdFactory,
+  SessionLaunchService,
   SessionLifecycleConfigSchema,
   type SessionLifecycleLauncher,
   SessionLifecycleService,
@@ -1921,6 +1924,8 @@ function createSessionControlSubsystem(
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
+        // Every new ferret is told it may use hypermedia until the owner says otherwise (docs/hypermedia.md).
+        hypermedia: true,
         // An incarnation names one RUN of a session: this is its first, and a revive is what mints
         // the next. The generation is the daemon-side counter of those relaunches.
         incarnation: `${id}-1`,
@@ -2243,6 +2248,8 @@ function createConversationAdopter(
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
+        // Every new ferret is told it may use hypermedia until the owner says otherwise (docs/hypermedia.md).
+        hypermedia: true,
         incarnation: `${id}-1`,
         runtimeGeneration: 1,
         boardAccess: 'none',
@@ -3014,6 +3021,55 @@ function createSessionRenameSubsystem(
   };
 }
 
+/** A session status after which no process runs until the session is launched again. */
+const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
+
+/**
+ * Whether a ferret is told to use hypermedia (docs/hypermedia.md), over its own documents.
+ *
+ * The decision is `SessionHypermediaService`'s. This writes the two places the switch lives — the
+ * configuration every surface reads and the launch environment the pane reads — together, under the
+ * session's own lock, so a concurrent environment merge (a task board delivering a grant) cannot lose
+ * either half.
+ */
+function createSessionHypermediaSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  environments: FileSessionEnvironmentStore,
+  serial: KeyedSerialExecutor,
+  clock: ClockPort,
+): SessionHypermediaSubsystem {
+  const service = new SessionHypermediaService({
+    facts: async reference => {
+      const id = tryParseSessionId(reference);
+      const view = id === undefined ? undefined : await sessions.get(id);
+      return view === undefined
+        ? undefined
+        : { enabled: view.config.hypermedia, running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status) };
+    },
+    write: async (reference, enabled, at) => {
+      const id = parseSessionId(reference);
+      await serial.run(`session:${id}`, async () => {
+        await storage.updateConfig(id, current => ({
+          ...(jsonObject(current) ?? {}),
+          hypermedia: enabled,
+          updatedAt: at,
+        }));
+        await environments.write(id, { ...(await environments.read(id)), [HYPERMEDIA_ENV]: enabled ? '1' : '0' });
+      });
+    },
+    now: () => new Date(clock.now()).toISOString(),
+  });
+  return {
+    set: async (reference, enabled) => {
+      const outcome = await service.set(reference, enabled);
+      const view = await sessions.get(parseSessionId(reference));
+      if (view === undefined)
+        throw new Error(`session ${reference} was switched but its documents do not satisfy the protocol`);
+      return { view, outcome };
+    },
+  };
+}
 /**
  * How long the daemon remembers when the last sweep finished, for its own health report.
  *
@@ -7548,6 +7604,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
+        sessionHypermedia: createSessionHypermediaSubsystem(
+          storage,
+          sessions,
+          sessionEnvironments,
+          sessionMutations,
+          clock,
+        ),
         sessionRuntime,
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither

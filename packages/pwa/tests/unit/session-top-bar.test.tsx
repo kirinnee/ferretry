@@ -190,3 +190,25 @@ describe('SessionTopBar turn word', () => {
     }
   });
 });
+
+describe('the hypermedia mark', () => {
+  test('sits beside the name while the ferret may use hypermedia, and is gone once it is off', async () => {
+    const bar = (hypermedia: boolean | undefined) => (
+      <SessionTopBar
+        actions={null}
+        compact={false}
+        project={null}
+        session={sessionView('s1', {
+          config: { teammate: 'hadi', ...(hypermedia === undefined ? {} : { hypermedia }) },
+        })}
+      />
+    );
+    view = await mount(bar(undefined));
+    expect(view.container.querySelector('.fy-session-bar__who [data-hypermedia-mark]')?.textContent).toBe(
+      'Hypermedia on',
+    );
+    await view.unmount();
+    view = await mount(bar(false));
+    expect(view.container.querySelector('[data-hypermedia-mark]')).toBeNull();
+  });
+});

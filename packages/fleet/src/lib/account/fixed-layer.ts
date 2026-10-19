@@ -206,10 +206,11 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
   'FY_SESSION_ID',
   'FY_SESSION_BOARD_CAPABILITY',
   'FY_LEARNING_PASSIVE',
+  'FY_HYPERMEDIA',
 ];
 
 /**
- * PASSIVE LEARNING — the one fixed-layer entry that differs per FERRET rather than per runtime.
+ * PASSIVE LEARNING — a fixed-layer entry that differs per FERRET rather than per runtime (as {@link HYPERMEDIA_ENV} does).
  *
  * A runtime's wrapper is materialised once and serves every ferret launched on it, so the teaching
  * cannot be a launch argument: it would be on for all of them or none. It rides the tools server the
@@ -226,6 +227,36 @@ export const PASSIVE_LEARNING_ENV = 'FY_LEARNING_PASSIVE';
 /** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
 export const LESSONS_INSTRUCTION = (fy: string): string =>
   `Lessons: when the owner corrects you, or you learn a durable fact about how they want work done, file it as one short imperative rule with \`${fy} lesson suggest "<rule>" --scope global|repo\` (or the lessons_suggest tool). Use --scope repo for a fact about this project and --scope global for one every ferret should follow. File each lesson once; the owner reviews every lesson before it reaches an instruction file.`;
+
+/**
+ * HYPERMEDIA — the second per-FERRET fixed-layer entry, carried exactly like passive learning and for
+ * the same reason: one runtime wrapper serves many ferrets, so a launch argument would be on for all of
+ * them or none. The daemon sets {@link HYPERMEDIA_ENV} to `1` (or `0`) in a ferret's launch environment
+ * and `fy mcp serve` adds {@link HYPERMEDIA_INSTRUCTION} to its MCP `initialize` instructions iff it is
+ * `1`. A ferret switched while running learns it at its next launch; nothing is sent to it.
+ *
+ * The markup it teaches is the `fy-render` fence (docs/fy-render.md), and docs/hypermedia.md is the
+ * contract that quotes this text verbatim.
+ */
+export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
+
+/** The hypermedia teaching. Short on purpose — it is in every prompt. docs/hypermedia.md quotes it. */
+export const HYPERMEDIA_INSTRUCTION = [
+  'Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
+  '- mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).',
+  '- svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.',
+  '- html: one self-contained interactive page with inline CSS and JS; it runs sandboxed, with no network.',
+  '- image, video, audio, pdf: put `src: @path/in/your/workspace` or `src: https://…` before `---`, and no payload.',
+  'Example:',
+  '```fy-render',
+  'type: mermaid',
+  'alt: How a request reaches the daemon',
+  '---',
+  'flowchart LR',
+  '  Phone --> Relay --> Daemon',
+  '```',
+  'The reader taps Render to show it. Chat only: never write fy-render into files, docs, commits or PR text.',
+].join('\n');
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
