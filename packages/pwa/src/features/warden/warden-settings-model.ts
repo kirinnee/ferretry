@@ -79,6 +79,7 @@ const sentenceList = (items: readonly string[]): string =>
 const ACT_ALONE_WORDS: Readonly<Record<keyof WardenMayActAlone, string>> = {
   nudge: 'nudge',
   resume: 'resume or revive',
+  restart: 'restart a dead or frozen process',
   failover: 'fail over to the next login',
   stop: 'stop',
 };

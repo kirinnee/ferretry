@@ -81,13 +81,24 @@ export const LEGACY_TRIAGE_LAYERS: Readonly<Record<LegacyWardenTriage, WardenLay
 };
 
 /**
- * A settings document with the legacy `triage` restated as `layers`. TOLERANT ON READ: an explicit
- * `layers` wins over a legacy `triage` field by field, and an unrecognised `triage` is left for the
- * schema to refuse. Anything that is not an object passes through untouched.
+ * A settings document from before a setting existed, restated in today's terms. TOLERANT ON READ:
+ *
+ * - a legacy `triage` becomes `layers`; an explicit `layers` wins over it field by field, and an
+ *   unrecognised `triage` is left for the schema to refuse;
+ * - a `mayActAlone` with no `restart` takes the owner's `resume` answer, because a restart is a resume
+ *   that relaunches the agent: what the owner let the Warden do to a dead turn, it may do to a dead or
+ *   frozen agent.
+ *
+ * Anything that is not an object passes through untouched.
  */
-export function migrateLegacyWardenTriage(value: unknown): unknown {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) || !('triage' in value)) return value;
-  const { triage, ...rest } = value as Record<string, unknown>;
+export function migrateLegacyWardenSettings(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  return withRestart(withLayers(value as Record<string, unknown>));
+}
+
+function withLayers(value: Record<string, unknown>): Record<string, unknown> {
+  if (!('triage' in value)) return value;
+  const { triage, ...rest } = value;
   const legacy = LegacyWardenTriageSchema.safeParse(triage);
   if (!legacy.success) return value;
   const stated = rest.layers;
@@ -98,6 +109,12 @@ export function migrateLegacyWardenTriage(value: unknown): unknown {
       ...(typeof stated === 'object' && stated !== null ? stated : {}),
     },
   };
+}
+
+function withRestart(value: Record<string, unknown>): Record<string, unknown> {
+  const acts = value.mayActAlone;
+  if (typeof acts !== 'object' || acts === null || 'restart' in acts || !('resume' in acts)) return value;
+  return { ...value, mayActAlone: { ...acts, restart: (acts as { readonly resume: unknown }).resume } };
 }
 
 /** The sweep cadences a person can pick. The sweep itself is free; only what a flag leads to costs. */
@@ -133,10 +150,15 @@ export const WardenCapsSchema = z.object({
 });
 export type WardenCaps = z.infer<typeof WardenCapsSchema>;
 
-/** What an investigation's verdict may do without asking. `stop` is off unless the owner turns it on. */
+/**
+ * What an investigation's verdict may do without asking. `stop` is off unless the owner turns it on.
+ * `restart` relaunches a dead or frozen process with its conversation intact; it defaults to whatever
+ * the owner said about `resume`.
+ */
 export const WardenMayActAloneSchema = z.object({
   nudge: z.boolean(),
   resume: z.boolean(),
+  restart: z.boolean(),
   failover: z.boolean(),
   stop: z.boolean(),
 });
@@ -188,9 +210,9 @@ const WardenConfigShape = z.object({
 
 /**
  * The Warden settings. A document still carrying the legacy `triage` is read as its `layers`
- * ({@link migrateLegacyWardenTriage}); nothing ever writes `triage` again.
+ * ({@link migrateLegacyWardenSettings}); nothing ever writes `triage` again.
  */
-export const WardenConfigSchema = z.preprocess(migrateLegacyWardenTriage, WardenConfigShape);
+export const WardenConfigSchema = z.preprocess(migrateLegacyWardenSettings, WardenConfigShape);
 export type WardenConfig = z.infer<typeof WardenConfigShape>;
 
 /** The longest a run of re-clears can leave a flag alone: four hours. */
@@ -259,6 +281,8 @@ export const WardenAnomalyKindSchema = z.enum([
   'peer_wait_unanswerable',
   'sus_thinking',
   'sus_subprocess',
+  /** The liveness reflex saw no sign of life after a nudge: a restart candidate, never stopped. */
+  'agent_frozen',
   'bootstrap_degraded',
   'provider_unavailable',
   /** Not detected: the owner asked for an investigation of this ferret. */
@@ -568,7 +592,7 @@ export type WardenInvestigation = z.infer<typeof WardenInvestigationSchema>;
 export const WardenClearedBySchema = z.enum(['jev', 'warden', 'owner']);
 export type WardenClearedBy = z.infer<typeof WardenClearedBySchema>;
 
-export const WardenActionKindSchema = z.enum(['bless', 'nudge', 'resume', 'stop', 'failover']);
+export const WardenActionKindSchema = z.enum(['bless', 'nudge', 'resume', 'restart', 'stop', 'failover']);
 export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
 
 /**

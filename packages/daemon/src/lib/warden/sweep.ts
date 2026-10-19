@@ -168,6 +168,8 @@ import {
   type WardenAssignmentRecord,
   type WardenRuntimeState,
 } from './state.ts';
+import type { ReflexEvent } from './liveness-monitor.ts';
+import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
 import { instantMs } from './time.ts';
 import { isTerminalStatus, WARDEN_LABEL, type WardenSessionView } from './types.ts';
 import { classifyVerdict } from './verdicts.ts';
@@ -922,6 +924,48 @@ export class WardenSweepService {
     };
   }
 
+  /**
+   * Act on what one liveness tick found. A quiet ferret is nudged only while the Warden is on and the
+   * owner lets it nudge alone, and every nudge is listed under Recent actions. A frozen one is NOT acted
+   * on here: it is journalled, and the next sweep raises it as a flag that goes through the layers like
+   * any other. Answers whether anything froze, so the caller can bring that sweep forward.
+   */
+  async reflex(events: readonly ReflexEvent[]): Promise<{ readonly frozen: boolean }> {
+    if (events.length === 0) return { frozen: false };
+    const config = parseStoredWardenConfig(await this.ports.config.read()).config;
+    let state = parseWardenRuntimeState(await this.ports.state.read());
+    const at = new Date(this.ports.nowMs()).toISOString();
+    for (const event of events) {
+      const quiet = Math.floor(event.assessment.quietSeconds / 60);
+      if (event.kind === 'frozen') {
+        this.ports.journal.record('fleet.warden_frozen', {
+          sessionId: event.sessionId,
+          quietSeconds: Math.floor(event.assessment.strongQuietSeconds),
+        });
+        continue;
+      }
+      if (!config.enabled || !config.mayActAlone.nudge) continue;
+      const base = { at, sessionId: event.sessionId, action: 'nudge' as const, by: 'warden' as const };
+      try {
+        await this.ports.remedies.nudge(event.sessionId, REFLEX_NUDGE_MESSAGE);
+        state = this.recordAction(state, {
+          ...base,
+          outcome: 'done',
+          detail: `Nudged: no output, screen change or subprocess for ${quiet} min.`,
+        });
+        this.ports.journal.record('fleet.warden_reflex_nudged', { sessionId: event.sessionId, quietMinutes: quiet });
+      } catch (error) {
+        state = this.recordAction(state, {
+          ...base,
+          outcome: 'failed',
+          detail: `The nudge did not take: ${failureMessage(error)}.`,
+        });
+      }
+    }
+    await this.ports.state.write(state);
+    return { frozen: events.some(event => event.kind === 'frozen') };
+  }
+
   /** The settings in effect, and nothing else — cheap enough to read on every session event. */
   async currentConfig(): Promise<WardenConfig> {
     return parseStoredWardenConfig(await this.ports.config.read()).config;
@@ -1497,6 +1541,7 @@ export class WardenSweepService {
       if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
       else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, wardenNudgeMessage(act.reason));
       else if (act.action === 'resume') await this.ports.remedies.resume(targetId);
+      else if (act.action === 'restart') await this.ports.remedies.restart(targetId);
       else await this.ports.remedies.stop(targetId, `Warden verdict: ${act.reason}`);
     } catch (error) {
       const message = failureMessage(error);

@@ -134,7 +134,10 @@ through the outbound holder ([docs/secrets.md](secrets.md)); `guard.endpoint` ca
 Investigations run on your own login and read the transcript, pane, diffs and CI. The rules send nothing.
 
 **Only an investigation acts.** Its explicit `Verdict:` line is what acts — never prose — and only as far as
-`mayActAlone` allows: `nudge`, `resume` and `failover` default on, **`stop` defaults off**. An act it may not
+`mayActAlone` allows: `nudge`, `resume`, `restart` and `failover` default on, **`stop` defaults off**.
+`restart` relaunches a dead or frozen process with its conversation intact — the resume path, replacing a
+pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
+`restart` gives `restart` the same answer. An act it may not
 do alone is held and listed under Needs you for you to decide. Every act and every Jev skip is listed under
 Recent actions with who decided it.
 
@@ -171,6 +174,18 @@ four, or until its status changes (at most a week). It covers the kinds flagged 
 shortens a quiet stretch already in force, takes the ferret out of the investigation queue, and counts into
 no streak. It is `POST /v1/warden/leave {sessionId, duration}` — `warden.configure`, because it switches the
 Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
+
+**The liveness check.** Every 30 s the Warden looks at each working ferret — a digest of its screen and
+of its transcript tail, the work counters its harness paints, and whether its pane has a live subprocess —
+and keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and
+long-command rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been
+able to see for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
+`nudgeAfterSeconds` (default 300) is nudged once — only while `mayActAlone.nudge` is on — and one with no
+transcript, counter or subprocess sign for its `killAfterSeconds` (default 900; read as "frozen", since the
+Warden never kills) after that is flagged **frozen**: a restart candidate that goes through the layers like
+any other flag. A ferret parked with `signal waiting`, an interactive ferret, or a tick that ran late on a
+starved host is never nudged or flagged. The ledger is kept in memory: a restarted daemon starts every
+clock again rather than judging silence it did not see.
 
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
 a question is waiting or a pane dies (`events.turnEnd`, `events.question`, `events.paneDied`), at most one
