@@ -1,24 +1,17 @@
 name: E2E
 
 # The e2e tier: compiled binaries, the real PWA bundle, a real Chrome and a local rendezvous, driven
-# through the product journeys in tests/e2e/. A separate workflow rather than a CI job because GitHub
-# filters by path per WORKFLOW, and this tier only has something to prove when a package it drives —
-# or the tier itself — changed.
+# through the product journeys in tests/e2e/. Its own workflow because it is advisory and its own
+# status, `E2E Journeys`, is what a merge waits on (docs/standards/ci-cd/index.md, "E2E tier").
 #
-# ADVISORY, NOT REQUIRED (docs/standards/ci-cd/index.md, "E2E tier"): it is not a branch-protection
-# check yet. After two weeks of runs have measured its flake rate it becomes one.
+# ON EVERY PULL REQUEST, and the `relevance` job decides: a pull request that changes only docs or
+# model catalogs runs no journey and still reports `E2E Journeys` green (scripts/ci/e2e-relevance.sh
+# says why that is not a workflow `paths-ignore`). The `[slow]` journeys run in `E2E Slow`.
+#
+# ADVISORY, NOT REQUIRED: it is not a branch-protection check yet. After two weeks of runs have
+# measured its flake rate it becomes one.
 on:
   pull_request:
-    paths:
-      - 'packages/pwa/**'
-      - 'packages/daemon/**'
-      - 'packages/relay/**'
-      - 'packages/protocol/**'
-      - 'packages/cli/**'
-      - 'tests/e2e/**'
-      - 'scripts/test/**'
-      - 'scripts/ci/e2e.sh'
-      - '.github/workflows/e2e.yaml'
   workflow_dispatch:
 
 # Copied from CI, as the standard asks of every pull_request workflow: a new push to a PR cancels the
@@ -32,37 +25,104 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  e2e:
-    name: E2E Journeys
+  relevance:
+    name: E2E Relevance
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide whether the journeys have anything to prove
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/e2e-relevance.sh
+
+  # The journeys of the `fast` tier, split by test across the matrix (scripts/ci/e2e-shards.ts, balanced
+  # by tests/e2e/timings.json). Each shard compiles its own binaries: measured, the compile is ~6s of a
+  # shard's ~40s setup, and a build-once job in front would add a whole job's startup to the critical path.
+  journeys:
+    name: E2E Shard (${{ matrix.shard }})
+    needs: relevance
+    if: needs.relevance.outputs.run == 'true'
     permissions:
       contents: read
     # `ubuntu-latest` ships the Google Chrome the journeys launch and the tmux their agent sessions
-    # live in, exactly as the int tier and the Settings geometry gate already rely on. Measured at
-    # about five minutes of journeys plus the compile; the timeout leaves room for one slow runner
-    # and stops a wedged browser from holding the runner for the default six hours.
+    # live in, exactly as the int tier and the Settings geometry gate already rely on. The timeout stops
+    # a wedged browser from holding the runner for the default six hours.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       # ADVISORY: `continue-on-error` on this STEP, not the job. On a job it still paints the job's check
-      # red; on the step the check stays green while the step's own result, the job summary line
-      # "E2E: N pass / M fail" and a warning annotation record every failure. Removed when the job
-      # becomes required (docs/standards/ci-cd/index.md, "E2E tier").
-      - name: Run the e2e journeys
+      # red; on the step the job stays green while the step's own result, the job summary line, a warning
+      # annotation and the `E2E Journeys` tally record every failure. Removed when the tier becomes required.
+      - name: Run this shard of the e2e journeys
         continue-on-error: true
+        env:
+          FY_E2E_TIER: fast
+          FY_E2E_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
         run: nix develop .#ci -c ./scripts/ci/e2e.sh
       # `always()` because a red run is the run whose evidence matters most: every screen the journeys
-      # reached at phone and desktop width in both colour schemes, the per-step journey log naming the
-      # step that broke, and the relay journey's ledger.
-      - name: Upload the e2e evidence
+      # reached at phone and desktop width in both colour schemes, the per-step journey log, the relay
+      # ledger, the JUnit report the timings are regenerated from, and the shard's result for the summary.
+      - name: Upload this shard's e2e evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          # One artifact per attempt: v4 artifacts are immutable within a run, so a re-run reusing the name
-          # failed its upload after the journeys had passed.
-          name: e2e-evidence-${{ github.run_attempt }}
+          # One artifact per shard and attempt: v4 artifacts are immutable within a run, so a re-run
+          # reusing the name failed its upload after the journeys had passed.
+          name: e2e-evidence-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/e2e-evidence/
           if-no-files-found: warn
+      # The shard's tally alone, so the summary reads a few bytes instead of every shard's screens.
+      - name: Upload this shard's result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-result-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-evidence/result.json
+          if-no-files-found: warn
+
+  # THE status: one name for branch protection and merge tooling however many shards there are.
+  summary:
+    name: E2E Journeys
+    needs: [relevance, journeys]
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      # Every attempt's: "re-run failed jobs" re-runs only some shards, and the summary keeps each
+      # shard's latest. A shard whose journeys never started left no result; the summary counts it.
+      - name: Download every shard's result
+        if: needs.relevance.outputs.run == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: e2e-result-*
+          path: ${{ runner.temp }}/e2e-shards
+      - name: Add up the shards
+        env:
+          RELEVANCE: ${{ needs.relevance.result }}
+          RUN: ${{ needs.relevance.outputs.run }}
+          SHARDS: ${{ needs.journeys.result }}
+        run: ./scripts/ci/e2e-summary.sh "${{ runner.temp }}/e2e-shards" 4
