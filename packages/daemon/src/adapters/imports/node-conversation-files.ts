@@ -34,6 +34,14 @@ export class NodeConversationFiles implements ConversationFiles {
       .text()
       .catch(() => undefined);
   }
+
+  async head(file: string, maxBytes: number): Promise<string | undefined> {
+    if ((await this.info(file)) === undefined) return undefined;
+    return await Bun.file(file)
+      .slice(0, maxBytes)
+      .text()
+      .catch(() => undefined);
+  }
 }
 
 const errorCode = (error: unknown): string | undefined =>

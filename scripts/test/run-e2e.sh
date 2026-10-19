@@ -99,6 +99,15 @@ trap 'exit 143' TERM
 echo "🧪 Typechecking the E2E harness..."
 ./node_modules/.bin/tsc --noEmit --project tests/e2e/tsconfig.json
 
+# THE PER-JOURNEY CEILING. Every journey outside the `[slow]` tier ends at this, so a journey that hangs
+# costs a shard minutes rather than the 10–15 it once did. Bun's `--timeout` is only a default a test can
+# raise, so the check below refuses a journey that raises it past here
+# (scripts/test/e2e-journey-timeouts.ts). The slowest pull-request journey takes about a minute, and a
+# journey whose browser vanished is run again from nothing, so this holds a retry; the ceiling bounds
+# every attempt together.
+journey_timeout_ms=150000
+bun scripts/test/e2e-journey-timeouts.ts "${journey_timeout_ms}" tests/e2e/*.e2e.test.ts
+
 # A TIER AND A SHARD (scripts/ci/e2e-shards.ts): `FY_E2E_TIER` is fast (no `[slow]` journey), slow or
 # all, and `FY_E2E_SHARD=i/N` runs this runner's share of it, balanced by tests/e2e/timings.json. With
 # neither set, every journey runs here, as it always has.
@@ -117,6 +126,6 @@ report=()
 
 echo "🧪 Running isolated E2E journeys..."
 # `--timeout` on the command line because `[test] timeout` in a bunfig is ignored by Bun.
-bun test "${selection[@]}" --config=bunfig.e2e.toml --timeout 120000 "${report[@]}"
+bun test "${selection[@]}" --config=bunfig.e2e.toml --timeout "${journey_timeout_ms}" "${report[@]}"
 
 echo "✅ Isolated E2E journeys passed"

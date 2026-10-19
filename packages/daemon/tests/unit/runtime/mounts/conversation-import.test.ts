@@ -44,6 +44,8 @@ function stub(): {
         queries.push(query ?? {});
         return LISTING;
       },
+      preview: async (harness, id) =>
+        id === 'c1' ? { id, harness, messages: [{ role: 'user', text: 'Fix the cart' }] } : undefined,
       adopt: async body => {
         adoptions.push(body);
         return { adopted: [{ id: 'c1', session: 's1', name: 'Mika', status: 'stopped' }], refused: [] };
@@ -67,6 +69,7 @@ describe('the conversation import mount', () => {
         headers: human,
         loopback: true,
         query: [
+          ['source', 'ferretry'],
           ['harness', 'claude'],
           ['q', 'cart'],
           ['since', ''],
@@ -79,7 +82,7 @@ describe('the conversation import mount', () => {
     should(response.status).equal(200);
     should(response.headers.get('cache-control')).equal('no-store');
     should(jsonBody(response)).deepEqual(LISTING);
-    should(queries).deepEqual([{ harness: 'claude', q: 'cart', limit: 20 }]);
+    should(queries).deepEqual([{ source: 'ferretry', harness: 'claude', q: 'cart', limit: 20 }]);
   });
 
   it('should refuse a search it cannot read with a sentence', async () => {
@@ -117,5 +120,42 @@ describe('the conversation import mount', () => {
     should(response.status).equal(200);
     should(jsonBody(response)).containDeep({ adopted: [{ session: 's1' }] });
     should(adoptions).deepEqual([{ ...body, conversations: [{ id: 'c1', start: false }] }]);
+  });
+});
+
+describe('the conversation preview', () => {
+  it('should answer the last exchanges of one conversation, never cached', async () => {
+    // Arrange
+    const { subsystem } = stub();
+
+    // Act
+    const response = await dispatcher(subsystem).dispatch(
+      request({ path: '/v1/imports/conversations/claude/c1/preview', headers: human, loopback: true }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(response)).deepEqual({
+      id: 'c1',
+      harness: 'claude',
+      messages: [{ role: 'user', text: 'Fix the cart' }],
+    });
+  });
+
+  it('should refuse an unknown CLI or a bad id, and say when no such conversation is here', async () => {
+    // Arrange
+    const { subsystem } = stub();
+    const at = async (path: string) =>
+      await dispatcher(subsystem).dispatch(request({ path, headers: human, loopback: true }));
+
+    // Act
+    const unknownCli = await at('/v1/imports/conversations/gemini/c1/preview');
+    const badId = await at('/v1/imports/conversations/claude/-c1/preview');
+    const missing = await at('/v1/imports/conversations/codex/c2/preview');
+
+    // Assert
+    should([unknownCli.status, badId.status, missing.status]).deepEqual([400, 400, 404]);
+    should(jsonBody(unknownCli)).containDeep({ code: 'invalid_conversation' });
   });
 });

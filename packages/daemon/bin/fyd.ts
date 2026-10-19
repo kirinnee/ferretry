@@ -239,6 +239,7 @@ import {
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
 } from '../src/adapters/session/harness/index.ts';
+import { FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
@@ -297,7 +298,6 @@ import {
   StorageSignalRepository,
 } from '../src/adapters/session/signal/index.ts';
 import { FileLastSnapshotStore } from '../src/adapters/session/snapshot/index.ts';
-import { FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
 import {
   FileHarnessWrapperSource,
   FileSessionTranscriptMessageTokenCodec,
@@ -369,6 +369,7 @@ import {
   watchConfigFiles,
 } from '../src/lib/config-files/index.ts';
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
+import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -747,7 +748,6 @@ import {
   wardenEventTrigger,
   wardenTriggerEnabled,
 } from '../src/lib/index.ts';
-import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
@@ -6892,16 +6892,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       /**
        * The owner's existing conversations, found in Ferretry's shared history FIRST (where every
-       * runtime already sees them) and then in the CLI's own home, as the daemon inherited it. Read
-       * through the same parsers managed sessions use; adopted through the same start machinery.
+       * runtime already sees them, and what Continue lists) and then in the CLI's own home on this
+       * computer, as the daemon inherited it (which only importing lists). Read through the same
+       * parsers managed sessions use; adopted through the same start machinery. A transcript's hand-off
+       * pointer is read back only from a session's own folder, or as an agent coordinator's turn file
+       * (`~/.<coordinator>/<agent>/turns/turn-NNN.md`, kteam's layout).
        */
       const conversationImport = new ConversationImportService(
         new NodeConversationFiles(),
         [
-          { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude') },
-          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude') },
-          { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex') },
-          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex') },
+          { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude'), source: 'ferretry' },
+          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'), source: 'computer' },
+          { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex'), source: 'ferretry' },
+          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex'), source: 'computer' },
         ],
         { claude: claudeTranscriptParser, codex: codexTranscriptParser },
         new StorageConversationOwners(storage),
@@ -6923,6 +6926,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           new NodeConversationLinker(),
         ),
+        { roots: [paths.sessions], coordinatorHomes: [userHome] },
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({

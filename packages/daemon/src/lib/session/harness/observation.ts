@@ -51,6 +51,52 @@ function instant(value: string | undefined): string | undefined {
 }
 
 /**
+ * The model a Claude `/model <id>` command asked for, read off the record Claude Code writes when the
+ * command is typed into its prompt (`<command-name>/model</command-name>` beside
+ * `<command-args>claude-opus-5-5</command-args>`). Undefined for any other record, and for a bare
+ * `/model` — that opens the picker, and the choice made there is printed only as a display name
+ * (`Opus 5.5 (1M context)`) that no model id can be recovered from.
+ */
+function claudeModelCommand(event: TranscriptEvent): string | undefined {
+  if (event.harness !== 'claude' || event.kind !== 'message' || event.role !== 'user') return undefined;
+  if (!/<command-name>\s*\/model\s*<\/command-name>/u.test(event.text)) return undefined;
+  return stated(/<command-args>([^<]*)<\/command-args>/u.exec(event.text)?.[1]);
+}
+
+/**
+ * Claude Code's printed answer to a local command — the record it writes right after one — as whether
+ * it confirmed a `/model`: `Set model to …`, or `Kept model as …` for re-selecting the running model.
+ * Undefined for a record that is not a printed answer at all.
+ */
+function claudeModelConfirmed(event: TranscriptEvent): boolean | undefined {
+  if (event.harness !== 'claude' || event.kind !== 'message' || event.role !== 'user') return undefined;
+  const printed = /<local-command-(stdout|stderr)>([\s\S]*?)<\/local-command-\1>/u.exec(event.text);
+  if (printed === null) return undefined;
+  return printed[1] === 'stdout' && /^\s*(?:Set model to|Kept model as)\b/u.test(printed[2] ?? '');
+}
+
+/**
+ * The runtime evidence ONE event carries, given the `/model` command still awaiting its answer.
+ *
+ * A CLAUDE SWITCH IS CONFIRMED BY ITS OWN ANSWER, NOT BY THE NEXT TURN. Claude restates its model
+ * only on an assistant turn's usage record, so a `/model` typed at an idle prompt — which is exactly
+ * how the daemon switches a Claude session — left no evidence until somebody sent a message, and the
+ * composer said "switching…" for as long as nobody did. The command and its answer are two records,
+ * so the id is the one the command NAMED, taken only once Claude has printed that it took it. A
+ * refused command, or a bare `/model` whose picker choice is printed only as a display name, is no
+ * evidence at all. The next assistant turn then restates the model in the API's own spelling.
+ */
+function eventEvidence(
+  event: TranscriptEvent,
+  requested: string | undefined,
+): { readonly model?: string; readonly effort?: string } | undefined {
+  if (event.kind === 'settings')
+    return { model: stated(event.settings.model), effort: stated(event.settings.reasoningEffort) };
+  if (event.kind === 'usage') return { model: stated(event.usage.model) };
+  return requested !== undefined && claudeModelConfirmed(event) === true ? { model: requested } : undefined;
+}
+
+/**
  * Fold a transcript tail into the runtime it last showed.
  *
  * LAST EVIDENCE WINS, per field. A Codex settings record may state a level without restating the
@@ -61,13 +107,12 @@ export function projectObservedRuntime(events: readonly TranscriptEvent[]): Obse
   let model: string | undefined;
   let reasoningEffort: string | undefined;
   let at: string | undefined;
+  // The `/model <id>` still waiting for Claude's printed answer. Any answer settles it, taken or not.
+  let requested: string | undefined;
   for (const event of events) {
-    const observed =
-      event.kind === 'settings'
-        ? { model: stated(event.settings.model), effort: stated(event.settings.reasoningEffort) }
-        : event.kind === 'usage'
-          ? { model: stated(event.usage.model), effort: undefined }
-          : undefined;
+    const observed = eventEvidence(event, requested);
+    if (claudeModelConfirmed(event) !== undefined) requested = undefined;
+    requested = claudeModelCommand(event) ?? requested;
     if (observed === undefined || (observed.model === undefined && observed.effort === undefined)) continue;
     if (observed.model !== undefined) model = observed.model;
     if (observed.effort !== undefined) reasoningEffort = observed.effort;

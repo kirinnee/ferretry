@@ -2,14 +2,22 @@
  * WHAT THE SESSIONS BAR LISTS, as pure decisions.
  *
  * The left bar replaces the Sessions tab (the approved session-view redesign): every session on this
- * machine, grouped by project, with a status dot, a "needs you" badge and three filters — All, Needs
- * you, Running. It is a navigator, not the dashboard, so it answers a narrower question than the
- * dashboard does: "which of my agents is doing what right now, and which one wants me?"
+ * machine, grouped by project, with a status dot, a "needs you" badge and the fleet filters kteam's
+ * sidebar has — All · Agents · Interactive, and "Show stopped". It is a navigator, not the dashboard, so
+ * it answers a narrower question than the dashboard does: "which of my agents is doing what right
+ * now, and which one wants me?"
  *
- * WHICH SESSIONS. EVERY session the machine reports, as kteam's sidebar lists them. An earlier cut hid
- * anything finished more than a day ago, and the reader read that as the bar losing sessions: a finished
- * agent is still one you go back to for its transcript. The project groups and the filters, not a
- * silent age cut, are what keep the live ones findable.
+ * WHICH SESSIONS. A session that is over — completed, failed, stalled or stopped, which is to say its
+ * terminal is gone — is HIDDEN until the reader ticks "Show stopped". An earlier cut hid anything
+ * finished more than a day ago, and the reader read that as the bar losing sessions; a stopped agent is
+ * still one you go back to for its transcript, which is why the tick exists and says how many it is
+ * hiding. The ONE exception is the session on screen: it stays listed, because a bar that drops the page
+ * you are looking at reads as broken.
+ *
+ * COUNTS ARE THE LIST'S OWN PREDICATE. A segment's number is the length of the list that choosing that
+ * segment would draw, under the same stopped rule — never a fleet-wide total that stops matching the
+ * rows underneath it. "Show stopped (3)" is likewise the stopped sessions that tick would add under the
+ * mode chosen.
  *
  * WHAT A ROW SAYS: the status mark, the agent's name, its task, and its project DIRECTORY — the folder
  * it runs in, which tells two agents on one project apart (a worktree each).
@@ -21,10 +29,18 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { type FleetProject, groupByProject, type SessionGroup } from '../lib/fleet-grouping.ts';
-import { statusMark, TERMINAL_STATUSES } from './status-mark.tsx';
+import type { ModeFilter } from '../lib/controls.ts';
+import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
+import { TERMINAL_STATUSES } from './status-mark.tsx';
 
-export type SessionsBarFilter = 'all' | 'needs-you' | 'running';
+/** The two controls the bar owns: which kind of session, and whether the stopped ones are listed. */
+export interface SessionsListFilter {
+  readonly mode: ModeFilter;
+  readonly showStopped: boolean;
+}
+
+/** Stopped sessions hidden, every kind shown: what the bar opens with. */
+export const DEFAULT_LIST_FILTER: SessionsListFilter = { mode: 'all', showStopped: false };
 
 /** The session is waiting on a person, by its own account. */
 export const needsYou = (view: SessionView): boolean => {
@@ -39,35 +55,70 @@ export const needsYou = (view: SessionView): boolean => {
   );
 };
 
-/** Doing something right now: the status dot's own "active" class. */
-export const isRunning = (view: SessionView): boolean => statusMark(view).klass === 'active';
+/** The session is over: its terminal is gone and nothing will move it again. */
+export const isStopped = (view: SessionView): boolean => TERMINAL_STATUSES.has(view.state.status);
 
-const FILTERS: Readonly<Record<SessionsBarFilter, (view: SessionView) => boolean>> = {
-  all: () => true,
-  'needs-you': needsYou,
-  running: isRunning,
-};
+/** Whether the session is the kind a mode segment asks for. */
+export const matchesMode = (view: SessionView, mode: ModeFilter): boolean =>
+  mode === 'all' || view.config.mode === mode;
 
-export interface SessionsBarView {
-  readonly groups: readonly SessionGroup[];
-  readonly counts: Readonly<Record<SessionsBarFilter, number>>;
+/**
+ * Which sessions the bar draws before the kind is chosen: everything live, the stopped ones only when
+ * ticked, and the open session always. `keep` names the open one — a caller that has none passes nothing.
+ */
+export const listedBeforeMode = (
+  view: SessionView,
+  { showStopped }: SessionsListFilter,
+  keep?: (view: SessionView) => boolean,
+): boolean => showStopped || !isStopped(view) || keep?.(view) === true;
+
+/** The tallies the filter controls print, from the sessions already past the stopped rule. */
+export interface ListTallies {
+  readonly counts: ModeCounts;
+  /** How many stopped sessions ticking "Show stopped" would add under the mode chosen. */
+  readonly hiddenStopped: number;
 }
 
 /**
- * The bar's whole content in one pass. Counts are taken over the same pool the list draws from, so
- * the number on a filter is always what choosing it would show.
+ * Tallies over `sessions`, one machine's or all machines' alike. `keep` is as in `listedBeforeMode`.
+ */
+export const listTallies = (
+  sessions: readonly SessionView[],
+  filter: SessionsListFilter,
+  keep?: (view: SessionView) => boolean,
+): ListTallies => {
+  const listed = sessions.filter(view => listedBeforeMode(view, filter, keep));
+  return {
+    counts: {
+      all: listed.length,
+      auto: listed.filter(view => view.config.mode === 'auto').length,
+      interactive: listed.filter(view => view.config.mode === 'interactive').length,
+    },
+    hiddenStopped: sessions.filter(view => !listedBeforeMode(view, filter, keep) && matchesMode(view, filter.mode))
+      .length,
+  };
+};
+
+export interface SessionsBarView extends ListTallies {
+  readonly groups: readonly SessionGroup[];
+}
+
+/**
+ * The bar's whole content in one pass. The groups and the tallies come from the same pool, so the
+ * number on a segment is always what choosing it would show.
  */
 export const sessionsBarView = (
   sessions: readonly SessionView[],
   projects: readonly FleetProject[],
-  filter: SessionsBarFilter,
+  filter: SessionsListFilter,
+  keep?: (view: SessionView) => boolean,
 ): SessionsBarView => ({
-  groups: groupByProject(sessions.filter(FILTERS[filter]), projects, true),
-  counts: {
-    all: sessions.length,
-    'needs-you': sessions.filter(needsYou).length,
-    running: sessions.filter(isRunning).length,
-  },
+  groups: groupByProject(
+    sessions.filter(view => listedBeforeMode(view, filter, keep) && matchesMode(view, filter.mode)),
+    projects,
+    true,
+  ),
+  ...listTallies(sessions, filter, keep),
 });
 
 /** The second line under a session's name: what it is working on, else where. */

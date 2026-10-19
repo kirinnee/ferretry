@@ -35,6 +35,7 @@
         "harness/relaunch-settings-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/model-catalog-screenshot.tsx",
+        "harness/runtime-switch-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
@@ -55,6 +56,7 @@
         "scripts/build-composer-integration-fixture.ts",
         "tests/integration/fixtures/composer-editor-scene.tsx",
         "tests/integration/fixtures/all-machines-scene.tsx",
+        "tests/integration/fixtures/sessions-list-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
         "scripts/fy-render-shell/lottie-entry.ts"

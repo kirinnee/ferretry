@@ -2021,3 +2021,44 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 .fy-convo-note {
   padding: 0 var(--pad-panel) var(--flow-1);
 }
+/* Continue's open row: the last few exchanges, then the button that continues it. Each message is held
+   to two lines so four exchanges still fit a phone screen beside the row they belong to. */
+.fy-convo-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--flow-1);
+  padding: 0 var(--pad-panel) var(--flow-1);
+}
+.fy-convo-exchanges {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: var(--flow-1) 0 0;
+  list-style: none;
+  border-top: 1px dashed var(--fy-row-rule);
+}
+.fy-convo-exchange {
+  display: flex;
+  gap: var(--gap-sm);
+  min-width: 0;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+.fy-convo-exchange__who {
+  flex: 0 0 2.75rem;
+  color: var(--faint, var(--fy-muted));
+  font-weight: 600;
+}
+.fy-convo-exchange__text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fy-muted);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.fy-convo-exchange[data-role='user'] .fy-convo-exchange__text {
+  color: var(--fy-fg);
+}

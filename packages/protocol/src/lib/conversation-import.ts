@@ -6,17 +6,20 @@ import { HarnessSchema } from './session-base.ts';
 /**
  * Keeping an existing Claude Code / Codex conversation "on" as a ferret.
  *
- *   GET  /v1/imports/conversations[?harness=&q=&since=&limit=]  what the CLIs already hold on this machine
+ *   GET  /v1/imports/conversations[?source=&harness=&q=&since=&limit=]  what the CLIs already hold on this machine
  *        (searched on the daemon over its metadata index: text in the first/last user message or the
- *        project folder, a harness, an earliest last-activity; newest first)
+ *        project folder, where it is kept, a harness, an earliest last-activity; newest first)
+ *   GET  /v1/imports/conversations/:harness/:id/preview  the last few exchanges of one, before continuing it
  *   POST /v1/imports/conversations/adopt                    one Ferretry session per chosen conversation
  *
  * A listing row is METADATA ONLY: the project folder, a preview of the first thing the owner typed,
  * when it was last active, how many turns it has, the model, and the session that already owns it.
  * The transcript itself never crosses the wire here and is never copied: an adopted session reads the
- * CLI's own file and resumes it with the CLI's own resume path, so Chat shows the same file.
+ * CLI's own file and resumes it with the CLI's own resume path, so Chat shows the same file. The one
+ * exception is the preview of ONE conversation the owner asked about: its last few exchanges, each cut
+ * short, so a row can be told apart from its neighbours before it is continued.
  *
- * Both routes are governed (`fleet` configure): a listing reads the owner's local CLI data, and an
+ * Every route is governed (`fleet` configure): a listing reads the owner's local CLI data, and an
  * adoption creates sessions that can launch an agent.
  */
 export const CONVERSATION_IMPORT_PATH = '/v1/imports/conversations';
@@ -24,6 +27,10 @@ export const CONVERSATION_ADOPT_PATH = '/v1/imports/conversations/adopt';
 
 /** The preview is the first user message cut to this many characters, never the transcript. */
 export const CONVERSATION_PREVIEW_MAX = 120;
+/** How many exchanges (an owner's message and the replies to it) a conversation preview shows. */
+export const CONVERSATION_EXCHANGE_COUNT = 4;
+/** Each message in a conversation preview is cut to this many characters. */
+export const CONVERSATION_EXCHANGE_TEXT_MAX = 280;
 /** The most conversations one adoption may name. */
 export const CONVERSATION_ADOPT_MAX = 200;
 /** The most conversations one adoption may LAUNCH, so a picker cannot start a burst of agents. */
@@ -51,8 +58,20 @@ export const ImportableConversationSchema = z.strictObject({
 });
 export type ImportableConversation = z.infer<typeof ImportableConversationSchema>;
 
+/**
+ * Where a conversation is kept.
+ *
+ *   ferretry  Ferretry's own history: the shared pool every runtime's home reads and writes, which
+ *             holds what Ferretry's sessions said and every conversation imported into it
+ *   computer  the CLI's own home on this computer (`~/.claude`, `~/.codex`), which only importing reads
+ */
+export const ConversationSourceSchema = z.enum(['ferretry', 'computer']);
+export type ConversationSource = z.infer<typeof ConversationSourceSchema>;
+
 /** The listing query, as the daemon parses it from the URL. Every field narrows; none widens. */
 export const ConversationImportQuerySchema = z.strictObject({
+  /** Only conversations kept there. Absent reads both, Ferretry's copy first. */
+  source: ConversationSourceSchema.optional(),
   harness: HarnessSchema.optional(),
   /** Case-insensitive words, each of which must appear in the preview, the latest message or the folder. */
   q: z.string().max(200).optional(),
@@ -71,6 +90,21 @@ export const ConversationImportListingSchema = z.strictObject({
   skipped: z.number().int().nonnegative(),
 });
 export type ConversationImportListing = z.infer<typeof ConversationImportListingSchema>;
+
+/** One message of a conversation preview: who said it, cleaned of delivery wrappers, and cut short. */
+export const ConversationExchangeMessageSchema = z.strictObject({
+  role: z.enum(['user', 'assistant']),
+  text: z.string().min(1).max(CONVERSATION_EXCHANGE_TEXT_MAX),
+});
+export type ConversationExchangeMessage = z.infer<typeof ConversationExchangeMessageSchema>;
+
+/** `GET …/:harness/:id/preview`: the last few exchanges, oldest first. */
+export const ConversationPreviewSchema = z.strictObject({
+  id: ImportConversationIdSchema,
+  harness: HarnessSchema,
+  messages: z.array(ConversationExchangeMessageSchema),
+});
+export type ConversationPreview = z.infer<typeof ConversationPreviewSchema>;
 
 export const ConversationAdoptItemSchema = z.strictObject({
   id: ImportConversationIdSchema,
