@@ -7068,6 +7068,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
       const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
+      const packHooks = createSessionPackHooks(packTree, sessionEnvironments, sessionMutations, packConfig);
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
@@ -7114,7 +7115,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             async id => await adoptLearning(id),
             id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
             async (executable, harness) => await launchSettings.digest(executable, harness),
-            createSessionPackHooks(packTree, sessionEnvironments, sessionMutations, packConfig),
+            packHooks,
           ),
           attachmentStore,
         ),
@@ -7156,7 +7157,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new NodeWorkingDirectoryResolver(),
           spawnProvenance,
           clock,
-          async id => await adoptLearning(id),
+          // An adopted conversation is a top-level ferret: told about Pack mode like any other new one.
+          async id => {
+            await packHooks.adopt(id, true, undefined).catch(() => undefined);
+            await adoptLearning(id);
+          },
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           new NodeConversationLinker(),
         ),

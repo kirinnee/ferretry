@@ -17,7 +17,7 @@ and the same filesystem proof.
 | ----------------------- | --------------------------------------------------------------------------------------------- |
 | A ferret's switch       | `config.hypermedia` on its session document; **absent means on**                              |
 | What a launch is handed | `FY_HYPERMEDIA=1` or `0` in the pane environment                                              |
-| Who reads it            | `fy mcp serve`, which adds the instruction to its MCP `initialize` instructions iff it is `1` |
+| Who reads it            | the runtime wrapper, which appends the instruction to the system prompt iff it is `1`        |
 | Changing it             | `PATCH /v1/sessions/:sessionId/hypermedia {enabled}` — `operator`                             |
 | The UI                  | Info › Runtime "Hypermedia" row, Actions › "Hypermedia" toggle, an icon on the session header |
 
@@ -27,24 +27,25 @@ and the same filesystem proof.
   read as on, so it is instructed **at its next launch** (restart, resume or revive) unless the owner
   turns it off first.
 - **A change takes effect at the next launch, and the answer says so.** A running ferret's
-  environment and its MCP instructions were fixed when it started, so the switch never re-instructs a
+  environment and its system prompt were fixed when it started, so the switch never re-instructs a
   running ferret and never sends it a message — unlike passive learning, there is nothing here worth
   a turn. The PATCH answer's `note` names whether a restart is needed.
 
-### Why MCP instructions and not `--append-system-prompt`
+### Delivered as system instructions, per ferret
 
-A runtime's wrapper is materialised once and serves every ferret launched on it (see the header of
-`packages/fleet/src/lib/account/fixed-layer.ts`), so a launch argument cannot differ per ferret: the
-fixed layer's `--append-system-prompt` (Claude) and `developer_instructions` (Codex) carry the same
-text for every ferret on that runtime. Passive learning met the same constraint and rides the tools
-server the fixed layer already puts in every agent runtime; Hypermedia rides it the same way. Both
-harnesses place a server's `initialize` instructions in the model's system context, so the text is
-additional system prompt either way, combined with — never replacing — the person's own appended
-instruction and Ferretry's tools instruction.
+Every Ferretry instruction is in the **appended system prompt** — Claude's `--append-system-prompt`,
+Codex's `developer_instructions` — because a harness weighs that far above a tools server's MCP
+`initialize` instructions, which an agent can ignore. (Hypermedia used to ride those; it no longer does,
+and the tools server now says one line.)
 
-The joined text is, in order: the hypermedia instruction (when on), the built-in "Set up Ferretry"
-skill, then the lessons teaching (when passive learning is on). The short behavioural instruction goes
-first so it can never be the part a long skill pushes out.
+A runtime's wrapper is materialised once and serves every ferret launched on it, so a static launch
+argument could not differ per ferret. The wrapper therefore **composes the one value at exec time**
+(`packages/fleet/src/lib/wrappers.ts`): the person's own appended instruction, then Ferretry's tools and
+settings rules, then each per-ferret section whose switch the daemon set to `1` in that ferret's launch
+environment, in this order: hypermedia (`FY_HYPERMEDIA`), Pack mode (`FY_PACK`,
+[pack-mode.md](pack-mode.md)), lessons (`FY_LEARNING_PASSIVE`, [learning.md](learning.md)). A restart,
+resume or revive runs the same wrapper with the same stored environment, so it keeps them. A wrapper run
+by hand, where nothing set the switches, carries no section.
 
 ## The injected instruction
 

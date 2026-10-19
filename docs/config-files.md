@@ -18,6 +18,8 @@ wire).
 | `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                                                                                                                                                                 |
 | `warden.yaml`                   | the Warden: on, its layers (rules always; Jev and LLM opt-in) and their caps — see [The Warden](#the-warden)                                                                                                                                                  |
 | `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                                                                                    |
+| `pack.yaml`                     | Pack mode: on/off, who picks a sub-ferret's model (`agent` or `jev`), the sub-ferret `limits`, the start `probe`, Jev's cap ([pack-mode.md](pack-mode.md)) |
+| `models-guide.yaml`             | the models guide: use cases and the models that suit each, best first; absent means the guide built from the catalogs ([pack-mode.md](pack-mode.md)) |
 | `voice.yaml`                    | who cleans up dictated text (provider, style, your own prompts, conversation context), and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device |
 | `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                                                                             |
 
@@ -41,7 +43,7 @@ that is not there). Three rules, in order:
    fleet change of that round is held back and the machine keeps the fleet it had.
 2. **Loosening waits for the owner.** An edit that loosens what the machine may spend or what agents may do
    is HELD and the tighter version stays in effect: a Warden layer that spends switched on (Jev, LLM),
-   a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; an agent control turned on (Ferretry
+   a cap raised, something it may now do alone, its concurrency raised or its cadence shortened; lesson mining turned on or its caps raised; Pack mode switched on, Jev choosing sub-ferret models, a sub-ferret limit or depth raised; an agent control turned on (Ferretry
    settings included); Agent permissions set to `skip`; dictated text sent to a provider. Tightening always
    applies at once. Deleting a file is an edit to its defaults and is judged the same way. The owner confirms
    a held edit by its etag — at the machine with `fy config confirm <file>`, or in the app with a passkey
@@ -241,8 +243,9 @@ kill switch, not a boundary: an agent with plain file access can edit the files 
 2 — an agent's loosening waits for the owner either way.
 
 The built-in **Set up Ferretry** skill teaches any agent the layout, the schemas, the commands and the rules.
-It is the Ferretry tools server's instructions in every agent runtime, and `fy config guide` prints it as a
-`SKILL.md` to drop into any skills directory.
+Every agent runtime's system prompt carries its short form (where the files are, no secret values,
+`fy config check` after every edit, a loosening waits for the owner) and points at `fy config guide`, which
+prints the whole skill as a `SKILL.md` to drop into any skills directory.
 
 ## Live changes
 
