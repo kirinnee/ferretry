@@ -2227,11 +2227,13 @@ describe('AppShell', () => {
    * WHAT THIS TEST CANNOT PROVE: it observes HTTP only, so it is not the guard against a spend
    * regression. That guard is `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`.
    */
-  it('mounts both daemon pickers for a new session, reading stored health and checking nothing', async () => {
+  it('mounts the runtime field and the folder picker for a new session, reading stored health and checking nothing', async () => {
     const { healthReads, view } = await renderShell(`/d/${ALPHA}/new`, [alpha.daemonId]);
     try {
       await settle();
-      expect(view.container.querySelector('#fy-new-session-agent')?.getAttribute('role')).toBe('combobox');
+      // This harness publishes no runtimes, so the roster read fails and the runtime is typed; the buttons
+      // themselves are exercised by the Launch-link tests below and by new-session-page.test.tsx.
+      expect(view.container.querySelector('#fy-new-session-agent')?.getAttribute('role')).toBeNull();
       expect(view.container.querySelector('#fy-new-session-cwd')?.getAttribute('role')).toBe('combobox');
       const paths = healthReads.map(read => read.path);
       expect(paths).toContain('/v1/fleet/runtimes');
@@ -2264,31 +2266,33 @@ describe('AppShell', () => {
       sameAs: [],
     });
     const roster = [pickerAccount('claude-auto-first'), pickerAccount('claude-auto-named')];
+    const chosenRuntime = (container: HTMLElement): string | undefined =>
+      [...container.querySelectorAll<HTMLInputElement>('input[name="fy-new-session-runtime"]')].find(
+        radio => radio.checked,
+      )?.value;
 
     afterEach(() => setPath('/'));
 
-    it('puts the runtime named by ?agent= in the Account box, and starts nothing', async () => {
+    it('selects the runtime named by ?agent= on its button, and starts nothing', async () => {
       const { view } = await renderShell(`/d/${ALPHA}/new?agent=claude-auto-named`, [alpha.daemonId], {
         accounts: roster,
       });
       try {
         await settle();
-        const box = must(view.container.querySelector<HTMLInputElement>('#fy-new-session-agent'), 'the Account box');
-        expect(box.value).toBe('claude-auto-named');
+        expect(chosenRuntime(view.container)).toBe('claude-auto-named');
         expect(view.container.querySelector('[data-route]')?.textContent).toBe('Sessions, New');
       } finally {
         await view.unmount();
       }
     });
 
-    it('falls back to the first usable account when there is no hint, an empty one, or one it cannot use', async () => {
+    it('falls back to the first usable runtime when there is no hint, an empty one, or one it cannot use', async () => {
       const accounts = [pickerAccount('claude-auto-first'), pickerAccount('claude-auto-down', false)];
       for (const search of ['', '?agent=', '?agent=claude-auto-down', '?agent=claude-auto-nobody']) {
         const { view } = await renderShell(`/d/${ALPHA}/new${search}`, [alpha.daemonId], { accounts });
         try {
           await settle();
-          const box = must(view.container.querySelector<HTMLInputElement>('#fy-new-session-agent'), 'the Account box');
-          expect(box.value).toBe('claude-auto-first');
+          expect(chosenRuntime(view.container)).toBe('claude-auto-first');
         } finally {
           await view.unmount();
         }
