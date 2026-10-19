@@ -11,6 +11,8 @@
  * Nothing here has a network path.
  */
 
+import { type CaptureMonitor, type MeterAudioGlobalLike, streamMonitor } from './level-monitor.ts';
+
 /** The sample rate Parakeet was trained on. */
 export const PARAKEET_SAMPLE_RATE = 16_000;
 
@@ -48,7 +50,7 @@ interface OfflineAudioContextLike {
 }
 
 /** The slice of the page this module needs, so a test supplies plain objects. */
-export interface AudioCaptureGlobalLike {
+export interface AudioCaptureGlobalLike extends MeterAudioGlobalLike {
   readonly navigator?: {
     readonly mediaDevices?: { getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStreamLike> };
   };
@@ -58,6 +60,11 @@ export interface AudioCaptureGlobalLike {
 
 /** One recording in progress. */
 export interface AudioRecording {
+  /**
+   * A read-only level tap on THIS recording's stream, for the dictation meter. `null` when the page
+   * has no Web Audio; the recording is unaffected either way.
+   */
+  readonly monitor: CaptureMonitor | null;
   /**
    * Everything recorded so far, decoded to 16 kHz mono, while recording carries on. Near-live words
    * (`near-live.ts`) read it about once a second; it decodes the whole take each time, which costs
@@ -141,8 +148,10 @@ export function browserAudioCapture(global: AudioCaptureGlobalLike): AudioCaptur
         settle?.reject((event as { error?: unknown } | null)?.error ?? event);
       };
       recorder.start();
+      const monitor = streamMonitor(stream, global);
       let done = false;
       return {
+        monitor,
         peek: async () => {
           if (done) return new Float32Array();
           await new Promise<void>(resolve => {

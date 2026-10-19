@@ -9,7 +9,7 @@ import {
   formatElapsed,
   splitLiveCaption,
 } from '../../src/components/dictation-sheet.tsx';
-import type { CaptureMonitor } from '../../src/components/input-waveform.tsx';
+import type { CaptureMonitor } from '../../src/lib/stt/level-monitor.ts';
 import { interact, mount, must, pressKey } from '../support/dom.ts';
 
 const noop = (): void => undefined;

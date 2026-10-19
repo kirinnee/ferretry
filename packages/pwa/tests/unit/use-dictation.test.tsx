@@ -16,6 +16,7 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { type AppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { BrowserRecognitionError } from '../../src/lib/stt/browser-recognition.ts';
+import type { CaptureMonitor, MicMeter, MicMeterPort } from '../../src/lib/stt/level-monitor.ts';
 import type { ParakeetSessionOptions } from '../../src/lib/stt/parakeet-session.ts';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { RemoteEnhancementError } from '../../src/lib/stt/remote-enhancement.ts';
@@ -694,7 +695,10 @@ describe('useDictation with the engine the person chose', () => {
 
   it('shows Parakeet’s near-live words, then replaces them with the final text on Stop', async () => {
     const { voice, sessions } = fakeVoice();
-    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
+    const view = await harness({
+      parakeet: voice,
+      settings: settingsWith({ engine: 'parakeet', liveWordsOptIn: true }),
+    });
     await interact(() => view.handle().start());
     const session = sessions[0] as FakeSession;
     expect(session.options.liveWords).toBe(true);
@@ -722,11 +726,12 @@ describe('useDictation with the engine the person chose', () => {
     await view.unmount();
   });
 
-  it('passes the Live words setting through, and ignores words from a cancelled take', async () => {
+  it('keeps Live words off by default, and ignores words from a cancelled take', async () => {
     const { voice, sessions } = fakeVoice();
-    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet', liveWords: false }) });
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
     await interact(() => view.handle().start());
     const session = sessions[0] as FakeSession;
+    expect(DEFAULT_STT_SETTINGS.liveWordsOptIn).toBe(false);
     expect(session.options.liveWords).toBe(false);
     await interact(() => view.handle().cancel());
     await interact(() => session.options.onLive?.({ committed: 'late', interim: '', paused: false }));
@@ -771,6 +776,166 @@ describe('useDictation with the engine the person chose', () => {
       code: 'model-not-installed',
       message: 'Parakeet is not installed on this device yet.',
     });
+    await view.unmount();
+  });
+});
+
+/**
+ * The input meter, for both engines. Parakeet hands the hook the tap on its own recording; browser
+ * speech owns its microphone, so the hook opens a meter-only stream beside it and must release it
+ * on every way out.
+ */
+describe('useDictation — the input meter', () => {
+  const monitor: CaptureMonitor = { createAnalyser: () => null };
+
+  const fakeMeter = () => {
+    const state = { opened: 0, released: 0, outcome: 'open' as 'open' | 'null' | 'reject' };
+    let waiting: ((meter: MicMeter | null) => void) | null = null;
+    const meter: MicMeter = { monitor, release: () => (state.released += 1) };
+    const port: MicMeterPort = {
+      open: () => {
+        state.opened += 1;
+        if (state.outcome === 'reject') return Promise.reject(new Error('blocked'));
+        if (state.outcome === 'null') return Promise.resolve(null);
+        return new Promise(resolve => {
+          waiting = resolve;
+        });
+      },
+    };
+    return { port, state, grant: () => waiting?.(meter) };
+  };
+
+  it('opens no meter and shows no tap before recording starts', async () => {
+    const provider = fakeRecognitionProvider();
+    const meter = fakeMeter();
+    const view = await harness({ recognition: provider, meter: meter.port });
+    await interact(() => view.handle().start());
+    expect(meter.state.opened).toBe(0);
+    expect(view.handle().inputMonitor).toBeNull();
+    await view.unmount();
+  });
+
+  it('gives browser voice a meter once the engine is live, and closes it on Stop', async () => {
+    const provider = fakeRecognitionProvider();
+    const meter = fakeMeter();
+    const view = await harness({ recognition: provider, meter: meter.port });
+    await record(view, provider);
+    expect(meter.state.opened).toBe(1);
+    await interact(async () => {
+      meter.grant();
+      await Promise.resolve();
+    });
+    expect(view.handle().inputMonitor).toBe(monitor);
+
+    await interact(() => view.handle().stop());
+    expect(meter.state.released).toBe(1);
+    expect(view.handle().inputMonitor).toBeNull();
+    await view.unmount();
+  });
+
+  it('opens one meter per take even when the engine restarts and reports start again', async () => {
+    const provider = fakeRecognitionProvider();
+    const meter = fakeMeter();
+    const view = await harness({ recognition: provider, meter: meter.port });
+    await record(view, provider);
+    await interact(() => provider.begin());
+    await interact(() => provider.begin());
+    expect(meter.state.opened).toBe(1);
+    await view.unmount();
+  });
+
+  it('releases a meter that finishes opening after the take was cancelled', async () => {
+    const provider = fakeRecognitionProvider();
+    const meter = fakeMeter();
+    const view = await harness({ recognition: provider, meter: meter.port });
+    await record(view, provider);
+    await interact(() => view.handle().cancel());
+    await interact(async () => {
+      meter.grant();
+      await Promise.resolve();
+    });
+    expect(meter.state.released).toBe(1);
+    expect(view.handle().inputMonitor).toBeNull();
+    await view.unmount();
+  });
+
+  it('closes the meter when the take fails, and on unmount', async () => {
+    const provider = fakeRecognitionProvider();
+    const meter = fakeMeter();
+    const view = await harness({ recognition: provider, meter: meter.port });
+    await record(view, provider);
+    await interact(async () => {
+      meter.grant();
+      await Promise.resolve();
+    });
+    await interact(() => provider.fail('not-allowed', 'blocked'));
+    expect(meter.state.released).toBe(1);
+    expect(view.handle().inputMonitor).toBeNull();
+
+    const again = fakeMeter();
+    const second = await harness({ recognition: provider, meter: again.port });
+    await record(second, provider);
+    await interact(async () => {
+      again.grant();
+      await Promise.resolve();
+    });
+    await second.unmount();
+    expect(again.state.released).toBe(1);
+    await view.unmount();
+  });
+
+  it('records all the same when the meter cannot open, whichever way it fails', async () => {
+    for (const outcome of ['null', 'reject'] as const) {
+      const provider = fakeRecognitionProvider();
+      const meter = fakeMeter();
+      meter.state.outcome = outcome;
+      const view = await harness({ recognition: provider, meter: meter.port });
+      await record(view, provider);
+      await interact(async () => {
+        await Promise.resolve();
+      });
+      expect(view.handle().phase).toBe('recording');
+      expect(view.handle().inputMonitor).toBeNull();
+      await view.unmount();
+    }
+  });
+
+  it('opens no meter for browser voice when the page offers none', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({ recognition: provider, meter: null });
+    await record(view, provider);
+    expect(view.handle().phase).toBe('recording');
+    expect(view.handle().inputMonitor).toBeNull();
+    await view.unmount();
+  });
+
+  it('takes Parakeet’s tap from the session and never opens a second microphone', async () => {
+    const meter = fakeMeter();
+    const created: { options: ParakeetSessionOptions }[] = [];
+    const voice = {
+      support: { available: true },
+      createSession: (options: ParakeetSessionOptions) => {
+        created.push({ options });
+        return { start: () => undefined, finish: () => new Promise<string>(() => undefined), cancel: () => undefined };
+      },
+    } as unknown as ParakeetVoice;
+    const view = await harness({
+      parakeet: voice,
+      meter: meter.port,
+      settings: settingsWith({ engine: 'parakeet' }),
+    });
+    await interact(() => view.handle().start());
+    const options = (created[0] as { options: ParakeetSessionOptions }).options;
+    await interact(() => options.onStart());
+    await interact(() => options.onMonitor?.(monitor));
+    expect(view.handle().inputMonitor).toBe(monitor);
+    expect(meter.state.opened).toBe(0);
+
+    await interact(() => options.onMonitor?.(null));
+    expect(view.handle().inputMonitor).toBeNull();
+    await interact(() => view.handle().cancel());
+    await interact(() => options.onMonitor?.(monitor));
+    expect(view.handle().inputMonitor).toBeNull();
     await view.unmount();
   });
 });
