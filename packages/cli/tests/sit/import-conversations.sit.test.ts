@@ -206,13 +206,13 @@ describe(`import conversations (SIT, ${useInProcess ? 'in-process' : 'compiled b
     should(daemon.adoptRequests.length).equal(requestsBefore);
   });
 
-  it('`fy new` without --continue should say to use `fy start`, and refuse', async () => {
+  it('`fy new` without --continue starts a sub-ferret (Pack mode), so with no brief it asks for one and refuses', async () => {
     // Act
     const result = await cli(['new']);
 
     // Assert
     should(result.code).equal(1);
-    should(result.err).containEql(`${binaryName} start`);
+    should(result.err).containEql(`give the brief: ${binaryName} new --runtime <runtime>`);
   });
 
   it('`fy new --continue` should open the one conversation it finds with a unique query', async () => {

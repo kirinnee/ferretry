@@ -56,6 +56,8 @@ import {
   type LearningConfig,
   localOnlyNotice,
   type MigrateSessionRequest,
+  type PackConfig,
+  type PackRefusal,
   type RegisterProjectRequest,
   type RuntimeControlRequest,
   refusalNotice,
@@ -204,6 +206,7 @@ import {
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
+import { bunProbeSpawn, CliPackProbe, FilePackSpendLedger, readSessionResult } from '../src/adapters/pack/index.ts';
 import {
   CatalogPrices,
   ConfigFileLearningSettings,
@@ -755,6 +758,19 @@ import {
   wardenEventTrigger,
   wardenTriggerEnabled,
 } from '../src/lib/index.ts';
+import {
+  admitChild,
+  depthOf,
+  JevPackRanker,
+  type PackParent,
+  PackService,
+  PackStartRefused,
+  packInstructed,
+  ProbeCache,
+} from '../src/lib/pack/index.ts';
+import { SessionPackService } from '../src/lib/session/pack/index.ts';
+import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
+import { PACK_ENV } from '@ferretry/fleet';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
@@ -1772,6 +1788,8 @@ function createSessionControlSubsystem(
   /** A digest of the fleet settings a wrapper launches under, recorded so a later read can say the
    *  running process is on older ones (`FileLaunchSettingsDigest`). */
   launchSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>,
+  /** Pack mode's two hooks into every start: the sub-ferret limits, and the new ferret's own switch. */
+  pack: SessionPackHooks,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1867,6 +1885,17 @@ function createSessionControlSubsystem(
         },
         await spawnAncestry(storage, sessions),
       );
+      // PACK MODE'S LIMITS, before anything is claimed or written: a parent already running as many
+      // sub-ferrets as it may, or one too deep to start its own, is refused here whichever command
+      // asked (docs/pack-mode.md). A warden's own spawns are the Warden's to bound, not this.
+      if (request.parent !== undefined && !stamped.provenance.wardenLineage) {
+        const refusal = await pack.admit(request.parent);
+        if (refusal !== undefined)
+          throw new SessionControlError(
+            refusal.code === 'depth_exceeded' ? 'depth_exceeded' : 'limit_reached',
+            refusal.message,
+          );
+      }
       // BEFORE the callsign is claimed, so a start refused over an unusable attachment does not park
       // a pool name for the whole resolution window on a session that never happens.
       const opening = composeOpeningMessage(attachments, id, request);
@@ -2006,6 +2035,11 @@ function createSessionControlSubsystem(
         if (opening.files.length > 0) await storeAttachments(lifecycle, attachments, id, opening.files);
         if (stamped.label !== LEARNING_MINER_LABEL && !stamped.provenance.wardenLineage)
           await adoptLearning(id).catch(() => undefined);
+        // A miner or a warden is never told about Pack mode; every other ferret is, unless the machine's
+        // switch is off or it sits too deep to start its own. A failure leaves it untold, never unstarted.
+        await pack
+          .adopt(id, stamped.label !== LEARNING_MINER_LABEL && !stamped.provenance.wardenLineage, request.parent)
+          .catch(() => undefined);
         // AFTER the record and BEFORE the launch, which is the only window in which both halves are
         // true: the board's session directory reads the session's own documents, so the target must
         // exist for the grant to name it, and a refusal must not have cost an agent.
@@ -3028,6 +3062,14 @@ function createSessionRenameSubsystem(
   };
 }
 
+/** Pack mode's hooks into a session start (docs/pack-mode.md). */
+interface SessionPackHooks {
+  /** Why `parent` may not start another sub-ferret now, or `undefined` when it may. */
+  admit(parent: string): Promise<PackRefusal | undefined>;
+  /** Records the new ferret's switch and writes `FY_PACK` into its launch environment. */
+  adopt(id: SessionId, eligible: boolean, parent: string | undefined): Promise<void>;
+}
+
 /** A session status after which no process runs until the session is launched again. */
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
@@ -3077,6 +3119,102 @@ function createSessionHypermediaSubsystem(
     },
   };
 }
+/** Pack mode's view of one session's place in the tree: its facts as a parent, from the session documents. */
+interface PackTree {
+  parent(id: string): Promise<PackParent | undefined>;
+  depth(id: string): Promise<number>;
+}
+
+function createPackTree(sessions: SessionDirectorySubsystem): PackTree {
+  const depth = async (id: string): Promise<number> =>
+    await depthOf(id, async candidate => (await sessions.get(candidate).catch(() => undefined))?.config);
+  return {
+    depth,
+    parent: async id => {
+      const view = await sessions.get(id).catch(() => undefined);
+      if (view === undefined) return undefined;
+      const all = await sessions.list();
+      return {
+        id: view.config.id,
+        interactive: view.config.mode === 'interactive',
+        depth: await depth(view.config.id),
+        runningChildren: all.filter(
+          child => child.config.parent === view.config.id && !HYPERMEDIA_NOT_RUNNING.has(child.state.status),
+        ).length,
+        cwd: view.config.cwd,
+        pack: view.config.pack,
+      };
+    },
+  };
+}
+
+/**
+ * Pack mode's two hooks into every start (docs/pack-mode.md). The limits: a parent the documents do
+ * not know is left alone, as a start always left it. The switch: `FY_PACK` in the new ferret's launch
+ * environment, `1` exactly when the machine's switch is on and it sits shallow enough to start its own.
+ */
+function createSessionPackHooks(
+  tree: PackTree,
+  environments: FileSessionEnvironmentStore,
+  serial: KeyedSerialExecutor,
+  packConfig: () => Promise<PackConfig>,
+): SessionPackHooks {
+  return {
+    admit: async parent => {
+      const facts = await tree.parent(parent);
+      return facts === undefined ? undefined : admitChild(facts, (await packConfig()).limits);
+    },
+    adopt: async (id, eligible, parent) => {
+      const config = await packConfig();
+      const depth = parent === undefined ? 0 : (await tree.depth(parent)) + 1;
+      const on = eligible && packInstructed(config, undefined, depth);
+      await serial.run(`session:${id}`, async () => {
+        await environments.write(id, { ...(await environments.read(id)), [PACK_ENV]: on ? '1' : '0' });
+      });
+    },
+  };
+}
+
+/** One ferret's own Pack switch: the document and the launch variable, under the session's lock. */
+function createSessionPackSwitch(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  environments: FileSessionEnvironmentStore,
+  serial: KeyedSerialExecutor,
+  tree: PackTree,
+  packConfig: () => Promise<PackConfig>,
+  clock: ClockPort,
+): PackSubsystem['setSwitch'] {
+  const service = new SessionPackService({
+    facts: async reference => {
+      const id = tryParseSessionId(reference);
+      const view = id === undefined ? undefined : await sessions.get(id);
+      return view === undefined
+        ? undefined
+        : { enabled: view.config.pack, running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status) };
+    },
+    write: async (reference, enabled, at) => {
+      const id = parseSessionId(reference);
+      const view = await sessions.get(id);
+      const parent = view?.config.parent;
+      const depth = parent === undefined ? 0 : (await tree.depth(parent)) + 1;
+      const on = packInstructed(await packConfig(), enabled, depth);
+      await serial.run(`session:${id}`, async () => {
+        await storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), pack: enabled, updatedAt: at }));
+        await environments.write(id, { ...(await environments.read(id)), [PACK_ENV]: on ? '1' : '0' });
+      });
+    },
+    now: () => new Date(clock.now()).toISOString(),
+  });
+  return async (reference, enabled) => {
+    const outcome = await service.set(reference, enabled);
+    const view = await sessions.get(parseSessionId(reference));
+    if (view === undefined)
+      throw new Error(`session ${reference} was switched but its documents do not satisfy the protocol`);
+    return { view, outcome };
+  };
+}
+
 /**
  * How long the daemon remembers when the last sweep finished, for its own health report.
  *
@@ -6934,6 +7072,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
       // A new ferret's passive-learning default, assigned once the learning subsystem below exists.
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
+      // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
+      const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
+      const packTree = createPackTree(sessions);
+      const packHooks = createSessionPackHooks(packTree, sessionEnvironments, sessionMutations, packConfig);
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
@@ -6980,6 +7122,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             async id => await adoptLearning(id),
             id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
             async (executable, harness) => await launchSettings.digest(executable, harness),
+            packHooks,
           ),
           attachmentStore,
         ),
@@ -7021,7 +7164,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new NodeWorkingDirectoryResolver(),
           spawnProvenance,
           clock,
-          async id => await adoptLearning(id),
+          // An adopted conversation is a top-level ferret: told about Pack mode like any other new one.
+          async id => {
+            await packHooks.adopt(id, true, undefined).catch(() => undefined);
+            await adoptLearning(id);
+          },
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           new NodeConversationLinker(),
         ),
@@ -7486,7 +7633,92 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         executors: fleetSetup.executors,
         presets: async () => await providerPresets.presets(),
       });
+      /**
+       * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
+       * the same session start every surface uses — so its limits, its callsigns and its launch are the
+       * ones a plain start gets. Probes run the runtime's own wrapper with its login's launch environment.
+       */
+      const packService = new PackService({
+        settings: async () => {
+          const effective = (await configFiles.load()).evaluation.effective;
+          return {
+            config: effective.pack,
+            guideFile: effective.modelsGuide,
+            jevUsdPerMillionInputTokens: effective.warden.guard.usdPerMillionInputTokens,
+          };
+        },
+        catalogs: async () =>
+          modelCatalogsView(await modelCatalogService.catalogs(), {
+            origin: modelCatalogOrigin,
+            enabled: publishedModelCatalog.enabled,
+            ...(await publishedModelCatalog.status()),
+          }).catalogs,
+        facts: async () => {
+          const [runtimes, credentials, machine] = await Promise.all([
+            fleetCatalog.runtimes(),
+            fleetCredentials.list(),
+            fleetCatalog.machine(undefined),
+          ]);
+          return { runtimes: runtimes.runtimes, credentials: credentials.credentials, tools: machine.tools };
+        },
+        parent: async id => await packTree.parent(id),
+        probe: (() => {
+          const cache = new ProbeCache(
+            new CliPackProbe(
+              accountLaunchEnvironment,
+              bunProbeSpawn,
+              Object.fromEntries(
+                Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+              ),
+              () => performance.now(),
+            ),
+            () => Date.parse(clock.now()),
+          );
+          return async (request, ttlMs) => await cache.probe(request, ttlMs);
+        })(),
+        start: async request => {
+          try {
+            return await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request));
+          } catch (error) {
+            if (
+              error instanceof SessionControlError &&
+              (error.failure === 'limit_reached' || error.failure === 'depth_exceeded')
+            )
+              throw new PackStartRefused({ code: error.failure, message: error.message });
+            throw error;
+          }
+        },
+        jev: new JevPackRanker(outboundAuthorizer),
+        spend: (() => {
+          const ledger = new FilePackSpendLedger(stateFiles, join(paths.state, 'pack-jev-spend.json'), () =>
+            clock.now().slice(0, 10),
+          );
+          return { today: async () => await ledger.spent(), record: async usd => await ledger.record(usd) };
+        })(),
+        bin: CLIENT_NAME,
+      });
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
+        pack: {
+          service: packService,
+          result: async reference => {
+            const id = tryParseSessionId(reference);
+            const view = id === undefined ? undefined : await sessions.get(id);
+            if (id === undefined || view === undefined) return undefined;
+            return await readSessionResult(
+              view,
+              async () => await stateFiles.readText(join(createSessionPaths(paths, id).directory, 'summary.md')),
+            );
+          },
+          setSwitch: createSessionPackSwitch(
+            storage,
+            sessions,
+            sessionEnvironments,
+            sessionMutations,
+            packTree,
+            packConfig,
+            clock,
+          ),
+        },
         health: createHealthSubsystem(health, scratch),
         doctor: {
           report: async () => {

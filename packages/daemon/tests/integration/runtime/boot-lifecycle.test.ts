@@ -28,6 +28,8 @@ import {
   SendResultSchema,
   SessionConfigSchema,
   SessionHypermediaPatchResultSchema,
+  SessionPackPatchResultSchema,
+  SessionResultSchema,
   SessionListSchema,
   SessionStateSchema,
   SessionTranscriptPageSchema,
@@ -1790,6 +1792,96 @@ describe('daemon boot lifecycle', () => {
     should(stored).have.property('FY_HYPERMEDIA', '0');
     should(sessionPaneEnvironment(parseSessionId(started.config.id), stored)).have.property('FY_HYPERMEDIA', '0');
     should(absent.status).equal(404);
+  });
+
+  /**
+   * Pack mode, through the real composition root (docs/pack-mode.md): every start with a parent is held
+   * to the sub-ferret limits whichever route made it, each new ferret's launch environment says whether
+   * it is told about Pack mode (never at the deepest level), the per-ferret switch writes both places,
+   * and a running ferret's result reads as unfinished.
+   *
+   * WHY THIS TIER. The hooks are wired in `bin/fyd.ts`, which is excluded from both coverage ledgers.
+   */
+  it('should hold every start with a parent to the sub-ferret limits and tell each ferret about Pack mode', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-pack');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: new RecordingSessionLauncher(),
+    };
+    await seedFleet(home);
+    // Tighter than the defaults, so it applies at once: one running sub-ferret per unattended ferret.
+    await writeFile(join(home, 'config', 'pack.yaml'), 'limits:\n  autoChildren: 1\n', { mode: 0o600 });
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'x-ferretry-client': 'cli',
+      'content-type': 'application/json',
+    };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startOne = async (request: string, parent?: string): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'x-fy-request-id': request },
+        body: JSON.stringify({
+          agent: WRAPPER,
+          mode: 'auto',
+          prompt: 'work',
+          cwd: home,
+          ...(parent === undefined ? {} : { parent }),
+        }),
+      });
+    const environments = new FileSessionEnvironmentStore(id => join(home, 'state', 'sessions', id));
+    const pack = async (id: string): Promise<string | undefined> =>
+      (await environments.read(parseSessionId(id))).FY_PACK;
+
+    // Act
+    const root = SessionViewSchema.parse(await (await startOne('req-pack-root')).json());
+    const child = SessionViewSchema.parse(await (await startOne('req-pack-child', root.config.id)).json());
+    const second = await startOne('req-pack-second', root.config.id);
+    const grandchild = SessionViewSchema.parse(await (await startOne('req-pack-grand', child.config.id)).json());
+    const tooDeep = await startOne('req-pack-deep', grandchild.config.id);
+    const off = await fetch(`${sessions}/${root.config.id}/pack`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ enabled: false }),
+    });
+    const offBody = SessionPackPatchResultSchema.parse(await off.json());
+    const result = SessionResultSchema.parse(
+      await (await fetch(`${sessions}/${child.config.id}/result`, { headers })).json(),
+    );
+    const refusals = [await second.json(), await tooDeep.json()] as { code?: string }[];
+    const environment = {
+      root: await pack(root.config.id),
+      child: await pack(child.config.id),
+      grand: await pack(grandchild.config.id),
+    };
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(child.config.parent).equal(root.config.id);
+    should(second.status).equal(409);
+    should(tooDeep.status).equal(409);
+    should(refusals.map(body => body.code)).deepEqual(['limit_reached', 'depth_exceeded']);
+    should({ ...environment, root: environment.root }).deepEqual({ root: '0', child: '1', grand: '0' });
+    should(offBody.view.config.pack).be.false();
+    should(offBody.note).startWith('Pack mode is off');
+    should(result).deepEqual({ id: child.config.id, status: child.state.status, finished: false });
   });
 
   /**

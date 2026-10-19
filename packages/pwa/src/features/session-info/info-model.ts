@@ -50,6 +50,7 @@ export const INFO_HINT = {
     'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
   hypermedia:
     'Whether this ferret is told it may explain with diagrams, drawings, interactive pages and media in chat. A change takes effect when it next starts. Change it in Actions.',
+  pack: 'Pack mode: whether this ferret is told it may delegate to sub-ferrets and pick the model each one runs on. The machine’s own switch and the depth limit still apply. A change takes effect at its next launch. Change it in Actions.',
 } as const;
 
 /** The CLI a harness is, in words. */
@@ -148,3 +149,12 @@ export const hypermediaOn = (view: SessionView): boolean => sessionHypermediaEna
 /** The Hypermedia row's value: said as what the ferret is told. */
 export const hypermediaLabel = (on: boolean): string =>
   on ? 'On · may explain with diagrams and media' : 'Off · plain text';
+
+/**
+ * Whether a ferret is told it may delegate to sub-ferrets (docs/pack-mode.md). ABSENT MEANS ON, as for
+ * hypermedia: the machine's own switch and the depth limit still apply on top of it.
+ */
+export const packOn = (view: SessionView): boolean => view.config.pack !== false;
+
+/** The Pack mode row's value: said as what the ferret is told, and when a change lands. */
+export const packLabel = (on: boolean): string => (on ? 'On · may delegate to sub-ferrets' : 'Off · works alone');

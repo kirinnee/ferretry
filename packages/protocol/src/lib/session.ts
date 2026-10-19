@@ -402,6 +402,11 @@ export const SessionConfigSchema = z.object({
    * at its next launch unless the owner set it explicitly. Read at launch, so a change takes effect at the next launch.
    */
   hypermedia: z.boolean().optional(),
+  /**
+   * Whether this ferret is told it may delegate to sub-ferrets (docs/pack-mode.md). ABSENT MEANS ON, as
+   * for hypermedia; the machine's own switch and the depth limit still apply. Read at launch.
+   */
+  pack: z.boolean().optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
 
