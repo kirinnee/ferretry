@@ -1,0 +1,22 @@
+# Models Ollama serves on this machine. The picker lists the ones Ollama reports it has (`ollama list`);
+# these two are the gpt-oss models Ollama's Codex guide suggests, shown before anything is detected.
+label: Ollama (local)
+docs: https://docs.ollama.com/integrations/codex
+verified: '2026-10-18'
+customIds: true
+detect: ollama
+codex:
+  models:
+    - id: gpt-oss:20b
+      label: gpt-oss 20B
+      tier: fast
+      context: 128000
+      efforts: [low, medium, high]
+      defaultEffort: medium
+      default: true
+    - id: gpt-oss:120b
+      label: gpt-oss 120B
+      tier: best
+      context: 128000
+      efforts: [low, medium, high]
+      defaultEffort: medium

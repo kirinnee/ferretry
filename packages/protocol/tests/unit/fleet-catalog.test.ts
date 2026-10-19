@@ -199,6 +199,37 @@ const cases: readonly SchemaCase[] = [
     schema: catalog.FleetRuntimeModelSetSchema,
     value: { source: 'harness-default' },
   },
+  {
+    name: 'FleetRuntimeModelChoiceSchema',
+    schema: catalog.FleetRuntimeModelChoiceSchema,
+    value: {
+      id: 'glm-5.3',
+      label: 'GLM-5.3',
+      tier: 'best',
+      context: 1_000_000,
+      reasoning: true,
+      efforts: ['low'],
+      defaultEffort: 'low',
+      note: 'Fast.',
+      available: true,
+    },
+  },
+  {
+    name: 'FleetRuntimeModelsSchema',
+    schema: catalog.FleetRuntimeModelsSchema,
+    value: {
+      catalog: {
+        id: 'ollama',
+        label: 'Ollama',
+        origin: 'file',
+        customIds: true,
+        docs: 'https://docs.ollama.com',
+        detect: 'ollama',
+      },
+      choices: [{ id: 'gpt-oss:20b', label: 'gpt-oss 20B', efforts: [], available: true }],
+      default: 'gpt-oss:20b',
+    },
+  },
   { name: 'FleetFixedLayerViewSchema', schema: catalog.FleetFixedLayerViewSchema, value: runtime.fixedLayer },
   { name: 'FleetRuntimeViewSchema', schema: catalog.FleetRuntimeViewSchema, value: runtime },
   {

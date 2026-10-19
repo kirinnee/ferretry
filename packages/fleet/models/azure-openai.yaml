@@ -1,0 +1,29 @@
+# GPT models on Azure OpenAI. A model here is a DEPLOYMENT name; these are the names Azure suggests,
+# which are the model ids. Type yours if you named a deployment differently.
+label: Azure OpenAI
+docs: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex
+verified: '2026-10-18'
+unverified:
+  - Which GPT-6 models a given Azure region offers is not on Microsoft's Codex page.
+customIds: true
+codex:
+  models:
+    - id: gpt-6-astra
+      label: GPT-6 Astra
+      tier: best
+      context: 1050000
+      efforts: [low, medium, high, xhigh, max, ultra]
+      defaultEffort: medium
+    - id: gpt-6.1-sol
+      label: GPT-6.1 Sol
+      tier: balanced
+      context: 1050000
+      efforts: [low, medium, high, xhigh, max, ultra]
+      defaultEffort: medium
+      default: true
+    - id: gpt-6-luna
+      label: GPT-6 Luna
+      tier: fast
+      context: 1050000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

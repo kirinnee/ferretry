@@ -4,6 +4,7 @@ summary: Claude Code on GLM models with a Z.ai Coding Plan key.
 group: popular
 docs: https://docs.z.ai/devpack/tool/claude
 verified: '2026-10-16'
+catalog: zai
 unverified:
   - The quota endpoint the Test and usage read is described by community tools, not by Z.ai's own documentation.
 claude:
@@ -15,13 +16,6 @@ claude:
     API_TIMEOUT_MS:
       value: '3000000'
       required: false
-    ANTHROPIC_DEFAULT_OPUS_MODEL:
-      value: glm-5.3
-    ANTHROPIC_DEFAULT_SONNET_MODEL:
-      value: glm-5.3
-    ANTHROPIC_DEFAULT_HAIKU_MODEL:
-      value: glm-5.3-flash
-  models: [glm-5.3, glm-5.3-flash]
 codex:
   docs: https://docs.z.ai/devpack/tool/codex
   env:
@@ -33,7 +27,6 @@ codex:
     baseUrl: https://api.z.ai/api/v1
     keyVariable: ZAI_API_KEY
     model: glm-5.3
-  models: [glm-5.3]
   unavailable: Z.ai serves the Responses API, but Codex only runs GLM with a model catalogue file (model_catalog_json) that Ferretry would have to write into a Codex home. Use this login with Claude Code instead.
 test:
   kind: request

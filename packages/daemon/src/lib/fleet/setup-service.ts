@@ -57,6 +57,7 @@ import {
   type LayerReferenceText,
   type MaterialiseBodies,
   materialiseFleet,
+  type ModelCatalogSources,
   mergeImport,
   mergeImportRecord,
   parseCloneBundle,
@@ -131,6 +132,7 @@ export type SetupCatalogDeps = Pick<
   | 'fyCommand'
   | 'hostCodexHome'
   | 'acceptsAutoPermissionMode'
+  | 'modelCatalogs'
 >;
 
 export interface FleetSetupServiceDeps {
@@ -673,6 +675,12 @@ export class FleetSetupService {
     );
   }
 
+  /** The catalogs an apply reads (docs/model-catalog.md), or nothing on a machine wired without them. */
+  async #modelCatalogs(): Promise<{ readonly modelCatalogs?: ModelCatalogSources }> {
+    const sources = await this.deps.catalog.modelCatalogs?.();
+    return sources === undefined ? {} : { modelCatalogs: sources };
+  }
+
   /** Materialise the model and apply it with these documents, inside the provisioner's one boundary. */
   async #applyModel(model: AccountModel, documents: readonly FleetDocumentWrite[]): Promise<void> {
     const { catalog } = this.deps;
@@ -689,6 +697,7 @@ export class FleetSetupService {
         fyCommand: catalog.fyCommand,
         ...(catalog.hostCodexHome === undefined ? {} : { hostCodexHome: catalog.hostCodexHome }),
         acceptsAutoPermissionMode: catalog.acceptsAutoPermissionMode,
+        ...(await this.#modelCatalogs()),
       });
     } catch (error) {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));

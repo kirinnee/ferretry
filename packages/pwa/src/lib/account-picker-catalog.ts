@@ -27,11 +27,21 @@ import {
 } from '@ferretry/protocol';
 
 import { normalizeProjectPath } from './fleet-grouping.ts';
+import type { ModelTier } from './model-tiers.ts';
 
-/** One model a runtime's model set offers, and whether its login can use it. */
+/**
+ * One model a runtime offers, and whether its login can use it. A login that reads a model catalog
+ * (docs/model-catalog.md) also says what the model is called, its tier and the efforts it takes.
+ */
 export interface PickerModel {
   readonly id: string;
   readonly available: boolean;
+  readonly label?: string;
+  readonly tier?: ModelTier;
+  readonly context?: number;
+  /** The reasoning efforts it takes; empty when it takes none. Absent when no catalog says. */
+  readonly efforts?: readonly string[];
+  readonly defaultEffort?: string;
 }
 
 /** One runtime a session can be started on, as the picker reads it. */
@@ -50,6 +60,8 @@ export interface PickerAccount {
   /** `null` = the harness's own default. */
   readonly defaultModel: string | null;
   readonly models: readonly PickerModel[];
+  /** The login's model catalog, when it reads one; `customIds` means a picker also offers "Custom id…". */
+  readonly modelCatalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
   readonly available: boolean;
   readonly unavailableReason: string | null;
 }
@@ -108,8 +120,28 @@ export const pickerAccount = (runtime: FleetRuntimeView): PickerAccount => ({
   kind: runtime.harness,
   agent: runtime.agent,
   credentialId: runtime.credential.id,
-  defaultModel: runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? null) : null,
-  models: runtime.modelSet.source === 'model-set' ? runtime.modelSet.models : [],
+  ...(runtime.models === undefined
+    ? {
+        defaultModel: runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? null) : null,
+        models: runtime.modelSet.source === 'model-set' ? runtime.modelSet.models : [],
+      }
+    : {
+        defaultModel: runtime.models.default ?? null,
+        models: runtime.models.choices.map(choice => ({
+          id: choice.id,
+          available: choice.available,
+          label: choice.label,
+          ...(choice.tier === undefined ? {} : { tier: choice.tier }),
+          ...(choice.context === undefined ? {} : { context: choice.context }),
+          efforts: choice.efforts,
+          ...(choice.defaultEffort === undefined ? {} : { defaultEffort: choice.defaultEffort }),
+        })),
+        modelCatalog: {
+          id: runtime.models.catalog.id,
+          label: runtime.models.catalog.label,
+          customIds: runtime.models.catalog.customIds,
+        },
+      }),
   available: runtime.launch.available,
   unavailableReason: runtime.launch.available ? null : runtime.launch.reason,
 });

@@ -16,6 +16,7 @@ const FILES: readonly { readonly address: Address; readonly path: string; readon
   { address: { kind: 'profile', name: 'default' }, path: 'profiles/default.yaml', schema: 'profile' },
   { address: { kind: 'runtime', name: 'claude-default' }, path: 'runtimes/claude-default.yaml', schema: 'runtime' },
   { address: { kind: 'preset', name: 'my-gateway' }, path: 'presets/my-gateway.yaml', schema: 'preset' },
+  { address: { kind: 'models', name: 'zai' }, path: 'models/zai.yaml', schema: 'models' },
   ...config.CONFIG_COMPONENT_KINDS.map(componentKind => ({
     address: { kind: 'component', componentKind, name: 'main' } as const,
     path: `components/${componentKind}/main.yaml`,
@@ -109,6 +110,7 @@ describe('where a configuration file lives', () => {
       'learning',
       'voice',
       'preset',
+      'models',
     ]);
     should(FILES.map(file => file.schema).toSorted()).deepEqual([...config.CONFIG_SCHEMA_IDS].toSorted());
   });

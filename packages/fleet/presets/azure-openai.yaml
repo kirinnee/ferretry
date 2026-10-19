@@ -5,6 +5,7 @@ summary: Codex on your Azure OpenAI resource with its API key. The model is your
 group: cloud
 docs: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex
 verified: '2026-10-16'
+catalog: azure-openai
 unverified:
   - The Test lists models on the v1 endpoint with the api-key header; Microsoft's Codex guide does not describe a test.
 env:
@@ -18,7 +19,6 @@ codexProvider:
   name: Azure OpenAI
   baseUrl: https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1
   keyVariable: AZURE_OPENAI_API_KEY
-models: []
 test:
   kind: request
   url: https://{AZURE_OPENAI_RESOURCE}.openai.azure.com/openai/v1/models

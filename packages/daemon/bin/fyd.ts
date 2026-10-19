@@ -26,6 +26,7 @@ import {
   resolveDefaultRuntime,
   runtimeIdsPath,
   sanitizeHarnessEnv,
+  sharedHistoryPoolDirectory,
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
@@ -154,6 +155,8 @@ import {
   MCP_OAUTH_SECRETS_DOCUMENT,
   NodeBrowserLoginRuntime,
   NodeCatalog,
+  NodeConversationFiles,
+  NodeConversationLinker,
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
@@ -177,6 +180,7 @@ import {
   StatePushRepository,
   StateSecuritySettingsDocument,
   StateVapidKeys,
+  StorageConversationOwners,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
@@ -245,6 +249,7 @@ import {
   RuntimeSupervisedLauncher,
   RuntimeSupervisedReaper,
 } from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
+import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -292,7 +297,6 @@ import {
   sessionMessageTokenKeyFile,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
-import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
@@ -395,6 +399,7 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
+  adoptedTranscriptProvenance,
   advertisesForeignAddress,
   agentSpokenName,
   answerArguments,
@@ -419,6 +424,9 @@ import {
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
+  type ConversationAdopter,
+  ConversationImportService,
+  type ConversationLinker,
   CredentialAgentIdentities,
   CredentialUsageSource,
   childGrantRequester,
@@ -427,6 +435,7 @@ import {
   combinedReferences,
   configuredAt,
   contextWindowForSession,
+  conversationResumeArguments,
   createFoundationPaths,
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -478,6 +487,9 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
+  handoffFolders,
+  handoffReadArguments,
+  handoffView,
   harnessAbsentWarning,
   harnessDiscoveryPolicy,
   harnessLocationSummary,
@@ -524,6 +536,7 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  ModelCatalogService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -664,9 +677,6 @@ import {
   secretsMatch,
   selectableAutoAccounts,
   selectBrowserWorker,
-  handoffFolders,
-  handoffReadArguments,
-  handoffView,
   sendRecordView,
   sessionHealthSettingsAt,
   sessionNameClaim,
@@ -716,7 +726,7 @@ import {
   wardenEventTrigger,
   wardenTriggerEnabled,
 } from '../src/lib/index.ts';
-import { createFleetCatalogSubsystem } from '../src/lib/runtime/mounts/fleet-catalog.ts';
+import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
@@ -2101,6 +2111,137 @@ async function spawnAncestry(
       },
     ]),
   );
+}
+
+/**
+ * Keeping an existing CLI conversation as a ferret: the start pipeline, minus the parts that would
+ * make a NEW conversation.
+ *
+ * The same account resolution, canonical directory, spawn stamp, callsign and plan a start takes, so
+ * an adopted ferret is indistinguishable from any other on every surface. What differs is exactly
+ * what adoption means:
+ *
+ *   * NO TRANSCRIPT IS MINTED OR BASELINED. The conversation already has its CLI id and its file; the
+ *     file is made visible in the runtime's history (a link, never a copy) and recorded as `adopted`,
+ *     so Chat reads it before anything launches.
+ *   * THE ARGV RESUMES (`--resume <id>` / `resume <id>`), which a revive re-runs unchanged — so a
+ *     ferret adopted stopped resumes the same conversation whenever the owner starts it.
+ *   * NO OPENING MESSAGE. Nothing is said to the agent on the owner's behalf.
+ *   * STOPPED unless asked: `start: false` records the session and retires it as stopped with the
+ *     reason, which is what makes it resumable and keeps a picker from launching a burst of agents.
+ */
+function createConversationAdopter(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  createLifecycle: DaemonWorld['createSessionLifecycle'],
+  planner: SessionPlanner,
+  launcher: SessionLifecycleLauncher,
+  accounts: AccountInventoryPort,
+  executables: ExecutableResolverPort,
+  ids: SessionIdFactory,
+  callsigns: CallsignClaims,
+  transcripts: Pick<TranscriptProvenanceCapture, 'home'>,
+  directories: WorkingDirectoryResolver,
+  provenance: SessionProvenanceStamper,
+  clock: ClockPort,
+  adoptLearning: (id: SessionId) => Promise<void>,
+  readableHandoffs: (id: SessionId) => readonly string[],
+  linker: ConversationLinker,
+): ConversationAdopter {
+  return {
+    adopt: async ({ harness, runtime, conversation, start }) => {
+      const resolved = await resolveStartAccount(
+        accounts,
+        runtime,
+        executables,
+        CLIENT_NAME,
+        async () => undefined,
+      ).catch((error: unknown) => error);
+      if (resolved instanceof Error) return { kind: 'refused', code: 'unavailable', reason: resolved.message };
+      const { account, executable } = resolved as Awaited<ReturnType<typeof resolveStartAccount>>;
+      if (account.kind !== harness)
+        return {
+          kind: 'refused',
+          code: 'harness_mismatch',
+          reason: `${runtime} runs ${account.kind === 'claude' ? 'Claude Code' : 'Codex'}, not this conversation's CLI.`,
+        };
+      const home = await transcripts.home(harness, executable);
+      if (home === undefined)
+        return {
+          kind: 'refused',
+          code: 'unavailable',
+          reason: `${runtime} declares no history folder to resume from.`,
+        };
+      const cwd = await directories.resolve(conversation.project).catch(() => undefined);
+      if (cwd === undefined)
+        return {
+          kind: 'refused',
+          code: 'unavailable',
+          reason: `The conversation's folder ${conversation.project} is no longer there.`,
+        };
+      const linked = await linker.link(conversation.source, home, conversation.relativePath);
+      if (linked.kind === 'conflict' || linked.kind === 'unavailable')
+        return { kind: 'refused', code: linked.kind, reason: linked.reason };
+      const id = ids.next();
+      const stamped = provenance.stamp({ id, requestedByHuman: true }, await spawnAncestry(storage, sessions));
+      const claimed = await claimStartName(callsigns, id, {}, Date.now());
+      const teammate = claimed.ok ? claimed.callsign : undefined;
+      const planned = planner.plan({
+        id,
+        account,
+        mode: 'interactive',
+        ...(teammate === undefined ? {} : { teammate }),
+      });
+      if (planned.kind === 'unservable-model') {
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+        return { kind: 'refused', code: 'unavailable', reason: planned.reason };
+      }
+      const plan = planned.plan;
+      const command = [
+        executable,
+        ...conversationResumeArguments(harness, conversation.id),
+        ...handoffReadArguments(account.kind, readableHandoffs(id)),
+        ...startupModelArguments(plan.model),
+      ];
+      const envelope: SessionProtocolEnvelope = {
+        agent: account.agent,
+        harness: account.kind,
+        incarnation: `${id}-1`,
+        runtimeGeneration: 1,
+        boardAccess: 'none',
+        modelHint: conversation.model ?? account.defaultModel ?? '',
+        model: plan.model,
+        remoteControl: false,
+        harnessFlags: [],
+        turn: 0,
+        transcript: adoptedTranscriptProvenance(home, conversation, clock.now()),
+        ...(teammate === undefined ? {} : { teammate }),
+        ...(stamped.label === undefined ? {} : { label: stamped.label }),
+        provenance: stamped.provenance,
+        ...SESSION_START_DEFAULTS,
+      };
+      const lifecycle = createLifecycle(storage, launcher, envelope, id);
+      try {
+        await lifecycle.create({ agent: executable, command, cwd, mode: 'interactive' });
+      } catch (error) {
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+        throw error;
+      }
+      await adoptLearning(id).catch(() => undefined);
+      // A failed launch keeps the record with its reason, like a start: the conversation is adopted
+      // either way, and the owner can resume it once whatever stopped it is fixed.
+      if (start) await lifecycle.start(id).catch(() => undefined);
+      else
+        await lifecycle.stop(id, 'adopted from an existing conversation; resume it to continue').catch(() => undefined);
+      const view = await sessions.get(id);
+      return {
+        kind: 'adopted',
+        session: id,
+        name: view?.config.teammate ?? view?.config.name ?? id,
+        status: view?.state.status ?? 'stopped',
+      };
+    },
+  };
 }
 
 /**
@@ -4107,6 +4248,11 @@ function createConfigFilesSubsystem(input: {
   readonly agentControl: AgentControlPolicy;
   readonly identities: CredentialAgentIdentities;
   readonly notices: BootNoticePort;
+  /**
+   * Run after the first load and after every change: the fleet is republished when a model catalog
+   * moved what its runtimes offer (docs/model-catalog.md). It must never throw.
+   */
+  readonly afterLoad?: () => Promise<void>;
 }): MountedSubsystems['configFiles'] {
   return {
     service: input.service,
@@ -4115,10 +4261,12 @@ function createConfigFilesSubsystem(input: {
     arm: async () => {
       await input.service.load();
       await input.service.publishSchemas(configJsonSchemaFiles());
+      await input.afterLoad?.();
       return watchConfigFiles({
         fingerprint: async () => await input.service.fingerprint(),
         onChange: async () => {
           await input.service.load();
+          await input.afterLoad?.();
         },
         onError: error =>
           input.notices.state(`config watcher: ${error instanceof Error ? error.message : String(error)}`),
@@ -6566,6 +6714,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
       );
+      /**
+       * The owner's existing conversations, found in Ferretry's shared history FIRST (where every
+       * runtime already sees them) and then in the CLI's own home, as the daemon inherited it. Read
+       * through the same parsers managed sessions use; adopted through the same start machinery.
+       */
+      const conversationImport = new ConversationImportService(
+        new NodeConversationFiles(),
+        [
+          { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude') },
+          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude') },
+          { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex') },
+          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex') },
+        ],
+        { claude: claudeTranscriptParser, codex: codexTranscriptParser },
+        new StorageConversationOwners(storage),
+        createConversationAdopter(
+          storage,
+          sessions,
+          createSessionLifecycle,
+          planner,
+          launcher,
+          accounts,
+          executables,
+          sessionIds,
+          nameClaims,
+          transcriptProvenance,
+          new NodeWorkingDirectoryResolver(),
+          spawnProvenance,
+          clock,
+          async id => await adoptLearning(id),
+          id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
+          new NodeConversationLinker(),
+        ),
+      );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({
         ledger: new FileNotificationDeliveryLedger(paths, stateFiles),
@@ -6735,8 +6917,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Environment logins (docs/provider-presets.md): the built-in provider presets with this machine's
       // own preset files laid over them, and a Test that spends a login's key once through the outbound
       // holder above — never handed a value, and only to where the login itself sends that key.
-      const providerPresets = new ProviderPresetService({
-        presets: async () => (await configFiles.load()).evaluation.effective.presets,
+      const providerPresets = new ProviderPresetService(
+        { presets: async () => (await configFiles.load()).evaluation.effective.presets },
+        undefined,
+        async () => await modelCatalogService.catalogs(),
+      );
+      // Model catalogs (docs/model-catalog.md): this build's, then this machine's own
+      // config/models/<id>.yaml over them. What every runtime on a login offers and pins.
+      const modelCatalogService = new ModelCatalogService({
+        files: async () => (await configFiles.load()).evaluation.effective.modelCatalogs,
+        presets: async () => await providerPresets.presets(),
       });
       const providerProbe = new ProviderProbeService({
         probe: new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport()),
@@ -6792,21 +6982,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
-      const fleetCatalogDeps = fileFleetCatalogDeps({
-        paths,
-        userHome,
-        ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-        sessionStates: async () =>
-          await Promise.all(
-            storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
-          ),
-        credentials: fleetCredentials,
-        locate: locateHarness,
-        machineName: () => hostname(),
-        clientName: CLIENT_NAME,
-        config: configFiles,
-        configDirectory: paths.config,
-      });
+      const fleetCatalogDeps = {
+        ...fileFleetCatalogDeps({
+          paths,
+          userHome,
+          ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
+          sessionStates: async () =>
+            await Promise.all(
+              storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
+            ),
+          credentials: fleetCredentials,
+          locate: locateHarness,
+          machineName: () => hostname(),
+          clientName: CLIENT_NAME,
+          config: configFiles,
+          configDirectory: paths.config,
+        }),
+        modelCatalogs: async () => await modelCatalogService.sources(),
+        publishedManifest: async () => await publishedManifest(),
+      };
       /**
        * First-run import, Import again, tool install, and the Clone export and import
        * (docs/design/account-model.md §4.3, §4.7). A package manager runs only inside an install
@@ -6985,6 +7179,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         createSessionTranscriptTail(storage),
         clock,
       );
+      // The catalogue runs the setup service's import and clone as two of its reviewed changes.
+      const fleetCatalog = new FleetCatalogService({
+        ...fleetCatalogDeps,
+        executors: fleetSetup.executors,
+        presets: async () => await providerPresets.presets(),
+      });
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         health: createHealthSubsystem(health, scratch),
         doctor: {
@@ -7031,12 +7231,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return await fleetCredentials.list();
           },
         },
-        // The catalogue runs the setup service's import and clone as two of its reviewed changes.
-        fleetCatalog: createFleetCatalogSubsystem({
-          ...fleetCatalogDeps,
-          executors: fleetSetup.executors,
-          presets: async () => await providerPresets.presets(),
-        }),
+        fleetCatalog,
         // Unit M's rebase target: the same single reader every other in-process consumer of this
         // document shares, so this never disagrees with what the catalogue or a start just read.
         agentControl,
@@ -7083,6 +7278,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           daemonPid: process.pid,
         }),
         foreignHistory,
+        conversationImport,
         // This owns no cache and no provider policy: the daemon usage feed already owns those. One
         // service per opened state home serializes only this daemon's timer ticks, so a slow read in
         // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
@@ -7259,6 +7455,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           agentControl,
           identities: agentIdentities(storage),
           notices: bootNotices,
+          // A build with newer built-in model catalogs, or a config/models/ file edited, moves every
+          // runtime's models, defaults and tier pins now rather than at the next change somebody makes.
+          // No configuration file is written, and an identical manifest is left alone.
+          afterLoad: async () => {
+            await fleetCatalog.republish().then(
+              outcome => {
+                if (outcome === 'applied')
+                  bootNotices.state('model catalogs moved what runtimes offer; fleet republished');
+              },
+              (error: unknown) =>
+                bootNotices.state(
+                  `could not republish the fleet for its model catalogs: ${error instanceof Error ? error.message : String(error)}`,
+                ),
+            );
+          },
         }),
         names: createNameSubsystem(storage),
         learning,

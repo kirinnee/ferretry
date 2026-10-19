@@ -1,0 +1,32 @@
+# Claude on Bedrock Mantle: the anthropic.… ids, with no version suffix and no region prefix.
+label: Bedrock Mantle
+docs: https://code.claude.com/docs/en/amazon-bedrock
+verified: '2026-10-18'
+unverified:
+  - AWS lists the 5.5 models on Mantle in very few regions (Opus 5.5 in us-east-1); a region without one answers that the model is not found.
+customIds: true
+claude:
+  tiers:
+    opus: anthropic.claude-opus-5-5
+    sonnet: anthropic.claude-sonnet-5-5
+    haiku: anthropic.claude-haiku-5-5
+  models:
+    - id: anthropic.claude-opus-5-5
+      label: Opus 5.5
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
+    - id: anthropic.claude-sonnet-5-5
+      label: Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+    - id: anthropic.claude-haiku-5-5
+      label: Haiku 5.5
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

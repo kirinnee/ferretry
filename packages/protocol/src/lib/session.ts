@@ -146,6 +146,10 @@ export type RuntimeReasoningChoice = z.infer<typeof RuntimeReasoningChoiceSchema
 
 export const RuntimeModelChoiceSchema = RuntimeModelOptionSchema.extend({
   description: z.string().optional(),
+  /** Where the login's model catalog puts it (docs/model-catalog.md): a picker groups by it. */
+  tier: z.enum(['best', 'balanced', 'fast']).optional(),
+  /** The context window, in tokens, when the catalog says. */
+  context: z.number().int().positive().optional(),
   isDefault: z.literal(true).optional(),
   reasoningEfforts: z.array(RuntimeReasoningChoiceSchema),
   defaultReasoningEffort: z.string().min(1).optional(),
@@ -156,6 +160,11 @@ export const RuntimeModelCatalogSchema = z.object({
   harness: HarnessSchema,
   source: z.enum(['wrapper-inventory', 'codex-app-server']),
   choices: z.array(RuntimeModelChoiceSchema),
+  /**
+   * The login's model catalog, when it reads one. With it, each choice's `reasoningEfforts` is what that
+   * model takes — empty means none — and `customIds` says the session may be switched to any id.
+   */
+  catalog: z.object({ id: z.string().min(1), label: z.string().min(1), customIds: z.boolean() }).optional(),
 });
 export type RuntimeModelCatalog = z.infer<typeof RuntimeModelCatalogSchema>;
 
@@ -253,11 +262,13 @@ const RetryPolicySchema = z.object({
  * transcript's name was decided before the harness ran. Nothing was inferred.
  * `correlated` — the harness named its own session, and the daemon proved which one by finding a
  * string only this session could contain in a rollout that did not exist before the launch.
+ * `adopted` — the conversation existed before this session did, and the owner chose to keep it as a
+ * ferret (`conversation-import.ts`). Its id is the CLI's own, read from the file the session resumes.
  * `undiscovered` — neither proof is available yet. A session in this state has NO transcript, which
  * is the point: attributing one by working directory or recency silently hands one agent's
  * transcript to another session and the mistake is invisible.
  */
-export const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'undiscovered']);
+export const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'adopted', 'undiscovered']);
 export type TranscriptIdentity = z.infer<typeof TranscriptIdentitySchema>;
 
 /**

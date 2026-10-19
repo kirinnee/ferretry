@@ -1,0 +1,33 @@
+# Claude on Amazon Bedrock, through the US cross-region inference profiles (us.anthropic.…).
+# In another geography, override this file in config/models/amazon-bedrock.yaml with the eu., au., jp. or global. ids.
+label: Amazon Bedrock
+docs: https://code.claude.com/docs/en/amazon-bedrock
+verified: '2026-10-18'
+unverified:
+  - The ids are the us. inference profiles; a login whose AWS_REGION is outside the US needs the matching eu., au., jp. or global. prefix.
+customIds: true
+claude:
+  tiers:
+    opus: us.anthropic.claude-opus-5-5
+    sonnet: us.anthropic.claude-sonnet-5-5
+    haiku: us.anthropic.claude-haiku-5-5
+  models:
+    - id: us.anthropic.claude-opus-5-5
+      label: Opus 5.5
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
+    - id: us.anthropic.claude-sonnet-5-5
+      label: Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+    - id: us.anthropic.claude-haiku-5-5
+      label: Haiku 5.5
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
