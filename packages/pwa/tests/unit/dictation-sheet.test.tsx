@@ -20,6 +20,8 @@ const sheetProps = (overrides: Partial<DictationSheetProps> = {}): DictationShee
   elapsedMs: 0,
   onDismiss: noop,
   onStop: noop,
+  onInsert: noop,
+  onDiscard: noop,
   onCancel: noop,
   onRetry: noop,
   ...overrides,
@@ -38,6 +40,11 @@ describe('dictationStage', () => {
   it('puts an error ahead of every other phase', () => {
     expect(stageFor({ phase: 'recording', hasError: true, wasCapturing: true })).toBe('error');
     expect(stageFor({ phase: 'error', hasError: false, wasCapturing: false })).toBe('error');
+  });
+
+  it('shows a landed take as the review stage, ahead of the capture phases', () => {
+    expect(stageFor({ phase: 'review', hasError: false, wasCapturing: true })).toBe('review');
+    expect(stageFor({ phase: 'review', hasError: false, wasCapturing: false })).toBe('review');
   });
 
   it('maps the capture phases straight through', () => {
@@ -62,10 +69,8 @@ describe('formatElapsed', () => {
 });
 
 describe('dictationFailureCopy', () => {
-  it('says the raw words were kept for any enhancement failure', () => {
-    const copy = dictationFailureCopy('enhancement-rate-limit');
-    expect(copy.title).toBe('Raw dictation kept');
-    expect(copy.hint).toContain('already added to your draft');
+  it('treats a failed cleanup as no failed take: the review box says so, not this headline', () => {
+    expect(dictationFailureCopy('enhancement-rate-limit').title).toBe('Dictation failed');
   });
 
   it("names the on-device engine's own failures", () => {
@@ -116,7 +121,7 @@ describe('dictationStripStatus', () => {
   it('offers the standing hint while recording with nothing heard yet', () => {
     const status = dictationStripStatus('recording', '', undefined, failure);
     expect(status).toContain('press Stop');
-    expect(status).toContain('only updates your draft');
+    expect(status).toContain('only shows you the text');
   });
 
   it('discloses the browser vendor’s service where a sighted reader can read it', () => {
@@ -125,7 +130,7 @@ describe('dictationStripStatus', () => {
     // people read as "on this device".
     const status = dictationStripStatus('recording', '', undefined, failure);
     expect(status).toContain('sends this audio to its vendor’s servers');
-    expect(status).toContain('Ferretry only updates your draft');
+    expect(status).toContain('Ferretry only shows you the text');
     expect(status).not.toContain('never leaves');
   });
 
@@ -150,6 +155,11 @@ describe('dictationStripStatus', () => {
     expect(dictationStripStatus('transcribing', 'half a sentence', undefined, failure)).toContain(
       'Last heard: half a sentence',
     );
+  });
+
+  it('tells the reader the finished take is theirs to insert', () => {
+    expect(dictationStripStatus('review', '', undefined, failure)).toContain('then insert it into your draft');
+    expect(dictationStripStatus('transcribing', '', undefined, failure)).toContain('review the result');
   });
 
   it('says the recording produced nothing', () => {
@@ -190,7 +200,7 @@ describe('<DictationSheet>', () => {
     const view = await mount(<DictationSheet {...sheetProps({ elapsedMs: 65_000 })} />);
     expect(view.container.textContent).toContain('1:05');
     expect(labels(view.container)).toEqual([
-      'Stop recording and add text to your draft',
+      'Stop recording and review the text',
       'Cancel dictation',
       'Hide dictation panel; recording continues',
     ]);
@@ -208,7 +218,7 @@ describe('<DictationSheet>', () => {
         })}
       />,
     );
-    await interact(() => buttonLabelled(view.container, 'Stop recording and add text to your draft').click());
+    await interact(() => buttonLabelled(view.container, 'Stop recording and review the text').click());
     await interact(() => buttonLabelled(view.container, 'Cancel dictation').click());
     await interact(() => buttonLabelled(view.container, 'Hide dictation panel; recording continues').click());
     expect(seen).toEqual(['stop', 'cancel', 'dismiss']);
@@ -245,15 +255,29 @@ describe('<DictationSheet>', () => {
     await view.unmount();
   });
 
-  it('offers no retry after an enhancement failure, because the words already landed', async () => {
+  it('turns into the review box when a take lands, with no strip and no Stop', async () => {
+    const seen: string[] = [];
+    const review = { id: 1, raw: 'fix the bug', cleaned: 'Fix the bug.' };
     const view = await mount(
       <DictationSheet
-        {...sheetProps({ stage: 'error', errorCode: 'enhancement-timeout', errorMessage: 'Groq timed out.' })}
+        {...sheetProps({
+          stage: 'review',
+          review,
+          onInsert: text => seen.push(`insert:${text}`),
+          onDiscard: () => seen.push('discard'),
+        })}
       />,
     );
-    expect(labels(view.container)).toEqual(['Close dictation', 'Hide dictation panel; recording continues']);
-    expect(view.container.textContent).toContain('Groq timed out.');
-    expect(view.container.textContent).toContain('raw dictation was added');
+    expect(view.container.querySelector('[data-live-transcript]')).toBeNull();
+    expect(labels(view.container)).toContain('Insert at the cursor');
+    expect(labels(view.container)).not.toContain('Stop recording and review the text');
+    await interact(() => buttonLabelled(view.container, 'Insert at the cursor').click());
+    expect(seen).toEqual(['insert:Fix the bug.']);
+
+    // Escape anywhere in the panel is Discard on a finished take, not Hide.
+    const panel = must(view.container.querySelector('[data-dictation-panel]'), 'the panel');
+    await interact(() => pressKey(panel, 'Escape'));
+    expect(seen).toEqual(['insert:Fix the bug.', 'discard']);
     await view.unmount();
   });
 
@@ -265,6 +289,7 @@ describe('<DictationSheet>', () => {
 
     for (const [stage, expected] of [
       ['transcribing', 'Finishing transcription in your browser'],
+      ['review', 'Transcript ready'],
       ['empty', 'No speech was captured'],
       ['starting', 'Starting'],
     ] as const) {
@@ -274,9 +299,6 @@ describe('<DictationSheet>', () => {
 
     await view.render(<DictationSheet {...sheetProps({ stage: 'error', errorMessage: 'Mic blocked.' })} />);
     expect(live(view.container)).toBe('Dictation failed: Mic blocked.');
-
-    await view.render(<DictationSheet {...sheetProps({ stage: 'error', errorCode: 'enhancement-provider' })} />);
-    expect(live(view.container)).toContain('Enhancement failed; raw dictation was added');
     await view.unmount();
   });
 
@@ -298,6 +320,10 @@ describe('<DictationSheet>', () => {
     const view = await mount(<DictationSheet {...sheetProps()} />);
     expect(edge(view.container)).toContain('border-l-err');
     await view.render(<DictationSheet {...sheetProps({ stage: 'transcribing' })} />);
+    expect(edge(view.container)).toContain('border-l-accent');
+    await view.render(
+      <DictationSheet {...sheetProps({ stage: 'review', review: { id: 1, raw: 'a', cleaned: 'a' } })} />,
+    );
     expect(edge(view.container)).toContain('border-l-accent');
     await view.render(<DictationSheet {...sheetProps({ stage: 'error' })} />);
     expect(edge(view.container)).toContain('border-l-warn');
@@ -336,10 +362,11 @@ describe('<DictationSheet>', () => {
     expect(description.textContent).toContain('never sends microphone audio to your daemon');
     expect(description.textContent).toContain('sends it to its vendor’s servers');
     expect(description.textContent).toContain('never sent automatically');
+    expect(description.textContent).toContain('Nothing reaches your draft until you press Insert');
 
     await view.render(<DictationSheet {...sheetProps({ engine: 'parakeet', stage: 'transcribing' })} />);
     expect(view.container.textContent).toContain('audio never leaves it');
-    expect(view.container.textContent).toContain('Transcribing on this device, then adding it to your draft');
+    expect(view.container.textContent).toContain('Transcribing on this device; you will review it');
     expect(view.container.textContent).not.toContain('vendor');
     await view.unmount();
   });
@@ -347,10 +374,12 @@ describe('<DictationSheet>', () => {
 
 /** The stage union is exhaustive: every member must render without throwing. */
 describe('every stage renders', () => {
-  const stages: readonly DictationStage[] = ['starting', 'recording', 'transcribing', 'empty', 'error'];
+  const stages: readonly DictationStage[] = ['starting', 'recording', 'transcribing', 'review', 'empty', 'error'];
   it('covers the whole union', async () => {
     for (const stage of stages) {
-      const view = await mount(<DictationSheet {...sheetProps({ stage })} />);
+      const view = await mount(
+        <DictationSheet {...sheetProps({ stage, review: { id: 1, raw: 'hello', cleaned: 'Hello.' } })} />,
+      );
       expect(view.container.querySelector('[data-dictation-panel]')).not.toBeNull();
       await view.unmount();
     }

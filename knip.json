@@ -40,6 +40,7 @@
         "harness/live-activity-screenshot.tsx",
         "harness/compaction-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
+        "harness/dictation-review-screenshot.tsx",
         "harness/conversation-picker-screenshot.tsx",
         "harness/voice-cleanup-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
