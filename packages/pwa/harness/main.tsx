@@ -3117,6 +3117,20 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     sessionRoute.rest === 'runtime-models'
   )
     return harnessJson(NEW_SESSION_RUNTIME_MODELS.claude);
+  // `?restart-ps-fails`: Restart CLI refused because the host's ps would not list the process table.
+  if (
+    method === 'POST' &&
+    sessionRoute?.rest === 'migrate' &&
+    new URLSearchParams(window.location.search).has('restart-ps-fails')
+  )
+    return new Response(
+      JSON.stringify({
+        error:
+          'refused: the process table could not be read: ps exited 1: ps: etimes: keyword not found\nin-flight inventory — status running, turn 2, worst: UNKNOWN\n  blind [UNKNOWN] the process table could not be read: ps exited 1: ps: etimes: keyword not found',
+        code: 'migration_refused',
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    );
   // An attachment upload answers with the daemon's own view of the file it now holds.
   if (method === 'POST' && sessionRoute?.rest === 'attachments') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };
