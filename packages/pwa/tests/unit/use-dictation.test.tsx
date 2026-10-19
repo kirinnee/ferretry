@@ -97,6 +97,13 @@ const finishTake = async (view: Harness, provider: FakeRecognitionProvider): Pro
   });
 };
 
+/** Stop, settle, then press Insert on whatever the take produced (an empty take has nothing to insert). */
+const landTake = async (view: Harness, provider: FakeRecognitionProvider): Promise<void> => {
+  await finishTake(view, provider);
+  const review = view.handle().review;
+  if (review !== null) await interact(() => view.handle().insert(review.cleaned));
+};
+
 describe('withinContextFetchBudget', () => {
   it('returns the value when the request wins', async () => {
     expect(await withinContextFetchBudget(Promise.resolve('ok'), 1_000)).toBe('ok');
@@ -220,7 +227,7 @@ describe('useDictation', () => {
     expect(view.handle().liveText).toBe('hello wor');
     await interact(() => provider.result([{ text: 'hello world', final: true }]));
 
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts).toEqual([{ text: 'typed hello world', caret: 17 }]);
     expect(view.handle().phase).toBe('idle');
     expect(view.handle().liveText).toBe('');
@@ -235,7 +242,7 @@ describe('useDictation', () => {
     // The reader keeps typing DURING the utterance; the commit must use this.
     await view.render({ draft: 'start end', selectionRef: { current: { selectionStart: 5, selectionEnd: 5 } } });
     await interact(() => provider.speak('hello world'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts[0]?.text).toBe('start hello world end');
     await view.unmount();
   });
@@ -244,7 +251,7 @@ describe('useDictation', () => {
     const provider = fakeRecognitionProvider();
     const view = await harness({ recognition: provider });
     await record(view, provider);
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts).toEqual([]);
     expect(view.handle().phase).toBe('idle');
     expect(view.handle().error).toBeNull();
@@ -287,7 +294,7 @@ describe('useDictation', () => {
     const view = await harness({ recognition: provider });
     await record(view, provider);
     await interact(() => provider.nomatch());
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.handle().phase).toBe('error');
     expect(view.handle().error?.code).toBe('bad-audio');
     expect(view.drafts).toEqual([]);
@@ -357,7 +364,7 @@ describe('useDictation', () => {
 
     await interact(() => provider.begin());
     await interact(() => provider.speak('second phrase'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts[0]?.text).toBe('first phrase second phrase');
     await view.unmount();
   });
@@ -422,6 +429,11 @@ describe('useDictation', () => {
       await Promise.resolve();
     });
     await interact(() => view.handle().stop());
+    // One take, one review: the second finish found nothing left to claim.
+    expect(view.handle().phase).toBe('review');
+    expect(view.handle().review?.id).toBe(1);
+    expect(view.drafts).toEqual([]);
+    await interact(() => view.handle().insert('a long take'));
     expect(view.drafts).toHaveLength(1);
     await view.unmount();
   });
@@ -474,7 +486,7 @@ describe('useDictation enhancement', () => {
     const view = await harness({ recognition: provider, settings: settingsWith({ dictionary }) });
     await record(view, provider);
     await interact(() => provider.speak('ferretree is running'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts[0]?.text).toContain('ferretry');
     await view.unmount();
   });
@@ -487,7 +499,7 @@ describe('useDictation enhancement', () => {
     });
     await record(view, provider);
     await interact(() => provider.speak('ferretree is running'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts[0]?.text).toBe('ferretree is running');
     await view.unmount();
   });
@@ -508,7 +520,7 @@ describe('useDictation enhancement', () => {
     });
     await record(view, provider);
     await interact(() => provider.speak('ferretree is running'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(asked).toEqual([['session-1', undefined, CONTEXT_FETCH_LIMIT]]);
     expect(view.drafts[0]?.text).toContain('ferretry');
     await view.unmount();
@@ -527,12 +539,12 @@ describe('useDictation enhancement', () => {
     });
     await record(view, provider);
     await interact(() => provider.speak('plain words'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts[0]?.text).toBe('plain words');
     await view.unmount();
   });
 
-  it('adds the raw words but reports a Groq failure afterwards', async () => {
+  it('reviews the raw words and says why when a Groq cleanup fails', async () => {
     const provider = fakeRecognitionProvider();
     const view = await harness({
       recognition: provider,
@@ -543,11 +555,14 @@ describe('useDictation enhancement', () => {
     await record(view, provider);
     await interact(() => provider.speak('raw words'));
     await finishTake(view, provider);
-    // The recognised words are never the price of a failed correction.
+    // The recognised words are never the price of a failed correction — and they wait for Insert.
+    expect(view.drafts).toEqual([]);
+    expect(view.handle().phase).toBe('review');
+    expect(view.handle().review?.cleaned).toBe('raw words');
+    expect(view.handle().review?.enhancementError?.code).toBe('enhancement-rate-limit');
+    expect(view.handle().error).toBeNull();
+    await interact(() => view.handle().insert('raw words'));
     expect(view.drafts[0]?.text).toBe('raw words');
-    expect(view.drafts[0]?.enhancementError?.code).toBe('enhancement-rate-limit');
-    expect(view.handle().phase).toBe('error');
-    expect(view.handle().error?.code).toBe('enhancement-rate-limit');
     await view.unmount();
   });
 
@@ -564,9 +579,89 @@ describe('useDictation enhancement', () => {
     });
     await record(view, provider);
     await interact(() => provider.speak('raw words'));
-    await finishTake(view, provider);
+    await landTake(view, provider);
     expect(view.drafts[0]?.text).toBe('Raw words.');
-    expect(view.drafts[0]?.enhancementError).toBeUndefined();
+    await view.unmount();
+  });
+});
+
+describe('useDictation review', () => {
+  const reviewed = async (draft = ''): Promise<{ view: Harness; provider: FakeRecognitionProvider }> => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({ recognition: provider, draft });
+    await record(view, provider);
+    await interact(() => provider.speak('hello world'));
+    await finishTake(view, provider);
+    return { view, provider };
+  };
+
+  it('parks the take for review: nothing reaches the draft on Stop', async () => {
+    const { view } = await reviewed();
+    expect(view.handle().phase).toBe('review');
+    expect(view.handle().review).toEqual({ id: 1, raw: 'hello world', cleaned: 'hello world' });
+    expect(view.handle().busy).toBe(false);
+    expect(view.drafts).toEqual([]);
+    await view.unmount();
+  });
+
+  it('inserts the edited text once, at the caret as it is at that moment', async () => {
+    const { view } = await reviewed('start end');
+    // The reader kept typing in the composer while the box was open.
+    await view.render({
+      draft: 'start typed end',
+      selectionRef: { current: { selectionStart: 11, selectionEnd: 11 } },
+    });
+    await interact(() => view.handle().insert('hello, world'));
+    expect(view.drafts).toEqual([{ text: 'start typed hello, world end', caret: 24 }]);
+    expect(view.handle().phase).toBe('idle');
+    expect(view.handle().review).toBeNull();
+
+    // A second Insert has no review to act on.
+    await interact(() => view.handle().insert('again'));
+    expect(view.drafts).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('closes without touching the draft when the person emptied the text', async () => {
+    const { view } = await reviewed();
+    await interact(() => view.handle().insert('   '));
+    expect(view.drafts).toEqual([]);
+    expect(view.handle().phase).toBe('idle');
+    await view.unmount();
+  });
+
+  it('ignores Insert outside a review', async () => {
+    const view = await harness();
+    await interact(() => view.handle().insert('stray'));
+    expect(view.drafts).toEqual([]);
+    await view.unmount();
+  });
+
+  it('discards a review without touching the draft', async () => {
+    const { view } = await reviewed();
+    await interact(() => view.handle().discard());
+    expect(view.handle().phase).toBe('idle');
+    expect(view.handle().review).toBeNull();
+    expect(view.drafts).toEqual([]);
+    await view.unmount();
+  });
+
+  it('starting again replaces the review, and the next take gets a new id', async () => {
+    const { view, provider } = await reviewed();
+    await interact(() => view.handle().start());
+    expect(view.handle().review).toBeNull();
+    await interact(() => provider.begin());
+    await interact(() => provider.speak('second take'));
+    await finishTake(view, provider);
+    expect(view.handle().review).toEqual({ id: 2, raw: 'second take', cleaned: 'second take' });
+    await view.unmount();
+  });
+
+  it('drops a review when dictation is switched off', async () => {
+    const { view } = await reviewed();
+    await view.render({ settings: settingsWith({ enabled: false }) });
+    expect(view.handle().review).toBeNull();
+    expect(view.handle().phase).toBe('idle');
     await view.unmount();
   });
 });
@@ -595,11 +690,10 @@ describe('useDictation over a relay-only daemon', () => {
       // Act
       await record(view, provider);
       await interact(() => provider.speak('relayed words'));
-      await finishTake(view, provider);
+      await landTake(view, provider);
 
       // Assert
       expect(view.drafts[0]?.text).toBe('Relayed words.');
-      expect(view.drafts[0]?.enhancementError).toBeUndefined();
       expect(carried).toHaveLength(1);
       expect(direct).toEqual([]);
       await view.unmount();
@@ -689,6 +783,8 @@ describe('useDictation with the engine the person chose', () => {
       sessions[0]?.resolve('words from this device');
       await Promise.resolve();
     });
+    expect(view.handle().review?.cleaned).toBe('words from this device');
+    await interact(() => view.handle().insert('words from this device'));
     expect(view.drafts.map(draft => draft.text)).toEqual(['words from this device']);
     await view.unmount();
   });
@@ -719,8 +815,9 @@ describe('useDictation with the engine the person chose', () => {
       session.resolve('the quick brown fox');
       await Promise.resolve();
     });
-    // …and the final text, not the interim words, is what lands.
-    expect(view.drafts.map(draft => draft.text)).toEqual(['the quick brown fox']);
+    // …and the final text, not the interim words, is what waits for Insert.
+    expect(view.handle().review?.cleaned).toBe('the quick brown fox');
+    expect(view.drafts).toEqual([]);
     expect(view.handle().liveText).toBe('');
     expect(view.handle().livePaused).toBe(false);
     await view.unmount();
@@ -776,6 +873,103 @@ describe('useDictation with the engine the person chose', () => {
       code: 'model-not-installed',
       message: 'Parakeet is not installed on this device yet.',
     });
+    await view.unmount();
+  });
+});
+
+describe('useDictation with the machine’s cleanup settings', () => {
+  const messages: FyEvent[] = Array.from(
+    { length: 12 },
+    (_, index) => ({ type: 'chat.user', data: { text: `message ${index + 1}` } }) as unknown as FyEvent,
+  );
+
+  /** One take through a hosted provider; resolves to what was sent (or `null` when nothing was). */
+  const take = async (
+    voiceCleanup: UseDictationOptions['voiceCleanup'],
+    answer: () => Response = () => Response.json({ text: 'Raw words.' }),
+  ): Promise<{ sent: Record<string, unknown> | null; history: number; text: string | undefined }> => {
+    const provider = fakeRecognitionProvider();
+    let sent: Record<string, unknown> | null = null;
+    let history = 0;
+    const view = await harness({
+      recognition: provider,
+      sessionId: 'session-1',
+      api: {
+        history: async () => {
+          history += 1;
+          return messages;
+        },
+      },
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      ...(voiceCleanup === undefined ? {} : { voiceCleanup }),
+      enhancementFetch: async (_url, init) => {
+        sent = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return answer();
+      },
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await landTake(view, provider);
+    const text = view.drafts[0]?.text;
+    await view.unmount();
+    return { sent, history, text };
+  };
+
+  const cleanup = (patch: Partial<NonNullable<UseDictationOptions['voiceCleanup']>>) => ({
+    style: 'fix' as const,
+    prompts: {},
+    useConversation: false,
+    conversationMessages: 8,
+    ...patch,
+  });
+
+  it('sends no conversation to a hosted provider by default, and does not even read it', async () => {
+    const result = await take(undefined);
+    expect(result.sent?.context).toEqual([]);
+    expect(result.history).toBe(0);
+  });
+
+  it('sends the latest N messages when the machine turns the conversation on', async () => {
+    const result = await take(cleanup({ useConversation: true, conversationMessages: 3 }));
+    expect(result.sent?.context).toEqual(['message 10', 'message 11', 'message 12']);
+  });
+
+  it('sends everything the history read yields, up to the machine’s count', async () => {
+    const result = await take(cleanup({ useConversation: true }));
+    expect(result.sent?.context).toHaveLength(8);
+  });
+
+  it('sends nothing and spends nothing when the machine has cleanup off', async () => {
+    const result = await take(cleanup({ style: 'off', useConversation: true }));
+    expect(result.sent).toBeNull();
+    expect(result.history).toBe(0);
+    expect(result.text).toBe('raw words');
+  });
+
+  it('inserts the transcript as-is when the daemon kept the raw words', async () => {
+    const result = await take(cleanup({}), () => Response.json({ text: 'raw words', kept: 'raw' }));
+    expect(result.text).toBe('raw words');
+  });
+
+  it('leaves on-device correction on its own context rules whatever the machine says', async () => {
+    const provider = fakeRecognitionProvider();
+    let history = 0;
+    const view = await harness({
+      recognition: provider,
+      sessionId: 'session-1',
+      api: {
+        history: async () => {
+          history += 1;
+          return messages;
+        },
+      },
+      settings: settingsWith({ enhancementProvider: 'local' }),
+      voiceCleanup: cleanup({ style: 'off' }),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await finishTake(view, provider);
+    expect(history).toBe(1);
     await view.unmount();
   });
 });

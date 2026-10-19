@@ -13,7 +13,7 @@ import { afterEach, describe, test } from 'bun:test';
 import type { ReactElement } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
-import { FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
+import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
 import type { FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
 import { FY_RENDER_SANDBOX_LIMITS, type FyRenderBlock as ParsedBlock, parseFyRender } from '../../src/lib/fy-render.ts';
 // Registers happy-dom, which is what gives this file a `window` to dispatch on.
@@ -106,6 +106,20 @@ const recorder = () => {
   };
 };
 
+/** The column's paint, as `FyRenderBlock` reads it from the computed style. */
+const DARK_PAINT: FyRenderHtmlPaint = {
+  background: 'rgb(15, 17, 21)',
+  color: 'rgb(230, 230, 235)',
+  font: 'Inter, sans-serif',
+  scheme: 'dark',
+};
+const LIGHT_PAINT: FyRenderHtmlPaint = {
+  background: 'rgb(250, 250, 252)',
+  color: 'rgb(20, 20, 24)',
+  font: 'Inter, sans-serif',
+  scheme: 'light',
+};
+
 const mounted: ReactTestRenderer[] = [];
 afterEach(() => {
   while (mounted.length > 0) {
@@ -124,7 +138,8 @@ const frameElement = (
     readonly block?: ParsedBlock;
     readonly deadlines?: { readonly readyMs: number; readonly hardMs: number };
     readonly fullscreen?: boolean;
-    readonly theme?: 'dark' | 'light';
+    readonly paint?: FyRenderHtmlPaint;
+    readonly ready?: boolean;
   } = {},
 ): ReactElement => (
   <FyRenderHtmlFrame
@@ -134,7 +149,9 @@ const frameElement = (
     onEscape={calls.onEscape}
     onFailed={calls.onFailed}
     onRendered={calls.onRendered}
-    theme={options.theme ?? 'dark'}
+    paint={options.paint ?? DARK_PAINT}
+    ready={options.ready ?? false}
+    title="A counter widget"
   />
 );
 
@@ -191,7 +208,10 @@ describe('FyRenderHtmlFrame frame element', () => {
     should(frame.props.referrerPolicy).equal('no-referrer');
     // A tab stop, unlike the library frame: the page IS the interaction.
     should(frame.props.tabIndex).equal(0);
-    should(frame.props.title).equal('Interactive HTML illustration');
+    // Named by the block's own description, since there is no caption any more.
+    should(frame.props.title).equal('A counter widget');
+    // Invisible until the page has drawn, so no unpainted plane flashes in the prose.
+    should(frame.props['data-fy-render-ready']).equal('false');
     // No `src` in markup: the effect assigns it, after the listeners exist.
     should(frame.props.src).be.undefined();
     should(node.assigned).eql(['/fy-render-html.html']);
@@ -266,17 +286,36 @@ describe('FyRenderHtmlFrame handshake trust', () => {
     should(node.transferred.length).equal(1);
   });
 
-  test('should send the page as data over the port, with the theme in force', async () => {
+  test('should send the page as data over the port, with the paint in force', async () => {
     // Arrange
     const node = frameMock();
-    mountFrame(frameElement(recorder(), { theme: 'light' }), node);
+    mountFrame(frameElement(recorder(), { paint: LIGHT_PAINT }), node);
 
     // Act
     const { received } = handshake(node);
     await settle(20);
 
-    // Assert — the authored bytes travel as DATA, never as a URL or markup.
-    should(received).eql([{ kind: 'render-html', source: PAGE, theme: 'light' }]);
+    // Assert — the authored bytes travel as DATA, never as a URL or markup, and
+    // the column's paint travels with them as the page's default.
+    should(received).eql([{ kind: 'render-html', paint: LIGHT_PAINT, source: PAGE, theme: 'light' }]);
+  });
+
+  test('should repaint a running page over the port rather than remount it', async () => {
+    // Arrange
+    const node = frameMock();
+    const calls = recorder();
+    const tree = mountFrame(frameElement(calls, { paint: DARK_PAINT }), node);
+    const { received } = handshake(node);
+    await settle(20);
+
+    // Act — the reader switches theme while the page runs.
+    run(() => tree.update(frameElement(calls, { paint: LIGHT_PAINT, ready: true })));
+    await settle(20);
+
+    // Assert — one paint message on the same port, and no second shell load.
+    should(received.at(-1)).eql({ kind: 'paint', paint: LIGHT_PAINT });
+    should(node.assigned).eql(['/fy-render-html.html']);
+    should(tree.root.findByType('iframe').props['data-fy-render-ready']).equal('true');
   });
 });
 

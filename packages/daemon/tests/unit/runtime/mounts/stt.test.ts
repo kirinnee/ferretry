@@ -56,7 +56,7 @@ describe('the dictation enhancement mount', () => {
     should(jsonBody(response)).deepEqual({
       text: 'Hello, world.',
       provider: 'groq',
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-120b',
       latencyMs: 42,
     });
     // UNPARSED: the service applies the wire schema itself, which is what lets it answer `too_long`

@@ -1707,7 +1707,7 @@ export class FakeSttEnhancer implements SttEnhancementSubsystem {
     private readonly answer: SttEnhancementResult | SttEnhancementError = {
       text: 'Hello, world.',
       provider: 'groq',
-      model: 'llama-3.1-8b-instant',
+      model: 'openai/gpt-oss-120b',
       latencyMs: 42,
     },
   ) {}
