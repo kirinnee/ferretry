@@ -150,7 +150,7 @@ const WALKS_SETTINGS = !(
  * MACHINES, fifty-seven per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
  * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
- * its callback port held by another program, finishing), the old pairing a reset left, four Add a login steps (its tool,
+ * its callback port held by another program, finishing), the old pairing a reset left, four Add a login frames (its tiles,
  * its sign-in, the provider tiles and a provider's key),
  * eighteen Profiles and Components pages (a profile page, a delete card, a refused mix, an override chip,
  * the Resolved view, Edit as YAML, a mixed profile, a new profile built by drag and drop — and on a phone its
@@ -2834,16 +2834,14 @@ try {
           await accountShot('credential-sign-out', 'sign-out confirmation');
           await credentialsPanel.locator('[data-sign-out-keep]').click();
           await credentialsPanel.locator('[data-page-back]').click();
-          // ADD A LOGIN (U21): which tool, then the sign-in it starts. A stepper is the screen a person
-          // spends longest in, and these two were the only Credentials steps never measured.
+          // ADD A LOGIN (U21): ONE screen — every provider as tiles (the two sign-ins, then the API-key
+          // providers under their headings, two to a row on a phone, with the search box thirteen providers
+          // earn), then only what the one tapped needs: a provider's key, or a sign-in and its one button.
           await credentialsPanel.locator('[data-add-login]').first().click();
-          await credentialsPanel.locator('[data-add-login-step="tool"]').waitFor({ state: 'visible' });
-          await accountShot('add-login-tool', 'Add a login tool step');
-          // ENVIRONMENT: the provider tiles under their headings, two to a row on a phone, with the search
-          // box thirteen providers earn; then one tap, straight to the key it asks for.
-          await credentialsPanel.locator('[data-add-login-kind-option="environment"]').click();
+          await credentialsPanel.locator('[data-add-login-choices]').waitFor({ state: 'visible' });
           await credentialsPanel.locator('[data-provider-search]').waitFor({ state: 'visible' });
-          // Each frame starts where the new part does, because on a phone the Type choice fills the top.
+          await accountShot('add-login-tool', 'Add a login provider choice');
+          // Each frame starts where the new part does, because on a phone the sign-in tiles fill the top.
           const toTop = (selector: string) => async (): Promise<void> => {
             await credentialsPanel
               .locator(selector)
@@ -2853,15 +2851,13 @@ try {
           await themedShot('add-login-providers');
           await credentialsPanel.locator('[data-provider-tile="deepseek"]').click();
           await credentialsPanel.locator('[data-one-click="deepseek"]').waitFor({ state: 'visible' });
-          await accountShot('add-login-provider-key', 'Add a login provider key', toTop('[data-one-click="deepseek"]'));
-          await credentialsPanel.locator('[data-add-login-kind-option="signin"]').click();
-          await credentialsPanel.locator('[data-add-login-tool]').first().waitFor({ state: 'visible' });
-          await credentialsPanel.locator('[data-add-login-tool] input:not([disabled])').first().check();
-          await credentialsPanel.locator('[data-step-next]').click();
-          await credentialsPanel.locator('[data-add-login-step="start"]').waitFor({ state: 'visible' });
-          await accountShot('add-login-start', 'Add a login sign-in step');
-          await credentialsPanel.locator('[data-stepper-cancel]').click();
-          const stopAddLogin = credentialsPanel.locator('[data-stepper-stop]');
+          await accountShot('add-login-provider-key', 'Add a login provider key', toTop('[data-add-login-chosen]'));
+          await credentialsPanel.locator('[data-add-login-change]').click();
+          await credentialsPanel.locator('[data-add-login-choice]:not([aria-disabled])').first().click();
+          await credentialsPanel.locator('[data-add-login-fields]').waitFor({ state: 'visible' });
+          await accountShot('add-login-start', 'Add a login sign-in');
+          await credentialsPanel.locator('[data-add-login-back]').click();
+          const stopAddLogin = credentialsPanel.locator('[data-add-login-stop]');
           if ((await stopAddLogin.count()) > 0) await stopAddLogin.click();
           await credentialsPanel.locator('[data-credential-row="claude-team"]').waitFor({ state: 'visible' });
 
