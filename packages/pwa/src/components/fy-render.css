@@ -279,3 +279,67 @@
   max-height: none;
   height: 100%;
 }
+
+/* THE `html` FRAME IS THE OPPOSITE CASE, and it overrides the rule above on
+   purpose. Its page IS the interaction — buttons, sliders, a canvas to drag — so
+   it takes the pointer and a tab stop, and the shell forwards Escape over the
+   port so fullscreen can still be left from inside it.
+
+   Its height is the page's own report, clamped by the parent and applied inline;
+   until the first report it keeps the base frame's shape. The ratio and the base
+   cap are dropped so the reported height is what the reader sees, and a solid
+   surface replaces the transparent one because the page paints its own
+   `Canvas` background in the reader's mode. */
+.fy-render-frame--html {
+  pointer-events: auto;
+  aspect-ratio: auto;
+  min-height: 4rem;
+  max-height: none;
+  background: var(--surface);
+}
+
+/* A `src:` block's media. The native players take the full measure and keep their
+   own controls; a PDF is a card of links (`fy-render-media.tsx` says why). */
+.fy-render-video {
+  display: block;
+  width: 100%;
+  max-height: min(60dvh, 720px);
+  background: #000;
+}
+
+.fy-render-audio {
+  display: block;
+  width: 100%;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-video {
+  max-height: none;
+  height: 100%;
+}
+
+/* THE MEDIA CARD: the sentence, the fold and a link stacked in one note, so a
+   refusal never looks like a broken player. */
+.fy-render-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+}
+
+.fy-render-link {
+  text-decoration: none;
+}
+
+/* A loading line or a refusal card fills the plane's measure instead of floating
+   mid-panel — the same reason the `note` stage stretches its sentence. */
+.fy-render-stage[data-fy-render-stage='media'] > .kt-fs-note {
+  flex: 1 1 auto;
+  align-self: stretch;
+  margin: var(--gap-sm);
+}
+
+.fy-render-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}

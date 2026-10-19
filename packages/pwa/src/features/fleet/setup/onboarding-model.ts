@@ -282,10 +282,14 @@ export const onboardingSkippedSteps = (progress: MachineSetupProgress): readonly
 // ── Warden ───────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * What the Warden step opens on (R4 step 5): the Jev guard PRESELECTED only when a Jev key was added
- * and the machine is still on the safe default (rules only, which spends nothing). A machine whose
- * owner already chose LLM triage, or turned the Warden off, keeps that choice; a machine without a Jev
- * key keeps rules only. Preselected is not saved: the step's own Save is what changes the machine.
+ * What the Warden step opens on (R4 step 5): the Jev layer PRESELECTED only when a Jev key was added
+ * and the machine is still on the safe default (rules only, which spends nothing). Only Jev: it makes
+ * the Warden cheaper to live with, and a flag it does not clear goes to the owner, never to a spend
+ * they did not choose. A machine whose owner already chose a layer, or turned the Warden off, keeps
+ * that choice; a machine without a Jev key keeps rules only. Preselected is not saved: the step's own
+ * Save is what changes the machine.
  */
 export const wardenStartingDraft = (config: WardenConfig, jevKeySet: boolean): WardenConfig =>
-  jevKeySet && config.enabled && config.triage === 'rules' ? { ...config, triage: 'jev' } : config;
+  jevKeySet && config.enabled && !config.layers.jev && !config.layers.llm
+    ? { ...config, layers: { ...config.layers, jev: true } }
+    : config;

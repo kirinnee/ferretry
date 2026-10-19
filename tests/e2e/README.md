@@ -102,11 +102,14 @@ on purpose, so it belongs in `[slow]`.
 DevTools pipe Playwright uses to drive Chrome, after the launch has succeeded. Playwright is
 never told: Chrome logs `Could not write into pipe`, or reads EOF and exits, and every call
 without its own timeout (`evaluate`, a CDP `send`, `newPage`) waits forever. The browser from
-`launchChromiumWithRetry` (`support/relay-harness.ts`) watches for both signs. When it sees
-one, every pending and later call on that browser and its contexts, pages and CDP sessions
+`launchChromiumWithRetry` (`support/relay-harness.ts`) watches for both signs. It also covers a
+third form, where Bun stops writing to Chrome and nothing at all is logged: a call still
+pending after 10 s asks Chrome's browser process for its version, and no reply within 5 s
+counts as a lost pipe. When it sees any of these, every pending and later call on that browser and its contexts, pages and CDP sessions
 fails at once with `browser has disconnected: …`, which the product journeys' retry already
 handles. A call that carries no timeout of its own and never answers fails after 60 s and
-says which call it was.
+says which call it was. A polling loop that counts a failed read as "not yet" must rethrow
+`isLostBrowser(error)`, or it polls a dead browser until its own deadline.
 
 ## Browser journeys
 

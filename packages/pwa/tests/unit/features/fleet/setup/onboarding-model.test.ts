@@ -337,32 +337,32 @@ describe('the steps still to do', () => {
 });
 
 describe('the Warden step’s starting draft', () => {
-  it('preselects Jev when a key is set, the Warden is on and it is on rules only', () => {
-    const config = wardenConfig({ enabled: true, triage: 'rules' });
-    expect(wardenStartingDraft(config, true)).toEqual({ ...config, triage: 'jev' });
+  it('preselects Jev alone when a key is set, the Warden is on and it is on rules only', () => {
+    const config = wardenConfig({ enabled: true, layers: { jev: false, llm: false } });
+    expect(wardenStartingDraft(config, true)).toEqual({ ...config, layers: { jev: true, llm: false } });
   });
 
   it('leaves a machine without a Jev key on rules only', () => {
-    const config = wardenConfig({ enabled: true, triage: 'rules' });
+    const config = wardenConfig({ enabled: true, layers: { jev: false, llm: false } });
     expect(wardenStartingDraft(config, false)).toBe(config);
   });
 
   it('keeps a Warden the owner turned off', () => {
-    const config = wardenConfig({ enabled: false, triage: 'rules' });
+    const config = wardenConfig({ enabled: false, layers: { jev: false, llm: false } });
     expect(wardenStartingDraft(config, true)).toBe(config);
   });
 
-  it('keeps a triage the owner already chose', () => {
-    const llm = wardenConfig({ enabled: true, triage: 'llm' });
+  it('keeps a layer the owner already chose', () => {
+    const llm = wardenConfig({ enabled: true, layers: { jev: false, llm: true } });
     expect(wardenStartingDraft(llm, true)).toBe(llm);
-    const jev = wardenConfig({ enabled: true, triage: 'jev' });
+    const jev = wardenConfig({ enabled: true, layers: { jev: true, llm: true } });
     expect(wardenStartingDraft(jev, true)).toBe(jev);
   });
 
   it('does not change the config it was given', () => {
-    const config = wardenConfig({ enabled: true, triage: 'rules' });
+    const config = wardenConfig({ enabled: true, layers: { jev: false, llm: false } });
     wardenStartingDraft(config, true);
-    expect(config.triage).toBe('rules');
+    expect(config.layers).toEqual({ jev: false, llm: false });
   });
 });
 

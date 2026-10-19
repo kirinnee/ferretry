@@ -37,3 +37,4 @@ packages/pwa/harness/out/
 packages/pwa/public/fy-render-sandbox.html
 packages/pwa/public/fy-render-mermaid.js
 packages/pwa/public/fy-render-lottie.js
+packages/pwa/public/fy-render-html.html

@@ -58,9 +58,9 @@ export const DICTATION_SAFETY_NOTE =
 export const DICTATION_DISABLED_EXPLANATION =
   'Off means off: the microphone cannot open for dictation. Your engine, dictionary and shortcut are kept, so turning dictation back on needs no reload.';
 
-/** Under Parakeet's "Live words" switch: what it shows, what it costs, and when. */
+/** Under Parakeet's "Live words (experimental)" switch: what it shows, what it costs, and when. */
 export const LIVE_WORDS_EXPLANATION =
-  'Shows your words while you speak: Parakeet re-reads the last few seconds about once a second, greyed until two reads agree. It uses this device’s processor and battery only while the microphone is open. Stop still transcribes the rest in one final pass, and a device too slow to keep up pauses live words rather than lagging behind.';
+  'Off by default; the words are added in one pass after you press Stop. Experimental, and can be buggy. When on, Parakeet shows your words while you speak: it re-reads the last few seconds about once a second, greyed until two reads agree. It uses this device’s processor and battery only while the microphone is open. Stop still transcribes the rest in one final pass, and a device too slow to keep up pauses live words rather than lagging behind.';
 
 /**
  * Said plainly next to the enhancement toggle. The capitalised phrase is the
@@ -187,21 +187,21 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
 
           {/* ---- Parakeet's near-live words ---- */}
           {settings.engine === 'parakeet' && (
-            <section aria-label="Live words" className="flex flex-col gap-2">
+            <section aria-label="Live words (experimental)" className="flex flex-col gap-2">
               <button
                 type="button"
                 role="switch"
-                aria-checked={settings.liveWords}
-                onClick={() => update({ liveWords: !settings.liveWords })}
+                aria-checked={settings.liveWordsOptIn}
+                onClick={() => update({ liveWordsOptIn: !settings.liveWordsOptIn })}
                 className={cn(
                   'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
-                  settings.liveWords
+                  settings.liveWordsOptIn
                     ? 'border-accent bg-accent-soft text-accent'
                     : 'border-border bg-surface-2 text-fg',
                 )}
               >
-                <span className="text-ui font-semibold">Live words</span>
-                <span className="text-meta">{settings.liveWords ? 'On' : 'Off'}</span>
+                <span className="text-ui font-semibold">Live words (experimental)</span>
+                <span className="text-meta">{settings.liveWordsOptIn ? 'On' : 'Off'}</span>
               </button>
               <p className="text-meta leading-base text-muted">{LIVE_WORDS_EXPLANATION}</p>
             </section>

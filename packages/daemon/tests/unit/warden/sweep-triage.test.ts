@@ -19,7 +19,9 @@ import {
  * an investigation's verdict does; the owner's own request; and the "who needs you" feed.
  */
 
-const jev = (overrides: Parameters<typeof enabled>[0] = {}) => enabled({ triage: 'jev', ...overrides });
+/** Both layers: Jev in front of the investigation. */
+const jev = (overrides: Parameters<typeof enabled>[0] = {}) =>
+  enabled({ layers: { jev: true, llm: true }, ...overrides });
 
 /** An assignment whose warden has finished, with the report it left. */
 const finished = (kind = 'unattended_question'): Partial<WardenRuntimeState> => ({
@@ -58,7 +60,7 @@ describe('rules only — the default', () => {
 
     // Assert
     should(actual.anomalies).have.length(2);
-    should(actual.message).equal('rules only: the flags are shown to you and nothing is spent');
+    should(actual.message).equal('investigations are off: 1 flag waits for you and nothing is spent on it');
     should(subject.spawns).be.empty();
     should(subject.guarded).be.empty();
     should(subject.state().triageDay?.flags).equal(2);
@@ -253,7 +255,7 @@ describe('the Jev guard', () => {
     should(subject.state().queueMeta?.s2?.origin).equal('jev');
   });
 
-  it('should fall back to rules — not investigate — once the Jev cap is reached mid-sweep', async () => {
+  it('should pass the rest on to investigations, unasked, once the Jev cap is reached mid-sweep', async () => {
     // Arrange
     const subject = harness({
       config: jev({ caps: { jevUsdPerDay: 0.01, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 } }),
@@ -263,14 +265,45 @@ describe('the Jev guard', () => {
 
     // Act
     await subject.service.run({ force: false });
+    const status = await subject.service.status();
 
     // Assert
     should(subject.guarded).have.length(1);
     should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
-    should(subject.state().assignedQueue ?? []).deepEqual([]);
+    should(subject.state().assignedQueue?.map(anomaly => anomaly.sessionId)).deepEqual(['s2']);
+    should(status.triage.jev).deepEqual({ configured: true, active: false, reason: 'jev_cap' });
+    should(status.triage.llm).deepEqual({ configured: true, active: true, reason: 'configured' });
   });
 
-  it('should keep a queued flag waiting while a cap holds the Warden to rules', async () => {
+  it('should keep a queued flag waiting while the investigation cap holds investigations off', async () => {
+    // Arrange
+    const queued = {
+      kind: 'unattended_question' as const,
+      sessionId: 's1',
+      status: 'awaiting_user' as const,
+      detail: 'd',
+    };
+    const subject = harness({
+      config: jev(),
+      fleet: [unattended('s1')],
+      state: {
+        assignedQueue: [queued],
+        investigations: [
+          { id: 'r', scope: 'fleet', origin: 'sweep', startedAt: at(-50), reportPath: '/r.md', costUsd: 5 },
+        ],
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.spawns).be.empty();
+    should(subject.guarded).be.empty();
+    should(subject.state().assignedQueue?.map(anomaly => anomaly.sessionId)).deepEqual(['s1']);
+  });
+
+  it('should still start a queued flag while only the Jev cap is reached', async () => {
     // Arrange
     const queued = {
       kind: 'unattended_question' as const,
@@ -291,9 +324,8 @@ describe('the Jev guard', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.spawns).be.empty();
     should(subject.guarded).be.empty();
-    should(subject.state().assignedQueue?.map(anomaly => anomaly.sessionId)).deepEqual(['s1']);
+    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
   });
 });
 
@@ -324,8 +356,8 @@ describe('the investigation budget', () => {
 
     // Assert
     should(subject.spawns).be.empty();
-    should(status.spend.capHit).equal('investigation');
-    should(status.triage).match({ configured: 'llm', effective: 'rules', reason: 'investigation_cap' });
+    should(status.spend.capsHit).deepEqual(['investigation']);
+    should(status.triage.llm).deepEqual({ configured: true, active: false, reason: 'investigation_cap' });
   });
 
   it('should hold investigations over the hourly limit in the queue', async () => {
@@ -425,7 +457,7 @@ describe('what a verdict does', () => {
   it('should stop when the owner allowed it', async () => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, failover: true, stop: true } }),
+      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true } }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('KILL', 'STOP — looping') },
       state: finished(),
@@ -437,6 +469,36 @@ describe('what a verdict does', () => {
     // Assert
     should(subject.remedies).deepEqual([{ action: 'stop', sessionId: 's1', detail: 'Warden verdict: looping' }]);
     should(journalTypes(subject)).containEql('fleet.warden_acted');
+  });
+
+  it('should restart a frozen ferret on RESTART, and hold it when the owner did not allow restarts', async () => {
+    // Arrange
+    const allowed = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1', status: 'running' })],
+      reports: { '/r.md': report('RESUME', 'RESTART — the process is frozen') },
+      state: finished(),
+    });
+    const held = harness({
+      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: false, failover: true, stop: false } }),
+      fleet: [session({ id: 's1', status: 'running' })],
+      reports: { '/r.md': report('RESUME', 'RESTART — the process is frozen') },
+      state: finished(),
+    });
+
+    // Act
+    await allowed.service.run({ force: false });
+    await held.service.run({ force: false });
+
+    // Assert
+    should(allowed.remedies).deepEqual([{ action: 'restart', sessionId: 's1', detail: '' }]);
+    should(allowed.state().actions?.[0]).match({
+      action: 'restart',
+      outcome: 'done',
+      detail: 'Restarted with its conversation intact: the process is frozen.',
+    });
+    should(held.remedies).deepEqual([]);
+    should(held.state().actions?.[0]).match({ action: 'restart', outcome: 'held' });
   });
 
   it('should resume on RESUME and fail over on a MIGRATE that names the login', async () => {
@@ -489,7 +551,7 @@ describe('what a verdict does', () => {
   it('should hold a nudge the owner did not let it send alone', async () => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: false, resume: true, failover: true, stop: false } }),
+      config: enabled({ mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false } }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('NUDGE', 'NUDGE — quiet') },
       state: finished(),
@@ -509,7 +571,7 @@ describe('what a verdict does', () => {
   ] as const)('should do nothing on %s', async (_label, text, status) => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, failover: true, stop: true } }),
+      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true } }),
       fleet: [session({ id: 's1', status })],
       reports: { '/r.md': text },
       state: finished(),
@@ -629,7 +691,7 @@ describe('the fleet warden under Jev', () => {
     should(subject.state().investigations?.[0]).match({ id: 'w0', scope: 'fleet', origin: 'jev' });
   });
 
-  it('should stop at the Jev cap and say so', async () => {
+  it('should pass the rest on to the investigation, unasked, once the Jev cap is reached', async () => {
     // Arrange
     const subject = harness({
       config: jev({ caps: { jevUsdPerDay: 0.01, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 } }),
@@ -641,8 +703,9 @@ describe('the fleet warden under Jev', () => {
     const actual = await subject.service.run({ force: false });
 
     // Assert
-    should(actual.message).equal('today’s Jev cap is reached: rules only until midnight UTC');
+    should(actual.spawned).equal('w0');
     should(subject.guarded).have.length(1);
+    should(subject.state().sweepCoverage?.anomalies).deepEqual([{ sessionId: 's2', kind: 'quota_reset_passed' }]);
   });
 
   it('should refuse past the hourly limit before paying Jev', async () => {
@@ -673,7 +736,7 @@ describe('the fleet warden under Jev', () => {
     should(subject.guarded).be.empty();
   });
 
-  it('should say a cap holds the fleet warden to rules', async () => {
+  it('should send every flag straight to the investigation while the Jev cap holds Jev off', async () => {
     // Arrange
     const subject = harness({
       config: jev(),
@@ -685,10 +748,12 @@ describe('the fleet warden under Jev', () => {
     const actual = await subject.service.run({ force: false });
 
     // Assert
-    should(actual.message).equal('today’s Jev cap is reached: rules only until midnight UTC');
+    should(actual.spawned).equal('w0');
+    should(subject.guarded).be.empty();
+    should(subject.state().investigations?.[0]).match({ scope: 'fleet', origin: 'sweep' });
   });
 
-  it('should say an investigation cap holds it to rules too', async () => {
+  it('should say an investigation cap leaves the flags for the owner', async () => {
     // Arrange
     const subject = harness({
       config: enabled(),
@@ -704,7 +769,7 @@ describe('the fleet warden under Jev', () => {
     const actual = await subject.service.run({ force: false });
 
     // Assert
-    should(actual.message).equal('today’s investigation cap is reached: rules only until midnight UTC');
+    should(actual.message).equal('today’s investigation cap is reached: 1 flag waits for you until midnight UTC');
   });
 });
 
@@ -865,9 +930,8 @@ describe('the status', () => {
     // Assert
     should(actual.nextSweepAt).equal('2026-07-31T12:02:00.000Z');
     should(actual.triage).match({
-      configured: 'jev',
-      effective: 'jev',
-      reason: 'configured',
+      jev: { configured: true, active: true, reason: 'configured' },
+      llm: { configured: true, active: true, reason: 'configured' },
       guardBackoffUntil: at(3),
     });
     should(actual.spend).match({ day: '2026-07-31', jevCapUsd: 0.5, investigationCapUsd: 2 });
@@ -884,7 +948,10 @@ describe('the status', () => {
     const actual = await subject.service.status();
 
     // Assert
-    should(actual.triage).deepEqual({ configured: 'llm', effective: 'llm', reason: 'configured' });
+    should(actual.triage).deepEqual({
+      jev: { configured: false, active: false, reason: 'configured' },
+      llm: { configured: true, active: true, reason: 'configured' },
+    });
     should(actual).not.have.property('nextSweepAt');
   });
 
@@ -1023,7 +1090,7 @@ describe('the settings in effect', () => {
     const actual = await subject.service.currentConfig();
 
     // Assert
-    should(actual.triage).equal('jev');
+    should(actual.layers).deepEqual({ jev: true, llm: true });
     should(actual.events.turnEnd).be.false();
   });
 });

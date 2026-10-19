@@ -25,6 +25,8 @@
 import type { SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { HypermediaMark } from '../features/hypermedia/hypermedia-session-actions.tsx';
+import { hypermediaOn } from '../features/session-info/info-model.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
@@ -108,6 +110,7 @@ export function SessionTopBar({
       )}
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
+        {hypermediaOn(session) ? <HypermediaMark /> : null}
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
         <span
           className="fy-session-bar__status"

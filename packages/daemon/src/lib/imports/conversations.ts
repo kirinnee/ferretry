@@ -7,12 +7,24 @@ import {
   type ConversationAdoptResult,
   type ConversationImportListing,
   type ConversationImportQuery,
+  type ConversationPreview,
+  type ConversationSource,
   type Harness,
   type ImportableConversation,
   ImportConversationIdSchema,
   type SessionStatus,
 } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptParser } from '../transcript/index.ts';
+import {
+  HANDOFF_READ_MAX_BYTES,
+  type HandoffDocuments,
+  type HandoffScope,
+  handoffPointers,
+  isReadableHandoff,
+  NO_HANDOFF_SCOPE,
+  recentExchanges,
+  spokenMessages,
+} from './conversation-text.ts';
 
 /**
  * Keeping an existing Claude Code / Codex conversation "on" as a ferret.
@@ -43,12 +55,16 @@ export interface ConversationFiles {
   entries(directory: string): Promise<readonly ConversationFileEntry[]>;
   info(file: string): Promise<ConversationFileInfo | undefined>;
   text(file: string): Promise<string | undefined>;
+  /** At most the first `maxBytes` of a file, for documents that are not trusted to be small. */
+  head(file: string, maxBytes: number): Promise<string | undefined>;
 }
 
-/** One CLI home to look in: the owner's own (`~/.claude`, `~/.codex`) or Ferretry's shared pool. */
+/** One CLI home to look in: Ferretry's shared pool, or the owner's own (`~/.claude`, `~/.codex`). */
 export interface ConversationRoot {
   readonly harness: Harness;
   readonly home: string;
+  /** Which listing it belongs to: Ferretry's own history, or the computer's that importing reads. */
+  readonly source: ConversationSource;
 }
 
 /** Which conversations a Ferretry session already keeps, keyed by {@link conversationKey}. */
@@ -100,15 +116,6 @@ interface Candidate {
 }
 
 /**
- * Text an owner did not type: the CLI's own injected wrappers (`<command-name>`, `<environment_context>`,
- * `<user_instructions>`) all open with a tag, and a preview of one would describe the CLI, not the
- * conversation.
- */
-const isInjected = (text: string): boolean => text.startsWith('<');
-
-const collapse = (text: string): string => text.replace(/\s+/gu, ' ').trim();
-
-/**
  * The working folder a transcript records — Claude on every record, Codex in its `session_meta` — and,
  * for Codex, the conversation id that record carries (Claude names a conversation by its file).
  */
@@ -139,23 +146,23 @@ export function conversationHead(
   return undefined;
 }
 
-/** The listing row a transcript describes, or why it describes none. */
+/**
+ * The listing row a transcript describes, or why it describes none. Its preview and latest message are
+ * what the owner said (`conversation-text.ts`), with each hand-off pointer read from `documents`.
+ */
 export function describeConversation(
   candidate: { readonly harness: Harness; readonly nameId: string | undefined },
   text: string,
   events: readonly TranscriptEvent[],
   modifiedAtMs: number,
+  documents?: HandoffDocuments,
 ): Omit<DiscoveredConversation, 'source' | 'relativePath'> | undefined {
   const head = conversationHead(candidate.harness, text);
   if (head === undefined) return undefined;
   const { project } = head;
   const id = head.id ?? candidate.nameId;
   if (id === undefined || !ImportConversationIdSchema.safeParse(id).success) return undefined;
-  const spoken = events.flatMap(event =>
-    event.kind === 'message' && event.role === 'user' && !isInjected(event.text.trim()) && collapse(event.text) !== ''
-      ? [collapse(event.text)]
-      : [],
-  );
+  const spoken = spokenMessages(events, documents);
   const first = spoken[0];
   if (first === undefined) return undefined;
   const latest = spoken.at(-1);
@@ -201,7 +208,7 @@ interface CachedDescription {
 }
 
 /**
- * Lists and adopts a machine's existing conversations.
+ * Lists, previews and adopts a machine's existing conversations.
  *
  * Each listing rescans, so a conversation the owner continued in their own terminal a minute ago is
  * current; a file whose size and modification time are unchanged is not re-parsed.
@@ -217,10 +224,12 @@ export class ConversationImportService {
     private readonly parsers: Readonly<Record<Harness, TranscriptParser>>,
     private readonly owners: ConversationOwners,
     private readonly adopter: ConversationAdopter,
+    /** Where a hand-off pointer's document may be read from; a pointer anywhere else says nothing. */
+    private readonly handoffScope: HandoffScope = NO_HANDOFF_SCOPE,
   ) {}
 
   async list(query: ConversationImportQuery = {}): Promise<ConversationImportListing> {
-    const { conversations, skipped } = await this.discover(query.harness);
+    const { conversations, skipped } = await this.discover(query.harness, query.source);
     const owners = await this.owners.owners();
     const matching = conversations.filter(conversationMatcher(query));
     return {
@@ -233,6 +242,20 @@ export class ConversationImportService {
         }),
       skipped,
     };
+  }
+
+  /**
+   * The last few exchanges of one conversation, cleaned like the listing, or `undefined` when no home
+   * holds it. Read fresh: it is asked for one row at a time, just before the owner continues it.
+   */
+  async preview(harness: Harness, id: string): Promise<ConversationPreview | undefined> {
+    const { conversations } = await this.discover(harness);
+    const conversation = conversations.find(row => row.id === id);
+    if (conversation === undefined) return undefined;
+    const text = await this.files.text(conversation.source);
+    if (text === undefined) return undefined;
+    const { events } = this.parsers[harness].parse({ text, source: conversation.source, endOfInput: true });
+    return { id, harness, messages: [...recentExchanges(events, await this.handoffDocuments(events))] };
   }
 
   /** One adoption at a time, so two pickers can never both keep one conversation. */
@@ -289,11 +312,13 @@ export class ConversationImportService {
 
   private async discover(
     harness: Harness | undefined,
+    source?: ConversationSource,
   ): Promise<{ readonly conversations: readonly DiscoveredConversation[]; readonly skipped: number }> {
     const seen = new Map<string, DiscoveredConversation>();
     let skipped = 0;
     for (const root of this.roots) {
       if (harness !== undefined && root.harness !== harness) continue;
+      if (source !== undefined && root.source !== source) continue;
       for (const candidate of await this.candidates(root)) {
         const described = await this.describe(candidate);
         if (described === undefined) {
@@ -321,17 +346,31 @@ export class ConversationImportService {
       return cached.described;
     const text = await this.files.text(candidate.source);
     // A live conversation may end mid-record; the complete records before it still describe it.
-    const described =
+    const events =
       text === undefined
         ? undefined
-        : describeConversation(
-            candidate,
-            text,
-            this.parsers[candidate.harness].parse({ text, source: candidate.source, endOfInput: true }).events,
-            info.modifiedAtMs,
-          );
+        : this.parsers[candidate.harness].parse({ text, source: candidate.source, endOfInput: true }).events;
+    const described =
+      text === undefined || events === undefined
+        ? undefined
+        : describeConversation(candidate, text, events, info.modifiedAtMs, await this.handoffDocuments(events));
     this.cache.set(candidate.source, { modifiedAtMs: info.modifiedAtMs, size: info.size, described });
     return described;
+  }
+
+  /**
+   * The hand-off documents `events` point at, each read only where the hand-off scope allows it and
+   * only up to {@link HANDOFF_READ_MAX_BYTES}. One that cannot be read is left out, which makes its
+   * pointer say nothing.
+   */
+  private async handoffDocuments(events: readonly TranscriptEvent[]): Promise<HandoffDocuments> {
+    const documents = new Map<string, string>();
+    for (const path of handoffPointers(events)) {
+      if (!isReadableHandoff(path, this.handoffScope)) continue;
+      const document = await this.files.head(path, HANDOFF_READ_MAX_BYTES);
+      if (document !== undefined) documents.set(path, document);
+    }
+    return documents;
   }
 
   /**

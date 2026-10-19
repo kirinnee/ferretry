@@ -6,10 +6,13 @@
  * and the errors, and gets the next config back on every change. Saving, and what the daemon answers,
  * are the caller's business (`warden-config-card.tsx` here).
  *
- * WHAT LEAVES THE MACHINE is said under the triage choice, every time, in words a person can check:
- * Rules only sends nothing; an investigation runs on the owner's own login and reads the transcript,
- * pane, diffs and CI; Jev triage sends TypeSafe AI a short, redacted summary with every stored secret
- * masked. The Jev key itself is not entered here — it lives in Settings › Speed-ups, which is the one
+ * THREE ROWS, ONE PER LAYER. The rules are always on and free; Jev and the LLM investigation are each
+ * switched on alone, each with its own daily cap beside it, so what can spend is visible where it is
+ * turned on.
+ *
+ * WHAT LEAVES THE MACHINE is said under the layers, every time, in words a person can check: the rules
+ * send nothing; an investigation runs on the owner's own login and reads the transcript, pane, diffs
+ * and CI; Jev is sent a short, redacted summary with every stored secret masked. The Jev key itself is not entered here — it lives in Settings › Speed-ups, which is the one
  * place a key is pasted, tested and replaced.
  */
 
@@ -19,9 +22,10 @@ import {
   type WardenAccount,
   type WardenConfig,
   type WardenEventTrigger,
+  type WardenFailoverPolicy,
   type WardenLogin,
   type WardenMayActAlone,
-  type WardenTriage,
+  type WardenLayers,
 } from '@ferretry/protocol';
 import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
@@ -59,17 +63,6 @@ export interface WardenSettingsFormProps {
   readonly onNavigate?: (to: string) => void;
 }
 
-const TRIAGE_OPTIONS: readonly { readonly id: WardenTriage; readonly label: string; readonly detail: string }[] = [
-  {
-    id: 'jev',
-    label: 'Jev guard',
-    detail:
-      'Recommended. Jev, a fast typed decision model, looks at each flag and answers only “skip” (healthy: bless it) or “investigate”. It never acts on a ferret, and when it is unsure it counts as investigate.',
-  },
-  { id: 'llm', label: 'LLM only', detail: 'The kteam behaviour: every flag gets a full investigation.' },
-  { id: 'rules', label: 'Rules only', detail: 'Flags are shown to you. No AI and no spend.' },
-];
-
 const EVENTS: readonly { readonly id: WardenEventTrigger; readonly label: string }[] = [
   { id: 'turnEnd', label: 'Turn end' },
   { id: 'question', label: 'Question asked' },
@@ -79,17 +72,26 @@ const EVENTS: readonly { readonly id: WardenEventTrigger; readonly label: string
 const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label: string; readonly detail: string }[] =
   [
     { id: 'nudge', label: 'Nudge', detail: 'Sends a short “still there?” message.' },
-    { id: 'resume', label: 'Resume or revive', detail: 'Restarts the CLI in its pane with resume.' },
+    { id: 'resume', label: 'Resume or revive', detail: 'Hands a dead turn back to the ferret.' },
+    {
+      id: 'restart',
+      label: 'Restart',
+      detail: 'Relaunches a dead or frozen process with its conversation intact.',
+    },
     { id: 'failover', label: 'Fail over', detail: 'Moves to the next login in the failover order when quota is out.' },
     { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: a KILL verdict asks you first.' },
   ];
 
-/** The privacy sentence for each triage: what leaves this machine, and to whom. */
-export const wardenPrivacyNote = (triage: WardenTriage, login: string): string => {
-  if (triage === 'rules') return 'What leaves this machine: nothing. Rules only sends nothing anywhere.';
-  const investigation = `Investigations run on your own login (${login}) and read the transcript, pane, diffs and CI.`;
-  if (triage === 'llm') return `What leaves this machine: ${investigation}`;
-  return `What leaves this machine: a short, redacted summary of a flagged ferret — its recent turns and screen tail, with every stored secret masked — is sent to TypeSafe AI (Jev). ${investigation}`;
+/** The privacy sentence for the layers that are on: what leaves this machine, and to whom. */
+export const wardenPrivacyNote = (layers: WardenLayers, login: string): string => {
+  if (!layers.jev && !layers.llm) return 'What leaves this machine: nothing. The rules send nothing anywhere.';
+  const investigation = layers.llm
+    ? ` Investigations run on your own login (${login}) and read the transcript, pane, diffs and CI.`
+    : '';
+  const jev = layers.jev
+    ? ' A short, redacted summary of a flagged ferret — its recent turns and screen tail, with every stored secret masked — is sent to TypeSafe AI (Jev).'
+    : '';
+  return `What leaves this machine:${jev}${investigation}`;
 };
 
 const KEY_PILL: Readonly<
@@ -228,6 +230,94 @@ function Segments<T extends string | number>({
   );
 }
 
+/** The cooldown, in one line under the layers. */
+const WARDEN_COOLDOWN_NOTE =
+  'A cleared flag stays quiet for a while; each time the same flag is cleared again the wait doubles, up to 4 h.';
+
+const FAILOVER_POLICIES: readonly WardenFailoverPolicy[] = ['fallback', 'round_robin'];
+
+const FAILOVER_POLICY_LABELS: Readonly<Record<WardenFailoverPolicy, string>> = {
+  fallback: 'First, then the next if it fails',
+  round_robin: 'Take turns',
+};
+
+/** An on/off switch: the track and its knob, and the word. */
+function Switch({
+  on,
+  label,
+  onToggle,
+}: {
+  readonly on: boolean;
+  readonly label: string;
+  readonly onToggle: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onToggle(!on)}
+      className="flex min-h-[44px] shrink-0 items-center gap-sm rounded-control px-control-x text-ui font-semibold text-fg"
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
+          on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
+            on ? 'translate-x-[18px]' : 'translate-x-[2px]',
+          )}
+        />
+      </span>
+      {on ? 'On' : 'Off'}
+    </button>
+  );
+}
+
+/**
+ * One layer: its name and what it does, its switch — none for the rules, which cannot be turned off —
+ * and, while it is on, its own settings and cap.
+ */
+function LayerRow({
+  title,
+  detail,
+  badges,
+  on,
+  onToggle,
+  children,
+}: {
+  readonly title: string;
+  readonly detail: string;
+  readonly badges?: ReactNode;
+  readonly on?: boolean;
+  readonly onToggle?: (next: boolean) => void;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-3 rounded-control border border-border-strong bg-surface-2 px-cell-x py-2"
+      data-warden-layer={title}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="flex flex-wrap items-center gap-xs text-ui font-semibold text-fg">
+            {title}
+            {badges}
+          </span>
+          <span className="mt-0.5 block text-meta leading-base text-muted">{detail}</span>
+        </div>
+        {on !== undefined && onToggle !== undefined && <Switch on={on} label={`${title} on`} onToggle={onToggle} />}
+      </div>
+      {on === true && children}
+    </div>
+  );
+}
+
 export function WardenSettingsForm({
   value,
   onChange,
@@ -241,7 +331,7 @@ export function WardenSettingsForm({
   onNavigate,
 }: WardenSettingsFormProps) {
   const name = useId();
-  const ai = value.triage !== 'rules';
+  const llm = value.layers.llm;
   const head = value.accounts[0];
   // The login a model is pinned on: the chosen head, else the machine default it stands in for.
   const base = head ?? (machineDefault === undefined ? undefined : { agent: machineDefault });
@@ -279,106 +369,62 @@ export function WardenSettingsForm({
             A supervisor that watches every ferret and steps in when one is stuck.
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={value.enabled}
-          aria-label="Warden on"
-          onClick={() => set({ enabled: !value.enabled })}
-          className="flex min-h-[44px] items-center gap-sm rounded-control px-control-x text-ui font-semibold text-fg"
-        >
-          <span
-            aria-hidden="true"
-            className={cn(
-              'relative h-5 w-9 shrink-0 rounded-full border transition-colors',
-              value.enabled ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
-            )}
-          >
-            <span
-              className={cn(
-                'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-fg transition-transform',
-                value.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]',
-              )}
-            />
-          </span>
-          {value.enabled ? 'On' : 'Off'}
-        </button>
+        <Switch on={value.enabled} label="Warden on" onToggle={enabled => set({ enabled })} />
       </section>
 
       <fieldset disabled={!value.enabled} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0 disabled:opacity-60">
-        <Card>
-          <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-            <legend className="mb-1 text-row font-semibold text-fg">Triage</legend>
-            <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-3">
-              {TRIAGE_OPTIONS.map(option => {
-                const checked = value.triage === option.id;
-                return (
-                  <label
-                    key={option.id}
-                    className={cn(
-                      'flex min-h-[44px] min-w-0 cursor-pointer items-start gap-3 rounded-control border px-control-x py-2',
-                      checked ? 'border-accent bg-accent-soft' : 'border-border bg-surface-2 hover:border-accent',
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name={`${name}-triage`}
-                      className="mt-1 accent-[var(--accent)]"
-                      checked={checked}
-                      onChange={() => set({ triage: option.id })}
-                    />
-                    <span className="min-w-0">
-                      <span className="flex flex-wrap items-center gap-xs text-ui font-semibold text-fg">
-                        {option.label}
-                        {option.id === 'jev' && <Badge tone={keyPill.tone}>{keyPill.label}</Badge>}
-                        {option.id === 'rules' && <Badge tone="ok">free</Badge>}
-                      </span>
-                      <span className="mt-0.5 block text-meta leading-base text-muted">{option.detail}</span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </fieldset>
-          {value.triage === 'jev' && jevKey.state !== 'set' && (
-            <div className="rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-meta leading-base text-warn">
-              <p className="m-0 font-semibold">
-                {jevKey.state === 'missing' ? 'No Jev key yet.' : 'Could not check the Jev key.'}
-              </p>
-              <p className="m-0 mt-xs text-fg-soft">
-                Without a key, every flag goes to an investigation (the kteam behaviour). Add it in{' '}
-                {speedupsHref === undefined ? (
-                  'Settings › Speed-ups'
-                ) : (
-                  <RouteLink
-                    to={speedupsHref}
-                    {...(onNavigate === undefined ? {} : { onNavigate })}
-                    className="font-semibold text-accent"
-                  >
-                    Settings › Speed-ups
-                  </RouteLink>
-                )}
-                .
-              </p>
-              {jevKey.keyUrl !== undefined && (
-                <p className="m-0 mt-xs break-all text-fg-soft">
-                  Get a key: {jevKey.keyUrl}{' '}
-                  <a
-                    href={jevKey.keyUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 font-semibold text-accent"
-                  >
-                    Get a key
-                    <ExternalLink size={12} aria-hidden="true" />
-                  </a>
+        <Card title="What happens to a flag" note={WARDEN_COOLDOWN_NOTE}>
+          <LayerRow
+            title="Rules"
+            detail="Always on while the Warden is. Free checks flag a stuck, idle or broken ferret for you."
+            badges={<Badge tone="ok">always on · free</Badge>}
+          />
+          <LayerRow
+            title="Jev"
+            detail="A fast typed decision model looks at each flag first and clears the ones it is sure are healthy. It never acts on a ferret."
+            badges={value.layers.jev ? <Badge tone={keyPill.tone}>{keyPill.label}</Badge> : undefined}
+            on={value.layers.jev}
+            onToggle={jev => set({ layers: { ...value.layers, jev } })}
+          >
+            {jevKey.state !== 'set' && (
+              <div className="rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-meta leading-base text-warn">
+                <p className="m-0 font-semibold">
+                  {jevKey.state === 'missing' ? 'No Jev key yet.' : 'Could not check the Jev key.'}
                 </p>
-              )}
-            </div>
-          )}
-          {value.triage === 'jev' && (
+                <p className="m-0 mt-xs text-fg-soft">
+                  Without a key, every flag {value.layers.llm ? 'goes to an investigation' : 'is shown to you'}. Add it
+                  in{' '}
+                  {speedupsHref === undefined ? (
+                    'Settings › Speed-ups'
+                  ) : (
+                    <RouteLink
+                      to={speedupsHref}
+                      {...(onNavigate === undefined ? {} : { onNavigate })}
+                      className="font-semibold text-accent"
+                    >
+                      Settings › Speed-ups
+                    </RouteLink>
+                  )}
+                  .
+                </p>
+                {jevKey.keyUrl !== undefined && (
+                  <p className="m-0 mt-xs break-all text-fg-soft">
+                    Get a key: {jevKey.keyUrl}{' '}
+                    <a
+                      href={jevKey.keyUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 font-semibold text-accent"
+                    >
+                      Get a key
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  </p>
+                )}
+              </div>
+            )}
             <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-              Skip threshold: Jev skips only when it is at least this sure the ferret is healthy
+              Clears a flag only when at least this sure it is healthy
               <span className="flex items-center gap-sm">
                 <input
                   type="range"
@@ -393,21 +439,72 @@ export function WardenSettingsForm({
                 <output className="mono w-12 text-right text-ui">{value.guard.threshold.toFixed(2)}</output>
               </span>
               <span className="text-meta font-normal leading-base text-muted">
-                Lower: more skipped and cheaper. Higher: more investigated and safer. Below the threshold, Jev’s answer
-                counts as investigate.
+                Lower: more cleared and cheaper. Higher: more passed on and safer.
               </span>
             </label>
+            <NumberField
+              label="Jev cap ($/day)"
+              value={value.caps.jevUsdPerDay}
+              error={errors.jevUsdPerDay}
+              {...WARDEN_FORM_LIMITS.capUsd}
+              step={0.1}
+              onChange={jevUsdPerDay => set({ caps: { ...value.caps, jevUsdPerDay } })}
+            />
+          </LayerRow>
+          <LayerRow
+            title="LLM investigation"
+            detail={
+              value.layers.jev
+                ? 'A read-only investigation looks at each flag Jev did not clear. Off: those flags are shown to you instead.'
+                : 'A read-only investigation looks at every flag. Off: flags are shown to you instead.'
+            }
+            on={value.layers.llm}
+            onToggle={llm => set({ layers: { ...value.layers, llm } })}
+          >
+            <Segments
+              label="Logins"
+              name={`${name}-rotation`}
+              options={FAILOVER_POLICIES}
+              value={value.failover.policy}
+              format={policy => FAILOVER_POLICY_LABELS[policy]}
+              onChange={policy => set({ failover: { ...value.failover, policy } })}
+            />
+            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+              <NumberField
+                label="LLM cap ($/day)"
+                value={value.caps.investigationUsdPerDay}
+                error={errors.investigationUsdPerDay}
+                {...WARDEN_FORM_LIMITS.capUsd}
+                step={0.5}
+                onChange={investigationUsdPerDay => set({ caps: { ...value.caps, investigationUsdPerDay } })}
+              />
+              <NumberField
+                label="Max investigations per hour"
+                value={value.caps.maxInvestigationsPerHour}
+                error={errors.maxInvestigationsPerHour}
+                {...WARDEN_FORM_LIMITS.perHour}
+                step={1}
+                onChange={maxInvestigationsPerHour => set({ caps: { ...value.caps, maxInvestigationsPerHour } })}
+              />
+            </div>
+          </LayerRow>
+          {(value.layers.jev || value.layers.llm) && (
+            <NumberField
+              label="A cleared flag stays quiet for (min)"
+              value={value.blessMinutes}
+              error={errors.blessMinutes}
+              {...WARDEN_FORM_LIMITS.blessMinutes}
+              step={1}
+              onChange={blessMinutes => set({ blessMinutes })}
+            />
           )}
           <p className="m-0 text-meta leading-base text-muted" data-warden-privacy="">
-            {wardenPrivacyNote(value.triage, base?.agent ?? 'no login')}
+            {wardenPrivacyNote(value.layers, base?.agent ?? 'no login')}
           </p>
         </Card>
 
-        {ai && (
-          <Card
-            title="Investigation (the assigned warden)"
-            note="A blessing stops re-flagging the same anomaly for this long, and is cancelled when the ferret’s status changes."
-          >
+        {llm && (
+          <Card title="Investigation (the assigned warden)">
             <p className="m-0 text-meta leading-base text-muted">
               A read-only LLM ferret that reads the transcript, pane, diffs and CI, then writes a report with a verdict:
               leave · nudge · resume · stop · needs you. Only this verdict ever acts. Every verdict records who ran it
@@ -470,8 +567,8 @@ export function WardenSettingsForm({
             ))}
             {notSet && (
               <p role="alert" className="m-0 text-meta leading-base text-warn" data-warden-login-not-set="">
-                No login is set and this machine has no default runtime, so LLM triage is unavailable. Choose a login
-                above.
+                No login is set and this machine has no default runtime, so LLM investigations are unavailable. Choose a
+                login above.
               </p>
             )}
             {efforts.length === 0 ? (
@@ -538,14 +635,6 @@ export function WardenSettingsForm({
                 step={1}
                 onChange={maxAssignedWardens => set({ maxAssignedWardens })}
               />
-              <NumberField
-                label="Blessing lasts (min)"
-                value={value.blessMinutes}
-                error={errors.blessMinutes}
-                {...WARDEN_FORM_LIMITS.blessMinutes}
-                step={1}
-                onChange={blessMinutes => set({ blessMinutes })}
-              />
             </div>
           </Card>
         )}
@@ -572,43 +661,7 @@ export function WardenSettingsForm({
           </fieldset>
         </Card>
 
-        {ai && (
-          <Card
-            title="Daily caps"
-            note="When a cap is hit, the Warden falls back to rules only until midnight UTC and says so."
-          >
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
-              {value.triage === 'jev' && (
-                <NumberField
-                  label="Jev ($/day)"
-                  value={value.caps.jevUsdPerDay}
-                  error={errors.jevUsdPerDay}
-                  {...WARDEN_FORM_LIMITS.capUsd}
-                  step={0.1}
-                  onChange={jevUsdPerDay => set({ caps: { ...value.caps, jevUsdPerDay } })}
-                />
-              )}
-              <NumberField
-                label="Investigations ($/day)"
-                value={value.caps.investigationUsdPerDay}
-                error={errors.investigationUsdPerDay}
-                {...WARDEN_FORM_LIMITS.capUsd}
-                step={0.5}
-                onChange={investigationUsdPerDay => set({ caps: { ...value.caps, investigationUsdPerDay } })}
-              />
-              <NumberField
-                label="Max investigations per hour"
-                value={value.caps.maxInvestigationsPerHour}
-                error={errors.maxInvestigationsPerHour}
-                {...WARDEN_FORM_LIMITS.perHour}
-                step={1}
-                onChange={maxInvestigationsPerHour => set({ caps: { ...value.caps, maxInvestigationsPerHour } })}
-              />
-            </div>
-          </Card>
-        )}
-
-        {ai && (
+        {llm && (
           <Card title="May act alone on a verdict">
             {ACT_ALONE.map(action => (
               <Check

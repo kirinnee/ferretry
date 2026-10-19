@@ -72,7 +72,7 @@ export const askWardenBlocker = (status: WardenStatusView): string | null => {
   if (!status.config.enabled) return 'The Warden is off. Turn it on in Settings › Warden.';
   const login = wardenLoginProblem(status.login, status.failover?.accounts ?? []);
   if (login !== null) return `${login}. Choose one in Settings › Warden.`;
-  if (status.spend.capHit === 'investigation')
+  if (status.spend.capsHit.includes('investigation'))
     return `Today’s ${usd(status.spend.investigationCapUsd)} investigation cap is reached. Raise it in Settings › Warden.`;
   return null;
 };

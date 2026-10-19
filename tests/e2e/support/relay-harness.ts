@@ -1141,7 +1141,9 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
       const browser = await launch();
       if (typeof browser !== 'object' || browser === null) return browser;
       const children = [...launchingChildren].filter(child => !childrenBefore.has(child));
-      const guarded = guardBrowserTransport(browser, watchBrowserTransport(children));
+      const transport = watchBrowserTransport(children);
+      await openTransportProbe(browser, transport);
+      const guarded = guardBrowserTransport(browser, transport);
       browserProcesses.set(browser, children);
       browserProcesses.set(guarded, children);
       return guarded;
@@ -1184,11 +1186,43 @@ const DEVTOOLS_PIPE_LOSS = /Could not write into pipe|Connection terminated whil
 const CALL_CEILING_MS = 60_000;
 const CALL_GRACE_MS = 30_000;
 
+/**
+ * THE THIRD, ENTIRELY SILENT FORM: Bun stops WRITING to Chrome. Chrome then receives nothing, so it has
+ * nothing to fail at and logs nothing, and Playwright waits on replies to commands that never arrived.
+ * Seen on a hosted runner as a journey that went quiet for two minutes with a healthy-looking Chrome.
+ *
+ * So a call still pending after {@link PROBE_AFTER_MS} asks Chrome's BROWSER process for its version
+ * over a session opened at launch. The browser process answers that in milliseconds even while a page
+ * is busy or a selector is still being waited for, so no reply within {@link PROBE_REPLY_MS} means the
+ * pipe is gone, not that the page is slow.
+ */
+const PROBE_AFTER_MS = 10_000;
+const PROBE_REPLY_MS = 5_000;
+
+/** What Playwright, or the guard below, says when a browser connection vanished under a journey. */
+const LOST_BROWSER =
+  /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
+
+/**
+ * Whether an error means the browser itself is gone rather than the page being not ready yet.
+ *
+ * A polling loop that treats every failed read as "not yet" polls a dead browser until its own
+ * deadline: one such loop held a journey for two minutes after its Chrome had died. Every loop
+ * rethrows this one.
+ */
+export function isLostBrowser(error: unknown): boolean {
+  return LOST_BROWSER.test(String((error as Error | undefined)?.message ?? error));
+}
+
 interface BrowserTransport {
   /** Rejects, with a `browser has disconnected` error, the moment the transport is known to be gone. */
   readonly lost: Promise<never>;
   /** Set by {@link closeChromeBounded}: an exit the harness asked for is not a lost transport. */
   closing: boolean;
+  /** Declare the transport lost: {@link lost} rejects with `why`. */
+  readonly fail: (why: string) => void;
+  /** A round trip to Chrome's browser process, when a session for one could be opened at launch. */
+  probe?: () => Promise<unknown>;
 }
 
 const browserTransports = new WeakMap<object, BrowserTransport>();
@@ -1205,7 +1239,7 @@ function watchBrowserTransport(children: readonly ChildProcess[]): BrowserTransp
   // Nothing may be left unhandled: Bun fails whichever test is running on an unhandled rejection.
   lost.catch(() => undefined);
   let reason: string | undefined;
-  const transport: BrowserTransport = { lost, closing: false };
+  const transport: BrowserTransport = { lost, closing: false, fail: why => markLost(why) };
   const markLost = (why: string): void => {
     if (reason !== undefined || transport.closing) return;
     reason = why;
@@ -1226,6 +1260,51 @@ function watchBrowserTransport(children: readonly ChildProcess[]): BrowserTransp
     });
   }
   return transport;
+}
+
+/** Open the browser-level CDP session {@link PROBE_AFTER_MS} probes through. No session, no probe. */
+async function openTransportProbe(browser: object, transport: BrowserTransport): Promise<void> {
+  const open = (browser as { newBrowserCDPSession?: () => Promise<{ send(method: string): Promise<unknown> }> })
+    .newBrowserCDPSession;
+  if (typeof open !== 'function') return;
+  const opening = open.call(browser);
+  opening.catch(() => undefined);
+  const session = await Promise.race([opening, Bun.sleep(PROBE_AFTER_MS).then(() => undefined)]).catch(() => undefined);
+  if (session !== undefined) transport.probe = () => session.send('Browser.getVersion');
+}
+
+/**
+ * While `name` is pending, ask Chrome's browser process for a reply every {@link PROBE_AFTER_MS}, and
+ * declare the transport lost the first time none comes within {@link PROBE_REPLY_MS}. Answers the stop.
+ */
+function watchPendingCall(name: string, transport: BrowserTransport): () => void {
+  const probe = transport.probe;
+  if (probe === undefined) return () => undefined;
+  let probing = false;
+  const watchdog = setInterval(() => {
+    if (probing) return;
+    probing = true;
+    let silence: ReturnType<typeof setTimeout> | undefined;
+    // A rejected probe still crossed the pipe; a session that has closed is what the other signs report.
+    const answered = Promise.race([
+      probe().then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>(settle => {
+        silence = setTimeout(() => settle(false), PROBE_REPLY_MS);
+      }),
+    ]);
+    void answered.then(replied => {
+      clearTimeout(silence);
+      probing = false;
+      if (!replied)
+        transport.fail(
+          `${name} was still pending and Chrome's browser process did not answer Browser.getVersion within ${String(PROBE_REPLY_MS)}ms — Bun stopped carrying Playwright's DevTools pipe`,
+        );
+    });
+  }, PROBE_AFTER_MS);
+  return () => clearInterval(watchdog);
 }
 
 /** The Playwright objects a guarded browser hands out, unwrapped again whenever one goes back in. */
@@ -1269,7 +1348,11 @@ function guardBrowserTransport<T extends object>(target: T, transport: BrowserTr
         ceiling,
       );
     });
-    return Promise.race([pending.then(wrap), transport.lost, silent]).finally(() => clearTimeout(timer));
+    const stopWatching = watchPendingCall(name, transport);
+    return Promise.race([pending.then(wrap), transport.lost, silent]).finally(() => {
+      clearTimeout(timer);
+      stopWatching();
+    });
   };
   const proxies = new WeakMap<object, object>();
   const guard = (object: object): object => {

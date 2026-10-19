@@ -6,8 +6,8 @@
  *
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
  *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
- *   - All · Needs you · Running, each with the count choosing it would show;
- *   - EVERY session, grouped by project, each a status dot, the agent's name, a "needs you" badge, a
+ *   - All · Agents · Interactive, each with the count choosing it would show, and "Show stopped";
+ *   - EVERY live session, grouped by project, each a status dot, the agent's name, a "needs you" badge, a
  *     line of what it is doing and the directory it runs in — the open one is a soft filled pill;
  *   - Projects, Insights (Analytics, Warden, Learning) and Settings, at the bottom.
  *
@@ -44,7 +44,13 @@ import { NewSessionMenu } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
-import { type SessionsBarFilter, sessionsBarSubline, sessionsBarView } from './sessions-bar-model.ts';
+import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
+import {
+  DEFAULT_LIST_FILTER,
+  type SessionsListFilter,
+  sessionsBarSubline,
+  sessionsBarView,
+} from './sessions-bar-model.ts';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
 import { StatusMark } from './status-mark.tsx';
 
@@ -56,13 +62,6 @@ export const SESSIONS_BAR_PLACES = [
   { id: 'insights', label: 'Insights', path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'settings', label: 'Settings', path: daemonSettingsPath, Icon: Settings },
 ] as const;
-
-const FILTER_LABEL: Readonly<Record<SessionsBarFilter, string>> = {
-  all: 'All',
-  'needs-you': 'Needs you',
-  running: 'Running',
-};
-const FILTER_ORDER: readonly SessionsBarFilter[] = ['all', 'needs-you', 'running'];
 
 /** Another paired machine the switcher can take the reader to. */
 export interface SessionsBarMachine {
@@ -283,14 +282,34 @@ function FindButton({
   );
 }
 
+/** The reader's filter, kept by the bar itself so the column, the rail and the drawer all follow it. */
+interface ListFilterProps {
+  readonly listFilter: SessionsListFilter;
+  readonly onListFilterChange: (next: SessionsListFilter) => void;
+}
+
+/** The open session stays listed whatever the filter says: a bar that drops the page on screen reads as broken. */
+const isOpen =
+  (activeSessionId: string | null) =>
+  (view: SessionView): boolean =>
+    view.config.id === activeSessionId;
+
+/** Every machine's list under the same filter; only this machine's rows may be the open one. */
+const allMachinesFor = (props: SessionsBarProps, listFilter: SessionsListFilter) =>
+  props.machineSources === undefined
+    ? null
+    : allMachinesView(props.machineSources, {
+        filter: listFilter,
+        keep: (machine, view) => machine === props.daemonId && view.config.id === props.activeSessionId,
+        sortRows: true,
+      });
+
 /** The column's and the drawer's content: everything but the frame. */
-function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: string) => void }) {
-  const { daemonId, sessions, projects, activeSessionId, active, navigate } = props;
-  const [filter, setFilter] = useState<SessionsBarFilter>('all');
-  const view = sessionsBarView(sessions ?? [], projects, filter);
-  const machineView =
-    props.machineSources === undefined ? null : allMachinesView(props.machineSources, { filter, sortRows: true });
-  const counts = machineView?.counts ?? view.counts;
+function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly navigate: (to: string) => void }) {
+  const { daemonId, sessions, projects, activeSessionId, active, navigate, listFilter } = props;
+  const view = sessionsBarView(sessions ?? [], projects, listFilter, isOpen(activeSessionId));
+  const machineView = allMachinesFor(props, listFilter);
+  const { counts, hiddenStopped } = machineView ?? view;
   return (
     <>
       {props.update === undefined ? null : (
@@ -315,28 +334,20 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
           </>
         )}
       </div>
-      <fieldset aria-label="Show sessions" className="fy-sbar__filters">
-        {FILTER_ORDER.map(id => (
-          <button
-            aria-pressed={filter === id}
-            className="fy-sbar__chip"
-            data-sbar-filter={id}
-            key={id}
-            onClick={() => setFilter(id)}
-            type="button"
-          >
-            {FILTER_LABEL[id]} <span className="fy-sbar__count">{counts[id]}</span>
-          </button>
-        ))}
-      </fieldset>
+      <SessionsBarFilters
+        counts={counts}
+        filter={listFilter}
+        hiddenStopped={hiddenStopped}
+        onChange={props.onListFilterChange}
+      />
       <div className="fy-sbar__list scroll-thin">
         {machineView !== null ? (
           !machineView.loaded ? (
             <p className="fy-sbar__empty" role="status">
               Reading sessions…
             </p>
-          ) : filter !== 'all' && machineView.needsYou.length === 0 && machineView.machines.length === 0 ? (
-            <p className="fy-sbar__empty">{`No sessions match ${FILTER_LABEL[filter]}.`}</p>
+          ) : listFilter.mode !== 'all' && machineView.needsYou.length === 0 && machineView.machines.length === 0 ? (
+            <p className="fy-sbar__empty">{sessionsBarEmptyMessage(listFilter, hiddenStopped)}</p>
           ) : (
             <SessionsBarMachines
               activeSessionId={activeSessionId}
@@ -354,13 +365,11 @@ function SessionsBarBody(props: SessionsBarProps & { readonly navigate: (to: str
         ) : view.groups.length === 0 ? (
           <div className="fy-sbar__empty">
             <p className="m-0">
-              {filter !== 'all'
-                ? `No sessions match ${FILTER_LABEL[filter]}.`
-                : props.createRuntimeHref === undefined
-                  ? 'No sessions running.'
-                  : 'No sessions yet, and nothing can start until this machine has a runtime.'}
+              {listFilter.mode === 'all' && props.createRuntimeHref !== undefined
+                ? 'No sessions yet, and nothing can start until this machine has a runtime.'
+                : sessionsBarEmptyMessage(listFilter, hiddenStopped)}
             </p>
-            {filter === 'all' && props.createRuntimeHref !== undefined && (
+            {listFilter.mode === 'all' && props.createRuntimeHref !== undefined && (
               <RouteLink
                 className="kt-btn mt-2"
                 data-variant="primary"
@@ -487,9 +496,10 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
 }
 
 /** The collapsed form: the same places and sessions, as icons and status dots. */
-function SessionsRail(props: SessionsBarProps) {
-  const { daemonId, sessions, projects, activeSessionId, active, onNavigate } = props;
-  const view = sessionsBarView(sessions ?? [], projects, 'all');
+function SessionsRail(props: SessionsBarProps & ListFilterProps) {
+  const { daemonId, sessions, projects, activeSessionId, active, onNavigate, listFilter } = props;
+  const view = sessionsBarView(sessions ?? [], projects, listFilter, isOpen(activeSessionId));
+  const machineView = allMachinesFor(props, listFilter);
   return (
     <nav aria-label="Sessions" className="fy-sbar fy-sbar--rail" data-sessions-bar="rail">
       {props.onExpand === undefined ? null : (
@@ -507,12 +517,12 @@ function SessionsRail(props: SessionsBarProps) {
       <NewSessionControl marked={false} navigate={onNavigate} props={props} />
       <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
       <ul className="fy-sbar__list fy-sbar__dots scroll-thin">
-        {props.machineSources !== undefined ? (
+        {machineView !== null ? (
           <SessionsRailMachineDots
             activeSessionId={activeSessionId}
             daemonId={daemonId}
             onNavigate={onNavigate}
-            view={allMachinesView(props.machineSources, { sortRows: true })}
+            view={machineView}
           />
         ) : (
           view.groups.flatMap(group =>
@@ -555,7 +565,7 @@ function SessionsRail(props: SessionsBarProps) {
   );
 }
 
-function SessionsDrawer(props: SessionsBarProps) {
+function SessionsDrawer(props: SessionsBarProps & ListFilterProps) {
   const panel = useRef<HTMLDivElement | null>(null);
   const close = props.onClose ?? (() => undefined);
   const { onKeyDown } = useDialogFocus(true, panel, close);
@@ -597,7 +607,7 @@ function SessionsDrawer(props: SessionsBarProps) {
  * rail's, under `left`, so it survives a reload and is the same on every machine's pages. A drag
  * previews locally and commits once, at the end, so the store is written once per gesture.
  */
-function SessionsColumn(props: SessionsBarProps) {
+function SessionsColumn(props: SessionsBarProps & ListFilterProps) {
   const rails = props.rails ?? workspaceRailPreferences;
   const widths = useSyncExternalStore(rails.subscribe, rails.snapshot, rails.snapshot);
   const [preview, setPreview] = useState<number | null>(null);
@@ -627,7 +637,9 @@ function SessionsColumn(props: SessionsBarProps) {
 }
 
 export function SessionsBar(props: SessionsBarProps) {
-  if (props.presentation === 'drawer') return <SessionsDrawer {...props} />;
-  if (props.presentation === 'rail') return <SessionsRail {...props} />;
-  return <SessionsColumn {...props} />;
+  const [listFilter, onListFilterChange] = useState<SessionsListFilter>(DEFAULT_LIST_FILTER);
+  const filtered = { ...props, listFilter, onListFilterChange };
+  if (props.presentation === 'drawer') return <SessionsDrawer {...filtered} />;
+  if (props.presentation === 'rail') return <SessionsRail {...filtered} />;
+  return <SessionsColumn {...filtered} />;
 }

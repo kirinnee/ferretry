@@ -35,7 +35,7 @@ export interface ParakeetSessionPorts {
 
 /** What only an on-device session can do on top of the shared contract. */
 export interface ParakeetSessionOptions extends BrowserRecognitionSessionOptions {
-  /** Near-live words while recording (the per-device "Live words" setting). */
+  /** Near-live words while recording (the per-device "Live words (experimental)" setting, off by default). */
   readonly liveWords?: boolean;
   /** Committed and interim words as they change. Never the output seam: Stop's result is. */
   onLive?(state: NearLiveState): void;
@@ -93,6 +93,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
           Math.max(1, this.#options.maxDurationMs ?? MAX_DICTATION_MS),
         );
         this.#options.onStart();
+        this.#options.onMonitor?.(opened.monitor);
         // Load while the person speaks. A failure here is reported by the transcribe that follows.
         try {
           this.#ports.engine.preload();
@@ -111,6 +112,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
       return Promise.reject(new BrowserRecognitionError('aborted', 'Dictation already ended.'));
     this.#state = 'finishing';
     this.#clearLimit();
+    this.#options.onMonitor?.(null);
     this.#finishing = this.#transcribe().then(
       text => {
         if (this.#state !== 'finishing') throw new BrowserRecognitionError('aborted', 'Dictation was cancelled.');
@@ -134,6 +136,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     if (this.#state === 'finished' || this.#state === 'cancelled' || this.#state === 'failed') return;
     this.#state = 'cancelled';
     this.#abort.abort();
+    this.#options.onMonitor?.(null);
     this.#live?.cancel();
     this.#clearLimit();
     void this.#recording?.then(
@@ -177,6 +180,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     if (this.#state !== 'opening' && this.#state !== 'recording') return;
     this.#state = 'failed';
     this.#clearLimit();
+    this.#options.onMonitor?.(null);
     this.#cleanup();
     this.#options.onFailure(failure);
   }

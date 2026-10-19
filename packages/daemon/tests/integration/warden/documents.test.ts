@@ -154,7 +154,7 @@ describe('the warden settings file', () => {
   it('should round-trip a configuration the owner changed, in effect at once even though it loosens', async () => {
     // Arrange
     const { home, store, file } = await settings('warden-config-roundtrip');
-    const configured = { ...defaultWardenConfig, triage: 'llm' as const, intervalMinutes: 10 as const };
+    const configured = { ...defaultWardenConfig, layers: { jev: false, llm: true }, intervalMinutes: 10 as const };
 
     // Act
     await store.write(configured);
@@ -163,6 +163,23 @@ describe('the warden settings file', () => {
     should(parseStoredWardenConfig(await store.read())).deepEqual({ config: configured, warnings: [] });
     should((await home.service.load()).evaluation.pending).deepEqual([]);
     should((await stat(file)).mode & 0o777).equal(0o600);
+  });
+
+  it('should write the layers and never the legacy triage a hand-written file still says', async () => {
+    // Arrange
+    const { home, store, file } = await settings('warden-config-legacy');
+    await writeFile(file, 'triage: rules\nintervalMinutes: 10\n', 'utf8');
+    await home.service.load();
+    const legacy = parseStoredWardenConfig(await store.read()).config;
+
+    // Act
+    await store.write({ ...legacy, layers: { jev: true, llm: false } });
+
+    // Assert
+    const text = await readFile(file, 'utf8');
+    should(legacy.layers).deepEqual({ jev: false, llm: false });
+    should(text).match(/layers:\n {2}jev: true/u);
+    should(text).not.match(/triage/u);
   });
 
   it('should read the version in effect, not the file: a hand edit that loosens is held', async () => {

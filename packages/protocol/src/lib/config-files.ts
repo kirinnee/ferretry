@@ -13,7 +13,9 @@ import {
   WardenInvestigationConfigSchema,
   WardenMayActAloneSchema,
   WardenSweepIntervalSchema,
-  WardenTriageSchema,
+  LegacyWardenTriageSchema,
+  migrateLegacyWardenSettings,
+  WardenLayersSchema,
 } from './warden.ts';
 
 /**
@@ -204,16 +206,16 @@ export function configFileCapability(address: ConfigFileAddress): 'fleet' | 'war
 /**
  * The Warden settings a state home with no `warden.yaml` behaves as.
  *
- * ON, AND FREE: the sweep runs every two minutes and its flags are shown to the owner, but triage is
- * `rules`, so nothing is ever spent until the owner picks Jev or LLM triage — each of which has its own
- * daily cap (`docs/config-files.md`). Stop is never something an investigation may do alone by default.
+ * ON, AND FREE: the sweep runs every two minutes and its rules flag what they find for the owner, but
+ * both triage layers are off, so nothing is ever spent until the owner switches Jev or LLM investigation
+ * on — each with its own daily cap (`docs/config-files.md`). Stop is never something an investigation may do alone by default.
  */
 export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   enabled: true,
-  triage: 'rules',
+  layers: { jev: false, llm: false },
   guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 },
   caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
-  mayActAlone: { nudge: true, resume: true, failover: true, stop: false },
+  mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: false },
   events: { turnEnd: true, question: true, paneDied: true },
   investigation: { effort: 'low' },
   // None: the machine's default runtime, resolved when it is read. No login name is compiled in.
@@ -232,11 +234,14 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
 
 /**
  * `warden.yaml` as written: every setting optional, the nested sections too, and an unknown key
- * refused. What a file leaves out is {@link DEFAULT_WARDEN_CONFIG}'s.
+ * refused. What a file leaves out is {@link DEFAULT_WARDEN_CONFIG}'s. A file from before the layers may
+ * still say `triage`; it is read as the layers it meant, and the next write leaves it out.
  */
 export const WardenFileSchema = z.strictObject({
   enabled: z.boolean().optional(),
-  triage: WardenTriageSchema.optional(),
+  layers: WardenLayersSchema.strict().partial().optional(),
+  /** DEPRECATED: the single choice `layers` replaced. Read as its layers; never written back. */
+  triage: LegacyWardenTriageSchema.optional(),
   guard: WardenGuardConfigSchema.strict().partial().optional(),
   caps: WardenCapsSchema.strict().partial().optional(),
   mayActAlone: WardenMayActAloneSchema.strict().partial().optional(),
@@ -258,7 +263,7 @@ export type WardenFile = z.infer<typeof WardenFileSchema>;
 
 /** The Warden settings a parsed `warden.yaml` means. */
 export function wardenConfigFromFile(file: WardenFile): WardenConfig {
-  return mergeWardenConfig(DEFAULT_WARDEN_CONFIG, file);
+  return mergeWardenConfig(DEFAULT_WARDEN_CONFIG, migrateLegacyWardenSettings(file) as Omit<WardenFile, 'triage'>);
 }
 
 // ── Learning ─────────────────────────────────────────────────────────────────────────────────────

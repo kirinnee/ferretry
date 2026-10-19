@@ -12,7 +12,16 @@
 import type { SessionView } from '@ferretry/protocol';
 import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { effortLabel, harnessLabel, INFO_HINT, learningLabel, loginScope, modelFacts } from './info-model.ts';
+import {
+  effortLabel,
+  harnessLabel,
+  hypermediaLabel,
+  hypermediaOn,
+  INFO_HINT,
+  learningLabel,
+  loginScope,
+  modelFacts,
+} from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
 import { type InfoRelaunchRead, InfoRelaunchRow } from './info-relaunch.tsx';
 
@@ -122,6 +131,9 @@ export function InfoRuntime({
           )}
         </InfoRow>
       )}
+      <InfoRow hint={INFO_HINT.hypermedia} label="Hypermedia">
+        <span data-info-hypermedia={hypermediaOn(view) ? 'on' : 'off'}>{hypermediaLabel(hypermediaOn(view))}</span>
+      </InfoRow>
     </InfoSection>
   );
 }

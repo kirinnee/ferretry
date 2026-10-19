@@ -5,9 +5,10 @@ import {
   ComposerRuntime,
   ComposerRuntimeWithKeyboard,
   codexReasoningObservationChanged,
-  modelObservationChanged,
-  type RuntimeSwitchLifecycle,
   launchedModel,
+  modelObservationChanged,
+  RUNTIME_SWITCH_CONFIRM_MS,
+  type RuntimeSwitchLifecycle,
   runtimeEffortReadout,
   runtimeModelChipLabel,
   runtimePopoverPosition,
@@ -465,6 +466,169 @@ describe('ComposerRuntime stale-until-evidence', () => {
     // Assert
     should(ariaOf(modelChip(view))).not.endWith(', switching');
     should(labelOf(effortChip(view))).equal('default');
+    await view.unmount();
+  });
+});
+
+describe('ComposerRuntime bounded switching', () => {
+  interface BarState {
+    readonly overrides: SessionOverrides;
+    readonly busy?: boolean;
+    readonly confirmMs?: number;
+  }
+
+  /** A bar whose model sheet body captures its lifecycle, re-rendered with each new state. */
+  const bar = async (
+    initial: BarState,
+  ): Promise<{
+    readonly view: Mounted;
+    readonly lifecycle: () => RuntimeSwitchLifecycle;
+    readonly rerender: (next: BarState) => Promise<void>;
+  }> => {
+    let captured: RuntimeSwitchLifecycle | undefined;
+    const element = ({ overrides, busy = false, confirmMs = 10 }: BarState) => (
+      <ComposerRuntime
+        busy={busy}
+        canControl
+        renderModelControls={lifecycle => {
+          captured = lifecycle;
+          return null;
+        }}
+        switchConfirmMs={confirmMs}
+        view={session(overrides)}
+      />
+    );
+    const view = await mount(element(initial));
+    await interact(() => modelChip(view).click());
+    return {
+      view,
+      lifecycle: () => must(captured, 'the captured sheet lifecycle'),
+      rerender: async next => view.render(element(next)),
+    };
+  };
+
+  const elapse = (ms: number): Promise<void> => interact(() => new Promise(resolve => setTimeout(resolve, ms)));
+  const markOf = (chip: HTMLButtonElement): string | null =>
+    chip.querySelector('[data-switch-state]')?.getAttribute('data-switch-state') ?? null;
+  const observed = { observedModel: 'claude-opus-5', observedModelAt: 't1' };
+
+  test('should bound "switching…" by default so it can never be permanent', async () => {
+    // Assert
+    should(RUNTIME_SWITCH_CONFIRM_MS).be.within(5_000, 60_000);
+  });
+
+  test('should say the switch was not confirmed once the bound passes with no evidence', async () => {
+    // Arrange
+    const { view, lifecycle } = await bar({ overrides: observed });
+    await interact(() => lifecycle().onSwitchSubmitted());
+
+    // Act
+    await elapse(40);
+
+    // Assert — the last OBSERVED model stays named; only the claim about it changes.
+    should(markOf(modelChip(view))).equal('unconfirmed');
+    should(labelOf(modelChip(view))).equal('claude-opus-5');
+    should(ariaOf(modelChip(view))).endWith(', could not confirm the switch; showing the last reported value');
+    should(modelChip(view).title).equal('Couldn’t confirm the switch — showing the last value the harness reported');
+    await view.unmount();
+  });
+
+  test('should keep "switching…" while the bound has not passed', async () => {
+    // Arrange
+    const { view, lifecycle } = await bar({ overrides: observed, confirmMs: 60_000 });
+
+    // Act
+    await interact(() => lifecycle().onSwitchSubmitted());
+
+    // Assert
+    should(markOf(modelChip(view))).equal('pending');
+    should(modelChip(view).title).equal('Switching — waiting for the harness to confirm');
+    await view.unmount();
+  });
+
+  test('should settle an unconfirmed switch when late evidence arrives', async () => {
+    // Arrange
+    const { view, lifecycle, rerender } = await bar({ overrides: observed });
+    await interact(() => lifecycle().onSwitchSubmitted());
+    await elapse(40);
+
+    // Act
+    await rerender({ overrides: { observedModel: 'claude-sonnet-5', observedModelAt: 't2' } });
+
+    // Assert
+    should(markOf(modelChip(view))).be.null();
+    should(labelOf(modelChip(view))).equal('claude-sonnet-5');
+    await view.unmount();
+  });
+
+  test('should settle a pending switch when the session goes busy', async () => {
+    // Arrange
+    const { view, lifecycle, rerender } = await bar({ overrides: observed, confirmMs: 60_000 });
+    await interact(() => lifecycle().onSwitchSubmitted());
+
+    // Act
+    await rerender({ overrides: observed, busy: true, confirmMs: 60_000 });
+
+    // Assert
+    should(markOf(modelChip(view))).be.null();
+    await view.unmount();
+  });
+
+  test('should keep saying unconfirmed while a busy turn runs, until it reports', async () => {
+    // Arrange
+    const { view, lifecycle, rerender } = await bar({ overrides: observed });
+    await interact(() => lifecycle().onSwitchSubmitted());
+    await elapse(40);
+
+    // Act
+    await rerender({ overrides: observed, busy: true });
+
+    // Assert
+    should(markOf(modelChip(view))).equal('unconfirmed');
+    await view.unmount();
+  });
+
+  test('should settle any switch when the session finishes', async () => {
+    // Arrange
+    const { view, lifecycle, rerender } = await bar({ overrides: observed });
+    await interact(() => lifecycle().onSwitchSubmitted());
+    await elapse(40);
+
+    // Act
+    await rerender({ overrides: { ...observed, status: 'stopped' } });
+
+    // Assert
+    should(markOf(modelChip(view))).be.null();
+    await view.unmount();
+  });
+
+  test('should clear an unconfirmed switch when a new submit fails', async () => {
+    // Arrange
+    const { view, lifecycle } = await bar({ overrides: observed });
+    await interact(() => lifecycle().onSwitchSubmitted());
+    await elapse(40);
+
+    // Act
+    await interact(() => lifecycle().onSwitchFailed());
+
+    // Assert
+    should(markOf(modelChip(view))).be.null();
+    await view.unmount();
+  });
+
+  test('should bound both Codex readouts together', async () => {
+    // Arrange
+    const { view, lifecycle } = await bar({
+      overrides: { harness: 'codex', observedModel: 'gpt-5.6', observedReasoningEffort: 'high', observedModelAt: 't1' },
+    });
+    await interact(() => lifecycle().onSwitchSubmitted());
+
+    // Act
+    await elapse(40);
+
+    // Assert
+    should(markOf(modelChip(view))).equal('unconfirmed');
+    should(markOf(effortChip(view))).equal('unconfirmed');
     await view.unmount();
   });
 });

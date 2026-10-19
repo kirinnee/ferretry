@@ -81,22 +81,29 @@ const last = (changes: WardenConfig[]): WardenConfig => {
   return value;
 };
 
+const BOTH = { layers: { jev: true, llm: true } } as const;
+const LLM = { layers: { jev: false, llm: true } } as const;
+
 describe('WardenSettingsForm', () => {
-  it('should hide every AI section and say nothing leaves the machine under Rules only', () => {
+  it('should show the rules always on, hide every layer’s settings and say nothing leaves the machine', () => {
     // Arrange
     const changes: WardenConfig[] = [];
 
     // Act
-    const renderer = render(<Harness initial={wardenConfig({ triage: 'rules' })} changes={changes} />);
+    const renderer = render(<Harness initial={wardenConfig()} changes={changes} />);
 
     // Assert
     const json = text(renderer);
-    expect(json).toContain('What leaves this machine: nothing. Rules only sends nothing anywhere.');
+    expect(json).toContain('What leaves this machine: nothing. The rules send nothing anywhere.');
+    expect(json).toContain('always on · free');
     expect(json).not.toContain('Investigation (the assigned warden)');
-    expect(json).not.toContain('Daily caps');
+    expect(json).not.toContain('Jev cap ($/day)');
+    expect(json).not.toContain('LLM cap ($/day)');
+    expect(json).not.toContain('stays quiet for (min)');
     expect(json).not.toContain('May act alone on a verdict');
-    expect(json).toContain('free');
     expect(json).toContain('No AI runs and nothing is spent.');
+    expect(renderer.root.findByProps({ 'aria-label': 'Jev on' }).props['aria-checked']).toBe(false);
+    expect(renderer.root.findByProps({ 'aria-label': 'LLM investigation on' }).props['aria-checked']).toBe(false);
     run(() => renderer.unmount());
   });
 
@@ -104,17 +111,17 @@ describe('WardenSettingsForm', () => {
     // Arrange
     const changes: WardenConfig[] = [];
     const renderer = render(<Harness initial={wardenConfig()} changes={changes} />);
-    const toggle = renderer.root.findByProps({ role: 'switch' });
+    const toggle = () => renderer.root.findByProps({ 'aria-label': 'Warden on' });
 
     // Act
-    run(() => toggle.props.onClick());
+    run(() => toggle().props.onClick());
 
     // Assert
     expect(last(changes).enabled).toBe(false);
-    expect(renderer.root.findByProps({ role: 'switch' }).props['aria-checked']).toBe(false);
+    expect(toggle().props['aria-checked']).toBe(false);
     expect(renderer.root.find(node => node.type === 'fieldset' && node.props.disabled === true)).toBeDefined();
     expect(text(renderer)).toContain('The Warden is off.');
-    run(() => renderer.root.findByProps({ role: 'switch' }).props.onClick());
+    run(() => toggle().props.onClick());
     expect(last(changes).enabled).toBe(true);
     run(() => renderer.unmount());
   });
@@ -122,7 +129,7 @@ describe('WardenSettingsForm', () => {
   it('should show the key pill for each key state and the no-key box with its links', () => {
     // Arrange
     const navigated: string[] = [];
-    const jev = wardenConfig({ triage: 'jev' });
+    const jev = wardenConfig(BOTH);
 
     // Act
     const set = render(<Harness initial={jev} changes={[]} jevKey={{ state: 'set' }} />);
@@ -136,6 +143,13 @@ describe('WardenSettingsForm', () => {
       />,
     );
     const unknown = render(<Harness initial={jev} changes={[]} jevKey={{ state: 'unknown' }} />);
+    const alone = render(
+      <Harness
+        initial={wardenConfig({ layers: { jev: true, llm: false } })}
+        changes={[]}
+        jevKey={{ state: 'missing' }}
+      />,
+    );
 
     // Assert
     expect(text(set)).toContain('key set');
@@ -143,6 +157,7 @@ describe('WardenSettingsForm', () => {
     expect(text(set)).not.toContain('Needs a Jev key');
     expect(text(missing)).toContain('needs Jev key');
     expect(text(missing)).toContain('No Jev key yet.');
+    expect(text(missing)).toContain('goes to an investigation');
     expect(text(missing)).toContain('https://keys.example.test');
     expect(text(missing)).toContain('Needs a Jev key: until one is added, every flag is investigated.');
     const link = missing.root.find(node => node.type === 'a' && node.props.href === '/d/a/settings#speedups');
@@ -152,27 +167,52 @@ describe('WardenSettingsForm', () => {
     expect(text(unknown)).toContain('Could not check the Jev key.');
     expect(text(unknown)).toContain('Settings › Speed-ups');
     expect(unknown.root.findAll(node => node.type === 'a')).toHaveLength(0);
-    for (const renderer of [set, missing, unknown]) run(() => renderer.unmount());
+    expect(text(alone)).toContain('is shown to you');
+    for (const renderer of [set, missing, unknown, alone]) run(() => renderer.unmount());
   });
 
-  it('should move the triage, the threshold and the privacy note together', () => {
+  it('should switch each layer on and off alone, with its own settings and the privacy note', () => {
     // Arrange
     const changes: WardenConfig[] = [];
-    const renderer = render(<Harness initial={wardenConfig({ triage: 'rules' })} changes={changes} />);
+    const renderer = render(<Harness initial={wardenConfig()} changes={changes} />);
+    const toggle = (label: string) => renderer.root.findByProps({ 'aria-label': label });
 
     // Act
-    run(() => option(renderer, 'Jev guard').props.onChange());
+    run(() => toggle('Jev on').props.onClick());
     const slider = renderer.root.find(node => node.type === 'input' && node.props.type === 'range');
     run(() => slider.props.onChange({ target: { value: '0.9' } }));
 
     // Assert
-    expect(last(changes).triage).toBe('jev');
+    expect(last(changes).layers).toEqual({ jev: true, llm: false });
     expect(last(changes).guard.threshold).toBe(0.9);
     expect(text(renderer)).toContain('0.90');
     expect(text(renderer)).toContain('sent to TypeSafe AI (Jev)');
-    run(() => option(renderer, 'LLM only').props.onChange());
-    expect(last(changes).triage).toBe('llm');
+    expect(text(renderer)).toContain('Jev cap ($/day)');
+    expect(text(renderer)).toContain('stays quiet for (min)');
+    expect(text(renderer)).not.toContain('Investigations run on your own login');
+    run(() => toggle('LLM investigation on').props.onClick());
+    expect(last(changes).layers).toEqual({ jev: true, llm: true });
+    expect(text(renderer)).toContain('LLM cap ($/day)');
+    expect(text(renderer)).toContain('each flag Jev did not clear');
+    run(() => toggle('Jev on').props.onClick());
+    expect(last(changes).layers).toEqual({ jev: false, llm: true });
     expect(renderer.root.findAll(node => node.type === 'input' && node.props.type === 'range')).toHaveLength(0);
+    expect(text(renderer)).toContain('looks at every flag');
+    run(() => renderer.unmount());
+  });
+
+  it('should let the logins take turns or fall back in order', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={wardenConfig(LLM)} changes={changes} />);
+
+    // Act
+    run(() => option(renderer, 'Take turns').props.onChange());
+
+    // Assert
+    expect(last(changes).failover.policy).toBe('round_robin');
+    run(() => option(renderer, 'First, then the next if it fails').props.onChange());
+    expect(last(changes).failover.policy).toBe('fallback');
     run(() => renderer.unmount());
   });
 
@@ -181,7 +221,7 @@ describe('WardenSettingsForm', () => {
     const changes: WardenConfig[] = [];
     const renderer = render(
       <Harness
-        initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-a' }, { agent: 'claude-auto-b' }] })}
+        initial={wardenConfig({ ...LLM, accounts: [{ agent: 'claude-auto-a' }, { agent: 'claude-auto-b' }] })}
         loginOptions={[{ agent: 'claude-auto-a' }, { agent: 'codex-auto-c', model: 'gpt' }]}
         changes={changes}
       />,
@@ -222,13 +262,15 @@ describe('WardenSettingsForm', () => {
   it('should hold a cleared number as NaN, show its error and say "(fix)" in the summary', () => {
     // Arrange
     const changes: WardenConfig[] = [];
-    const renderer = render(<Harness initial={wardenConfig({ triage: 'jev' })} changes={changes} />);
+    const renderer = render(<Harness initial={wardenConfig(BOTH)} changes={changes} />);
 
     // Act
     run(() => control(renderer, 'Investigations at a time', 'input').props.onChange({ target: { value: '' } }));
-    run(() => control(renderer, 'Blessing lasts (min)', 'input').props.onChange({ target: { value: '0' } }));
-    run(() => control(renderer, 'Jev ($/day)', 'input').props.onChange({ target: { value: '200' } }));
-    run(() => control(renderer, 'Investigations ($/day)', 'input').props.onChange({ target: { value: '3' } }));
+    run(() =>
+      control(renderer, 'A cleared flag stays quiet for (min)', 'input').props.onChange({ target: { value: '0' } }),
+    );
+    run(() => control(renderer, 'Jev cap ($/day)', 'input').props.onChange({ target: { value: '200' } }));
+    run(() => control(renderer, 'LLM cap ($/day)', 'input').props.onChange({ target: { value: '3' } }));
     run(() => control(renderer, 'Max investigations per hour', 'input').props.onChange({ target: { value: '61' } }));
 
     // Assert
@@ -238,7 +280,7 @@ describe('WardenSettingsForm', () => {
     expect(value.caps).toEqual({ jevUsdPerDay: 200, investigationUsdPerDay: 3, maxInvestigationsPerHour: 61 });
     expect(control(renderer, 'Investigations at a time', 'input').props.value).toBe('');
     expect(control(renderer, 'Investigations at a time', 'input').props['aria-invalid']).toBe(true);
-    expect(control(renderer, 'Investigations ($/day)', 'input').props['aria-invalid']).toBeUndefined();
+    expect(control(renderer, 'LLM cap ($/day)', 'input').props['aria-invalid']).toBeUndefined();
     const json = text(renderer);
     expect(json).toContain('1 to 4.');
     expect(json).toContain('1 to 240 minutes.');
@@ -248,20 +290,20 @@ describe('WardenSettingsForm', () => {
     run(() => renderer.unmount());
   });
 
-  it('should show the Jev cap only for Jev triage', () => {
+  it('should show each cap only while its own layer is on', () => {
     // Arrange + Act
-    const llm = render(<Harness initial={wardenConfig({ triage: 'llm' })} changes={[]} />);
+    const llm = render(<Harness initial={wardenConfig(LLM)} changes={[]} />);
 
     // Assert
-    expect(text(llm)).toContain('Investigations ($/day)');
-    expect(text(llm)).not.toContain('Jev ($/day)');
+    expect(text(llm)).toContain('LLM cap ($/day)');
+    expect(text(llm)).not.toContain('Jev cap ($/day)');
     run(() => llm.unmount());
   });
 
   it('should change the sweep interval, the event triggers and what may act alone', () => {
     // Arrange
     const changes: WardenConfig[] = [];
-    const renderer = render(<Harness initial={wardenConfig({ triage: 'llm' })} changes={changes} />);
+    const renderer = render(<Harness initial={wardenConfig(LLM)} changes={changes} />);
 
     // Act
     run(() => option(renderer, '10 min').props.onChange());
@@ -274,26 +316,28 @@ describe('WardenSettingsForm', () => {
     expect(value.events).toEqual({ turnEnd: true, question: true, paneDied: false });
     expect(value.mayActAlone.stop).toBe(true);
     expect(text(renderer)).not.toContain('stopping always asks you first');
-    expect(text(renderer)).toContain('Every 10 min the sweep flags anomalies');
+    expect(text(renderer)).toContain('Every 10 min the rules flag anomalies');
     run(() => renderer.unmount());
   });
 });
 
 describe('wardenPrivacyNote', () => {
-  it('should name what leaves the machine for each triage', () => {
+  it('should name what leaves the machine for each mix of layers', () => {
     // Arrange + Act + Assert
-    expect(wardenPrivacyNote('rules', 'x')).toBe(
-      'What leaves this machine: nothing. Rules only sends nothing anywhere.',
+    expect(wardenPrivacyNote({ jev: false, llm: false }, 'x')).toBe(
+      'What leaves this machine: nothing. The rules send nothing anywhere.',
     );
-    expect(wardenPrivacyNote('llm', 'claude-auto-a')).toBe(
+    expect(wardenPrivacyNote({ jev: false, llm: true }, 'claude-auto-a')).toBe(
       'What leaves this machine: Investigations run on your own login (claude-auto-a) and read the transcript, pane, diffs and CI.',
     );
-    expect(wardenPrivacyNote('jev', 'claude-auto-a')).toContain('with every stored secret masked');
+    expect(wardenPrivacyNote({ jev: true, llm: false }, 'claude-auto-a')).toContain('with every stored secret masked');
+    expect(wardenPrivacyNote({ jev: true, llm: false }, 'claude-auto-a')).not.toContain('Investigations');
+    expect(wardenPrivacyNote({ jev: true, llm: true }, 'claude-auto-a')).toContain('Investigations run');
   });
 });
 
 describe('WardenSettingsForm, when the owner chose no login', () => {
-  const unset = wardenConfig({ triage: 'llm', accounts: [] });
+  const unset = wardenConfig({ ...LLM, accounts: [] });
   const options = (renderer: ReactTestRenderer): string[] =>
     control(renderer, 'Login', 'select')
       .findAllByType('option')
@@ -320,7 +364,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     const changes: WardenConfig[] = [];
     const renderer = render(
       <Harness
-        initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-glm' }] })}
+        initial={wardenConfig({ ...LLM, accounts: [{ agent: 'claude-glm' }] })}
         runtimes={[glm]}
         changes={changes}
       />,
@@ -361,7 +405,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     run(() => renderer.unmount());
   });
 
-  it('should say not set, keep the model closed and say LLM triage is unavailable', () => {
+  it('should say not set, keep the model closed and say LLM investigations are unavailable', () => {
     // Arrange
     const renderer = render(
       <Harness initial={unset} login={{ source: 'not_set', unknown: [], available: [] }} changes={[]} />,
@@ -370,7 +414,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     // Act / Assert
     expect(options(renderer)).toEqual(['Not set — choose a login']);
     expect(control(renderer, 'Model', 'input').props.disabled).toBe(true);
-    expect(text(renderer)).toContain('LLM triage is unavailable');
+    expect(text(renderer)).toContain('LLM investigations are unavailable');
     run(() => control(renderer, 'Model', 'input').props.onChange({ target: { value: 'x' } }));
     run(() => renderer.unmount());
   });
@@ -388,7 +432,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     // Arrange
     const changes: WardenConfig[] = [];
     const renderer = render(
-      <Harness initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-spare' }] })} changes={changes} />,
+      <Harness initial={wardenConfig({ ...LLM, accounts: [{ agent: 'claude-spare' }] })} changes={changes} />,
     );
 
     // Act
@@ -403,7 +447,7 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     // Arrange
     const chosen = render(
       <Harness
-        initial={wardenConfig({ triage: 'llm', accounts: [{ agent: 'legacy-wrapper' }, { agent: 'claude-default' }] })}
+        initial={wardenConfig({ ...LLM, accounts: [{ agent: 'legacy-wrapper' }, { agent: 'claude-default' }] })}
         login={{ source: 'configured', unknown: ['legacy-wrapper'], available: ['claude-default'] }}
         changes={[]}
       />,

@@ -9,6 +9,7 @@
     go-task
     goreleaser
     jq
+    nodejs_24
     pre-commit
     ripgrep
     shellcheck

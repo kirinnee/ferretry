@@ -2,6 +2,7 @@ import { describe, test } from 'bun:test';
 import type { AttentionId } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import should from 'should';
+import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
 import { fyRenderFenceBody, Markdown, referenceHasTrustedOrigin } from '../../src/components/markdown.tsx';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
@@ -843,5 +844,21 @@ describe('referenceHasTrustedOrigin', () => {
 
     // Assert
     should(actual).be.null();
+  });
+});
+
+describe('Markdown fy-render workspace media', () => {
+  test('should hand the workspace reader it was given to the block a media fence renders', () => {
+    // Arrange
+    const readWorkspaceMedia = async () => ({ ok: false, reason: 'missing' }) as const;
+    const text = fence('fy-render', 'type: video', 'alt: A recording', 'src: @clip.mp4', '---');
+
+    // Act
+    const tree = render(<Markdown enableFyRender readWorkspaceMedia={readWorkspaceMedia} text={text} />);
+
+    // Assert — the very function, not a copy; reduced to booleans so a failure cannot walk a fiber.
+    should(
+      tree.root.findAllByType(FyRenderBlock).map(block => block.props.readWorkspaceMedia === readWorkspaceMedia),
+    ).deepEqual([true]);
   });
 });

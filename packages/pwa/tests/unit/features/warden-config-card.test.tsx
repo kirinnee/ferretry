@@ -63,7 +63,7 @@ const settle = async (): Promise<void> => {
 
 /** A config whose next state the test can drive by setting one field. */
 const turnOff = (renderer: ReactTestRenderer): void => {
-  run(() => renderer.root.findByProps({ role: 'switch' }).props.onClick());
+  run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onClick());
 };
 
 describe('jevKeyStatus', () => {
@@ -123,14 +123,16 @@ describe('WardenConfigCard', () => {
 
     // Assert
     expect(saves).toEqual([{ enabled: false }]);
-    expect(renderer.root.findByProps({ role: 'switch' }).props['aria-checked']).toBe(true);
+    expect(renderer.root.findByProps({ 'aria-label': 'Warden on' }).props['aria-checked']).toBe(true);
     expect(button(renderer, 'Save').props.disabled).toBe(true);
     run(() => renderer.unmount());
   });
 
   it('should refuse to save settings with an error in them', () => {
     // Arrange
-    const renderer = render(<Harness base={view(wardenConfig({ triage: 'llm', maxAssignedWardens: 9 }))} saves={[]} />);
+    const renderer = render(
+      <Harness base={view(wardenConfig({ layers: { jev: false, llm: true }, maxAssignedWardens: 9 }))} saves={[]} />,
+    );
 
     // Act
     turnOff(renderer);
@@ -161,7 +163,7 @@ describe('WardenConfigCard', () => {
 type Client = Awaited<ReturnType<WardenClientFactory>>;
 
 const client = (overrides: Partial<Client> = {}): Client => ({
-  wardenConfig: async () => view(wardenConfig({ triage: 'llm' })),
+  wardenConfig: async () => view(wardenConfig({ layers: { jev: false, llm: true } })),
   wardenStatus: async () =>
     wardenStatus({ failover: wardenFailover({ accounts: [{ agent: 'codex-default', eligible: true }] }) }),
   updateWardenConfig: async patch => view(wardenConfig({ ...patch } as Partial<WardenConfig>)),
@@ -205,7 +207,7 @@ describe('WardenConfigSurface', () => {
     expect(json(renderer)).toContain('codex-default');
     const link = renderer.root.findAll(node => node.type === 'a' && node.props.href === '/d/a/settings#speedups');
     expect(link).toHaveLength(0);
-    run(() => renderer.root.findByProps({ role: 'switch' }).props.onClick());
+    run(() => renderer.root.findByProps({ 'aria-label': 'Warden on' }).props.onClick());
     run(() => renderer.unmount());
   });
 
@@ -215,7 +217,9 @@ describe('WardenConfigSurface', () => {
     const renderer = render(
       <WardenConfigSurface
         connection={connection('a')}
-        createClient={async () => client({ wardenConfig: async () => view(wardenConfig({ triage: 'jev' })) })}
+        createClient={async () =>
+          client({ wardenConfig: async () => view(wardenConfig({ layers: { jev: true, llm: true } })) })
+        }
         onNavigate={to => navigated.push(to)}
       />,
     );
@@ -238,7 +242,7 @@ describe('WardenConfigSurface', () => {
         connection={connection('a')}
         createClient={async () =>
           client({
-            wardenConfig: async () => view(wardenConfig({ triage: 'jev' })),
+            wardenConfig: async () => view(wardenConfig({ layers: { jev: true, llm: true } })),
             wardenStatus: async () => Promise.reject(new Error('no status')),
             request: (async () => Promise.reject(new Error('no speedups'))) as Client['request'],
           })
@@ -280,7 +284,8 @@ describe('WardenConfigSurface', () => {
       active.daemonId === 'a'
         ? client({ wardenConfig: () => lateA })
         : client({
-            wardenConfig: async () => view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] })),
+            wardenConfig: async () =>
+              view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-beta' }] })),
           });
     const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={createClient} />);
 
@@ -288,7 +293,7 @@ describe('WardenConfigSurface', () => {
     run(() => renderer.update(<WardenConfigSurface connection={connection('b')} createClient={createClient} />));
     await settle();
     await runAsync(async () => {
-      releaseA?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })));
+      releaseA?.(view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-alpha' }] })));
       await Promise.resolve();
     });
     await settle();
@@ -353,7 +358,7 @@ describe('WardenConfigSurface', () => {
 
     // Assert
     expect(json(renderer)).toContain('save refused');
-    expect(renderer.root.findByProps({ role: 'switch' }).props['aria-checked']).toBe(false);
+    expect(renderer.root.findByProps({ 'aria-label': 'Warden on' }).props['aria-checked']).toBe(false);
     run(() => renderer.unmount());
   });
 
@@ -369,7 +374,8 @@ describe('WardenConfigSurface', () => {
               }),
           })
         : client({
-            wardenConfig: async () => view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] })),
+            wardenConfig: async () =>
+              view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-beta' }] })),
           });
     const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={createClient} />);
     await settle();
@@ -380,7 +386,7 @@ describe('WardenConfigSurface', () => {
     run(() => renderer.update(<WardenConfigSurface connection={connection('b')} createClient={createClient} />));
     await settle();
     await runAsync(async () => {
-      finish?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })));
+      finish?.(view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-alpha' }] })));
       await Promise.resolve();
     });
     await settle();
@@ -424,7 +430,7 @@ describe('WardenConfigSurface', () => {
   });
 
   describe('when the machine says its configuration moved', () => {
-    const switchOf = (renderer: ReactTestRenderer) => renderer.root.findByProps({ role: 'switch' });
+    const switchOf = (renderer: ReactTestRenderer) => renderer.root.findByProps({ 'aria-label': 'Warden on' });
 
     /** A daemon whose Warden settings and Jev key a test changes between reads, counting the reads. */
     const changing = (first: WardenConfigView) => {
@@ -443,7 +449,7 @@ describe('WardenConfigSurface', () => {
 
     it('should follow another device’s change, and a Jev key added in Speed-ups, when the draft is untouched', async () => {
       // Arrange
-      const daemon = changing(view(wardenConfig({ enabled: true, triage: 'jev' })));
+      const daemon = changing(view(wardenConfig({ enabled: true, layers: { jev: true, llm: true } })));
       const harness = configChangeHarness(connection('a').daemonId);
       const renderer = render(
         harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => daemon.make()} />),
@@ -453,7 +459,9 @@ describe('WardenConfigSurface', () => {
       expect(json(renderer)).toContain('needs Jev key');
 
       // Act
-      daemon.state.view = view(wardenConfig({ enabled: false, triage: 'jev' }), ['Edited on the host.']);
+      daemon.state.view = view(wardenConfig({ enabled: false, layers: { jev: true, llm: true } }), [
+        'Edited on the host.',
+      ]);
       daemon.state.keyed = true;
       await harness.move(['speedups']);
       await settle();
@@ -478,7 +486,9 @@ describe('WardenConfigSurface', () => {
       turnOff(renderer);
 
       // Act
-      daemon.state.view = view(wardenConfig({ enabled: true, triage: 'llm' }), ['Loosened elsewhere.']);
+      daemon.state.view = view(wardenConfig({ enabled: true, layers: { jev: false, llm: true } }), [
+        'Loosened elsewhere.',
+      ]);
       await harness.move(['warden']);
       await settle();
 
@@ -516,7 +526,7 @@ describe('WardenConfigSurface', () => {
     it('should pick up a runtime made while the page is open: its login, no longer "not set"', async () => {
       // Arrange: a machine with no runtime, so no login is set.
       const notSet: WardenConfigView = {
-        config: wardenConfig({ triage: 'llm', accounts: [] }),
+        config: wardenConfig({ layers: { jev: false, llm: true }, accounts: [] }),
         accounts: [],
         warnings: [],
         login: { source: 'not_set', unknown: [], available: [] },
@@ -590,7 +600,7 @@ describe('WardenConfigSurface', () => {
       await harness.move(['warden']);
       await settle();
       await runAsync(async () => {
-        answer?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-late' }] })));
+        answer?.(view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-late' }] })));
         await Promise.resolve();
       });
       await settle();
@@ -603,7 +613,9 @@ describe('WardenConfigSurface', () => {
 
     it('should not read the daemon the reader left when the new one is already moved', async () => {
       // Arrange
-      const a = changing(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })));
+      const a = changing(
+        view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-alpha' }] })),
+      );
       const harness = configChangeHarness(connection('a').daemonId);
       harness.configChanges.observe(connection('b').daemonId, {
         kind: 'config',
@@ -622,7 +634,7 @@ describe('WardenConfigSurface', () => {
           ? a.make()
           : client({
               wardenConfig: async () =>
-                view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] })),
+                view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-beta' }] })),
             });
       const renderer = render(
         harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={createClient} />),
@@ -647,7 +659,7 @@ describe('WardenConfigSurface', () => {
       let late: ((value: WardenConfigView) => void) | undefined;
       let readsOfA = 0;
       let releaseB: ((value: WardenConfigView) => void) | undefined;
-      const beta = view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-beta' }] }));
+      const beta = view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-beta' }] }));
       const harness = configChangeHarness(connection('a').daemonId);
       const createClient: WardenClientFactory = async active =>
         active.daemonId === 'a'
@@ -655,7 +667,11 @@ describe('WardenConfigSurface', () => {
               wardenConfig: () => {
                 readsOfA += 1;
                 return readsOfA === 1
-                  ? Promise.resolve(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-alpha' }] })))
+                  ? Promise.resolve(
+                      view(
+                        wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-alpha' }] }),
+                      ),
+                    )
                   : new Promise<WardenConfigView>(resolve => {
                       late = resolve;
                     });
@@ -681,7 +697,7 @@ describe('WardenConfigSurface', () => {
       );
       await settle();
       await runAsync(async () => {
-        late?.(view(wardenConfig({ triage: 'llm', accounts: [{ agent: 'claude-auto-stale' }] })));
+        late?.(view(wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'claude-auto-stale' }] })));
         await Promise.resolve();
       });
       await settle();
@@ -705,7 +721,7 @@ describe('the investigation login the daemon resolved', () => {
   it('should offer every login the machine has, and say the order runs on the machine default', async () => {
     // Arrange
     const resolved: WardenConfigView = {
-      config: wardenConfig({ triage: 'llm', accounts: [] }),
+      config: wardenConfig({ layers: { jev: false, llm: true }, accounts: [] }),
       accounts: [{ agent: 'claude-default' }],
       warnings: [],
       login: { source: 'machine_default', unknown: [], available: ['claude-default', 'claude-spare'] },
@@ -730,7 +746,7 @@ describe('the investigation login the daemon resolved', () => {
   it('should name an unknown login and leave it chosen until the owner picks another', () => {
     // Arrange
     const legacy: WardenConfigView = {
-      config: wardenConfig({ triage: 'llm', accounts: [{ agent: 'legacy-wrapper' }] }),
+      config: wardenConfig({ layers: { jev: false, llm: true }, accounts: [{ agent: 'legacy-wrapper' }] }),
       accounts: [{ agent: 'legacy-wrapper' }],
       warnings: [],
       login: { source: 'configured', unknown: ['legacy-wrapper'], available: ['claude-default'] },

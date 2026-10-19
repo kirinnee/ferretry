@@ -92,29 +92,93 @@ describe('SessionsBar as a column', () => {
     expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
   });
 
-  test('chips a ferret instructed to learn, unless it needs the reader', async () => {
+  test('marks a ferret instructed to learn with the cap alone, unless it needs the reader', async () => {
     const { element } = bar({ learningPassive: new Set(['hadi-1', 'maryah-1']) });
     view = await mount(element);
     const chip = (id: string) => view?.container.querySelector(`[data-sbar-session="${id}"] [data-learning-passive]`);
-    expect(chip('hadi-1')?.textContent).toBe('Learning: passive');
+    expect(chip('hadi-1')?.textContent).toBe('');
+    expect(chip('hadi-1')?.getAttribute('aria-label')).toContain('Learning: passive');
     // "needs you" is the more urgent fact, and the row has one slot for it.
     expect(chip('maryah-1')).toBeNull();
     expect(chip('nameless')).toBeNull();
   });
 
-  test('narrows the list with the filters and says when nothing matches', async () => {
-    const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number]] });
+  test('hides stopped sessions until "Show stopped" is ticked, and says how many it is hiding', async () => {
+    const stopped = sessionView('old-1', {
+      config: { teammate: 'ora', label: 'Finished work', cwd: '/work/ferretry' },
+      state: { status: 'completed', lastActivityAt: recent },
+    });
+    const { element } = bar({ sessions: [...SESSIONS, stopped] });
     view = await mount(element);
-    const chip = (id: string) => view?.container.querySelector<HTMLButtonElement>(`[data-sbar-filter="${id}"]`) ?? null;
-    expect(chip('all')?.getAttribute('aria-pressed')).toBe('true');
-    expect(chip('needs-you')?.textContent).toBe('Needs you 0');
+    const ids = () =>
+      [...(view?.container.querySelectorAll('[data-sbar-session]') ?? [])].map(node =>
+        node.getAttribute('data-sbar-session'),
+      );
+    const box = () => view?.container.querySelector<HTMLInputElement>('[data-sbar-show-stopped]') ?? null;
+    expect(ids()).not.toContain('old-1');
+    expect(box()?.checked).toBe(false);
+    expect(view.container.querySelector('[data-sbar-hidden-stopped]')?.textContent).toBe('1');
+    expect(view.container.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('3');
 
-    await click(chip('needs-you'), 'the Needs you filter');
-    expect(chip('needs-you')?.getAttribute('aria-pressed')).toBe('true');
-    expect(view.container.textContent).toContain('No sessions match Needs you.');
+    await click(box(), 'Show stopped');
+    expect(ids()).toContain('old-1');
+    expect(box()?.checked).toBe(true);
+    expect(view.container.querySelector('[data-sbar-hidden-stopped]')).toBeNull();
+    expect(view.container.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('4');
 
-    await click(chip('running'), 'the Running filter');
-    expect(view.container.querySelectorAll('[data-sbar-session]')).toHaveLength(1);
+    await click(box(), 'Show stopped');
+    expect(ids()).not.toContain('old-1');
+  });
+
+  test('keeps the open session listed even when it has stopped', async () => {
+    const stopped = sessionView('hadi-1', {
+      config: { teammate: 'hadi', label: 'Done', cwd: '/work/ferretry' },
+      state: { status: 'stopped' },
+    });
+    view = await mount(bar({ sessions: [stopped] }).element);
+    expect(view.container.querySelector('[data-sbar-session="hadi-1"]')).not.toBeNull();
+    await view.render(bar({ sessions: [stopped], activeSessionId: null }).element);
+    expect(view.container.querySelector('[data-sbar-session="hadi-1"]')).toBeNull();
+    expect(view.container.querySelector('.fy-sbar__empty')?.textContent).toBe(
+      'No live sessions — 1 stopped. Tick Show stopped.',
+    );
+  });
+
+  test('narrows by kind with live counts, and says plainly when a kind has nothing', async () => {
+    const person = sessionView('pat-1', {
+      config: { teammate: 'pat', label: 'Pairing', mode: 'interactive', cwd: '/work/ferretry' },
+    });
+    const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number], person] });
+    view = await mount(element);
+    const segment = (id: string) =>
+      view?.container.querySelector<HTMLButtonElement>(`[data-sbar-filter="${id}"]`) ?? null;
+    const ids = () =>
+      [...(view?.container.querySelectorAll('[data-sbar-session]') ?? [])].map(node =>
+        node.getAttribute('data-sbar-session'),
+      );
+    expect(segment('all')?.getAttribute('aria-pressed')).toBe('true');
+    expect(['all', 'auto', 'interactive'].map(id => segment(id)?.textContent)).toEqual([
+      'All2',
+      'Agents1',
+      'Interactive1',
+    ]);
+
+    await click(segment('interactive'), 'Interactive');
+    expect(segment('interactive')?.getAttribute('aria-pressed')).toBe('true');
+    expect(ids()).toEqual(['pat-1']);
+    // The numbers are what each segment would show, so choosing one leaves the others' alone.
+    expect(['all', 'auto', 'interactive'].map(id => segment(id)?.textContent)).toEqual([
+      'All2',
+      'Agents1',
+      'Interactive1',
+    ]);
+
+    await click(segment('auto'), 'Agents');
+    expect(ids()).toEqual(['hadi-1']);
+
+    await view.render(bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number]] }).element);
+    await click(segment('interactive'), 'Interactive');
+    expect(view.container.textContent).toContain('No interactive sessions.');
   });
 
   test('says it is still reading, and says plainly when nothing is running', async () => {
@@ -126,7 +190,7 @@ describe('SessionsBar as a column', () => {
     expect(view.container.textContent).toContain('No sessions running.');
   });
 
-  test('leads an empty list with Create a runtime while the machine has none, and nowhere else', async () => {
+  test('leads an empty list with Create a runtime while the machine has none', async () => {
     const { calls, element } = bar({ sessions: [], createRuntimeHref: '#settings/work-mac/runtimes' });
     view = await mount(element);
     expect(view.container.textContent).toContain('nothing can start until this machine has a runtime');
@@ -134,11 +198,6 @@ describe('SessionsBar as a column', () => {
     expect(link?.textContent).toBe('Create a runtime');
     await click(link, 'Create a runtime');
     expect(calls).toContain('navigate:#settings/work-mac/runtimes');
-
-    await view.render(bar({ sessions: [], createRuntimeHref: '#settings/work-mac/runtimes' }).element);
-    await click(view.container.querySelector('[data-sbar-filter="needs-you"]'), 'the Needs you filter');
-    expect(view.container.querySelector('[data-sessions-create-runtime]')).toBeNull();
-    expect(view.container.textContent).toContain('No sessions match Needs you.');
   });
 
   test('navigates from a row, a foot place and the new-session button', async () => {
@@ -434,7 +493,7 @@ describe('SessionsBar across every machine', () => {
     // A row opens its own machine.
     await click(offline.querySelector('[data-sbar-session="hadi-1"]'), 'the other machine’s row');
     expect(calls.at(-1)).toBe('navigate:/d/beta/session/hadi-1');
-    expect(view.container.querySelector('[data-sbar-filter="needs-you"] .fy-sbar__count')?.textContent).toBe('2');
+    expect(view.container.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('5');
   });
 
   test('an online machine pins its own question, and a machine whose sessions all moved says so', async () => {
@@ -451,10 +510,46 @@ describe('SessionsBar across every machine', () => {
     expect(view.container.querySelector('.fy-sbar__list [role="status"]')?.textContent).toBe('Reading sessions…');
     await view.render(bar({ machineSources: [source(DAEMON, 'work-mac', [], 'online')] }).element);
     expect(view.container.querySelector('[data-sbar-machine-group] .fy-sbar__empty')?.textContent).toBe('No sessions.');
-    await click(view.container.querySelector('[data-sbar-filter="running"]'), 'Running');
+    await click(view.container.querySelector('[data-sbar-filter="interactive"]'), 'Interactive');
     expect(view.container.querySelector('.fy-sbar__list .fy-sbar__empty')?.textContent).toBe(
-      'No sessions match Running.',
+      'No interactive sessions.',
     );
+  });
+
+  test('filters every machine alike, hides what stopped on either, and the rail follows', async () => {
+    const stoppedBeta = sessionView('end-1', {
+      config: { teammate: 'ula', label: 'Over', cwd: '/work/site', mode: 'interactive' },
+      state: { status: 'completed' },
+    });
+    const machineSources = [
+      source(DAEMON, 'work-mac', SESSIONS, 'online'),
+      source(BETA, 'kirin-box', [...BETA_SESSIONS, stoppedBeta], 'online'),
+    ];
+    view = await mount(bar({ machineSources, now: NOW }).element);
+    const rows = () =>
+      [...(view?.container.querySelectorAll('[data-sbar-session]') ?? [])].map(node =>
+        node.getAttribute('data-sbar-session'),
+      );
+    expect(rows()).not.toContain('end-1');
+    expect(view.container.querySelector('[data-sbar-hidden-stopped]')?.textContent).toBe('1');
+    await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');
+    expect(rows()).toContain('end-1');
+
+    await click(view.container.querySelector('[data-sbar-filter="interactive"]'), 'Interactive');
+    expect(rows()).toEqual(['end-1']);
+    expect(view.container.querySelectorAll('[data-sbar-machine-group]')).toHaveLength(1);
+  });
+
+  test('the rail follows the column’s filter', async () => {
+    const stopped = sessionView('old-1', { config: { label: 'Finished' }, state: { status: 'completed' } });
+    const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number], stopped] });
+    view = await mount(element);
+    await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');
+    expect(view.container.querySelector('[data-sbar-session="old-1"]')).not.toBeNull();
+    await view.render(
+      bar({ presentation: 'rail', sessions: [SESSIONS[0] as (typeof SESSIONS)[number], stopped] }).element,
+    );
+    expect(view.container.querySelectorAll('.fy-sbar__dot')).toHaveLength(2);
   });
 
   test('"+ New" asks which machine, this one first', async () => {
