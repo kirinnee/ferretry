@@ -83,10 +83,9 @@ const MERMAID = [
   'graph TD',
   '  A[Reader opens a message] --> B{Is there an fy-render block?}',
   '  B -->|no| C[Ordinary markdown]',
-  '  B -->|yes| D[Offer, do not render]',
-  '  D --> E[Reader presses Render]',
-  '  E --> F[Sandbox frame compiles]',
-  '  F --> G[SVG re-admitted, shown as an image]',
+  '  B -->|yes| D[Near the viewport?]',
+  '  D -->|yes| F[Sandbox frame compiles]',
+  '  F --> G[SVG re-admitted, shown inline]',
 ].join('\n');
 
 /** A jison parse error: the reachable Mermaid failure, and the ugliest wording. */

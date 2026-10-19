@@ -61,7 +61,7 @@ interface Drive {
  * listener before `src`, identity-checked handshake, the page sent as data over the
  * port — and returns what the parent observed after `settleMs`.
  */
-const drive = (source: string, settleMs = 2_500): string => `(async () => {
+const drive = (source: string, settleMs = 2_500, paint: unknown = null): string => `(async () => {
   return await new Promise(resolve => {
     const reports = [];
     const replies = [];
@@ -78,7 +78,7 @@ const drive = (source: string, settleMs = 2_500): string => `(async () => {
       port = channel.port1;
       port.onmessage = e => replies.push(e.data);
       frame.contentWindow.postMessage({ kind: 'init' }, '*', [channel.port2]);
-      port.postMessage({ kind: 'render-html', source: ${JSON.stringify(source)}, theme: 'dark' });
+      port.postMessage({ kind: 'render-html', paint: ${JSON.stringify(paint)}, source: ${JSON.stringify(source)}, theme: 'dark' });
     });
     document.body.appendChild(frame);
     // AFTER insertion, as FyRenderHtmlFrame does: inserting a src-less iframe fires a
@@ -366,6 +366,48 @@ describe('fy-render html — ordinary requests are refused', () => {
       await page.close();
     }
   });
+});
+
+describe('fy-render html — the column paint', () => {
+  test('should paint the page with the column’s colours, and fetch nothing for a hostile paint value', async () => {
+    ledger.length = 0;
+    const page = await newPage();
+    try {
+      const base = server.url.origin;
+      const read = probePage(`
+        const root = getComputedStyle(document.documentElement);
+        note('background', () => root.backgroundColor);
+        note('color', () => root.color);
+        note('scheme', () => document.documentElement.style.colorScheme);
+        note('margin', () => getComputedStyle(document.body).margin);
+      `);
+      // The paint `FyRenderBlock` reads from the message column.
+      const painted = (await page.evaluate(
+        drive(read, 2_500, { background: 'rgb(1, 2, 3)', color: 'rgb(4, 5, 6)', font: 'serif', scheme: 'light' }),
+      )) as Drive;
+      should(painted.reports[0]?.background).equal('rgb(1, 2, 3)');
+      should(painted.reports[0]?.color).equal('rgb(4, 5, 6)');
+      should(painted.reports[0]?.scheme).equal('light');
+      // Frameless: the page starts flush with the prose around it.
+      should(painted.reports[0]?.margin).equal('0px');
+
+      // A paint value that tries to name a URL is not a colour or a font family,
+      // so `setProperty` drops it and nothing is requested.
+      const hostile = (await page.evaluate(
+        drive(read, 2_500, {
+          background: `url(${base}/beacon?paint-background)`,
+          color: `red; background-image: url(${base}/beacon?paint-color)`,
+          font: `x; background: url(${base}/beacon?paint-font)`,
+          scheme: 'dark',
+        }),
+      )) as Drive;
+      should(hostile.reports.length).equal(1);
+      should(ledger.some(hit => hit.path.includes('paint-'))).be.false();
+    } finally {
+      await page.close();
+    }
+    // Two probes of 2.5 s each.
+  }, 15_000);
 });
 
 describe('fy-render html — the residual the parent detects', () => {
