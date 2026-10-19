@@ -39,10 +39,11 @@ import type { CodexRuntimeCatalogCache } from '../harness/codex-catalog-cache.ts
 import { claudeRuntimeCatalog, codexRuntimeCatalog, codexSwitchContext } from '../harness/model-catalog.ts';
 import { CodexModelPickerDriver, type PickerSleeper } from '../harness/picker-drive.ts';
 import { failureMessage } from '../harness/quarantine.ts';
+import { fastModeFacts } from '../harness/fast-mode.ts';
 import type { RuntimeSwitchPlan } from '../harness/runtime-switch.ts';
 import type { HarnessQuirkService } from '../harness/service.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
-import { documentRefusal, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
+import { documentRefusal, needsFastFacts, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
 import {
   type RuntimeInjector,
   type RuntimePane,
@@ -271,6 +272,8 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
 
     const wanted = switchRequest(current, request);
     const account = current.config.harness === 'codex' ? undefined : await this.#accountFor(current.config.agent);
+    // One read serves both questions a request can ask of the catalog.
+    const catalog = needsLiveCatalog(wanted) || needsFastFacts(wanted) ? await this.#catalogFor(id) : undefined;
     const plan = this.ports.harness.planSwitch(wanted, {
       wrapper: current.config.agent,
       ...(account === undefined
@@ -279,10 +282,13 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
             allowedModels: servableModels(account).map(model => model.id),
             ...(account.modelCatalog?.customIds === true ? { acceptsCustomModels: true } : {}),
           }),
-      ...(needsLiveCatalog(wanted) ? { catalog: codexSwitchContext(await this.#catalogFor(id)) } : {}),
+      ...(catalog === undefined || !needsLiveCatalog(wanted) ? {} : { catalog: codexSwitchContext(catalog) }),
+      ...(catalog === undefined || !needsFastFacts(wanted) ? {} : { fast: fastModeFacts(current, catalog) }),
     });
 
     if (plan.kind === 'refused') throw new SessionRuntimeError('unsupported', plan.reason);
+    // Nothing to type, so nothing to spend: the session is already as asked.
+    if (plan.kind === 'unchanged') return { performed: false };
     // Everything above this line is decision and refusal, and none of it has touched the pane. The id
     // is spent HERE, on the last line before the first keystroke — a refused plan leaves the id unspent
     // so the caller may fix the request and reuse it, and a driven pane can never be driven again.
@@ -294,6 +300,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
       harness: current.config.harness,
       ...(wanted.model === undefined ? {} : { requestedModel: wanted.model }),
       ...(wanted.effort === undefined ? {} : { requestedEffort: wanted.effort }),
+      ...(wanted.fast === undefined ? {} : { requestedFast: wanted.fast }),
       // A bare picker open is the one arm where the daemon made no choice, so it claims none.
       ...(plan.kind === 'inject' && !plan.claimsOutcome ? { picker: true } : {}),
     });

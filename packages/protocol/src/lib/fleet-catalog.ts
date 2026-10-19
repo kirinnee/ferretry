@@ -435,6 +435,8 @@ export const FleetRuntimeModelChoiceSchema = z.strictObject({
   reasoning: z.boolean().optional(),
   efforts: z.array(NonEmptyStringSchema).readonly(),
   defaultEffort: NonEmptyStringSchema.optional(),
+  /** Whether the CLI offers fast mode on it, when that is known without asking the CLI (Claude's is a rule on the id). */
+  fast: z.boolean().optional(),
   note: NonEmptyStringSchema.optional(),
   available: z.boolean(),
 });

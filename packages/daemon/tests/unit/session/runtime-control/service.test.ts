@@ -775,3 +775,132 @@ describe('a login with a model catalog (docs/model-catalog.md)', () => {
     should(plain.choices[0]).deepEqual({ value: 'gpt-6.1-sol', label: 'sol', reasoningEfforts: [] });
   });
 });
+
+describe('switching fast mode', () => {
+  const opus = () =>
+    new FakeAccounts([
+      account({
+        agent: 'claude-auto',
+        defaultModel: 'claude-opus-5-5',
+        models: [
+          { id: 'claude-opus-5-5', displayName: 'Opus 5.5', available: true },
+          { id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5', available: true },
+        ],
+      }),
+    ]) as never;
+
+  it('should type the named state into a Claude session on a model that has it, and journal what was asked', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({
+      views: [CLAUDE_VIEW({ observedModel: 'claude-opus-5-5' }), CLAUDE_VIEW({ observedFast: true })],
+    });
+    const { subject, injector } = subjectWith({ repository, accounts: opus() });
+
+    // Act
+    const view = await subject.control('s1', { action: 'fast', fast: true }, 'req-1');
+
+    // Assert
+    should(injector.delivered).deepEqual([['fy-s1', '/fast on']]);
+    should(view.state.observedFast).equal(true);
+    should(repository.calls).match([
+      { kind: 'journal', event: 'control.runtime_model', data: { harness: 'claude', requestedFast: true } },
+    ]);
+  });
+
+  it('should refuse a Claude model with no fast mode before a key is pressed, and leave the id unspent', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({ views: [CLAUDE_VIEW({ observedModel: 'claude-sonnet-5-5' })] });
+    const { subject, injector, effects } = subjectWith({ repository, accounts: opus() });
+
+    // Act
+    const refused = await refusal(subject.control('s1', { action: 'fast', fast: true }, 'req-1'));
+
+    // Assert
+    should(refused).match({ failure: 'unsupported', message: 'Sonnet 5.5 has no fast mode' });
+    should(injector.delivered).deepEqual([]);
+    should(await effects.inspect({ sessionId: 's1' as never, effectId: 'runtime:req-1' }, 'x')).equal('unclaimed');
+  });
+
+  it('should flip a Codex session with a bare /fast only when the state differs, from what the catalog says', async () => {
+    // Arrange — gpt-6-sol runs fast by default, so turning it OFF is a flip.
+    const repository = new FakeRuntimeRepository({
+      views: [CODEX_VIEW({ observedModel: 'gpt-6-sol' }), CODEX_VIEW({ observedModel: 'gpt-6-sol' })],
+    });
+    const catalog = catalogCache(async () => [
+      { value: 'gpt-6-sol', label: 'GPT-6-Sol', reasoningEfforts: [], fast: true, fastDefault: true },
+    ]);
+    const { subject, injector } = subjectWith({ repository, catalog });
+
+    // Act
+    await subject.control('s1', { action: 'fast', fast: false }, 'req-1');
+
+    // Assert
+    should(injector.delivered).deepEqual([['fy-s1', '/fast']]);
+  });
+
+  it('should type nothing and spend nothing when a Codex session is already as asked', async () => {
+    // Arrange — the harness itself reported it on.
+    const repository = new FakeRuntimeRepository({
+      views: [CODEX_VIEW({ observedModel: 'gpt-6-astra', observedFast: true }), CODEX_VIEW({ observedFast: true })],
+    });
+    const catalog = catalogCache(async () => [
+      { value: 'gpt-6-astra', label: 'GPT-6-Astra', reasoningEfforts: [], fast: true },
+    ]);
+    const { subject, injector, effects } = subjectWith({ repository, catalog });
+
+    // Act
+    const view = await subject.control('s1', { action: 'fast', fast: true }, 'req-1');
+
+    // Assert
+    should(injector.delivered).deepEqual([]);
+    should(view.state.observedFast).equal(true);
+    should(repository.calls).deepEqual([]);
+    should(await effects.inspect({ sessionId: 's1' as never, effectId: 'runtime:req-1' }, 'x')).equal('unclaimed');
+  });
+
+  it('should refuse a Codex model whose service tiers do not include fast, naming it by its label', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({ views: [CODEX_VIEW({ observedModel: 'gpt-daybreak' })] });
+    const catalog = catalogCache(async () => [
+      { value: 'gpt-daybreak', label: 'Daybreak Blue', reasoningEfforts: [], fast: false },
+    ]);
+    const { subject, injector } = subjectWith({ repository, catalog });
+
+    // Act
+    const refused = await refusal(subject.control('s1', { action: 'fast', fast: true }, 'req-1'));
+
+    // Assert
+    should(refused).match({ failure: 'unsupported', message: 'Daybreak Blue has no fast mode' });
+    should(injector.delivered).deepEqual([]);
+  });
+
+  it('should refuse a flip it cannot place when the model is not in the catalog and nothing was reported', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({ views: [CODEX_VIEW()] });
+    const catalog = catalogCache(async () => [{ value: 'other', label: 'Other', reasoningEfforts: [] }]);
+    const { subject, injector } = subjectWith({ repository, catalog });
+
+    // Act
+    const refused = await refusal(subject.control('s1', { action: 'fast', fast: true }, 'req-1'));
+
+    // Assert
+    should(refused).match({ failure: 'unsupported', message: /not known yet/u });
+    should(injector.delivered).deepEqual([]);
+  });
+
+  it('should refuse when the catalog cannot be read, rather than type at a model that might not have it', async () => {
+    // Arrange
+    const repository = new FakeRuntimeRepository({ views: [CODEX_VIEW({ observedModel: 'gpt-6-sol' })] });
+    const catalog = catalogCache(async () => {
+      throw new Error('app-server would not start');
+    });
+    const { subject, injector } = subjectWith({ repository, catalog });
+
+    // Act
+    const refused = await refusal(subject.control('s1', { action: 'fast', fast: true }, 'req-1'));
+
+    // Assert
+    should(refused.failure).equal('catalog_unavailable');
+    should(injector.delivered).deepEqual([]);
+  });
+});

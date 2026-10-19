@@ -8,6 +8,8 @@ export interface NewSessionDraft {
   cwd: string;
   model: string;
   mode: 'auto' | 'interactive';
+  /** Launch in the harness's fast mode. */
+  fast: boolean;
   label: string;
   prompt: string;
 }
@@ -17,6 +19,7 @@ export const emptyNewSessionDraft: NewSessionDraft = {
   cwd: '',
   model: '',
   mode: 'auto',
+  fast: false,
   label: '',
   prompt: '',
 };
@@ -50,6 +53,7 @@ export function buildStartSessionRequest(draft: NewSessionDraft): StartSessionRe
     ...(cwd === undefined ? {} : { cwd }),
     ...(model === undefined ? {} : { model }),
     mode: draft.mode,
+    ...(draft.fast ? { fast: true } : {}),
     ...(label === undefined ? {} : { label }),
     ...(prompt === undefined ? {} : { prompt }),
   });

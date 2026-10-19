@@ -66,6 +66,41 @@ export function persistedReasoningEffort(harness: HarnessKind, document: string 
   return harness === 'claude' ? claudeLevel(document) : codexLevel(document);
 }
 
+/** Claude's `settings.json` `fastMode`, which `/fast on` and `/fast off` write. */
+function claudeFast(document: string): boolean | undefined {
+  try {
+    const parsed: unknown = JSON.parse(document);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const value = (parsed as Record<string, unknown>).fastMode;
+    return typeof value === 'boolean' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Codex's top-level `service_tier`, which `/fast` writes: `fast` (or the `priority` id it maps to) is
+ * on and `default` is off. Any other tier is neither, and a missing key means the model's own default
+ * — which is not knowable from this file, so it is not an answer.
+ */
+function codexFast(document: string): boolean | undefined {
+  for (const line of document.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('[')) return undefined;
+    const match = /^service_tier\s*=\s*(?:"([^"]*)"|'([^']*)')\s*(?:#.*)?$/u.exec(trimmed);
+    if (match === null) continue;
+    const tier = (match[1] ?? match[2] ?? '').trim().toLowerCase();
+    return tier === 'fast' || tier === 'priority' ? true : tier === 'default' ? false : undefined;
+  }
+  return undefined;
+}
+
+/** Whether a runtime's settings document has saved fast mode on or off, or `undefined` when it has not said. */
+export function persistedFast(harness: HarnessKind, document: string | undefined): boolean | undefined {
+  if (document === undefined) return undefined;
+  return harness === 'claude' ? claudeFast(document) : codexFast(document);
+}
+
 /** The level this launch starts on: the request's, else the runtime's persisted one, else none. */
 export function launchReasoningEffort(
   requested: string | undefined,

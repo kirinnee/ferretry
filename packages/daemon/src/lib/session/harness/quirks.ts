@@ -33,6 +33,14 @@ export interface HarnessQuirks {
    */
   readonly reportsTokenCounter: boolean;
   /**
+   * Fast mode is switched by a command that FLIPS it, with no way to name the state wanted.
+   *
+   * Codex's `/fast` takes no argument: `/fast on` is typed into the conversation as a message and
+   * costs a model turn. Claude's `/fast on` and `/fast off` name the state. A flip is only safe to
+   * type when the current state is known, so the planner refuses one it cannot place.
+   */
+  readonly fastIsToggle: boolean;
+  /**
    * The harness mints its own session ids that only exist after launch, so they
    * are discovered by diffing its state directory rather than assigned.
    */
@@ -49,6 +57,7 @@ const QUIRKS: Readonly<Record<HarnessKind, HarnessQuirks>> = {
     effortIsRuntimeCommand: true,
     modelSwitchNeedsPicker: false,
     reportsTokenCounter: true,
+    fastIsToggle: false,
     mintsOwnSessionIds: false,
     supportsRemoteControl: true,
   },
@@ -56,6 +65,7 @@ const QUIRKS: Readonly<Record<HarnessKind, HarnessQuirks>> = {
     effortIsRuntimeCommand: false,
     modelSwitchNeedsPicker: true,
     reportsTokenCounter: false,
+    fastIsToggle: true,
     mintsOwnSessionIds: true,
     supportsRemoteControl: false,
   },

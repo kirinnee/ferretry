@@ -225,7 +225,9 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
     const wanted: HarnessRuntimeSwitchRequest = {
       harness: target.harness,
       ...(startup.action === 'model' && startup.model !== undefined ? { model: startup.model } : {}),
-      ...(startup.action === 'compact' || startup.effort === undefined ? {} : { effort: startup.effort }),
+      ...((startup.action === 'model' || startup.action === 'effort') && startup.effort !== undefined
+        ? { effort: startup.effort }
+        : {}),
     };
     const plan = this.ports.harness.planSwitch(wanted, {
       wrapper: resolved.account.agent,

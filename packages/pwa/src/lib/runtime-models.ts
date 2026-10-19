@@ -19,6 +19,10 @@ export interface RuntimeModelChoice {
   readonly isDefault?: boolean;
   readonly reasoningEfforts: readonly RuntimeReasoningChoice[];
   readonly defaultReasoningEffort?: string;
+  /** Whether the harness offers fast mode on this model: absent when the daemon did not say. */
+  readonly fast?: boolean;
+  /** The model runs in fast mode unless told otherwise. */
+  readonly fastDefault?: true;
 }
 
 export interface RuntimeModelCatalog {
@@ -114,6 +118,8 @@ export const parseRuntimeModelCatalog = (value: unknown): RuntimeModelCatalog =>
       ...(choice.isDefault === true ? { isDefault: true } : {}),
       reasoningEfforts,
       ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+      ...(typeof choice.fast === 'boolean' ? { fast: choice.fast } : {}),
+      ...(choice.fastDefault === true ? { fastDefault: true as const } : {}),
     });
   }
   const rawCatalog = asObject(root.catalog);

@@ -273,3 +273,61 @@ describe('the Codex model/list exchange', () => {
     should(() => new CodexModelListExchange().receive(page([]))).throw(/did not advertise any selectable/u);
   });
 });
+
+describe('the Codex model/list page parser — fast mode', () => {
+  // A real `model/list` reply from Codex 0.156.1 (a subset of its bundled catalog), kept verbatim.
+  const real = async () =>
+    (await Bun.file(new URL('../../../fixtures/codex/model-list-service-tiers.json', import.meta.url)).json()) as {
+      result: { data: Record<string, unknown>[] };
+    };
+
+  it('should read fast support and the fast default off the real service tiers', async () => {
+    // Act
+    const parsed = parseCodexModelListPage(await real());
+    const byModel = new Map(parsed.choices.map(choice => [choice.value, choice]));
+
+    // Assert — the hidden no-tier row is skipped like any hidden row.
+    should([...byModel.keys()]).deepEqual(['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol']);
+    should(byModel.get('gpt-6-astra')?.fast).equal(true);
+    should(byModel.get('gpt-6-astra')?.fastDefault).equal(undefined);
+    should(byModel.get('gpt-6-sol')?.fast).equal(true);
+    should(byModel.get('gpt-6-sol')?.fastDefault).equal(true);
+    // Ultrafast is a different tier the /fast command does not switch to; only `priority` counts.
+    should(byModel.get('gpt-5.6-sol')?.fast).equal(true);
+    should(byModel.get('gpt-5.6-sol')?.fastDefault).equal(undefined);
+  });
+
+  it('should say a model that lists no service tier has no fast mode', async () => {
+    // Arrange — the real no-tier row, made visible.
+    const reply = await real();
+    const blue = reply.result.data.find(row => row.model === 'gpt-daybreak-blue-latest') as Record<string, unknown>;
+
+    // Act
+    const parsed = parseCodexModelListPage(page([{ ...blue, hidden: false }]));
+
+    // Assert
+    should(blue.serviceTiers).deepEqual([]);
+    should(parsed.choices[0]?.fast).equal(false);
+    should(parsed.choices[0]?.fastDefault).equal(undefined);
+  });
+
+  it('should say nothing about fast mode when the reply does not carry service tiers', async () => {
+    // Act
+    const parsed = parseCodexModelListPage(page([{ model: 'gpt-old', supportedReasoningEfforts: [] }]));
+
+    // Assert
+    should(parsed.choices[0]).not.have.property('fast');
+    should(parsed.choices[0]).not.have.property('fastDefault');
+  });
+
+  it('should not call a default tier of another name the fast default', async () => {
+    // Act
+    const parsed = parseCodexModelListPage(
+      page([{ model: 'gpt-x', serviceTiers: [{ id: 'priority' }], defaultServiceTier: 'flex' }]),
+    );
+
+    // Assert
+    should(parsed.choices[0]?.fast).equal(true);
+    should(parsed.choices[0]).not.have.property('fastDefault');
+  });
+});

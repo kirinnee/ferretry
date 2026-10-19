@@ -4,6 +4,7 @@ import { CODEX_PICKER_QUARANTINE_KIND } from '../../../../src/lib/session/harnes
 import { IDLE_SEND_STATUSES } from '../../../../src/lib/session/send/types.ts';
 import {
   documentRefusal,
+  needsFastFacts,
   needsLiveCatalog,
   paneRefusal,
   switchRequest,
@@ -139,6 +140,32 @@ describe('translating a control into a switch request', () => {
     // Assert
     should(actual[0]).deepEqual({ harness: 'claude', effort: 'high' });
     should(actual[1]).deepEqual({ harness: 'codex', model: 'gpt-5.6-codex', effort: 'max' });
+  });
+});
+
+describe('translating a fast control', () => {
+  it('should carry the state asked for, and nothing else', () => {
+    // Act
+    const actual = [
+      switchRequest(CLAUDE_VIEW(), { action: 'fast', fast: true }),
+      switchRequest(CODEX_VIEW(), { action: 'fast', fast: false }),
+    ];
+
+    // Assert
+    should(actual[0]).deepEqual({ harness: 'claude', fast: true });
+    should(actual[1]).deepEqual({ harness: 'codex', fast: false });
+  });
+
+  it('should ask for the catalog on either harness, and only for a fast request', () => {
+    // Act
+    const actual = [
+      needsFastFacts({ harness: 'codex', fast: true }),
+      needsFastFacts({ harness: 'claude', fast: false }),
+      needsFastFacts({ harness: 'claude', effort: 'high' }),
+    ];
+
+    // Assert
+    should(actual).deepEqual([true, true, false]);
   });
 });
 

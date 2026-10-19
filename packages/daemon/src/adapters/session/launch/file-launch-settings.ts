@@ -24,6 +24,20 @@ export class FileLaunchSettingsDigest {
     private readonly environment: Readonly<Record<string, string | undefined>>,
   ) {}
 
+  /**
+   * The text of the fixed `--settings` file this wrapper hands a Claude session: empty when the login
+   * has no such file, nothing when the wrapper or the file cannot be read for any other reason.
+   */
+  async fixedSettings(executable: string, harness: HarnessKind): Promise<string | undefined> {
+    const wrapper = await this.wrappers.read(executable);
+    if (wrapper === undefined) return undefined;
+    const home = harnessHomeFromWrapper(wrapper, harness, this.environment);
+    if (home === undefined) return '';
+    return await readFile(join(home, RUNTIME_STATE_DIRECTORY, FIXED_SETTINGS_FILE), 'utf8').catch(
+      (failure: NodeJS.ErrnoException) => (failure.code === 'ENOENT' ? '' : undefined),
+    );
+  }
+
   async digest(executable: string, harness: HarnessKind): Promise<string | undefined> {
     const wrapper = await this.wrappers.read(executable);
     if (wrapper === undefined) return undefined;

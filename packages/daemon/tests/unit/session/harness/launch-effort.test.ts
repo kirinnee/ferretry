@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   launchReasoningEffort,
+  persistedFast,
   persistedReasoningEffort,
   RUNTIME_SETTINGS_FILE,
 } from '../../../../src/lib/session/harness/launch-effort.ts';
@@ -59,5 +60,32 @@ describe('launchReasoningEffort', () => {
     should(launchReasoningEffort(undefined, 'high')).equal('high');
     should(launchReasoningEffort('   ', 'medium')).equal('medium');
     should(launchReasoningEffort(undefined, undefined)).be.undefined();
+  });
+});
+
+describe('persistedFast', () => {
+  it("should read Claude's saved fastMode only when it is a boolean", () => {
+    should(persistedFast('claude', '{"fastMode":true}')).equal(true);
+    should(persistedFast('claude', '{"fastMode":false,"effortLevel":"high"}')).equal(false);
+    should(persistedFast('claude', '{"fastMode":"yes"}')).be.undefined();
+    should(persistedFast('claude', '{}')).be.undefined();
+    should(persistedFast('claude', '[true]')).be.undefined();
+    should(persistedFast('claude', 'null')).be.undefined();
+    should(persistedFast('claude', '{not json')).be.undefined();
+    should(persistedFast('claude', undefined)).be.undefined();
+  });
+
+  it("should read Codex's root service_tier: fast and priority are on, default is off, anything else is no answer", () => {
+    should(persistedFast('codex', 'model = "gpt-6"\nservice_tier = "fast"\n')).equal(true);
+    should(persistedFast('codex', "service_tier = 'priority' # fastest\r\n")).equal(true);
+    should(persistedFast('codex', 'service_tier = "default"\n')).equal(false);
+    should(persistedFast('codex', 'service_tier = "ultrafast"\n')).be.undefined();
+    should(persistedFast('codex', 'service_tier = fast\n')).be.undefined();
+    should(persistedFast('codex', 'model = "gpt-6"\n')).be.undefined();
+    should(persistedFast('codex', undefined)).be.undefined();
+  });
+
+  it('should ignore a service tier that belongs to a profile table the launch did not select', () => {
+    should(persistedFast('codex', 'model = "gpt-6"\n\n[profiles.quick]\nservice_tier = "fast"\n')).be.undefined();
   });
 });

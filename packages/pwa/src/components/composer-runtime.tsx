@@ -129,7 +129,7 @@ interface SwitchConfirmation {
  *     value and says it could not confirm the switch. Late evidence still settles it.
  * A different session is a different runtime, so nothing carries across one.
  */
-function useSwitchConfirmation<T>(
+export function useSwitchConfirmation<T>(
   evidence: T,
   changed: (before: T, current: T) => boolean,
   sessionId: string,
@@ -286,6 +286,8 @@ export interface ComposerRuntimeProps {
   readonly renderModelControls?: (lifecycle: RuntimeSwitchLifecycle) => ReactNode;
   /** The reasoning switcher's body. Not built here — see the file header. */
   readonly renderEffortControls?: (lifecycle: RuntimeSwitchLifecycle) => ReactNode;
+  /** The fast-mode toggle, drawn after the two chips. A switch, not a picker: it owns no sheet. */
+  readonly renderFast?: () => ReactNode;
   /**
    * Draw the popovers and sheets at the document's root instead of beside the chips. For a host that
    * is itself inside a moving panel (Info's phone sheet is a transformed box): a fixed overlay inside
@@ -562,6 +564,7 @@ export function ComposerRuntimeWithKeyboard({
   presentation = 'sheet',
   renderModelControls,
   renderEffortControls,
+  renderFast,
   portalOverlays = false,
   switchConfirmMs = RUNTIME_SWITCH_CONFIRM_MS,
   keyboardOpen,
@@ -754,6 +757,7 @@ export function ComposerRuntimeWithKeyboard({
           sheetId={effortSheetId}
           title="Change the reasoning level"
         />
+        {renderFast?.()}
       </div>
       {disabledReason ? (
         <span className="sr-only" id={reasonId}>

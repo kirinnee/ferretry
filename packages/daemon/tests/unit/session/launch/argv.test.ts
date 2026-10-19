@@ -3,6 +3,8 @@ import should from 'should';
 import {
   buildLaunchArgv,
   effortLaunchArguments,
+  FixedSettingsUnreadableError,
+  fastLaunchArguments,
   settingsArguments,
   transcriptLaunchArguments,
 } from '../../../../src/lib/session/launch/index.ts';
@@ -63,12 +65,96 @@ describe('buildLaunchArgv', () => {
   });
 });
 
+describe('buildLaunchArgv with fast mode', () => {
+  it('should put fast mode after the model and effort and before the owner flags, which still win', () => {
+    // Act
+    const claude = buildLaunchArgv({
+      harness: 'claude',
+      executable: WRAPPER,
+      remoteControl: [],
+      transcript: [],
+      readableFolders: [],
+      model: 'claude-opus-5-5',
+      effort: 'high',
+      fast: true,
+      fixedSettings: '{"skipAutoPermissionPrompt":true}',
+      harnessFlags: ['--verbose'],
+    });
+    const codex = buildLaunchArgv({
+      harness: 'codex',
+      executable: '/fleet/bin/codex-auto-boot',
+      remoteControl: [],
+      transcript: [],
+      readableFolders: [],
+      fast: false,
+      harnessFlags: ['--no-alt-screen'],
+    });
+
+    // Assert
+    should(claude).eql([
+      WRAPPER,
+      '--model',
+      'claude-opus-5-5',
+      '--effort',
+      'high',
+      '--settings',
+      '{"skipAutoPermissionPrompt":true,"fastMode":true}',
+      '--verbose',
+    ]);
+    should(codex).eql(['/fleet/bin/codex-auto-boot', '-c', 'service_tier="default"', '--no-alt-screen']);
+  });
+});
+
 describe('effortLaunchArguments', () => {
   it('should spell the effort in each harness own way, and not at all when there is none', () => {
     // Act / Assert: Codex has no flag, so its config key is overridden for one invocation.
     should(effortLaunchArguments('claude', 'max')).eql(['--effort', 'max']);
     should(effortLaunchArguments('codex', 'x"h\\')).eql(['-c', 'model_reasoning_effort="x\\"h\\\\"']);
     should(effortLaunchArguments('claude', undefined)).eql([]);
+  });
+});
+
+describe('fastLaunchArguments', () => {
+  const FIXED = JSON.stringify({ permissions: { defaultMode: 'auto' }, skipAutoPermissionPrompt: true });
+
+  it('should say nothing when no state was decided, so the harness keeps its own setting', () => {
+    // Act / Assert
+    should(fastLaunchArguments('claude', undefined, FIXED)).eql([]);
+    should(fastLaunchArguments('codex', undefined, undefined)).eql([]);
+  });
+
+  it('should set the Codex service tier explicitly in both directions, in the TOML the config reads', () => {
+    // Act / Assert — `priority` is the tier Codex calls Fast; `default` is the one a toggle off writes.
+    should(fastLaunchArguments('codex', true, undefined)).eql(['-c', 'service_tier="priority"']);
+    should(fastLaunchArguments('codex', false, undefined)).eql(['-c', 'service_tier="default"']);
+  });
+
+  it('should carry the fixed overlay into the one --settings Claude honours, with fast mode added', () => {
+    // Act
+    const on = fastLaunchArguments('claude', true, FIXED);
+    const off = fastLaunchArguments('claude', false, `  ${FIXED}\n`);
+
+    // Assert — the permission mode survives, or an unattended agent would stop at a dialog.
+    should(on[0]).equal('--settings');
+    should(JSON.parse(on[1] as string)).eql({
+      permissions: { defaultMode: 'auto' },
+      skipAutoPermissionPrompt: true,
+      fastMode: true,
+    });
+    should(JSON.parse(off[1] as string)).containEql({ fastMode: false });
+  });
+
+  it('should launch a login with no fixed file on a settings object of its own', () => {
+    // Act / Assert
+    should(fastLaunchArguments('claude', true, undefined)).eql(['--settings', '{"fastMode":true}']);
+    should(fastLaunchArguments('claude', false, '')).eql(['--settings', '{"fastMode":false}']);
+  });
+
+  it('should refuse a fixed file it cannot carry, rather than drop the permission mode', () => {
+    // Act / Assert
+    should(() => fastLaunchArguments('claude', true, '{not json')).throw(FixedSettingsUnreadableError);
+    should(() => fastLaunchArguments('claude', true, '[1]')).throw(FixedSettingsUnreadableError);
+    should(() => fastLaunchArguments('claude', true, 'null')).throw(FixedSettingsUnreadableError);
   });
 });
 
@@ -153,6 +239,27 @@ describe('settingsArguments', () => {
 
     // Assert
     should(kept).eql([WRAPPER, '--allowedTools=Read(//state/s1/turns/**)', '-c', 'sandbox_mode="danger"', '--verbose']);
+  });
+
+  it('should treat fast mode as a run fact, so a /fast typed into the pane is not a stale setting', () => {
+    // Arrange
+    const argv = [
+      WRAPPER,
+      '--settings',
+      '{"permissions":{"defaultMode":"auto"},"fastMode":true}',
+      '-c',
+      'service_tier="priority"',
+      '--settings',
+      '/fleet/own-overlay.json',
+      '--settings',
+      '{"theme":"dark"}',
+    ];
+
+    // Act
+    const kept = settingsArguments(argv);
+
+    // Assert — only the inline overlay that names fast mode is dropped; an owner's own --settings stays.
+    should(kept).eql([WRAPPER, '--settings', '/fleet/own-overlay.json', '--settings', '{"theme":"dark"}']);
   });
 
   it('should keep a trailing -c that carries no value', () => {

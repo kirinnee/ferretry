@@ -23,6 +23,7 @@
 
 import type { RuntimeModelCatalog, RuntimeModelChoice } from '@ferretry/protocol';
 import { type CoreAccount, type CoreAccountModel, servableModels } from '../../core/inventory.ts';
+import { claudeFastSupport } from './fast-mode.ts';
 
 /**
  * What one Claude account may be switched to mid-session.
@@ -38,6 +39,7 @@ export function claudeRuntimeCatalog(account: CoreAccount): RuntimeModelCatalog 
       value: model.id,
       label: model.displayName ?? model.id,
       ...catalogFacts(model),
+      fast: claudeFastSupport(model.id),
       ...(account.defaultModel === model.id ? { isDefault: true as const } : {}),
       reasoningEfforts: (model.efforts ?? []).map(value => ({ value })),
       ...(model.defaultEffort === undefined ? {} : { defaultReasoningEffort: model.defaultEffort }),

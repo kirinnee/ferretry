@@ -58,6 +58,7 @@ import {
   type MigrateSessionRequest,
   type RegisterProjectRequest,
   type RuntimeControlRequest,
+  type RuntimeModelChoice,
   refusalNotice,
   type SessionConfig,
   SessionConfigSchema,
@@ -235,6 +236,7 @@ import {
 } from '../src/adapters/session/filesystem/index.ts';
 import {
   CodexAppServerCatalog,
+  readPersistedFast,
   readPersistedReasoningEffort,
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
@@ -426,6 +428,8 @@ import {
   BrowserViewerStream,
   type BrowserWorkerProgram,
   buildLaunchArgv,
+  FixedSettingsUnreadableError,
+  fastStartRefusal,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -1706,6 +1710,14 @@ async function storeAttachments(
  * but it also loses the connection the retry would have travelled on, so the client sees a transport
  * failure rather than a duplicate session.
  */
+/** The two reads a start makes only when it names fast mode. */
+interface StartFastPorts {
+  /** The text of the login's fixed Claude `--settings` file: empty when it has none, nothing when unreadable. */
+  readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
+  /** The models a Codex login advertises, for a start asking for fast mode on one of them. */
+  readonly codexChoices: (executable: string, cwd: string) => Promise<readonly RuntimeModelChoice[]>;
+}
+
 function createSessionControlSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
@@ -1770,6 +1782,8 @@ function createSessionControlSubsystem(
   /** A digest of the fleet settings a wrapper launches under, recorded so a later read can say the
    *  running process is on older ones (`FileLaunchSettingsDigest`). */
   launchSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>,
+  /** What a start that names fast mode reads: the fixed overlay to carry, and a Codex model's catalog. */
+  fast: StartFastPorts,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1897,6 +1911,32 @@ function createSessionControlSubsystem(
         throw new SessionControlError('unservable_model', planned.reason);
       }
       const plan = planned.plan;
+      // FAST MODE the model cannot give is refused here, with the callsign released like the model
+      // refusal above: nothing has been written, and a session that silently ran at standard speed
+      // would be billed and described as fast.
+      const releaseCallsign = async (): Promise<void> => {
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+      };
+      if (request.fast === true) {
+        const choices = account.kind === 'codex' ? await fast.codexChoices(executable, cwd).catch(() => []) : [];
+        const refusal = fastStartRefusal(account.kind, plan.model, choices);
+        if (refusal !== undefined) {
+          await releaseCallsign();
+          throw new SessionControlError('unservable_model', refusal);
+        }
+      }
+      // Claude carries fast mode in a replacement `--settings`, so the overlay it replaces is read now.
+      const fixedSettings =
+        account.kind === 'claude' && request.fast !== undefined
+          ? await fast.fixedSettings(executable, account.kind)
+          : '';
+      if (fixedSettings === undefined) {
+        await releaseCallsign();
+        throw new SessionControlError(
+          'failed',
+          'the login’s fixed settings could not be read, so fast mode cannot be applied',
+        );
+      }
       const startupRuntime: RuntimeControlRequest | undefined =
         request.effort === undefined
           ? undefined
@@ -1910,15 +1950,24 @@ function createSessionControlSubsystem(
       // about what a launch carries. Effort is not on it: a start applies the requested level as a
       // runtime command before turn one (`startupRuntime` above), and a relaunch passes the level the
       // session is on by then.
-      const command = buildLaunchArgv({
-        harness: account.kind,
-        executable,
-        remoteControl: request.remoteControl === true ? plan.extraArgs : [],
-        transcript: transcript.launchArguments,
-        readableFolders: readableHandoffs(id),
-        model: plan.model,
-        harnessFlags: request.harnessFlags ?? [],
-      });
+      const command = await (async (): Promise<readonly string[]> => {
+        try {
+          return buildLaunchArgv({
+            harness: account.kind,
+            executable,
+            remoteControl: request.remoteControl === true ? plan.extraArgs : [],
+            transcript: transcript.launchArguments,
+            readableFolders: readableHandoffs(id),
+            model: plan.model,
+            ...(request.fast === undefined ? {} : { fast: request.fast, fixedSettings }),
+            harnessFlags: request.harnessFlags ?? [],
+          });
+        } catch (error) {
+          if (!(error instanceof FixedSettingsUnreadableError)) throw error;
+          await releaseCallsign();
+          throw new SessionControlError('failed', error.message);
+        }
+      })();
       const settingsDigest = await launchSettings(executable, account.kind);
       // The level this launch starts on, so a session that has said nothing yet still shows one. A
       // single local file read: no harness is started and no provider is asked.
@@ -1926,6 +1975,10 @@ function createSessionControlSubsystem(
         request.effort,
         await readPersistedReasoningEffort(account.kind, transcript.provenance?.home),
       );
+      // The state fast mode starts in: the request's choice, else what the login saved. Not an
+      // assertion — only a request that NAMED it is put on the argv — but the composer has to show what
+      // the harness will do before it has said anything.
+      const launchFast = request.fast ?? (await readPersistedFast(account.kind, transcript.provenance?.home));
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
@@ -1944,6 +1997,7 @@ function createSessionControlSubsystem(
         modelHint: request.model ?? account.defaultModel ?? '',
         model: plan.model,
         ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
+        ...(launchFast === undefined ? {} : { launchFast }),
         ...(settingsDigest === undefined ? {} : { launchSettings: settingsDigest }),
         remoteControl: request.remoteControl === true,
         harnessFlags: [...(request.harnessFlags ?? [])],
@@ -3853,7 +3907,14 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
       // silently keep the old harness's file under the new harness's name.
-      const { transcript: _replaced, launchReasoningEffort: _previousEffort, ...retained } = jsonObject(current) ?? {};
+      // Fast mode is dropped with the effort's launch record: the target is another login, often
+      // another harness, and a model there may have none. It starts on that login's own setting.
+      const {
+        transcript: _replaced,
+        launchReasoningEffort: _previousEffort,
+        launchFast: _previousFast,
+        ...retained
+      } = jsonObject(current) ?? {};
       return {
         ...retained,
         ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
@@ -6007,6 +6068,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         );
       },
       settings: async (executable, harness) => await launchSettings.digest(executable, harness),
+      fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
       transcriptStarted: async file => await Bun.file(file).exists(),
       authorize: (executable, argv) => authorizeSessionCommand(executable, argv, defaultSessionLifecycleSettings),
       record: async (id, launch) => {
@@ -6019,6 +6081,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ...(launch.launchReasoningEffort === undefined
               ? {}
               : { launchReasoningEffort: launch.launchReasoningEffort }),
+            ...(launch.launchFast === undefined ? {} : { launchFast: launch.launchFast }),
             ...(launch.launchSettings === undefined ? {} : { launchSettings: launch.launchSettings }),
             updatedAt: clock.now(),
           };
@@ -6977,6 +7040,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             async id => await adoptLearning(id),
             id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
             async (executable, harness) => await launchSettings.digest(executable, harness),
+            {
+              fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
+              codexChoices: async (executable, cwd) => await codexRuntimeModels.get(executable, cwd),
+            },
           ),
           attachmentStore,
         ),

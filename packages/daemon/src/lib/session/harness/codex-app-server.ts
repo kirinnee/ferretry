@@ -66,6 +66,19 @@ function reasoningEfforts(item: Record<string, unknown>): RuntimeReasoningChoice
   return efforts;
 }
 
+/** The service tier id Codex's `/fast` switches to; its display name is "Fast". */
+export const CODEX_FAST_TIER = 'priority';
+
+/**
+ * Whether a model offers Codex's fast tier. `serviceTiers` is the account's statement of what a model
+ * can run at, so a model that lists none has no fast mode — an explicit answer, unlike a reply that
+ * omits the field, which says nothing.
+ */
+function fastSupport(item: Record<string, unknown>): boolean | undefined {
+  if (!Array.isArray(item.serviceTiers)) return undefined;
+  return item.serviceTiers.some(tier => asString(asObject(tier)?.id) === CODEX_FAST_TIER);
+}
+
 /**
  * One `model/list` reply, parsed without assuming Codex's model or effort vocabulary.
  *
@@ -93,6 +106,7 @@ export function parseCodexModelListPage(message: unknown): CodexModelListPage {
     if (value === undefined) continue;
     const description = asString(item.description);
     const defaultReasoningEffort = asString(item.defaultReasoningEffort);
+    const fast = fastSupport(item);
     choices.push({
       value,
       label: asString(item.displayName) ?? value,
@@ -100,6 +114,8 @@ export function parseCodexModelListPage(message: unknown): CodexModelListPage {
       ...(item.isDefault === true ? { isDefault: true as const } : {}),
       reasoningEfforts: reasoningEfforts(item),
       ...(defaultReasoningEffort === undefined ? {} : { defaultReasoningEffort }),
+      ...(fast === undefined ? {} : { fast }),
+      ...(fast === true && asString(item.defaultServiceTier) === CODEX_FAST_TIER ? { fastDefault: true as const } : {}),
     });
   }
   const nextCursor = asString(result.nextCursor);

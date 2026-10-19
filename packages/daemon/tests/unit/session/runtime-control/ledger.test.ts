@@ -28,9 +28,19 @@ describe('the runtime request fingerprint', () => {
       print({ action: 'model' }),
       print({ action: 'model', model: 'gpt-5.6-codex' }),
       print({ action: 'model', model: 'gpt-5.6-codex', effort: 'high' }),
+      print({ action: 'fast', fast: true }),
+      print({ action: 'fast', fast: false }),
     ];
 
-    // Assert: five controls, five distinct prints.
+    // Assert: seven controls, seven distinct prints.
     should(new Set(prints).size).equal(prints.length);
+  });
+
+  it('should leave the print of every pre-existing control exactly as it was', () => {
+    // A request begun before fast mode existed and still awaiting its retry must not read as a conflict.
+    // Act / Assert
+    should(print({ action: 'compact' })).equal('["compact",null,null]');
+    should(print({ action: 'effort', effort: 'high' })).equal('["effort","high",null]');
+    should(print({ action: 'model', model: 'm', effort: 'e' })).equal('["model","e","m"]');
   });
 });

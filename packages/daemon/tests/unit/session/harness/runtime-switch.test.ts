@@ -47,6 +47,7 @@ describe('harnessQuirks', () => {
       effortIsRuntimeCommand: false,
       modelSwitchNeedsPicker: true,
       reportsTokenCounter: false,
+      fastIsToggle: true,
       mintsOwnSessionIds: true,
       supportsRemoteControl: false,
     });
@@ -58,6 +59,7 @@ describe('harnessQuirks', () => {
       effortIsRuntimeCommand: true,
       modelSwitchNeedsPicker: false,
       reportsTokenCounter: true,
+      fastIsToggle: false,
       mintsOwnSessionIds: false,
       supportsRemoteControl: true,
     });
@@ -286,5 +288,90 @@ describe('planRuntimeSwitch with a custom model id (docs/model-catalog.md)', () 
     should(planRuntimeSwitch({ harness: 'claude', model: 'two words' }, openCatalog)).match({ kind: 'refused' });
     should(planRuntimeSwitch({ harness: 'claude', model: 'x;rm' }, openCatalog)).match({ kind: 'refused' });
     should(planRuntimeSwitch({ harness: 'claude', model: 'other-model' }, claudeContext)).match({ kind: 'refused' });
+  });
+});
+
+describe('planRuntimeSwitch for fast mode', () => {
+  it('should name the state it wants on a harness whose command takes one', () => {
+    // Arrange / Act
+    const on = planRuntimeSwitch({ harness: 'claude', fast: true }, claudeContext);
+    const off = planRuntimeSwitch({ harness: 'claude', fast: false }, claudeContext);
+
+    // Assert
+    should(on).eql({ kind: 'inject', command: '/fast on', requestedFast: true, claimsOutcome: true });
+    should(off).eql({ kind: 'inject', command: '/fast off', requestedFast: false, claimsOutcome: true });
+  });
+
+  it('should flip with a bare command on a harness whose command only flips, and only when it must', () => {
+    // Codex types `/fast on` into the conversation as a message, so the only safe keystrokes are the bare command.
+    // Arrange / Act
+    const turnOn = planRuntimeSwitch(
+      { harness: 'codex', fast: true },
+      { ...codexContext, fast: { supported: true, current: false } },
+    );
+    const turnOff = planRuntimeSwitch(
+      { harness: 'codex', fast: false },
+      { ...codexContext, fast: { supported: true, current: true } },
+    );
+
+    // Assert
+    should(turnOn).eql({ kind: 'inject', command: '/fast', requestedFast: true, claimsOutcome: true });
+    should(turnOff).eql({ kind: 'inject', command: '/fast', requestedFast: false, claimsOutcome: true });
+  });
+
+  it('should type nothing when a flip would undo the state already asked for', () => {
+    // Arrange / Act
+    const plan = planRuntimeSwitch(
+      { harness: 'codex', fast: true },
+      { ...codexContext, fast: { supported: true, current: true } },
+    );
+
+    // Assert
+    should(plan).eql({ kind: 'unchanged' });
+  });
+
+  it('should refuse a flip it cannot place, rather than guess the direction', () => {
+    // Arrange / Act
+    const unknown = planRuntimeSwitch({ harness: 'codex', fast: true }, { ...codexContext, fast: { supported: true } });
+    const none = planRuntimeSwitch({ harness: 'codex', fast: true }, codexContext);
+
+    // Assert
+    should(unknown).match({ kind: 'refused', reason: /not known yet/u });
+    should(none).match({ kind: 'refused', reason: /not known yet/u });
+  });
+
+  it('should refuse a model that has no fast mode, naming it, on either harness', () => {
+    // Arrange / Act
+    const claude = planRuntimeSwitch(
+      { harness: 'claude', fast: true },
+      { ...claudeContext, fast: { supported: false, model: 'Sonnet 5.5' } },
+    );
+    const codex = planRuntimeSwitch(
+      { harness: 'codex', fast: false },
+      { ...codexContext, fast: { supported: false, current: true } },
+    );
+
+    // Assert
+    should(claude).eql({ kind: 'refused', reason: 'Sonnet 5.5 has no fast mode' });
+    should(codex).eql({ kind: 'refused', reason: 'this model has no fast mode' });
+  });
+
+  it('should try a command harness when nothing can say whether the model has it', () => {
+    // The CLI answers a wrong guess itself, and the transcript carries that answer.
+    // Arrange / Act
+    const plan = planRuntimeSwitch({ harness: 'claude', fast: true }, claudeContext);
+
+    // Assert
+    should(plan).match({ kind: 'inject', command: '/fast on' });
+  });
+
+  it('should refuse fast mode combined with a model or an effort', () => {
+    // Arrange / Act
+    const withModel = planRuntimeSwitch({ harness: 'claude', fast: true, model: 'claude-opus-5' }, claudeContext);
+    const withEffort = planRuntimeSwitch({ harness: 'claude', fast: true, effort: 'high' }, claudeContext);
+
+    // Assert
+    should(withModel).match({ kind: 'refused', reason: /on its own/u });
+    should(withEffort).match({ kind: 'refused', reason: /on its own/u });
   });
 });

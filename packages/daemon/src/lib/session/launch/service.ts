@@ -24,8 +24,8 @@ import { type CoreAccount, canServeModel } from '../../core/inventory.ts';
 import type { SessionPlanner } from '../../core/session-planner.ts';
 import type { SessionId } from '../../session-id.ts';
 import { relaunchCommand } from '../transcript/relaunch.ts';
-import { buildLaunchArgv, settingsArguments, transcriptLaunchArguments } from './argv.ts';
-import { currentLaunchEffort, currentLaunchModel } from './current.ts';
+import { buildLaunchArgv, FixedSettingsUnreadableError, settingsArguments, transcriptLaunchArguments } from './argv.ts';
+import { currentLaunchEffort, currentLaunchFast, currentLaunchModel } from './current.ts';
 
 /** What a relaunch reads about one session. */
 export interface LaunchSubject {
@@ -47,6 +47,7 @@ export interface RecordedLaunch {
   readonly command: readonly string[];
   readonly model: string;
   readonly launchReasoningEffort?: string;
+  readonly launchFast?: boolean;
   readonly launchSettings?: string;
 }
 
@@ -57,6 +58,11 @@ export interface SessionLaunchPorts {
   readonly planner: Pick<SessionPlanner, 'plan'>;
   /** The session's hand-off folders, which its `Read(...)` rules name. */
   readonly readableFolders: (id: SessionId) => readonly string[];
+  /**
+   * The text of the fixed `--settings` file this wrapper launches a Claude session under now: empty
+   * when the login has none, nothing when it cannot be read at all.
+   */
+  readonly fixedSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
   /** A digest of the fleet settings this wrapper launches under now, or nothing when unreadable. */
   readonly settings: (executable: string, harness: HarnessKind) => Promise<string | undefined>;
   /** Whether the harness has written this transcript, i.e. already created its session. */
@@ -71,6 +77,7 @@ interface PlannedLaunch {
   readonly argv: readonly string[];
   readonly model: string;
   readonly effort: string | undefined;
+  readonly fast: boolean | undefined;
   readonly executable: string;
   readonly harness: HarnessKind;
 }
@@ -96,6 +103,7 @@ export class SessionLaunchService {
       command: argv,
       model: planned.model,
       ...(planned.effort === undefined ? {} : { launchReasoningEffort: planned.effort }),
+      ...(planned.fast === undefined ? {} : { launchFast: planned.fast }),
       ...(settings === undefined ? {} : { launchSettings: settings }),
     });
     const transcript = subject.config.transcript?.file;
@@ -142,21 +150,34 @@ export class SessionLaunchService {
     const outcome = requested.kind === 'planned' ? requested : this.ports.planner.plan(shape);
     if (outcome.kind !== 'planned') return undefined;
     const effort = currentLaunchEffort(config, state);
-    return {
-      argv: buildLaunchArgv({
-        harness: account.kind,
-        executable,
-        remoteControl: config.remoteControl ? outcome.plan.extraArgs : [],
-        transcript: transcriptLaunchArguments(account.kind, config.transcript, subject.command),
-        readableFolders: this.ports.readableFolders(id),
+    const fast = currentLaunchFast(config, state);
+    // Claude carries fast mode in a replacement overlay, so the one it replaces has to be in hand. A
+    // login whose overlay cannot be read cannot be rebuilt: the record is replayed as it was.
+    const fixedSettings =
+      account.kind === 'claude' && fast !== undefined ? await this.ports.fixedSettings(executable, account.kind) : '';
+    if (fixedSettings === undefined) return undefined;
+    try {
+      return {
+        argv: buildLaunchArgv({
+          harness: account.kind,
+          executable,
+          remoteControl: config.remoteControl ? outcome.plan.extraArgs : [],
+          transcript: transcriptLaunchArguments(account.kind, config.transcript, subject.command),
+          readableFolders: this.ports.readableFolders(id),
+          model: outcome.plan.model,
+          ...(effort === undefined ? {} : { effort }),
+          ...(fast === undefined ? {} : { fast, fixedSettings }),
+          harnessFlags: config.harnessFlags,
+        }),
         model: outcome.plan.model,
-        ...(effort === undefined ? {} : { effort }),
-        harnessFlags: config.harnessFlags,
-      }),
-      model: outcome.plan.model,
-      effort,
-      executable,
-      harness: account.kind,
-    };
+        effort,
+        fast,
+        executable,
+        harness: account.kind,
+      };
+    } catch (failure) {
+      if (failure instanceof FixedSettingsUnreadableError) return undefined;
+      throw failure;
+    }
   }
 }

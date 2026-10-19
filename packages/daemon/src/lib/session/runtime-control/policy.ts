@@ -77,7 +77,10 @@ export function switchRequest(
   return {
     harness: view.config.harness,
     ...(request.action === 'model' && request.model !== undefined ? { model: request.model } : {}),
-    ...(request.effort === undefined ? {} : { effort: request.effort }),
+    ...((request.action === 'model' || request.action === 'effort') && request.effort !== undefined
+      ? { effort: request.effort }
+      : {}),
+    ...(request.action === 'fast' ? { fast: request.fast } : {}),
   };
 }
 
@@ -90,4 +93,14 @@ export function switchRequest(
  */
 export function needsLiveCatalog(wanted: HarnessRuntimeSwitchRequest): boolean {
   return wanted.harness === 'codex' && wanted.model !== undefined && wanted.effort !== undefined;
+}
+
+/**
+ * Whether a fast request needs the catalog read first, on EITHER harness: whether the model in force
+ * has a fast mode, and whether it runs fast by default, are facts the catalog states. A fast switch
+ * that cannot read one is refused rather than guessed, so it never types `/fast` at a model that
+ * answers it with an error.
+ */
+export function needsFastFacts(wanted: HarnessRuntimeSwitchRequest): boolean {
+  return wanted.fast !== undefined;
 }

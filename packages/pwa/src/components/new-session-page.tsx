@@ -25,6 +25,8 @@ import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
+import { FAST_COST_NOTE } from '../lib/fast-mode.ts';
+import { FastSwitch } from './fast-switch.tsx';
 import { ModelSelect } from './model-select.tsx';
 
 /**
@@ -109,7 +111,7 @@ export interface NewSessionPageProps {
   readonly createFleetClient?: FleetClientFactory;
 }
 
-type TextDraftField = Exclude<keyof NewSessionDraft, 'mode'>;
+type TextDraftField = Exclude<keyof NewSessionDraft, 'mode' | 'fast'>;
 
 const fieldId = (field: TextDraftField): string => `fy-new-session-${field}`;
 
@@ -184,6 +186,16 @@ const modelSuggestions = (account: AccountPickerOption | null): readonly string[
  * will get them. No chosen account, or one that declares no default, gets an
  * empty placeholder rather than a guess.
  */
+/** Why the chosen model cannot launch in fast mode, or nothing when it can or nobody can say. */
+const fastUnavailableReason = (account: AccountPickerOption | null, typed: string): string | undefined => {
+  if (account === null) return undefined;
+  const id = typed.trim() === '' ? (account.defaultModel ?? undefined) : typed.trim();
+  const model = account.models.find(candidate => candidate.id === id);
+  return model?.fast === false ? `${model.label ?? model.id} has no fast mode.` : undefined;
+};
+
+const FAST_REASON_ID = 'fy-new-session-fast-reason';
+
 const modelPlaceholder = (account: AccountPickerOption | null): string =>
   account?.defaultModel ? `default: ${account.defaultModel}` : '';
 
@@ -274,6 +286,9 @@ export function NewSessionPage({
   const chosen = chosenForDraft(chosenAccount, connection, draft.agent);
   const models = modelSuggestions(chosen);
   const blocker = createBlocker(draft, submitting, noRunnableAccount);
+  // A model the catalog says has no fast mode cannot be launched with it, so the switch says why it is
+  // unavailable and the request never carries it (the daemon would refuse it too).
+  const fastReason = fastUnavailableReason(chosen, draft.model);
   const noAccounts = (
     <NoSessionAccounts
       onOpenSettings={() =>
@@ -288,7 +303,7 @@ export function NewSessionPage({
     setSubmitting(true);
     setError(null);
     try {
-      const scope = await submitNewSession(draft, {
+      const scope = await submitNewSession(fastReason === undefined ? draft : { ...draft, fast: false }, {
         connection,
         start: request => startSession(connection, request),
       });
@@ -468,6 +483,26 @@ export function NewSessionPage({
                 ))}
               </dl>
             </fieldset>
+          </div>
+
+          <div data-new-session-fast="">
+            <FastSwitch
+              ariaLabel="Fast mode"
+              disabled={fastReason !== undefined}
+              {...(fastReason === undefined ? {} : { disabledReason: fastReason })}
+              onPress={() => setDraft(current => ({ ...current, fast: !current.fast }))}
+              pressed={draft.fast && fastReason === undefined}
+              reasonId={FAST_REASON_ID}
+              variant="field"
+            />
+            {fastReason === undefined ? null : (
+              <p className="sr-only" id={FAST_REASON_ID}>
+                {fastReason}
+              </p>
+            )}
+            <p className="m-0 mt-1.5 text-meta leading-base text-muted">
+              Faster output on models that offer it. {FAST_COST_NOTE}
+            </p>
           </div>
 
           <SessionField hint="optional — groups related sessions" inputId={fieldId('label')} label="Label">

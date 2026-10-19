@@ -1,5 +1,5 @@
 /**
- * The model and reasoning effort a session is ON, which is what a relaunch must keep.
+ * The model, reasoning effort and fast mode a session is ON, which is what a relaunch must keep.
  *
  * Two records say it, and neither is enough alone:
  *
@@ -49,6 +49,16 @@ export function currentLaunchModel(
   )
     return observed;
   return decided;
+}
+
+/**
+ * The fast mode a relaunch should ask for: the harness's report when it is newer than the last
+ * decision, else the state the session was launched in. Absent when neither was ever decided, which
+ * leaves the harness's own setting in charge — a relaunch must not turn a default into a choice.
+ */
+export function currentLaunchFast(config: SessionConfig, state: SessionState): boolean | undefined {
+  if (state.observedFast !== undefined && observedSinceDecision(config, state)) return state.observedFast;
+  return config.launchFast;
 }
 
 /**

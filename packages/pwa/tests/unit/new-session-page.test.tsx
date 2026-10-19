@@ -68,6 +68,25 @@ describe('NewSessionPage', () => {
     expect(button(view, 'Create session').props.disabled).toBeFalse();
   });
 
+  it('starts in fast mode only when the switch was pressed, and says what it costs on the form', async () => {
+    const { view, starts } = page();
+    const fast = (): ReactTestInstance => view.root.findByProps({ 'data-fast-switch': 'off' });
+    expect(JSON.stringify(view.toJSON())).toContain('Fast mode can cost more.');
+    change(view, 'fy-new-session-agent', 'claude-auto-loge');
+    change(view, 'fy-new-session-prompt', 'Port the page');
+
+    run(() => fast().props.onClick());
+    expect(view.root.findByProps({ 'data-fast-switch': 'on' }).props['aria-pressed']).toBeTrue();
+    await runAsync(() => button(view, 'Create session').props.onClick());
+    expect(starts[0]?.request).toMatchObject({ fast: true });
+
+    const untouched = page();
+    change(untouched.view, 'fy-new-session-agent', 'claude-auto-loge');
+    change(untouched.view, 'fy-new-session-prompt', 'Port the page');
+    await runAsync(() => button(untouched.view, 'Create session').props.onClick());
+    expect(untouched.starts[0]?.request).not.toHaveProperty('fast');
+  });
+
   it('speaks the product, not the tool it replaced, and says what each mode means', () => {
     const { view } = page();
     const text = JSON.stringify(view.toJSON());
@@ -621,6 +640,47 @@ describe('NewSessionPage with the daemon pickers', () => {
     await create();
 
     expect(must(recorder.starts.at(0), 'a start').request.model).toBe('glm-5.3-flash');
+  });
+
+  it('disables the fast switch for a model the catalog says has none, says why, and never sends it', async () => {
+    const opus: PickerAccount = {
+      ...studio,
+      defaultModel: 'claude-opus-5-5',
+      models: [
+        { id: 'claude-opus-5-5', label: 'Opus 5.5', tier: 'best', available: true, efforts: [], fast: true },
+        { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', tier: 'balanced', available: true, efforts: [], fast: false },
+      ],
+      modelCatalog: { id: 'anthropic', label: 'Anthropic', customIds: false },
+    };
+    const { props, recorder } = wire({ accounts: [opus] });
+    await show(props);
+    await openList('fy-new-session-agent');
+    await pressRow(0);
+    await closeLists();
+    const fastSwitch = () =>
+      must(root().querySelector<HTMLButtonElement>('[data-new-session-fast] button'), 'the switch');
+    const chooseModel = async (id: string) => {
+      const select = must(root().querySelector<HTMLSelectElement>('select#fy-new-session-model'), 'the select');
+      await interact(() => {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, id);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    };
+
+    // The account default has it: pressable, and pressed.
+    expect(fastSwitch().disabled).toBeFalse();
+    await interact(() => fastSwitch().click());
+    expect(fastSwitch().getAttribute('aria-pressed')).toBe('true');
+
+    // Choosing a model without it takes the switch away, with the reason, and un-presses it.
+    await chooseModel('claude-sonnet-5-5');
+    expect(fastSwitch().disabled).toBeTrue();
+    expect(fastSwitch().getAttribute('aria-pressed')).toBe('false');
+    expect(root().querySelector('#fy-new-session-fast-reason')?.textContent).toBe('Sonnet 5.5 has no fast mode.');
+    await typeInto(promptBox(), 'Quick one');
+    await create();
+
+    expect(Object.hasOwn(must(recorder.starts.at(0), 'a start').request, 'fast')).toBeFalse();
   });
 
   it('drops the suggestions when the box no longer names that account', async () => {

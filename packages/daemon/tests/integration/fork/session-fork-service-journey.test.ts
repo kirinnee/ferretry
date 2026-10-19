@@ -321,7 +321,7 @@ function besideTheTranscript(snapshot: Snapshot): Snapshot {
 function runtimeEffectFingerprint(request: RuntimeControlRequest): string {
   return JSON.stringify([
     request.action,
-    request.action === 'compact' ? null : (request.effort ?? null),
+    request.action === 'model' || request.action === 'effort' ? (request.effort ?? null) : null,
     request.action === 'model' ? (request.model ?? null) : null,
   ]);
 }

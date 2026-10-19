@@ -42,6 +42,8 @@ export interface PickerModel {
   /** The reasoning efforts it takes; empty when it takes none. Absent when no catalog says. */
   readonly efforts?: readonly string[];
   readonly defaultEffort?: string;
+  /** Whether the CLI offers fast mode on it; absent when the daemon did not say. */
+  readonly fast?: boolean;
 }
 
 /** One runtime a session can be started on, as the picker reads it. */
@@ -135,6 +137,7 @@ export const pickerAccount = (runtime: FleetRuntimeView): PickerAccount => ({
           ...(choice.context === undefined ? {} : { context: choice.context }),
           efforts: choice.efforts,
           ...(choice.defaultEffort === undefined ? {} : { defaultEffort: choice.defaultEffort }),
+          ...(choice.fast === undefined ? {} : { fast: choice.fast }),
         })),
         modelCatalog: {
           id: runtime.models.catalog.id,

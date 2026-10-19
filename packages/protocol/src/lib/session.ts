@@ -153,6 +153,14 @@ export const RuntimeModelChoiceSchema = RuntimeModelOptionSchema.extend({
   isDefault: z.literal(true).optional(),
   reasoningEfforts: z.array(RuntimeReasoningChoiceSchema),
   defaultReasoningEffort: z.string().min(1).optional(),
+  /**
+   * Whether the harness offers FAST MODE on this model: `true` it does, `false` it does not, absent
+   * the daemon cannot say (a daemon that predates fast mode, or a catalog that does not describe it).
+   * A surface disables its fast toggle only on an explicit `false`.
+   */
+  fast: z.boolean().optional(),
+  /** The model runs in fast mode unless told otherwise (Codex: its default service tier is the fast one). */
+  fastDefault: z.literal(true).optional(),
 });
 export type RuntimeModelChoice = z.infer<typeof RuntimeModelChoiceSchema>;
 
@@ -178,6 +186,9 @@ export const RuntimeControlRequestSchema = z.discriminatedUnion('action', [
     effort: z.string().min(1).optional(),
   }),
   z.strictObject({ action: z.literal('effort'), effort: z.string().min(1) }),
+  // Fast mode is a switch, not a level: `true` turns it on and `false` off, and either is applied
+  // with the harness's own command at an idle prompt and confirmed by what the harness then reports.
+  z.strictObject({ action: z.literal('fast'), fast: z.boolean() }),
   z.strictObject({ action: z.literal('compact') }),
 ]);
 export type RuntimeControlRequest = z.infer<typeof RuntimeControlRequestSchema>;
@@ -354,6 +365,12 @@ export const SessionConfigSchema = z.object({
    */
   launchReasoningEffort: z.string().min(1).optional(),
   /**
+   * Whether this session was LAUNCHED in fast mode: the start request's choice, kept so a Restart and a
+   * revive launch it the same way. A launch fact, not an observation — a surface prefers anything the
+   * harness later reports (`observedFast`). Absent means the harness's own default (off).
+   */
+  launchFast: z.boolean().optional(),
+  /**
    * A digest of the FLEET settings this session's process was launched under: its wrapper and the
    * fixed settings file beside it. Compared with the same digest taken now to say whether the running
    * process is on older settings than a relaunch would give it. Absent for a session launched before
@@ -507,6 +524,8 @@ export const SessionStateSchema = z.object({
   observedModel: z.string().optional(),
   observedModelAt: InstantSchema.optional(),
   observedReasoningEffort: z.string().optional(),
+  /** Whether the harness last reported fast mode on; moves `observedModelAt` like a model switch. */
+  observedFast: z.boolean().optional(),
   activity: z.string().optional(),
   lastToolStartedAt: InstantSchema.optional(),
   quota: QuotaSchema.optional(),
@@ -719,6 +738,8 @@ const StartSessionBaseSchema = z.strictObject({
    * value; the protocol deliberately does not own a second harness effort enum.
    */
   effort: z.string().min(1).optional(),
+  /** Launch in the harness's fast mode. Refused when the chosen model has none; omitted leaves it off. */
+  fast: z.boolean().optional(),
   intervalSeconds: PositiveIntegerSchema.optional(),
   timeoutSeconds: NonNegativeIntegerSchema.optional(),
   nudgeAfterSeconds: NonNegativeIntegerSchema.optional(),
