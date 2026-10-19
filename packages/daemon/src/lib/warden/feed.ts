@@ -155,6 +155,8 @@ export function blessingViews(store: BlessingStore, nowMs: number): readonly War
       kinds: [...blessing.kinds],
       expiresAt: blessing.expiresAt,
       by: blessing.by ?? 'warden',
+      ...(blessing.streak === undefined ? {} : { streak: blessing.streak }),
+      ...(blessing.untilChange === true ? { untilChange: true as const } : {}),
     }));
 }
 

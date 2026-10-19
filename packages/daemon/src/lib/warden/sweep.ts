@@ -65,6 +65,8 @@ import type {
   WardenGuardConfig,
   WardenInvestigateView,
   WardenInvestigationOrigin,
+  WardenLeaveDuration,
+  WardenLeaveView,
   WardenAnomaly as WireWardenAnomaly,
   WardenConfigView,
   WardenFailoverStatus,
@@ -84,11 +86,14 @@ import {
 } from './feed.ts';
 import { mayActAlone, verdictAct, wardenActDetail, wardenNudgeMessage, type WardenRemedyPort } from './remedy.ts';
 import {
-  effectiveTriage,
+  effectiveLayers,
+  forgetPassedOn,
   guardBackingOff,
   guardHealthAfter,
   guardOutcome,
   newFlagCount,
+  passedOnKey,
+  prunePassedOn,
   recordGuardDecision,
   redactTriageSnapshot,
   triageDayFor,
@@ -98,6 +103,7 @@ import {
   wardenSavings,
   wardenSpend,
   type WardenTextRedactor,
+  type WardenLayersInEffect,
   type WardenTriageEvidence,
 } from './triage.ts';
 import { WARDEN_HISTORY_LIMIT, type WardenQueueEntryMeta } from './state.ts';
@@ -115,7 +121,16 @@ import {
   type WardenConfig,
   type WardenConfigPatch,
 } from './config.ts';
-import { blessingTtlMs, isAnomalyBlessed, reconcileBlessings, recordBlessing, type BlessingStore } from './bless.ts';
+import {
+  activeBlessing,
+  clearStreak,
+  growingBlessingMs,
+  isAnomalyBlessed,
+  mergeBlessing,
+  reconcileBlessings,
+  reconcileClearStreaks,
+  recordClears,
+} from './bless.ts';
 import { decideAssignedWardens, wardenSlotsFree, type LiveWarden } from './concurrency.ts';
 import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from './detect.ts';
 import {
@@ -153,6 +168,7 @@ import {
   type WardenAssignmentRecord,
   type WardenRuntimeState,
 } from './state.ts';
+import { instantMs } from './time.ts';
 import { isTerminalStatus, WARDEN_LABEL, type WardenSessionView } from './types.ts';
 import { classifyVerdict } from './verdicts.ts';
 
@@ -384,7 +400,9 @@ export type WardenRequestFailure =
   /** Today's investigation cap is reached. */
   | 'cap'
   /** No investigation login exists on this machine. */
-  | 'no_login';
+  | 'no_login'
+  /** Nothing about the ferret is flagged or cleared, so there is nothing to leave alone. */
+  | 'not_flagged';
 
 export class WardenRequestError extends Error {
   constructor(
@@ -396,10 +414,48 @@ export class WardenRequestError extends Error {
   }
 }
 
-/** The triage in effect right now, with the budget that decided it. */
+/** The layers in effect right now, with the budget that decided them. */
 interface TriageBudget {
   readonly status: WardenTriageStatus;
+  readonly layers: WardenLayersInEffect;
   readonly spend: ReturnType<typeof wardenSpend>;
+}
+
+/** How many logins one spawn tries before it waits for the next sweep. */
+export const MAX_SPAWN_ATTEMPTS = 3;
+
+/** What the owner's "Leave it longer" choices last. `until_change` is bounded so nothing is forever. */
+const LEAVE_MS: Readonly<Record<WardenLeaveDuration, number>> = {
+  '1h': 3_600_000,
+  '4h': 4 * 3_600_000,
+  until_change: 7 * 86_400_000,
+};
+
+/** A lifetime as a person reads it: minutes under an hour, hours otherwise. */
+export function leftAloneFor(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  return `${hours} h`;
+}
+
+/** Why a clear lasts longer than the first one did. */
+function streakNote(streak: number): string {
+  return streak <= 0 ? '' : ` — cleared ${streak + 1} times in a row, so it is left alone longer each time`;
+}
+
+/** Why flags were left for the owner rather than investigated, in the run's own words. */
+export function investigationsOffMessage(layers: WardenLayersInEffect, waiting: number): string {
+  const flags = `${waiting} flag${waiting === 1 ? '' : 's'}${layers.jev.active ? ' Jev did not clear' : ''}`;
+  const wait = waiting === 1 ? 'waits' : 'wait';
+  switch (layers.llm.reason) {
+    case 'no_login':
+      return `no investigation login exists on this machine: ${flags} ${wait} for you until one is chosen in Settings › Warden`;
+    case 'investigation_cap':
+      return `today’s investigation cap is reached: ${flags} ${wait} for you until midnight UTC`;
+    default:
+      return `investigations are off: ${flags} ${wait} for you and nothing is spent on ${waiting === 1 ? 'it' : 'them'}`;
+  }
 }
 
 /** The one field the run view carries that is not an anomaly list. */
@@ -638,7 +694,7 @@ export class WardenSweepService {
           : `Unknown login '${resolved.accounts[0]?.agent}' — choose one in Settings › Warden.`,
       );
     const budget = this.budget(stored.config, state, nowMs, resolved.usable);
-    if (budget.spend.capHit === 'investigation')
+    if (budget.spend.capsHit.includes('investigation'))
       throw new WardenRequestError(
         'cap',
         `Today’s investigation cap ($${stored.config.caps.investigationUsdPerDay.toFixed(2)}) is reached. Raise it in Settings › Warden, or wait until midnight UTC.`,
@@ -697,7 +753,81 @@ export class WardenSweepService {
     };
   }
 
-  /** The triage in effect and today's spend, from the durable state. */
+  /**
+   * The owner leaves a flagged or cleared ferret alone for longer than the Warden would.
+   *
+   * NARROW, like every blessing: it covers the kinds flagged or cleared on that ferret right now, in the
+   * status it holds now, so a new kind of trouble still raises a flag and any change of status ends it.
+   * It never SHORTENS a blessing already in force — the later expiry wins — and it takes the ferret out
+   * of the investigation queue, because the owner's latest word about it is "leave it". It counts into
+   * no streak: the streak measures the Warden's own clears. Refused for a ferret that has finished, and
+   * for one with nothing flagged or cleared, where there is nothing to leave alone.
+   */
+  async leaveAlone(sessionId: string, duration: WardenLeaveDuration): Promise<WardenLeaveView> {
+    const target = (await this.ports.fleet.fleet()).find(session => session.config.id === sessionId);
+    if (target === undefined) throw new WardenRequestError('not_found', `no ferret ${sessionId}`);
+    if (isTerminalStatus(target.state.status))
+      throw new WardenRequestError('finished', `${sessionId} has finished, so there is nothing left to watch`);
+    const nowMs = this.ports.nowMs();
+    const state = parseWardenRuntimeState(await this.ports.state.read());
+    const status = target.state.status;
+    const store = state.blessings ?? {};
+    const current = activeBlessing(store, sessionId, nowMs);
+    const kinds = [
+      ...new Set([
+        ...(state.lastAnomalies ?? [])
+          .filter(anomaly => anomaly.sessionId === sessionId && anomaly.status === status)
+          .map(anomaly => anomaly.kind)
+          .filter(kind => kind !== 'owner_request'),
+        ...(current?.status === status ? current.kinds : []),
+      ]),
+    ];
+    if (kinds.length === 0)
+      throw new WardenRequestError(
+        'not_flagged',
+        'Nothing about this ferret is flagged or cleared right now, so there is nothing to leave alone.',
+      );
+    const blessings = mergeBlessing(
+      store,
+      { sessionId, kinds, status, by: 'owner', ...(duration === 'until_change' ? { untilChange: true } : {}) },
+      nowMs,
+      LEAVE_MS[duration],
+    );
+    const blessing = blessings[sessionId] as NonNullable<(typeof blessings)[string]>;
+    const how =
+      duration === 'until_change'
+        ? 'until its status changes'
+        : `for ${leftAloneFor((instantMs(blessing.expiresAt) ?? nowMs) - nowMs)}`;
+    const at = new Date(nowMs).toISOString();
+    const meta = { ...(state.queueMeta ?? {}) };
+    delete meta[sessionId];
+    await this.ports.state.write(
+      this.recordAction(
+        {
+          ...state,
+          blessings,
+          assignedQueue: (state.assignedQueue ?? []).filter(anomaly => anomaly.sessionId !== sessionId),
+          queueMeta: meta,
+        },
+        {
+          at,
+          sessionId,
+          action: 'bless',
+          outcome: 'done',
+          by: 'owner',
+          ...(kinds[0] === undefined ? {} : { anomalyKind: kinds[0] }),
+          detail: `You asked the Warden to leave it alone ${how}.`,
+        },
+      ),
+    );
+    this.ports.journal.record('fleet.warden_left_alone', { sessionId, duration, kinds, expiresAt: blessing.expiresAt });
+    return {
+      blessing: blessingViews({ [sessionId]: blessing }, nowMs)[0] as WardenLeaveView['blessing'],
+      message: `Left alone ${how}. A new kind of trouble, or a change of status, still raises a flag.`,
+    };
+  }
+
+  /** The layers in effect and today's spend, from the durable state. */
   private budget(config: WardenConfig, state: WardenRuntimeState, nowMs: number, hasLogin: boolean): TriageBudget {
     const spend = wardenSpend({
       caps: config.caps,
@@ -706,13 +836,13 @@ export class WardenSweepService {
       ...(state.costAverage === undefined ? {} : { average: state.costAverage }),
       nowMs,
     });
-    const triage = effectiveTriage(config.triage, config.enabled, spend, hasLogin);
-    const guard = config.triage === 'jev' ? state.guard : undefined;
+    const layers = effectiveLayers(config.layers, config.enabled, spend, hasLogin);
+    const guard = config.layers.jev ? state.guard : undefined;
     return {
       spend,
+      layers,
       status: {
-        configured: config.triage,
-        ...triage,
+        ...layers,
         ...(guard?.lastFailure === undefined ? {} : { guardFailure: guard.lastFailure }),
         ...(guard !== undefined && guardBackingOff(guard, nowMs) && guard.backoffUntil !== undefined
           ? { guardBackoffUntil: guard.backoffUntil }
@@ -745,7 +875,7 @@ export class WardenSweepService {
 
     let state = parseWardenRuntimeState(await this.ports.state.read());
     const today = triageDayFor(state.triageDay, nowMs);
-    state = this.pruneBlessings(state, fleet, nowMs);
+    state = this.pruneClears(state, fleet, detected.anomalies, nowMs);
     state = recordSweepFingerprint(state, detected.fingerprint);
     state = {
       ...state,
@@ -768,7 +898,6 @@ export class WardenSweepService {
 
     const escalated = await this.escalate({
       anomalies: detected.anomalies.filter(anomaly => anomaly.assignedWarden !== true),
-      fingerprint: detected.fingerprint,
       fleet,
       config,
       login,
@@ -824,20 +953,58 @@ export class WardenSweepService {
 
   /**
    * Drop blessings that lapsed, whose session changed status, or whose session
-   * vanished — BEFORE anything can be skipped on the strength of one.
+   * vanished — BEFORE anything can be skipped on the strength of one — and with
+   * them the clear streaks and Jev's answers that no longer describe a standing
+   * flag.
    *
    * The early revocation is journalled: a session that STOPS being skipped must
    * be explicable rather than mysterious.
    */
-  private pruneBlessings(
+  private pruneClears(
     state: WardenRuntimeState,
     fleet: readonly WardenFleetSession[],
+    anomalies: readonly WardenAnomaly[],
     nowMs: number,
   ): WardenRuntimeState {
     const statuses = new Map(fleet.map(session => [session.config.id, session.state.status]));
     const pruned = reconcileBlessings(state.blessings ?? {}, statuses, nowMs);
     for (const sessionId of pruned.revoked) this.ports.journal.record('fleet.warden_bless_revoked', { sessionId });
-    return { ...state, blessings: pruned.store };
+    return {
+      ...state,
+      blessings: pruned.store,
+      clearStreaks: reconcileClearStreaks(state.clearStreaks ?? {}, statuses, anomalies, pruned.store, nowMs),
+      passedOn: prunePassedOn(state.passedOn ?? [], anomalies),
+    };
+  }
+
+  /**
+   * Clear flags: bless them for a lifetime that doubles with each clear in a row, merged into any
+   * blessing the ferret already holds in the same status, and count the clear into the streak.
+   */
+  private clearFlags(
+    state: WardenRuntimeState,
+    request: {
+      readonly sessionId: string;
+      readonly kinds: readonly WardenAnomaly['kind'][];
+      readonly status: WardenFleetSession['state']['status'];
+      readonly by: 'jev' | 'warden';
+      readonly wardenId?: string;
+    },
+    config: WardenConfig,
+    nowMs: number,
+  ): { readonly state: WardenRuntimeState; readonly ttlMs: number; readonly streak: number } {
+    const streaks = state.clearStreaks ?? {};
+    const streak = clearStreak(streaks, request.sessionId, request.kinds, request.status);
+    const ttlMs = growingBlessingMs(config.blessMinutes, streak);
+    return {
+      ttlMs,
+      streak,
+      state: {
+        ...state,
+        blessings: mergeBlessing(state.blessings ?? {}, { ...request, streak }, nowMs, ttlMs),
+        clearStreaks: recordClears(streaks, request.sessionId, request.kinds, request.status),
+      },
+    };
   }
 
   /** Every live warden fleet-wide, assigned and sweep alike — the one budget both
@@ -864,11 +1031,11 @@ export class WardenSweepService {
    *
    * WHAT REACHES THE GATE. The owner's own requests always do (they were refused
    * at the door if the Warden is off or the cap is hit). The sweep's flags reach
-   * it only under an AI triage: `rules` shows them to the owner and spends
-   * nothing, and under `jev` each NEW flag is first put to the guard, whose
-   * confident skip blesses it instead. A flag already queued, investigated or
-   * cooling down is never put to Jev again — that would pay for the same answer
-   * every sweep.
+   * it only while the LLM layer is on. Before that, with the Jev layer on, each
+   * NEW flag is put to Jev, whose confident skip clears it instead; a flag Jev
+   * passes on with investigations off is the owner's to read, never a spawn. A
+   * flag already queued, investigated or cooling down is never put to Jev again
+   * — that would pay for the same answer every sweep.
    */
   private async runAssigned(input: {
     readonly anomalies: readonly WardenAnomaly[];
@@ -895,18 +1062,15 @@ export class WardenSweepService {
 
     const nowMs = this.ports.nowMs();
     const budget = this.budget(input.config, state, nowMs, input.login.usable);
-    const automatic = input.force || budget.status.effective !== 'rules';
+    const investigating = input.force || budget.layers.llm.active;
+    const guarding = !input.force && budget.layers.jev.active;
     const meta: Record<string, WardenQueueEntryMeta> = { ...(state.queueMeta ?? {}) };
-    // A flag queued by an AI triage the owner has since turned off is no longer
-    // the Warden's to investigate. One queued while a cap is hit waits for the
-    // cap to reset; the owner's own requests always keep their place.
+    // A flag queued while investigations were on is no longer the Warden's to
+    // investigate once the owner turns them off. One queued while a cap or a
+    // missing login holds them off waits in its place; the owner's own requests
+    // always keep theirs.
     const queued = queuedBefore.filter(
-      anomaly =>
-        automatic ||
-        meta[anomaly.sessionId]?.origin === 'owner' ||
-        budget.status.reason === 'jev_cap' ||
-        budget.status.reason === 'investigation_cap' ||
-        budget.status.reason === 'no_login',
+      anomaly => investigating || input.config.layers.llm || meta[anomaly.sessionId]?.origin === 'owner',
     );
     const isOwnerRequest = (targetId: string): boolean =>
       queued.some(anomaly => anomaly.sessionId === targetId && anomaly.kind === 'owner_request');
@@ -928,28 +1092,21 @@ export class WardenSweepService {
     // A blessed anomaly must not even become a candidate, so it can never occupy
     // the single warden slot. Narrow: the exact kinds a warden cleared, only
     // while the session still holds the status it was cleared in.
-    const unblessed = automatic
-      ? input.anomalies.filter(anomaly => {
-          const target = byId.get(anomaly.sessionId);
-          return target === undefined || !isAnomalyBlessed(blessings, anomaly, target.state.status, nowMs);
-        })
-      : [];
+    const unblessed = input.anomalies.filter(anomaly => {
+      const target = byId.get(anomaly.sessionId);
+      return target === undefined || !isAnomalyBlessed(blessings, anomaly, target.state.status, nowMs);
+    });
 
     const queuedIds = new Set(queued.map(anomaly => anomaly.sessionId));
-    const candidates: WardenAnomaly[] = [];
-    const origin: WardenInvestigationOrigin = budget.status.effective === 'jev' && !input.force ? 'jev' : 'sweep';
-    for (const anomaly of unblessed) {
-      if (origin !== 'jev' || queuedIds.has(anomaly.sessionId) || !isStillSuspect(anomaly.sessionId)) {
-        candidates.push(anomaly);
-        continue;
-      }
-      const guarded = await this.askGuard(anomaly, input.config, state, byId);
-      state = guarded.state;
-      // The Jev cap was reached part-way: the rest of the flags fall back to
-      // rules — shown to the owner, never investigated on the guard's silence.
-      if (guarded.outcome === undefined) break;
-      if (guarded.outcome.kind === 'investigate') candidates.push(anomaly);
-    }
+    const askable = (anomaly: WardenAnomaly): boolean =>
+      guarding && !queuedIds.has(anomaly.sessionId) && isStillSuspect(anomaly.sessionId);
+    const jev = await this.passThroughJev(unblessed.filter(askable), input.config, state, byId);
+    state = jev.state;
+    const passed = new Set(jev.passed);
+    const viaJev = new Set(jev.passed.map(anomaly => anomaly.sessionId));
+    const candidates = investigating ? unblessed.filter(anomaly => !askable(anomaly) || passed.has(anomaly)) : [];
+    const originOf = (targetId: string): WardenInvestigationOrigin =>
+      meta[targetId]?.origin ?? (viaJev.has(targetId) ? 'jev' : 'sweep');
 
     // A fresh anomaly supersedes a queued copy of the same target: it describes
     // the situation as it is now rather than as it was one sweep ago. The one
@@ -960,9 +1117,10 @@ export class WardenSweepService {
       anomalyById.set(anomaly.sessionId, anomaly);
     }
 
-    // Under rules — a cap reached — only the owner's own requests may start; the sweep's queued flags
-    // wait for the budget to come back, in their place.
-    const waiting = automatic ? [] : queued.filter(anomaly => anomaly.kind !== 'owner_request');
+    // With investigations off — a cap reached, no login — only the owner's own
+    // requests may start; the sweep's queued flags wait for them to come back,
+    // in their place.
+    const waiting = investigating ? [] : queued.filter(anomaly => anomaly.kind !== 'owner_request');
     const decision = decideAssignedWardens({
       maxConcurrent: input.config.maxAssignedWardens,
       live: this.liveWardens(input.fleet, state),
@@ -973,10 +1131,10 @@ export class WardenSweepService {
 
     // The hourly limit and the investigation cap are budgets, not slots: what
     // they hold back is queued, never dropped, and starts once they allow it.
-    const spend = this.budget(input.config, state, nowMs, input.login.usable).spend;
+    const spend = budget.spend;
     const allowed = input.force
       ? decision.spawn.length
-      : spend.capHit === 'investigation'
+      : spend.capsHit.includes('investigation')
         ? 0
         : Math.max(0, input.config.caps.maxInvestigationsPerHour - spend.investigationsLastHour);
     const spawnNow = decision.spawn.slice(0, allowed);
@@ -993,71 +1151,65 @@ export class WardenSweepService {
       const anomaly = anomalyById.get(targetId);
       const target = byId.get(targetId);
       if (anomaly === undefined || target === undefined) continue;
-      // Per spawn, so round-robin rotates across targets and fallback re-checks
-      // the preferred account every time.
-      const picked = await this.pickAccount(input.login.accounts, input.config, state);
-      state = picked.state;
-      if (picked.account === undefined) {
-        deferred.push(targetId);
-        continue;
-      }
       const reportPath = this.ports.artifacts.reportPath(input.at, targetId);
       const capability = this.ports.capabilities();
-      const result = await this.spawn({
-        agent: picked.account.agent,
-        ...(picked.account.model === undefined ? {} : { model: picked.account.model }),
-        name: `warden:${target.config.teammate ?? targetId}`,
-        prompt: buildAssignedWardenPrompt(anomaly, target, reportPath, this.settings),
-        cwd: this.settings.wardenCwd,
-        effort: input.config.investigation.effort,
-        stopCapability: capability,
-      });
-      if (result.facts === undefined) {
-        state = this.recordSpawnFailure(state, input.config, picked.account.agent, result.error);
+      // Per spawn, so round-robin rotates across targets and fallback re-checks
+      // the preferred account every time; a login that fails to start hands the
+      // same spawn to the next one, within this sweep.
+      const result = await this.spawnOnAnyAccount(
+        input.login.accounts,
+        input.config,
+        state,
+        {
+          name: `warden:${target.config.teammate ?? targetId}`,
+          prompt: buildAssignedWardenPrompt(anomaly, target, reportPath, this.settings),
+          cwd: this.settings.wardenCwd,
+          effort: input.config.investigation.effort,
+          stopCapability: capability,
+        },
+        { targetId },
+      );
+      state = result.state;
+      if (result.started === undefined) {
+        if (result.exhausted) {
+          deferred.push(targetId);
+          continue;
+        }
         // The target cooldown damps a genuinely target-scoped failure and stops a
-        // same-sweep hot loop; the STRIKE above is what routes the next spawn to
+        // same-sweep hot loop; the STRIKES are what route the next spawn to
         // another account, which is the fault that actually needs routing.
         nextCooldowns = { ...nextCooldowns, [targetId]: input.at };
         delete meta[targetId];
-        this.ports.journal.record('fleet.warden_spawn_failed', {
-          targetId,
-          agent: picked.account.agent,
-          message: failureMessage(result.error),
-        });
         continue;
       }
-      await this.writeProvenance(reportPath, result.facts, picked.selection, targetId);
-      state = { ...state, failover: recordWardenSuccess(state.failover ?? {}, picked.account.agent) };
+      const { facts, selection } = result.started;
+      await this.writeProvenance(reportPath, facts, selection, targetId);
       // Only the kind this warden was actually shown. A sibling kind it was never
       // asked about stays visibly unjudged rather than borrowing its verdict.
       nextAssignments = {
         ...nextAssignments,
-        [targetId]: {
-          wardenId: result.facts.sessionId,
-          spawnedAt: input.at,
-          capability,
-          kinds: [anomaly.kind],
-          reportPath,
-        },
+        [targetId]: { wardenId: facts.sessionId, spawnedAt: input.at, capability, kinds: [anomaly.kind], reportPath },
       };
       records = [
         {
-          id: result.facts.sessionId,
+          id: facts.sessionId,
           scope: 'session',
-          origin: anomaly.kind === 'owner_request' ? 'owner' : (meta[targetId]?.origin ?? origin),
+          origin: anomaly.kind === 'owner_request' ? 'owner' : originOf(targetId),
           targetId,
           anomalyKind: anomaly.kind,
           startedAt: input.at,
           reportPath,
-          agent: result.facts.agent,
-          ...(result.facts.model === undefined ? {} : { model: result.facts.model }),
+          agent: facts.agent,
+          ...(facts.model === undefined ? {} : { model: facts.model }),
         },
         ...records,
       ];
+      // The investigation looks for itself: once it is done, a flag that still stands is put to Jev afresh.
+      state = { ...state, passedOn: forgetPassedOn(state.passedOn ?? [], targetId) };
       delete meta[targetId];
-      spawned.push(result.facts.sessionId);
+      spawned.push(facts.sessionId);
       this.ports.journal.record('fleet.warden_assigned', {
-        wardenId: result.facts.sessionId,
+        wardenId: facts.sessionId,
         targetId,
         kind: anomaly.kind,
         reportPath,
@@ -1075,7 +1227,10 @@ export class WardenSweepService {
       ...waiting,
     ];
     for (const anomaly of carried)
-      meta[anomaly.sessionId] ??= { queuedAt: input.at, origin: anomaly.kind === 'owner_request' ? 'owner' : origin };
+      meta[anomaly.sessionId] ??= {
+        queuedAt: input.at,
+        origin: anomaly.kind === 'owner_request' ? 'owner' : originOf(anomaly.sessionId),
+      };
     for (const targetId of Object.keys(meta))
       if (!carried.some(anomaly => anomaly.sessionId === targetId)) delete meta[targetId];
     state = {
@@ -1091,20 +1246,62 @@ export class WardenSweepService {
   }
 
   /**
+   * Put flags to Jev, once each, and return the ones it did not clear.
+   *
+   * A flag Jev already passed on while it stands is passed on again without a call. Once today's Jev
+   * cap is reached part-way, the rest are passed on unasked: the cap turns off Jev, not the layers
+   * after it. Only a REAL answer is remembered — a failure, a back-off or an unredactable snapshot is
+   * asked again next sweep, so a blip never becomes a permanent "Jev could not clear it".
+   */
+  private async passThroughJev(
+    anomalies: readonly WardenAnomaly[],
+    config: WardenConfig,
+    state: WardenRuntimeState,
+    byId: ReadonlyMap<string, WardenFleetSession>,
+  ): Promise<{ readonly state: WardenRuntimeState; readonly passed: readonly WardenAnomaly[] }> {
+    let next = state;
+    const passed: WardenAnomaly[] = [];
+    let capped = false;
+    for (const anomaly of anomalies) {
+      const key = passedOnKey(anomaly);
+      if (capped || (next.passedOn ?? []).includes(key)) {
+        passed.push(anomaly);
+        continue;
+      }
+      const guarded = await this.askGuard(anomaly, config, next, byId);
+      next = guarded.state;
+      if (guarded.outcome === undefined) {
+        capped = true;
+        passed.push(anomaly);
+        continue;
+      }
+      if (guarded.outcome.kind !== 'investigate') continue;
+      passed.push(anomaly);
+      if (guarded.decided) next = { ...next, passedOn: [...(next.passedOn ?? []), key] };
+    }
+    return { state: next, passed };
+  }
+
+  /**
    * Put one flag to the Jev guard.
    *
    * `outcome` is `undefined` when the Jev cap is already reached: the guard is not called, and the flag
-   * falls back to rules. While the guard is backing off, the flag goes straight to investigation without
-   * a call. A snapshot the vault redactor cannot scrub is NEVER sent: that flag is investigated instead.
-   * A confident skip blesses the flag's kind for the blessing lifetime, merged into any blessing the
-   * ferret already holds in the same status, and is recorded as Jev's action.
+   * is passed on unasked. While the guard is backing off, the flag is passed on without a call. A
+   * snapshot the vault redactor cannot scrub is NEVER sent: that flag is passed on instead. `decided` is
+   * true only for a real answer, which is the only one worth remembering. A confident skip clears the
+   * flag's kind for a lifetime that grows with each clear in a row, merged into any blessing the ferret
+   * already holds in the same status, and is recorded as Jev's action.
    */
   private async askGuard(
     anomaly: WardenAnomaly,
     config: WardenConfig,
     state: WardenRuntimeState,
     byId: ReadonlyMap<string, WardenFleetSession>,
-  ): Promise<{ readonly state: WardenRuntimeState; readonly outcome?: WardenGuardOutcome }> {
+  ): Promise<{
+    readonly state: WardenRuntimeState;
+    readonly outcome?: WardenGuardOutcome;
+    readonly decided?: boolean;
+  }> {
     const nowMs = this.ports.nowMs();
     const today = triageDayFor(state.triageDay, nowMs);
     if (today.jevUsd >= config.caps.jevUsdPerDay) return { state };
@@ -1149,22 +1346,13 @@ export class WardenSweepService {
     });
     const target = byId.get(anomaly.sessionId);
     if (outcome.kind === 'skip' && target !== undefined) {
-      const ttlMs = blessingTtlMs(config.blessMinutes);
-      const current = next.blessings?.[anomaly.sessionId];
-      const kinds =
-        current !== undefined && current.status === target.state.status && (Date.parse(current.expiresAt) || 0) > nowMs
-          ? [...current.kinds, anomaly.kind]
-          : [anomaly.kind];
-      next = {
-        ...next,
-        blessings: recordBlessing(
-          next.blessings ?? {},
-          { sessionId: anomaly.sessionId, kinds, status: target.state.status, by: 'jev' },
-          nowMs,
-          ttlMs,
-        ),
-      };
-      next = this.recordAction(next, {
+      const cleared = this.clearFlags(
+        next,
+        { sessionId: anomaly.sessionId, kinds: [anomaly.kind], status: target.state.status, by: 'jev' },
+        config,
+        nowMs,
+      );
+      next = this.recordAction(cleared.state, {
         at: new Date(nowMs).toISOString(),
         sessionId: anomaly.sessionId,
         action: 'bless',
@@ -1172,10 +1360,10 @@ export class WardenSweepService {
         by: 'jev',
         anomalyKind: anomaly.kind,
         confidence: outcome.confidence,
-        detail: `Jev was ${Math.round(outcome.confidence * 100)}% sure it is healthy, so this flag is left alone for ${Math.round(ttlMs / 60_000)} min.`,
+        detail: `Jev was ${Math.round(outcome.confidence * 100)}% sure it is healthy, so this flag is left alone for ${leftAloneFor(cleared.ttlMs)}${streakNote(cleared.streak)}.`,
       });
     }
-    return { state: next, outcome };
+    return { state: next, outcome, decided: decision.failure === undefined };
   }
 
   /** Newest first, bounded: the list the owner reads as "Recent actions". */
@@ -1202,7 +1390,6 @@ export class WardenSweepService {
     const assignments = { ...(state.assignments ?? {}) };
     const cooldowns = { ...(state.assignedCooldowns ?? {}) };
     let next: WardenRuntimeState = state;
-    const ttlMs = blessingTtlMs(config.blessMinutes);
     const nowMs = this.ports.nowMs();
 
     for (const [targetId, record] of Object.entries(assignments)) {
@@ -1213,24 +1400,13 @@ export class WardenSweepService {
       const verdict = readable ? classifyVerdict(report) : undefined;
       next = {
         ...next,
-        blessings: this.blessIfCleared(next.blessings ?? {}, targetId, record, byId, verdict, nowMs, ttlMs),
         investigations: (next.investigations ?? []).map(entry =>
           entry.id === record.wardenId
             ? { ...entry, finishedAt: entry.finishedAt ?? at, ...(verdict === undefined ? {} : { verdict }) }
             : entry,
         ),
       };
-      if (verdict === 'cleared' && byId.get(targetId) !== undefined && record.kinds.length > 0)
-        next = this.recordAction(next, {
-          at,
-          sessionId: targetId,
-          action: 'bless',
-          outcome: 'done',
-          by: 'warden',
-          ...(record.kinds[0] === undefined ? {} : { anomalyKind: record.kinds[0] }),
-          reportPath: record.reportPath,
-          detail: `The investigation found it healthy, so this flag is left alone for ${Math.round(ttlMs / 60_000)} min.`,
-        });
+      next = this.blessIfCleared(next, targetId, record, byId, verdict, config, nowMs, at);
       if (readable) next = await this.actOnVerdict(next, targetId, record, report, byId, config, at);
       delete assignments[targetId];
       cooldowns[targetId] = at;
@@ -1238,20 +1414,21 @@ export class WardenSweepService {
     return { state: { ...next, assignments, assignedCooldowns: cooldowns } };
   }
 
+  /** Clear the kinds a finished warden was shown — when, and only when, its report says CLEARED. */
   private blessIfCleared(
-    blessings: BlessingStore,
+    state: WardenRuntimeState,
     targetId: string,
     record: WardenAssignmentRecord,
     byId: ReadonlyMap<string, WardenFleetSession>,
     verdict: ReturnType<typeof classifyVerdict> | undefined,
+    config: WardenConfig,
     nowMs: number,
-    ttlMs: number,
-  ): BlessingStore {
+    at: string,
+  ): WardenRuntimeState {
     const target = byId.get(targetId);
-    if (target === undefined || record.kinds.length === 0) return blessings;
-    if (verdict !== 'cleared') return blessings;
-    const next = recordBlessing(
-      blessings,
+    if (target === undefined || record.kinds.length === 0 || verdict !== 'cleared') return state;
+    const cleared = this.clearFlags(
+      state,
       {
         sessionId: targetId,
         kinds: record.kinds,
@@ -1259,16 +1436,26 @@ export class WardenSweepService {
         wardenId: record.wardenId,
         by: 'warden',
       },
+      config,
       nowMs,
-      ttlMs,
     );
     this.ports.journal.record('fleet.warden_blessed', {
       targetId,
       wardenId: record.wardenId,
       kinds: record.kinds,
-      expiresAt: next[targetId]?.expiresAt,
+      expiresAt: cleared.state.blessings?.[targetId]?.expiresAt,
+      streak: cleared.streak,
     });
-    return next;
+    return this.recordAction(cleared.state, {
+      at,
+      sessionId: targetId,
+      action: 'bless',
+      outcome: 'done',
+      by: 'warden',
+      ...(record.kinds[0] === undefined ? {} : { anomalyKind: record.kinds[0] }),
+      reportPath: record.reportPath,
+      detail: `The investigation found it healthy, so this flag is left alone for ${leftAloneFor(cleared.ttlMs)}${streakNote(cleared.streak)}.`,
+    });
   }
 
   /**
@@ -1361,22 +1548,19 @@ export class WardenSweepService {
   /**
    * The shared fleet-triage escalation.
    *
-   * The gates are ordered cheapest-first, and account selection comes LAST on
-   * purpose: exhaustion must not consume the spawn gap or the suppression
-   * fingerprint, so the very next sweep after an account recovers escalates
-   * immediately. The Jev guard sits after every free gate and before the
-   * account: a flag the spawn gap or the suppression would hold back anyway is
-   * never paid for.
+   * The flags go through the layers in order: blessed ones are not part of the
+   * set, Jev (when its layer is on) clears what it is confident about, and only
+   * then is an investigation considered — and only while the LLM layer is on.
+   * With it off, the flags Jev did not clear are the owner's to read.
    *
-   * Under `rules` nothing is escalated — the flags are the owner's to read — and
-   * a flag Jev or a warden blessed is not part of the set. Under `jev` the
-   * suppression key is taken over the flags Jev sent on, so the same flags are
-   * not put to it again next sweep; under `llm` it is kteam's key over the whole
-   * anomaly set, unchanged.
+   * The spawn gates are ordered cheapest-first, and account selection comes LAST
+   * on purpose: exhaustion must not consume the spawn gap or the suppression
+   * fingerprint, so the very next sweep after an account recovers escalates
+   * immediately. The suppression key is taken over the flags that reached the
+   * investigation, so the same set is not investigated again next sweep.
    */
   private async escalate(input: {
     readonly anomalies: readonly WardenAnomaly[];
-    readonly fingerprint: string;
     readonly fleet: readonly WardenFleetSession[];
     readonly config: WardenConfig;
     readonly login: ResolvedWardenLogin;
@@ -1397,120 +1581,82 @@ export class WardenSweepService {
     if (unblessed.length === 0) return { state, outcome: { message: 'no anomalies to escalate' } };
 
     const budget = this.budget(config, state, nowMs, input.login.usable);
-    if (!force && budget.status.effective === 'rules') {
-      const why =
-        budget.status.reason === 'configured'
-          ? 'rules only: the flags are shown to you and nothing is spent'
-          : budget.status.reason === 'no_login'
-            ? 'no investigation login exists on this machine: rules only until one is chosen in Settings › Warden'
-            : `today’s ${budget.status.reason === 'jev_cap' ? 'Jev' : 'investigation'} cap is reached: rules only until midnight UTC`;
-      return { state, outcome: { message: why } };
+    const investigating = force || budget.layers.llm.active;
+    // While an investigation could follow, the free gates go first: a flag they would hold back anyway
+    // is not paid for. With investigations off there is nothing to hold back, and Jev still clears
+    // what it can, so the owner is shown only the rest.
+    const held = investigating ? this.spawnHeldBack(config, state, input.fleet, budget, nowMs, force) : undefined;
+    if (held !== undefined) return { state, outcome: { message: held } };
+
+    const guarded = !force && budget.layers.jev.active;
+    let anomalies: readonly WardenAnomaly[] = unblessed;
+    if (guarded) {
+      const jev = await this.passThroughJev(unblessed, config, state, byId);
+      state = jev.state;
+      anomalies = jev.passed;
+      if (anomalies.length === 0)
+        return { state, outcome: { message: 'Jev judged every flag healthy; nothing to investigate' } };
     }
-    const guarded = !force && budget.status.effective === 'jev';
+    if (!investigating)
+      return { state, outcome: { message: investigationsOffMessage(budget.layers, anomalies.length) } };
 
-    const live = this.liveWardens(input.fleet, state);
-    if (wardenSlotsFree(config.maxAssignedWardens, live.length) <= 0) {
-      return {
-        state,
-        outcome: {
-          message: `warden concurrency cap reached (${live.length}/${Math.max(1, config.maxAssignedWardens)} live)`,
-        },
-      };
-    }
-
-    const lastSpawnMs = Date.parse(state.lastSpawnAt ?? '');
-    const gap = spawnGapMs(config);
-    if (!force && Number.isFinite(lastSpawnMs) && nowMs - lastSpawnMs < gap)
-      return { state, outcome: { message: `spawn gap not elapsed (last spawn ${state.lastSpawnAt})` } };
-
-    const key = spawnSuppressionKey(state, guarded ? fingerprintAnomalies(unblessed) : input.fingerprint);
+    const key = spawnSuppressionKey(state, fingerprintAnomalies(anomalies));
     if (!force && key === state.lastSpawnFingerprint)
       return { state, outcome: { message: 'anomaly set unchanged since the last escalation' } };
 
-    if (!force && budget.spend.investigationsLastHour >= config.caps.maxInvestigationsPerHour)
-      return {
-        state,
-        outcome: { message: `hourly investigation limit reached (${config.caps.maxInvestigationsPerHour} per hour)` },
-      };
-
-    let anomalies = unblessed;
-    if (guarded) {
-      const sent: WardenAnomaly[] = [];
-      let capped = false;
-      for (const anomaly of unblessed) {
-        const decision = await this.askGuard(anomaly, config, state, byId);
-        state = decision.state;
-        if (decision.outcome === undefined) {
-          capped = true;
-          break;
-        }
-        if (decision.outcome.kind === 'investigate') sent.push(anomaly);
-      }
-      anomalies = sent;
-      if (anomalies.length === 0)
-        return {
-          state: capped ? state : { ...state, lastSpawnFingerprint: spawnSuppressionKey(state, '') },
-          outcome: {
-            message: capped
-              ? 'today’s Jev cap is reached: rules only until midnight UTC'
-              : 'Jev judged every flag healthy; nothing to investigate',
-          },
-        };
-    }
-    const sentKey = guarded ? spawnSuppressionKey(state, fingerprintAnomalies(anomalies)) : key;
-
-    const picked = await this.pickAccount(input.login.accounts, config, state);
-    state = picked.state;
-    if (picked.account === undefined)
-      return { state, outcome: { message: 'every configured warden account is currently ineligible (exhausted)' } };
-
     const reportPath = this.ports.artifacts.reportPath(input.at);
-    const result = await this.spawn({
-      agent: picked.account.agent,
-      ...(picked.account.model === undefined ? {} : { model: picked.account.model }),
-      name: 'warden-sweep',
-      prompt: buildWardenSweepPrompt({
-        anomalies,
-        sessions: input.fleet,
-        reportPath,
-        at: input.at,
-        settings: this.settings,
-      }),
-      cwd: this.settings.wardenCwd,
-      effort: config.investigation.effort,
-    });
-    if (result.facts === undefined) {
-      state = this.recordSpawnFailure(state, config, picked.account.agent, result.error);
+    const result = await this.spawnOnAnyAccount(
+      input.login.accounts,
+      config,
+      state,
+      {
+        name: 'warden-sweep',
+        prompt: buildWardenSweepPrompt({
+          anomalies,
+          sessions: input.fleet,
+          reportPath,
+          at: input.at,
+          settings: this.settings,
+        }),
+        cwd: this.settings.wardenCwd,
+        effort: config.investigation.effort,
+      },
+      {},
+    );
+    state = result.state;
+    if (result.started === undefined) {
+      if (result.exhausted)
+        return { state, outcome: { message: 'every configured warden account is currently ineligible (exhausted)' } };
       // A FAILED launch still consumes the spawn gap, so a persistently broken
       // account cannot be retried every sweep — but NOT the suppression key, so a
       // changed anomaly set can still escalate once the gap elapses.
-      state = { ...state, lastSpawnAt: input.at };
-      const message = `warden spawn failed: ${failureMessage(result.error)}`;
-      this.ports.journal.record('fleet.warden_spawn_failed', { message, agent: picked.account.agent });
-      return { state, outcome: { message } };
+      return {
+        state: { ...state, lastSpawnAt: input.at },
+        outcome: { message: `warden spawn failed: ${failureMessage(result.error)}` },
+      };
     }
 
-    await this.writeProvenance(reportPath, result.facts, picked.selection);
+    const { facts, selection } = result.started;
+    await this.writeProvenance(reportPath, facts, selection);
     state = {
       ...state,
-      failover: recordWardenSuccess(state.failover ?? {}, picked.account.agent),
       lastSpawnAt: input.at,
-      lastSpawnFingerprint: sentKey,
+      lastSpawnFingerprint: key,
       sweepCoverage: {
-        wardenId: result.facts.sessionId,
+        wardenId: facts.sessionId,
         reportPath,
         anomalies: anomalies.map(anomaly => ({ sessionId: anomaly.sessionId, kind: anomaly.kind })),
       },
       investigations: retainRecords(
         [
           {
-            id: result.facts.sessionId,
+            id: facts.sessionId,
             scope: 'fleet',
             origin: guarded ? 'jev' : 'sweep',
             startedAt: input.at,
             reportPath,
-            agent: result.facts.agent,
-            ...(result.facts.model === undefined ? {} : { model: result.facts.model }),
+            agent: facts.agent,
+            ...(facts.model === undefined ? {} : { model: facts.model }),
           },
           ...(state.investigations ?? []),
         ],
@@ -1519,11 +1665,36 @@ export class WardenSweepService {
       ),
     };
     this.ports.journal.record('fleet.warden_spawned', {
-      sessionId: result.facts.sessionId,
+      sessionId: facts.sessionId,
       count: anomalies.length,
       reportPath,
     });
-    return { state, outcome: { spawned: result.facts.sessionId } };
+    return { state, outcome: { spawned: facts.sessionId } };
+  }
+
+  /**
+   * Why the fleet warden may not start now, from the gates that cost nothing and do not depend on which
+   * flags it would be sent: the concurrency cap, the spawn gap and the hourly limit. `force` passes the
+   * last two, never the first — the cap protects the host, not the operator's patience.
+   */
+  private spawnHeldBack(
+    config: WardenConfig,
+    state: WardenRuntimeState,
+    fleet: readonly WardenFleetSession[],
+    budget: TriageBudget,
+    nowMs: number,
+    force: boolean,
+  ): string | undefined {
+    const live = this.liveWardens(fleet, state);
+    if (wardenSlotsFree(config.maxAssignedWardens, live.length) <= 0)
+      return `warden concurrency cap reached (${live.length}/${Math.max(1, config.maxAssignedWardens)} live)`;
+    if (force) return undefined;
+    const lastSpawnMs = Date.parse(state.lastSpawnAt ?? '');
+    if (Number.isFinite(lastSpawnMs) && nowMs - lastSpawnMs < spawnGapMs(config))
+      return `spawn gap not elapsed (last spawn ${state.lastSpawnAt})`;
+    if (budget.spend.investigationsLastHour >= config.caps.maxInvestigationsPerHour)
+      return `hourly investigation limit reached (${config.caps.maxInvestigationsPerHour} per hour)`;
+    return undefined;
   }
 
   // ─── escalation to a human ──────────────────────────────────────────────────
@@ -1652,6 +1823,63 @@ export class WardenSweepService {
   // ─── accounts ───────────────────────────────────────────────────────────────
 
   /**
+   * Start one warden, handing the spawn to the next login when one fails to start — within this sweep,
+   * bounded by {@link MAX_SPAWN_ATTEMPTS} and by the logins there are.
+   *
+   * Every failure strikes its ACCOUNT, as a single failure always did, so the order of the next sweep is
+   * still decided by the failover state; trying the next login now only stops one broken login from
+   * costing a whole sweep. `exhausted` means no login was eligible at the FIRST pick: nothing was tried,
+   * and the caller defers rather than cooling anything down.
+   */
+  private async spawnOnAnyAccount(
+    accounts: readonly WardenAccount[],
+    config: WardenConfig,
+    state: WardenRuntimeState,
+    request: Omit<WardenSpawnRequest, 'agent' | 'model'>,
+    context: Readonly<Record<string, unknown>>,
+  ): Promise<{
+    readonly state: WardenRuntimeState;
+    readonly started?: {
+      readonly facts: WardenSpawnFacts;
+      readonly account: WardenAccount;
+      readonly selection: WardenSelectionProvenance;
+    };
+    readonly exhausted: boolean;
+    readonly error?: unknown;
+  }> {
+    const tried = new Set<string>();
+    const attempts = Math.min(MAX_SPAWN_ATTEMPTS, Math.max(1, accounts.length));
+    let next = state;
+    let error: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const picked = await this.pickAccount(accounts, config, next, tried);
+      next = picked.state;
+      if (picked.account === undefined) return { state: next, exhausted: attempt === 0, error };
+      const result = await this.spawn({
+        ...request,
+        agent: picked.account.agent,
+        ...(picked.account.model === undefined ? {} : { model: picked.account.model }),
+      });
+      if (result.facts !== undefined)
+        return {
+          state: { ...next, failover: recordWardenSuccess(next.failover ?? {}, picked.account.agent) },
+          started: { facts: result.facts, account: picked.account, selection: picked.selection },
+          exhausted: false,
+        };
+      error = result.error;
+      next = this.recordSpawnFailure(next, config, picked.account.agent, error);
+      tried.add(picked.account.agent);
+      this.ports.journal.record('fleet.warden_spawn_failed', {
+        ...context,
+        agent: picked.account.agent,
+        attempt: attempt + 1,
+        message: failureMessage(error),
+      });
+    }
+    return { state: next, exhausted: false, error };
+  }
+
+  /**
    * The account the next warden spawn should use, or `undefined` on exhaustion.
    *
    * Demotions are reconciled against the usage feed first, so positive evidence
@@ -1663,6 +1891,7 @@ export class WardenSweepService {
     accounts: readonly WardenAccount[],
     config: WardenConfig,
     state: WardenRuntimeState,
+    tried: ReadonlySet<string> = new Set(),
   ): Promise<{
     readonly state: WardenRuntimeState;
     readonly account?: WardenAccount;
@@ -1689,8 +1918,15 @@ export class WardenSweepService {
       usage,
       state: reconciled.state,
       nowMs,
+      excluded: tried,
     });
 
+    // Every login left has failed to start this spawn: that is not exhaustion, and nothing is recorded.
+    if (selection.exhausted && tried.size > 0)
+      return {
+        state: { ...state, failover: reconciled.state },
+        selection: { policy, selection: 'preferred', configuredFirst, skipped: selection.reasons },
+      };
     if (selection.exhausted) {
       if (!wasExhausted)
         this.ports.journal.record('fleet.warden_exhausted', {

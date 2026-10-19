@@ -205,6 +205,16 @@ describe('account selection', () => {
     should(selection.skipped).eql({ first: 'at its usage limit (usage feed)' });
   });
 
+  it('should skip an account that already failed to start this spawn, saying so', () => {
+    // Arrange / Act
+    const selection = selectWardenAccount(input({ excluded: new Set(['first']) }));
+
+    // Assert
+    if (selection.exhausted) throw new Error('expected a selection');
+    should(selection.account.agent).eql('second');
+    should(selection.skipped).eql({ first: 'failed to start a moment ago' });
+  });
+
   it('should fail back automatically once the first choice recovers', () => {
     // Arrange
     const demoted = selectWardenAccount(input({ state: { demotedUntil: { first: at(10) } } }));

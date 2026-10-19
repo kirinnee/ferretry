@@ -41,6 +41,8 @@ import type {
   WardenConfigView,
   WardenInvestigateRequest,
   WardenInvestigateView,
+  WardenLeaveRequest,
+  WardenLeaveView,
   WardenRunView,
   WardenStatusView,
   WardenVerdictsView,
@@ -90,6 +92,8 @@ export interface IFyApiClient {
   wardenAttention(): Promise<WardenAttentionView>;
   /** Ask for an investigation of one ferret: it skips Jev and waits for a free slot. */
   wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
+  /** Leave a flagged or cleared ferret alone for longer than the Warden would: an hour, four, or until it changes. */
+  wardenLeave(request: WardenLeaveRequest): Promise<WardenLeaveView>;
   cgroupConfig(): Promise<CgroupConfigView>;
   updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView>;
   /** How this machine's daemon was installed, the latest release, and what updating takes. */

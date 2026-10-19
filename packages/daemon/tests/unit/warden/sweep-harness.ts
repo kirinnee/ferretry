@@ -24,7 +24,7 @@ import {
  * The sweep, over fakes for every port: shared by the sweep's own tests and the triage tests.
  */
 
-const NOW = Date.parse('2026-07-31T12:00:00.000Z');
+export const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
 /** Jev, sure the ferret is healthy. */
 export const JEV_SKIP: TriageDecision = {
@@ -143,6 +143,8 @@ export function harness(
     readonly remedyFails?: string;
     readonly cost?: (wardenId: string) => Promise<number | undefined>;
     readonly feedBoards?: Readonly<Record<string, AttentionBoardInput | undefined>>;
+    /** The clock, for the tests that let time pass. Fixed at noon otherwise. */
+    readonly now?: () => number;
   } = {},
 ): Harness {
   let configDocument: unknown = options.config ?? defaultWardenConfig;
@@ -266,7 +268,7 @@ export function harness(
       },
     },
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
-    nowMs: () => NOW,
+    nowMs: () => options.now?.() ?? NOW,
     capabilities: () => {
       capability += 1;
       return `capability-${capability}`;
@@ -297,11 +299,11 @@ export function harness(
   };
 }
 
-/** The Warden on with LLM triage — kteam's behaviour, which is what every "escalation on" test here pins. */
+/** The Warden on with the LLM layer alone — kteam's behaviour, which is what every "escalation on" test here pins. */
 export const enabled = (overrides: Partial<WardenConfig> = {}): WardenConfig => ({
   ...defaultWardenConfig,
   enabled: true,
-  triage: 'llm',
+  layers: { jev: false, llm: true },
   minSpawnGapMinutes: 0,
   ...overrides,
 });

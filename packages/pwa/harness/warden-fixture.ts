@@ -1,5 +1,5 @@
 /**
- * The Warden as a realistic day with Jev triage on: a savings line, one question waiting on the owner,
+ * The Warden as a realistic day with both layers on — Jev, then an LLM investigation: a savings line, one question waiting on the owner,
  * two sessions being watched, one investigation running and one finished, and recent actions including
  * a stop the owner has not let the Warden take alone. Session ids are the harness fleet's own, so rows
  * resolve to real names and status marks.
@@ -20,7 +20,7 @@ const at = (minutesAgo: number): string => new Date(WARDEN_FIXTURE_NOW - minutes
 
 const config = {
   ...DEFAULT_WARDEN_CONFIG,
-  triage: 'jev' as const,
+  layers: { jev: true, llm: true },
   caps: { ...DEFAULT_WARDEN_CONFIG.caps, jevUsdPerDay: 0.5, investigationUsdPerDay: 2 },
   accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }, { agent: 'claude-spare' }],
 };
@@ -67,7 +67,10 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
     ],
     lastSelection: { agent: 'claude-default', policy: 'fallback', at: at(30), reason: 'first eligible' },
   },
-  triage: { configured: 'jev', effective: 'jev', reason: 'configured' },
+  triage: {
+    jev: { configured: true, active: true, reason: 'configured' },
+    llm: { configured: true, active: true, reason: 'configured' },
+  },
   spend: {
     day: '2026-07-31',
     jevUsd: 0.03,
@@ -75,6 +78,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
     investigationUsd: 1.2,
     investigationCapUsd: 2,
     pendingInvestigations: 1,
+    capsHit: [],
     investigationsLastHour: 2,
     maxInvestigationsPerHour: 6,
   },
@@ -123,7 +127,8 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       outcome: 'done',
       by: 'jev',
       anomalyKind: 'sus_subprocess',
-      detail: 'A long `bun test` is still advancing; Jev judged it healthy.',
+      detail:
+        'Jev was 96% sure it is healthy, so this flag is left alone for 1 h — cleared 3 times in a row, so it is left alone longer each time.',
       confidence: 0.96,
     },
     {
@@ -146,7 +151,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       reportPath: 'warden/reports/harness-kamila.md',
     },
   ],
-  blessings: [{ sessionId: 'harness-workspace', kinds: ['sus_subprocess'], expiresAt: at(-9), by: 'jev' }],
+  blessings: [{ sessionId: 'harness-workspace', kinds: ['sus_subprocess'], expiresAt: at(-54), by: 'jev', streak: 2 }],
 };
 
 export const WARDEN_FIXTURE_ATTENTION: WardenAttentionView = {
@@ -204,21 +209,21 @@ export const WARDEN_FIXTURE_CONFIG: WardenConfigView = {
 
 /** A `warden.yaml` written on another machine: its login does not exist here, and nothing rewrites it. */
 export const WARDEN_FIXTURE_CONFIG_UNKNOWN_LOGIN: WardenConfigView = {
-  config: { ...config, triage: 'llm', accounts: [{ agent: 'legacy-wrapper' }] },
+  config: { ...config, layers: { jev: false, llm: true }, accounts: [{ agent: 'legacy-wrapper' }] },
   accounts: [{ agent: 'legacy-wrapper' }],
   warnings: [
     "unknown login 'legacy-wrapper' — choose one in Settings › Warden (it is skipped until it exists here)",
-    'no investigation login exists on this machine, so LLM triage is unavailable',
+    'no investigation login exists on this machine, so LLM investigations are unavailable',
   ],
   login: { source: 'configured', unknown: ['legacy-wrapper'], available: HARNESS_LOGINS },
 };
 
-/** No login chosen and no default runtime: LLM triage is unavailable, and says so. */
+/** No login chosen and no default runtime: LLM investigations are unavailable, and say so. */
 export const WARDEN_FIXTURE_CONFIG_NO_LOGIN: WardenConfigView = {
-  config: { ...config, triage: 'llm', accounts: [] },
+  config: { ...config, layers: { jev: false, llm: true }, accounts: [] },
   accounts: [],
   warnings: [
-    'no investigation login is set and this machine has no default runtime, so LLM triage is unavailable — choose a login in Settings › Warden',
+    'no investigation login is set and this machine has no default runtime, so LLM investigations are unavailable — choose a login in Settings › Warden',
   ],
   login: { source: 'not_set', unknown: [], available: HARNESS_LOGINS },
 };

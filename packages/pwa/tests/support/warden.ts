@@ -71,7 +71,10 @@ export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): WardenS
     config,
     anomalies: [],
     fingerprint: 'fp-1',
-    triage: { configured: config.triage, effective: config.triage, reason: 'configured' },
+    triage: {
+      jev: { configured: config.layers.jev, active: config.layers.jev, reason: 'configured' },
+      llm: { configured: config.layers.llm, active: config.layers.llm, reason: 'configured' },
+    },
     spend: {
       day: '2026-07-31',
       jevUsd: 0,
@@ -79,6 +82,7 @@ export const wardenStatus = (overrides: Partial<WardenStatusView> = {}): WardenS
       investigationUsd: 0,
       investigationCapUsd: config.caps.investigationUsdPerDay,
       pendingInvestigations: 0,
+      capsHit: [],
       investigationsLastHour: 0,
       maxInvestigationsPerHour: config.caps.maxInvestigationsPerHour,
     },

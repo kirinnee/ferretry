@@ -49,18 +49,20 @@ const wholeInRange = (value: number, range: { readonly min: number; readonly max
   Number.isInteger(value) && inRange(value, range.min, range.max);
 
 /**
- * Only the settings in play are checked: Rules only spends nothing and investigates nothing, so its
- * hidden caps cannot block a save.
+ * Only the settings in play are checked: with both layers off nothing spends or investigates, so the
+ * hidden caps cannot block a save. Jev's cap is Jev's; the investigation caps are the LLM layer's; the
+ * cooldown applies to a clear by either.
  */
 export const wardenFormErrors = (config: WardenConfig): WardenFormErrors => {
-  if (config.triage === 'rules') return {};
+  const { jev, llm } = config.layers;
+  if (!jev && !llm) return {};
   const { capUsd, perHour, atATime, blessMinutes } = WARDEN_FORM_LIMITS;
   const errors: { -readonly [K in keyof WardenFormErrors]: string } = {};
-  if (config.triage === 'jev' && !inRange(config.caps.jevUsdPerDay, capUsd.min, capUsd.max))
-    errors.jevUsdPerDay = CAP_ERROR;
-  if (!inRange(config.caps.investigationUsdPerDay, capUsd.min, capUsd.max)) errors.investigationUsdPerDay = CAP_ERROR;
-  if (!wholeInRange(config.caps.maxInvestigationsPerHour, perHour)) errors.maxInvestigationsPerHour = '1 to 60.';
-  if (!wholeInRange(config.maxAssignedWardens, atATime)) errors.maxAssignedWardens = '1 to 4.';
+  if (jev && !inRange(config.caps.jevUsdPerDay, capUsd.min, capUsd.max)) errors.jevUsdPerDay = CAP_ERROR;
+  if (llm && !inRange(config.caps.investigationUsdPerDay, capUsd.min, capUsd.max))
+    errors.investigationUsdPerDay = CAP_ERROR;
+  if (llm && !wholeInRange(config.caps.maxInvestigationsPerHour, perHour)) errors.maxInvestigationsPerHour = '1 to 60.';
+  if (llm && !wholeInRange(config.maxAssignedWardens, atATime)) errors.maxAssignedWardens = '1 to 4.';
   if (!wholeInRange(config.blessMinutes, blessMinutes)) errors.blessMinutes = '1 to 240 minutes.';
   return errors;
 };
@@ -94,8 +96,9 @@ export const wardenMachineDefaultLogin = (view: Pick<WardenConfigView, 'accounts
  */
 export const wardenSummary = (config: WardenConfig, hasJevKey: boolean, machineDefault?: string): string => {
   if (!config.enabled) return 'The Warden is off. Nothing watches your ferrets, and nothing spends money.';
-  const every = `Every ${config.intervalMinutes} min the sweep flags anomalies`;
-  if (config.triage === 'rules') return `${every} and shows them to you. No AI runs and nothing is spent.`;
+  const every = `Every ${config.intervalMinutes} min the rules flag anomalies`;
+  const { jev, llm } = config.layers;
+  if (!jev && !llm) return `${every} and show them to you. No AI runs and nothing is spent.`;
   const errors = wardenFormErrors(config);
   const own = (Object.keys(ACT_ALONE_WORDS) as (keyof WardenMayActAlone)[])
     .filter(action => config.mayActAlone[action])
@@ -112,13 +115,25 @@ export const wardenSummary = (config: WardenConfig, hasJevKey: boolean, machineD
     config.accounts.length > 0 ? config.accounts.map(account => account.agent) : [machineDefault ?? 'no login'];
   const atATime =
     errors.maxAssignedWardens === undefined ? `${config.maxAssignedWardens} at a time` : '(fix) at a time';
-  const investigation = `a read-only ${model}investigation on ${order[0]} (${config.investigation.effort} effort, ${atATime}; failover ${order.join(' → ')})`;
+  const rotation =
+    order.length < 2
+      ? ''
+      : config.failover.policy === 'round_robin'
+        ? `; taking turns ${order.join(' → ')}`
+        : `; failover ${order.join(' → ')}`;
+  const investigation = `a read-only ${model}investigation on ${order[0]} (${config.investigation.effort} effort, ${atATime}${rotation})`;
   const invCap = errors.investigationUsdPerDay === undefined ? money(config.caps.investigationUsdPerDay) : '(fix)';
-  if (config.triage === 'llm')
-    return `${every}, and every flag gets ${investigation}, as kteam does. Cap: ${invCap}/day. ${acts}${stop}.`;
   const jevCap = errors.jevUsdPerDay === undefined ? money(config.caps.jevUsdPerDay) : '(fix)';
   const bless = errors.blessMinutes === undefined ? `${config.blessMinutes} min` : '(fix)';
-  const summary = `${every}. Jev only guards: it skips a flag (healthy, then blesses that anomaly for ${bless}) when it is at least ${pct(config.guard.threshold)} sure. Anything else, including when it is unsure, goes to ${investigation}. Caps: ${jevCap}/day for Jev and ${invCap}/day for investigations. ${acts}${stop}.`;
+  const quiet = `A cleared flag is left alone for ${bless}, twice as long each time it is cleared again, up to 4 h.`;
+  if (!jev)
+    return `${every}, and every flag gets ${investigation}, as kteam does. ${quiet} Cap: ${invCap}/day. ${acts}${stop}.`;
+  const clears = `Jev clears a flag it is at least ${pct(config.guard.threshold)} sure is healthy`;
+  if (!llm) {
+    const summary = `${every}. ${clears}; every other flag is shown to you, and no investigation runs. ${quiet} Cap: ${jevCap}/day for Jev.`;
+    return hasJevKey ? summary : `${summary} Needs a Jev key: until one is added, every flag is shown to you.`;
+  }
+  const summary = `${every}. ${clears}; anything else, including when it is unsure, goes to ${investigation}. ${quiet} Caps: ${jevCap}/day for Jev and ${invCap}/day for investigations. ${acts}${stop}.`;
   return hasJevKey ? summary : `${summary} Needs a Jev key: until one is added, every flag is investigated.`;
 };
 

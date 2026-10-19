@@ -162,8 +162,11 @@ describe('WardenOverview', () => {
   it('should show a sweeping button and a cap warning chip', async () => {
     // Arrange
     const capped = wardenStatus({
-      config: wardenConfig({ triage: 'llm' }),
-      triage: { configured: 'llm', effective: 'rules', reason: 'investigation_cap' },
+      config: wardenConfig({ layers: { jev: false, llm: true } }),
+      triage: {
+        jev: { configured: false, active: false, reason: 'configured' },
+        llm: { configured: true, active: false, reason: 'investigation_cap' },
+      },
     });
     const view = await render({ status: ready(capped), sweeping: true });
     try {
@@ -171,7 +174,7 @@ describe('WardenOverview', () => {
       const text = view.container.textContent ?? '';
 
       // Assert
-      expect(text).toContain('Cap hit — rules only until midnight UTC');
+      expect(text).toContain('LLM cap hit — flags wait for you until midnight UTC');
       expect(button(view.container, 'Sweeping…').disabled).toBe(true);
     } finally {
       await view.unmount();

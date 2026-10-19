@@ -11,17 +11,18 @@
  * what the owner changed; the rest is {@link defaultWardenConfig}. An edit to it
  * that turns spending on is held until the owner confirms it.
  *
- * WHAT `enabled` AND `triage` GATE. Detection is always on: the anomaly list,
+ * WHAT `enabled` AND `layers` GATE. Detection is always on: the anomaly list,
  * the fingerprint and the failover status are deterministic and cost nothing but
- * a fleet read. `enabled` is the owner's On/Off for everything after that, and
- * `triage` decides whether a flag may cost anything at all: `rules` — the
- * default — never spends, so a fresh daemon is on and watching without spending
- * a token. Jev and LLM triage are each an explicit opt-in with a daily cap
- * (`triage.ts`).
+ * a fleet read. `enabled` is the owner's On/Off for everything after that — the
+ * rules flag whenever it is on — and `layers` decides whether a flag may cost
+ * anything at all: both off — the default — never spends, so a fresh daemon is on
+ * and watching without spending a token. Jev and LLM investigation are each an
+ * explicit opt-in with its own daily cap (`triage.ts`). An older document's
+ * `triage` is read as the layers it meant and never written back.
  *
  * TOLERANT ON READ, STRICT ON WRITE. A stored document that no longer validates
  * falls back to the defaults and SAYS SO in a warning, because the defaults are
- * the safe direction: `triage: rules` means a configuration the daemon cannot
+ * the safe direction: both layers off means a configuration the daemon cannot
  * understand can never authorise a spawn. A PATCH is parsed strictly instead —
  * an operator naming a field that does not exist has made a mistake worth
  * refusing, not worth silently dropping.
@@ -173,19 +174,29 @@ export function resolveWardenLogin(
  * to create it, and refusing the configuration would order-couple two tools that
  * have no reason to know about each other. Nor is it rewritten away: the owner
  * chooses another in Settings › Warden.
+ *
+ * The login warnings are only said while the LLM layer is on: with investigations off nothing needs a
+ * login, and "no login is set" would be a problem the owner has no reason to fix.
  */
 export function wardenConfigWarnings(config: WardenConfig, resolved: ResolvedWardenLogin): readonly string[] {
   const warnings: string[] = [];
+  if (config.layers.llm) warnings.push(...loginWarnings(resolved));
+  if (!config.enabled)
+    warnings.push('the Warden is off (enabled=false); detection still runs, but nothing is triaged or acted on');
+  return warnings;
+}
+
+/** What is wrong with the investigation login, in the operator's words. */
+function loginWarnings(resolved: ResolvedWardenLogin): readonly string[] {
+  const warnings: string[] = [];
   if (resolved.login.source === 'not_set')
     warnings.push(
-      'no investigation login is set and this machine has no default runtime, so LLM triage is unavailable — choose a login in Settings › Warden',
+      'no investigation login is set and this machine has no default runtime, so LLM investigations are unavailable — choose a login in Settings › Warden',
     );
   for (const agent of resolved.login.unknown)
     warnings.push(`unknown login '${agent}' — choose one in Settings › Warden (it is skipped until it exists here)`);
   if (resolved.accounts.length > 0 && !resolved.usable)
-    warnings.push('no investigation login exists on this machine, so LLM triage is unavailable');
-  if (!config.enabled)
-    warnings.push('the Warden is off (enabled=false); detection still runs, but nothing is triaged or acted on');
+    warnings.push('no investigation login exists on this machine, so LLM investigations are unavailable');
   return warnings;
 }
 
