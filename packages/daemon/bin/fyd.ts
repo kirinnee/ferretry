@@ -640,6 +640,7 @@ import {
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
+  SessionDialogService,
   type SessionDirectorySubsystem,
   SessionFilesystem,
   SessionHandoverService,
@@ -7894,6 +7895,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const typing = new SessionConsoleService(sessionAttach, launchTmuxCommands);
           const capture = new ProvedPaneCapture(sessionAttach, launchTmuxCommands);
           return new SessionPermissionService(
+            {
+              capture: async id => await capture.capture(id),
+              write: async (id, bytes) => await typing.write(id, bytes),
+            },
+            milliseconds => Bun.sleep(milliseconds),
+          );
+        })(),
+        // A dialog answer does the same, on the same proved pane.
+        sessionDialog: (() => {
+          const typing = new SessionConsoleService(sessionAttach, launchTmuxCommands);
+          const capture = new ProvedPaneCapture(sessionAttach, launchTmuxCommands);
+          return new SessionDialogService(
             {
               capture: async id => await capture.capture(id),
               write: async (id, bytes) => await typing.write(id, bytes),

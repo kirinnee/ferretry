@@ -3,6 +3,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { SessionLiveActivitySchema } from './session-live.ts';
+import { HarnessDialogSchema } from './session-dialog.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
@@ -527,6 +528,12 @@ export const SessionStateSchema = z.object({
    * wants to do and the choices its harness offered. Absent for every other turn.
    */
   permissionRequest: PermissionRequestSchema.optional(),
+  /**
+   * The harness's own dialog the agent's pane is parked on while `turnState` is `needs-input` — hooks to
+   * review, an update, a sign-in, an MCP server to approve — with the choices it offers. Absent for every
+   * other turn.
+   */
+  harnessDialog: HarnessDialogSchema.optional(),
   waiting: DeclaredWaitSchema.optional(),
   waitingCreditSeconds: NonNegativeFiniteSchema.optional(),
 });

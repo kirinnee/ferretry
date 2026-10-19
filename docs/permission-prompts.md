@@ -27,7 +27,8 @@ Any other dialog with the same shape — a "Do you want to …?" / "Would you li
 above a choice list numbered 1..n, at the bottom of the frame, with no composer below it — is read as a
 generic request with the harness's own title as `tool`. The one-time dialogs Ferretry already knows
 (auto-mode nudge, trust, API key) keep their own reading (`turnPrompt`) and are never shown as approval
-cards.
+cards. The harness's own dialogs — hook review, MCP-server approval, sign-in, update — have their own card:
+see [harness-dialogs.md](harness-dialogs.md).
 
 The request (`PermissionRequest` in `packages/protocol/src/lib/session-permission.ts`) carries every option
 in the harness's own words, its kind (`allow`, `allow-always`, `deny`) and the row the harness's cursor is
