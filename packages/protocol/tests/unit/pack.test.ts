@@ -24,7 +24,7 @@ const ready = {
   runtime: 'claude-auto-x',
   ready: true,
 };
-const attempt = { runtime: 'claude-auto-x', model: 'claude-opus-5-5', outcome: 'started', probeMs: 812 };
+const attempt = { runtime: 'claude-auto-x', model: 'claude-opus-5-5', outcome: 'started', probe: 'ran', probeMs: 812 };
 
 const cases: SchemaCase[] = [
   { name: 'decision mode', schema: pack.PackDecisionModeSchema, value: 'jev' },

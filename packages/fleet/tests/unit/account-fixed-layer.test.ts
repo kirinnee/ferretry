@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AGENT_INSTRUCTION,
-  AGENT_TOOLS_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,

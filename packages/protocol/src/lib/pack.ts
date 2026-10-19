@@ -306,8 +306,10 @@ export type PackNewRequest = z.infer<typeof PackNewRequestSchema>;
 export const PackAttemptSchema = z.strictObject({
   runtime: NonEmpty,
   model: NonEmpty.optional(),
-  outcome: z.enum(['started', 'refused', 'probe-cached']),
+  outcome: z.enum(['started', 'refused']),
   refusal: PackRefusalSchema.optional(),
+  /** `cached`: a probe of this runtime and model answered OK moments ago, so none was run. */
+  probe: z.enum(['ran', 'cached']).optional(),
   probeMs: NonNegativeIntegerSchema.optional(),
 });
 export type PackAttempt = z.infer<typeof PackAttemptSchema>;

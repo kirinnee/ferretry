@@ -1,6 +1,6 @@
 import { FyTransportError } from '@ferretry/protocol/client';
 import { SessionCommandError } from '../session/errors.ts';
-import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo, ITerminalAttacher } from './ports.ts';
+import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo, ITerminalAttacher, IWaitResults } from './ports.ts';
 import { renderEvent, renderFleetStreamIdle, renderStreamIdle } from './render.ts';
 import { decideWait, renderWaitOutcome, type WaitNotices, type WaitOutcome, waitExitCode } from './wait.ts';
 
@@ -47,6 +47,8 @@ export interface WaitOptions {
   readonly timeout?: number;
   readonly untilMarker?: string;
   readonly interval?: number;
+  /** Leave a ferret that is still running once its result is collected; by default it is stopped. */
+  readonly keep?: boolean;
 }
 
 /** How often a wait asks the daemon again, when the caller names nothing. */
@@ -76,6 +78,8 @@ export class ReadsController {
     private readonly attacher: ITerminalAttacher,
     /** The shipped command name, which prefixes every stderr note so it names a command that exists. */
     private readonly binaryName: string,
+    /** Absent: a wait reports the status alone. */
+    private readonly results?: IWaitResults,
   ) {}
 
   /** Attach only after both daemon and client proved the complete tmux process incarnation. */
@@ -158,14 +162,32 @@ export class ReadsController {
   }
 
   /** End one wait, preserving stdout as a state channel and stderr as an outcome channel. */
-  private finishWait(
+  /**
+   * Reports how a wait ended. A SETTLED wait also hands back the ferret's result — its `signal done`
+   * message — and stops a ferret still running once that result is collected (a `--until-marker` wait on
+   * one that has not signalled), unless the caller said `--keep` (docs/pack-mode.md).
+   */
+  private async finishWait(
     sessionId: string,
-    json: boolean,
+    options: WaitOptions,
     view: Awaited<ReturnType<IReadsGateway['get']>> | undefined,
     outcome: Exclude<WaitOutcome, { kind: 'keep-waiting' }>,
-  ): void {
-    if (view !== undefined)
-      this.out.success(json ? JSON.stringify(view.state) : `${sessionId} is ${view.state.status}`);
+  ): Promise<void> {
+    const json = options.json === true;
+    const result =
+      outcome.kind === 'settled' && view !== undefined ? await this.results?.result(view.config.id).catch(() => undefined) : undefined;
+    if (view !== undefined) {
+      const summary = result?.summary;
+      this.out.success(
+        json
+          ? JSON.stringify(summary === undefined ? view.state : { ...view.state, result: summary })
+          : `${sessionId} is ${view.state.status}${summary === undefined ? '' : `\n\n${summary}`}`,
+      );
+    }
+    if (outcome.kind === 'settled' && view !== undefined && result?.finished === false && options.keep !== true) {
+      await this.results?.stop(view.config.id, 'its result was collected').catch(() => undefined);
+      this.out.error(`${this.binaryName} wait: stopped ${sessionId} now its result is collected (--keep leaves it running)`);
+    }
     const explanation = renderWaitOutcome(outcome);
     if (explanation !== undefined) this.out.error(`${this.binaryName} wait: ${explanation}`);
     this.out.setExitCode(waitExitCode(outcome));
@@ -193,7 +215,7 @@ export class ReadsController {
     try {
       for (;;) {
         if (deadlinePassed()) {
-          this.finishWait(sessionId, options.json === true, lastView, {
+          await this.finishWait(sessionId, options, lastView, {
             kind: 'timed-out',
             ...(lastView === undefined ? {} : { status: lastView.state.status }),
           });
@@ -205,14 +227,14 @@ export class ReadsController {
           view = await this.gateway.get(sessionId, deadline?.signal);
         } catch (error) {
           if (deadlinePassed()) {
-            this.finishWait(sessionId, options.json === true, lastView, {
+            await this.finishWait(sessionId, options, lastView, {
               kind: 'timed-out',
               ...(lastView === undefined ? {} : { status: lastView.state.status }),
             });
             return;
           }
           if (error instanceof FyTransportError) {
-            this.finishWait(sessionId, options.json === true, lastView, {
+            await this.finishWait(sessionId, options, lastView, {
               kind: 'daemon-unavailable',
               failure: error.timedOut ? 'unresponsive' : 'unavailable',
               detail: error.message,
@@ -239,7 +261,7 @@ export class ReadsController {
           await this.clock.sleep(Math.min(intervalMs, remainingMs), deadline?.signal);
           continue;
         }
-        this.finishWait(sessionId, options.json === true, view, decision.outcome);
+        await this.finishWait(sessionId, options, view, decision.outcome);
         return;
       }
     } finally {
