@@ -1,6 +1,10 @@
 [test]
-# Every tier runs offline: no booted daemon follows the published model catalog or the hosted relay.
-preload = ["./packages/daemon/tests/support/offline-environment.ts"]
+# ONE `preload` key. Two arrived from two pull requests that merged the same day, and Bun refuses a
+# repeated key ("expected string but received array"), so the tier loaded no file at all.
+# - offline-environment: every tier runs offline, so no booted daemon follows the published model
+#   catalog or the hosted relay.
+# - teardown: the suite-level sweep for journeys Bun abandoned at their timeout — see the file.
+preload = ["./packages/daemon/tests/support/offline-environment.ts", "./tests/e2e/support/teardown.ts"]
 root = "tests/e2e"
 # THE PER-TEST TIMEOUT IS NOT SET HERE, and it is not an omission.
 #
@@ -15,5 +19,3 @@ root = "tests/e2e"
 # this tier is invoked: `scripts/test/run-e2e.sh`.
 # Do not restore the key here — a value that is read by nothing is worse than no
 # value, because the next reader believes it.
-# The suite-level sweep for journeys Bun abandoned at their timeout — see the file.
-preload = ["./tests/e2e/support/teardown.ts"]

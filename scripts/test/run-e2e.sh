@@ -99,8 +99,24 @@ trap 'exit 143' TERM
 echo "🧪 Typechecking the E2E harness..."
 ./node_modules/.bin/tsc --noEmit --project tests/e2e/tsconfig.json
 
+# A TIER AND A SHARD (scripts/ci/e2e-shards.ts): `FY_E2E_TIER` is fast (no `[slow]` journey), slow or
+# all, and `FY_E2E_SHARD=i/N` runs this runner's share of it, balanced by tests/e2e/timings.json. With
+# neither set, every journey runs here, as it always has.
+selection=(tests/e2e)
+if [ -n "${FY_E2E_SHARD:-}" ] || [ "${FY_E2E_TIER:-all}" != "all" ]; then
+  plan="$(bun scripts/ci/e2e-shards.ts plan "${FY_E2E_TIER:-all}" "${FY_E2E_SHARD:-1/1}")"
+  if [ -z "${plan}" ]; then
+    echo "✅ this shard of the ${FY_E2E_TIER:-all} tier holds no journeys"
+    exit 0
+  fi
+  mapfile -t selection <<<"${plan}"
+fi
+# A JUnit report when asked for one: CI keeps it as evidence, and it is what regenerates the timings.
+report=()
+[ -n "${FY_E2E_JUNIT:-}" ] && report=(--reporter=junit "--reporter-outfile=${FY_E2E_JUNIT}")
+
 echo "🧪 Running isolated E2E journeys..."
 # `--timeout` on the command line because `[test] timeout` in a bunfig is ignored by Bun.
-bun test tests/e2e --config=bunfig.e2e.toml --timeout 120000
+bun test "${selection[@]}" --config=bunfig.e2e.toml --timeout 120000 "${report[@]}"
 
 echo "✅ Isolated E2E journeys passed"

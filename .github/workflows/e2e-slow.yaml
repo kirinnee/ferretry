@@ -1,0 +1,115 @@
+name: E2E Slow
+
+# The `[slow]` e2e journeys: the ones that wait on purpose — a relayed page left idle for minutes, a tab
+# frozen past the relay's eviction grace, a relay restarted again and again under a live page. Each
+# takes one to three minutes, so they stay out of every pull request's `E2E` run and run here instead:
+# nightly, on every push to `main`, on demand, and on a pull request that touches the code they prove —
+# the relay, and the daemon's and the PWA's connection and carrier code. Same scripts, same evidence,
+# same advisory status as `E2E` (docs/standards/ci-cd/index.md, "E2E tier").
+on:
+  schedule:
+    # Nightly, off the hour so it does not queue behind every other scheduled job.
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'packages/fleet/models/**'
+  pull_request:
+    paths:
+      - 'packages/relay/**'
+      - 'packages/protocol/src/lib/carriers.ts'
+      - 'packages/protocol/src/lib/relay-*.ts'
+      - 'packages/daemon/src/**/relay/**'
+      - 'packages/daemon/src/lib/runtime/**carrier*.ts'
+      - 'packages/daemon/src/lib/api/socket.ts'
+      - 'packages/daemon/src/lib/pairing/live-connections.ts'
+      - 'packages/pwa/src/lib/connection*.ts'
+      - 'packages/pwa/src/lib/daemon-connection.ts'
+      - 'packages/pwa/src/lib/daemon-transport.ts'
+      - 'packages/pwa/src/lib/event-transport.ts'
+      - 'packages/pwa/src/lib/relay-*.ts'
+      - 'packages/pwa/src/features/connection/**'
+      - 'packages/pwa/src/hooks/use-connection-health.ts'
+      - 'packages/pwa/src/hooks/use-active-carrier.ts'
+      - 'tests/e2e/relay-reconnect.e2e.test.ts'
+      - 'tests/e2e/support/relay-harness.ts'
+      - 'scripts/test/rendezvous-process.ts'
+      - 'scripts/test/run-e2e.sh'
+      - 'scripts/ci/e2e*'
+      - '.github/workflows/e2e-slow.yaml'
+
+# Copied from CI: a new push to a PR cancels the run for its old SHA; `main`, the schedule and a manual
+# dispatch each get a group of their own run id and are never cancelled.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || github.run_id
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # One `[slow]` journey per shard, so the wall clock is the slowest journey (~3.5 min idle) and not
+  # their sum. Adding a slow journey means adding a shard here and to the summary's count.
+  journeys:
+    name: E2E Slow Shard (${{ matrix.shard }})
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      # ADVISORY, exactly as in `E2E`: on the step, so the job stays green and the summary tallies.
+      - name: Run this shard of the slow e2e journeys
+        continue-on-error: true
+        env:
+          FY_E2E_TIER: slow
+          FY_E2E_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: nix develop .#ci -c ./scripts/ci/e2e.sh
+      - name: Upload this shard's e2e evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-slow-evidence-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-evidence/
+          if-no-files-found: warn
+      - name: Upload this shard's result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-result-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/e2e-evidence/result.json
+          if-no-files-found: warn
+
+  summary:
+    name: E2E Slow Journeys
+    needs: journeys
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - name: Download every shard's result
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: e2e-result-*
+          path: ${{ runner.temp }}/e2e-shards
+      - name: Add up the shards
+        env:
+          SHARDS: ${{ needs.journeys.result }}
+        run: ./scripts/ci/e2e-summary.sh "${{ runner.temp }}/e2e-shards" 3

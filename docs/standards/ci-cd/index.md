@@ -18,12 +18,13 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 ## Workflow split
 
-| Workflow  | Trigger                                                     | Responsibility                                         |
-| --------- | ----------------------------------------------------------- | ------------------------------------------------------ |
-| `CI`      | push to `main`, pull request, manual dispatch               | gates, tests, compile, SIT, cross-platform smoke       |
-| `E2E`     | pull requests touching the tier's packages, manual dispatch | the e2e tier: compiled binaries, real PWA, real Chrome |
-| `Release` | `CI` completed successfully on `main`                       | semantic-release: version, changelog, `vX.Y.Z` tag     |
-| `CD`      | push of a `v*.*.*` tag                                      | GoReleaser publishes the release and its channels      |
+| Workflow   | Trigger                                                                                   | Responsibility                                                     |
+| ---------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `CI`       | push to `main`, pull request, manual dispatch                                             | gates, tests, compile, SIT, cross-platform smoke                   |
+| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch                  | the e2e tier's fast journeys in four shards, into `E2E Journeys`   |
+| `E2E Slow` | nightly, push to `main`, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
+| `Release`  | `CI` completed successfully on `main`                                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
+| `CD`       | push of a `v*.*.*` tag                                                                    | GoReleaser publishes the release and its channels                  |
 
 The chain is deliberately one-directional: CI proves the tree, Release decides the version and
 pushes the tag, the tag fires CD. Nothing else publishes anything.
@@ -84,19 +85,80 @@ Notable details:
 
 ## E2E tier
 
-`E2E` (`.github/workflows/e2e.yaml`) runs `nix develop .#ci -c ./scripts/ci/e2e.sh`. That script compiles the
-binaries and hands off to `scripts/test/run-e2e.sh`, which runs every journey in `tests/e2e/` against the
-compiled `fy`/`fyd`, the real built PWA, the runner's Google Chrome and a local rendezvous
-([Testing](../testing/index.md)). It is its own workflow because GitHub filters by path per workflow. It runs on
-pull requests that touch `packages/{pwa,daemon,relay,protocol,cli}` or the tier itself, and on manual dispatch.
+`E2E` (`.github/workflows/e2e.yaml`) runs every journey in `tests/e2e/` against the compiled `fy`/`fyd`, the
+real built PWA, the runner's Google Chrome and a local rendezvous ([Testing](../testing/index.md)). Each
+runner runs `nix develop .#ci -c ./scripts/ci/e2e.sh`, which compiles the binaries and hands off to
+`scripts/test/run-e2e.sh`. That script resolves the real tmux and the compiled CLI, typechecks the
+harness, owns the suite root and cleans it up.
 
-- **Evidence is an artifact.** The `e2e-evidence-<attempt>` artifact (one per run attempt) uploads with `if: always()`. It holds every screen
-  the journeys reached at 390 px and 1280 px in both colour schemes, the per-step journey log, and the relay
-  ledger.
-- **Advisory, and visibly so.** The journeys step runs with `continue-on-error: true`, so a red run leaves the
-  check green. Its failures still land in three places: the job summary ("E2E: N pass / M fail" plus the
-  failing tests), a warning annotation, and the evidence artifact. When the job becomes required,
-  `continue-on-error` is removed in the same change.
+| Job         | Check name         | Runs                                                                                      |
+| ----------- | ------------------ | ----------------------------------------------------------------------------------------- |
+| `relevance` | `E2E Relevance`    | `scripts/ci/e2e-relevance.sh`: does this pull request have anything for the tier to prove |
+| `journeys`  | `E2E Shard (1..4)` | `FY_E2E_TIER=fast FY_E2E_SHARD=i/4 ./scripts/ci/e2e.sh`, one share of the journeys each   |
+| `summary`   | **`E2E Journeys`** | `scripts/ci/e2e-summary.sh`: the one status, adding up every shard                        |
+
+`E2E Slow` (`.github/workflows/e2e-slow.yaml`) runs the `[slow]` journeys the same way, one per shard,
+into **`E2E Slow Journeys`**.
+
+- **One status, whatever the shard count.** Branch protection and merge tooling wait on `E2E Journeys`.
+  The shard jobs are named differently so that nothing waits on them by accident. The summary runs
+  unless the run was cancelled. It is green when the run had nothing to prove or every shard job
+  finished. It is red when the relevance check or a shard job did not finish: a setup step failed, a
+  runner died, or the matrix was cancelled.
+- **Docs-only and model-catalog-only pull requests skip the journeys** and still report `E2E Journeys`
+  green. The workflow runs on every pull request, and the `relevance` job lists the pull request's
+  files. When every one is under `docs/`, ends in `.md`, or is under `packages/fleet/models/`, no shard
+  starts. It is a job and not a workflow `paths-ignore` because a filtered-out workflow never posts
+  its status, so a merge waiting on that status waits forever. The usual fix is a stub workflow that
+  reports the same name on the ignored paths. That stub also fires on a mixed pull request, so a green
+  stub then sits beside the real check. The decision fails open: if it can't list the files, the
+  journeys run.
+- **Split by test, balanced by measured time.** `bun test --shard` splits by file, and one file holds
+  about five minutes of the tier. `scripts/ci/e2e-shards.ts` lists every journey with Bun's own JUnit
+  report: a run whose name pattern matches nothing loads every file in ~0.5 s and runs nothing. It
+  then places the longest journeys first, each on the least-loaded shard. Times come from
+  `tests/e2e/timings.json`, and a journey with no recorded time counts as 10 s. Each shard gets its
+  files plus one anchored `--test-name-pattern`. Every runner computes the same plan from the same
+  checkout. The plan, with each journey's expected seconds, is printed at the top of the shard's log.
+- **Regenerating the timings.** Every shard writes `junit.xml` into its evidence. Download a green
+  run's `e2e-evidence-*` artifacts, plus an `E2E Slow` run's for the slow journeys, and run
+  `bun scripts/ci/e2e-shards.ts timings <junit.xml>…`. Times measured in the reports replace the
+  recorded ones. Journeys the reports did not run keep their times, and journeys that no longer exist
+  are dropped. A local `FY_E2E_JUNIT=<file> task test:e2e` writes a report too, but a laptop's times
+  are not a runner's.
+- **`[slow]` journeys run in `E2E Slow`.** A journey whose title ends in `[slow]` waits on purpose,
+  for a minute or more: a relayed page left idle, a tab frozen past the relay's eviction grace, a
+  relay restarted again and again under a live page. `E2E` runs the `fast` tier, which is everything else.
+  `E2E Slow` runs the slow tier nightly, on every push to `main` (except docs and model catalogs), on
+  manual dispatch, and on a pull request that touches the code those journeys prove: `packages/relay`,
+  the daemon's relay, carrier and socket code, and the PWA's connection, transport and relay code (the
+  workflow lists the paths). Those pull requests get both workflows, and the slow journeys run in
+  parallel with the rest. Tag a journey `[slow]` only when its length is the point. A journey that is
+  slow because it polls or sleeps should wait on a condition instead.
+- **No build-once job, measured.** A shard spends about 40 s before its first journey. Of that, about
+  20 s is the Nix shell (substituted from cache.nixos.org, nothing built), about 2 s is `bun install`,
+  about 6 s is compiling every target, and about 3 s is the harness typecheck. A job that compiled
+  once and handed the binaries to the shards would save the 6 s per shard. It would also add a whole
+  job's startup, setup and artifact round trip in front of every shard, which is a net loss of wall
+  clock. The PWA bundle cannot be shared either: it is built inside the suite, against the loopback
+  relay directory's port, and takes about 5 s.
+- **One Chrome per journey, measured.** A headless Chrome launches and closes in about 0.5 s, so
+  sharing one browser across a shard would save a few seconds per shard. The cost would be isolation:
+  each journey launches with its own flags, user agent and virtual authenticator, and some journeys
+  close their own browser mid-journey. Most fixed sleeps that remain in the journeys are observation
+  windows for a negative assertion ("the prompt did not come back", "still serving two seconds
+  later"). Replacing one with "wait until" would pass at the first instant the condition holds and
+  weaken the assertion.
+- **Evidence is an artifact.** Each shard uploads `e2e-evidence-<shard>-<attempt>` (`E2E Slow`:
+  `e2e-slow-evidence-…`) with `if: always()`. It holds every screen the journeys reached at 390 px and
+  1280 px in both colour schemes, the per-step journey log, the relay ledgers, the JUnit report and the
+  shard's `result.json`. The summary reads only the small `e2e-result-<shard>-<attempt>` artifacts.
+  After "re-run failed jobs", it counts each shard's latest attempt.
+- **Advisory, and visibly so.** Each shard's journeys step runs with `continue-on-error: true`, so a
+  failing journey leaves the checks green. Failures still land in four places: the shard's job summary,
+  a warning annotation, the `E2E Journeys` tally with every failing test listed, and the evidence
+  artifact. When the tier becomes required, `continue-on-error` is removed in the same change, and the
+  summary fails when any shard's `result.json` reports a non-zero exit.
 - **It is NOT a required check yet.** The tier drives a real browser through Bun, and Bun 1.3 occasionally
   drops a child's pipes. The harness retries those failures, or bounds them and names them, but the real
   flake rate on hosted runners is unmeasured. It becomes a required branch-protection check after **two
@@ -107,8 +169,11 @@ pull requests that touch `packages/{pwa,daemon,relay,protocol,cli}` or the tier 
   product bug passes `softStep` a `knownWhen` pattern. While that exact failure reproduces, the step is
   logged as `KNOWN` with its bug note. Once it passes, the run fails with "remove the marker". Any other
   failure of that step is an ordinary failure.
-- About ten minutes on `ubuntu-latest`, with `timeout-minutes: 30` so a wedged browser cannot hold a runner
-  for six hours.
+- **About three and a half to four and a half minutes per pull request** on `ubuntu-latest`. Four
+  shards each run about 2–2.5 minutes of journeys after about 40 s of setup. `E2E Slow` takes about
+  five minutes; the idle journey alone runs for about four. Before the split, the tier was one job of
+  13–25 minutes, with 12–24 of them spent in the journeys. Each shard has `timeout-minutes: 20`
+  (`E2E Slow`: 25), so a wedged browser cannot hold a runner for six hours.
 
 ## One run per commit
 

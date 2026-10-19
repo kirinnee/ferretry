@@ -540,7 +540,7 @@ const FREEZE_SECONDS = Number(process.env.FY_E2E_FREEZE_SECONDS ?? '75');
 
 describe('a relayed session page that loses its connection', () => {
   it(
-    'should bring the page back unaided with no lost or duplicated send when the relay restarts',
+    'should bring the page back unaided with no lost or duplicated send when the relay restarts [slow]',
     () =>
       withJourney('restart', async ({ environment, rendezvous, page, session, mark }) => {
         const messageA = `reconnect-A-${mark}`;
@@ -651,7 +651,7 @@ describe('a relayed session page that loses its connection', () => {
   );
 
   it(
-    'should stay connected and send cleanly after sitting idle',
+    'should stay connected and send cleanly after sitting idle [slow]',
     () =>
       withJourney('idle', async ({ environment, rendezvous, page, session, fingerprint, mark }) => {
         const dials = async () => {
@@ -707,7 +707,7 @@ describe('a relayed session page that loses its connection', () => {
   );
 
   it(
-    'should recover unaided after the page was frozen past the relay eviction grace',
+    'should recover unaided after the page was frozen past the relay eviction grace [slow]',
     () =>
       withJourney('frozen', async ({ environment, teardown, rendezvous, page, session, mark }) => {
         const frozenAt = Date.now();

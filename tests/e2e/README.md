@@ -75,10 +75,20 @@ wrapper, `claude` or `codex` resolves into a real install fails with
 with `installFakeHarness(name)` (scenario-driven) or write into `harnessBin`.
 
 Run the tier with `task test:e2e`. It typechecks the harness and runs without a
-coverage ledger. CI runs it as the `E2E` workflow (`scripts/ci/e2e.sh`) on pull
-requests that touch the packages it drives, and uploads every journey's screens
-and step log as the `e2e-evidence-<attempt>` artifact. It is advisory until two weeks of
-runs have measured its flake rate, then a required check — see
+coverage ledger. CI runs it as the `E2E` workflow (`scripts/ci/e2e.sh`), split
+by test across four parallel shards and reported as one `E2E Journeys` status.
+Each shard uploads its journeys' screens, step log and JUnit report as the
+`e2e-evidence-<shard>-<attempt>` artifact. The tier is advisory until two weeks of
+runs have measured its flake rate, and then it becomes a required check. See
+[CI/CD](../../docs/standards/ci-cd/index.md#e2e-tier).
+
+**A journey that waits on purpose ends its title in `[slow]`.** Examples are a page
+left idle for minutes and a relay restarted again and again under a live page. Pull
+requests do not run these journeys. `E2E Slow` runs them nightly, on `main`, and on
+pull requests that touch the relay or connection code. Run one tier and one share
+locally with `FY_E2E_TIER=fast|slow|all FY_E2E_SHARD=i/N task test:e2e`.
+`scripts/ci/e2e-shards.ts` balances the shards by `timings.json`, and a new journey
+counts as 10 s until the timings are regenerated from a run's JUnit reports. See
 [CI/CD](../../docs/standards/ci-cd/index.md#e2e-tier).
 
 ## Browser journeys

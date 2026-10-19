@@ -44,21 +44,38 @@ export FY_E2E_EVIDENCE_ROOT="${evidence}/shots"
 export FY_E2E_SHOTS_ROOT="${evidence}/shots"
 export FY_E2E_JOURNEY_LOG="${evidence}/journeys.jsonl"
 export FY_E2E_RELAY_REPORT="${evidence}/relay-journey.md"
+export FY_E2E_RECONNECT_REPORT="${evidence}/relay-reconnect.md"
+export FY_E2E_JUNIT="${evidence}/junit.xml"
+
+# Which journeys this runner owns (scripts/ci/e2e-shards.ts). Unset, it is every journey, as before.
+tier="${FY_E2E_TIER:-all}"
+shard="${FY_E2E_SHARD:-1/1}"
 
 # Chrome's own stderr, through Playwright, so a browser that dies mid-journey says why in the log.
 export DEBUG="${DEBUG:-pw:browser}"
 
-echo "🧪 e2e tier — Chrome: $("${chrome}" --version), tmux: $(tmux -V), evidence: ${evidence}"
+echo "🧪 e2e tier (${tier}, shard ${shard}) — Chrome: $("${chrome}" --version), tmux: $(tmux -V), evidence: ${evidence}"
+started=${SECONDS}
 set +e
 ./scripts/test/run-e2e.sh 2>&1 | tee "${evidence}/tier.log"
 status=${PIPESTATUS[0]}
 set -e
+elapsed=$((SECONDS - started))
 
 # One line a reader sees without opening the log, and the tally the flake-rate window is measured by.
 passed="$(grep -Eo '^ *[0-9]+ pass$' "${evidence}/tier.log" | tail -1 | tr -dc '0-9')"
 failed="$(grep -Eo '^ *[0-9]+ fail$' "${evidence}/tier.log" | tail -1 | tr -dc '0-9')"
-summary="E2E: ${passed:-?} pass / ${failed:-?} fail (exit ${status})"
+# A shard the plan left empty ran nothing, and says so rather than "?".
+grep -q 'holds no journeys$' "${evidence}/tier.log" && passed="${passed:-0}" && failed="${failed:-0}"
+summary="E2E ${tier} ${shard}: ${passed:-?} pass / ${failed:-?} fail (exit ${status}, ${elapsed}s)"
 echo "${summary}"
+# What `scripts/ci/e2e-summary.sh` adds up into the one `E2E Journeys` status.
+{ grep -E '^\(fail\)' "${evidence}/tier.log" || true; } | sort -u | jq -R -s \
+  --arg tier "${tier}" --arg shard "${shard}" --arg passed "${passed:-}" --arg failed "${failed:-}" \
+  --argjson status "${status}" --argjson seconds "${elapsed}" \
+  '{tier: $tier, shard: $shard, passed: ($passed | tonumber? // null), failed: ($failed | tonumber? // null),
+    status: $status, seconds: $seconds, failures: (split("\n") | map(select(length > 0)))}' \
+  >"${evidence}/result.json"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "### ${summary}"
