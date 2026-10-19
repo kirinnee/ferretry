@@ -75,15 +75,15 @@ A block the grammar refuses renders as an ordinary escaped code fence, so a malf
 breaks the transcript. Nothing decodes, downloads or runs until the reader presses **Render**
 ([fy-render.md](fy-render.md#no-browser-decoder-runs-until-the-reader-asks)).
 
-| `type:`   | Payload / header                    | Renders as                                                                |
-| --------- | ----------------------------------- | ------------------------------------------------------------------------- |
-| `mermaid` | Mermaid source                      | a diagram, compiled in the sandbox frame, theme following light/dark      |
-| `svg`     | one `<svg>` document                | a picture through the measured `<img>` sink — never inline SVG            |
-| `html`    | one self-contained page             | an interactive page in an opaque-origin sandbox frame with its own policy |
-| `image`   | `src:` — or `mime:` + base64 inline | a picture; an https image needs CORS from its host, else a link card      |
-| `video`   | `src:`                              | the browser's native player (https plays directly)                        |
-| `audio`   | `src:`                              | the browser's native player (https plays directly)                        |
-| `pdf`     | `src:`                              | an Open / Download card; an https PDF is a link (no in-frame viewer)      |
+| `type:`   | Payload / header                    | Renders as                                                                   |
+| --------- | ----------------------------------- | ---------------------------------------------------------------------------- |
+| `mermaid` | Mermaid source                      | a diagram, compiled in the sandbox frame, theme following light/dark         |
+| `svg`     | one `<svg>` document                | a picture through the measured `<img>` sink — never inline SVG               |
+| `html`    | one self-contained page             | an interactive page in an opaque-origin sandbox frame with its own policy    |
+| `image`   | `src:` — or `mime:` + base64 inline | a picture; an https image needs CORS from its host, else a link row          |
+| `video`   | `src:`                              | the browser's native player (https plays directly)                           |
+| `audio`   | `src:`                              | the browser's native player (https plays directly)                           |
+| `pdf`     | `src:`                              | a file row with Open / Download; an https PDF is a link (no in-frame viewer) |
 
 `src:` is one of two things, and nothing else:
 
@@ -93,10 +93,10 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
   ([grants.md](grants.md) — `filesystem` _use_), the same as opening the file in the workspace. The
   bytes become a short-lived object URL; no daemon URL or credential ever reaches a media element.
   A workspace file is capped at 1 MiB, the daemon's per-file view limit; a larger one shows a
-  "too large" card.
-- **`https://…`** — a link the reader's browser fetches only after they press Render.
+  "too large" row.
+- **`https://…`** — a link the reader's browser fetches as soon as the block is near the screen.
 
-A file that is missing, unreadable, over its cap or denied to this reader renders a fallback card that
+A file that is missing, unreadable, over its cap or denied to this reader renders a file row that
 says which — never a broken player and never the denied bytes.
 
 ## Security
