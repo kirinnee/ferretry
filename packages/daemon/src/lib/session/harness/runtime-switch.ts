@@ -44,6 +44,8 @@ export interface CodexReasoningChoice {
 /** One model as the live Codex account advertises it. */
 export interface CodexModelChoice {
   readonly value: string;
+  /** The name Codex's own picker renders the model under — its `displayName`, which is not its id. */
+  readonly label?: string;
   readonly reasoningEfforts: readonly CodexReasoningChoice[];
   /** The effort the quick picker applies when a row is chosen directly. Absent
    *  when the account does not advertise one. */
@@ -57,7 +59,10 @@ export interface CodexModelCatalog {
 /** What the picker driver has to reach. */
 export interface CodexPickerTarget {
   readonly model: string;
-  readonly effort: string;
+  /** The name the picker's row carries when it is not the id (a catalog's "DeepSeek V4 Pro"). */
+  readonly rowName?: string;
+  /** Absent only for a model that advertises no reasoning level: choosing its row applies it whole. */
+  readonly effort?: string;
   /** The effort the quick row would apply instead of the requested one, when the
    *  account advertises it. NAMES the preset for a refusal message; it is never
    *  what decides whether to refuse — see {@link CodexPickerTarget.quickPickerAppliesPreset}. */
@@ -128,6 +133,8 @@ export type RuntimeSwitchPlan =
 
 const refused = (reason: string): RuntimeSwitchPlan => ({ kind: 'refused', reason });
 
+const TARGETED_SWITCH_NEEDS_BOTH = 'a targeted switch on this harness requires both a model and a reasoning effort';
+
 /**
  * Whether the quick picker will open the reasoning submenu for a model.
  *
@@ -153,10 +160,21 @@ function opensReasoningMenu(choice: CodexModelChoice): boolean {
  * predict — so it is marked {@link CodexPickerTarget.quickPickerAppliesPreset}
  * and the driver refuses it against the real screen.
  */
-function planCodexSwitch(model: string, effort: string, catalog: CodexModelCatalog | undefined): RuntimeSwitchPlan {
+function planCodexSwitch(
+  model: string,
+  effort: string | undefined,
+  catalog: CodexModelCatalog | undefined,
+): RuntimeSwitchPlan {
   if (catalog === undefined) return refused('the live Codex model catalog must be read before a targeted switch');
   const advertised = catalog.choices.find(choice => choice.value === model);
   if (advertised === undefined) return refused(`model ${model} is not in this Codex account's current catalog`);
+  const rowName = advertised.label === undefined || advertised.label === model ? {} : { rowName: advertised.label };
+  if (effort === undefined) {
+    // A model with no level to choose is applied whole by its row; one that has levels needs the one wanted.
+    return advertised.reasoningEfforts.length === 0
+      ? { kind: 'drive_picker', target: { model, ...rowName } }
+      : refused(TARGETED_SWITCH_NEEDS_BOTH);
+  }
   if (!advertised.reasoningEfforts.some(choice => choice.value === effort)) {
     return refused(`${effort} is not advertised for Codex model ${model}`);
   }
@@ -169,6 +187,7 @@ function planCodexSwitch(model: string, effort: string, catalog: CodexModelCatal
     kind: 'drive_picker',
     target: {
       model,
+      ...rowName,
       effort,
       ...(presetWouldWin && defaultEffort !== undefined ? { quickPickerDefaultEffort: defaultEffort } : {}),
       ...(presetWouldWin ? { quickPickerAppliesPreset: true as const } : {}),
@@ -223,8 +242,6 @@ export function planRuntimeSwitch(
   // choose — and claim nothing about the outcome, because the daemon did not make
   // it.
   if (!wantsModel && !wantsEffort) return { kind: 'inject', command: '/model', claimsOutcome: false };
-  if (!wantsModel || !wantsEffort) {
-    return refused('a targeted switch on this harness requires both a model and a reasoning effort');
-  }
-  return planCodexSwitch(model, effort, context.catalog);
+  if (!wantsModel) return refused(TARGETED_SWITCH_NEEDS_BOTH);
+  return planCodexSwitch(model, wantsEffort ? effort : undefined, context.catalog);
 }

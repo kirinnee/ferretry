@@ -36,6 +36,7 @@ import {
 import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
 import { FilesTab } from '../../components/files-tab.tsx';
+import { DialogCard, type HarnessDialogAnswerApi } from '../../features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard, type PermissionAnswerApi } from '../../features/permission-request/approval-card.tsx';
 import { ActionToast } from '../../features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../features/session-actions/actions-menu.tsx';
@@ -89,6 +90,7 @@ import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import type { LiveActivityFeed } from '../live-activity-feed.ts';
+import { answerHarnessDialog } from '../harness-dialogs.ts';
 import { answerPermissionRequest } from '../permission-requests.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
@@ -622,6 +624,11 @@ export function SessionChatPage({
     [client, connection, referenceFetch],
   );
 
+  const dialogApi = useMemo<HarnessDialogAnswerApi>(
+    () => ({ answer: async (daemon, at, answer) => await answerHarnessDialog(daemon, at, answer, referenceFetch) }),
+    [referenceFetch],
+  );
+
   const runAction = async (action: SessionAction): Promise<void> => {
     if (action === 'stop' && !confirmStop) {
       setConfirmStop(true);
@@ -701,6 +708,11 @@ export function SessionChatPage({
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
   // The tool-permission prompt the agent's pane is parked on, answerable only while the session is live.
   const permissionRequest = TERMINAL_STATUSES.has(session.state.status) ? undefined : session.state.permissionRequest;
+  // The harness's own dialog (hooks to review, a sign-in) — the same pane, so never beside a permission prompt.
+  const harnessDialog =
+    TERMINAL_STATUSES.has(session.state.status) || permissionRequest !== undefined
+      ? undefined
+      : session.state.harnessDialog;
   const compact = presentation === 'sheet';
   const chatSurface = useRef<HTMLDivElement | null>(null);
   useChatScrollbarGutter(chatSurface, session.config.id);
@@ -1155,6 +1167,17 @@ export function SessionChatPage({
               key={`${connection.daemonId}:${session.config.id}:${permissionRequest.id}`}
               onSettled={onRefresh}
               request={permissionRequest}
+              scope={scope}
+            />
+          )}
+          {harnessDialog === undefined || !canControl ? null : (
+            <DialogCard
+              agentName={sessionDisplayName(session)}
+              api={dialogApi}
+              daemon={connection}
+              key={`${connection.daemonId}:${session.config.id}:${harnessDialog.id}`}
+              dialog={harnessDialog}
+              onSettled={onRefresh}
               scope={scope}
             />
           )}

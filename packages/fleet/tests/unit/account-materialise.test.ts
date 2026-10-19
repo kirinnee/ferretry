@@ -578,6 +578,20 @@ describe('materialiseFleet', () => {
     should(wrapperOf(result, 'claude-default')).endWith('exec claude "$@"\n');
   });
 
+  it('should have each wrapper exec the harness path the caller resolved, per harness', () => {
+    // Arrange
+    const model = modelOf();
+
+    // Act
+    const located = plan(model, { harnessCommands: { claude: '/opt/h/claude' } });
+    const unlocated = plan(model);
+
+    // Assert
+    should(wrapperOf(located, 'claude-default')).containEql(`exec '/opt/h/claude' `);
+    should(wrapperOf(located, 'codex-default')).containEql('exec codex ');
+    should(wrapperOf(unlocated, 'claude-default')).containEql('exec claude ');
+  });
+
   it('should pool every harness, every runtime of it included', () => {
     // Act / Assert
     should(plan(modelOf()).sharedHistoryRequests).eql([
@@ -982,6 +996,103 @@ describe('materialiseFleet', () => {
       // Assert
       should(result.manifest.accounts[0]?.models[0]).match({ id: 'glm-5.3', available: false });
       should(result.manifest.accounts[0]?.defaultModel).equal('glm-5.3-flash');
+    });
+
+    describe("a Codex runtime's own picker", () => {
+      const deepseekModel = (settings?: Record<string, unknown>) =>
+        modelOf({
+          credentials: {
+            'claude-you': { harness: 'claude', store: 'host' },
+            'codex-work': {
+              harness: 'codex',
+              store: 'environment',
+              preset: 'deepseek',
+              env: { DEEPSEEK_API_KEY: '${secret:DEEPSEEK_API_KEY}' },
+              codexProvider: {
+                id: 'deepseek',
+                name: 'DeepSeek',
+                baseUrl: 'https://api.deepseek.com/',
+                keyVariable: 'DEEPSEEK_API_KEY',
+                model: 'deepseek-flash',
+              },
+            },
+          },
+          ...(settings === undefined
+            ? {}
+            : {
+                components: { ...COMPONENTS, settings: { own: { harness: 'codex', file: 'own.toml' } } },
+                profiles: { default: { layers: [...DEFAULT_LAYERS, 'settings/own'] } },
+              }),
+        });
+      const CATALOG_FILE = `${HOME_B}/.fy/codex-model-catalog.json`;
+
+      it("should be given the login's catalog models as the list it offers, from a file Ferretry owns", () => {
+        // Act
+        const result = plan(deepseekModel(), { modelCatalogs: sources });
+
+        // Assert — the file lists the catalog's models and nothing of OpenAI's
+        const file = only(result, CATALOG_FILE);
+        should(file).match({ kind: 'file', mode: 0o600 });
+        const catalog = JSON.parse((file as { content: string }).content) as {
+          models: { slug: string; display_name: string; priority: number }[];
+        };
+        // the model the runtime launches with comes first: Codex calls its first model the default
+        should(catalog.models.map(model => [model.slug, model.display_name, model.priority])).eql([
+          ['deepseek-flash', 'DeepSeek Flash', 1],
+          ['deepseek-v4-pro', 'DeepSeek V4 Pro', 2],
+        ]);
+        should(wrapperOf(result, 'codex-default')).containEql(`'-c' 'model_catalog_json="${CATALOG_FILE}"'`);
+        // The manifest says the runtime has one, so a machine that has none republishes.
+        should(result.manifest.accounts.find(account => account.displayName === 'codex-default')?.codexCatalog).equal(
+          1,
+        );
+        should(
+          result.manifest.accounts.find(account => account.displayName === 'claude-default')?.codexCatalog,
+        ).be.undefined();
+        // The sweep of Ferretry's corner keeps it.
+        should(
+          result.operations.find(
+            operation => operation.kind === 'prune-directory' && operation.path === `${HOME_B}/.fy`,
+          ),
+        ).match({ keep: [MATERIALISED_RECORD_FILE, 'codex-model-catalog.json'] });
+      });
+
+      it("should leave Codex's own list alone for a catalog of models Codex ships, and for a sign-in", () => {
+        // Act — a sign-in Codex login reads OpenAI's catalog
+        const result = plan(modelOf(), { modelCatalogs: sources });
+
+        // Assert
+        should(at(result, CATALOG_FILE)).be.empty();
+        should(wrapperOf(result, 'codex-default')).not.containEql('model_catalog_json');
+        should(result.manifest.accounts.find(account => account.displayName === 'codex-default')).not.have.property(
+          'codexCatalog',
+        );
+      });
+
+      it('should write no catalog on a machine that reads none, nor for a Claude runtime', () => {
+        // Act
+        const result = plan(deepseekModel());
+
+        // Assert
+        should(at(result, CATALOG_FILE)).be.empty();
+        should(wrapperOf(result, 'codex-default')).not.containEql('model_catalog_json');
+        should(wrapperOf(result, 'claude-default')).not.containEql('model_catalog_json');
+      });
+
+      it('should leave a catalog the person set in their own Codex settings as it is', () => {
+        // Act
+        const result = plan(deepseekModel({}), {
+          modelCatalogs: sources,
+          bodies: { settings: { own: { model_catalog_json: '/home/person/models.json' } } },
+        });
+
+        // Assert
+        should(at(result, CATALOG_FILE)).be.empty();
+        should(wrapperOf(result, 'codex-default')).not.containEql('model_catalog_json');
+        should(only(result, `${HOME_B}/config.toml`)).match({
+          layers: [{ settings: { model_catalog_json: '/home/person/models.json' } }],
+        });
+      });
     });
   });
 });

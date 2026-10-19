@@ -650,6 +650,35 @@ describe('auditedRoutes', () => {
     ]);
   });
 
+  it('should audit answering a harness dialog as terminal input on the session, never with the choice', async () => {
+    // Arrange
+    const { journal, routes } = decorated({});
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s-1/dialog',
+        headers: ADMIN,
+        loopback: true,
+        body: JSON.stringify({ kind: 'choice', dialogId: '0123456789abcdef', number: 2 }),
+      }),
+    );
+
+    // Assert
+    should(records(journal)).deepEqual([
+      {
+        at: AT,
+        event: 'terminal.input',
+        actor: { kind: 'host' },
+        subject: 's-1',
+        outcome: 'succeeded',
+        detail: { mode: 'dialog', status: 200 },
+      },
+    ]);
+  });
+
   it('should record a refusal and a fault, and pass each through untouched', async () => {
     // Arrange
     const { journal, routes } = decorated({

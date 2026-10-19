@@ -15,6 +15,7 @@ import type { FleetSnapshot } from './fleet-store.ts';
 import type { DeviceNotificationFilterPreferences } from './notification-filter.ts';
 import { shouldShowNotification } from './notification-filter.ts';
 import type { NotificationPreferences } from './notification-preferences.ts';
+import { harnessDialogNotice } from './harness-dialogs.ts';
 import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
 import { permissionSentence, shortPermissionWhat } from './permission-requests.ts';
 
@@ -44,16 +45,19 @@ export interface TurnBoundary {
   readonly at: string;
   /** The permission prompt a `needs-input` boundary is parked on, by its request id. */
   readonly permission?: string;
+  /** The harness dialog a `needs-input` boundary is parked on, by its dialog id. */
+  readonly dialog?: string;
 }
 
 /** The boundary a view carries, or `undefined` from a daemon that predates the turn watcher. */
 export const turnBoundary = (view: SessionView): TurnBoundary | undefined => {
-  const { turnState, turnStateAt, permissionRequest } = view.state;
+  const { turnState, turnStateAt, permissionRequest, harnessDialog } = view.state;
   if (turnState === undefined) return undefined;
   return {
     state: turnState,
     at: turnStateAt ?? '',
     ...(permissionRequest === undefined ? {} : { permission: permissionRequest.id }),
+    ...(harnessDialog === undefined ? {} : { dialog: harnessDialog.id }),
   };
 };
 
@@ -65,9 +69,9 @@ export const turnBoundary = (view: SessionView): TurnBoundary | undefined => {
  * working → your-turn → working cycle that fell between two polls still shows as a new `your-turn`
  * boundary rather than being missed. Never while working; never on first sight.
  *
- * A NEW PERMISSION PROMPT is a new ask even on an unchanged boundary: a session that is allowed one
- * command and stops at the next one may never leave `needs-input` between two reads, so a changed
- * request id is notified as a question of its own. A prompt that merely went away is not an ask.
+ * A NEW PERMISSION PROMPT OR HARNESS DIALOG is a new ask even on an unchanged boundary: a session that is
+ * allowed one command and stops at the next one may never leave `needs-input` between two reads, so a
+ * changed request or dialog id is notified as a question of its own. One that merely went away is not an ask.
  */
 export const classifyTurnTransition = (
   prev: TurnBoundary | undefined,
@@ -75,7 +79,8 @@ export const classifyTurnTransition = (
 ): SessionNotifyKind | null => {
   if (prev === undefined || next === undefined) return null;
   const sameBoundary = prev.state === next.state && prev.at === next.at;
-  if (sameBoundary && (next.permission === undefined || next.permission === prev.permission)) return null;
+  const ask = next.permission ?? next.dialog;
+  if (sameBoundary && (ask === undefined || ask === (prev.permission ?? prev.dialog))) return null;
   if (next.state === 'needs-input') return 'question';
   return next.state === 'your-turn' ? 'attention' : null;
 };
@@ -210,6 +215,9 @@ const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
         const agent = displayCallsign(view.config.teammate) || 'The agent';
         return `${permissionSentence(agent, permission, shortPermissionWhat(permission))} — Allow?`;
       }
+      const dialog = view.state.harnessDialog;
+      if (dialog !== undefined)
+        return harnessDialogNotice(displayCallsign(view.config.teammate) || 'The agent', dialog);
       const question = view.state.pendingQuestion?.questions[0]?.question;
       if (question)
         return question.length > QUESTION_PREVIEW_LEN ? `${question.slice(0, QUESTION_PREVIEW_LEN - 1)}…` : question;
@@ -250,7 +258,11 @@ const notificationEventParts = (
     view.state.turn,
     // The boundary itself, so each turn end is its own event and never collapsed into the last one.
     kind === 'question'
-      ? (view.state.permissionRequest?.id ?? view.state.pendingQuestion?.toolUseId ?? view.state.turnStateAt ?? '')
+      ? (view.state.permissionRequest?.id ??
+        view.state.harnessDialog?.id ??
+        view.state.pendingQuestion?.toolUseId ??
+        view.state.turnStateAt ??
+        '')
       : kind === 'attention'
         ? (view.state.turnStateAt ?? '')
         : '',

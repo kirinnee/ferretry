@@ -56,16 +56,27 @@ const catalogFacts = (model: CoreAccountModel): Pick<RuntimeModelChoice, 'tier' 
  * What one Codex account advertised, restated as the wire catalog. The app-server's list is the only
  * one Codex's own picker can switch to, so it stays the list; where the account's catalog describes an
  * advertised id, the choice gains that model's tier and label for the picker to group by.
+ *
+ * A runtime on a third-party provider is launched with a model catalog FILE of its login's catalog
+ * (docs/model-catalog.md), so for it the app-server's list IS the catalog's, in the catalog's order.
+ * Codex marks the first model it lists as the default; the account says which one the runtime launches
+ * with, and when that model is on the list it is the one marked.
  */
 export function codexRuntimeCatalog(
   choices: readonly RuntimeModelChoice[],
-  account?: Pick<CoreAccount, 'models' | 'modelCatalog'>,
+  account?: Pick<CoreAccount, 'models' | 'modelCatalog'> & Partial<Pick<CoreAccount, 'defaultModel'>>,
 ): RuntimeModelCatalog {
   const described = new Map((account?.models ?? []).map(model => [model.id, model]));
+  const launchesWith = choices.find(choice => choice.value === account?.defaultModel)?.value;
   return {
     harness: 'codex',
     source: 'codex-app-server',
-    choices: choices.map(choice => {
+    choices: choices.map(advertised => {
+      const { isDefault: _advertisedDefault, ...rest } = advertised;
+      const choice =
+        launchesWith === undefined
+          ? advertised
+          : { ...rest, ...(advertised.value === launchesWith ? { isDefault: true as const } : {}) };
       const model = described.get(choice.value);
       return model === undefined
         ? choice
@@ -75,17 +86,25 @@ export function codexRuntimeCatalog(
   };
 }
 
-/** The model and effort values a Codex catalog offers, for a switch that must name an exact target. */
-export function codexSwitchContext(catalog: RuntimeModelCatalog): {
+/**
+ * The model and effort values a Codex catalog offers, for a switch that must name an exact target.
+ *
+ * Read from what the app-server ADVERTISED, not from the restated catalog: `label` is the name Codex's
+ * own picker renders the model under, and the driver finds the model's row by it. The catalog's friendlier
+ * label is for the browser — Codex's row for the same model may be spelled differently ("GPT-6-Astra").
+ */
+export function codexSwitchContext(choices: readonly RuntimeModelChoice[]): {
   readonly choices: readonly {
     readonly value: string;
+    readonly label: string;
     readonly reasoningEfforts: readonly { readonly value: string }[];
     readonly defaultReasoningEffort?: string;
   }[];
 } {
   return {
-    choices: catalog.choices.map(choice => ({
+    choices: choices.map(choice => ({
       value: choice.value,
+      label: choice.label,
       reasoningEfforts: choice.reasoningEfforts.map(effort => ({ value: effort.value })),
       ...(choice.defaultReasoningEffort === undefined ? {} : { defaultReasoningEffort: choice.defaultReasoningEffort }),
     })),

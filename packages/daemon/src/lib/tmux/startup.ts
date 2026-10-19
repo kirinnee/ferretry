@@ -12,6 +12,7 @@
  * dialog whose affirmative path is READ OFF THE PANE. Nothing here guesses a key count, and a
  * recognised dialog whose options cannot be parsed returns nothing rather than a blind Enter.
  */
+import { parseHarnessDialog } from './harness-dialog.ts';
 
 /** A dialog whose affirmative path is known, and the exact keys that take it. */
 export interface StartupDialogAction {
@@ -22,7 +23,8 @@ export interface StartupDialogAction {
     | 'api-key'
     | 'onboarding'
     | 'resume-menu'
-    | 'auto-default-nudge';
+    | 'auto-default-nudge'
+    | 'codex-update';
   readonly keys: readonly string[];
 }
 
@@ -113,6 +115,25 @@ export function autoDefaultNudgeAction(pane: string): StartupDialogAction | unde
   return keys.length === 0 ? undefined : { kind: 'auto-default-nudge', keys };
 }
 
+/**
+ * Codex's "Update available" prompt, answered SKIP.
+ *
+ * Skip installs nothing and records nothing — measured on 0.145.0 and 0.156.1: `version.json` keeps
+ * `dismissed_version` empty, so the next launch asks again and a person at the terminal still sees it.
+ * "Update now" would run a package manager on the owner's machine and "Skip until next version" would
+ * write their choice, so neither is ever picked. Arrows, then Enter: the update prompt acts on a digit
+ * the moment it is pressed, but its rows are read off the pane like every other dialog's.
+ */
+export function codexUpdateAction(pane: string): StartupDialogAction | undefined {
+  const dialog = parseHarnessDialog(pane);
+  if (dialog?.kind !== 'update' || dialog.harness !== 'codex' || dialog.selected === undefined) return undefined;
+  const skip = dialog.options.find(option => option.label.toLowerCase() === 'skip');
+  if (skip === undefined) return undefined;
+  const distance = skip.number - dialog.selected;
+  const move = distance > 0 ? 'Down' : 'Up';
+  return { kind: 'codex-update', keys: [...Array.from({ length: Math.abs(distance) }, () => move), 'Enter'] };
+}
+
 /** Which of the recognised trust/confirmation dialogs the frame is showing, if any. */
 function dialogKind(lower: string): StartupDialogAction['kind'] | undefined {
   if (lower.includes('do you trust the contents of this directory')) return 'codex-trust';
@@ -147,6 +168,8 @@ export function startupDialogAction(pane: string, options: StartupDialogOptions 
   // Its rows carry no numbers, so it has its own row parser rather than the affirmative search below.
   const nudge = autoDefaultNudgeAction(pane);
   if (nudge !== undefined) return nudge;
+  const update = codexUpdateAction(pane);
+  if (update !== undefined) return update;
   const lower = pane.toLowerCase();
   // The theme picker has no wrong answer: every row is a text style, and the harness proceeds on any
   // of them. It is the one dialog that needs no row search.

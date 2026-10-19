@@ -40,6 +40,7 @@ describe('readUserMessage', () => {
       from: {
         name: 'torrey',
         sessionId: 'mvb0sw7d-27f71326',
+        kind: 'message',
         replyExpected: false,
         note: 'No reply is required; torrey has carried on. Reply with `fy send torrey "…"` if useful.',
       },
@@ -48,12 +49,32 @@ describe('readUserMessage', () => {
   });
 
   test("reads whatever the daemon's own writer produces, parked or not", () => {
-    const preamble = peerEnvelopePreamble({ name: 'kamila', sessionId: 's2', replyExpected: true, clientName: 'fy' });
+    const preamble = peerEnvelopePreamble({ name: 'kamila', sessionId: 's2', kind: 'question', clientName: 'fy' });
     const message = readUserMessage(`<pasted_content id="x">\n${preamble}Is CI green?\n</pasted_content>`);
     expect(message).toMatchObject({
       kind: 'peer',
-      from: { name: 'kamila', replyExpected: true },
+      from: { name: 'kamila', kind: 'question', replyExpected: true },
       body: 'Is CI green?',
+    });
+  });
+
+  test('reads a Codex record, which carries the banner bare, the same way', () => {
+    const preamble = peerEnvelopePreamble({
+      name: 'tomi',
+      sessionId: 'mveq0r0r-ddd75d7b',
+      kind: 'reply',
+      clientName: 'fy',
+    });
+    expect(readUserMessage(`${preamble}Hello from home-manager-fd.`)).toEqual({
+      kind: 'peer',
+      from: {
+        name: 'tomi',
+        sessionId: 'mveq0r0r-ddd75d7b',
+        kind: 'reply',
+        replyExpected: false,
+        note: 'No reply needed. To reply: fy send tomi "<reply>"',
+      },
+      body: 'Hello from home-manager-fd.',
     });
   });
 

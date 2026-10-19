@@ -537,6 +537,22 @@ describe('the setup.import executor', () => {
     should(plan?.manifest.accounts[0]?.modelCatalog?.id).equal('anthropic');
   });
 
+  it('should have an imported wrapper exec the harness path this daemon located', async () => {
+    // Arrange
+    const { service, applied } = world();
+
+    // Act
+    await importOnce(service);
+
+    // Assert — the located Claude, not whichever `claude` a session's PATH puts first
+    const plan = applied[0]?.plan as { operations: { kind: string; content?: string }[] } | undefined;
+    const scripts = (plan?.operations ?? []).flatMap(operation =>
+      operation.content?.includes('\nexec ') ? [operation.content] : [],
+    );
+    should(scripts.length).be.above(0);
+    should(scripts.every(script => script.includes("\nexec '/usr/bin/claude' "))).be.true();
+  });
+
   it('should refuse to apply anything that was not described first, or changed since', async () => {
     const { service, state } = world();
     await catalogRefusal(service.executors.setup.execute(IMPORT()), 'fleet_change_stale');

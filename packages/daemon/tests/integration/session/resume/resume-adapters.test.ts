@@ -399,6 +399,39 @@ describe('tmux resume launcher', () => {
     should(launches[1]?.indexOf('-e')).be.below(launches[1]?.indexOf('/opt/fleet/bin/agent') ?? -1);
   });
 
+  it('should relaunch with the hypermedia default of the session mode, and let a stored switch win', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const revive = async (mode: 'auto' | 'interactive' | undefined, env: Record<string, string>) => {
+      await new TmuxResumeLauncher(
+        controller,
+        async () => ({
+          tmuxSession: 'fy-session-1',
+          cwd: '/workspace/project',
+          command: ['/opt/fleet/bin/agent'],
+          env,
+          ...(mode === undefined ? {} : { mode }),
+        }),
+        new TmuxPaneDelivery(controller, async () => {}),
+      ).relaunch(ID);
+    };
+
+    // Act
+    port.alive = false;
+    await revive('interactive', {});
+    await revive('auto', {});
+    await revive(undefined, {});
+    await revive('auto', { FY_HYPERMEDIA: '1' });
+
+    // Assert
+    const launches = port.calls.filter(call => call[0] === 'new-session');
+    should(launches[0]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+    should(launches[1]).containDeep(['-e', 'FY_HYPERMEDIA=0']);
+    should(launches[2]).containDeep(['-e', 'FY_HYPERMEDIA=0']);
+    should(launches[3]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+  });
+
   it('should relaunch with the argv built at launch rather than the one recorded', async () => {
     // A revive used to REPLAY the recorded argv, so whatever the daemon learned to put on a launch
     // since — a Read rule, the model the owner switched to — never reached the replacement process.

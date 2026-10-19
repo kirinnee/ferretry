@@ -93,6 +93,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
         (await this.accountEnvironment?.forWrapper(record.config.agent)) ?? {},
         await this.environment.read(record.config.id),
       ),
+      record.config.mode,
       await this.media?.(record.config.id),
     );
     // Before the pane, not after: an access token that has aged out is renewed while there is still

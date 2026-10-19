@@ -331,15 +331,19 @@ describe('session lifecycle policy', () => {
     const contradicted = sessionPaneEnvironment(id, { FY_SESSION_ID: 'somebody-else' });
 
     // Assert
-    should(withNothingStored).deepEqual({ FY_HYPERMEDIA: '1', FY_SESSION_ID: 'session-1' });
+    should(withNothingStored).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'session-1' });
     should(beside).deepEqual({
-      FY_HYPERMEDIA: '1',
+      FY_HYPERMEDIA: '0',
       FY_SESSION_BOARD_CAPABILITY: 'secret',
       TASK_BOARD: 'board-7',
       FY_SESSION_ID: 'session-1',
     });
-    should(contradicted).deepEqual({ FY_HYPERMEDIA: '1', FY_SESSION_ID: 'session-1' });
-    // Hypermedia defaults on, and an owner's stored switch wins over the default.
+    should(contradicted).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'session-1' });
+    // Hypermedia defaults by mode — on for interactive, off for auto or unknown — and a stored switch wins.
+    should(sessionPaneEnvironment(id, {}, 'interactive')).have.property('FY_HYPERMEDIA', '1');
+    should(sessionPaneEnvironment(id, {}, 'auto')).have.property('FY_HYPERMEDIA', '0');
+    should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '1' }, 'auto')).have.property('FY_HYPERMEDIA', '1');
+    should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive')).have.property('FY_HYPERMEDIA', '0');
     should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' })).deepEqual({
       FY_HYPERMEDIA: '0',
       FY_SESSION_ID: 'session-1',
@@ -348,7 +352,12 @@ describe('session lifecycle policy', () => {
     should(SESSION_ID_VARIABLE).equal('FY_SESSION_ID');
     // The media folder is derived like the id: a stored value cannot redirect it.
     should(
-      sessionPaneEnvironment(id, { FY_MEDIA_DIR: '/elsewhere' }, '/home/me/.fy/state/sessions/session-1/media'),
+      sessionPaneEnvironment(
+        id,
+        { FY_MEDIA_DIR: '/elsewhere' },
+        'interactive',
+        '/home/me/.fy/state/sessions/session-1/media',
+      ),
     ).deepEqual({
       FY_HYPERMEDIA: '1',
       FY_MEDIA_DIR: '/home/me/.fy/state/sessions/session-1/media',

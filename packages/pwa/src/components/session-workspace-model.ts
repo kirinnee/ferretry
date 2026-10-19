@@ -2,6 +2,7 @@ import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
 
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
+import { projectDeliveries } from '../lib/peer-delivery.ts';
 import { readUserMessage } from '../lib/user-message.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
 import { fieldHash } from './session-chat-model.ts';
@@ -232,9 +233,14 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
  * remains an explicit integration gap.
  *
  * Text before the first record header is not a record at all; like every other piece of daemon
- * bookkeeping it is left out of the conversation. `now` dates the records' wall clocks.
+ * bookkeeping it is left out of the conversation. `now` dates the records' wall clocks, and `clientName` is
+ * the CLI a ferret runs to message another (`peer-delivery.ts`).
  */
-export const transcriptEntriesFromLog = (text: string, now: number = Date.now()): readonly TranscriptEntry[] => {
+export const transcriptEntriesFromLog = (
+  text: string,
+  now: number = Date.now(),
+  clientName = 'fy',
+): readonly TranscriptEntry[] => {
   if (text.trim() === '') return [];
   const records: LogRecord[] = [];
   let current: { clock?: string; role: LogRecord['role']; kind: string; lines: string[] } | null = null;
@@ -261,7 +267,7 @@ export const transcriptEntriesFromLog = (text: string, now: number = Date.now())
   }
   flush();
 
-  return projectRecords(records, now);
+  return projectDeliveries(projectRecords(records, now), clientName);
 };
 
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {

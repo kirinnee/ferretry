@@ -293,6 +293,20 @@ const serviceCases: SchemaCase[] = [
 ];
 
 describe('session schemas', () => {
+  it('should resolve hypermedia from the switch, else the mode default', () => {
+    // Arrange
+    const config = (mode: 'auto' | 'interactive', hypermedia?: boolean) => ({
+      mode,
+      ...(hypermedia === undefined ? {} : { hypermedia }),
+    });
+
+    // Act + Assert
+    should(session.sessionHypermediaEnabled(config('interactive'))).be.true();
+    should(session.sessionHypermediaEnabled(config('auto'))).be.false();
+    should(session.sessionHypermediaEnabled(config('auto', true))).be.true();
+    should(session.sessionHypermediaEnabled(config('interactive', false))).be.false();
+  });
+
   it('should round-trip every public session schema', () => {
     // Arrange
     const cases = sessionCases;

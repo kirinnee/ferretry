@@ -581,3 +581,97 @@ describe('the Codex model picker drive', () => {
     should(failure).match({ message: /\(last: unknown screen\)/u });
   });
 });
+
+describe('the Codex model picker on a login catalog (captured from Codex 0.156.1)', () => {
+  // The rows are the models' DISPLAY names; the ids never appear on screen.
+  const CATALOG_LIST = [
+    'Select Model and Effort',
+    '',
+    '› 1. DeepSeek V4 Pro (current)  Best · 1M context',
+    '  2. DeepSeek Flash             Fast · 1M context',
+    '  3. Kimi K3                    Balanced',
+    '',
+    '  enter select · esc back',
+  ].join('\n');
+  const CATALOG_LEVELS = [
+    'Select Reasoning Level for DeepSeek Flash',
+    '',
+    '  1. Low             Fast responses with lighter reasoning',
+    '› 2. High (default)  Greater reasoning depth for complex problems',
+    '',
+    '  enter default · s session · esc back',
+  ].join('\n');
+
+  it('should find a model by the name its row carries, then its level', async () => {
+    // Arrange
+    const transport = new ScriptedPicker([
+      { visible: CATALOG_LIST },
+      { visible: CATALOG_LEVELS },
+      { visible: IDLE, promptReady: true },
+    ]);
+
+    // Act
+    await driver(transport).drive({ model: 'deepseek-flash', rowName: 'DeepSeek Flash', effort: 'high' });
+
+    // Assert
+    should(transport.keys.map(sent => [sent.key, sent.expected.row.name])).deepEqual([
+      ['2', 'DeepSeek Flash'],
+      ['2', 'High'],
+    ]);
+  });
+
+  it('should fall back to the id when the row is spelled as the id', async () => {
+    // Arrange — an older Codex that renders ids
+    const transport = new ScriptedPicker([
+      { visible: ['Select Model and Effort', '  1. deepseek-flash'].join('\n') },
+      { visible: IDLE, promptReady: true },
+    ]);
+
+    // Act
+    await driver(transport).drive({ model: 'deepseek-flash', rowName: 'DeepSeek Flash' });
+
+    // Assert
+    should(transport.keys.map(sent => sent.expected.row.name)).deepEqual(['deepseek-flash']);
+  });
+
+  it('should apply a model with no levels from its row alone', async () => {
+    // Arrange
+    const transport = new ScriptedPicker([{ visible: CATALOG_LIST }, { visible: IDLE, promptReady: true }]);
+
+    // Act
+    await driver(transport).drive({ model: 'kimi-k3', rowName: 'Kimi K3' });
+
+    // Assert
+    should(transport.keys.map(sent => sent.key)).deepEqual(['3']);
+  });
+
+  it('should refuse to guess a level when Codex asks for one the switch never named', async () => {
+    // Arrange
+    const transport = new ScriptedPicker([{ visible: CATALOG_LIST }, { visible: CATALOG_LEVELS }]);
+
+    // Act
+    const failure = await driver(transport)
+      .drive({ model: 'deepseek-flash', rowName: 'DeepSeek Flash' })
+      .catch(error => error);
+
+    // Assert
+    should(failure).match({ message: 'Codex asked for a reasoning level for deepseek-flash, which was not named' });
+    should(transport.keys.map(sent => sent.key)).deepEqual(['2']);
+  });
+
+  it('should judge the quick picker by the same row name', async () => {
+    // Arrange — the quick picker lists the model under its display name
+    const screen = parseCodexPickerScreen(['Select Model', '  1. DeepSeek Flash', '  2. All models'].join('\n'));
+
+    // Assert
+    should(
+      quickPickerRefusal(screen, {
+        model: 'deepseek-flash',
+        rowName: 'DeepSeek Flash',
+        effort: 'max',
+        quickPickerAppliesPreset: true,
+        quickPickerDefaultEffort: 'high',
+      }),
+    ).match(/quick picker can only apply its default high reasoning level/u);
+  });
+});

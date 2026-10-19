@@ -10,6 +10,7 @@ import {
   isDirectPayload,
   isFileBackedQueue,
   parseSessionSendSettings,
+  peerMessageKind,
   peerPreamble,
   queuedPayloadInstruction,
   routeSend,
@@ -122,20 +123,33 @@ describe('routeSend', () => {
 });
 
 describe('peerPreamble', () => {
-  it('names the callsign and the session, and states the unblocking command when a reply is awaited', () => {
-    const banner = peerPreamble({ id: ID, teammate: 'loge' }, true, 'fy');
-    should(banner).containEql('[peer message from teammate loge (session session-1) — not from the human lead]');
-    should(banner).containEql('fy send loge "<your reply>"');
-    should(banner).containEql('PARKED');
+  it('names the ferret and the session, and states the unblocking command when an answer is awaited', () => {
+    const banner = peerPreamble({ id: ID, teammate: 'loge' }, 'question', 'fy');
+    should(banner).containEql('[question from ferret loge (session session-1) — not from the owner]');
+    should(banner).containEql('loge is waiting for your answer');
+    should(banner).containEql('fy send loge "<reply>"');
     should(banner.endsWith('\n\n')).be.true();
   });
 
   it('never nags a receiver about a note that wants nothing back', () => {
-    const banner = peerPreamble({ id: ID }, false, 'fy');
-    should(banner).containEql('No reply is required');
-    should(banner).not.containEql('PARKED');
+    const banner = peerPreamble({ id: ID }, 'message', 'fy');
+    should(banner).containEql('No reply needed');
+    should(banner).not.containEql('waiting');
     // With no callsign the session id stands in for it, so the reply command still addresses somebody.
     should(banner).containEql('fy send session-1');
+  });
+});
+
+describe('peerMessageKind', () => {
+  it('calls a message the recipient is parked on a reply, even when it asks something back', () => {
+    should(peerMessageKind({ waiting: { peer: 'p1' } }, 'p1', false)).equal('reply');
+    should(peerMessageKind({ waiting: { peer: 'p1' } }, 'p1', true)).equal('reply');
+  });
+
+  it('calls anything else a question when its sender parks, and a note otherwise', () => {
+    should(peerMessageKind({ waiting: { peer: 'someone-else' } }, 'p1', true)).equal('question');
+    should(peerMessageKind(undefined, 'p1', false)).equal('message');
+    should(peerMessageKind({}, 'p1', false)).equal('message');
   });
 });
 

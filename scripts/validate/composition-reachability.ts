@@ -381,10 +381,10 @@ function resolveSpecifier(importer: string, specifier: string, root: string): st
   if (!specifier.startsWith('.')) return null;
   const base = resolve(root, dirname(importer), specifier);
   if (base.endsWith('.json')) return null;
-  // A bundled asset (the terminal's font, a provider preset imported as text) is a URL or a string the
+  // A bundled asset (the terminal's font, a provider preset or a prompt imported as text) is a URL or a string the
   // bundler hands back, not a module with exports or a composition root of its own — there is nothing
   // in it to reach. It must still exist. (`.pub` is the hosted app's release key, compiled into the daemon.)
-  if (/\.(woff2?|png|svg|webp|yaml|pub)$/u.test(base)) {
+  if (/\.(woff2?|png|svg|webp|yaml|txt|pub)$/u.test(base)) {
     if (!existsSync(base)) return fail(`cannot resolve '${specifier}' imported by ${importer}`);
     return null;
   }
