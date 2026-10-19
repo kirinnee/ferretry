@@ -1,131 +1,311 @@
 /* ---- fy-render -------------------------------------------------------------
-   A quiet instrument panel inside the transcript, not a card competing with it.
+   An illustration that reads as part of the message, not as a card inside it.
 
-   Everything geometric here is a token the rest of the shell already uses, and
-   the block deliberately borrows `.kt-rich-file*` and `.kt-fs-*` wholesale from
-   `files.css`: the source and error states of an illustration should read as the
-   same surface as every other code and note surface in the app, because they
-   are the same thing. What is added below is only what those classes cannot
-   know — the illustration plane's proportions, and the fullscreen overlay.
-
-   NO TOUCH-TARGET OVERRIDE. `.kt-btn--sm` already resolves its height through
-   `max(--control-h-sm-desktop, --target-floor)`, and `--target-floor` is 44px on
-   a coarse pointer. Restating 44px here would inflate desktop density for no
-   gain and put the number in a second place. */
+   The owner's decision (`docs/fy-render.md`, "Inline by default"): no border,
+   no surface, no caption and no status line. A picture is sized to the message
+   column and bounded in height; an `html` page is frameless and painted with the
+   column's own background; a PDF is the same file row an attachment is. The
+   only chrome left is the corner tool cluster below, and it is invisible until
+   a reader hovers, focuses or long-presses. */
 .fy-render {
-  margin-block: var(--gap-md);
-  border: var(--stroke) solid var(--border-strong);
+  position: relative;
+  min-width: 0;
+  margin: 0.7em 0;
+}
+
+/* The stage is the positioning box for the corner tools and the off-stage
+   compile frame. It adds nothing visible of its own. */
+.fy-render-stage {
+  position: relative;
+  min-width: 0;
+}
+
+/* BOUNDED BOTH WAYS. The column's measure in width and the same height ceiling
+   `.kt-rich-file-image` uses, in DYNAMIC units: on iOS Safari `vh` resolves
+   against the large viewport, so a `60vh` picture took more than 60% of what the
+   reader could actually see. `contain` keeps the drawing's own proportions. */
+.fy-render-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(60dvh, 720px);
+  height: auto;
+  object-fit: contain;
+}
+
+/* A QUIET PLANE where a picture, a player or a first diagram will be, so the
+   prose under it does not jump twice. The faintest surface the theme has. */
+.fy-render-placeholder {
+  height: 160px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  opacity: 0.6;
 }
 
-/* The illustration is the dominant plane: it gets the lighter background and
-   the height, and the caption and controls stay chrome around it. */
-.fy-render-stage {
+/* OFF STAGE: Mermaid compiles here and hands back an image. Hidden rather than
+   absent, because Mermaid measures text and needs a laid-out document; placed
+   over the stage so it costs no layout of its own. */
+.fy-render-offstage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ---- the corner tools --------------------------------------------------------
+   Source, Fullscreen and — for Lottie — Play/Pause, as small icons in the top
+   corner. Invisible until the figure is hovered or something inside it holds
+   focus, so a keyboard reader who tabs to one sees it; a long press on touch
+   pins them (`data-fy-render-tools='shown'`), as does a paused animation, so
+   reduced motion never hides Play.
+
+   NOT `display: none` when hidden: the buttons stay in the tab order and in the
+   accessibility tree, and appear the moment one is focused. */
+.fy-render-tools {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
   display: flex;
-  min-height: 120px;
-  min-width: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fy-render:hover .fy-render-tools,
+.fy-render:focus-within .fy-render-tools,
+.fy-render[data-fy-render-tools='shown'] .fy-render-tools {
+  opacity: 1;
+}
+
+/* THE TOUCH FLOOR IS POINTER-DERIVED. `--target-floor` is 0 on a fine pointer and
+   44px on a coarse one, so the icon stays small on desktop and becomes a real
+   thumb target on a phone without a second number living here. */
+.fy-render-tool {
+  display: inline-flex;
+  min-width: max(26px, var(--target-floor));
+  min-height: max(26px, var(--target-floor));
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  border: var(--stroke) solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-
-.fy-render-image {
-  padding: var(--gap-sm);
-}
-
-/* A STAGE HOLDING A NOTE IS A PARAGRAPH, NOT A PICTURE, and the two want
-   opposite things.
-
-   It reserves nothing: the 120px floor is room for an illustration, and a
-   declared limitation, a decode failure and an unaccepted offer are all one
-   sentence. Reserving the plane for them put a 12px line inside a 120px panel
-   above ninety pixels of empty colour, which reads as something still loading
-   rather than as a settled state.
-
-   And it stretches: centring shrinks a note to its text and floats it mid-panel
-   with its accent rail marking nothing. `align-items` alone is not enough — the
-   stage is a ROW, so that only stretches vertically, measured as 493px of note
-   in a 1394px stage — so the note fills the main axis too. At 390px it already
-   filled the measure either way, which is how this survived a review. */
-.fy-render-stage[data-fy-render-stage='note'] {
-  min-height: 0;
-  align-items: stretch;
+  padding: 0;
   border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
-}
-
-.fy-render-stage[data-fy-render-stage='note'] > .kt-fs-note {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* DOM ORDER IS VISUAL ORDER. The actions row is chrome and lives outside the
-   `<figure>`, so the caption can be the figure's last child — its content model
-   allows only first or last — without any `order` reconciling the two readings.
-   A screen reader and a sighted reader now meet the same sequence. */
-.fy-render-figure {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--gap-sm);
-  margin: 0;
-}
-
-.fy-render-caption {
-  margin: 0;
   color: var(--fg-soft);
-  font-size: var(--text-sm);
-  line-height: var(--leading-base);
+  cursor: pointer;
 }
 
-/* INLINE, THE SOURCE PANEL HAS A CEILING. A source-only type opens its panel
-   with no reader action and the preview cap is 32,768 characters, so without one
-   a single block pushes the rest of the message off screen. The panel already
-   scrolls inside itself in fullscreen; this is the same behaviour asked for
-   inline. */
-.fy-render:not([data-fy-render-fullscreen='true']) .kt-fs-code {
+.fy-render-tool:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+
+.fy-render-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-render-tools {
+    transition: none;
+  }
+}
+
+/* THE SOURCE PANEL is the ordinary fenced code block (`.md pre`), capped so one
+   long payload cannot push the rest of the message off screen. */
+.fy-render-source {
   max-height: 50dvh;
   overflow-y: auto;
 }
 
+.fy-render-source > pre {
+  margin: 0.4em 0 0;
+}
+
+.fy-render-truncated {
+  margin: 0.2em 0 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+/* ---- quiet notes -------------------------------------------------------------
+   The two non-picture states: a frame that reached its permitted life, and the
+   retry under a fallen-back block. One muted line, the app's smallest type. */
+.fy-render-stopped {
+  margin: 0;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+.fy-render-quiet-action {
+  display: inline-flex;
+  min-height: max(24px, var(--target-floor));
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.fy-render-quiet-action:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.fy-render--fallback > pre {
+  margin-bottom: 0.2em;
+}
+
+/* ---- frames ------------------------------------------------------------------
+   THE LIBRARY FRAME is sized by this stylesheet and never by a message from
+   inside it: a frame that could ask the page for more room could ask for all
+   of it. Lottie draws into it; Mermaid compiles in it off stage.
+
+   NOT POINTER-FOCUSABLE (the other half is `tabIndex={-1}` in
+   `fy-render-sandbox.tsx`): the frame is a separate document, so focus resting
+   in it would swallow the Escape that leaves fullscreen, and nothing in it is
+   interactive — Play/Pause is a parent button. */
+.fy-render-frame {
+  display: block;
+  width: 100%;
+  min-height: 12rem;
+  max-height: min(60dvh, 720px);
+  aspect-ratio: 16 / 10;
+  border: 0;
+  background: transparent;
+  color-scheme: normal;
+  pointer-events: none;
+}
+
+/* THE `html` FRAME IS THE OPPOSITE CASE. Its page IS the interaction, so it takes
+   the pointer and a tab stop. Frameless: no border, a transparent element, and
+   the page paints the column's own background (`FyRenderHtmlPaint`), so it reads
+   as part of the message. Its height is the page's own report, clamped by the
+   parent and applied inline; it stays invisible until the page has drawn, so no
+   unpainted plane flashes in the prose. */
+.fy-render-frame--html {
+  min-height: 2rem;
+  max-height: none;
+  aspect-ratio: auto;
+  height: 160px;
+  background: transparent;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.fy-render-frame--html[data-fy-render-ready='true'] {
+  opacity: 1;
+}
+
+/* A `src:` block's players take the column's measure and keep their own controls. */
+.fy-render-video {
+  display: block;
+  width: 100%;
+  max-height: min(60dvh, 720px);
+  border-radius: var(--radius-sm);
+  background: #000;
+}
+
+.fy-render-audio {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+}
+
+/* ---- the file row ------------------------------------------------------------
+   A PDF, or a media file this reader cannot see: the shape an attachment card
+   has in this transcript — an icon, the name, one muted line of facts, and the
+   actions. Its own rules rather than utility classes, so it reads the same on
+   every surface that bundles this stylesheet. The actions are links inside an
+   `.md` column, so the prose link styling is taken back off them. */
+.fy-render-row {
+  display: flex;
+  min-width: 0;
+  max-width: min(100%, 480px);
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.fy-render-row-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--fg-soft);
+}
+
+.fy-render-row-icon[data-tone='warn'] {
+  color: var(--warn);
+}
+
+.fy-render-row-body {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+}
+
+.fy-render-row-name {
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fy-render-row-meta {
+  color: var(--fg-soft);
+}
+
+.fy-render-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+  margin-left: -6px;
+}
+
+.md .fy-render-row-action,
+.fy-render-row-action {
+  display: inline-flex;
+  min-height: max(28px, var(--target-floor));
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--fg-soft);
+  text-decoration: none;
+}
+
+.md .fy-render-row-action:hover,
+.fy-render-row-action:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
 /* ---- fullscreen ------------------------------------------------------------
    An in-app overlay rather than the Fullscreen API: `Element.requestFullscreen`
-   is unavailable on iOS Safari, which is a first-class target for this PWA, and
-   an overlay keeps Escape and the focus trap in the app's own single stack
-   (`useDialogFocus`) instead of splitting them between the app and the browser.
+   is unavailable on iOS Safari, a first-class target for this PWA, and an
+   overlay keeps Escape and the focus trap in the app's single `useDialogFocus`
+   stack. `z-index: 50` is the app's dialog/sheet layer, matching its peers.
 
-   `z-index: 50` is the app's established dialog/sheet layer — the same number
-   `rename-sheet`, `migrate-sheet`, `attachment-unlock-prompt`, the command
-   palette and the context menu use. There is no z-index token in this codebase
-   to read it from, and inventing one here would give a scale its first member
-   and no owner, so the literal matches its peers instead. The layers ABOVE it
-   are deliberate: the bulk-stop confirmation (60), the side pane (70/80) and
-   the portrait gate (200) must all be able to cover an open illustration.
-
-   THE VISIBLE BOX, NOT THE LAYOUT VIEWPORT. The element also carries
-   `kt-overlay`, which this app defines for exactly this case — `top: --app-top`,
-   `height: --app-h`, `padding-bottom: env(safe-area-inset-bottom)` — so the
-   overlay follows the same box as the shell. `inset: 0` alone would run the top
-   of an illustration under a notch and put the caption and Exit control (the
-   only dismiss affordance on touch: there is no backdrop click and no swipe)
-   under the home indicator, or behind a software keyboard. Headless Chrome
-   resolves `env()` to zero, so no capture could ever have shown this.
-
-   `inset-inline: 0` STAYS, and is not redundant with `kt-overlay`: that class
-   owns the vertical box and the bottom inset only, so without an explicit
-   horizontal anchor a `position: fixed` element falls back to auto insets and
-   shrink-to-fit width. The vertical box is deliberately left to `kt-overlay`.
-
-   THE SELECTOR CARRIES BOTH CLASSES ON PURPOSE. `.kt-overlay` and
-   `.fy-render-fullscreen` are the same specificity, and `.kt-overlay` is defined
-   LATER — `index.css` imports this file at the top and then declares the overlay
-   contract in its own body — so a single-class rule here loses every property
-   they share, including the safe-area padding this block is paying. `.kt-overlay`
-   remains the vertical-box owner; this only wins the properties it restates. */
+   THE SELECTOR CARRIES BOTH CLASSES ON PURPOSE. `.kt-overlay` owns the visible
+   box and the bottom safe-area inset and is defined LATER, so a single-class
+   rule here would lose every property they share. `inset-inline: 0` stays,
+   because `kt-overlay` anchors only the vertical box. */
 .kt-overlay.fy-render-fullscreen {
   position: fixed;
   z-index: 50;
@@ -139,207 +319,30 @@
 }
 
 .fy-render-fullscreen > .fy-render {
+  display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  flex-direction: column;
   margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-/* THE FIGURE IS PART OF THE FULLSCREEN FLEX CHAIN. It sits between the card and
-   the stage, so without a growable, shrinkable box of its own the stage below it
-   has no sized parent to consume: the plane stops filling the overlay, a long
-   source panel pushes the actions row and Exit out of reach, and a tall-fit
-   measurement would be taken against the wrong plane entirely. */
-.fy-render[data-fy-render-fullscreen='true'] .fy-render-figure {
-  flex: 1 1 auto;
-  min-height: 0;
 }
 
 .fy-render[data-fy-render-fullscreen='true'] .fy-render-stage {
+  display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  align-items: center;
+  justify-content: center;
 }
 
-/* A NOTE-BEARING STAGE DOES NOT SHRINK. With `flex: 1 1 auto` a long source
-   panel beside it squeezed the stage to a few pixels, and in the two states
-   whose stage IS the explanation — a declared limitation, and a decode failure —
-   the explanation is precisely what vanished. A 7px gold sliver where "this
-   build does not run Mermaid illustrations" should be leaves a reader looking at
-   raw source with no statement of why; for the failure case it removes the only
-   thing distinguishing a broken image from a deliberate source dump. The source
-   panel already scrolls inside itself here, so nothing else needs to give. */
-.fy-render[data-fy-render-fullscreen='true'] .fy-render-stage[data-fy-render-stage='note'] {
-  flex: 0 0 auto;
-}
-
-/* FIT THE PLANE, do not escape it. `max-height: none` lifted the reading-column
-   ceiling but the stage still clips and never grows, so a portrait illustration
-   was centred in a viewport-height box with both ends cut off and nothing to
-   scroll — measured at 32% visible on desktop. Fullscreen then showed strictly
-   LESS of the picture than the transcript did, inverting what the control
-   promises. `100%` lets the illustration use the whole plane in both axes, which
-   is what "the biggest possible view" meant. (Panning at natural size would need
-   `overflow: auto` on the stage as well — `auto` alone on a centred flex item
-   clips the top and cannot scroll back to it.) */
-.fy-render[data-fy-render-fullscreen='true'] .fy-render-image {
+/* FIT THE PLANE in both axes — the biggest possible view, which is what the
+   control promises. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-image,
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-video {
+  max-width: 100%;
   max-height: 100%;
 }
 
-/*
- * There is deliberately no `[data-fy-render-stage='sandbox']` rule. The sandbox
- * case takes the BASE `.fy-render-stage` layout — the same illustration plane a
- * decoded `<img>` gets — because a live frame is a picture, not a note. Only
- * `note` needs to opt out of that plane, so only `note` has a rule. Reading the
- * missing selector as an omission and adding one would be the regression.
- *
- * THE SANDBOX FRAME.
- *
- * It is sized by this stylesheet and never by a message from inside it: a frame
- * that could ask the page for more room could ask for all of it, and the
- * dimensions it reports are bounded and used for nothing. `aspect-ratio` keeps a
- * sensible shape at both viewports without the parent having to know what the
- * illustration turned out to be.
- */
-.fy-render-frame {
-  display: block;
-  width: 100%;
-  min-height: 12rem;
-  /* THE DYNAMIC UNIT, matching its two siblings exactly — `.kt-rich-file-image`
-     and `.kt-rich-file-frame` are both `min(60dvh, 720px)` and the source panel
-     two rules up is `50dvh`. On iOS Safari `vh` resolves against the LARGE
-     viewport, so with browser chrome showing a `60vh` frame took more than 60%
-     of what the reader could actually see — on the engine this PWA calls
-     first-class. */
-  max-height: min(60dvh, 720px);
-  aspect-ratio: 16 / 10;
-  border: 0;
-  background: transparent;
-  color-scheme: normal;
-  /* NOT POINTER-FOCUSABLE, and this is the second half of a deliberate decision
-     rather than a styling flourish (the first half is `tabIndex={-1}` in
-     `fy-render-sandbox.tsx`).
-
-     The frame is a separate, opaque-origin document. A keydown delivered inside
-     it never reaches the parent, and the app's Escape listener lives on the
-     PARENT document — so one tap or click on a live animation in fullscreen used
-     to move `document.activeElement` into the frame and kill Escape from that
-     moment on, leaving Exit as the only way out. On touch Exit is already the
-     only dismiss affordance, and tapping the picture is the most natural thing a
-     reader does in fullscreen.
-
-     Nothing in the frame is interactive — Play/Pause is a parent button that
-     speaks over the capability port — so refusing it the pointer costs the reader
-     nothing and lets wheel and touch scrolling pass through to the page instead
-     of being swallowed by a cross-document child. */
-  pointer-events: none;
-}
-
-/* THE SANDBOX STATUS LINE. Soft, small and the same voice as the caption for the
-   two transient states, because "Preparing the Mermaid renderer…" is a status and
-   not a warning. The failure phases take `kt-fs-note` from the component instead,
-   so a failure reads as the app's ordinary failure surface. */
-.fy-render-status {
-  min-width: 0;
-  color: var(--fg-soft);
-  font-size: var(--text-sm);
-  line-height: var(--leading-base);
-}
-
-/* IT MUST STAY IN THE ACCESSIBILITY TREE AND OUT OF THE LAYOUT, which is why
-   `display: none` and a visually-hidden class are both wrong here: the first
-   removes the region from the tree so its first text reads as an insertion, and
-   the second is a positioned box this app has already had escape a scrollport.
-   An empty `<div>` with no padding is zero-height on its own; the only thing it
-   still costs is one `gap` from `.fy-render-figure`, which this cancels exactly. */
-.fy-render-status[data-fy-render-sandbox-status='idle'] {
-  margin-block-start: calc(-1 * var(--gap-sm));
-}
-
-/* THE FOLDED DIAGNOSTIC IS MACHINE TEXT, so it keeps its own line breaks AND its
-   own font. A Mermaid parse error is a multi-line jison dump with an ASCII caret
-   rule under the offending column; collapsing it onto one line made it look like
-   mangled app copy, and preserving the breaks in a PROPORTIONAL font fixed only
-   half of that — the dashes and their `^` landed well left of the token they mark,
-   so the alignment the line breaks exist to preserve was still lost. Measured in
-   `390x844-mermaid-08-failure-unfolded.png` before this rule.
-
-   The values match `.kt-fs-pre`, which is the same kind of text one surface over.
-   `kt-fs-why-body` already caps the measure at 60ch. */
-.fy-render-why-body {
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
-  font-size: var(--code-font-size);
-  white-space: pre-wrap;
-}
-
-/* In fullscreen the frame may use the room the overlay gives it. */
 .fy-render-fullscreen .fy-render-frame {
   max-height: none;
   height: 100%;
-}
-
-/* THE `html` FRAME IS THE OPPOSITE CASE, and it overrides the rule above on
-   purpose. Its page IS the interaction — buttons, sliders, a canvas to drag — so
-   it takes the pointer and a tab stop, and the shell forwards Escape over the
-   port so fullscreen can still be left from inside it.
-
-   Its height is the page's own report, clamped by the parent and applied inline;
-   until the first report it keeps the base frame's shape. The ratio and the base
-   cap are dropped so the reported height is what the reader sees, and a solid
-   surface replaces the transparent one because the page paints its own
-   `Canvas` background in the reader's mode. */
-.fy-render-frame--html {
-  pointer-events: auto;
-  aspect-ratio: auto;
-  min-height: 4rem;
-  max-height: none;
-  background: var(--surface);
-}
-
-/* A `src:` block's media. The native players take the full measure and keep their
-   own controls; a PDF is a card of links (`fy-render-media.tsx` says why). */
-.fy-render-video {
-  display: block;
-  width: 100%;
-  max-height: min(60dvh, 720px);
-  background: #000;
-}
-
-.fy-render-audio {
-  display: block;
-  width: 100%;
-}
-
-.fy-render[data-fy-render-fullscreen='true'] .fy-render-video {
-  max-height: none;
-  height: 100%;
-}
-
-/* THE MEDIA CARD: the sentence, the fold and a link stacked in one note, so a
-   refusal never looks like a broken player. */
-.fy-render-fallback {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--gap-sm);
-}
-
-.fy-render-link {
-  text-decoration: none;
-}
-
-/* A loading line or a refusal card fills the plane's measure instead of floating
-   mid-panel — the same reason the `note` stage stretches its sentence. */
-.fy-render-stage[data-fy-render-stage='media'] > .kt-fs-note {
-  flex: 1 1 auto;
-  align-self: stretch;
-  margin: var(--gap-sm);
-}
-
-.fy-render-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-sm);
 }

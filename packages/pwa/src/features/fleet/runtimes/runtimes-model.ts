@@ -240,3 +240,37 @@ export const runtimeProfileLine = (runtime: FleetRuntimeView, profile: FleetLaye
       : ` · ${String(runtime.stack.skipped.length)} skipped on ${HARNESS_NAMES[runtime.harness]}`;
   return `${layers}${plural(parts, 'part')}${skipped}`;
 };
+
+/** The runtime Add a login makes on the login it adds: which CLI it runs, on which profile, by what name. */
+export interface FirstRuntime {
+  readonly harness: HarnessKind;
+  readonly profile: string;
+  readonly name: string;
+  /** No runtime on the machine runs this CLI yet, so the runtime is made unless the person says not to. */
+  readonly needed: boolean;
+}
+
+/**
+ * The runtime for a new login that drives `harnesses`: the first of them a profile runs — the profile a
+ * runtime of that CLI already uses, else the first that fits — with the suggested name. `null` when no
+ * profile runs any of them, so there is nothing to make it from.
+ */
+export const firstRuntimeFor = (
+  harnesses: readonly HarnessKind[],
+  runtimes: readonly FleetRuntimeView[],
+  profiles: readonly FleetLayeredProfileView[],
+): FirstRuntime | null => {
+  for (const harness of harnesses) {
+    const profile =
+      runtimes.find(runtime => runtime.harness === harness)?.profile ??
+      profiles.find(candidate => profileFit(candidate, harness).fits)?.name;
+    if (profile === undefined) continue;
+    return {
+      harness,
+      profile,
+      name: suggestedRuntimeName(harness, profile, runtimes),
+      needed: !runtimes.some(runtime => runtime.harness === harness),
+    };
+  }
+  return null;
+};

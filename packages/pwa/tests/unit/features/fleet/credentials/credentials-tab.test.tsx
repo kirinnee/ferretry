@@ -270,11 +270,12 @@ describe('CredentialsTab · the list', () => {
       'A credential is one login to Claude Code or Codex. It belongs to this machine.',
     );
     await click(view.container.querySelector('[data-credentials-empty] [data-add-login]'), 'Add a login');
-    expect(view.container.querySelector('[data-machine-stepper="add-login"]')).not.toBeNull();
-    expect(text(view.container, '#machine-stepper-title')).toBe('Add a login');
-    await click(view.container.querySelector('[data-stepper-cancel]'), 'Cancel');
-    expect(text(view.container, '[data-stepper-confirm] p')).toBe('Stop adding a login?');
-    await click(view.container.querySelector('[data-stepper-stop]'), 'Stop');
+    expect(view.container.querySelector('[data-add-login-screen]')).not.toBeNull();
+    expect(text(view.container, '#add-login-title')).toBe('Add a login');
+    await click(view.container.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    await click(view.container.querySelector('[data-add-login-back]'), 'Logins');
+    expect(text(view.container, '[data-add-login-confirm] p')).toBe('Stop adding a login?');
+    await click(view.container.querySelector('[data-add-login-stop]'), 'Stop');
     expect(view.container.querySelector('[data-credentials-empty]')).not.toBeNull();
     await view.unmount();
   });
@@ -698,19 +699,20 @@ describe('CredentialsTab · Add a login from the tab', () => {
     });
     const c = view.container;
     await click(c.querySelector('[data-add-login]'), 'Add a login');
-    expect(text(c, '#machine-stepper-title')).toBe('Add a login');
-    expect(text(c, '[data-stepper-position]')).toBe('Step 1 of 2 · Choose tool');
-    await click(c.querySelector('[data-add-login-tool="claude"] input'), 'the Claude radio');
-    await click(c.querySelector('[data-step-next]'), 'Next');
-    await click(c.querySelector('[data-change-submit]'), 'Sign in to Claude Code');
+    expect(text(c, '#add-login-title')).toBe('Add a login');
+    await click(c.querySelector('[data-add-login-choice="claude"]'), 'the Claude Code tile');
+    // Claude Code already has runtimes here, so this one click makes only the login and starts its sign-in.
+    await click(c.querySelector('[data-add-login-fields] [data-change-submit]'), 'Sign in to Claude Code');
+    await wait(50);
     expect(changeBodies(calls)).toEqual([{ kind: 'credential.add', id: 'claude', harness: 'claude' }]);
     await type(must(c.querySelector<HTMLTextAreaElement>('textarea'), 'the code field'), 'a-code');
     await click(button(c, 'Finish sign-in'), 'Finish sign-in');
-    expect(text(c, '[role="status"]')).toBe('Signed in to Claude Code as new@example.com');
-    await click(c.querySelector('[data-step-next]'), 'Next');
+    await wait(50);
+    expect(text(c, '[data-add-login-done] > p')).toBe('Signed in to Claude Code as new@example.com');
+    await click(c.querySelector('[data-add-login-finish]'), 'Done');
 
     expect(window.location.hash).toBe(`${HASH}/claude`);
-    expect(c.querySelector('[data-machine-stepper]')).toBeNull();
+    expect(c.querySelector('[data-add-login-screen]')).toBeNull();
     expect(c.querySelector('[data-credential-page]')?.getAttribute('data-credential-page')).toBe('claude');
     expect(text(c, '[data-credential-page] p.font-mono')).toBe('new@example.com');
     await view.unmount();
