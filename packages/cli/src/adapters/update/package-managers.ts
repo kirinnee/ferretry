@@ -14,6 +14,16 @@ const NIX = ['nix', '--extra-experimental-features', 'nix-command flakes'] as co
 export class CommandPackageManagers implements IPackageManagerPort {
   constructor(private readonly run: (argv: readonly string[]) => Promise<CommandOutcome>) {}
 
+  /** Make brew see the newest cask: tap it if it is gone, then `brew update`. Auto-update may not have run for a day. */
+  async brewRefresh(tap: string, url: string): Promise<CommandOutcome> {
+    const tapped = await this.run(['brew', 'tap']);
+    if (tapped.code === 0 && !tapped.stdout.split('\n').some(line => line.trim() === tap)) {
+      const added = await this.run(['brew', 'tap', tap, url]);
+      if (added.code !== 0) return added;
+    }
+    return this.run(['brew', 'update']);
+  }
+
   brewUpgrade(cask: string): Promise<CommandOutcome> {
     return this.run(['brew', 'upgrade', '--cask', cask]);
   }

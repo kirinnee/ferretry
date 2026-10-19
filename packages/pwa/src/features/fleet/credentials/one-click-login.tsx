@@ -19,9 +19,11 @@ import type { FleetClientFactory } from '../fleet-client.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { type EnvironmentDraft, environmentChange, environmentDraftProblem, presetScope } from './environment-model.ts';
+import { LocalModelsPanel } from './local-models-panel.tsx';
 import { LoginScopeChip } from './login-scope-chip.tsx';
 import { blankRequiredValues, oneClickDraft, type Prefill, type SecretField, secretFields } from './provider-model.ts';
 import { SecretPill } from './secret-pill.tsx';
+import type { LocalModelsControl } from './use-local-models.ts';
 
 /** The facts under a provider's name: scope, quota, docs, when it was checked, and what was not. */
 export function PresetFacts({ preset }: { readonly preset: FleetProviderPresetView }) {
@@ -71,6 +73,8 @@ export interface OneClickLoginProps {
   readonly createClient: FleetClientFactory;
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
+  /** The models the machine's Ollama has, for the one preset that runs on it. */
+  readonly local?: LocalModelsControl | undefined;
   /** Back to the providers. Left out where the providers stay on the same screen (Add a login). */
   readonly onBack?: () => void;
   /** The button's words. Defaults to "Add". */
@@ -92,6 +96,7 @@ export function OneClickLogin({
   createClient,
   changes,
   reload,
+  local,
   onBack,
   onSaved,
   submitLabel = 'Add',
@@ -258,6 +263,8 @@ export function OneClickLogin({
           </div>
         )}
       </div>
+
+      {local === undefined ? null : <LocalModelsPanel machineName={machineName} read={local} onCheck={local.check} />}
 
       <div className="flex min-w-0 flex-col gap-3">
         <div>

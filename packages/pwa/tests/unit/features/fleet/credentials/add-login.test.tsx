@@ -7,6 +7,7 @@ import type { FleetClient } from '../../../../../src/features/fleet/fleet-client
 import { useMachineData } from '../../../../../src/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { interact, mount, must } from '../../../../support/dom.ts';
+import { localModelsFixture } from '../../../../support/local-models.ts';
 import {
   APPLIED,
   type Call,
@@ -22,7 +23,7 @@ import {
   scripted,
   stagedFrom,
 } from '../account-support.ts';
-import { PROVIDERS } from './environment-support.ts';
+import { OLLAMA, PROVIDERS } from './environment-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
@@ -744,6 +745,32 @@ describe('AddLogin · progress', () => {
     await until(() => c.querySelector('[data-add-login-runtime-made]') !== null, 'the runtime made');
     expect(c.querySelector('[data-add-login-working]')).toBeNull();
     expect(must(c.querySelector<HTMLButtonElement>('[data-add-login-finish]'), 'Done').disabled).toBe(false);
+    await view.unmount();
+  });
+});
+
+describe('AddLogin · Ollama on this machine', () => {
+  const REFRESH = 'POST /v1/models/local/refresh';
+  const withOllama = { 'GET /v1/fleet/presets': { presets: [...PROVIDERS.presets, OLLAMA] } };
+
+  it('reads Ollama once, says what it found on the tile, and shows the panel on the Ollama form only', async () => {
+    const { view, calls } = await open({ routes: { ...withOllama, [REFRESH]: localModelsFixture('found') } });
+    const c = view.container;
+    await until(
+      () => c.querySelector('[data-provider-tile="ollama-codex"] [data-provider-tile-local]') !== null,
+      'the tile line',
+    );
+    expect(only(calls, REFRESH)).toHaveLength(1);
+    await click(c.querySelector('[data-provider-tile="ollama-codex"]'), 'the Ollama tile');
+    expect(c.querySelector('[data-local-models-panel]')?.getAttribute('data-local-models-panel')).toBe('found');
+    await view.unmount();
+  });
+
+  it('shows no panel on another provider’s form', async () => {
+    const { view } = await open({ routes: { ...withOllama, [REFRESH]: localModelsFixture('found') } });
+    const c = view.container;
+    await click(c.querySelector('[data-provider-tile]:not([data-provider-tile="ollama-codex"])'), 'another tile');
+    expect(c.querySelector('[data-local-models-panel]')).toBeNull();
     await view.unmount();
   });
 });

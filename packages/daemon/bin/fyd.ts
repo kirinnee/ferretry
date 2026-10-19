@@ -10,7 +10,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { hostname, tmpdir } from 'node:os';
+import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   CredentialStatusService,
@@ -34,11 +34,11 @@ import {
 import {
   AnthropicUsageProbe,
   CodexUsageProbe,
+  claudeKeychainAccount,
   FileConversationLeaseStore,
   FilePassiveUsageStore,
   type FleetBinaryLookup,
   fetchQuota,
-  harnessKeychainAccount,
   newestRolloutRateLimits,
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
@@ -542,6 +542,7 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
+  LocalModelsService,
   ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
@@ -572,6 +573,7 @@ import {
   ProviderProbeService,
   ProviderQuotaService,
   PublishedModelCatalogService,
+  suggestedOllamaModel,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -5815,7 +5817,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     platform: process.platform,
     command: new SpawnCredentialCommand(),
     now: () => millisecondClock.now(),
-    keychainAccount: harnessKeychainAccount([process.env.USER, process.env.LOGNAME]),
+    // Claude's own rule, never LOGNAME: under launchd or systemd USER can be unset, and Claude then
+    // names its item after the OS login name — which is what this must ask for too.
+    keychainAccount: claudeKeychainAccount(process.env.USER, () => userInfo().username),
     // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no
     // suffix. Spelled from `userHome` because the fleet layout owns the same join.
     defaultClaudeHome: join(userHome, '.claude'),
@@ -5906,7 +5910,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       userHome,
       ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
     },
-    classify: async resolution => await credentialClassifier.classify(resolution),
+    inspect: async resolution => await harnessCredentials.inspectStored(resolution),
     ensureDirectory: ensurePrivateDirectory,
   });
   const locateHarness = (kind: HarnessKind): string | undefined => harnessBinary(HARNESS_BINARIES[kind]);
@@ -7452,9 +7456,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return await publishedModelCatalog.catalogs();
         },
         presets: async () => await providerPresets.presets(),
+        ollama: () => localModels.snapshot(),
+      });
+      // The models Ollama has installed on this machine (docs/model-catalog.md § Local models): read at
+      // boot and whenever a person opens Settings or a login's setup — never on a timer — through the
+      // same keyless, loopback-only read a login Test makes. A different set moves what runtimes offer.
+      const keylessProbe = new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport());
+      const localModels = new LocalModelsService({
+        probe: keylessProbe,
+        address: process.env.OLLAMA_HOST,
+        enabled: process.env.FY_LOCAL_MODELS !== 'off',
+        suggested: async () => suggestedOllamaModel(await modelCatalogService.catalogs()),
+        now: () => clock.now(),
+        onChanged: async () => {
+          await fleetCatalog.republish().catch(() => undefined);
+        },
       });
       const providerProbe = new ProviderProbeService({
-        probe: new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport()),
+        probe: keylessProbe,
         clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
       });
       // Provider quotas for environment logins (docs/provider-quotas.md): read through the SAME outbound
@@ -8104,6 +8123,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(await publishedModelCatalog.status()),
             }),
           refresh: async () => await publishedModelCatalog.refresh(true),
+          refreshLocal: async () => await localModels.refresh(),
         },
         speedups: new SpeedupsService({
           authorizer: outboundAuthorizer,
@@ -8853,6 +8873,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // the absence is already visible as `wardenTimerArmed: false` on its own health report.
   // The configuration files: first load, editors' schemas, and the watcher (docs/config-files.md).
   cleanups.push(await subsystems.configFiles.arm());
+  // Which models Ollama has installed, read once now that the fleet can be republished with them.
+  void subsystems.models.refreshLocal().catch(() => undefined);
   await subsystems.warden
     .arm()
     .then(disarm => cleanups.push(disarm))

@@ -86,7 +86,7 @@ function service(binary: string, port: number, windowMinutes?: number): HarnessL
         environment: { FAKE_CALLBACK_PORT: String(port) },
         arguments: [],
         prepare: async () => undefined,
-        signedIn: async () => false,
+        check: async () => ({ signedIn: false as const, finding: 'Checked nothing.' }),
       }),
     },
     locate: () => binary,

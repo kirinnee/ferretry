@@ -35,9 +35,11 @@
  * The harness composes the two stores on darwin: it reads the keychain and falls back to
  * `<home>/.credentials.json`, and it WRITES the file when the keychain write fails. A store that
  * looked only in the keychain therefore reported `missing` for a home that is signed in, which is
- * the hard negative that condemns a login. The fallback here is on ABSENCE only — a keychain that
- * could not be read stays `unreadable`, because papering an unknown over with a file that may be
- * the credential the harness replaced is the mistake `unreadable` exists to prevent.
+ * the hard negative that condemns a login. The fallback here is on ABSENCE — a keychain that could
+ * not be read stays `unreadable`, because papering an unknown over with a file that may be the
+ * credential the harness replaced is the mistake `unreadable` exists to prevent. The account-model
+ * read makes ONE exception, the one Claude itself makes: `security` exit 36 (locked, or an approval no
+ * window can show) is read past to the file, because that is where Claude both reads and writes then.
  *
  * ## THE ACCOUNT MODEL READS A CREDENTIAL BY ITS STORE, NOT BY A HOME
  *
@@ -52,7 +54,7 @@
  * ## THAT ONE ITEM IS NAMED BY TWO ATTRIBUTES, AND READING BY ONE OF THEM SIGNED THE OWNER OUT
  *
  * Claude looks its item up by the PAIR (`acct`, `svce`): `find-generic-password -a <user> -w -s
- * <service>` (claude-code 2.1.296), where `<user>` is `$USER`. `security` asked by `-s` alone
+ * <service>` (claude-code 2.1.296), where `<user>` is `$USER`, else the OS login name ({@link claudeKeychainAccount}). `security` asked by `-s` alone
  * answers with WHICHEVER item of that name it meets first — and a Mac that ever ran an older Ferretry
  * holds a second `Claude Code-credentials` beside the harness's, under another `acct` (see
  * {@link harnessKeychainAccount}). Reading that stale copy, `storedMaterial` reported a login Claude
@@ -82,6 +84,7 @@ import {
 } from '../lib/identity.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { CodexCredentialLink, StoredCredentialResolution } from '../lib/account/credentials.ts';
+import type { CredentialStoreCheck, CredentialStoreInspection } from '../lib/account/store-inspection.ts';
 
 /** What running one command produced. `stdout` may be credential material, so it is never logged. */
 export interface CredentialCommandResult {
@@ -107,6 +110,37 @@ export const KEYCHAIN_ITEM_NOT_FOUND = 44;
 
 /** The exit code reported when the command could not be run, or its output could not be collected. */
 export const COMMAND_FAILED = -1;
+
+/**
+ * `security` exits with the low byte of the keychain's status code. 36 is `errSecInteractionNotAllowed`
+ * (-25308): the keychain is locked, or the read needs an approval and there is no window to show it in
+ * — the answer a background service gets. Claude Code calls the same exit "keychain locked".
+ */
+export const KEYCHAIN_INTERACTION_NOT_ALLOWED = 36;
+
+/** The other `security` exits a keychain read can end with, each its own remedy. */
+const KEYCHAIN_FAILURES: Readonly<Record<number, string>> = {
+  // errSecNoDefaultKeychain (-25307), errSecNoSuchKeychain (-25294), errSecNotAvailable (-25291).
+  37: 'this user has no keychain the daemon can open',
+  50: 'this user has no keychain the daemon can open',
+  53: 'this user has no keychain the daemon can open',
+  // errSecAuthFailed (-25293): the item's access list refused this reader.
+  51: 'the keychain refused this read: the item’s access list does not allow it',
+  // userCanceledErr (-128): somebody pressed Deny, or the prompt was dismissed.
+  128: 'the keychain prompt for this read was denied or dismissed',
+};
+
+/**
+ * Why one `security find-generic-password` failed, in words — the exit code kept, so a person can match
+ * it against what `security` prints for them. Never called for 0 or 44.
+ */
+export function keychainReadFailure(code: number): string {
+  if (code === COMMAND_FAILED) return 'the `security` command could not be run, or did not answer in time';
+  if (code === KEYCHAIN_INTERACTION_NOT_ALLOWED) {
+    return 'the keychain is locked, or reading it needs an approval that a background service cannot show (security exit 36)';
+  }
+  return `${KEYCHAIN_FAILURES[code] ?? 'the keychain read failed'} (security exit ${String(code)})`;
+}
 
 const CREDENTIAL_FILE_MODE = 0o600;
 const DEFAULT_KEYCHAIN_TIMEOUT_MS = 5_000;
@@ -253,6 +287,35 @@ async function readClaudeStoreFile(path: string): Promise<CredentialMaterial> {
   return await readFileMaterial(path);
 }
 
+/** Why a file could not be read, by its error code alone — a message could quote a path, never a value, but a code is enough. */
+function fileFailure(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return `the file could not be read (${code ?? 'an unknown error'})`;
+}
+
+/**
+ * Read one credential file and record what it held in `checked`. A read that throws is recorded as
+ * unreadable and then thrown on, so a caller that wants the throw still gets it.
+ */
+async function checkedFile(
+  path: string,
+  read: (path: string) => Promise<CredentialMaterial>,
+  checked: CredentialStoreCheck[],
+): Promise<CredentialMaterial> {
+  const location = `the file ${path}`;
+  let material: CredentialMaterial;
+  try {
+    material = await read(path);
+  } catch (error) {
+    checked.push({ location, found: 'unreadable', why: fileFailure(error) });
+    throw error;
+  }
+  if (material.outcome === 'found') checked.push({ location, found: 'present' });
+  else if (material.outcome === 'absent') checked.push({ location, found: 'nothing' });
+  else checked.push({ location, found: 'unreadable', why: material.reason });
+  return material;
+}
+
 /** A harness config file, read for a merge: absent, a JSON object, or something that is neither. */
 type JsonObjectReading =
   | { readonly kind: 'absent' }
@@ -339,21 +402,73 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
    * the keychain has no item (the harness's own fallback). Codex's is its canonical `auth.json`.
    */
   async storedMaterial(resolution: StoredCredentialResolution): Promise<CredentialMaterial> {
-    if (resolution.harness === 'codex') return await readFileMaterial(resolution.canonicalFile);
-    if (this.deps.platform === 'darwin') {
-      // By the PAIR Claude reads by, never `-s` alone: see the module note.
-      const keychain = await this.#readKeychainItem(
-        secureStorageKeychainService(resolution.secureStorage),
-        this.deps.keychainAccount,
-      );
-      if (keychain.outcome !== 'absent') return keychain;
-    }
-    return await readClaudeStoreFile(resolution.credentialFile);
+    return await this.#walkStored(resolution, []);
   }
 
   /** {@link storedMaterial}, classified: the verdict, never the secret. */
   async readStored(resolution: StoredCredentialResolution): Promise<CredentialReading> {
     return classifyCredential(resolution.harness, await this.storedMaterial(resolution), this.deps.now());
+  }
+
+  /**
+   * {@link readStored} with its trail: every place the store was looked in, and what each held — so a
+   * sign-in that found no usable login can say WHERE it looked and WHY nothing there counted.
+   *
+   * Total: a file that throws is recorded as unreadable rather than thrown, because the trail up to that
+   * point is exactly what the person needs. Names locations, never values.
+   */
+  async inspectStored(resolution: StoredCredentialResolution): Promise<CredentialStoreInspection> {
+    const checked: CredentialStoreCheck[] = [];
+    let material: CredentialMaterial;
+    try {
+      material = await this.#walkStored(resolution, checked);
+    } catch (error) {
+      material = { outcome: 'unreadable', reason: fileFailure(error) };
+    }
+    return { reading: classifyCredential(resolution.harness, material, this.deps.now()), checked };
+  }
+
+  /**
+   * The one read every account-model reader shares, recording each place it looks in `checked`.
+   *
+   * Claude on macOS is read the way Claude itself reads it (claude-code 2.1.281 and 2.1.303, the darwin
+   * build's keychain-with-plaintext-fallback store): the keychain item by the PAIR (`acct`, `svce`) — see
+   * the module note — and then the storage directory's file when the item is ABSENT, or when `security`
+   * exits 36. Claude reads 36 (the keychain is locked, or the read needs an approval no window can show)
+   * as "no keychain item" and falls through to the file, and when its own keychain WRITE fails that way it
+   * writes the file instead. A daemon started by launchd is exactly where that happens, so stopping at
+   * `unreadable` there reported a login Claude had just written as not written. 36 with no file stays
+   * unreadable, with the keychain's reason. Every other failure stops the walk, as before.
+   */
+  async #walkStored(
+    resolution: StoredCredentialResolution,
+    checked: CredentialStoreCheck[],
+  ): Promise<CredentialMaterial> {
+    if (resolution.harness === 'codex') return await checkedFile(resolution.canonicalFile, readFileMaterial, checked);
+    let locked: CredentialMaterial | undefined;
+    if (this.deps.platform === 'darwin') {
+      const service = secureStorageKeychainService(resolution.secureStorage);
+      const account = this.deps.keychainAccount;
+      const { code, stdout } = await this.deps.command.run(
+        ['security', 'find-generic-password', '-a', account, '-s', service, '-w'],
+        this.#timeout(),
+      );
+      const location = `the keychain item "${service}" (account "${account}")`;
+      const blob = code === 0 ? stdout.trim() : '';
+      if (blob.length > 0) {
+        checked.push({ location, found: 'present' });
+        return { outcome: 'found', blob };
+      }
+      if (code === 0 || code === KEYCHAIN_ITEM_NOT_FOUND) checked.push({ location, found: 'nothing' });
+      else {
+        const why = keychainReadFailure(code);
+        checked.push({ location, found: 'unreadable', why });
+        if (code !== KEYCHAIN_INTERACTION_NOT_ALLOWED) return { outcome: 'unreadable', reason: why };
+        locked = { outcome: 'unreadable', reason: why };
+      }
+    }
+    const file = await checkedFile(resolution.credentialFile, readClaudeStoreFile, checked);
+    return file.outcome === 'absent' && locked !== undefined ? locked : file;
   }
 
   async #material(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialMaterial> {
@@ -586,6 +701,30 @@ export function harnessKeychainAccount(candidates: readonly (string | undefined)
     if (named.length > 0) return HARNESS_KEYCHAIN_ACCOUNT.test(named) ? named : FALLBACK_KEYCHAIN_ACCOUNT;
   }
   return FALLBACK_KEYCHAIN_ACCOUNT;
+}
+
+/**
+ * The keychain `acct` Claude Code itself uses on this host — its own rule, spelled out (claude-code
+ * 2.1.281 and 2.1.303 alike): `$USER` when it is set to anything, otherwise the OS login name, and
+ * {@link FALLBACK_KEYCHAIN_ACCOUNT} when that lookup throws or the name is outside its alphabet.
+ *
+ * **`LOGNAME` is not in it, and neither is falling back to `claude-code-user` while a login name
+ * exists.** A daemon started by launchd or systemd is handed a bare environment, so `USER` can be unset
+ * there; the Claude child it launches then names its item after the OS login name. Reading with
+ * {@link harnessKeychainAccount}`([USER, LOGNAME])` there asked for `claude-code-user` — an item Claude
+ * never writes — and a sign-in that had just written the login ended "no usable login was written".
+ *
+ * `loginName` is the composition root's `os.userInfo().username`, passed in because the root is the only
+ * place that may read the host.
+ */
+export function claudeKeychainAccount(user: string | undefined, loginName: () => string): string {
+  let named: string;
+  try {
+    named = user !== undefined && user.length > 0 ? user : loginName();
+  } catch {
+    return FALLBACK_KEYCHAIN_ACCOUNT;
+  }
+  return HARNESS_KEYCHAIN_ACCOUNT.test(named) ? named : FALLBACK_KEYCHAIN_ACCOUNT;
 }
 
 /** The account names Claude Code accepts as a keychain `acct`; anything else becomes its fallback. */

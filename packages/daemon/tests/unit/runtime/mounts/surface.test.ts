@@ -551,6 +551,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   models: {
     view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),
     refresh: async () => ({ outcome: 'disabled' as const }),
+    refreshLocal: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
   },
   daemonUpdate: {
     view: async () => {
@@ -667,7 +670,7 @@ describe('the mounted daemon surface', () => {
       1 + // the owner leaving a ferret alone for longer than the Warden would
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
-      2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
+      3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
@@ -927,9 +930,11 @@ describe('the mounted daemon surface', () => {
       // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
-      // The model catalogs: the list and a check for a newer published catalog. Fixed literals, no other user.
+      // The model catalogs: the list, a check for a newer published catalog, and a read of the models Ollama
+      // has installed on this machine. Fixed literals, no other user.
       'GET /v1/models',
       'POST /v1/models/refresh',
+      'POST /v1/models/local/refresh',
       // Updating this daemon: the view, starting an update, and the automatic-install setting.
       'GET /v1/daemon/update',
       'POST /v1/daemon/update',

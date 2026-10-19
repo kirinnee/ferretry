@@ -583,6 +583,7 @@ function modelsView(
         ...(harness === 'claude' ? { fast: claudeFastSupport(model.id) } : {}),
       })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
+      ...(derived.local === undefined ? {} : { local: derived.local }),
     },
   };
 }

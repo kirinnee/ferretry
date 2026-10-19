@@ -51,8 +51,13 @@ const COPY_MESSAGE: Record<CopyState, string> = {
 };
 
 /** 32px: smaller than a control, still comfortably bigger than the icon in it. */
+const COPY_SIZE = 'h-8 w-8';
+
+/** A copy that is the one thing to press (a command with no other way to take it): the control floor. */
+const COPY_SIZE_TOUCH = 'h-control w-[var(--control-h)]';
+
 const COPY_CONTROL =
-  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-transparent bg-transparent text-faint transition-colors hover:border-border-strong hover:bg-surface hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus';
+  'inline-flex shrink-0 items-center justify-center rounded-control border border-transparent bg-transparent text-faint transition-colors hover:border-border-strong hover:bg-surface hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus';
 
 const COPY_TONE: Record<CopyState, string> = {
   idle: '',
@@ -65,9 +70,11 @@ export interface CopyButtonProps {
   /** The accessible name. Not rendered: the icon carries the meaning. */
   readonly label: string;
   readonly write: ClipboardWriter;
+  /** Sized to the theme's control floor (44px on a touch pointer) instead of the quiet 32px. */
+  readonly touch?: boolean;
 }
 
-export function CopyButton({ text, label, write }: CopyButtonProps) {
+export function CopyButton({ text, label, write, touch = false }: CopyButtonProps) {
   const [state, setState] = useState<CopyState>('idle');
   // The promise is consumed here on purpose: an unhandled rejection would take
   // the whole page's error handling with it over a clipboard permission.
@@ -82,7 +89,7 @@ export function CopyButton({ text, label, write }: CopyButtonProps) {
       <button
         type="button"
         aria-label={label}
-        className={`${COPY_CONTROL} ${COPY_TONE[state]}`}
+        className={`${COPY_CONTROL} ${touch ? COPY_SIZE_TOUCH : COPY_SIZE} ${COPY_TONE[state]}`}
         onClick={copy}
         data-onboarding-copy={label}
       >

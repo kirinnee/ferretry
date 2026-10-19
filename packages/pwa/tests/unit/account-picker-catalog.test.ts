@@ -9,6 +9,7 @@ import {
   readAccountPickerHealth,
   recentProjectPaths,
 } from '../../src/lib/account-picker-catalog.ts';
+import { localModelsFixture } from '../support/local-models.ts';
 import { sessionView } from '../support/sessions.ts';
 import { credentialList, credentialStatus, credentialView, runtimeCatalog, runtimeView } from './picker-support.ts';
 
@@ -239,6 +240,40 @@ describe('pickerAccount', () => {
       runtimeView({ wrapper: 'claude-auto-a', launch: { available: false, reason: 'Sign in to launch' } }),
     );
     expect(account).toMatchObject({ available: false, unavailableReason: 'Sign in to launch' });
+  });
+
+  it('carries the models Ollama has installed, and what the daemon last read from it', () => {
+    const local = localModelsFixture('found');
+    const account = pickerAccount(
+      runtimeView({
+        wrapper: 'codex-auto-ollama',
+        harness: 'codex',
+        models: {
+          catalog: {
+            id: 'ollama',
+            label: 'Ollama',
+            origin: 'built-in',
+            customIds: true,
+            docs: 'https://docs.ollama.com',
+            detect: 'ollama',
+          },
+          choices: [
+            { id: 'gpt-oss:20b', label: 'gpt-oss:20b', tier: 'best', efforts: [], available: true, local: true },
+            { id: 'qwen3-coder:30b', label: 'qwen3-coder:30b', efforts: [], available: true, local: true },
+            { id: 'llama3', label: 'llama3', efforts: [], available: true },
+          ],
+          local,
+        },
+      }),
+    );
+    expect(account.models.map(model => model.local)).toEqual([true, true, undefined]);
+    expect(account.modelCatalog).toEqual({
+      id: 'ollama',
+      label: 'Ollama',
+      customIds: true,
+      detect: 'ollama',
+      local,
+    });
   });
 });
 

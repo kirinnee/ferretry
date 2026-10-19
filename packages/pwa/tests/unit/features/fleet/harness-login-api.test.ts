@@ -7,6 +7,7 @@ import {
   cancelCredentialSignIn,
   FLEET_LOGIN_PATH,
   readCredentialSignIn,
+  recheckCredentialSignIn,
   restartCredentialSignIn,
   startCredentialSignIn,
   submitCredentialSignInCode,
@@ -57,6 +58,7 @@ describe('signing in a credential', () => {
         'POST',
       ],
       [{ outcome: 'accepted', flow }, async client => await switchCredentialSignInToLink(client, flow.flowId), 'POST'],
+      [{ outcome: 'accepted', flow }, async client => await recheckCredentialSignIn(client, flow.flowId), 'POST'],
     ];
     for (const [answer, call, method] of cases) {
       const { client, calls } = clientFor(answer);
@@ -64,6 +66,16 @@ describe('signing in a credential', () => {
       expect(calls[0]?.init?.method).toBe(method);
       expect(calls[0]?.path.startsWith(FLEET_LOGIN_PATH)).toBe(true);
     }
+  });
+
+  it('asks for a second look with nothing in the body but the method', async () => {
+    const { client, calls } = clientFor({ outcome: 'refused', reason: 'still nothing' });
+
+    const outcome = await recheckCredentialSignIn(client, 'flow-one');
+
+    expect(outcome).toEqual({ outcome: 'refused', reason: 'still nothing' });
+    expect(calls[0]?.path).toBe(`${FLEET_LOGIN_PATH}/flow-one`);
+    expect(bodyOf(calls[0]?.init)).toEqual({ method: 'recheck' });
   });
 
   it('reads one flow by id, percent-encoding it into the path', async () => {

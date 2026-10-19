@@ -99,14 +99,27 @@ function harness(
   return { host, packages, standalone, lifecycle, out, prompt, reports, view, clock, latest, run, report };
 }
 
+const BREW_REFRESH = 'brew-refresh:kirinnee/ferretry:https://github.com/kirinnee/ferretry';
+const RECOVERY =
+  'To recover by hand run: brew update && brew upgrade --cask ferretry && fy daemon restart; if the tap is wedged: brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry';
+
 describe('DaemonUpdater — Homebrew', () => {
   it('upgrades the cask, restarts, and proves the new version serves', async () => {
     const h = harness('homebrew');
     await h.run();
-    should(h.host.trail).deepEqual(['brew:ferretry', 'restart']);
+    should(h.host.trail).deepEqual([BREW_REFRESH, 'brew:ferretry', 'restart']);
+    should(h.out.lines).containEql(
+      'warn: refreshing the Homebrew tap kirinnee/ferretry so brew can see 1.3.0 (brew update)',
+    );
     should(h.report()).match({ from: '1.2.3', target: '1.3.0', outcome: 'succeeded' });
-    should(h.out.text).equal('ok: fyd updated 1.2.3 → 1.3.0 and serving');
+    should(h.out.lines.at(-1)).equal('ok: fyd updated 1.2.3 → 1.3.0 and serving');
     should(h.out.exitCode).be.undefined();
+  });
+
+  it('keeps --json output machine-readable by not printing progress', async () => {
+    const h = harness('homebrew');
+    await h.run({ yes: true, json: true });
+    should(h.out.lines.some(line => line.startsWith('warn:'))).be.false();
   });
 
   it('cannot roll a Homebrew update back, and says so', async () => {
@@ -124,10 +137,29 @@ describe('DaemonUpdater — Homebrew', () => {
     const h = harness('homebrew');
     h.packages.failures.add('brew:ferretry');
     await h.run();
-    should(h.host.trail).deepEqual(['brew:ferretry']);
+    should(h.host.trail).deepEqual([BREW_REFRESH, 'brew:ferretry']);
     should(h.report().message).equal(
-      'brew upgrade --cask ferretry failed, and nothing changed: error: brew:ferretry broke',
+      `brew upgrade --cask ferretry failed, and nothing changed: error: brew:ferretry broke. ${RECOVERY}`,
     );
+  });
+
+  it('stops before upgrading when the tap cannot be refreshed, and names the manual commands', async () => {
+    const h = harness('homebrew');
+    h.packages.failures.add(BREW_REFRESH);
+    await h.run();
+    should(h.host.trail).deepEqual([BREW_REFRESH]);
+    should(h.report().message).equal(
+      `brew update failed, and nothing changed: error: ${BREW_REFRESH} broke. ${RECOVERY}`,
+    );
+  });
+
+  it('says how to recover by hand when brew upgraded to something else', async () => {
+    const h = harness('homebrew');
+    h.packages.upgradeTo = '1.2.9';
+    await h.run();
+    should(h.report().outcome).equal('failed');
+    should(h.report().message).startWith('the upgrade left fyd at 1.2.9, not 1.3.0');
+    should(h.report().message).containEql(RECOVERY);
   });
 });
 

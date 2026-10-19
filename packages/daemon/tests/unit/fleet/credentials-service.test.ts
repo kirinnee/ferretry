@@ -84,10 +84,13 @@ const catalogOf = (document: AccountModel | undefined, options: CatalogOptions =
   new FleetCredentialCatalog({
     document: options.document ?? (async () => document),
     paths: options.paths ?? PATHS,
-    classify: async resolution => {
+    inspect: async resolution => {
       const reading = options.readings?.[storeFile(resolution)];
       if (reading === 'throw') throw new Error('locked keychain');
-      return reading ?? { state: 'missing' };
+      const location = `the file ${storeFile(resolution)}`;
+      return reading === undefined
+        ? { reading: { state: 'missing' }, checked: [{ location, found: 'nothing' }] }
+        : { reading, checked: [{ location, found: 'present' }] };
     },
     ensureDirectory: async path => {
       options.created?.push(path);
@@ -287,7 +290,7 @@ describe('signing a credential in', () => {
     });
     should(target.arguments).deepEqual([]);
     should(created).deepEqual([owned, `${owned}/sign-in`]);
-    should(await target.signedIn()).be.true();
+    should(await target.check()).deepEqual({ signedIn: true });
   });
 
   it('should sign the person’s own Claude in with the empty secure-storage value and no config directory', async () => {
@@ -303,10 +306,13 @@ describe('signing a credential in', () => {
     if (target.kind !== 'store') throw new Error('expected a store sign-in');
     await target.prepare();
 
-    // Assert — and a store that cannot be read is not signed in.
+    // Assert — and a store that cannot be read is not signed in, and says so.
     should(target.environment).deepEqual({ CLAUDE_SECURESTORAGE_CONFIG_DIR: '' });
     should(created).deepEqual([]);
-    should(await target.signedIn()).be.false();
+    should(await target.check()).deepEqual({
+      signedIn: false,
+      finding: 'The store this login is kept in could not be read.',
+    });
   });
 
   it('should sign Codex in at the canonical file’s directory with file storage forced', async () => {
@@ -328,7 +334,11 @@ describe('signing a credential in', () => {
     should(own.arguments).deepEqual(['-c', 'cli_auth_credentials_store="file"']);
     should(host.environment).deepEqual({ CODEX_HOME: '/home/person/.codex' });
     should(created).deepEqual([owned.store === 'ferretry' ? owned.ownedDirectory : '']);
-    should(await own.signedIn()).be.false();
+    // An empty store says where it looked.
+    should(await own.check()).deepEqual({
+      signedIn: false,
+      finding: `Checked the file ${owned.store === 'ferretry' && owned.harness === 'codex' ? owned.canonicalFile : ''} — nothing there.`,
+    });
   });
 
   it('should refuse an environment credential and a store this machine cannot name', async () => {

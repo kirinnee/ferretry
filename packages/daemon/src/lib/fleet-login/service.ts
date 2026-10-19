@@ -80,7 +80,7 @@ import type {
   HarnessLoginSubmitRequest,
 } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
-import { type CredentialSignInTarget, FleetCredentialRefusal } from '../fleet/credentials-service.ts';
+import { type CredentialSignInTarget, FleetCredentialRefusal, type SignInCheck } from '../fleet/credentials-service.ts';
 import {
   CLAUDE_LOGIN_ARGV,
   CLAUDE_LOGIN_START,
@@ -189,6 +189,12 @@ export const HARNESS_LOGIN_IDLE_MINUTES = 5;
  */
 export const HARNESS_LOGIN_LINK_SECONDS = 60;
 
+/**
+ * The start of a sign-in's ending when the harness exited cleanly but its store held no usable login.
+ * The finding — where it looked and what each place held — follows it.
+ */
+export const NO_USABLE_LOGIN = 'the sign-in finished, but no usable login was found for this credential.';
+
 /** How many settled flows are kept so a poller can still read its own outcome. */
 const RETAINED_FLOWS = 8;
 
@@ -215,6 +221,11 @@ interface FlowRecord {
   disarmIdle: (() => void) | undefined;
   /** Claude only: ends a flow that never printed its link. */
   disarmLink: (() => void) | undefined;
+  /**
+   * Set when the harness finished cleanly but its store held no usable login: reads that store again,
+   * launching nothing. What a `recheck` submission runs, and why the failed flow offers one.
+   */
+  recheck: (() => Promise<SignInCheck>) | undefined;
 }
 
 const settled = (stage: FlowStage): boolean => stage.stage.stage === 'complete' || stage.stage.stage === 'failed';
@@ -300,6 +311,7 @@ export class HarnessLoginService {
    */
   async submit(flowId: string, request: HarnessLoginSubmitRequest): Promise<HarnessLoginSubmission> {
     const record = this.#require(flowId);
+    if ('method' in request && request.method === 'recheck') return await this.#recheck(record);
     const stage = record.stage;
     if (stage.harness === 'codex') return await this.#submitCodex(record, stage.stage, request);
     if ('method' in request) {
@@ -321,6 +333,46 @@ export class HarnessLoginService {
           reason:
             'the harness was no longer reading, so nobody can say whether that code arrived; check whether this login is signed in before trying again',
         };
+  }
+
+  /**
+   * Look in the credential's store again, for a sign-in that finished but whose login was not there.
+   *
+   * Launches nothing and forwards nothing: the harness already exited, and this only reads. A login that
+   * landed late — or that the keychain would not hand over a moment ago — completes the flow exactly as
+   * if the first read had found it. One still missing keeps the flow failed, with what THIS read found.
+   */
+  async #recheck(record: FlowRecord): Promise<HarnessLoginSubmission> {
+    const recheck = record.recheck;
+    if (recheck === undefined) {
+      return {
+        outcome: 'conflict',
+        reason: settled(record.stage)
+          ? 'this sign-in did not end with a login to look for again; start a new sign-in instead'
+          : 'this sign-in is still running, so there is nothing to look for yet',
+      };
+    }
+    const check = await recheck().catch(
+      (): SignInCheck => ({ signedIn: false, finding: 'The store this login is kept in could not be read.' }),
+    );
+    if (check.signedIn) {
+      record.recheck = undefined;
+      record.stage =
+        record.stage.harness === 'claude'
+          ? { harness: 'claude', stage: { stage: 'complete' } }
+          : { harness: 'codex', stage: { stage: 'complete' } };
+      this.options.onSignedIn?.(record.credentialId);
+      return { outcome: 'accepted', flow: this.#projection(record) };
+    }
+    const reason = `${NO_USABLE_LOGIN} ${check.finding}`;
+    // A flow offering a recheck is always a failed one — the offer is made only as it ends — so this keeps
+    // its ending and replaces only the finding, with what this read saw.
+    const failed = record.stage.stage as ClaudeLoginFailure;
+    record.stage =
+      record.stage.harness === 'claude'
+        ? { harness: 'claude', stage: { ...failed, reason } }
+        : { harness: 'codex', stage: { ...failed, reason } };
+    return { outcome: 'refused', reason };
   }
 
   /** A Codex flow's submission: a switch to the link sign-in, or the address it ended on. */
@@ -501,6 +553,7 @@ export class HarnessLoginService {
       readAt: startedAt,
       disarmIdle: undefined,
       disarmLink: undefined,
+      recheck: undefined,
     };
     this.#flows.set(record.flowId, record);
     record.disarm = this.options.timer.after(window, () => {
@@ -607,8 +660,12 @@ export class HarnessLoginService {
         this.#end(record, `the sign-in exited with code ${code}`);
         return;
       }
-      if (!(await target.signedIn())) {
-        this.#end(record, 'the sign-in finished, but no usable login was written for this credential');
+      const check = await target.check();
+      if (settled(record.stage)) return;
+      if (!check.signedIn) {
+        // Offered BEFORE the ending, so the failed flow every reader sees already says it can look again.
+        record.recheck = async () => await target.check();
+        this.#end(record, `${NO_USABLE_LOGIN} ${check.finding}`);
         return;
       }
       this.#finish(record);
@@ -716,7 +773,8 @@ export class HarnessLoginService {
       expiresAt: instant(record.expiresAt),
     };
     const stage = record.stage;
-    return stage.harness === 'claude' ? claudeProjection(base, stage.stage) : codexProjection(base, stage.stage);
+    const flow = stage.harness === 'claude' ? claudeProjection(base, stage.stage) : codexProjection(base, stage.stage);
+    return flow.state === 'failed' && record.recheck !== undefined ? { ...flow, recheck: true } : flow;
   }
 
   /**

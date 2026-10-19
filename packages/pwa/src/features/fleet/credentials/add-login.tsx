@@ -40,6 +40,8 @@ import {
   sameEmailLogin,
 } from './credentials-model.ts';
 import { useProviderCatalog } from './environment-login.tsx';
+import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
+import { type LocalModelsControl, useLocalModels } from './use-local-models.ts';
 import { offeredHarnesses, presetScope } from './environment-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';
 import { LoginTest } from './login-test.tsx';
@@ -116,6 +118,13 @@ export function AddLogin({
   pollMs,
 }: AddLoginProps) {
   const catalog = useProviderCatalog(connection, createClient);
+  // One read of Ollama when this screen opens and it offers the Ollama tile; then only on Check again.
+  const local = useLocalModels({
+    connection,
+    createClient,
+    enabled:
+      catalog.loaded.kind === 'ready' && catalog.loaded.presets.some(candidate => candidate.id === OLLAMA_PRESET_ID),
+  });
   const [choice, setChoice] = useState<Choice | null>(null);
   /** Whether to make the runtime too; `null` while the default (make it when none runs that CLI) holds. */
   const [withRuntime, setWithRuntime] = useState<boolean | null>(null);
@@ -265,7 +274,7 @@ export function AddLogin({
     return (
       <div className="flex min-w-0 flex-col gap-4">
         {choice === null ? (
-          <Choices machine={machine} machineName={machineName} catalog={catalog} onChoose={choose} />
+          <Choices machine={machine} machineName={machineName} catalog={catalog} local={local} onChoose={choose} />
         ) : (
           <Chosen
             choice={choice}
@@ -405,6 +414,7 @@ export function AddLogin({
           connection={connection}
           createClient={createClient}
           changes={changes}
+          local={preset.id === OLLAMA_PRESET_ID ? local : undefined}
           reload={reload}
           submitLabel={makeRuntime ? 'Add login and runtime' : 'Add login'}
           onSaved={credentialId => void saved(credentialId)}
@@ -573,11 +583,13 @@ function Choices({
   machine,
   machineName,
   catalog,
+  local,
   onChoose,
 }: {
   readonly machine: FleetMachineView | null;
   readonly machineName: string;
   readonly catalog: ReturnType<typeof useProviderCatalog>;
+  readonly local: LocalModelsControl;
   readonly onChoose: (choice: Choice) => void;
 }) {
   return (
@@ -622,6 +634,7 @@ function Choices({
       ) : catalog.loaded.presets.length === 0 ? null : (
         <ProviderGrid
           presets={catalog.loaded.presets}
+          local={local}
           onPick={presetId => onChoose({ kind: 'preset', presetId })}
           onPaste={() => onChoose({ kind: 'paste' })}
         />

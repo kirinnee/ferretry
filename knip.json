@@ -36,6 +36,7 @@
         "harness/approval-card-screenshot.tsx",
         "harness/dialog-card-screenshot.tsx",
         "harness/model-catalog-screenshot.tsx",
+        "harness/local-models-screenshot.tsx",
         "harness/runtime-switch-screenshot.tsx",
         "harness/fast-mode-screenshot.tsx",
         "harness/receipts-screenshot.tsx",

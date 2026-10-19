@@ -45,6 +45,7 @@ import {
   FleetCredentialViewSchema,
 } from './fleet-credentials.ts';
 import { GrantRefusalSchema } from './grants.ts';
+import { LocalModelsSchema } from './models.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -439,6 +440,8 @@ export const FleetRuntimeModelChoiceSchema = z.strictObject({
   fast: z.boolean().optional(),
   note: NonEmptyStringSchema.optional(),
   available: z.boolean(),
+  /** Installed on this machine, as the local server reported it (Ollama), rather than listed by the catalog. */
+  local: z.boolean().optional(),
 });
 export type FleetRuntimeModelChoice = z.infer<typeof FleetRuntimeModelChoiceSchema>;
 
@@ -461,6 +464,8 @@ export const FleetRuntimeModelsSchema = z.strictObject({
   }),
   choices: z.array(FleetRuntimeModelChoiceSchema).readonly(),
   default: NonEmptyStringSchema.optional(),
+  /** What the last read of the local server found, for a catalog that detects one (`catalog.detect`). */
+  local: LocalModelsSchema.optional(),
 });
 export type FleetRuntimeModels = z.infer<typeof FleetRuntimeModelsSchema>;
 

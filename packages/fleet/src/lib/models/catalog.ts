@@ -31,6 +31,7 @@ import openrouter from '../../../models/openrouter.yaml' with { type: 'text' };
 import qwen from '../../../models/qwen.yaml' with { type: 'text' };
 import vercelAiGateway from '../../../models/vercel-ai-gateway.yaml' with { type: 'text' };
 import zai from '../../../models/zai.yaml' with { type: 'text' };
+import type { LocalModels } from '@ferretry/protocol';
 import type { Credential } from '../account/schema.ts';
 import { readConfigText } from '../config-files/yaml-text.ts';
 import type { HarnessKind } from '../manifest.ts';
@@ -137,6 +138,8 @@ export function loginModelCatalogId(
 export interface ModelCatalogSources {
   readonly catalogs: Readonly<Record<string, ModelCatalog>>;
   readonly presets: readonly ProviderPreset[];
+  /** What the last read of each local server found, by the `detect` kind a catalog names. */
+  readonly local?: { readonly ollama?: LocalModels };
 }
 
 /**
@@ -148,11 +151,16 @@ export function loginModelCatalog(
   credential: Pick<Credential, 'store' | 'preset'>,
   harness: HarnessKind,
   sources: ModelCatalogSources,
-): { readonly catalog?: ModelCatalog; readonly personOwned: ReadonlySet<string> } {
+): {
+  readonly catalog?: ModelCatalog;
+  readonly personOwned: ReadonlySet<string>;
+  readonly local?: LocalModels;
+} {
   const id = loginModelCatalogId(credential, harness, sources.presets);
   const catalog = id === undefined ? undefined : sources.catalogs[id];
   const preset =
     credential.store === 'environment' ? sources.presets.find(entry => entry.id === credential.preset) : undefined;
   const personOwned = new Set(Object.keys(preset?.halves[harness]?.env ?? {}));
-  return { ...(catalog === undefined ? {} : { catalog }), personOwned };
+  const local = catalog?.detect === undefined ? undefined : sources.local?.[catalog.detect];
+  return { ...(catalog === undefined ? {} : { catalog }), personOwned, ...(local === undefined ? {} : { local }) };
 }

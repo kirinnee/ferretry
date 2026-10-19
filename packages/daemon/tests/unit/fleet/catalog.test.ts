@@ -1035,6 +1035,53 @@ describe('runtimeCatalog', () => {
     FleetRuntimeCatalogSchema.parse(actual);
   });
 
+  it('should list the models Ollama has installed for a login on the Ollama catalog, marked local', () => {
+    // Arrange
+    const model = parseAccountModel({
+      version: 2,
+      credentials: {
+        local: {
+          harness: 'codex',
+          store: 'environment',
+          preset: 'ollama-codex',
+          codex: { codexProvider: { id: 'ollama', model: 'gpt-oss:20b' } },
+        },
+      },
+      components: COMPONENTS,
+      profiles: PROFILES,
+      runtimes: { 'on-ollama': { credential: 'local', profile: 'base' } },
+    });
+    const local = {
+      provider: 'ollama' as const,
+      baseUrl: 'http://127.0.0.1:11434',
+      state: 'found' as const,
+      models: [{ id: 'llama3.2:latest', label: 'llama3.2:latest' }],
+      checkedAt: '2026-10-19T00:00:00.000Z',
+      message: 'Ollama has 1 model installed on this machine.',
+      pullCommand: 'ollama pull gpt-oss:20b',
+    };
+
+    // Act
+    const actual = runtimeCatalog(
+      model,
+      withReadFacts({
+        modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets(), local: { ollama: local } },
+      }),
+    );
+    const unread = runtimeCatalog(
+      model,
+      withReadFacts({ modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets() } }),
+    );
+
+    // Assert
+    const models = actual.runtimes.find(runtime => runtime.name === 'on-ollama')?.models;
+    should(models?.choices.map(choice => [choice.id, choice.local])).eql([['llama3.2:latest', true]]);
+    should(models?.default).equal('llama3.2:latest');
+    should(models?.local).eql(local);
+    should(unread.runtimes.find(runtime => runtime.name === 'on-ollama')?.models?.local).be.undefined();
+    FleetRuntimeCatalogSchema.parse(actual);
+  });
+
   it('should name each runtime by its ids.json id, falling back to its name, with a wrapper of the same name', () => {
     // Act
     const actual = runtimeCatalog(modelOf(), withReadFacts({ runtimeIds: { 'agent-claude': 'rt_0001' } }));

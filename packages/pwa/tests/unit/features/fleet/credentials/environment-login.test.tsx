@@ -8,6 +8,7 @@ import { useMachineData } from '../../../../../src/features/fleet/runtimes/machi
 import { useAccountChanges } from '../../../../../src/features/fleet/shell/apply-change-panel.tsx';
 import { LONG_PRESS_MS } from '../../../../../src/shell/agent-sidebar-model.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
+import { localModelsFixture } from '../../../../support/local-models.ts';
 import {
   APPLIED,
   type Call,
@@ -19,7 +20,7 @@ import {
   scripted,
   stagedFrom,
 } from '../account-support.ts';
-import { DEEPSEEK, DEEPSEEK_MIRROR, ENVIRONMENT, FOUNDRY, PROVIDERS } from './environment-support.ts';
+import { DEEPSEEK, DEEPSEEK_MIRROR, ENVIRONMENT, FOUNDRY, OLLAMA, PROVIDERS } from './environment-support.ts';
 
 const CHANGES = 'POST /v1/fleet/proposals';
 const APPLY = `POST /v1/fleet/proposals/${CHANGE_ID}/apply`;
@@ -568,6 +569,86 @@ describe('EnvironmentLogin · Paste variables', () => {
     await paste(c, 'DEEPSEEK_API_KEY=whatever');
     expect(c.querySelector('[data-paste-not-offered]')?.textContent).toBe(
       'That provider is not offered here, so this continues as Custom gateway.',
+    );
+    await view.unmount();
+  });
+});
+
+describe('AddLoginStep · Environment · Ollama on this machine', () => {
+  const REFRESH = 'POST /v1/models/local/refresh';
+  const withOllama = { [PRESETS_READ]: { presets: [...PROVIDERS.presets, OLLAMA] } };
+  const refreshes = (calls: readonly Call[]) => sent(calls, REFRESH).length;
+  const tileLine = (c: HTMLElement) => c.querySelector('[data-provider-tile-local]')?.textContent;
+
+  it('reads Ollama once when the grid opens and says what it found on the tile’s second line', async () => {
+    const { view, calls } = await open({ ...withOllama, [REFRESH]: localModelsFixture('found') });
+    await until(() => tileLine(view.container) === '2 models installed', 'the count');
+    expect(refreshes(calls)).toBe(1);
+    expect(view.container.querySelector('[data-provider-tile-local]')?.getAttribute('data-provider-tile-local')).toBe(
+      'found',
+    );
+    // Only the Ollama tile carries it.
+    expect(view.container.querySelectorAll('[data-provider-tile-local]')).toHaveLength(1);
+    expect(
+      view.container.querySelector('[data-provider-tile="ollama-codex"] [data-provider-tile-local]'),
+    ).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('says "Not running" and "No model pulled yet" in the same place', async () => {
+    const down = await open({ ...withOllama, [REFRESH]: localModelsFixture('not-running') });
+    await until(() => tileLine(down.view.container) === 'Not running', 'not running');
+    await down.view.unmount();
+    const empty = await open({ ...withOllama, [REFRESH]: localModelsFixture('none-pulled') });
+    await until(() => tileLine(empty.view.container) === 'No model pulled yet', 'none pulled');
+    await empty.view.unmount();
+  });
+
+  it('shows the list, the sentence and Check again on the form — and asks again only on that tap', async () => {
+    let answer = localModelsFixture('none-pulled');
+    const { view, calls } = await open({ ...withOllama, [REFRESH]: () => answer });
+    await until(() => tileLine(view.container) === 'No model pulled yet', 'none pulled');
+    await click(view.container.querySelector('[data-provider-tile="ollama-codex"]'), 'Ollama');
+    const c = view.container;
+    const panel = must(c.querySelector('[data-local-models-panel]'), 'the panel');
+    expect(panel.getAttribute('data-local-models-panel')).toBe('none-pulled');
+    expect(panel.querySelector('[data-local-models-command]')?.textContent).toBe('ollama pull gpt-oss:20b');
+    expect(refreshes(calls)).toBe(1);
+    answer = localModelsFixture('found');
+    await click(c.querySelector('[data-local-models-check]'), 'Check again');
+    await until(
+      () => c.querySelector('[data-local-models-panel]')?.getAttribute('data-local-models-panel') === 'found',
+      'found',
+    );
+    expect(refreshes(calls)).toBe(2);
+    expect([...c.querySelectorAll('[data-local-model]')].map(row => row.getAttribute('data-local-model'))).toEqual([
+      'gpt-oss:20b',
+      'qwen3-coder:30b',
+    ]);
+    // No timer: nothing else asks.
+    await interact(() => sleep(150));
+    expect(refreshes(calls)).toBe(2);
+    await view.unmount();
+  });
+
+  it('puts no panel on any other provider’s form, and reads nothing when there is no Ollama tile', async () => {
+    const { view, calls } = await open();
+    await until(() => grid(view.container) !== null, 'the grid');
+    await click(view.container.querySelector('[data-provider-tile="deepseek"]'), 'DeepSeek');
+    expect(view.container.querySelector('[data-local-models-panel]')).toBeNull();
+    expect(refreshes(calls)).toBe(0);
+    await view.unmount();
+  });
+
+  it('keeps the tile quiet when the machine cannot be asked, and says so on the form', async () => {
+    const { view } = await open({
+      ...withOllama,
+      [REFRESH]: new FyHttpError('This device may not do that.', 403, 'forbidden'),
+    });
+    await until(() => tileLine(view.container) === 'Could not check Ollama', 'the failure');
+    await click(view.container.querySelector('[data-provider-tile="ollama-codex"]'), 'Ollama');
+    expect(view.container.querySelector('[data-local-models-error]')?.textContent).toContain(
+      'Could not ask studio-mac what Ollama has installed.',
     );
     await view.unmount();
   });

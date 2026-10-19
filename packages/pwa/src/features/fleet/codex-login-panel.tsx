@@ -31,7 +31,7 @@
  */
 
 import type { CodexLoginFlow, HarnessLoginLastCode } from '@ferretry/protocol';
-import { CheckCircle2, KeyRound, Link2, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, KeyRound, Link2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { Button } from '../../shell/primitives.tsx';
@@ -50,6 +50,11 @@ export interface CodexLoginPanelProps {
   readonly onCancel: () => void;
   /** End this sign-in and start a fresh one. Offered while one is running; absent where nothing can. */
   readonly onStartOver?: () => void;
+  /**
+   * Look in the credential's store again, launching nothing. Offered only on a sign-in whose harness
+   * finished but whose login was not found (`recheck`): it may have landed late.
+   */
+  readonly onRecheck?: () => void;
   /** Move a device code that did not work to the link sign-in, in the same flow. */
   readonly onUseLink: () => void;
   /** Start a fresh sign-in with a link, after a device code failed. */
@@ -105,6 +110,7 @@ export function CodexLoginPanel({
   onStart,
   onCancel,
   onStartOver,
+  onRecheck,
   onUseLink,
   onStartLink,
   onSubmitAddress,
@@ -327,6 +333,12 @@ export function CodexLoginPanel({
             </p>
             <p className="m-0 text-meta leading-base">{ending?.next ?? flow.remedy}</p>
             <div className="flex flex-wrap items-center gap-2">
+              {onRecheck === undefined ? null : (
+                <Button type="button" variant="primary" onClick={onRecheck} disabled={busy} data-sign-in-recheck="">
+                  <RefreshCw size={16} aria-hidden="true" />
+                  {busy ? 'Looking…' : 'Look for the login again'}
+                </Button>
+              )}
               <Button type="button" variant="outline" onClick={onStart} disabled={busy}>
                 <Link2 size={16} aria-hidden="true" />
                 {ending?.action ?? 'Start a new sign-in'}

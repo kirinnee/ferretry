@@ -6,6 +6,7 @@ import { CredentialsTab } from '../../../../../src/features/fleet/credentials/cr
 import { secretRef } from '../../../../../src/features/fleet/credentials/environment-model.ts';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { interact, mount, must } from '../../../../support/dom.ts';
+import { localModelsFixture } from '../../../../support/local-models.ts';
 import {
   APPLIED,
   type Call,
@@ -776,5 +777,49 @@ describe('CredentialsTab · an environment login', () => {
     expect(panel.textContent).toContain(`${secretRef('ZAI_API_KEY')} set ✓`);
     expect(panel.querySelector('[data-login-test-run]')).not.toBeNull();
     await view.unmount();
+  });
+});
+
+describe('CredentialsTab · an Ollama login', () => {
+  const REFRESH = 'POST /v1/models/local/refresh';
+  const { preset: _preset, ...base } = ENVIRONMENT;
+  const ollama = credential({
+    id: 'ollama-local',
+    harness: 'codex',
+    store: 'environment',
+    environment: { ...base, preset: { id: 'ollama-codex', label: 'Ollama (local)', docs: 'https://docs.ollama.com' } },
+  });
+
+  it('reads Ollama once when its page opens, lists what is installed, and asks again only on Check again', async () => {
+    let answer = localModelsFixture('not-running');
+    const { view, calls } = await open(
+      { [LIST]: listOf([ollama]), [REFRESH]: () => answer },
+      { hash: `${HASH}/ollama-local` },
+    );
+    await wait(50);
+    const c = view.container;
+    const panel = must(c.querySelector('[data-local-models-panel]'), 'the panel');
+    expect(panel.getAttribute('data-local-models-panel')).toBe('not-running');
+    expect(only(calls, REFRESH)).toHaveLength(1);
+    answer = localModelsFixture('found');
+    await click(c.querySelector('[data-local-models-check]'), 'Check again');
+    await wait(50);
+    expect(c.querySelector('[data-local-models-panel]')?.getAttribute('data-local-models-panel')).toBe('found');
+    expect(c.querySelectorAll('[data-local-model]')).toHaveLength(2);
+    expect(only(calls, REFRESH)).toHaveLength(2);
+    await view.unmount();
+  });
+
+  it('asks nothing on the list, nor on another login’s page', async () => {
+    const glm = credential({ id: 'glm-env', store: 'environment', environment: ENVIRONMENT });
+    const list = await open({ [LIST]: listOf([ollama, glm]) });
+    await wait(50);
+    expect(only(list.calls, REFRESH)).toHaveLength(0);
+    await list.view.unmount();
+    const page = await open({ [LIST]: listOf([ollama, glm]) }, { hash: `${HASH}/glm-env` });
+    await wait(50);
+    expect(only(page.calls, REFRESH)).toHaveLength(0);
+    expect(page.view.container.querySelector('[data-local-models-panel]')).toBeNull();
+    await page.view.unmount();
   });
 });

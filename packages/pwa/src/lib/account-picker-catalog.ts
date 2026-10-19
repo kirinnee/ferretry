@@ -23,6 +23,7 @@ import {
   FleetRuntimeCatalogSchema,
   type FleetRuntimeView,
   type IFyApiClient,
+  type LocalModels,
   type SessionView,
 } from '@ferretry/protocol';
 
@@ -44,6 +45,8 @@ export interface PickerModel {
   readonly defaultEffort?: string;
   /** Whether the CLI offers fast mode on it; absent when the daemon did not say. */
   readonly fast?: boolean;
+  /** Installed on this machine, as the local server (Ollama) reported it, rather than listed by the catalog. */
+  readonly local?: true;
 }
 
 /** One runtime a session can be started on, as the picker reads it. */
@@ -63,7 +66,15 @@ export interface PickerAccount {
   readonly defaultModel: string | null;
   readonly models: readonly PickerModel[];
   /** The login's model catalog, when it reads one; `customIds` means a picker also offers "Custom id…". */
-  readonly modelCatalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
+  readonly modelCatalog?: {
+    readonly id: string;
+    readonly label: string;
+    readonly customIds: boolean;
+    /** Set when the catalog also reads the models a local server has installed (`ollama`). */
+    readonly detect?: 'ollama';
+    /** What the daemon last read from that server; absent until it has read once. */
+    readonly local?: LocalModels;
+  };
   readonly available: boolean;
   readonly unavailableReason: string | null;
 }
@@ -138,11 +149,14 @@ export const pickerAccount = (runtime: FleetRuntimeView): PickerAccount => ({
           efforts: choice.efforts,
           ...(choice.defaultEffort === undefined ? {} : { defaultEffort: choice.defaultEffort }),
           ...(choice.fast === undefined ? {} : { fast: choice.fast }),
+          ...(choice.local === true ? { local: true as const } : {}),
         })),
         modelCatalog: {
           id: runtime.models.catalog.id,
           label: runtime.models.catalog.label,
           customIds: runtime.models.catalog.customIds,
+          ...(runtime.models.catalog.detect === undefined ? {} : { detect: runtime.models.catalog.detect }),
+          ...(runtime.models.local === undefined ? {} : { local: runtime.models.local }),
         },
       }),
   available: runtime.launch.available,

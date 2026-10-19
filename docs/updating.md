@@ -39,15 +39,15 @@ Walking the launched path's links therefore shows it (`passes through home-manag
   anything under `/run/current-system/sw/bin` (`environment.systemPackages`): no `home-manager-path`
   on the chain. Reported as a **nix-darwin** or **NixOS** module.
 
-| method           | how it is recognised                                                              | update                                                          |
-| ---------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `homebrew`       | the resolved path is under `…/Caskroom/<product>/`                                | **self**: `brew upgrade --cask <product>`, then restart         |
-| `nix-profile`    | a store path reached through the user's nix profile, held by a profile element    | **self**: `nix profile upgrade <element>`, then restart         |
-| `nix-shell`      | the launched path is itself a `/nix/store/…` path (an ephemeral `nix shell`)      | **switch**: offer a nix profile install; never silently         |
-| `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS (see above)        | **manual**: bump the flake input, then switch                   |
-| `system-package` | `dpkg` or `rpm` owns the file (`/usr/bin/<daemon>` from the deb/rpm)              | **manual**: the exact `sudo apt`/`sudo dnf` command             |
-| `standalone`     | a release archive or `install.sh` binary anywhere else                            | **self**: download, verify the signature, swap, keep a rollback |
-| `unknown`        | a development build (`bun …/fyd.ts`) or anything the rules above do not recognise | **manual**: none — said so                                      |
+| method           | how it is recognised                                                              | update                                                            |
+| ---------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `homebrew`       | the resolved path is under `…/Caskroom/<product>/`                                | **self**: `brew update`, `brew upgrade --cask <product>`, restart |
+| `nix-profile`    | a store path reached through the user's nix profile, held by a profile element    | **self**: `nix profile upgrade <element>`, then restart           |
+| `nix-shell`      | the launched path is itself a `/nix/store/…` path (an ephemeral `nix shell`)      | **switch**: offer a nix profile install; never silently           |
+| `nix-module`     | a store path reached through home-manager, nix-darwin or NixOS (see above)        | **manual**: bump the flake input, then switch                     |
+| `system-package` | `dpkg` or `rpm` owns the file (`/usr/bin/<daemon>` from the deb/rpm)              | **manual**: the exact `sudo apt`/`sudo dnf` command               |
+| `standalone`     | a release archive or `install.sh` binary anywhere else                            | **self**: download, verify the signature, swap, keep a rollback   |
+| `unknown`        | a development build (`bun …/fyd.ts`) or anything the rules above do not recognise | **manual**: none — said so                                        |
 
 Two things deliberately do NOT self-update:
 
@@ -113,6 +113,22 @@ Every self-update is the same transaction:
 
 Homebrew keeps no previous cask version, so a failed Homebrew update cannot be rolled back
 automatically. That is a declared GAP: the outcome says so and names `fy daemon logs`.
+
+### Homebrew refreshes its tap first
+
+Homebrew only auto-updates its taps about once a day (and never with `HOMEBREW_NO_AUTO_UPDATE`), so a
+bare `brew upgrade --cask` can answer "already up to date" or install an old cask. The update therefore
+prints a progress line and runs `brew update` first (tapping `kirinnee/ferretry` again if the tap has
+gone missing), then `brew upgrade --cask`, then proves the installed version is the target. A failure
+at any step names the manual recovery. The cask clears macOS quarantine in its own `postflight`.
+
+By hand:
+
+```bash
+brew update && brew upgrade --cask ferretry && fy daemon restart
+# if the tap is wedged:
+brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry
+```
 
 ### The standalone binary
 

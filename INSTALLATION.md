@@ -102,12 +102,24 @@ fy daemon update           # update the way it was installed, restart, and roll 
 ```
 
 Homebrew and nix profile installs, and standalone binaries, update themselves: `fy daemon update`
-runs `brew upgrade --cask ferretry` or `nix profile upgrade`, restarts the daemon, and checks that the
+runs `brew update` then `brew upgrade --cask ferretry`, or `nix profile upgrade`, restarts the daemon, and checks that the
 new version serves within 30 seconds — rolling back the nix profile or the previous binary when it does
 not. A daemon running from a temporary `nix shell` is offered a switch to a nix profile install, which
 fixes updates for good (`fy daemon update --switch-to-profile`; `fy daemon install` offers the same).
 home-manager, nix-darwin, NixOS and apt/dnf installs are shown the exact steps instead: their version
 is pinned by your own configuration, or needs `sudo`.
+
+If a Homebrew update does not land the latest version, refresh the tap and upgrade by hand:
+
+```bash
+brew update && brew upgrade --cask ferretry && fy daemon restart
+```
+
+If the tap is wedged, remove it and install again:
+
+```bash
+brew untap kirinnee/ferretry && brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew reinstall --cask ferretry
+```
 
 `fy daemon status` says how the daemon was installed and when an update is available, and the app
 shows the same under Settings › Machines › About with a one-click Update. The whole design, including

@@ -15,6 +15,7 @@ import {
   parseModelCatalogText,
   SIGN_IN_MODEL_CATALOGS,
 } from '../../src/lib/models/catalog.ts';
+import type { LocalModels } from '@ferretry/protocol';
 import { runtimeModels } from '../../src/lib/models/runtime.ts';
 import {
   type CatalogHalf,
@@ -316,5 +317,92 @@ describe('runtimeModels', () => {
     // Assert
     should(derived.models[0]).eql({ id: 'a', label: 'a', tier: 'best', efforts: [], note: 'Local.', available: true });
     should(derived.catalog).match({ docs: 'https://acme.example/codex', detect: 'ollama' });
+  });
+
+  describe('with the models a local server has installed', () => {
+    const ollama = CATALOGS.ollama as ModelCatalog;
+    const installed = (state: LocalModels['state'], ids: readonly string[]): LocalModels => ({
+      provider: 'ollama',
+      baseUrl: 'http://127.0.0.1:11434',
+      state,
+      models: ids.map(id => ({ id, label: id })),
+      checkedAt: '2026-10-19T00:00:00.000Z',
+      message: 'Ollama says so.',
+      pullCommand: 'ollama pull gpt-oss:20b',
+    });
+
+    it('should offer only what is installed, keep the catalog’s words for a model it knows, and mark each local', () => {
+      // Arrange / Act
+      const derived = runtimeModels({
+        harness: 'codex',
+        modelSet: undefined,
+        catalog: ollama,
+        local: installed('found', ['llama3.2:latest', 'gpt-oss:120b']),
+      });
+
+      // Assert
+      should(derived.models.map(entry => [entry.id, entry.label, entry.local, entry.available])).eql([
+        ['gpt-oss:120b', 'gpt-oss 120B', true, true],
+        ['llama3.2:latest', 'llama3.2:latest', true, true],
+      ]);
+      should(derived.models[0]).match({ tier: 'best', context: 128000, efforts: ['low', 'medium', 'high'] });
+      should(derived.models[1]).eql({
+        id: 'llama3.2:latest',
+        label: 'llama3.2:latest',
+        efforts: [],
+        available: true,
+        local: true,
+      });
+      should(derived.default).equal('gpt-oss:120b');
+      should(derived.local?.state).equal('found');
+    });
+
+    it('should launch with the catalog’s default when it is installed', () => {
+      // Arrange / Act
+      const derived = runtimeModels({
+        harness: 'codex',
+        modelSet: undefined,
+        catalog: ollama,
+        local: installed('found', ['llama3.2:latest', 'gpt-oss:20b']),
+      });
+
+      // Assert
+      should(derived.default).equal('gpt-oss:20b');
+    });
+
+    it('should keep the catalog’s suggestions, and say what was found, when no model is installed', () => {
+      // Arrange / Act
+      const states = (['none-pulled', 'not-running', 'unreadable', 'refused', 'disabled'] as const).map(state =>
+        runtimeModels({ harness: 'codex', modelSet: undefined, catalog: ollama, local: installed(state, []) }),
+      );
+
+      // Assert
+      for (const derived of states) {
+        should(derived.models.map(entry => [entry.id, entry.local])).eql([
+          ['gpt-oss:20b', undefined],
+          ['gpt-oss:120b', undefined],
+        ]);
+        should(derived.local).not.be.undefined();
+      }
+    });
+
+    it('should hand a login the snapshot only when its catalog detects that server', () => {
+      // Arrange
+      const local = installed('found', ['gpt-oss:20b']);
+      const sources = { catalogs: CATALOGS, presets: PRESETS, local: { ollama: local } };
+
+      // Act
+      const ollamaLogin = loginModelCatalog({ store: 'environment', preset: 'ollama-codex' }, 'codex', sources);
+      const zaiLogin = loginModelCatalog({ store: 'environment', preset: 'zai-glm' }, 'claude', sources);
+      const unread = loginModelCatalog({ store: 'environment', preset: 'ollama-codex' }, 'codex', {
+        catalogs: CATALOGS,
+        presets: PRESETS,
+      });
+
+      // Assert
+      should(ollamaLogin.local).equal(local);
+      should(zaiLogin.local).be.undefined();
+      should(unread.local).be.undefined();
+    });
   });
 });

@@ -128,6 +128,10 @@ export class FakePackages implements IPackageManagerPort {
     if (this.upgradeTo !== undefined) this.host.versions.set(this.daemonPath, this.upgradeTo);
   }
 
+  brewRefresh(tap: string, url: string): Promise<CommandOutcome> {
+    return this.#ran(`brew-refresh:${tap}:${url}`, () => undefined);
+  }
+
   brewUpgrade(cask: string): Promise<CommandOutcome> {
     return this.#ran(`brew:${cask}`, () => this.#upgrade());
   }
