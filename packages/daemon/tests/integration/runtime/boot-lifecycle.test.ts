@@ -2660,7 +2660,7 @@ describe('daemon boot lifecycle', () => {
     // The receiving agent is TOLD who is talking to it, in the payload it actually reads. An
     // unattributed peer message is one an agent cannot reply to.
     should(delivered).containEql(`session ${sender.config.id}`);
-    should(delivered).containEql('not from the human lead');
+    should(delivered).containEql('not from the owner');
     // Both halves of the conversation are durable: the recipient's inbox and the sender's own outbox.
     should(inbox).containEql(`"from":"${sender.config.id}"`);
     should(outbox).containEql(`"to":"${recipient.config.id}"`);
