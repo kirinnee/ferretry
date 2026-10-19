@@ -117,6 +117,8 @@ interface World {
   readonly routes?: Record<string, unknown>;
   /** A change this answers with a refusal instead of staging. */
   readonly refuse?: (change: { kind: string; id?: string; name?: string }) => Error | undefined;
+  /** A `runtime.put` waits for this before it is answered. */
+  readonly hold?: Promise<void>;
 }
 
 interface Opened {
@@ -131,7 +133,7 @@ const open = async (world: World = {}, props: Opened = {}) => {
   const events: string[] = [];
   const made: FleetCredentialView[] = [];
   const existing = world.existing ?? CREDENTIALS.credentials;
-  const client = scripted(
+  const base = scripted(
     {
       ...READS({
         ...DATA,
@@ -163,6 +165,16 @@ const open = async (world: World = {}, props: Opened = {}) => {
     },
     calls,
   );
+  const client: FleetClient = {
+    request: async (path, schema, init) => {
+      const kind =
+        typeof init?.body === 'string'
+          ? (JSON.parse(init.body) as { change?: { kind?: string } }).change?.kind
+          : undefined;
+      if (world.hold !== undefined && path === '/v1/fleet/proposals' && kind === 'runtime.put') await world.hold;
+      return base.request(path, schema, init);
+    },
+  };
   const view = await mount(
     <Host
       createClient={async () => client}
@@ -711,5 +723,27 @@ describe('AddLogin · leaving and pausing', () => {
     expect(retry.textContent).toBe('Checking…');
     expect(retry.disabled).toBe(true);
     await checking.view.unmount();
+  });
+});
+
+describe('AddLogin · progress', () => {
+  it('says what it is doing while the runtime is made, and offers Done only once it is', async () => {
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const { view } = await open({ hold });
+    const c = view.container;
+    await click(c.querySelector('[data-provider-tile="deepseek"]'), 'DeepSeek');
+    await type(c.querySelector('[data-env-secret-input="DEEPSEEK_API_KEY"]'), 'held-key');
+    await click(submit(c), 'Add login and runtime');
+    await until(() => c.querySelector('[data-add-login-working]') !== null, 'the progress line');
+    expect(text(c, '[data-add-login-working]')).toBe('Creating claude-default…');
+    expect(must(c.querySelector<HTMLButtonElement>('[data-add-login-finish]'), 'Done').disabled).toBe(true);
+    release();
+    await until(() => c.querySelector('[data-add-login-runtime-made]') !== null, 'the runtime made');
+    expect(c.querySelector('[data-add-login-working]')).toBeNull();
+    expect(must(c.querySelector<HTMLButtonElement>('[data-add-login-finish]'), 'Done').disabled).toBe(false);
+    await view.unmount();
   });
 });
