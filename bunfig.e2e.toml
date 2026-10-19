@@ -1,4 +1,6 @@
 [test]
+# Every tier runs offline: no booted daemon follows the published model catalog or the hosted relay.
+preload = ["./packages/daemon/tests/support/offline-environment.ts"]
 root = "tests/e2e"
 # THE PER-TEST TIMEOUT IS NOT SET HERE, and it is not an omission.
 #

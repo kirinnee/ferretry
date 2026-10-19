@@ -34,6 +34,7 @@ export * from './handover.ts';
 export * from './harness-login.ts';
 export * from './learning.ts';
 export * from './mcp-oauth.ts';
+export * from './models.ts';
 export * from './pairing.ts';
 export * from './pins.ts';
 export * from './push.ts';

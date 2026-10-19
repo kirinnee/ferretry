@@ -76,6 +76,9 @@ import {
 import { deviceRotateMessage, verifyDeviceProof } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
+// The hosted app's release key, the one its signed release list is checked with — and so the published
+// model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
+import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
 import { BunSqliteAnalyticsStoreFactory, HttpAnalyticsPricingFeed } from '../src/adapters/analytics/index.ts';
 import {
@@ -145,9 +148,11 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
+  FileModelCatalogCache,
   FileSpeedupTestLedger,
   FileUpdateDocuments,
   foreignHistoryRoots,
+  HostedModelCatalog,
   GitHubLatestRelease,
   HostedRelayDirectory,
   HostInstallFacts,
@@ -545,8 +550,11 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  HOSTED_APP_ORIGIN,
   ModelCatalogService,
+  modelCatalogsView,
   PinService,
+  PublishedModelCatalogService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   ProvedPaneCapture,
@@ -7004,10 +7012,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         async () => await modelCatalogService.catalogs(),
       );
-      // Model catalogs (docs/model-catalog.md): this build's, then this machine's own
-      // config/models/<id>.yaml over them. What every runtime on a login offers and pins.
+      // The model catalog Ferretry publishes with the hosted app (docs/model-catalog.md § Live updates):
+      // a one-file version check, at most every six hours when something reads the catalogs, and the
+      // full catalog only when the version differs — checked against the hosted app's signed release
+      // list with the key compiled into this build. `FY_MODEL_CATALOG=off` follows none; the origin can
+      // be pointed elsewhere with `FY_MODEL_CATALOG_ORIGIN`.
+      const modelCatalogOrigin = process.env.FY_MODEL_CATALOG_ORIGIN?.trim() || HOSTED_APP_ORIGIN;
+      const publishedModelCatalog = new PublishedModelCatalogService({
+        ...(process.env.FY_MODEL_CATALOG === 'off' ? {} : { fetch: new HostedModelCatalog(modelCatalogOrigin) }),
+        cache: new FileModelCatalogCache(stateFiles, join(paths.state, 'model-catalog.json')),
+        publicKeyPem: HOSTED_APP_RELEASE_KEY,
+        nowMs: () => millisecondClock.now(),
+        // A newer catalog moves what every runtime offers now, not at the next change somebody makes.
+        onUpdated: async () => {
+          await fleetCatalog.republish().catch(() => undefined);
+        },
+      });
+      // Model catalogs (docs/model-catalog.md): this build's, the published one over them, then this
+      // machine's own config/models/<id>.yaml over both. What every runtime on a login offers and pins.
       const modelCatalogService = new ModelCatalogService({
         files: async () => (await configFiles.load()).evaluation.effective.modelCatalogs,
+        published: async () => {
+          publishedModelCatalog.refreshIfDue();
+          return await publishedModelCatalog.catalogs();
+        },
         presets: async () => await providerPresets.presets(),
       });
       const providerProbe = new ProviderProbeService({
@@ -7559,6 +7587,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sttEnhancement,
         // Names-only status over the store's listing, and a Test that spends a key once through the
         // outbound holder above. Jev's Test goes through the same guard the Warden will use.
+        // The model catalogs in effect, and the published one this machine follows (docs/model-catalog.md).
+        models: {
+          view: async () =>
+            modelCatalogsView(await modelCatalogService.catalogs(), {
+              origin: modelCatalogOrigin,
+              enabled: publishedModelCatalog.enabled,
+              ...(await publishedModelCatalog.status()),
+            }),
+          refresh: async () => await publishedModelCatalog.refresh(true),
+        },
         speedups: new SpeedupsService({
           authorizer: outboundAuthorizer,
           secrets: secrets.directory,
