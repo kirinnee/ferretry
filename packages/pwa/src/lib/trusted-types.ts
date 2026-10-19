@@ -1,14 +1,14 @@
 /**
  * TRUSTED TYPES: the browser, not review, keeps markup out of the app's script sinks (docs/cross-daemon.md §2b).
  *
- * `public/_headers` says `require-trusted-types-for 'script'` and names exactly two policies. From then
+ * `public/_headers` says `require-trusted-types-for 'script'` and names exactly three policies. From then
  * on Chromium refuses a plain string at every sink that can turn text into script — `innerHTML`, a
  * worker's script URL — and only a value one of these policies made is accepted. Before, the four
  * places the app writes raw markup were safe because a reviewer read them; now they are safe because
  * nothing else CAN write markup, and a fifth one added later fails in the browser instead of passing
  * review.
  *
- * The two policies, each the narrowest rule its one job allows:
+ * The three policies, each the narrowest rule its one job allows:
  *
  * - `fy-highlight` makes the markup a code view shows from highlight.js output (or `escapeHtml`). It
  *   accepts a string only when every tag in it is `<span class="…">` or `</span>` and no other `<` or
@@ -20,6 +20,14 @@
  *   and the on-device speech worker the build emits beside the app (`/assets/parakeet-worker-<hash>.js`,
  *   or its dev-server address). A registration and a `new Worker` are script sinks to the browser, so
  *   without a policy neither could start at all.
+ * - `fy-fragment` exists for ONE caller, the `fy-render` html fragment sanitizer
+ *   (`components/fy-render-fragment.tsx`), and it is handed to DOMPurify as its parsing policy and
+ *   to nothing else. DOMPurify has to parse an agent's markup into an inert document before it can
+ *   remove anything, and that parse is itself a script sink. The policy does not judge the markup —
+ *   it cannot, the sanitizer is the judge — so the value it makes never reaches a live sink: DOMPurify
+ *   returns a sanitized DOM fragment, appended as nodes into a closed shadow root. A second caller
+ *   would be a second unsanitized sink, which is why `fy-render-opt-in.test.ts` holds the importers
+ *   of {@link fragmentParsingPolicy} at one.
  *
  * Where the browser has no Trusted Types (Safari, Firefox, the unit tests) both helpers return the
  * same string, checked by the same rules, so behaviour never forks on the engine.
@@ -29,7 +37,7 @@ import { escapeHtml } from './highlight.ts';
 import { RELEASE_WORKER_FILE } from './release-manifest.ts';
 
 /** The policy names `public/_headers` allows, and nothing else may create one. */
-export const TRUSTED_TYPE_POLICIES = ['fy-highlight', 'fy-worker'] as const;
+export const TRUSTED_TYPE_POLICIES = ['fy-highlight', 'fy-worker', 'fy-fragment'] as const;
 
 interface TrustedTypePolicyLike {
   createHTML?(input: string): unknown;
@@ -114,3 +122,33 @@ export const trustedHighlight = (markup: string): TrustedHTML | string => truste
 
 /** The app's own worker URL, ready for `navigator.serviceWorker.register` or `new Worker`. */
 export const trustedWorkerUrl = (url: string): string => trustedTypes().scriptUrl(url);
+
+/** The slice of a policy DOMPurify's `TRUSTED_TYPES_POLICY` option reads. */
+export interface FragmentParsingPolicy {
+  createHTML(input: string): string;
+  createScriptURL(input: string): string;
+}
+
+/** One policy per factory: a browser refuses a second policy of the same name. */
+const fragmentPolicies = new WeakMap<TrustedTypePolicyFactoryLike, FragmentParsingPolicy>();
+
+/**
+ * The `fy-fragment` policy for DOMPurify's own parse, or `null` where the browser has no Trusted Types
+ * (DOMPurify then parses the plain string, which nothing enforces there). Created once per factory:
+ * a browser refuses a second policy of the same name. It makes NO script URL — DOMPurify asks for one only to
+ * carry a sanitized `<script>`, and a fragment never keeps one.
+ */
+export const fragmentParsingPolicy = (
+  factory: TrustedTypePolicyFactoryLike | undefined = (globalThis as { trustedTypes?: TrustedTypePolicyFactoryLike })
+    .trustedTypes,
+): FragmentParsingPolicy | null => {
+  if (factory === undefined) return null;
+  const known = fragmentPolicies.get(factory);
+  if (known !== undefined) return known;
+  const made = factory.createPolicy('fy-fragment', {
+    createHTML: input => input,
+    createScriptURL: () => refuse('a script URL inside an html fragment'),
+  }) as unknown as FragmentParsingPolicy;
+  fragmentPolicies.set(factory, made);
+  return made;
+};

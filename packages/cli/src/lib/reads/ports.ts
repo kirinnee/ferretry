@@ -1,4 +1,4 @@
-import type { IFyApiClient, SessionAttachTarget } from '@ferretry/protocol';
+import type { IFyApiClient, SessionAttachTarget, SessionResult } from '@ferretry/protocol';
 
 /**
  * The daemon reads the operator commands need, and nothing else.
@@ -26,6 +26,16 @@ export interface IReadsIo {
   success(message: string): void;
   error(message: string): void;
   setExitCode(code: number): void;
+}
+
+/**
+ * What a finished wait collects (docs/pack-mode.md): the ferret's `signal done` result, and stopping one
+ * that is still running once its result is in hand, as a sub-ferret's parent does.
+ */
+export interface IWaitResults {
+  /** `undefined` when it cannot be read; a wait never fails over a result. */
+  result(id: string): Promise<SessionResult | undefined>;
+  stop(id: string, reason: string): Promise<void>;
 }
 
 /** Wall clock and sleep, injected so a poll loop is testable without real time passing. */

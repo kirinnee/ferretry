@@ -76,8 +76,10 @@ invalidate DaemonRuntimeModelCatalogStore # unmounted: no construction site in p
 # is no daemon, no session, no token and no daemon URL anywhere in its props or its request; giving it
 # a `DaemonConnection` to satisfy this rule would ADD the credential the design exists to withhold.
 access packages/pwa/src/components/fy-render-sandbox.tsx # a fixed same-origin static asset, deliberately unscoped: see docs/fy-render.md
-# The `fy-render` media stage, for the same reason. Its one request is an https image a reader pressed
-# Render on — someone else's server, `credentials: 'omit'`, no referrer, byte-capped — and it reads
+# The `fy-render` media stage, for the same reason. Its one request is an https image a block near the
+# viewport names — someone else's server, `credentials: 'omit'`, no referrer, byte-capped — and it reads
 # workspace files only through the narrow reader function it is handed, never a connection.
-access packages/pwa/src/components/fy-render-media.tsx # an author-named https image after a gesture, deliberately unscoped: see docs/fy-render.md
+access packages/pwa/src/components/fy-render-media.tsx # an author-named https image once near, deliberately unscoped: see docs/fy-render.md
 retain packages/pwa/src/lib/message-clock.ts:formatters # memoised Intl.DateTimeFormat objects keyed by locale and timezone. They describe how this device prints a time, which every paired daemon shares; no daemon record is stored.
+retain packages/pwa/src/components/fy-render-fragment.tsx:purifier # one DOMPurify instance with this module's fixed hooks; it holds sanitizer rules, never a daemon record, and is the same for every paired daemon.
+retain packages/pwa/src/lib/trusted-types.ts:fragmentPolicies # one fy-fragment Trusted Types policy per browser policy factory, because the browser refuses a second policy of the same name; no daemon record is stored.

@@ -48,6 +48,11 @@ export const SendUnaccountedReasonSchema = z.enum([
   'composer_discarded',
   /** The transcript could not be read, so absence could not be proven. */
   'transcript_unreadable',
+  /**
+   * The session has no transcript this daemon can prove is its own, so nothing it typed can ever be
+   * confirmed — not a timing problem, and re-sending cannot fix it. Restarting the CLI can.
+   */
+  'transcript_unbound',
   /** The pane could not be read, so absence could not be proven. */
   'pane_unreadable',
   /** A dialog on the agent's screen was waiting for an answer, so the message could not be typed. */
@@ -397,6 +402,11 @@ export const SessionConfigSchema = z.object({
    * at its next launch unless the owner set it explicitly. Read at launch, so a change takes effect at the next launch.
    */
   hypermedia: z.boolean().optional(),
+  /**
+   * Whether this ferret is told it may delegate to sub-ferrets (docs/pack-mode.md). ABSENT MEANS ON, as
+   * for hypermedia; the machine's own switch and the depth limit still apply. Read at launch.
+   */
+  pack: z.boolean().optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
 

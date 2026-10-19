@@ -10,6 +10,9 @@
  *   * NOT DELIVERED — the daemon proved it never arrived. Retry is one tap, because it cannot duplicate.
  *   * UNCONFIRMED — it could be proven neither way and may well have landed. "Send again anyway" is a
  *     two-step disclosure that says what a second copy costs before the button exists.
+ *   * UNCONFIRMABLE — the daemon can prove no transcript is this session's, so NOTHING it sends can be
+ *     confirmed. Offering "send again" there only types another copy into an agent that most likely
+ *     has the first; the row says so instead, and the workspace's notice carries the remedies.
  *
  * Both are latched synchronously through a ref, so a double activation is one request.
  */
@@ -21,6 +24,9 @@ import { peerFrom } from '../lib/peer-message.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { MessageFooter } from './send-receipt.tsx';
+
+export const UNBOUND_SEND_COPY =
+  'Ferretry can’t confirm this, because it can’t find this session’s transcript. Check the Console tab before sending it again.';
 
 export const RESEND_RISK_COPY =
   'The original may still have reached the agent. Sending again could make it read this twice — continue only if that is acceptable.';
@@ -55,19 +61,28 @@ export function LedgerMessage({ record, placement = 'chronological', onRetry }: 
   const boundary = ledgerPlacementCopy(placement);
   const actionHeld = useRef(false);
   const [retrying, setRetrying] = useState(false);
-  const [result, setResult] = useState<'accepted' | 'error' | null>(null);
+  const [outcome, setOutcome] = useState<{ readonly result: 'accepted' | 'error'; readonly attempt: number } | null>(
+    null,
+  );
+  const attempt = record.attempt ?? 1;
+  // A retry's word is about THAT attempt. Once a newer one has settled, the row says its own state, so
+  // "Sending again" can never outlive the send it described.
+  const settledSince =
+    outcome !== null && attempt > outcome.attempt && record.fate !== 'accepted' && record.fate !== 'queued';
+  const result = settledSince ? null : (outcome?.result ?? null);
   const retryable = record.fate === 'timed_out' && record.retryable === true;
-  const unconfirmed = record.fate === 'unaccounted';
+  const unbound = record.fate === 'unaccounted' && record.unaccountedReason === 'transcript_unbound';
+  const unconfirmed = record.fate === 'unaccounted' && !unbound;
 
   const retry = async (force: boolean): Promise<void> => {
     if (!onRetry || actionHeld.current) return;
     setRetrying(true);
-    setResult(null);
+    setOutcome(null);
     try {
       const accepted = await runResendOnce(actionHeld, () => onRetry(record, force));
-      if (accepted !== undefined) setResult(accepted ? 'accepted' : 'error');
+      if (accepted !== undefined) setOutcome({ result: accepted ? 'accepted' : 'error', attempt });
     } catch {
-      setResult('error');
+      setOutcome({ result: 'error', attempt });
     } finally {
       setRetrying(false);
     }
@@ -128,6 +143,14 @@ export function LedgerMessage({ record, placement = 'chronological', onRetry }: 
               </div>
             </div>
           </details>
+        ) : null}
+        {unbound ? (
+          <p
+            className="mx-panel mb-2 mt-0 border-t border-border-soft pt-1.5 text-[11px] text-muted"
+            data-send-unbound=""
+          >
+            {UNBOUND_SEND_COPY}
+          </p>
         ) : null}
         {result === 'accepted' ? (
           <div className="mx-panel mb-2 text-[11px] text-muted" role="status">

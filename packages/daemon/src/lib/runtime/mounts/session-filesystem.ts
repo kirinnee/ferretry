@@ -82,12 +82,42 @@ async function list(
   }
 }
 
+/**
+ * Names the session's MEDIA folder — where its agent puts files it made to show the person — or
+ * `undefined` on a daemon that keeps none. A function of the session id alone: the caller chooses
+ * `scope=media`, never a directory.
+ */
+export type SessionMediaRoot = (sessionId: string) => string;
+
+/**
+ * Which tree a file read is confined to: the session's working tree, or with `scope=media` its media
+ * folder. The media folder lives in the daemon's own session state, so no repository's ignore rules
+ * decide whether a generated chart can be shown — the denylist still applies, the filesystem grant still
+ * governs the route, and the read is still descriptor-confined to that one folder.
+ */
+async function fileRoot(
+  sessions: SessionDirectorySubsystem,
+  mediaRoot: SessionMediaRoot | undefined,
+  context: RouteContext,
+): Promise<string> {
+  const id = sessionId(context);
+  const cwd = await sessionCwd(sessions, id);
+  const scope = queryValue(context.request, 'scope');
+  if (scope === undefined) return cwd;
+  if (scope !== 'media') throw new ApiError(400, 'query parameter "scope" must be "media"', 'invalid_scope');
+  if (queryValue(context.request, 'rev') !== undefined)
+    throw new ApiError(400, 'the media folder has no history, so "rev" does not apply', 'invalid_rev');
+  if (mediaRoot === undefined) throw new ApiError(404, 'this daemon keeps no session media folder', 'not_found');
+  return mediaRoot(id);
+}
+
 async function file(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
+  mediaRoot: SessionMediaRoot | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  const cwd = await sessionCwd(sessions, sessionId(context));
+  const cwd = await fileRoot(sessions, mediaRoot, context);
   const target = requiredPath(context);
   // `rev` is an enumeration of exactly one member, so anything else is a client mistake rather than a
   // silent fall back to the working tree — which would serve different bytes than the caller asked for.
@@ -192,6 +222,7 @@ async function diff(
 export function sessionFilesystemRoutes(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
+  mediaRoot?: SessionMediaRoot,
 ): readonly ApiRoute[] {
   return [
     {
@@ -200,7 +231,7 @@ export function sessionFilesystemRoutes(
       minimum: 'operator',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
-      handle: async context => await file(filesystem, sessions, context),
+      handle: async context => await file(filesystem, sessions, mediaRoot, context),
     },
     {
       method: 'GET',

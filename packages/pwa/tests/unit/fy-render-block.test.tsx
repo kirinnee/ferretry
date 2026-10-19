@@ -3,7 +3,7 @@ import type { ElementType, ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
-import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
+import { FyRenderFragment } from '../../src/components/fy-render-fragment.tsx';
 import { FyRenderMedia } from '../../src/components/fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
 import {
@@ -153,15 +153,11 @@ const sandboxProps = (tree: ReactTestRenderer) =>
     readonly onRendered: () => void;
   };
 
-const htmlProps = (tree: ReactTestRenderer) =>
-  tree.root.findByType(FyRenderHtmlFrame).props as {
-    readonly fullscreen: boolean;
-    readonly paint: FyRenderHtmlPaint;
-    readonly ready: boolean;
-    readonly title: string;
-    readonly onEscape: () => void;
-    readonly onFailed: (failure: FyRenderSandboxFailure) => void;
-    readonly onRendered: () => void;
+const fragmentProps = (tree: ReactTestRenderer) =>
+  tree.root.findByType(FyRenderFragment).props as {
+    readonly source: string;
+    readonly alt: string;
+    readonly readWorkspaceMedia?: FyRenderWorkspaceReader;
   };
 
 const wait = async (ms = 10): Promise<void> => {
@@ -262,19 +258,20 @@ describe('FyRenderBlock execution surface', () => {
     }
   });
 
-  test('should run an HTML payload only inside its sandboxed frame, never in this document', () => {
+  test('should render an HTML payload as a static fragment, never a frame, and never as a script here', () => {
     // Arrange — a payload that would be unmistakable if it were ever live here.
     const tree = render(<FyRenderBlock block={htmlBlock('<script>globalThis.pwned = true</script>')} />);
 
     // Act — open the source.
     run(() => tool(tree, 'HTML source').props.onClick());
 
-    // Assert — the ONLY frame is the opaque-origin one, and no other sink exists.
-    should(count(tree, 'iframe')).equal(1);
-    should(tree.root.findByType('iframe').props.sandbox).equal('allow-scripts');
-    for (const forbidden of ['script', 'object', 'embed', 'canvas'] as const) should(count(tree, forbidden)).equal(0);
+    // Assert — no frame at all, and no sink in the tree React renders: the fragment is sanitized
+    // into a closed shadow root by `FyRenderFragment` (proven in its own file).
+    should(count(tree, FyRenderFragment)).equal(1);
+    for (const forbidden of ['iframe', 'script', 'object', 'embed', 'canvas'] as const)
+      should(count(tree, forbidden)).equal(0);
     should(tree.root.findAll(node => node.props?.dangerouslySetInnerHTML !== undefined).length).equal(0);
-    // The payload reaches this document only as escaped text in the source panel.
+    // The payload reaches this document's React tree only as escaped text in the source panel.
     should(textOf(tree.root)).containEql('<script>globalThis.pwned = true</script>');
   });
 
@@ -330,22 +327,19 @@ describe('FyRenderBlock inline by default', () => {
     should(String(tree.root.findByType('img').props.src).startsWith('data:image/png;base64,')).be.true();
   });
 
-  test('should run an html page at once, named by its description, painted and revealed once drawn', () => {
+  test('should render an html fragment at once, named by its description, with the media reader', () => {
+    // Arrange
+    const reader: FyRenderWorkspaceReader = () => new Promise(() => {});
+
     // Act
-    const tree = render(<FyRenderBlock block={htmlBlock()} />);
-
-    // Assert — frameless: the page is told the column's paint, and is not shown
-    // until it has drawn.
-    const frame = htmlProps(tree);
-    should(frame.title).equal('A counter widget');
-    should(frame.ready).be.false();
-    should(frame.paint.scheme).equal('dark');
-
-    // Act — the page reports its first draw.
-    run(() => frame.onRendered());
+    const tree = render(<FyRenderBlock block={htmlBlock('<p>hi</p>')} readWorkspaceMedia={reader} />);
 
     // Assert
-    should(htmlProps(tree).ready).be.true();
+    const fragment = fragmentProps(tree);
+    should(fragment.source).equal('<p>hi</p>');
+    should(fragment.alt).equal('A counter widget');
+    should(fragment.readWorkspaceMedia === reader).be.true();
+    should(tools(tree)).eql(['HTML source', 'Fullscreen']);
   });
 
   test('should play an animation at once and pause it from its corner tool', () => {
@@ -668,28 +662,28 @@ describe('FyRenderBlock fallback', () => {
     }
   });
 
-  test('should fall back when an html page navigates away, and close fullscreen with it', () => {
-    // Arrange — the reader is standing in fullscreen.
-    const tree = render(<FyRenderBlock block={htmlBlock()} />);
+  test('should fall back when a sandbox fails, and close fullscreen with it', () => {
+    // Arrange — the reader is standing in fullscreen on a playing animation.
+    const tree = render(<FyRenderBlock block={lottieBlock()} />);
     run(() => tool(tree, 'Fullscreen').props.onClick());
-    should(htmlProps(tree).fullscreen).be.true();
+    should(marked(tree, { role: 'dialog' })).equal(1);
 
     // Act
-    run(() => htmlProps(tree).onFailed({ detail: null, kind: 'navigation' }));
+    run(() => sandboxProps(tree).onFailed({ detail: null, kind: 'render' }));
 
     // Assert — no overlay left behind with nothing in it.
-    should(attribute(tree, 'data-fy-render-failure')).equal('navigation');
+    should(attribute(tree, 'data-fy-render-failure')).equal('render');
     should(marked(tree, { role: 'dialog' })).equal(0);
     should(count(tree, 'iframe')).equal(0);
   });
 
   test('should say so in the truncated preview of a very long source', () => {
-    // Arrange — an html body past the preview cap.
-    const long = `<p>${'x'.repeat(FY_RENDER_LIMITS.sourcePreviewCharacters)}</p>`;
-    const tree = render(<FyRenderBlock block={htmlBlock(long)} />);
+    // Arrange — an animation past the preview cap.
+    const long = `{"v":"5.7.0","w":100,"h":100,"layers":[],"nm":"${'x'.repeat(FY_RENDER_LIMITS.sourcePreviewCharacters)}"}`;
+    const tree = render(<FyRenderBlock block={parsed('type: lottie', 'alt: A spinner', '---', long)} />);
 
     // Act
-    run(() => htmlProps(tree).onFailed({ detail: 'startup', kind: 'startup' }));
+    run(() => sandboxProps(tree).onFailed({ detail: 'startup', kind: 'startup' }));
 
     // Assert
     should(textOf(tree.root)).containEql(
@@ -699,27 +693,6 @@ describe('FyRenderBlock fallback', () => {
 });
 
 describe('FyRenderBlock designed stops', () => {
-  test('should keep a stopped html page’s place with one muted line and run it again', () => {
-    // Arrange
-    const tree = render(<FyRenderBlock block={htmlBlock()} />);
-
-    // Act — ten minutes pass.
-    run(() => htmlProps(tree).onFailed({ detail: null, kind: 'lifetime' }));
-
-    // Assert — not a failure: no code block, no error mark.
-    should(count(tree, 'iframe')).equal(0);
-    should(count(tree, 'pre')).equal(0);
-    should(textOf(tree.root)).containEql('This interactive page stopped after ten minutes.');
-    should(tools(tree)).eql([]);
-
-    // Act
-    run(() => quietAction(tree).props.onClick());
-
-    // Assert
-    should(count(tree, 'iframe')).equal(1);
-    should(htmlProps(tree).ready).be.false();
-  });
-
   test('should keep a stopped animation’s place and replay it', () => {
     // Arrange
     const tree = render(<FyRenderBlock block={lottieBlock()} />);
@@ -766,7 +739,7 @@ describe('FyRenderBlock corner tools', () => {
     should(marked(tree, { 'data-fy-render-source': 'true' })).equal(0);
   });
 
-  test('should open a labelled modal from the Fullscreen tool and close it from inside an html page', () => {
+  test('should open a labelled modal from the Fullscreen tool and close it from its Exit tool', () => {
     // Arrange
     const tree = render(<FyRenderBlock block={htmlBlock()} />);
 
@@ -779,10 +752,9 @@ describe('FyRenderBlock corner tools', () => {
     should(dialog.props['aria-label']).equal('Illustration: A counter widget');
     should(dialog.props.tabIndex).equal(-1);
     should(attribute(tree, 'data-fy-render-tools')).equal('shown');
-    should(tools(tree)).containEql('Exit fullscreen');
 
-    // Act — Escape inside the frame, forwarded by the shell.
-    run(() => htmlProps(tree).onEscape());
+    // Act
+    run(() => tool(tree, 'Exit fullscreen').props.onClick());
 
     // Assert
     should(marked(tree, { role: 'dialog' })).equal(0);
@@ -815,65 +787,6 @@ describe('FyRenderBlock corner tools', () => {
     await wait(500);
     run(() => figure().props.onPointerUp());
     should(attribute(tree, 'data-fy-render-tools')).equal('hover');
-  });
-});
-
-describe('FyRenderBlock html paint', () => {
-  /** The iframe's half of a ref, enough for the frame's mount effect to run against. */
-  const frameNode = () => ({
-    addEventListener: (): void => {},
-    contentWindow: { postMessage: (): void => {} },
-    removeEventListener: (): void => {},
-    set src(_value: string) {},
-  });
-
-  test('should paint a page with the first painted background and the column colour and font, and follow the theme', async () => {
-    // Arrange — the message column sits on a painted surface; the block's own host is unpainted.
-    const surface = document.createElement('div');
-    surface.style.backgroundColor = 'rgb(1, 2, 3)';
-    const host = document.createElement('div');
-    host.style.color = 'rgb(4, 5, 6)';
-    host.style.fontFamily = 'Inter';
-    surface.appendChild(host);
-    document.body.appendChild(surface);
-    const tree = mountTree(<FyRenderBlock block={htmlBlock()} />, {
-      createNodeMock: element => (element.type === 'iframe' ? frameNode() : host),
-    });
-    mounted.push(tree);
-
-    // Act
-    viewport(true);
-
-    // Assert
-    should(htmlProps(tree).paint).eql({
-      background: 'rgb(1, 2, 3)',
-      color: 'rgb(4, 5, 6)',
-      font: 'Inter',
-      scheme: 'dark',
-    });
-
-    // Act — the reader switches to a light theme while the page runs.
-    run(() => document.documentElement.setAttribute('data-theme', 'studio-light'));
-    await wait();
-
-    // Assert — repainted, not remounted.
-    should(htmlProps(tree).paint.scheme).equal('light');
-    should(count(tree, 'iframe')).equal(1);
-    surface.remove();
-  });
-
-  test('should hand the frame no paint for a node it cannot measure', () => {
-    // Arrange — a host node that is not a laid-out element.
-    const tree = mountTree(<FyRenderBlock block={htmlBlock()} />, {
-      createNodeMock: element => (element.type === 'iframe' ? frameNode() : hostNode()),
-    });
-    mounted.push(tree);
-
-    // Act
-    viewport(true);
-
-    // Assert — the shell keeps its own system colours.
-    should(htmlProps(tree).paint).eql({ background: '', color: '', font: '', scheme: 'dark' });
   });
 });
 

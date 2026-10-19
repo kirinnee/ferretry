@@ -23,43 +23,41 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 Every type renders **by itself, inline in the message**, as soon as it scrolls near the screen — no
 button, no card, no caption:
 
-| `type:`   | Today                                                                       |
-| --------- | --------------------------------------------------------------------------- |
-| `svg`     | renders as a picture                                                        |
-| `image`   | renders as a picture (raster only) — inline base64, or from `src:`          |
-| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture               |
-| `lottie`  | plays as an animation, with Pause and Play                                  |
-| `html`    | **runs** as an interactive page in an isolated frame — your JavaScript runs |
-| `video`   | plays in the browser's own player, from `src:`                              |
-| `audio`   | plays in the browser's own player, from `src:`                              |
-| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link     |
+| `type:`   | Today                                                                   |
+| --------- | ----------------------------------------------------------------------- |
+| `svg`     | renders as a picture                                                    |
+| `image`   | renders as a picture (raster only) — inline base64, or from `src:`      |
+| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture           |
+| `lottie`  | plays as an animation, with Pause and Play                              |
+| `html`    | a **static** fragment drawn in the message — markup and CSS, no scripts |
+| `video`   | plays in the browser's own player, from `src:`                          |
+| `audio`   | plays in the browser's own player, from `src:`                          |
+| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link |
 
 So write `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
 to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, `lottie` when
-motion genuinely helps, and `html` when the reader should be able to **do** something — drag a
-slider, step through states, toggle a comparison.
+motion genuinely helps, and `html` for a table, a comparison or a small styled layout.
 
 ### Writing `html` that works
 
-Your page runs in an opaque-origin frame with its own strict policy. Design for exactly that:
+An `html` block is a **static fragment**: it is sanitized and drawn straight into the message, and
+**nothing in it runs**. Design for exactly that:
 
-- **One self-contained document.** Inline `<style>` and inline `<script>` (classic or
-  `type="module"`) run, in order, after your markup is in place — so you can query the DOM at the top
-  level. `DOMContentLoaded` and `load` are dispatched once for you.
-- **No network, at all.** `fetch`, XHR, WebSocket, external scripts, stylesheets, fonts and remote
-  images are all refused. Images, media and fonts may only be `data:` or `blob:` URIs you build
-  yourself. There is no CDN: no React, no D3 — write plain DOM or `<canvas>`.
-- **No storage, no cookies, no `eval`, no `new Function`, no forms, no popups, no `alert`.**
-- **Never navigate.** Setting `location`, following a link inside the frame or building a meta
-  refresh stops the page: the block replaces it with a note and the source. Authored `<meta>`,
-  `<base>` and `<link>` elements are removed before the page runs.
-- **Respect the reader's theme.** The page is frameless and defaults to the conversation's own
-  background, text colour and font, in the reader's light or dark `color-scheme` — so it reads as
-  part of the message. If you set your own background, set your own text colour too.
-- **Keep it short.** Inline, the frame grows to your page's height up to 640px and then scrolls; the
-  reader can open it fullscreen. It stops after ten minutes, with Run again to restart it.
-- **Do not reach for `html` for a static picture.** A diagram is `mermaid` and a drawing is `svg`;
-  they are cheaper, they need no scripts, and they are what a reader expects.
+- **Markup and CSS only.** Tables, lists, headings, `<details>`/`<summary>`, `<code>`/`<pre>`, inline
+  `<svg>` and `style` attributes or a `<style>` element all work. `<script>`, every `on…` handler,
+  `<iframe>`, `<object>`, `<embed>`, forms and their controls, `<meta>`, `<link>`, `<base>` and SVG
+  `<use>`/`<foreignObject>`/animation are removed before anything is shown.
+- **Your styles stay yours.** The fragment lives in its own shadow root: your `<style>` cannot touch
+  the app and the app's styles do not touch your markup, except the conversation's text colour and
+  font, which you inherit. Theme tokens such as `var(--fg)`, `var(--border-strong)` and
+  `var(--accent)` work inside it.
+- **Nothing loads.** No remote images, fonts, stylesheets or `@import`; a CSS `url()` that is not a
+  `data:image/` becomes `none`. Pictures are `data:image/…` URIs or `media:<file>` from your media
+  folder. Links work only as `https://` and open in a new tab.
+- **Keep it short.** It is bounded in height inline and scrolls past that; the reader can open it
+  fullscreen.
+- **Not for drawings.** A diagram is `mermaid` and a drawing is `svg`. Reach for `html` for a table, a
+  comparison, a checklist or a small styled layout — the things prose and a picture both do badly.
 
 ### Showing a file or a link with `src:`
 
@@ -68,15 +66,22 @@ Your page runs in an opaque-origin frame with its own strict policy. Design for 
 ```fy-render
 type: video
 alt: The new onboarding flow, recorded at 390px
-src: @recordings/onboarding.mp4
+src: media:onboarding.mp4
 ---
 ```
+
+- **`src: media:<file>` is the one to use for anything you MADE** — a chart, a screenshot, a
+  recording, a report. Save it into the folder `$FY_MEDIA_DIR` names (it exists for your session and
+  is outside any repository) and name it by its path inside that folder. It is always servable — no
+  repository's ignore rules apply — while still never serving a protected secret, and the reader
+  reads it with their own access.
 
 - **`src: @path`** is a file in your session's workspace, written exactly as an `@file` reference —
   `@relative/path`, `@./relative/path`, or `@/absolute/path` inside your folder — **without** a
   `:line`. It is read with the **reader's** access, so a file they could not open from the Files tab
-  shows a file row saying so. Gitignored files and protected secrets are never served. **At most 1 MiB**:
-  a longer recording will show a "too large" row, so trim it or link it.
+  shows a file row saying so. Gitignored files and protected secrets are never served, and a refused
+  file says WHICH rule refused it. **At most 1 MiB** (the media folder too): a longer recording will
+  show a "too large" row, so trim it or link it.
 - **`src: https://…`** is fetched by the reader's browser as soon as the block is near the screen, and
   the host sees their address — so link only hosts you would be comfortable having the reader's
   browser contact. Video and audio play directly. An https **image** must come from a host that allows
@@ -208,11 +213,10 @@ blank or incomplete, an external reference is the first thing to check.
 The picture, inline. Hovering it — or a long press on a phone, or tabbing to it — shows two small icons
 in its corner: **Source** (exactly what you wrote) and **Fullscreen**. A Lottie animation plays by
 itself while on screen and adds a **Pause/Play** icon; under a reduced-motion preference it starts
-paused with Play showing. An `html` page runs by itself, frameless, painted with the conversation's
-own background, text colour and font, so leave its background unset unless you need one. A `pdf` is
-a compact file row — name, size, **Open** and **Download** — never an embedded viewer. An animation
-stops after two minutes and an `html` page after ten; each leaves one muted line with a way to run it
-again.
+paused with Play showing. An `html` fragment is drawn in the conversation's own type and colours,
+so leave its background unset unless you need one. A `pdf` is a compact file row — name, size,
+**Open** and **Download** — never an embedded viewer. An animation stops after two minutes and leaves
+one muted line with **Replay**.
 
 ## Before you paste one
 

@@ -15,11 +15,18 @@ import {
   type ConfigComponentKind,
   type ConfigSchemaId,
   DEFAULT_LEARNING_CONFIG,
+  DEFAULT_MODELS_GUIDE_FILE,
+  DEFAULT_PACK_CONFIG,
   DEFAULT_VOICE_CONFIG,
   DEFAULT_WARDEN_CONFIG,
   type LearningConfig,
   LearningFileSchema,
   learningConfigFromFile,
+  type ModelsGuideFile,
+  ModelsGuideFileSchema,
+  type PackConfig,
+  PackFileSchema,
+  packConfigFromFile,
   type VoiceConfig,
   VoiceConfigSchema,
   type WardenConfig,
@@ -92,6 +99,8 @@ export const CONFIG_FILE_SCHEMAS: Readonly<Record<ConfigSchemaId, z.ZodType>> = 
   warden: WardenFileSchema,
   learning: LearningFileSchema,
   voice: VoiceConfigSchema,
+  pack: PackFileSchema,
+  modelsGuide: ModelsGuideFileSchema,
   preset: ProviderPresetFileSchema,
   models: ModelCatalogFileSchema,
 };
@@ -106,6 +115,8 @@ export interface ConfigValues {
   readonly warden: WardenConfig;
   readonly learning: LearningConfig;
   readonly voice: VoiceConfig;
+  readonly pack: PackConfig;
+  readonly modelsGuide: ModelsGuideFile;
   readonly preset: ProviderPresetFile;
   readonly models: ModelCatalogFile;
 }
@@ -123,6 +134,8 @@ export function configValue(schema: ConfigSchemaId, parsed: unknown): ConfigValu
       return wardenConfigFromFile(parsed as z.infer<typeof WardenFileSchema>);
     case 'learning':
       return learningConfigFromFile(parsed as z.infer<typeof LearningFileSchema>);
+    case 'pack':
+      return packConfigFromFile(parsed as z.infer<typeof PackFileSchema>);
     default:
       return parsed as ConfigValues[keyof ConfigValues];
   }
@@ -148,6 +161,8 @@ export const SINGLETON_DEFAULTS = {
   warden: DEFAULT_WARDEN_CONFIG,
   learning: DEFAULT_LEARNING_CONFIG,
   voice: DEFAULT_VOICE_CONFIG,
+  pack: DEFAULT_PACK_CONFIG,
+  modelsGuide: DEFAULT_MODELS_GUIDE_FILE,
 } as const;
 export type SingletonKind = keyof typeof SINGLETON_DEFAULTS;
 
@@ -247,6 +262,31 @@ function learningLoosening(before: LearningConfig, after: LearningConfig): reado
   ];
 }
 
+/**
+ * Pack mode loosens when ferrets may start more sub-ferrets, or nest deeper, or when Jev may spend on
+ * choosing their models. A probe spends a token or two per start, only when a ferret asks for one, and
+ * a longer probe or cache spends nothing more, so neither is judged.
+ */
+function packLoosening(before: PackConfig, after: PackConfig): readonly string[] {
+  const jevSpends = (config: PackConfig): boolean => config.enabled && config.decision === 'jev';
+  return [
+    ...switchedOn(before.enabled, after.enabled, 'ferrets may now start sub-ferrets (Pack mode)'),
+    ...switchedOn(jevSpends(before), jevSpends(after), 'Jev may now spend on choosing sub-ferret models'),
+    ...raised(
+      before.limits.interactiveChildren,
+      after.limits.interactiveChildren,
+      'the sub-ferrets an interactive ferret may run at once',
+    ),
+    ...raised(
+      before.limits.autoChildren,
+      after.limits.autoChildren,
+      'the sub-ferrets an unattended ferret may run at once',
+    ),
+    ...raised(before.limits.maxDepth, after.limits.maxDepth, 'how deep sub-ferrets may nest'),
+    ...raised(before.jev.usdPerDay, after.jev.usdPerDay, "Jev's daily cap in dollars for choosing models"),
+  ];
+}
+
 function voiceLoosening(before: VoiceConfig, after: VoiceConfig): readonly string[] {
   const from = before.postProcessing;
   const to = after.postProcessing;
@@ -278,6 +318,11 @@ export function configLoosening<K extends SingletonKind>(
       return wardenLoosening(before as WardenConfig, after as WardenConfig);
     case 'learning':
       return learningLoosening(before as LearningConfig, after as LearningConfig);
+    case 'pack':
+      return packLoosening(before as PackConfig, after as PackConfig);
+    // The guide only says which model suits which work: it widens nothing a ferret may do or spend.
+    case 'modelsGuide':
+      return [];
     default:
       return voiceLoosening(before as VoiceConfig, after as VoiceConfig);
   }
@@ -310,6 +355,9 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
   warden:
     '# The Warden. Its rules flag trouble for free; the Jev and LLM layers each spend, under their own daily cap.\nenabled: true\nlayers:\n  jev: false\n  llm: false\n',
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
+  pack: '# Pack mode: ferrets delegate to sub-ferrets (docs/pack-mode.md). Every setting is optional.\nenabled: true\ndecision: agent\n',
+  modelsGuide:
+    '# The models guide (docs/pack-mode.md): use cases, and the models that suit each, best first.\n# Leave useCases out to use the guide built from the model catalogs.\nuseCases:\n  - id: everyday\n    title: Everyday coding\n    description: Ordinary features and fixes.\n    candidates:\n      - provider: anthropic\n        model: claude-sonnet-5-5\n        why: Strong and fast for everyday work.\n',
   voice:
     '# Voice. Transcription is chosen on each device (Settings › Voice); this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',
   preset:

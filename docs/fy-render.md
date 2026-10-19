@@ -3,21 +3,20 @@
 A fenced block an assistant can put in its own chat message so a diagram, a drawing or a screenshot
 renders where the explanation is, instead of as a wall of markup the reader has to imagine.
 
-**Read this first: one type runs an author's code, and it runs it somewhere that cannot reach the
-app.** `svg` and inline `image` become an `<img>` directly. `mermaid` and `lottie` are handed as
-**data** to a trusted library running inside an opaque-origin sandbox frame — a library interpreting
-data, not a payload running code. `html` **executes**: an agent-authored interactive page runs inside
-its own opaque-origin frame, on its own static shell, under its own policy, with no storage, no reach
-into this document, no daemon token and no ordinary network ([The `html` frame](#the-html-frame)).
+**Read this first: no type runs an author's code.** `svg` and inline `image` become an `<img>`
+directly. `mermaid` and `lottie` are handed as **data** to a trusted library running inside an
+opaque-origin sandbox frame — a library interpreting data, not a payload running code. `html` is a
+**static fragment**: sanitized against a strict allowlist and rendered into a closed shadow root in the
+message, with no script, no handler, no frame and no remote load ([The `html` fragment](#the-html-fragment)).
 `image`, `video`, `audio` and `pdf` with a `src:` header name bytes that live in the session's
 workspace or behind an https link, and are read or fetched once the block is near the viewport
 ([Media from `src:`](#media-from-src)).
 
-Running `html` is a decision the owner asked for, made with the measured residual stated rather than
-hidden: an opaque frame that runs script can still navigate itself, prerender and open WebRTC, and no
-browser bounds a frame's CPU or memory — [gap 1](#declared-gaps) says exactly what is mitigated and
-what is accepted. [handover.md](../handover.md) row 65 **stays open**: it asks for author JavaScript
-under an enforceable CPU and memory bound, and a wall-clock lifetime is not that.
+An interactive `html` page that ran its own scripts in an opaque frame shipped briefly and is gone, by
+the owner's decision: a frame that runs script can still navigate itself, prerender and open WebRTC,
+and a static fragment cannot ([gap 1](#declared-gaps)). [handover.md](../handover.md) row 65 **stays
+open**: it asks for author JavaScript under an enforceable CPU and memory bound, which no part of this
+build attempts.
 
 **`fy-render` is conversation-only.** It exists for live explanation between an agent and a person in
 a transcript. **NEVER use `fy-render` when writing or editing documentation, handovers, READMEs,
@@ -72,7 +71,9 @@ is a parse error, and so is a repeated one.
 Both together is a parse error — the reader would not know which bytes they were shown. A block
 with a `src:` must have an **empty payload** (blank lines are not content).
 
-**`src:` is one of two things and nothing else.** `@path` is an `@file` reference, parsed by the
+**`src:` is one of three things and nothing else.** `media:<file>` names a file in the session's
+MEDIA folder (below): a relative name with no `..`, no empty or `.` segment, no leading `/`, no
+whitespace or backslash. `@path` is an `@file` reference, parsed by the
 reference grammar's own token reader (`parseReferenceToken`), without a line suffix — the same
 session-relative, `./`-relative or absolute-inside-the-folder forms
 [reference-standard.md](reference-standard.md) defines. `https://…` is parsed by the platform's URL
@@ -173,7 +174,7 @@ Two properties this feature must never change, and does not:
 | ---------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `svg`            | `<img src="data:image/svg+xml,…">`                                    | The measured boundary — see below                                                                        |
 | `image` (inline) | `<img src="data:{mime};base64,…">`                                    | No script surface exists in a raster decode                                                              |
-| `html`           | a live page in its own opaque frame, `/fy-render-html.html`           | The owner asked for interactive explanation; [The `html` frame](#the-html-frame) is the boundary         |
+| `html`           | a static fragment in a closed shadow root, sanitized by DOMPurify     | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest |
 | `mermaid`        | `<img src="data:image/svg+xml,…">`                                    | Compiled to SVG in the sandbox frame, then re-admitted through the same gate an authored SVG passes      |
 | `lottie`         | live player inside the sandbox frame                                  | An animation has to keep running to animate, so this one stays live                                      |
 | `image` (`src:`) | `<img src="blob:…">` of admitted bytes                                | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                |
@@ -181,63 +182,63 @@ Two properties this feature must never change, and does not:
 | `audio`          | the browser's native `<audio controls>`                               | As `video`                                                                                               |
 | `pdf`            | a file row: workspace Open / Download of a minted `blob:`; https link | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames |
 
-### The `html` frame
+### The `html` fragment
 
-An `html` block, once it is near the viewport, mounts `/fy-render-html.html` in an
-`<iframe sandbox="allow-scripts">` (`fy-render-html-frame.tsx`). It is a **separate static shell**
-from the library sandbox's, with a **separate policy**, because it exists to do the one thing the other
-forbids: run code an agent wrote.
+**An `html` block is a STATIC FRAGMENT rendered directly in the message — nothing an author writes in
+it runs.** The owner's decision: "no need to render full HTML — just render HTML fragments that don't
+allow scripts, directly." There is no frame, no shell and no message port (the interactive-page frame
+that used to stand here is deleted, with its static shell, its `_headers` rules and its pins).
+`fy-render-fragment.tsx` sanitizes the markup with DOMPurify (pinned, bundled, its own instance) and
+appends the result as DOM nodes into a **closed shadow root** in the message.
 
-- **Its own document, because nothing else works.** A `blob:` or `srcdoc` frame inherits the parent's
-  hash-pinned policy and could run nothing; a static same-origin document with its own policy is the
-  only shape that runs author script without widening the app's. Its `public/_headers` rule is the
-  library shell's — the `!` detachment line so `/*`'s `frame-ancestors 'none'` does not make it
-  unframeable, and `sandbox allow-scripts` so a direct visit is opaque — and
-  `scripts/validate/pages-config.sh` pins both.
-- **Opaque origin and nothing else granted.** No `allow-same-origin`, so no storage, no cookies, no
-  `parent.document`; no `allow-forms`, `allow-popups`, `allow-modals`, `allow-top-navigation` or
-  `allow-downloads`. The parent trusts `event.source` identity only, as the library frame does.
-- **Its policy**, in the generated document's `<meta>` and checked by the build:
-  `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
-media-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`.
-  No `'unsafe-eval'`, no `'self'`, no scheme source.
-- **The page arrives as data.** The bootstrap — the only script in the shell — receives the authored
-  page over the `MessagePort`, parses it with `DOMParser` (which runs nothing), strips `meta`, `base`,
-  `link`, embedded frames and objects, moves the rest in, and only then re-creates its classic and
-  module `<script>`s so they run in order; every other script `type`, speculation rules included, is
-  dropped. It removes the `RTCPeerConnection` family of constructors before any author code runs, and
-  forwards Escape from a capture listener installed first, so a page cannot swallow the one key that
-  leaves fullscreen.
-- **The page is interactive.** The frame takes the pointer and is a tab stop (`tabIndex={0}`, so the
-  fullscreen focus trap counts it). Its height is the page's own report, clamped to 640px inline; past
-  that the page scrolls inside its frame, and Fullscreen gives it the plane.
-- **Frameless, in the column's own paint.** The parent reads the message column's computed
-  background (the first painted ancestor's), text colour and font family and sends them with the page,
-  and again on every theme switch over the live port — a repaint, never a remount. The shell sets
-  them on its root with `style.setProperty`, which drops a value that does not parse; none of the
-  three properties can name a URL, so a value is paint and nothing else (measured: a `url(…)` smuggled
-  into each produces zero requests). Body margin is zero, so the page sits flush with the prose, and
-  any author stylesheet overrides all of it. The frame stays invisible until its first draw, so no
-  unpainted plane flashes.
-- **Its height is the body's**, not the root's: a root's `scrollHeight` is never less than the
-  frame's viewport, so a short page would otherwise keep a band of empty background under it.
-- **A navigation tears it down.** Author content is moved in by script and fires no `load`; the
-  parent counts `load` events from the moment it sets `src` (inserting a src-less iframe fires one for
-  its initial `about:blank` — measured, and not a navigation). A second one means the page sent its
-  frame somewhere else, and the block quietly falls back to the authored source.
-- **Ten minutes of wall-clock life**, armed at mount and cleared by nothing the page says, then a
-  neutral `lifetime` stop — one muted line and **Run again**. It bounds how long author code runs, never how hard.
+**What is stripped**, by the sanitizer's configuration and hooks rather than by review:
 
-**Measured in real Chromium** (`tests/integration/fy-render-html.security.test.ts`, the real generated
-shell, a server-side request ledger): author script runs, reports its height and answers a real
-click; `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`, `parent.document` and the
-parent's globals yield nothing of the app, and no token the parent holds appears anywhere the frame can
-read; `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`, a remote image, a worker,
-a nested frame and a form submission produce **zero** requests at the server; `eval` is refused; a
-popup is `null`; an authored `<meta http-equiv="refresh">`, `<link rel="prerender">`, `<base>` and a
-speculation-rules script cause no navigation and no request. And the residual, measured as a
-residual: a page that sets `location.href` **does** reach the server, and the parent **does** see the
-second `load` it tears the frame down on.
+- every `<script>`, and every element that could run, frame, submit or reconfigure the page —
+  `iframe`, `frame`, `object`, `embed`, `portal`, `form` and every form control, `base`, `meta`,
+  `link`, `template`, `noscript` — plus SVG's `foreignObject`, `use` and SMIL animation, and the
+  page's own players (`audio`, `video`; a recording is a `src:` block);
+- every `on*` handler, and `action`, `formaction`, `srcset`, `ping`, `background`, `poster`, `srcdoc`
+  and every author `data-*` attribute;
+- every URL that is not one of exactly three shapes: an `https:` link on an `<a>`, which opens a new tab
+  `noopener noreferrer`; a `data:image/` picture; or `media:<file>` from the session's media folder,
+  read through the reader's grant, admitted like any other picture and shown as a `blob:` this page
+  minted. `javascript:`, every other `data:`, and every relative or same-origin URL are dropped — a
+  fragment has no business addressing the app;
+- in CSS, inline and in `<style>`: `@import`, and every `url(…)` or `image-set(…)` that is not a
+  `data:image/`, which become `none`.
+
+**What is kept**: structure and text, tables, `<details>`/`<summary>`, lists, code, inline SVG with
+its filters, `style` attributes and `<style>` elements.
+
+**What contains what is left.** The closed shadow root keeps the fragment's styles from reaching the
+app and the app's selectors from reaching the fragment; custom properties still inherit, which is how
+the theme tokens arrive (a small baseline stylesheet inside the root uses them). The host carries
+`contain: layout paint`, so a `position: fixed` overlay is fixed to the fragment and clipped by it
+rather than covering the app, and its height is bounded (`min(70dvh, 900px)`, then it scrolls). The
+page's own policy is the backstop under all of it: `img-src`, `font-src` and `connect-src` refuse a
+remote load the sanitizer missed, and `require-trusted-types-for 'script'` refuses any string at a
+script sink. DOMPurify's own parse runs under the one dedicated `fy-fragment` Trusted Types policy
+(`lib/trusted-types.ts`, added to the `_headers` allowlist), which `fy-render-opt-in.test.ts` holds to
+a single user, and the result never reaches a sink as a string.
+
+**Measured in real Chromium** (`tests/integration/fy-render-fragment.security.test.ts`, the shipped
+block under the exact `/*` policy from `_headers`, Trusted Types included, and a server-side request
+ledger): a corpus of a script element, an image `onerror`, an SVG `onload`, a `javascript:` link, a
+relative link, an inline-style `url()`, a `<style>` with `@import` and `url()` and rules aimed at the
+HOST page's `body` and `#outside`, a form with an action, an `iframe srcdoc`, an `object`, an `embed`, a
+meta refresh, a `link` stylesheet, a `base`, an SVG `foreignObject` with a handler, a `use` and a
+`position: fixed` overlay. Nothing set `window.__fyPwned` — before or after the test clicked the links
+and the submit button — the page never navigated, the ledger saw **zero** `/beacon` requests, the host
+page's computed styles were unchanged, the overlay stayed inside the fragment's box, and the page raised
+no Trusted Types or CSP violation. With the CSS neutraliser disabled, the same test fails on three
+same-origin beacons — the app's own `img-src 'self'` would have let them through.
+
+**Why Mermaid is NOT rendered in the page too**, though the owner asked for it: measured under this
+same policy, `mermaid.render()` throws "This document requires 'TrustedHTML' assignment" — Mermaid
+writes raw `innerHTML` itself, and still does with DOMPurify's own policy name allowed. The only way to
+run it in the page is a catch-all `default` Trusted Types policy, which would silently re-open every
+markup sink in the app. So Mermaid keeps compiling in the opaque library sandbox and its diagram is
+shown inline as an `<img>` — the reader sees no difference.
 
 ### Media from `src:`
 
@@ -256,6 +257,20 @@ URL.
   show costs no transfer: `image` takes `png`/`jpg`/`jpeg`/`gif`/`webp`; `video` takes
   `mp4`/`m4v`/`webm`/`ogv`/`mov`; `audio` takes `mp3`/`m4a`/`aac`/`wav`/`ogg`/`oga`/`opus`/`weba`/`flac`;
   `pdf` takes `pdf`.
+- **`media:<file>` reads the session's MEDIA folder** — `state/sessions/<id>/media` inside the daemon's
+  `FY_HOME`, created at every launch and handed to the agent's pane as `FY_MEDIA_DIR` (derived like
+  `FY_SESSION_ID`, so a stored variable cannot redirect it). It is the official place for an agent to
+  put media it MADE to show the person: outside any repository, so a generated chart never dirties a
+  working tree and no repository's ignore rules decide whether it can be shown. It is read through the
+  same route with `scope=media` — the daemon names the folder from the session id; a caller never names
+  a directory — under the same `filesystem` _use_ grant, the same denylist and the same 1 MiB bound.
+- **A refusal names the rule that refused it.** The daemon's file view carries `rule`: the ignore
+  source, line and pattern Git matched (`git check-ignore -v`), the Git failure that stopped the check
+  (the gitignore gate fails closed, so a Git error used to read as "ignored" with no way to tell), or
+  the denied name. A 403 that is about the PATH (`escapes_root`, `denied`, `ignored`) is named as
+  such rather than as the reader's lack of access. "Not served — gitignored, a protected secret, or
+  outside the folder" was one sentence for four different causes, and an agent's own freshly written
+  image in a dotfiles repository got it with no way to find out which.
 - **Every refusal is a file row that says which** — missing, denied to this reader (a 403 from the grant
   check), not served (gitignored, a protected secret, or outside the folder), over the 1 MiB cap,
   unsupported, unavailable, refused by an https host, or undecodable — never a broken player and never
@@ -418,24 +433,24 @@ unsafe". Read an acceptance as "this is within the caps", never as "this will re
 it in those words — "make it inline, as if it's native. no need to have a special hypermedia block" —
 and this build does exactly that. There is no Render control, no card around the picture, no caption
 under it and no status line beside it. A picture is sized to the message column and bounded in
-height (`min(60dvh, 720px)`), an `html` page is frameless and painted with the column's own
-background, text colour and font, and a PDF is the same compact file row an attachment is.
+height (`min(60dvh, 720px)`), an `html` block is a static fragment in the column's own type and
+colours, and a PDF is the same compact file row an attachment is.
 
 **What changed is who starts the work, and nothing else.** Every security property of where author
 bytes run is untouched: the `<img>` sink for `svg`, inline `image` and compiled Mermaid; the
-opaque-origin library sandbox for `mermaid` and `lottie`; the opaque-origin `html` shell with its own
-policy, no `allow-same-origin`, no storage, no reach into the app or the daemon; the media capability
+opaque-origin library sandbox for `mermaid` and `lottie`; the sanitized, shadow-contained `html`
+fragment in which nothing runs; the media capability
 that reads a workspace file as the reader and never holds a connection. The gesture gate in front of
 all of them is gone. What replaced it bounds where and when work happens, and **not** how much:
 
 - **Near the viewport.** A block renders the first time it comes within about one phone screen of the
   viewport (`IntersectionObserver`, `800px` vertical margin) and stays rendered. A block far down a
-  long transcript decodes nothing, downloads no renderer, runs no page and reads no file until the
+  long transcript decodes nothing, downloads no renderer, sanitizes nothing and reads no file until the
   reader scrolls toward it.
 - **Settled bytes.** A block's first bytes render at once, so a finished message from history never
   waits; later bytes replace them only once they have stopped changing for 400 ms. A streaming
-  assistant therefore does not re-decode a partial SVG, recompile a diagram or restart a page on
-  every token. A change of type takes effect immediately.
+  assistant therefore does not re-decode a partial SVG, recompile a diagram or re-sanitize a fragment
+  on every token. A change of type takes effect immediately.
 - **On screen only, for the two things that should be.** A Lottie animation plays only while it is on
   screen (or fullscreen), and a diagram drawn for the other theme is redrawn only while it is on
   screen — so a theme switch with ten diagrams in a transcript redraws the ones in view, and the rest
@@ -444,20 +459,16 @@ all of them is gone. What replaced it bounds where and when work happens, and **
 **The residual this adds, stated rather than softened.** The gesture was the reader's chance to decline
 work an agent asked their device to do. Without it:
 
-1. **An `html` page runs as soon as it is near**, so gap 1's egress residual — self-navigation,
-   prerender, WebRTC from the reader's device — is reachable without the reader choosing it. The frame
-   is still opaque, holds no token and can read nothing of the app; what leaves is the reader's IP
-   address and the fact that the message was scrolled to.
-2. **An https `src:` is contacted as soon as it is near.** The reader's browser fetches an https
+1. **An https `src:` is contacted as soon as it is near.** The reader's browser fetches an https
    `image` (credentials omitted, no referrer) or hands an https `video`/`audio` to the native player
    with `preload="metadata"`, so the host learns the reader's address without a press. An https `pdf`
    is still a link and contacts nothing until it is followed.
-3. **Decode and compile cost is spent without asking.** A payload inside every cap can still be
-   expensive to rasterise or compile, and it now is, once near. The caps bound the input; the 15 s,
-   120 s and 10 min watchdogs bound wall-clock life; nothing bounds CPU or memory (gap 3).
+2. **Decode and compile cost is spent without asking.** A payload inside every cap can still be
+   expensive to rasterise or compile, and it now is, once near. The caps bound the input; the 15 s and
+   120 s watchdogs bound wall-clock life; nothing bounds CPU or memory (gap 3).
 
-These are accepted on the same terms gap 1 already gives: the author is the owner's own ferret, which
-already runs on a host with network access; nothing in the app is reachable to put in a request; and
+These are accepted because the author is the owner's own ferret, which already runs on a host with
+network access; nothing in the app is reachable to put in a request; and
 the per-ferret Hypermedia switch ([hypermedia.md](hypermedia.md)) is how an owner keeps a ferret from
 writing blocks at all. Anyone who considers this unacceptable can restore a gate by setting
 `enableFyRender` nowhere — every block is then an ordinary escaped fence.
@@ -490,10 +501,8 @@ in fullscreen; a file row has its own Open and Download actions.
   `tabIndex={0}`, so a keyboard reader can pan a payload that is one enormous line. Its control
   carries `aria-expanded`, and `aria-controls` only while the panel exists.
 - **Fullscreen** is an in-app overlay (`role="dialog"`, `aria-modal`), not the Fullscreen API, which
-  iOS Safari lacks. It carries `kt-overlay`, the app's visible-viewport contract; Escape closes it —
-  from inside an `html` page too, because the shell forwards Escape over the port from a capture
-  listener installed before author code — Tab is trapped both ways, and focus returns to the icon
-  that opened it. A failure closes it, so Exit never vanishes under a reader standing in it.
+  iOS Safari lacks. It carries `kt-overlay`, the app's visible-viewport contract; Escape closes it,
+  Tab is trapped both ways, and focus returns to the icon that opened it. A failure closes it, so Exit never vanishes under a reader standing in it.
 - **Play / Pause** is a command on the live capability port, never a remount. Under
   `prefers-reduced-motion: reduce` an animation starts paused, and **the icons stay visible while it
   is paused**, so Play is never behind a hover a reader may not have. Once the reader presses either,
@@ -501,20 +510,18 @@ in fullscreen; a file row has its own Open and Download actions.
   animation is outside this, as before.
 
 **The description is the picture's own.** With no caption, `alt` goes where a screen reader finds it:
-the `<img>`'s `alt`, the `<video>`/`<audio>` `aria-label`, and the `html` frame's `title`. The
+the `<img>`'s `alt`, the `<video>`/`<audio>` `aria-label`, and the `html` fragment's `aria-label`. The
 fullscreen dialog is named `Illustration: <alt>`.
 
 **The library frame is deliberately unreachable by keyboard and pointer** (`tabIndex={-1}` plus
 `pointer-events: none`): it holds no control, and focus resting in a separate document would swallow
-the Escape that leaves fullscreen. The `html` frame is the opposite — its page is the interaction —
-so it takes the pointer and a tab stop.
+the Escape that leaves fullscreen.
 
 ### Error fallback
 
 **A failure falls back to the code block, quietly.** A payload the browser will not decode, a diagram
 Mermaid will not parse, a compiled diagram the re-admission gate refuses, a sandbox that never
-started, a renderer that did not load, a compile that ran out of time, and an `html` page that
-navigated away all show the authored source as the ordinary fence it would have been without this
+started, a renderer that did not load, and a compile that ran out of time all show the authored source as the ordinary fence it would have been without this
 feature — `.md pre`, nothing else. No sentence in the app's voice says it failed. The class travels as
 `data-fy-render-failure` and the raw library or gate wording as the element's `title`, for whoever is
 debugging; a jison dump quoting the author's own source is never presented as the app speaking.
@@ -522,11 +529,10 @@ debugging; a jison dump quoting the author's own source is never presented as th
 **A retry only where one can help.** `startup`, `library` and `deadline` are about the deployment —
 a shell that did not answer, a bundle that did not load, a cold multi-megabyte download that used up
 the 15 s bound — so they carry one muted **Try rendering again** link. Bytes the browser or the
-library refused, and a page that navigated, would only do the same thing again, so they carry none.
+library refused would only be refused again, so they carry none.
 
-**A designed stop is not a failure.** A Lottie frame reaching its 120 s life, or an `html` page its
-ten minutes, keeps its place with one muted line — "This animation stopped." or "This interactive page
-stopped after ten minutes." — and **Replay** / **Run again**. No code block, no error mark.
+**A designed stop is not a failure.** A Lottie frame reaching its 120 s life keeps its place with one
+muted line — "This animation stopped." — and **Replay**. No code block, no error mark.
 
 **Media refusals are file rows.** A workspace file that is missing, denied to this reader, not
 served, too large or unsupported, an https host that refused, and a player that could not decode all
@@ -594,39 +600,17 @@ renders as an ordinary escaped fence.
 
 What this build knowingly does not do. Each of these is why row 65 is **not** ticked.
 
-1. **`type: html` executes, and the egress residual a browser-only sandbox cannot close stays.** Three
-   independent probes established it before this build, and `fy-render-html.security.test.ts` measures
-   the first again against the shipped shell: in an opaque-origin `sandbox="allow-scripts"` frame,
-   hostile script performed a real **self-navigation** that the server received;
-   `<link rel="prerender">` produced a real connection under `default-src 'none'`; and
-   `RTCPeerConnection` sent real STUN and TURN UDP under `connect-src 'none'`, with Chromium rejecting
-   `webrtc 'block'` as unrecognised. The Navigation API is inert in that frame, so it cannot veto a
-   navigation either.
-
-   **What is mitigated.** The frame is opaque, so the app's storage, cookies, document, globals and
-   daemon tokens are out of reach — measured. Every ordinary request (fetch, XHR, WebSocket,
-   EventSource, beacon, image, worker, nested frame, form) is refused — measured against a ledger.
-   Authored `meta` refresh, `base`, `link` (prerender/prefetch), embedded frames and speculation-rules
-   scripts are stripped before the page runs, and the `RTCPeerConnection` family is deleted from the
-   frame's global first. A navigation is detected by its second `load` and the frame torn down with a
-   stated note, so the destination page does not stay on screen as if it were the explanation; the
-   page lives at most ten minutes.
-
-   **What is NOT closed, and is accepted.** Author script can still rebuild a prerender link or a
-   speculation rule, reach WebRTC through any path the deletion missed, or navigate the frame — and
-   each of those can carry a request **from the reader's device** to anywhere: the reader's IP address
-   and the fact that they opened the block leave, and a navigated frame can show a convincing page
-   for the instant before it is torn down (a phishing surface). The deletions are speed bumps and are
-   described as such. **Accepted now** because the owner asked for interactive explanation; because
-   the author is the owner's own ferret, which already runs on a host with network access and needs no
-   reader's browser to make a request; because nothing in the app — no token, no storage, no daemon
-   URL — is reachable to put in such a request; and because the owner chose inline rendering knowing
-   this, which removed the press that used to stand in front of the page
-   ([Inline by default](#inline-by-default--the-owners-decision), residual 1). A page now runs once it
-   is near the viewport, and a navigation falls back to the authored source. Separately, no browser
-   offers a per-frame CPU or memory quota, so "resource-bounded" has no browser-only implementation:
-   row 65 stays open. Anyone who considers this residual unacceptable should restore `html` to
-   source-only by mapping it to a non-executing presentation; nothing else depends on it.
+1. **`type: html` is a static fragment, and its residual is the sanitizer's.** Nothing in a fragment
+   runs, so the egress an opaque frame could not close — self-navigation, prerender, WebRTC — has
+   nothing to run it. What remains is the class of every HTML sanitizer: a DOMPurify parsing
+   differential, or a browser feature it does not know to strip, would put author markup in the page
+   as live DOM. Mitigated by: DOMPurify's own allowlist plus this build's narrower one, the URL and CSS
+   rules, the closed shadow root and paint containment, a pinned DOMPurify version, and the page's
+   policy underneath — `require-trusted-types-for 'script'` refuses a string at any script sink, and
+   `img-src`/`font-src`/`connect-src` refuse a remote load. **Not eliminated.** Same-origin `url()` loads
+   are refused by the CSS rewrite, not by the policy (`img-src 'self'` would allow them); the security
+   test fails if that rewrite is ever removed. Anyone who considers this unacceptable should map
+   `html` to source-only; nothing else depends on it.
 
 2. **`type: mermaid` and `type: lottie` carry a residual risk that is not eliminated.** No
    attacker-authored code runs — but a trusted LIBRARY compromised by its own untrusted data would
@@ -639,7 +623,7 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    is a coherent product.
 3. **No CPU or memory bound on anything, in any form.** The caps bound **input size and declared
    dimensions, and nothing else**. The sandbox watchdogs bound **wall-clock lifetime only** — 15
-   seconds for a Mermaid compile, 120 seconds for a Lottie frame, ten minutes for an `html` page — so they bound how long a payload
+   seconds for a Mermaid compile and 120 seconds for a Lottie frame — so they bound how long a payload
    may compute and say nothing about how hard. Browsers offer no per-frame CPU or memory quota at
    all. A payload inside every limit and still expensive to rasterise is bounded in neither what the
    machine spends nor, for the non-sandbox types, how long the reader waits. Do not describe the caps
@@ -674,9 +658,9 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
    behaviour can only be confirmed against an actual Pages preview deploy, never locally). None of
    those are covered by a macOS runner, and none should be described as covered.
 
-   **The `html` frame and the media stage are Chromium-only today.** The Safari job runs the library
-   sandbox journey; it does not yet load `/fy-render-html.html` or play a `src:` block, so nothing about
-   either may be described as Safari-measured.
+   **The `html` fragment and the media stage are Chromium-only today.** The Safari job runs the library
+   sandbox journey; it does not yet render a fragment or play a `src:` block, so nothing about either
+   may be described as Safari-measured — including Safari's Trusted Types support, which differs.
 
 5. **SVG admission is prefix-only, a deliberate deviation from the approved plan.** The plan asked
    for a structural "exactly one well-formed `<svg>` root". The grammar checks that a payload
@@ -717,19 +701,16 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     mode so that its bytes can pass the admission checks; a host that sends no
     `Access-Control-Allow-Origin` gets the link row instead. That is the price of not widening
     `img-src` for every Markdown image in the app, and it is paid deliberately.
-13. **The `html` lifetime has no browser capture either.** Like gap 3's two watchdogs, the ten-minute
-    bound is proven against a shortened deadline in `tests/unit/fy-render-html-frame.test.tsx`, not by
-    waiting ten minutes in a browser.
-14. **Rendering without a gesture is the owner's decision, with a residual.** An `html` page runs, an
+13. **Rendering without a gesture is the owner's decision, with a residual.** An
     https `src:` is contacted, and decode or compile work is spent as soon as a block is near the
     viewport. [Inline by default](#inline-by-default--the-owners-decision) states each residual and the
     terms it is accepted on.
-15. **"Near" and "settled" are unit-proven, not browser-measured.** The proximity gate is
+14. **"Near" and "settled" are unit-proven, not browser-measured.** The proximity gate is
     `IntersectionObserver` with an 800px margin and the settle window is 400 ms; both are proven in
     `tests/unit/fy-render-block.test.tsx` against a fake observer and a shortened window. No Chromium
     journey scrolls a long transcript to show a block far away doing nothing, so nothing may describe
     the gate as browser-measured.
-16. **The long press is unmeasured on a real phone.** It is a 450 ms touch held still, driven in
+15. **The long press is unmeasured on a real phone.** It is a 450 ms touch held still, driven in
     Chromium's touch emulation. A real iOS or Android browser may also open its own context menu for a
     long-pressed image; the corner tools still appear, but the overlap is unmeasured.
 
@@ -738,13 +719,15 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
 Every claim above is either a test in this repository or one of these probe records. They are session
 artifacts outside the repository; cite them, do not assume they will outlive the session.
 
-| Claim                                                                                                      | Record                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `<img>`-loaded SVG: zero egress, no script/handler execution, Chrome 150                                   | `svg-img-security-probe-report.md` with `svg-img-network-*`, `svg-img-same-origin-*` and `svg-img-script-*` ledgers   |
-| Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert                            | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                                |
-| Independent review concluding executable HTML is a release blocker                                         | `sandbox-security-verdict.md`                                                                                         |
-| Slice plan, mechanism survey and cost sheet                                                                | `execution-boundary-plan.md`                                                                                          |
-| Static-slice security review that found the unbounded-decode blocker                                       | `fy-render-static-security-review.md`                                                                                 |
-| UI/accessibility review of the fullscreen presentation                                                     | `fy-render-static-ui-review.md`                                                                                       |
-| Raster header reader agreeing with Chrome's decoder, 18 of 18                                              | `prototype/verify.ts` beside its `raster-header.ts`                                                                   |
-| `html` frame: storage, parent, token, every ordinary request refused; self-navigation egresses and is seen | `packages/pwa/tests/integration/fy-render-html.security.test.ts` (in this repository, real Chromium + request ledger) |
+| Claim                                                                                                    | Record                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `<img>`-loaded SVG: zero egress, no script/handler execution, Chrome 150                                 | `svg-img-security-probe-report.md` with `svg-img-network-*`, `svg-img-same-origin-*` and `svg-img-script-*` ledgers       |
+| Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert                          | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                                    |
+| Independent review concluding executable HTML is a release blocker                                       | `sandbox-security-verdict.md`                                                                                             |
+| Slice plan, mechanism survey and cost sheet                                                              | `execution-boundary-plan.md`                                                                                              |
+| Static-slice security review that found the unbounded-decode blocker                                     | `fy-render-static-security-review.md`                                                                                     |
+| UI/accessibility review of the fullscreen presentation                                                   | `fy-render-static-ui-review.md`                                                                                           |
+| Raster header reader agreeing with Chrome's decoder, 18 of 18                                            | `prototype/verify.ts` beside its `raster-header.ts`                                                                       |
+| `html` fragment: an XSS corpus runs nothing, loads nothing and escapes nothing under the app policy      | `packages/pwa/tests/integration/fy-render-fragment.security.test.ts` (in this repository, real Chromium + request ledger) |
+| The production build renders every form inline, from an agent's reply, with media from `FY_MEDIA_DIR`    | `tests/e2e/product-journeys.e2e.test.ts` step `hypermedia-renders-inline` (in this repository)                            |
+| The library shell is frameable under Pages pretty URLs; the `fy-fragment` policy and no other is allowed | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`)                                     |

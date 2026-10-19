@@ -309,7 +309,7 @@ describe('FyRenderMedia workspace source', () => {
 
     // Assert
     should(fallbackOf(tree)).equal('no-workspace');
-    should(sentenceOf(tree)).equal("This video is a file in the session's workspace, which this view cannot read.");
+    should(sentenceOf(tree)).equal("This video is a file in this session's workspace, which this view cannot read.");
     should(countOf(tree, 'details')).equal(0);
   });
 
@@ -331,10 +331,7 @@ describe('FyRenderMedia workspace source', () => {
   for (const [reason, sentence] of [
     ['missing', "clip.mp4 was not found in this session's workspace."],
     ['denied', "You do not have access to clip.mp4 in this session's workspace."],
-    [
-      'not-served',
-      "clip.mp4 is not served from this session's workspace — it is gitignored, a protected secret, or outside the folder.",
-    ],
+    ['not-served', "clip.mp4 is not served from this session's workspace."],
     ['too-large', 'clip.mp4 is larger than the 1 MB a workspace file can be shown at.'],
     ['unavailable', 'The workspace could not be read just now.'],
   ] as const) {
@@ -354,6 +351,37 @@ describe('FyRenderMedia workspace source', () => {
       should(countOf(tree, 'a')).equal(0);
     });
   }
+
+  test('should say WHICH rule refused a file the daemon will not serve', async () => {
+    // Arrange — the owner's exact case: an agent's own image, refused with no reason anybody could act on.
+    const { read } = answers({ ok: false, reason: 'not-served', rule: 'Git ignores it (.gitignore:3: *.png)' });
+
+    // Act
+    const tree = mount(image('@fy-render-test/card.png'), read);
+    await flush();
+
+    // Assert
+    should(sentenceOf(tree)).equal(
+      "fy-render-test/card.png is not served from this session's workspace: Git ignores it (.gitignore:3: *.png).",
+    );
+  });
+
+  test('should read a media: file from the session media folder, and name that folder when it refuses', async () => {
+    // Arrange
+    const folders: (string | undefined)[] = [];
+    const read: FyRenderWorkspaceReader = async (_path, _signal, folder) => {
+      folders.push(folder);
+      return { ok: false, reason: 'missing' };
+    };
+
+    // Act
+    const tree = mount(image('media:card.png'), read);
+    await flush();
+
+    // Assert
+    should(folders).deepEqual(['media']);
+    should(sentenceOf(tree)).equal("card.png was not found in this session's media folder.");
+  });
 
   test('should refuse bytes over the workspace media bound', async () => {
     // Arrange

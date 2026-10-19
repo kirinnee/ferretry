@@ -12,6 +12,8 @@ import {
   lineage,
   loginScope,
   modelFacts,
+  packLabel,
+  packOn,
   worktreeFact,
 } from '../../../../src/features/session-info/info-model.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -226,5 +228,15 @@ describe('hypermedia', () => {
     expect(hypermediaLabel(true)).toBe('On · may explain with diagrams and media');
     expect(hypermediaLabel(false)).toBe('Off · plain text');
     expect(INFO_HINT.hypermedia).toContain('takes effect when it next starts');
+  });
+});
+
+describe('pack', () => {
+  it('reads a session from before the switch as on, and only an explicit false as off', () => {
+    expect(packOn(sessionView('legacy'))).toBe(true);
+    expect(packOn(sessionView('off', { config: { pack: false } }))).toBe(false);
+    expect(packLabel(true)).toBe('On · may delegate to sub-ferrets');
+    expect(packLabel(false)).toBe('Off · works alone');
+    expect(INFO_HINT.pack).toContain('next launch');
   });
 });

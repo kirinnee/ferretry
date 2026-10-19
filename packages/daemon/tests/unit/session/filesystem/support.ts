@@ -197,6 +197,7 @@ export interface SessionGitScript {
   readonly ignoredPaths?: (cwd: string, rels: readonly string[], call: number) => ReadonlySet<string>;
   readonly isTracked?: (cwd: string, rel: string) => boolean | Promise<boolean>;
   readonly changes?: (cwd: string) => SessionChangesView;
+  readonly ignoreRule?: (cwd: string, rels: readonly string[]) => string | undefined;
   readonly headEntry?: (cwd: string, rel: string, maxBytes: number) => HeadEntry | undefined;
   readonly readHeadBlob?: (cwd: string, rel: string, maxBytes: number) => HeadBlob | undefined;
   readonly diffSnapshots?: (rel: string, oldSide: DiffSide | undefined, newSide: DiffSide | undefined) => RenderedDiff;
@@ -234,6 +235,10 @@ export class FakeSessionGit implements SessionGit {
   async ignoredPaths(cwd: string, rels: readonly string[]): Promise<ReadonlySet<string>> {
     this.ignoreCalls.push({ cwd, rels });
     return this.script.ignoredPaths?.(cwd, rels, this.ignoreCalls.length) ?? new Set();
+  }
+
+  async ignoreRule(cwd: string, rels: readonly string[]): Promise<string | undefined> {
+    return this.script.ignoreRule?.(cwd, rels);
   }
 
   async isTracked(cwd: string, rel: string): Promise<boolean> {

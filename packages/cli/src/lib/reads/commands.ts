@@ -102,13 +102,14 @@ export function registerReadsCommands(program: Command, controller: ReadsCommand
   program
     .command('wait')
     .description(
-      'block until a session settles; exits 0 completed, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
+      'block until a session settles and print its result; exits 0 completed, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
     )
     .argument('<id>', 'session id')
     .option('--json', 'print the session state as one line of JSON')
     .option('--timeout <seconds>', 'give up after this many seconds (exit 124)', Number)
     .option('--interval <seconds>', 'how often to ask the daemon again', Number)
     .option('--until-marker <file>', 'wait for this file rather than trusting a completion claim')
+    .option('--keep', 'leave the session running after its result is collected (a settled wait stops it otherwise)')
     .action(async (id: string, options: WaitOptions) => {
       await controller.wait(id, options);
     });

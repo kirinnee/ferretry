@@ -10,6 +10,7 @@ import {
   hasDiffableChange,
   parseBatchCheck,
   parseCheckIgnore,
+  parseCheckIgnoreRule,
   parseFileList,
   parseHeadTreeEntry,
   parseNumstat,
@@ -171,6 +172,22 @@ export class RunnerSessionGit implements SessionGit {
     if (execution.exitCode === 1 && !execution.timedOut) return new Set();
     requireGitExit('git check-ignore', execution);
     return parseCheckIgnore(decodeGitOutput(execution));
+  }
+
+  /** See the port: the source, line and pattern Git matched, for a refusal that has to name its rule. */
+  async ignoreRule(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<string | undefined> {
+    const candidates = [...new Set(rels.filter(rel => rel.length > 0))];
+    if (candidates.length === 0 || !(await this.repoInfo(cwd)).repo) return undefined;
+    const stdin = new TextEncoder().encode(`${candidates.map(rel => `./${rel}`).join(NUL)}${NUL}`);
+    const execution = await this.runner.run({
+      args: ['check-ignore', '-v', '-z', '--stdin'],
+      cwd,
+      stdin,
+      literalPathspecs: false,
+    });
+    if (execution.exitCode === 1 && !execution.timedOut) return undefined;
+    requireGitExit('git check-ignore -v', execution);
+    return parseCheckIgnoreRule(decodeGitOutput(execution));
   }
 
   /**

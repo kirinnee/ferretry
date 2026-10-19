@@ -8,6 +8,7 @@ import type {
   ImportSelectOptions,
   NewSessionOptions,
 } from '../../../src/lib/import/controller.ts';
+import type { PackNewOptions } from '../../../src/lib/pack/controller.ts';
 
 function importProgram() {
   const listCalls: ImportListOptions[] = [];
@@ -25,10 +26,15 @@ function importProgram() {
 
 function newProgram() {
   const runCalls: NewSessionOptions[] = [];
+  const freshCalls: Array<{ words: readonly string[]; options: PackNewOptions }> = [];
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerNewCommand(program, { run: async options => void runCalls.push(options) });
-  return { program, runCalls };
+  registerNewCommand(
+    program,
+    { run: async options => void runCalls.push(options) },
+    { newChild: async (words, options) => void freshCalls.push({ words, options }) },
+  );
+  return { program, runCalls, freshCalls };
 }
 
 describe('registerImportCommands', () => {
@@ -158,15 +164,15 @@ describe('registerNewCommand', () => {
     const { program, runCalls } = newProgram();
 
     // Act
-    await program.parseAsync(['node', 'fy', 'new']);
+    await program.parseAsync(['node', 'fy', 'new', '--continue']);
 
     // Assert
-    should(runCalls).eql([{ continue: false }]);
+    should(runCalls).eql([{ continue: true }]);
   });
 
   it('should join the query and pass every other flag through', async () => {
     // Arrange
-    const { program, runCalls } = newProgram();
+    const { program, runCalls, freshCalls } = newProgram();
 
     // Act
     await program.parseAsync([
@@ -188,6 +194,7 @@ describe('registerNewCommand', () => {
     should(runCalls).eql([
       { continue: true, query: 'login bug', harness: 'codex', runtime: 'codex-work', since: '2h' },
     ]);
+    should(freshCalls).be.empty();
   });
 
   it('should reject a malformed --since', async () => {
@@ -196,5 +203,93 @@ describe('registerNewCommand', () => {
 
     // Act + Assert
     await should(program.parseAsync(['node', 'fy', 'new', '--continue', '--since', 'later'])).be.rejected();
+  });
+
+  it('should hand a start without --continue to the fresh handler with only the Pack options', async () => {
+    // Arrange
+    const { program, runCalls, freshCalls } = newProgram();
+
+    // Act
+    await program.parseAsync([
+      'node',
+      'fy',
+      'new',
+      'rename',
+      'the',
+      'helper',
+      '--runtime',
+      'claude-work',
+      '--model',
+      'opus',
+      '--effort',
+      'high',
+      '--use-case',
+      'bulk',
+      '--cwd',
+      '/work',
+      '--name',
+      'Rename Helper',
+      '--mode',
+      'interactive',
+      '--prompt-file',
+      'brief.md',
+      '--json',
+      '--harness',
+      'codex',
+      '--since',
+      '2h',
+    ]);
+
+    // Assert — the continue-only flags never reach the Pack path.
+    should(runCalls).be.empty();
+    should(freshCalls).eql([
+      {
+        words: ['rename', 'the', 'helper'],
+        options: {
+          runtime: 'claude-work',
+          model: 'opus',
+          effort: 'high',
+          useCase: 'bulk',
+          cwd: '/work',
+          name: 'Rename Helper',
+          mode: 'interactive',
+          promptFile: 'brief.md',
+          json: true,
+        },
+      },
+    ]);
+  });
+
+  it('should pass --auto to the fresh handler', async () => {
+    // Arrange
+    const { program, freshCalls } = newProgram();
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'new', '--auto', 'do it']);
+
+    // Assert
+    should(freshCalls).eql([{ words: ['do it'], options: { auto: true } }]);
+  });
+
+  it('should refuse a mode that is neither auto nor interactive', async () => {
+    // Arrange
+    const { program } = newProgram();
+
+    // Act + Assert
+    await should(program.parseAsync(['node', 'fy', 'new', '--mode', 'wild', 'x'])).be.rejected();
+  });
+
+  it('should keep the old path for a bare new when no fresh handler is mounted', async () => {
+    // Arrange
+    const runCalls: NewSessionOptions[] = [];
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerNewCommand(program, { run: async options => void runCalls.push(options) });
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'new']);
+
+    // Assert
+    should(runCalls).eql([{ continue: false }]);
   });
 });

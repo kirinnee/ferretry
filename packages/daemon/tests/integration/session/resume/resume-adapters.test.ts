@@ -675,6 +675,32 @@ describe('the resume launcher and a profile-authenticated account', () => {
     should(launch).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
   });
 
+  it('should hand the replacement the same media folder', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async id => `/state/sessions/${id}/media`,
+    );
+
+    // Act
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert
+    const launch = port.calls.filter(call => call[0] === 'new-session')[0];
+    should(launch).containDeep(['-e', `FY_MEDIA_DIR=/state/sessions/${ID}/media`]);
+  });
+
   it('should let the session keep its own variable when a profile names the same one', async () => {
     // Arrange — a profile is shared by every account that lists it; a board capability is not.
     const port = new RecordingTmuxPort();

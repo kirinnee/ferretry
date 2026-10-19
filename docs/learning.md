@@ -24,9 +24,10 @@ The **only** thing the passive switch controls is whether a ferret is _instructe
 - `learning.yaml` `passiveDefault` (default `true`) decides it for every NEW ferret; Settings › Learning
   edits that key. A miner or a warden is never instructed.
 - `PATCH /v1/sessions/:sessionId/learning {passive}` switches one ferret.
-- The teaching rides the fixed layer's tools server, not a launch argument, because one runtime wrapper
-  serves many ferrets. The daemon writes `FY_LEARNING_PASSIVE=1` (or `0`) into the ferret's launch
-  environment and `fy mcp serve` adds the teaching to its MCP `initialize` instructions when it is `1`.
+- The teaching is a per-ferret section of the appended system prompt, not a static launch argument,
+  because one runtime wrapper serves many ferrets. The daemon writes `FY_LEARNING_PASSIVE=1` (or `0`)
+  into the ferret's launch environment and the wrapper appends the teaching when it is `1`
+  ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 - A ferret's environment is fixed once it runs, so switching a RUNNING ferret also sends it a queued
   message that does **not** interrupt it. Reading it costs the ferret one turn; the answer says so. A
   ferret that is not running learns the switch at its next launch, and nothing is sent.

@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-oUDBCuV5em40NMRBCt5++b5S+chGvHBQAUib2P3w9jk=' 'sha256-+wiRIqS9x5FvDCgblRWdz5D6qiFnSdt9s0Fren/SWoo=' 'sha256-wiSKRrTHENNUzRFaPfo85NV3GXBSPEkAt1h2LT8TOkE=' 'sha256-kaU70xfWB2q0kzoF8iDxpt5BPHcJH98Z5WkO7jtFdsQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: https:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; worker-src 'self'; manifest-src 'self'; require-trusted-types-for 'script'; trusted-types fy-highlight fy-worker
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-oUDBCuV5em40NMRBCt5++b5S+chGvHBQAUib2P3w9jk=' 'sha256-+wiRIqS9x5FvDCgblRWdz5D6qiFnSdt9s0Fren/SWoo=' 'sha256-wiSKRrTHENNUzRFaPfo85NV3GXBSPEkAt1h2LT8TOkE=' 'sha256-kaU70xfWB2q0kzoF8iDxpt5BPHcJH98Z5WkO7jtFdsQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob: https:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; worker-src 'self'; manifest-src 'self'; require-trusted-types-for 'script'; trusted-types fy-highlight fy-worker fy-fragment
   Permissions-Policy: camera=(self), geolocation=(), microphone=(self)
   Referrer-Policy: no-referrer
   X-Content-Type-Options: nosniff
@@ -15,19 +15,21 @@
 #
 # `sandbox allow-scripts` re-applies the opaque origin at the response level, so
 # navigating straight to this URL yields an inert document rather than a live one.
+#
+# TWO PATHS, AND THE SECOND ONE IS THE ONE THAT IS SERVED. Pages' pretty URLs answer
+# `/fy-render-sandbox.html` with a 308 to `/fy-render-sandbox`, and `_headers` matches the
+# path that is REQUESTED. With only the `.html` rule, the redirect wore this policy and the
+# document itself wore `/*`'s `frame-ancestors 'none'`: the frame was refused, the shell
+# never announced itself, and every Mermaid and html block in production read "The
+# illustration sandbox did not start". `scripts/validate/pages-config.sh` pins both, and
+# `tests/e2e/fy-render-pages.e2e.test.ts` proves it under `wrangler pages dev`.
 /fy-render-sandbox.html
   ! Content-Security-Policy
   Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts
   X-Content-Type-Options: nosniff
   Cache-Control: no-cache
 
-# The `fy-render` html shell, where an agent-authored interactive page runs. The
-# same two lines as the library shell above, for the same reasons: its content
-# policy is a meta tag inside the document (it runs author code, so it carries
-# `script-src 'unsafe-inline'` and nothing that reaches the network), the `!` line
-# keeps `/*`'s `frame-ancestors 'none'` off it, and `sandbox allow-scripts` makes a
-# direct visit an opaque, storage-less document rather than one on this origin.
-/fy-render-html.html
+/fy-render-sandbox
   ! Content-Security-Policy
   Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts
   X-Content-Type-Options: nosniff

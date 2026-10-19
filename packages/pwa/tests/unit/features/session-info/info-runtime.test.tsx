@@ -2,8 +2,8 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
-  InfoRuntime,
   type InfoListRead,
+  InfoRuntime,
   type InfoRuntimeProps,
 } from '../../../../src/features/session-info/info-runtime.tsx';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
@@ -191,5 +191,19 @@ describe('InfoRuntime — hypermedia', () => {
   it('says plain text when the owner switched it off', async () => {
     const root = await show({ view: sessionView('session-a', { config: { hypermedia: false } }) });
     expect(root.querySelector('[data-info-hypermedia="off"]')?.textContent).toBe('Off · plain text');
+  });
+});
+
+describe('InfoRuntime — Pack mode', () => {
+  it('reads the switch off the session itself, absent as on, and says when a change lands', async () => {
+    const root = await show();
+    const row = must(root.querySelector('[data-info-row="Pack mode"]'), 'pack row');
+    expect(row.textContent).toContain('On · may delegate to sub-ferrets');
+    expect(row.textContent).toContain('takes effect at the next launch');
+  });
+
+  it('says it works alone when the owner switched it off', async () => {
+    const root = await show({ view: sessionView('session-a', { config: { pack: false } }) });
+    expect(root.querySelector('[data-info-pack="off"]')?.textContent).toBe('Off · works alone');
   });
 });

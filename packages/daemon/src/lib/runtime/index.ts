@@ -21,6 +21,7 @@ export * from './mounts/session-answer.ts';
 export * from './mounts/session-attach.ts';
 export * from './mounts/session-control.ts';
 export * from './mounts/session-filesystem.ts';
+export * from './mounts/pack.ts';
 export * from './mounts/session-hypermedia.ts';
 export * from './mounts/session-migrate.ts';
 export * from './mounts/session-reads.ts';

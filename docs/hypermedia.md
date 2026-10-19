@@ -1,7 +1,7 @@
 # Hypermedia
 
 A ferret explains with more than words when words are not enough: a Mermaid diagram of a flow, an
-SVG drawing, a small interactive HTML page, or a video, recording, PDF or picture from its workspace,
+SVG drawing, a static HTML fragment, or a video, recording, PDF or picture it made or found,
 rendered inline in the Chat transcript. **Hypermedia** is the per-ferret switch that tells a ferret it
 may — and should, when an idea is not straightforward — communicate that way.
 
@@ -17,31 +17,32 @@ and the same filesystem proof.
 | ----------------------- | --------------------------------------------------------------------------------------------- |
 | A ferret's switch       | `config.hypermedia` on its session document; **absent means the mode's default**              |
 | What a launch is handed | `FY_HYPERMEDIA=1` or `0` in the pane environment                                              |
-| Who reads it            | `fy mcp serve`, which adds the instruction to its MCP `initialize` instructions iff it is `1` |
+| Who reads it            | the runtime wrapper, which appends the instruction to the system prompt iff it is `1`         |
 | Changing it             | `PATCH /v1/sessions/:sessionId/hypermedia {enabled}` — `operator`                             |
 | The UI                  | Info › Runtime "Hypermedia" row, Actions › "Hypermedia" toggle, an icon on the session header |
 
 - **The default follows the mode.** An **interactive** ferret — one a person is talking to — is on by default: the start and the adopt record `hypermedia: true`. A ferret that runs **auto** (a worker, and the background helpers: wardens, learning miners) is **off** by default, because nobody is reading its chat to look at a picture and the instruction is context it pays for every turn. The start of an auto ferret records `hypermedia: false`. Only the owner's explicit switch overrides the default, in either direction, and `sessionHypermediaEnabled` in `packages/protocol` is the one place that resolves it for the daemon and the PWA.
 - **A ferret that existed before the switch** has no `config.hypermedia` and no stored variable, so it reads as its mode's default: an existing interactive ferret is instructed at its next launch (restart, resume or revive) unless the owner turns it off first, and an existing auto ferret is **not** instructed at its next launch unless the owner explicitly turned it on.
 - **A change takes effect at the next launch, and the answer says so.** A running ferret's
-  environment and its MCP instructions were fixed when it started, so the switch never re-instructs a
+  environment and its system prompt were fixed when it started, so the switch never re-instructs a
   running ferret and never sends it a message — unlike passive learning, there is nothing here worth
   a turn. The PATCH answer's `note` names whether a restart is needed.
 
-### Why MCP instructions and not `--append-system-prompt`
+### Delivered as system instructions, per ferret
 
-A runtime's wrapper is materialised once and serves every ferret launched on it (see the header of
-`packages/fleet/src/lib/account/fixed-layer.ts`), so a launch argument cannot differ per ferret: the
-fixed layer's `--append-system-prompt` (Claude) and `developer_instructions` (Codex) carry the same
-text for every ferret on that runtime. Passive learning met the same constraint and rides the tools
-server the fixed layer already puts in every agent runtime; Hypermedia rides it the same way. Both
-harnesses place a server's `initialize` instructions in the model's system context, so the text is
-additional system prompt either way, combined with — never replacing — the person's own appended
-instruction and Ferretry's tools instruction.
+Every Ferretry instruction is in the **appended system prompt** — Claude's `--append-system-prompt`,
+Codex's `developer_instructions` — because a harness weighs that far above a tools server's MCP
+`initialize` instructions, which an agent can ignore. (Hypermedia used to ride those; it no longer does,
+and the tools server now says one line.)
 
-The joined text is, in order: the hypermedia instruction (when on), the built-in "Set up Ferretry"
-skill, then the lessons teaching (when passive learning is on). The short behavioural instruction goes
-first so it can never be the part a long skill pushes out.
+A runtime's wrapper is materialised once and serves every ferret launched on it, so a static launch
+argument could not differ per ferret. The wrapper therefore **composes the one value at exec time**
+(`packages/fleet/src/lib/wrappers.ts`): the person's own appended instruction, then Ferretry's tools and
+settings rules, then each per-ferret section whose switch the daemon set to `1` in that ferret's launch
+environment, in this order: hypermedia (`FY_HYPERMEDIA`), Pack mode (`FY_PACK`,
+[pack-mode.md](pack-mode.md)), lessons (`FY_LEARNING_PASSIVE`, [learning.md](learning.md)). A restart,
+resume or revive runs the same wrapper with the same stored environment, so it keeps them. A wrapper run
+by hand, where nothing set the switches, carries no section.
 
 ## The injected instruction
 
@@ -52,8 +53,8 @@ in every turn's context, so it is kept short; change it there and here together.
 Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).
 - svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.
-- html: one self-contained interactive page with inline CSS and JS; it runs sandboxed, so load nothing from the network.
-- image, video, audio, pdf: put `src: @path/in/your/workspace` or `src: https://…` before `---`, and no payload.
+- html: a static HTML fragment (tables, lists, details, inline SVG, inline CSS); no scripts or event handlers — they are stripped, and nothing runs.
+- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.
 Example:
 ```fy-render
 type: mermaid
@@ -62,7 +63,7 @@ alt: How a request reaches the daemon
 flowchart LR
   Phone --> Relay --> Daemon
 ```
-The reader taps Render to show it. Chat only: never write fy-render into files, docs, commits or PR text.
+It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PR text.
 ````
 
 ## The supported forms
@@ -76,13 +77,18 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
 | --------- | ----------------------------------- | ---------------------------------------------------------------------------- |
 | `mermaid` | Mermaid source                      | a diagram, compiled in the sandbox frame, theme following light/dark         |
 | `svg`     | one `<svg>` document                | a picture through the measured `<img>` sink — never inline SVG               |
-| `html`    | one self-contained page             | an interactive page in an opaque-origin sandbox frame with its own policy    |
+| `html`    | one static fragment                 | sanitized markup in a closed shadow root — no script, no handler, no frame   |
 | `image`   | `src:` — or `mime:` + base64 inline | a picture; an https image needs CORS from its host, else a link row          |
 | `video`   | `src:`                              | the browser's native player (https plays directly)                           |
 | `audio`   | `src:`                              | the browser's native player (https plays directly)                           |
 | `pdf`     | `src:`                              | a file row with Open / Download; an https PDF is a link (no in-frame viewer) |
 
-`src:` is one of two things, and nothing else:
+`src:` is one of three things, and nothing else:
+
+- **`media:<file>`** — a file in the session's MEDIA folder, `$FY_MEDIA_DIR` in the agent's pane
+  (`state/sessions/<id>/media` under `FY_HOME`). It is where an agent puts what it MADE to show the
+  person: outside any repository, so no ignore rule decides whether it can be shown, and read through
+  the same route and grant as a workspace file (`scope=media`), never secrets.
 
 - **`@path`** — a file in the ferret's workspace, written and resolved exactly as an `@file`
   reference is: session-relative, `./`-relative, or absolute inside the session's folder. It is read
@@ -94,7 +100,8 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
 - **`https://…`** — a link the reader's browser fetches as soon as the block is near the screen.
 
 A file that is missing, unreadable, over its cap or denied to this reader renders a file row that
-says which — never a broken player and never the denied bytes.
+says which — and for a file the daemon will not serve, WHICH RULE refused it (the ignore file, line
+and pattern, a Git failure, or the denied name) — never a broken player and never the denied bytes.
 
 ## Security
 

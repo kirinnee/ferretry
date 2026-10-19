@@ -177,7 +177,8 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       await resolveFsFilePaths(connection, scope, candidates, cwd, fetcher, signal),
     // A `fy-render` media block's `src: @path`, read through the same route and the same grants an
     // `@file` click uses. The block receives this one function and never the connection behind it.
-    readWorkspaceMedia: async (path, signal) => await readWorkspaceMedia(connection, scope, path, cwd, fetcher, signal),
+    readWorkspaceMedia: async (path, signal, folder) =>
+      await readWorkspaceMedia(connection, scope, path, cwd, fetcher, signal, folder),
     onCodeReferenceOpen: reference => {
       const selection = fileSelection(reference.line, reference.endLine);
       if (destinations.openFile !== undefined) destinations.openFile(reference.path, selection);
