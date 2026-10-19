@@ -249,6 +249,26 @@ describe('session dashboard row leaves', () => {
     expect(String(age.props.className)).toContain('ml-auto shrink-0');
   });
 
+  it('echoes the question a waiting ferret asks as its own line, under the task', () => {
+    const asking = render(
+      <LeanSessionCard
+        daemonId={DAEMON}
+        now={NOW}
+        density="compact"
+        view={view('asking', {
+          state: {
+            status: 'awaiting_question',
+            pendingQuestion: { toolUseId: 't1', questions: [{ question: 'Delete the old branch?' }] },
+          },
+        })}
+      />,
+    ).root;
+    expect(text(asking.findByProps({ 'data-session-question': '' }))).toBe('Delete the old branch?');
+    expect(text(asking)).toContain('Ship dashboard rows');
+    const quiet = render(<LeanSessionCard daemonId={DAEMON} now={NOW} density="compact" view={view('quiet')} />).root;
+    expect(quiet.findAllByProps({ 'data-session-question': '' })).toHaveLength(0);
+  });
+
   it('renders compact-card status and flag exceptions while minimal mounts neither', () => {
     const compact = render(
       <LeanSessionCard

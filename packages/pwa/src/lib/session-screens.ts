@@ -1,6 +1,7 @@
 import type { HandoffPointer, SessionStatus } from '@ferretry/protocol';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
 import type { PeerFrom } from './peer-message.ts';
+import type { SentMessage } from './peer-delivery.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 import type { SlashCommand } from './slash-commands.ts';
 import type { ToolResultData, ToolUseData } from './tool-extract.ts';
@@ -48,6 +49,8 @@ export interface TranscriptEntry {
   /** The hand-off document a `user` row points at: the person's message is in that file, and `text`
    *  is only the pointer the agent was typed. */
   readonly handoff?: HandoffPointer;
+  /** The message a ferret SENT, when this row is the `send` it ran rather than an ordinary tool group. */
+  readonly sent?: SentMessage;
   /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }

@@ -24,7 +24,7 @@
  * without constructing a second mount-owned runtime implementation.
  */
 
-import type { RuntimeControlRequest, RuntimeModelCatalog, SessionView } from '@ferretry/protocol';
+import type { RuntimeControlRequest, RuntimeModelCatalog, RuntimeModelChoice, SessionView } from '@ferretry/protocol';
 import {
   type AccountInventoryPort,
   type CoreAccount,
@@ -184,13 +184,18 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
         );
       return claude;
     }
-    const launch = await this.#launch(id);
-    const choices = await this.ports.catalog.get(launch.agent, launch.cwd).catch((error: unknown) => {
-      throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
-    });
+    const choices = await this.#advertised(id);
     // The catalog only describes what the app-server advertised; an account it cannot find adds nothing.
     const published = await this.ports.accounts.accounts().catch(() => []);
     return codexRuntimeCatalog(choices, findAccountByAgent(published, current.config.agent));
+  }
+
+  /** What this Codex session's own app-server lists right now, under the names its picker renders. */
+  async #advertised(id: SessionId): Promise<readonly RuntimeModelChoice[]> {
+    const launch = await this.#launch(id);
+    return await this.ports.catalog.get(launch.agent, launch.cwd).catch((error: unknown) => {
+      throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
+    });
   }
 
   /** Types one native command, and refuses if the harness read it as a turn instead of a command. */
@@ -272,8 +277,8 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
 
     const wanted = switchRequest(current, request);
     const account = current.config.harness === 'codex' ? undefined : await this.#accountFor(current.config.agent);
-    // One read serves both questions a request can ask of the catalog.
-    const catalog = needsLiveCatalog(wanted) || needsFastFacts(wanted) ? await this.#catalogFor(id) : undefined;
+    // A fast request reads the catalog as the picker shows it (labels included), on either harness.
+    const fastCatalog = needsFastFacts(wanted) ? await this.#catalogFor(id) : undefined;
     const plan = this.ports.harness.planSwitch(wanted, {
       wrapper: current.config.agent,
       ...(account === undefined
@@ -282,8 +287,8 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
             allowedModels: servableModels(account).map(model => model.id),
             ...(account.modelCatalog?.customIds === true ? { acceptsCustomModels: true } : {}),
           }),
-      ...(catalog === undefined || !needsLiveCatalog(wanted) ? {} : { catalog: codexSwitchContext(catalog) }),
-      ...(catalog === undefined || !needsFastFacts(wanted) ? {} : { fast: fastModeFacts(current, catalog) }),
+      ...(needsLiveCatalog(wanted) ? { catalog: codexSwitchContext(await this.#advertised(id)) } : {}),
+      ...(fastCatalog === undefined ? {} : { fast: fastModeFacts(current, fastCatalog) }),
     });
 
     if (plan.kind === 'refused') throw new SessionRuntimeError('unsupported', plan.reason);

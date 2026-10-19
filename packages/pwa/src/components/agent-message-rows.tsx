@@ -1,19 +1,23 @@
+import type { MouseEvent, ReactNode } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import { daemonSessionPath } from '../lib/pages/routes.ts';
 import type { PeerFrom } from '../lib/peer-message.ts';
+import type { ResolvedAgent } from '../lib/references.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { Markdown } from './markdown.tsx';
-import { useReferenceSurface } from './reference-surface.tsx';
+import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 
 /**
  * The two transcript rows that arrive on the user channel but are NOT the person speaking.
  *
- * A PEER MESSAGE reads as a message FROM that agent: a monogram and name chip ("Torrey →"), the
- * sender as a `:torrey` reference (docs/reference-standard.md) through the one renderer so it proves
- * and opens like any other, the message itself as Markdown, and the banner's delivery boilerplate
- * folded away — it is addressed to the receiving agent, not to the person reading. A parked sender
- * says so, because "somebody is blocked on this" is the one part of the boilerplate a reader needs.
+ * A PEER MESSAGE reads as a message FROM that ferret, never as a "You" bubble: a card on the left with
+ * the sender's monogram, the sender as a `:name` reference (docs/reference-standard.md) through the one
+ * renderer so it proves and opens like any other, what kind of message it is, and the message itself as
+ * Markdown. Nothing the daemon wrote for the RECEIVING agent is shown — not the banner, not the session
+ * id, not the reply command — because the person reading is not who it was addressed to. Under it, a
+ * quiet link opens the sender's own conversation, and only when the sender is proved.
  *
  * A FERRETRY NOTICE — a message this machine typed into the session itself, such as a send that did
  * not arrive — is a compact system line, never a "You" bubble the person would not recognise.
@@ -21,42 +25,98 @@ import { MessageFooter } from './send-receipt.tsx';
 
 type Rhythm = Record<string, string | undefined>;
 
+/** What a peer message says about itself, beside the sender's name. A plain note says nothing. */
+const KIND_LABEL: Readonly<Record<PeerFrom['kind'], string | undefined>> = {
+  message: undefined,
+  question: 'waiting for a reply',
+  reply: 'replied',
+};
+
+/**
+ * The sender, when this session can PROVE it: by its session id when the message names one — the
+ * stable identity — and by its name otherwise. Unproved, it is a name and nothing to click.
+ */
+const provedPeer = (surface: ReferenceSurface, peer: Pick<PeerFrom, 'name' | 'sessionId'>): ResolvedAgent | null => {
+  const resolve = surface.agentReferenceResolver;
+  if (resolve === undefined) return null;
+  const answer = peer.sessionId === undefined ? resolve({ name: peer.name }) : resolve({ sessionId: peer.sessionId });
+  return answer ?? null;
+};
+
+/**
+ * The sender's name: a proved `:name` reference that opens it, or the plain name. Read through the
+ * shared renderer by the PROVED name, so the link names the same session the proof found.
+ */
+export function PeerName({
+  peer,
+  surface,
+}: {
+  readonly peer: Pick<PeerFrom, 'name' | 'sessionId'>;
+  readonly surface: ReferenceSurface;
+}) {
+  const agent = provedPeer(surface, peer);
+  if (agent === null) return <span className="fy-peer-name">{displayCallsign(peer.name)}</span>;
+  return <Markdown className="fy-peer-reference" text={`:${agent.name}`} {...surface} />;
+}
+
+/** "Open conversation with tomi" — a real link, so a modifier-click still opens a new tab. */
+function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; readonly surface: ReferenceSurface }) {
+  const navigate = surface.onNavigate;
+  if (navigate === undefined) return null;
+  const to = daemonSessionPath(agent.daemonId, agent.sessionId);
+  const open = (event: MouseEvent<HTMLAnchorElement>): void => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    navigate(to);
+  };
+  return (
+    <a className="fy-peer-open" href={to} onClick={open}>
+      Open conversation with {displayCallsign(agent.name)}
+    </a>
+  );
+}
+
 export function PeerMessageRow({
   entry,
   peer,
   rhythm,
+  body,
 }: {
   readonly entry: TranscriptEntry;
   readonly peer: PeerFrom;
   readonly rhythm: Rhythm;
+  /** What the message holds, when it is not `entry.text` — a hand-off's document and its files. */
+  readonly body?: ReactNode;
 }) {
   const surface = useReferenceSurface();
   const name = displayCallsign(peer.name);
+  const agent = provedPeer(surface, peer);
+  const kind = KIND_LABEL[peer.kind];
   return (
-    <article className="fy-message fy-message-peer" data-peer={peer.name} data-transcript-kind="user" {...rhythm}>
+    <article
+      className="fy-message fy-message-peer"
+      data-peer={peer.name}
+      data-peer-kind={peer.kind}
+      data-transcript-kind="user"
+      {...rhythm}
+    >
       <header>
-        <span className="fy-peer-chip">
-          <span aria-hidden="true" className="fy-peer-avatar">
-            {name.charAt(0)}
-          </span>
-          <span className="fy-peer-name">
-            {name}
-            <span aria-hidden="true"> →</span>
-            <span className="sr-only"> sent this</span>
-          </span>
+        <span aria-hidden="true" className="fy-peer-avatar">
+          {name.charAt(0)}
         </span>
-        <Markdown className="fy-peer-reference" text={`:${peer.name}`} {...surface} />
-        {peer.replyExpected ? <span className="fy-peer-awaiting">waiting for a reply</span> : null}
+        <span className="sr-only">Message from ferret</span>
+        <PeerName peer={peer} surface={surface} />
+        <span className="fy-peer-role">ferret</span>
+        {kind === undefined ? null : (
+          <span className="fy-peer-kind" data-peer-kind={peer.kind}>
+            {kind}
+          </span>
+        )}
       </header>
-      <Markdown className="fy-peer-body" text={entry.text} {...surface} />
+      {body ?? <Markdown className="fy-peer-body" text={entry.text} {...surface} />}
       {/* Where this send is, as the same small receipt mark the reader's own bubbles wear. */}
       <MessageFooter clock={clockOfInstant(entry.at)} record={entry.send} side="other" />
-      {peer.note === '' ? null : (
-        <details className="fy-peer-note">
-          <summary>Delivery note for the agent</summary>
-          <p>{peer.note}</p>
-        </details>
-      )}
+      {agent === null ? null : <OpenConversation agent={agent} surface={surface} />}
     </article>
   );
 }

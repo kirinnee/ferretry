@@ -11,17 +11,16 @@
  * directly. `mermaid` and `lottie` are handed as DATA to a trusted library
  * running inside an opaque-origin sandbox frame — Mermaid compiles to an SVG
  * which is re-admitted through `fyRenderMermaidSvg` and then reaches the same
- * `<img>` sink, Lottie plays live inside the frame. `html` EXECUTES: it is the
- * one type whose author code runs, inside its own opaque-origin frame with its
- * own policy (`fy-render-html-frame.tsx`). `image`, `video`, `audio` and `pdf`
+ * `<img>` sink, Lottie plays live inside the frame. `html` is a STATIC FRAGMENT:
+ * sanitized by DOMPurify against a strict allowlist and rendered into a closed
+ * shadow root (`fy-render-fragment.tsx`) — no script, no handler, no frame, no
+ * remote load. `image`, `video`, `audio` and `pdf`
  * with a `src:` header name bytes that live somewhere else — the session's
  * workspace or an https URL — and carry no payload at all.
  *
- * `html` RUNNING IS A DECISION, NOT AN OVERSIGHT, and it does not close the
- * residual `docs/fy-render.md` gap 1 measures: an opaque frame that runs author
- * script can self-navigate, prerender and open WebRTC, and no browser bounds a
- * frame's CPU or memory. What the frame cannot reach is this app — its storage,
- * its document, its daemon tokens. Nothing in THIS module runs anything.
+ * `html` DOES NOT RUN, by the owner's decision: an interactive page in an opaque
+ * frame could still self-navigate, prerender and open WebRTC, and a fragment
+ * cannot. Nothing in THIS module runs anything either.
  *
  * THE VALIDATION HERE IS A BOUND, NOT A SANITISER, and not a promise of a
  * precise refusal either. It rejects a few obviously unsupported constructs and
@@ -113,13 +112,17 @@ export type FyRenderMediaType = (typeof FY_RENDER_MEDIA_TYPES)[number];
  * `workspace` is an `@path` written and parsed exactly as an `@file` reference
  * is (`parseReferenceToken`), minus a line suffix — a picture has no line 12.
  * It is resolved against the session's folder at read time, by the reader's own
- * grants, never here. `https` is a URL the reader's browser fetches after the
- * gesture. There is no third kind: no `http:`, no `data:`, no `blob:`, no
- * daemon URL, because each of those is either a downgrade, a second inline
- * grammar, or a credential-shaped address.
+ * grants, never here. `media` is `media:<path>`: a file in the session's MEDIA
+ * folder (`FY_MEDIA_DIR`), where an agent puts what it made to show the person —
+ * outside any repository, so no ignore rule decides whether it can be shown, and
+ * read by the same grant. `https` is a URL the reader's browser fetches once the
+ * block is near. Nothing else: no `http:`, no `data:`, no `blob:`, no daemon
+ * URL, because each of those is either a downgrade, a second inline grammar, or a
+ * credential-shaped address.
  */
 export type FyRenderSource =
   | { readonly kind: 'workspace'; readonly path: string }
+  | { readonly kind: 'media'; readonly path: string }
   | { readonly kind: 'https'; readonly url: string };
 
 /**
@@ -181,15 +184,16 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  * `visual` blocks reach an `<img>` directly. `sandbox` blocks are interpreted by
  * a trusted library inside the opaque sandbox frame — Mermaid compiles to an SVG
  * that then reaches the same `<img>` sink, Lottie plays live inside the frame.
- * `interactive` is `html`: author code running in its own opaque frame. `media`
- * is any block with a `src:` — its bytes are read or fetched after the gesture.
+ * `fragment` is `html`: static markup, sanitized and rendered in a closed shadow
+ * root, where nothing an author wrote runs. `media` is any block with a `src:` —
+ * its bytes are read or fetched once the block is near.
  *
  * Decided by the BLOCK rather than the type, because `image` is two things: an
  * inline base64 payload that is admitted at parse time, and a `src:` whose
  * bytes do not exist yet. The switch is exhaustive on purpose: a new type is a
  * compile error here rather than a silent fallthrough into the last branch.
  */
-export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox' | 'interactive' | 'media' {
+export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox' | 'fragment' | 'media' {
   if (isFyRenderMediaBlock(block)) return 'media';
   switch (block.type) {
     case 'svg':
@@ -199,7 +203,7 @@ export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox'
     case 'lottie':
       return 'sandbox';
     case 'html':
-      return 'interactive';
+      return 'fragment';
   }
 }
 
@@ -706,6 +710,8 @@ interface FyRenderHeaders {
 }
 
 const HEADER_KEYS: readonly string[] = ['type', 'alt', 'mime', 'src'];
+/** The session media folder's `src:` prefix — see `FyRenderSource`. */
+const MEDIA_PREFIX = 'media:';
 const isMediaType = (type: FyRenderType): type is FyRenderMediaType =>
   FY_RENDER_MEDIA_TYPES.some(media => media === type);
 
@@ -732,7 +738,21 @@ function parseSource(value: string): FyRenderSource | string {
       return 'A workspace src must be an @path to a file, without a line number';
     return { kind: 'workspace', path: reference.path };
   }
-  if (!value.startsWith('https://')) return 'The src header must be an @path or an https:// URL';
+  if (value.startsWith(MEDIA_PREFIX)) {
+    const path = value.slice(MEDIA_PREFIX.length);
+    // A name inside the folder, nothing that could leave it. The daemon refuses these too; refusing them
+    // here means a bad block is an ordinary fence rather than a request that was always going to fail.
+    if (
+      path === '' ||
+      path.startsWith('/') ||
+      /[\s\\]/u.test(path) ||
+      hasControlCharacter(path) ||
+      path.split('/').some(segment => segment === '' || segment === '.' || segment === '..')
+    )
+      return 'A media src must be media:<file> inside the session media folder';
+    return { kind: 'media', path };
+  }
+  if (!value.startsWith('https://')) return 'The src header must be an @path, media:<file> or an https:// URL';
   if (/\s/u.test(value) || hasControlCharacter(value)) return 'The src URL must not contain whitespace';
   let url: URL;
   try {
@@ -1148,9 +1168,21 @@ export function fyRenderMediaMime(type: FyRenderMediaType, path: string): string
  */
 export type FyRenderWorkspaceRead =
   | { readonly ok: true; readonly bytes: Uint8Array<ArrayBuffer> }
-  | { readonly ok: false; readonly reason: 'missing' | 'denied' | 'not-served' | 'too-large' | 'unavailable' };
+  | {
+      readonly ok: false;
+      readonly reason: 'missing' | 'denied' | 'not-served' | 'too-large' | 'unavailable';
+      /** WHICH rule refused it, in the daemon's words — said to the reader, never folded away. */
+      readonly rule?: string;
+    };
 
-export type FyRenderWorkspaceReader = (path: string, signal: AbortSignal) => Promise<FyRenderWorkspaceRead>;
+/** Where the path is read from: the session's working tree, or its media folder (`media:`). */
+export type FyRenderWorkspaceScope = 'workspace' | 'media';
+
+export type FyRenderWorkspaceReader = (
+  path: string,
+  signal: AbortSignal,
+  scope?: FyRenderWorkspaceScope,
+) => Promise<FyRenderWorkspaceRead>;
 
 /**
  * Reads one fence body. Never throws, never executes, never reaches the network:
@@ -1322,17 +1354,7 @@ export type FyRenderSandboxMessage =
   | { readonly kind: 'mermaid-svg'; readonly svg: string; readonly theme: FyRenderSandboxTheme }
   | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
   | { readonly kind: 'playing'; readonly playing: boolean }
-  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass }
-  /**
-   * The `html` shell's two messages. `height` is the page's own scroll height,
-   * which the parent clamps — author code can make it say anything within the
-   * dimension bound, so it is a layout hint and never a decision. `escape` is a
-   * keydown forwarded from inside the frame, because a separate document's keys
-   * never reach the app's Escape listener and a reader in fullscreen must be
-   * able to leave.
-   */
-  | { readonly kind: 'height'; readonly height: number }
-  | { readonly kind: 'escape' };
+  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass };
 
 /** Which way the shell was told to paint, echoed back on the compiled diagram. */
 export type FyRenderSandboxTheme = 'dark' | 'light';
@@ -1403,13 +1425,6 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
       if (width === null || height === null) return null;
       return { height, kind: 'rendered', width };
     }
-    case 'height': {
-      if (!hasExactKeys(message, ['kind', 'height'])) return null;
-      const height = boundedDimension(message.height);
-      return height === null ? null : { height, kind: 'height' };
-    }
-    case 'escape':
-      return hasExactKeys(message, ['kind']) ? { kind: 'escape' } : null;
     case 'playing': {
       if (!hasExactKeys(message, ['kind', 'playing'])) return null;
       if (typeof message.playing !== 'boolean') return null;

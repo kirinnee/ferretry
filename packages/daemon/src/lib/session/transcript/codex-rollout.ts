@@ -9,7 +9,8 @@
  *     somebody else, by construction. Excluding it costs nothing and removes the entire history of
  *     the account from consideration.
  *   * THE CORRELATION TOKEN. A string this daemon injected into this session and into no other —
- *     the session's own directory, which its opening turn tells the agent to read. A rollout
+ *     the session's own directory, which every Codex launch declares as a workspace root
+ *     ({@link codexCorrelationArguments}) so Codex writes it into the rollout itself. A rollout
  *     containing it was written by this session; a rollout that does not is not this session's
  *     however recent it is.
  *
@@ -52,4 +53,37 @@ export function selectCodexRollout(
   const excluded = new Set([...query.baseline, ...(query.claimed ?? [])]);
   const correlated = candidates.filter(candidate => candidate.correlated && !excluded.has(candidate.id));
   return correlated.length === 1 ? correlated[0] : undefined;
+}
+
+/**
+ * The folder, inside a session's own directory, that every Codex launch DECLARES and nothing creates.
+ *
+ * WHY THE TOKEN HAS TO BE PUT THERE RATHER THAN HOPED FOR. The correlation token used to reach a
+ * rollout only as conversation content — the turn-file pointer a long send types, which names the
+ * session's directory. A session started bare and spoken to in single lines ("hello") is typed
+ * DIRECTLY, so its rollout never contained the token and its transcript could never be proven: Chat
+ * stayed empty and every send went unconfirmed, while the pane showed Codex answering.
+ *
+ * `--add-dir` makes Codex write the path into the rollout itself, before the first turn, whatever the
+ * person types: in `session_meta.runtime_workspace_roots` from 0.156, and in the opening
+ * `environment_context` and each `turn_context.workspace_roots` in 0.145 (both measured against the
+ * real binaries; the fixtures under `tests/fixtures/transcript/codex-rollouts/` are those runs).
+ *
+ * WHY A PATH THAT DOES NOT EXIST. `--add-dir` also declares the folder writable. Naming one nobody
+ * creates grants nothing — Codex records it and does not create it, measured on all three versions —
+ * so the proof costs no access the session did not already have.
+ */
+export const CODEX_CORRELATION_ROOT = 'codex-correlation';
+
+/** The Codex flag that declares an extra workspace root. */
+const CODEX_ADD_DIR = '--add-dir';
+
+/** The launch arguments that make a Codex rollout carry `correlationToken` from its first record. */
+export function codexCorrelationArguments(correlationToken: string): readonly string[] {
+  return [CODEX_ADD_DIR, `${correlationToken}/${CODEX_CORRELATION_ROOT}`];
+}
+
+/** Whether `flag value` is the pair {@link codexCorrelationArguments} produces, for any session. */
+export function isCodexCorrelationPair(flag: string, value: string | undefined): boolean {
+  return flag === CODEX_ADD_DIR && value?.endsWith(`/${CODEX_CORRELATION_ROOT}`) === true;
 }

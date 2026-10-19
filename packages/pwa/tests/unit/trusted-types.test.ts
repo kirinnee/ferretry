@@ -1,5 +1,5 @@
 /**
- * The two Trusted Types policies: what each accepts, what each refuses, and that a browser without
+ * The three Trusted Types policies: what each accepts, what each refuses, and that a browser without
  * Trusted Types gets the same strings by the same rules.
  */
 import { describe, expect, it } from 'bun:test';
@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   createTrustedTypes,
+  fragmentParsingPolicy,
   isHighlightMarkup,
   isWorkerScriptUrl,
   TRUSTED_TYPE_POLICIES,
@@ -156,5 +157,34 @@ describe('the page’s shared policies', () => {
     expect(trustedTypes()).toBe(trustedTypes());
     expect(trustedHighlight('<span class="hljs-keyword">if</span>')).toBe('<span class="hljs-keyword">if</span>');
     expect(trustedWorkerUrl('/sw.verified.js')).toBe('/sw.verified.js');
+  });
+});
+
+describe('fragmentParsingPolicy', () => {
+  it('makes one fy-fragment policy per factory, passing markup through for the sanitizer to judge', () => {
+    // Arrange
+    const created: string[] = [];
+    let rules: { createHTML?: (input: string) => string; createScriptURL?: (input: string) => string } = {};
+    const fake: TrustedTypePolicyFactoryLike = {
+      createPolicy: (name, given) => {
+        created.push(name);
+        rules = given;
+        return given;
+      },
+    };
+
+    // Act
+    const first = fragmentParsingPolicy(fake);
+    const second = fragmentParsingPolicy(fake);
+
+    // Assert — the policy does not judge markup (DOMPurify does) and never makes a script URL.
+    expect(created).toEqual(['fy-fragment']);
+    expect(second).toBe(first);
+    expect(rules.createHTML?.('<p onclick="x">a</p>')).toBe('<p onclick="x">a</p>');
+    expect(() => rules.createScriptURL?.('/x.js')).toThrow(/script URL inside an html fragment/u);
+  });
+
+  it('is absent where the browser has no Trusted Types', () => {
+    expect(fragmentParsingPolicy(undefined)).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import type { SendPaneObservation, SendQueueOutcome, SendTerminal } from '../../
 import type { SessionId } from '../../../lib/session-id.ts';
 import {
   composerEvidence,
+  paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
   paneShowsActiveWork,
@@ -40,7 +41,8 @@ export class TmuxSendTerminal implements SendTerminal {
       activeWork: paneShowsActiveWork(state.visible),
       // A permission prompt blocks a send as surely as a dialog: a message typed into its choice list
       // could pick a row.
-      blockingPrompt: paneBlockingPrompt(state.visible) ?? paneBlockingPermission(state.visible),
+      blockingPrompt:
+        paneBlockingPrompt(state.visible) ?? paneBlockingPermission(state.visible) ?? paneBlockingDialog(state.visible),
     };
   }
 

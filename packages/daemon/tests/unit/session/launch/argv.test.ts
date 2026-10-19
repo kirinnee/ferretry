@@ -213,6 +213,44 @@ describe('transcriptLaunchArguments, for a Codex conversation Ferretry adopted',
   });
 });
 
+describe('transcriptLaunchArguments, for a Codex session proven by correlation', () => {
+  const TOKEN = '/state/sessions/s1';
+
+  it('should declare the correlation root again, so a Restart lands in a rollout it can prove', () => {
+    // Arrange: a session whose rollout was never proven, the shape a bare start used to leave.
+    const provenance = {
+      v: 1 as const,
+      home: '/fleet/homes/codex',
+      identity: 'undiscovered' as const,
+      baseline: [],
+      correlationToken: TOKEN,
+    };
+
+    // Act
+    const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
+
+    // Assert
+    should(argv).eql(['--add-dir', `${TOKEN}/codex-correlation`]);
+  });
+
+  it('should resume an adopted conversation and still declare the root after the subcommand', () => {
+    // Arrange
+    const provenance = {
+      v: 1 as const,
+      home: '/fleet/homes/codex',
+      harnessSessionId: HARNESS_SESSION,
+      identity: 'adopted' as const,
+      correlationToken: TOKEN,
+    };
+
+    // Act
+    const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
+
+    // Assert
+    should(argv).eql(['resume', HARNESS_SESSION, '--add-dir', `${TOKEN}/codex-correlation`]);
+  });
+});
+
 describe('settingsArguments', () => {
   it('should drop what describes the run and keep what describes the settings', () => {
     // Arrange: a model switched with /model, or a revive's resume flag, is not a stale setting.
@@ -260,6 +298,24 @@ describe('settingsArguments', () => {
 
     // Assert — only the inline overlay that names fast mode is dropped; an owner's own --settings stays.
     should(kept).eql([WRAPPER, '--settings', '/fleet/own-overlay.json', '--settings', '{"theme":"dark"}']);
+  });
+
+  it('should drop the Codex correlation root and keep an owner’s own --add-dir', () => {
+    // Arrange: a session started before launches declared the root must not read as stale.
+    const argv = [
+      WRAPPER,
+      '--add-dir',
+      '/state/sessions/s1/codex-correlation',
+      '--add-dir',
+      '/work/shared',
+      '--add-dir',
+    ];
+
+    // Act
+    const kept = settingsArguments(argv);
+
+    // Assert
+    should(kept).eql([WRAPPER, '--add-dir', '/work/shared', '--add-dir']);
   });
 
   it('should keep a trailing -c that carries no value', () => {

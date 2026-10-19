@@ -110,7 +110,7 @@ describe('NewSessionPage', () => {
     const { view } = page();
     const reason = (): string => view.root.findByProps({ id: 'fy-new-session-create-blocker' }).children.join('');
 
-    expect(reason()).toBe('Choose an account first.');
+    expect(reason()).toBe('Choose a runtime first.');
     expect(button(view, 'Create session').props['data-variant']).toBeUndefined();
     expect(button(view, 'Create session').props['aria-describedby']).toBe('fy-new-session-create-blocker');
 
@@ -313,7 +313,10 @@ type ReadOutcome<T> = T | 'unreadable';
 
 interface WiredOptions {
   readonly connection?: DaemonConnection;
-  readonly accounts?: ReadOutcome<readonly PickerAccount[]>;
+  /** `pending` never answers; `degrades` answers once and then refuses, so a refresh fails over good rows. */
+  readonly accounts?: ReadOutcome<readonly PickerAccount[]> | 'pending' | 'degrades';
+  /** Hands the roster one stored verdict, for `studio`'s login. */
+  readonly health?: 'ready';
   readonly registered?: ReadOutcome<readonly ReturnType<typeof projectRow>[]>;
   readonly sessions?: ReadOutcome<readonly SessionView[]>;
   /** `absent` hands the form no usage store at all, which is a legal wiring. */
@@ -364,15 +367,24 @@ const wire = (options: WiredOptions = {}) => {
   const accountsPort: DaemonAccountPickerPort = {
     catalog: async daemon => {
       recorder.manifests += 1;
-      const roster = options.accounts ?? rosters[daemon.daemonId] ?? [];
-      if (roster === 'unreadable') throw new Error('this daemon refused its account manifest');
-      return { accounts: roster };
+      const outcome = options.accounts ?? rosters[daemon.daemonId] ?? [];
+      if (outcome === 'pending') return await new Promise<never>(() => undefined);
+      if (outcome === 'unreadable' || (outcome === 'degrades' && recorder.manifests > 1)) {
+        throw new Error('this daemon refused its account manifest');
+      }
+      return { accounts: outcome === 'degrades' ? [studio, atelier] : outcome };
     },
     // The stored snapshot: free, and the page hydrates it. Answering empty keeps every row
     // never-checked until the control below is pressed, so the two are told apart by what is on screen.
     health: async () => {
       recorder.snapshots += 1;
-      return { health: new Map(), error: null };
+      return {
+        health:
+          options.health === 'ready'
+            ? new Map([[studio.credentialId, pickerHealth(studio.credentialId, 'ready')]])
+            : new Map(),
+        error: null,
+      };
     },
     // The collecting call. `recorder.probes` counts THIS, so a page load reaching it fails a test.
     checkHealth: async () => {
@@ -514,12 +526,38 @@ const press = (element: Element): Promise<void> =>
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
 
-/**
- * Empties the Account box. The form pre-fills the first usable account, and the
- * typed value is also the list's query, so a test that wants the WHOLE roster in
- * view clears it first — exactly as a reader would.
- */
-const clearAccount = (): Promise<void> => typeInto(box('fy-new-session-agent'), '');
+/** Every runtime button, in document order, across both harness groups. */
+const radios = (): readonly HTMLInputElement[] => [
+  ...root().querySelectorAll<HTMLInputElement>('input[name="fy-new-session-runtime"]'),
+];
+
+const radio = (wrapper: string): HTMLInputElement =>
+  must(
+    radios().find(candidate => candidate.value === wrapper),
+    `a runtime button for ${wrapper}`,
+  );
+
+/** The one wrapper selected across BOTH groups, or `null` when none is. */
+const checkedWrapper = (): string | null => radios().find(candidate => candidate.checked)?.value ?? null;
+
+const chip = (wrapper: string): HTMLElement =>
+  must(root().querySelector<HTMLElement>(`[data-runtime-option="${wrapper}"]`), `the chip for ${wrapper}`);
+
+const chipText = (wrapper: string): string => chip(wrapper).textContent ?? '';
+
+/** Taps a runtime button, as a reader does. */
+const chooseRuntime = (wrapper: string): Promise<void> => interact(() => radio(wrapper).click());
+
+/** The harness groups as drawn: their title, and the wrappers under each. */
+const groups = (): readonly { readonly kind: string | null; readonly title: string; readonly wrappers: string[] }[] =>
+  [...root().querySelectorAll('[data-runtime-group]')].map(group => ({
+    kind: group.getAttribute('data-runtime-group'),
+    title: group.querySelector('legend')?.textContent ?? '',
+    wrappers: [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map(input => input.value),
+  }));
+
+const modelOptions = (): readonly (string | null)[] =>
+  [...root().querySelectorAll('#fy-new-session-model-options option')].map(option => option.getAttribute('value'));
 
 /** Presses Create and lets the start promise and the navigation settle. */
 const create = async (): Promise<void> => {
@@ -530,14 +568,14 @@ const create = async (): Promise<void> => {
 };
 
 describe('NewSessionPage with the daemon pickers', () => {
-  it('starts the session a chosen account and a chosen registered project describe', async () => {
+  it('starts the session a chosen runtime and a chosen registered project describe', async () => {
     const { props, recorder } = wire();
     await show(props);
 
-    await openList('fy-new-session-agent');
-    expect(rowText(0)).toContain('Studio Claude');
-    await pressRow(0);
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
+    // The machine's first usable runtime is already chosen; a tap moves the answer.
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    await chooseRuntime('codex-auto-atelier');
+    expect(checkedWrapper()).toBe('codex-auto-atelier');
 
     await openList('fy-new-session-cwd');
     expect(rowText(0)).toContain('Registered');
@@ -552,7 +590,7 @@ describe('NewSessionPage with the daemon pickers', () => {
       {
         connection: props.connection,
         request: {
-          agent: 'claude-auto-studio',
+          agent: 'codex-auto-atelier',
           boardAccess: 'none',
           cwd: '/work/ferretry',
           mode: 'auto',
@@ -563,48 +601,67 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(recorder.navigated).toEqual(['/d/daemon%2Fa/session/new%2Fsession']);
   });
 
-  it('marks a folder a session merely used as recent, and starts there without registering it', async () => {
-    const { props, recorder } = wire();
+  it('draws one radio group named Runtime, split Claude then Codex, with a single choice across both', async () => {
+    // The roster lists Codex first; the groups do not follow it.
+    const { props } = wire({ accounts: [atelier, studio] });
     await show(props);
 
-    await openList('fy-new-session-cwd');
-    expect(rowText(0)).toContain('Registered');
-    expect(rowText(1)).toContain('/work/scratch');
-    expect(rowText(1)).toContain('Recent');
-    expect(rowText(1)).not.toContain('Registered');
+    expect(groups()).toEqual([
+      { kind: 'claude', title: 'Claude', wrappers: ['claude-auto-studio'] },
+      { kind: 'codex', title: 'Codex', wrappers: ['codex-auto-atelier'] },
+    ]);
+    const group = must(root().querySelector('[role="radiogroup"]'), 'the radio group');
+    const labelId = must(group.getAttribute('aria-labelledby'), 'its label');
+    expect(root().querySelector(`#${labelId}`)?.textContent).toBe('Runtime');
+    // One shared name is what makes the browser keep a single choice and walk arrows across both groups.
+    expect(new Set(radios().map(candidate => candidate.name)).size).toBe(1);
+    // The daemon's own order decides the first usable runtime, not the group order.
+    expect(checkedWrapper()).toBe('codex-auto-atelier');
 
-    await pressRow(1);
-    expect(box('fy-new-session-cwd').value).toBe('/work/scratch');
-
-    await closeLists();
-    await typeInto(box('fy-new-session-agent'), 'claude-auto-studio');
-    await typeInto(promptBox(), 'Try something scratch');
-    await create();
-
-    expect(recorder.starts.at(0)?.request.cwd).toBe('/work/scratch');
-    // The whole reason `Recent` is its own badge: choosing one declares nothing.
-    expect(recorder.requests.filter(request => request.method !== 'GET')).toEqual([]);
+    await chooseRuntime('claude-auto-studio');
+    expect(radios().filter(candidate => candidate.checked)).toHaveLength(1);
+    expect(radio('codex-auto-atelier').checked).toBeFalse();
+    await chooseRuntime('codex-auto-atelier');
+    expect(checkedWrapper()).toBe('codex-auto-atelier');
   });
 
-  it('reads a chosen account’s models as SUGGESTIONS and leaves the model unset', async () => {
+  it('draws no group for a harness with nothing to run, and never a typed box beside the buttons', async () => {
+    const { props } = wire({ accounts: [studio, warehouse] });
+    await show(props);
+
+    expect(groups().map(group => group.title)).toEqual(['Claude']);
+    expect(groups()[0]?.wrappers).toEqual(['claude-auto-studio', 'claude-auto-warehouse']);
+    expect(root().querySelector('#fy-new-session-agent')).toBeNull();
+  });
+
+  it('names each runtime and what it runs on, and the wrapper only when the name differs', async () => {
+    const glm: PickerAccount = {
+      ...warehouse,
+      defaultModel: 'glm-5.3',
+      modelCatalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
+    };
+    const bare: PickerAccount = { ...atelier, wrapper: 'codex-bare', displayName: 'codex-bare', defaultModel: null };
+    const { props } = wire({ accounts: [studio, glm, bare], quota: 'absent' });
+    await show(props);
+
+    expect(chipText('claude-auto-studio')).toBe('Studio Claudeclaude-auto-studio · claude-opus-5');
+    expect(chipText('claude-auto-warehouse')).toBe('Warehouse Claudeclaude-auto-warehouse · GLM / Z.ai · glm-5.3');
+    // The name IS the wrapper, so it is not printed twice, and no model is claimed.
+    expect(chipText('codex-bare')).toBe('codex-baredefault model');
+  });
+
+  it('reads a chosen runtime’s models as SUGGESTIONS and leaves the model unset', async () => {
     const { props, recorder } = wire();
     await show(props);
 
-    await openList('fy-new-session-agent');
-    await pressRow(0);
-
-    const suggestions = [...root().querySelectorAll('#fy-new-session-model-options option')].map(option =>
-      option.getAttribute('value'),
-    );
-    expect(suggestions).toEqual(['claude-opus-5']);
+    expect(modelOptions()).toEqual(['claude-opus-5']);
     expect(box('fy-new-session-model').getAttribute('list')).toBe('fy-new-session-model-options');
     // Declared unavailable by the manifest, so it is not offered.
-    expect(suggestions).not.toContain('claude-haiku-4-5');
+    expect(modelOptions()).not.toContain('claude-haiku-4-5');
     // The point of the whole callback: the box the daemon reads stays empty.
     expect(box('fy-new-session-model').value).toBe('');
 
-    await closeLists();
-    await typeInto(promptBox(), 'Use whatever this account defaults to');
+    await typeInto(promptBox(), 'Use whatever this runtime defaults to');
     await create();
 
     const request = must(recorder.starts.at(0), 'a start').request;
@@ -624,10 +681,6 @@ describe('NewSessionPage with the daemon pickers', () => {
     };
     const { props, recorder } = wire({ accounts: [glm] });
     await show(props);
-
-    await openList('fy-new-session-agent');
-    await pressRow(0);
-    await closeLists();
 
     const select = must(root().querySelector<HTMLSelectElement>('select#fy-new-session-model'), 'the model select');
     expect([...select.querySelectorAll('optgroup')].map(group => group.label)).toEqual(['Most capable', 'Fast']);
@@ -654,9 +707,6 @@ describe('NewSessionPage with the daemon pickers', () => {
     };
     const { props, recorder } = wire({ accounts: [opus] });
     await show(props);
-    await openList('fy-new-session-agent');
-    await pressRow(0);
-    await closeLists();
     const fastSwitch = () =>
       must(root().querySelector<HTMLButtonElement>('[data-new-session-fast] button'), 'the switch');
     const chooseModel = async (id: string) => {
@@ -683,45 +733,34 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(Object.hasOwn(must(recorder.starts.at(0), 'a start').request, 'fast')).toBeFalse();
   });
 
-  it('drops the suggestions when the box no longer names that account', async () => {
-    const { props } = wire();
+  it('moves the model suggestions and the default hint to the runtime the reader taps', async () => {
+    const { props } = wire({ accounts: [terminal, studio, atelier] });
     await show(props);
 
-    await openList('fy-new-session-agent');
-    await pressRow(0);
-    expect(root().querySelector('#fy-new-session-model-options')).not.toBeNull();
+    expect(box('fy-new-session-model').placeholder).toBe('default: claude-opus-5');
+    expect(box('fy-new-session-model').value).toBe('');
 
-    await typeInto(box('fy-new-session-agent'), 'claude-auto-elsewhere');
-
-    expect(root().querySelector('#fy-new-session-model-options')).toBeNull();
-    expect(box('fy-new-session-model').hasAttribute('list')).toBeFalse();
+    await chooseRuntime('codex-auto-atelier');
+    expect(modelOptions()).toEqual(['gpt-5.6-terra']);
+    expect(box('fy-new-session-model').placeholder).toBe('default: gpt-5.6-terra');
   });
 
-  it('filters the roster from the field the reader actually types in', async () => {
-    const { props } = wire();
+  it('shows no default model hint for a runtime that declares none', async () => {
+    const { props } = wire({ accounts: [{ ...studio, defaultModel: null }] });
     await show(props);
 
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    expect(rows()).toHaveLength(2);
-
-    await typeInto(box('fy-new-session-agent'), 'atel');
-    expect(rows()).toHaveLength(1);
-    expect(rowText(0)).toContain('Atelier Codex');
-
-    await typeInto(box('fy-new-session-agent'), 'glm-mass-chore');
-    expect(panelState()).toBe('no-match');
-    expect(box('fy-new-session-agent').value).toBe('glm-mass-chore');
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    expect(box('fy-new-session-model').placeholder).toBe('');
   });
 
-  it('keeps both boxes typeable when every catalogue read fails, and starts from the typed text', async () => {
+  it('types the runtime where the roster cannot be read, and starts from the typed text', async () => {
     const { props, recorder } = wire({ accounts: 'unreadable', registered: 'unreadable', sessions: 'unreadable' });
     await show(props);
 
-    await openList('fy-new-session-agent');
-    expect(panelState()).toBe('failed');
-    expect(panelText()).toContain('this daemon refused its account manifest');
+    expect(radios()).toHaveLength(0);
+    expect(must(root().querySelector('[role="alert"]'), 'the reason').textContent).toBe(
+      'this daemon refused its account manifest Type a runtime name instead.',
+    );
     expect(box('fy-new-session-agent').hasAttribute('disabled')).toBeFalse();
 
     await openList('fy-new-session-cwd');
@@ -740,14 +779,43 @@ describe('NewSessionPage with the daemon pickers', () => {
     });
   });
 
+  it('claims nothing while the roster is still being read', async () => {
+    const { props } = wire({ accounts: 'pending' });
+    await show(props);
+
+    expect(must(root().querySelector('[role="status"]'), 'the status').textContent).toBe(
+      'Reading this machine’s runtimes…',
+    );
+    expect(radios()).toHaveLength(0);
+    expect(root().querySelector('#fy-new-session-agent')).toBeNull();
+    expect(namedButton('Create session').disabled).toBeTrue();
+  });
+
+  it('keeps the buttons and says they may be out of date when a later refresh fails', async () => {
+    const { props } = wire({ accounts: 'degrades' });
+    await show(props);
+    expect(radios()).toHaveLength(2);
+
+    await interact(async () => {
+      await props.accounts?.refresh(props.connection).catch(() => undefined);
+    });
+
+    expect(radios()).toHaveLength(2);
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    const notices = [...root().querySelectorAll('[role="status"]')].map(notice => notice.textContent);
+    expect(notices).toContain('this daemon refused its account manifest The runtimes shown may be out of date.');
+  });
+
   it('says a positively empty roster and an empty folder list are empty, in their own words', async () => {
     const { props, recorder } = wire({ accounts: [], registered: [], sessions: [] });
     await show(props);
 
-    // No list to open: the Account box's place says why and where to go instead.
+    // No buttons: the Runtime field's place says why and where to go instead.
+    expect(radios()).toHaveLength(0);
     expect(root().querySelector('#fy-new-session-agent') === null).toBeTrue();
     expect(noAccountsText()).toBe(NO_ACCOUNTS_SENTENCE);
-    await press(namedButton('Open Settings'));
+    expect(namedButton('Create a runtime').getAttribute('data-variant')).toBe('primary');
+    await press(namedButton('Create a runtime'));
     // No machine name was handed in, so the link names the machine the way the switcher does.
     expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings#machines/https%3A%2F%2Fdaemon.example.test/runtimes']);
 
@@ -756,38 +824,35 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(panelText()).toContain('registers no projects');
   });
 
-  it('joins the cached quota feed onto the rows and never asks a fleet usage route', async () => {
+  it('joins the cached quota feed onto the buttons and never asks a fleet usage route', async () => {
     const { props, recorder } = wire();
     await show(props);
 
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    expect(rowText(0)).toContain('5h 37%');
-    expect(rowText(1)).toContain('quota —');
+    expect(chipText('claude-auto-studio')).toContain('5h 37%');
+    expect(chipText('claude-auto-studio')).toContain('wk 61%');
+    // No reading is no claim: not a percentage, and not a made-up "0%".
+    expect(chipText('codex-auto-atelier')).not.toMatch(/%|quota/u);
     expect(root().querySelector('[data-picker-advisory]')).toBeNull();
     expect(recorder.requests.map(request => request.path).sort()).toEqual(['/v1/projects', '/v1/usage']);
   });
 
-  it('reports a refused quota feed beside the rows instead of failing the roster', async () => {
+  it('reports a refused quota feed beside the buttons instead of failing the roster', async () => {
     const { props } = wire({ quota: 'unreadable' });
     await show(props);
 
-    await openList('fy-new-session-agent');
-    expect(panelState()).toBe('options');
+    expect(radios()).toHaveLength(2);
     expect(must(root().querySelector('[data-picker-advisory]'), 'the advisory').textContent).toContain(
       'the usage feed is unavailable',
     );
-    expect(rowText(0)).toContain('quota —');
+    expect(chipText('claude-auto-studio')).not.toContain('%');
   });
 
   it('offers the roster with no quota at all when this surface has no feed to join', async () => {
     const { props, recorder } = wire({ quota: 'absent' });
     await show(props);
 
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    expect(rows()).toHaveLength(2);
-    expect(rowText(0)).toContain('quota —');
+    expect(radios()).toHaveLength(2);
+    expect(chipText('claude-auto-studio')).not.toContain('%');
     // No feed was asked for, so nothing is claimed about quota either way.
     expect(root().querySelector('[data-picker-advisory]')).toBeNull();
     expect(recorder.requests.map(request => request.path)).toEqual(['/v1/projects']);
@@ -797,8 +862,7 @@ describe('NewSessionPage with the daemon pickers', () => {
     const { props, recorder } = wire();
     await show(props);
 
-    await openList('fy-new-session-agent');
-    await pressRow(0);
+    await chooseRuntime('codex-auto-atelier');
     await openList('fy-new-session-cwd');
     await typeInto(box('fy-new-session-cwd'), '/work/scr');
     await pressRow(0);
@@ -817,94 +881,35 @@ describe('NewSessionPage with the daemon pickers', () => {
   });
 
   /**
-   * COLLECTS ONLY FROM THE CONTROL, and the control's copy no longer names a cost.
+   * COLLECTS ONLY FROM THE CONTROL, and the control is not on this form.
    *
-   * This block used to assert that the page made no health call at all, over copy that said the check
-   * "starts each published account once and waits for a reply" — a real inference call per account,
-   * disclosed rather than removed. The probe is deleted, so the page hydrates the free stored snapshot
-   * on mount and the property is now about the COLLECTING call.
-   *
-   * WHAT THIS CANNOT PROVE: it counts port calls. It cannot see a process spawn, so it is not the
+   * The page hydrates the free stored snapshot on mount and the property is about the COLLECTING
+   * call. WHAT THIS CANNOT PROVE: it counts port calls. It cannot see a process spawn, so it is not the
    * guard against a spend regression — `packages/daemon/tests/integration/runtime/boot-lifecycle.test.ts`
    * ("what an unattended fleet pass may spend") is, because it boots a real `fyd`.
    */
   it('hydrates the stored snapshot on mount, offers no re-check here, and collects nothing', async () => {
-    // Arrange / Act
     const { props, recorder } = wire();
     await show(props);
 
-    // Assert — one free snapshot read, no collection.
     expect(recorder.snapshots).toBe(1);
     expect(recorder.probes).toBe(0);
-
-    // The re-check control is not on the form that starts a session: every row
-    // already carries its stored verdict, which is all choosing an account needs.
     expect(
       [...root().querySelectorAll('button')].some(button => button.textContent?.includes('Check now')),
     ).toBeFalse();
     expect(root().querySelector('[data-picker-health]')).toBeNull();
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    expect(rowText(0)).toContain('never checked');
+    // Nobody has checked, and the button does not pretend either way.
+    expect(chipText('claude-auto-studio')).not.toMatch(/never checked|ready/iu);
     expect(recorder.probes).toBe(0);
   });
 
-  it('leads the closed Account box with the display name, the id small beside it', async () => {
-    const { props } = wire({ accounts: [terminal, studio, atelier] });
-    await show(props);
-    const face = (): Element | null => root().querySelector('[data-account-face]');
-    const faceParts = (): readonly string[] => [...(face()?.children ?? [])].map(part => part.textContent ?? '');
-
-    // Pre-filled and closed: the value is still the id the daemon is sent, but
-    // the name is what shows, first and in the box's own type, with the id after it.
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    expect(faceParts()).toEqual(['Studio Claude', 'claude-auto-studio']);
-    expect(face()?.className).not.toContain('opacity-0');
-    expect(box('fy-new-session-agent').className).toContain('!text-transparent');
-    // A screen reader standing in the box hears the name too.
-    expect(box('fy-new-session-agent').getAttribute('aria-describedby')).toContain(must(face(), 'the face').id);
-
-    // Editing: the face steps aside for the id, which is the thing being typed.
-    await openList('fy-new-session-agent');
-    expect(face()?.className).toContain('opacity-0');
-    expect(box('fy-new-session-agent').className).not.toContain('!text-transparent');
-    await typeInto(box('fy-new-session-agent'), 'codex-auto-atelier');
-    await closeLists();
-    expect(faceParts()).toEqual(['Atelier Codex', 'codex-auto-atelier']);
-
-    // A typed name no offered account has: nothing is claimed about it, and the
-    // box shows the typed text as it is.
-    await openList('fy-new-session-agent');
-    await typeInto(box('fy-new-session-agent'), 'claude-auto-elsewhere');
-    await closeLists();
-    expect(face()).toBeNull();
-    expect(box('fy-new-session-agent').className).not.toContain('!text-transparent');
-  });
-
-  it('hints the model box from the chosen account’s own default, never another harness’s', async () => {
-    const { props } = wire({ accounts: [terminal, studio, atelier] });
+  it('prints a login’s stored verdict on its button once the host has one', async () => {
+    const { props } = wire({ health: 'ready' });
     await show(props);
 
-    expect(box('fy-new-session-model').placeholder).toBe('default: claude-opus-5');
-    expect(box('fy-new-session-model').value).toBe('');
-
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    await pressRow(1);
-    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
-    expect(box('fy-new-session-model').placeholder).toBe('default: gpt-5.6-terra');
-
-    // Typed away from the choice: the hint goes with it.
-    await typeInto(box('fy-new-session-agent'), 'claude-auto-elsewhere');
-    expect(box('fy-new-session-model').placeholder).toBe('');
-  });
-
-  it('shows no default model hint for an account that declares none', async () => {
-    const { props } = wire({ accounts: [{ ...studio, defaultModel: null }] });
-    await show(props);
-
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    expect(box('fy-new-session-model').placeholder).toBe('');
+    expect(chipText('claude-auto-studio')).toContain('ready');
+    expect(chip('claude-auto-studio').querySelector('.text-ok')?.getAttribute('title')).toContain('provider accepted');
+    expect(chipText('codex-auto-atelier')).not.toContain('ready');
   });
 
   it('offers the known folders in the Project box with typing a path as the fallback', async () => {
@@ -916,19 +921,17 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(rows()).toHaveLength(2);
   });
 
-  it('never offers the previous daemon’s accounts or folders after the connection changes', async () => {
+  it('never offers the previous daemon’s runtimes or folders after the connection changes', async () => {
     const { props } = wire();
     const mounted = await show(props);
-
-    await openList('fy-new-session-agent');
-    expect(rowText(0)).toContain('Studio Claude');
+    expect(chipText('claude-auto-studio')).toContain('Studio Claude');
 
     await mounted.render(<NewSessionPage {...props} connection={workstation} />);
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    const accountRows = rows().map(row => row.textContent ?? '');
-    expect(accountRows.join(' ')).not.toContain('Studio Claude');
-    expect(accountRows.join(' ')).toContain('Warehouse Claude');
+    const text = radios()
+      .map(candidate => chipText(candidate.value))
+      .join(' ');
+    expect(text).not.toContain('Studio Claude');
+    expect(text).toContain('Warehouse Claude');
 
     await openList('fy-new-session-cwd');
     const folderRows = rows().map(row => row.textContent ?? '');
@@ -943,10 +946,9 @@ describe('NewSessionPage with the daemon pickers', () => {
       usage: stubUsage({ feed: feedBody, status: 'error', error: 'the daemon stopped answering' }),
     });
 
-    await openList('fy-new-session-agent');
     // Both facts at once: a failed refresh must not silently pass off old
     // percentages as current ones, and must not hide them either.
-    expect(rowText(0)).toContain('5h 37%');
+    expect(chipText('claude-auto-studio')).toContain('5h 37%');
     expect(must(root().querySelector('[data-picker-advisory]'), 'the advisory').textContent).toContain(
       'the daemon stopped answering',
     );
@@ -956,7 +958,6 @@ describe('NewSessionPage with the daemon pickers', () => {
     const { props } = wire();
     await show({ ...props, usage: stubUsage({ feed: null, status: 'error', error: null }) });
 
-    await openList('fy-new-session-agent');
     expect(must(root().querySelector('[data-picker-advisory]'), 'the advisory').textContent).toContain(
       'the cached quota feed could not be read',
     );
@@ -966,52 +967,30 @@ describe('NewSessionPage with the daemon pickers', () => {
     const { props } = wire();
     await show({ ...props, usage: stubUsage({ feed: null, status: 'loading', error: null }) });
 
-    await openList('fy-new-session-agent');
     expect(root().querySelector('[data-picker-advisory]')).toBeNull();
-    expect(rowText(0)).toContain('quota —');
+    expect(chipText('claude-auto-studio')).not.toContain('%');
   });
 
-  it('drops model suggestions on a daemon switch even when the wrapper name matches on both hosts', async () => {
+  it('takes the model suggestions from THIS daemon’s runtime when the connection changes, even on a shared wrapper name', async () => {
     const { props } = wire();
     const mounted = await show(props);
-
-    await openList('fy-new-session-agent');
-    await pressRow(0);
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    expect(root().querySelector('#fy-new-session-model-options')).not.toBeNull();
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    expect(modelOptions()).toEqual(['claude-opus-5']);
 
     await mounted.render(<NewSessionPage {...props} connection={workstation} />);
 
-    // The workstation publishes its own `claude-auto-studio`, so the TEXT still
-    // matches a real row — and the choice was made on a host the reader has left,
-    // so it is no longer evidence about anything on screen.
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    expect(root().querySelector('#fy-new-session-model-options')).toBeNull();
-    expect(box('fy-new-session-model').hasAttribute('list')).toBeFalse();
-
-    // Choosing again on THIS daemon suggests this daemon's models, not the other's.
-    // The typed text is also the query, so the workstation's own row is the match.
-    // Choosing dismissed the list, so the caret leaves and comes back — which is
-    // what a reader does too.
-    await closeLists();
-    await openList('fy-new-session-agent');
-    expect(rowText(0)).toContain('Warehouse Studio');
-    await pressRow(0);
-    expect(
-      [...root().querySelectorAll('#fy-new-session-model-options option')].map(option => option.getAttribute('value')),
-    ).toEqual(['claude-sonnet-5']);
+    // The workstation publishes its own `claude-auto-studio`. The text still names a real button there,
+    // and the suggestions are that button's — never the laptop's.
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    expect(chipText('claude-auto-studio')).toContain('Warehouse Studio');
+    expect(modelOptions()).toEqual(['claude-sonnet-5']);
   });
 
-  it('drops model suggestions when the same daemon id is re-paired', async () => {
+  it('keeps the chosen runtime and its suggestions when the same daemon id is re-paired', async () => {
     const { props } = wire();
     const mounted = await show(props);
+    expect(modelOptions()).toEqual(['claude-opus-5']);
 
-    await openList('fy-new-session-agent');
-    await pressRow(0);
-    expect(root().querySelector('#fy-new-session-model-options')).not.toBeNull();
-
-    // Same id, same address, a new grant: everything this browser proved about
-    // the last pairing expired with it, including which account it chose.
     await mounted.render(
       <NewSessionPage
         {...props}
@@ -1023,52 +1002,69 @@ describe('NewSessionPage with the daemon pickers', () => {
       />,
     );
 
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    expect(root().querySelector('#fy-new-session-model-options')).toBeNull();
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    expect(modelOptions()).toEqual(['claude-opus-5']);
   });
 
-  it('never offers the terminal account, and pre-fills the first account that can run a session', async () => {
-    // The default fleet's shape: the terminal account is published FIRST, so it
-    // used to be both the top row and the most likely first choice — and the
-    // daemon refuses a session on it in either mode.
+  it('replaces a draft that names no runtime on this machine with the first usable one', async () => {
+    const { props } = wire();
+    const mounted = await show(props);
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+
+    // Another machine's roster: nothing it offers is the wrapper the draft still holds.
+    const elsewhere = wire({ accounts: [warehouse] });
+    await mounted.render(<NewSessionPage {...props} accounts={elsewhere.props.accounts} />);
+
+    expect(checkedWrapper()).toBe('claude-auto-warehouse');
+  });
+
+  it('never offers the terminal runtime, and chooses the first runtime that can run a session', async () => {
+    // The default fleet's shape: the terminal runtime is published FIRST, and the daemon refuses a
+    // session on it in either mode.
     const { props, recorder } = wire({ accounts: [terminal, studio, atelier] });
     await show(props);
 
-    expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
-    // The pre-fill counts as a choice, so the model box suggests that account's models.
-    expect(
-      [...root().querySelectorAll('#fy-new-session-model-options option')].map(option => option.getAttribute('value')),
-    ).toEqual(['claude-opus-5']);
+    expect(checkedWrapper()).toBe('claude-auto-studio');
+    expect(radios().map(candidate => candidate.value)).toEqual(['claude-auto-studio', 'codex-auto-atelier']);
+    expect(root().textContent).not.toContain('Claude (default)');
+    // The choice counts, so the model box suggests that runtime's models.
+    expect(modelOptions()).toEqual(['claude-opus-5']);
 
-    await openList('fy-new-session-agent');
-    await clearAccount();
-    const offered = rows().map(row => row.textContent ?? '');
-    expect(offered).toHaveLength(2);
-    expect(offered.join(' ')).not.toContain('Claude (default)');
-    expect(offered.join(' ')).not.toContain('claude-default');
-
-    // Cleared is an answer: the pre-fill never comes back over it.
-    expect(box('fy-new-session-agent').value).toBe('');
-    await typeInto(box('fy-new-session-agent'), 'codex-auto-atelier');
-    await closeLists();
-    await typeInto(promptBox(), 'Run on the codex account');
+    await chooseRuntime('codex-auto-atelier');
+    await typeInto(promptBox(), 'Run on the codex runtime');
     await create();
     expect(recorder.starts.at(0)?.request.agent).toBe('codex-auto-atelier');
   });
 
-  it('pre-fills past an account the daemon says is unavailable', async () => {
-    const down: PickerAccount = { ...studio, available: false };
+  it('shows a runtime the daemon says is unavailable disabled, with its reason, and chooses past it', async () => {
+    const down: PickerAccount = { ...studio, available: false, unavailableReason: 'its login needs signing in' };
     const { props } = wire({ accounts: [terminal, down, atelier] });
     await show(props);
 
-    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
+    expect(radio('claude-auto-studio').disabled).toBeTrue();
+    expect(chipText('claude-auto-studio')).toContain('its login needs signing in');
+    expect(checkedWrapper()).toBe('codex-auto-atelier');
   });
 
-  it('says in one sentence that no account can run a session when the only one is the terminal account', async () => {
+  it('leaves the runtime unchosen, and says so, when every runtime is unavailable', async () => {
+    const down: PickerAccount = { ...studio, available: false, unavailableReason: 'its login needs signing in' };
+    const { props } = wire({ accounts: [down] });
+    await show(props);
+
+    expect(radios()).toHaveLength(1);
+    expect(checkedWrapper()).toBeNull();
+    expect(namedButton('Create session').disabled).toBeTrue();
+    expect(must(root().querySelector('#fy-new-session-create-blocker'), 'the reason').textContent).toBe(
+      'Choose a runtime first.',
+    );
+  });
+
+  it('says in one sentence that no runtime can run a session when the only one is the terminal runtime', async () => {
     const { props, recorder } = wire({ accounts: [terminal] });
     await show({ ...props, machineName: 'studio-mac' });
 
-    // Not an empty dropdown: the box is replaced by the sentence and a way forward.
+    // Not an empty list: the buttons are replaced by the sentence and a way forward.
+    expect(radios()).toHaveLength(0);
     expect(root().querySelector('#fy-new-session-agent') === null).toBeTrue();
     expect(root().querySelectorAll('[role="combobox"]')).toHaveLength(1); // the Project box only
     expect(noAccountsText()).toBe(NO_ACCOUNTS_SENTENCE);
@@ -1076,11 +1072,11 @@ describe('NewSessionPage with the daemon pickers', () => {
     expect(namedButton('Create session').disabled).toBeTrue();
     // Disabled WITH a reason, and no longer drawn as a filled primary button.
     const blocker = must(root().querySelector('#fy-new-session-create-blocker'), 'the reason').textContent;
-    expect(blocker).toBe('No account can run a session yet — add one first.');
+    expect(blocker).toBe('No runtime can run a session yet — add one first.');
     expect(namedButton('Create session').getAttribute('aria-describedby')).toBe('fy-new-session-create-blocker');
     expect(namedButton('Create session').hasAttribute('data-variant')).toBeFalse();
 
-    await press(namedButton('Open Settings'));
+    await press(namedButton('Create a runtime'));
     // Straight to this machine's Runtimes tab, where an agent runtime is added.
     expect(recorder.navigated).toEqual(['/d/daemon%2Fa/settings#machines/studio-mac/runtimes']);
     expect(recorder.starts).toEqual([]);
@@ -1088,26 +1084,24 @@ describe('NewSessionPage with the daemon pickers', () => {
 });
 
 describe('NewSessionPage initialAgent', () => {
-  it('fills the Account box with the runtime a Launch button named, over the first usable account', async () => {
+  it('chooses the runtime a Launch button named, over the first usable one', async () => {
     const { props, recorder } = wire({ accounts: [terminal, studio, atelier] });
     await show({ ...props, initialAgent: 'codex-auto-atelier' });
 
-    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
-    // It is a hint, not a start: nothing was sent, and the model box suggests that account's models.
+    expect(checkedWrapper()).toBe('codex-auto-atelier');
+    // It is a hint, not a start: nothing was sent, and the model box suggests that runtime's models.
     expect(recorder.starts).toEqual([]);
-    expect(
-      [...root().querySelectorAll('#fy-new-session-model-options option')].map(option => option.getAttribute('value')),
-    ).toEqual(['gpt-5.6-terra']);
+    expect(modelOptions()).toEqual(['gpt-5.6-terra']);
   });
 
   it('does the same on a surface that has no quota feed', async () => {
     const { props } = wire({ accounts: [terminal, studio, atelier], quota: 'absent' });
     await show({ ...props, initialAgent: 'codex-auto-atelier' });
 
-    expect(box('fy-new-session-agent').value).toBe('codex-auto-atelier');
+    expect(checkedWrapper()).toBe('codex-auto-atelier');
   });
 
-  it('ignores a runtime the roster does not offer, an unavailable one, and the terminal account', async () => {
+  it('ignores a runtime the roster does not offer, an unavailable one, and the terminal runtime', async () => {
     const down: PickerAccount = { ...atelier, available: false };
     for (const [accounts, hint] of [
       [[terminal, studio, atelier], 'claude-auto-nobody'],
@@ -1116,7 +1110,7 @@ describe('NewSessionPage initialAgent', () => {
     ] as const) {
       const { props } = wire({ accounts: [...accounts] });
       await show({ ...props, initialAgent: hint });
-      expect(box('fy-new-session-agent').value).toBe('claude-auto-studio');
+      expect(checkedWrapper()).toBe('claude-auto-studio');
       await live?.unmount();
       live = undefined;
     }

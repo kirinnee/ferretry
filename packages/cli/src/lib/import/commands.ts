@@ -1,6 +1,7 @@
 import { type Command, InvalidArgumentError, Option } from 'commander';
 import type { ContinueSessionController, ImportController } from './controller.ts';
 import { parseSinceDuration } from './controller.ts';
+import type { PackNewOptions } from '../pack/controller.ts';
 
 /** Both commands share one `--since` grammar: validated here, converted to an instant in the controller. */
 function sinceArgument(value: string): string {
@@ -86,21 +87,55 @@ export function registerImportCommands(
     );
 }
 
-/** Mounts `fy new` — continuing an existing conversation; a fresh session stays `fy start`. */
-export function registerNewCommand(program: Command, controller: Pick<ContinueSessionController, 'run'>): void {
+/** `fy new` without `--continue`: a sub-ferret on a chosen model (Pack mode, docs/pack-mode.md). */
+export interface FreshSubFerret {
+  newChild(words: readonly string[], options: PackNewOptions): Promise<void>;
+}
+
+/**
+ * Mounts `fy new`: with `--continue`, continuing an existing conversation; without it, a sub-ferret on a
+ * chosen model after a "reply OK" check (Pack mode). A plain fresh session stays `fy start`.
+ */
+export function registerNewCommand(
+  program: Command,
+  controller: Pick<ContinueSessionController, 'run'>,
+  fresh?: FreshSubFerret,
+): void {
+  const bin = program.name();
   program
     .command('new')
-    .description('continue an existing Claude Code or Codex conversation as a ferret (fresh sessions: `fy start`)')
-    .argument('[query...]', 'search words for --continue')
+    .description(
+      `start a sub-ferret on a chosen model (Pack mode; \`${bin} wait <id>\` collects its result), or --continue an existing conversation`,
+    )
+    .argument('[words...]', 'the complete brief for a sub-ferret, or search words for --continue')
     .addOption(harnessOption('search only this harness'))
     .option('--continue', 'search existing conversations and continue one, instead of starting fresh')
-    .option('--runtime <name>', 'the runtime to run it on')
+    .option('--runtime <name>', `the runtime to run it on (\`${bin} recommend\` lists them)`)
     .option('--since <duration>', SINCE_HELP, sinceArgument)
+    .option('--model <model>', 'the model, as the runtime lists it')
+    .option('--effort <level>', 'the reasoning effort')
+    .option('--auto', 'let Ferretry choose from the models guide (or Jev, when Jev decides)')
+    .option('--use-case <id>', 'with --auto: the models-guide use case to choose from')
+    .option('--cwd <dir>', "its folder (defaults to its parent's, or here)")
+    .option('--name <title>', 'its task title')
+    .addOption(new Option('--mode <mode>', 'auto (default) or interactive').choices(['auto', 'interactive']))
+    .option('--prompt-file <file>', 'read the brief from a file')
+    .option('--json', 'print the outcome as JSON')
     .action(
       async (
         words: string[],
-        options: { continue?: boolean; harness?: 'claude' | 'codex'; runtime?: string; since?: string },
+        options: {
+          continue?: boolean;
+          harness?: 'claude' | 'codex';
+          runtime?: string;
+          since?: string;
+        } & PackNewOptions,
       ) => {
+        if (options.continue !== true && fresh !== undefined) {
+          const { continue: _continue, harness: _harness, since: _since, ...pack } = options;
+          await fresh.newChild(words, pack);
+          return;
+        }
         const query = words.join(' ');
         await controller.run({
           continue: options.continue === true,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
+  type HarnessDialog,
   MCP_OAUTH_PATH,
   matchesSessionSearchQuery,
   type PermissionRequest,
@@ -24,6 +25,7 @@ import { SessionAnalyticsSurface } from '../../src/features/analytics/session-an
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
+import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
 import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
@@ -322,6 +324,53 @@ const fakeDaemon = (options: { readonly migrate?: Error } = {}) => {
 };
 
 describe('SessionChatPage', () => {
+  test('names the ferret that started this one in the header, as a link to it', () => {
+    const parent = sessionView('boss', { config: { teammate: 'hadi' } });
+    const child = sessionView('kid', { config: { parent: 'boss' } });
+    const opened: string[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], child)}
+        connection={alpha}
+        daemonSessions={[parent, child]}
+        entries={[]}
+        onNavigate={to => opened.push(to)}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={child}
+      />,
+    );
+    try {
+      const link = page.root.findByProps({ 'data-session-started-by': '' });
+      expect(textOf(link)).toBe('Started by Hadi · Session boss');
+      run(() => link.props.onClick());
+      expect(opened).toEqual(['/d/alpha/session/boss']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('draws no "Started by" for a ferret nobody started, or one whose parent is unknown', () => {
+    const lone = sessionView('lone', { config: { parent: 'ghost' } });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], lone)}
+        connection={alpha}
+        daemonSessions={[lone]}
+        entries={[]}
+        onNavigate={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={lone}
+      />,
+    );
+    try {
+      expect(page.root.findAllByProps({ 'data-session-started-by': '' })).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('threads the daemon account and cached usage stores into migration', () => {
     const accountPicker = new DaemonAccountPickerStore({
       catalog: async () => ({ accounts: [] }),
@@ -1846,6 +1895,115 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('answers a harness dialog above the Composer through the daemon, and never beside a permission prompt', async () => {
+    const harnessDialog: HarnessDialog = {
+      id: '0123456789abcdef',
+      harness: 'codex',
+      kind: 'hooks-review',
+      title: 'Hooks need review',
+      options: [
+        { number: 1, label: 'Review hooks', grantsTrust: false },
+        { number: 2, label: 'Trust all and continue', grantsTrust: true },
+      ],
+      selected: 1,
+      escape: 'skip',
+    };
+    const parked = sessionView('shared', {
+      config: { teammate: 'hadi' },
+      state: { status: 'running', turnState: 'needs-input', harnessDialog },
+    });
+    const posted: { url: string; body: unknown }[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/dialog')) {
+        posted.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+        return Response.json({ dialogId: harnessDialog.id, cleared: true });
+      }
+      return route(input);
+    }) as typeof fetch;
+    let refreshed = 0;
+    const mountFor = (session: SessionView, canControl = true) => (
+      <SessionChatPage
+        canControl={canControl}
+        client={client([], parked)}
+        connection={alpha}
+        entries={[]}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = renderSessionChatPage(mountFor(parked));
+    try {
+      const card = page.root.findByType(DialogCard);
+      expect(card.props.agentName).toBe('Hadi');
+      expect(card.props.dialog).toEqual(harnessDialog);
+      const column = page.root.findByProps({ className: 'fy-chat-input__column' });
+      const kinds = column.children.map(child => (typeof child === 'string' ? child : child.type));
+      expect(kinds.indexOf(DialogCard)).toBeLessThan(kinds.indexOf(Composer));
+
+      const scope = daemonSessionScope(alpha, 'shared');
+      expect(await card.props.api.answer(alpha, scope, { kind: 'escape', dialogId: harnessDialog.id })).toEqual({
+        dialogId: harnessDialog.id,
+        cleared: true,
+      });
+      expect(posted).toEqual([
+        {
+          url: 'https://alpha.example.test/v1/sessions/shared/dialog',
+          body: { kind: 'escape', dialogId: harnessDialog.id },
+        },
+      ]);
+      card.props.onSettled();
+      expect(refreshed).toBe(1);
+
+      // Nothing to answer from a device that cannot control the session, or once it is over.
+      run(() => page.update(withSessionSearch(mountFor(parked, false))));
+      expect(page.root.findAllByType(DialogCard)).toHaveLength(0);
+      run(() =>
+        page.update(
+          withSessionSearch(
+            mountFor(
+              sessionView('shared', { state: { status: 'completed', turnState: 'needs-input', harnessDialog } }),
+            ),
+          ),
+        ),
+      );
+      expect(page.root.findAllByType(DialogCard)).toHaveLength(0);
+
+      // A permission prompt owns the pane: the dialog card steps aside.
+      const permissionRequest: PermissionRequest = {
+        id: 'fedcba9876543210',
+        harness: 'codex',
+        tool: 'Shell',
+        action: 'run',
+        what: 'ls',
+        question: 'Run?',
+        options: [
+          { number: 1, label: 'Yes', kind: 'allow' },
+          { number: 2, label: 'No', kind: 'deny' },
+        ],
+        selected: 1,
+      };
+      run(() =>
+        page.update(
+          withSessionSearch(
+            mountFor(
+              sessionView('shared', {
+                state: { status: 'running', turnState: 'needs-input', harnessDialog, permissionRequest },
+              }),
+            ),
+          ),
+        ),
+      );
+      expect(page.root.findAllByType(DialogCard)).toHaveLength(0);
+      expect(page.root.findAllByType(ApprovalCard)).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('renders the refresh error verbatim and never as a second live region', () => {
     const page = renderSessionChatPage(
       <SessionChatPage
@@ -1903,6 +2061,38 @@ describe('SessionChatPage', () => {
       expect(JSON.stringify(page.toJSON())).not.toContain('could not reach fyd');
       expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
       expect(page.root.findByType(Composer).props.connectionLive).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('shows an unprovable transcript as its own notice, with Check again and a confirmed Restart', async () => {
+    let refreshed = 0;
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        connectionState={{ kind: 'connected' }}
+        entries={[]}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        refreshError="Session workspace issue: Transcript: session shared has no transcript this daemon can prove is its own"
+        session={sessionView('shared')}
+        transcriptUnbound
+      />,
+    );
+    try {
+      const notice = page.root.findByProps({ 'data-transcript-unbound': '' });
+      expect(textOf(notice)).toContain('Console tab');
+      expect(textOf(notice)).toContain('Restart CLI…');
+      expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
+      await runAsync(async () => {
+        notice.find(node => node.type === 'button' && textOf(node) === 'Check again').props.onClick();
+      });
+      expect(refreshed).toBe(1);
     } finally {
       run(() => page.unmount());
     }

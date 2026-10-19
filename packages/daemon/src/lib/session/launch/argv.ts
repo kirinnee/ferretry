@@ -27,6 +27,7 @@ import type { HarnessKind } from '@ferretry/fleet';
 import type { TranscriptProvenance } from '@ferretry/protocol';
 import { handoffReadArguments } from '../send/handoff.ts';
 import { claudeSessionArguments } from '../transcript/claude-path.ts';
+import { codexCorrelationArguments, isCodexCorrelationPair } from '../transcript/codex-rollout.ts';
 import { HARNESS_RESUME_FLAG, HARNESS_SESSION_FLAG } from '../transcript/relaunch.ts';
 
 /** The daemon-owned parts of one launch. */
@@ -154,6 +155,10 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
  * id is kept rather than a new conversation being created. Codex names its own session and takes
  * nothing — except a conversation Ferretry ADOPTED, which it was started on with `resume <id>` and
  * must keep being resumed into.
+ *
+ * A Codex session with a correlation token is relaunched DECLARING it again, as its start did. A
+ * session whose rollout was never proven — including one started before starts declared it — would
+ * otherwise come back in a fresh rollout nothing can prove either, so Restart could never repair it.
  */
 export function transcriptLaunchArguments(
   harness: HarnessKind,
@@ -163,7 +168,11 @@ export function transcriptLaunchArguments(
   if (harness !== 'claude') {
     const adopted = provenance?.identity === 'adopted' ? provenance.harnessSessionId : undefined;
     const id = adopted ?? (recorded[1] === CODEX_RESUME ? recorded[2] : undefined);
-    return id === undefined ? [] : [CODEX_RESUME, id];
+    const token = provenance?.correlationToken;
+    return [
+      ...(id === undefined ? [] : [CODEX_RESUME, id]),
+      ...(token === undefined ? [] : codexCorrelationArguments(token)),
+    ];
   }
   if (provenance?.harnessSessionId !== undefined) return claudeSessionArguments(provenance.harnessSessionId);
   const at = recorded.findIndex(token => token === HARNESS_SESSION_FLAG || token === HARNESS_RESUME_FLAG);
@@ -186,13 +195,14 @@ const RUN_OVERRIDE = /^(?:model|model_reasoning_effort|service_tier)=/u;
 const INLINE_SETTINGS = /^\{.*"fastMode":(?:true|false).*\}$/su;
 
 /**
- * The argv with what describes THIS RUN removed: the harness session, the model, the effort and fast
- * mode.
+ * The argv with what describes THIS RUN removed: the harness session, its Codex correlation root,
+ * the model, the effort and fast mode.
  *
  * What is left is the part a relaunch would change if a setting changed — the wrapper, the
  * remote-control surface, the `Read(...)` rules, the owner's flags — which is what a stale-settings
  * check must compare. A model the owner switched to with `/model` is not a stale setting, and a
- * revive turning `--session-id` into `--resume` is not one either.
+ * revive turning `--session-id` into `--resume` is not one either. Nor is the correlation root: every
+ * session started before launches declared it would otherwise be told its settings are stale.
  */
 export function settingsArguments(argv: readonly string[]): readonly string[] {
   const kept: string[] = [];
@@ -202,7 +212,8 @@ export function settingsArguments(argv: readonly string[]): readonly string[] {
     if (
       RUN_FLAGS.has(token) ||
       (token === '-c' && next !== undefined && RUN_OVERRIDE.test(next)) ||
-      (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next))
+      (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next)) ||
+      isCodexCorrelationPair(token, next)
     ) {
       index += 1;
       continue;

@@ -125,8 +125,9 @@ jobs:
     # Integration Tests job's shared Chromium launches, so this needs no new tool and no third `macos-14`
     # job. A sibling job rather than a step on an existing one, so it adds runner time and no wall clock.
     # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
-    # The harness walks both viewports at once in two processes beside its session layout pass: the
-    # full gallery's three browsers want the 4x8, the Settings walk is short enough for a 2x4.
+    # The full gallery peaks at ~3.3GB, past a 2x4's memory, so it keeps the 4x8; the Settings walk fits
+    # a 2x4. Both walk their viewports one after the other: run at once, as three software-rendered
+    # Chromes on four cores, the full gallery timed out in 3 of 7 runs under load (#598).
     runs-on:
       - nscloud-ubuntu-24.04-amd64-${{ matrix.shape }}-with-cache
       - nscloud-cache-tag-ferretry-nix

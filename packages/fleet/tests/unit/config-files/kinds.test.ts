@@ -6,9 +6,13 @@ import {
   type ConfigSchemaId,
   configSchemaModeline,
   DEFAULT_LEARNING_CONFIG,
+  DEFAULT_PACK_CONFIG,
   DEFAULT_VOICE_CONFIG,
   DEFAULT_WARDEN_CONFIG,
   type LearningConfig,
+  type PackConfig,
+  type PackFile,
+  packConfigFromFile,
   type VoiceConfig,
   VoiceConfigSchema,
   type WardenConfig,
@@ -560,6 +564,8 @@ const CANONICAL_PATHS: Readonly<Record<ConfigSchemaId, string>> = {
   warden: 'warden.yaml',
   learning: 'learning.yaml',
   voice: 'voice.yaml',
+  pack: 'pack.yaml',
+  modelsGuide: 'models-guide.yaml',
   preset: 'presets/my-preset.yaml',
   models: 'models/my-provider.yaml',
   ...Object.fromEntries(CONFIG_COMPONENT_KINDS.map(kind => [`component-${kind}`, `components/${kind}/main.yaml`])),
@@ -596,5 +602,61 @@ describe('CONFIG_FILE_STARTERS', () => {
   it('should show the login starter naming its secret as a reference, never a value', () => {
     // Assert
     should(CONFIG_FILE_STARTERS.login).containEql('${secret:EXAMPLE_API_KEY}');
+  });
+});
+
+describe('configLoosening — pack.yaml and models-guide.yaml', () => {
+  const pack = (file: PackFile): PackConfig => packConfigFromFile(file);
+
+  it.each([
+    [{ enabled: false }, {}, ['ferrets may now start sub-ferrets (Pack mode)']],
+    [{}, { decision: 'jev' }, ['Jev may now spend on choosing sub-ferret models']],
+    [
+      { enabled: false, decision: 'jev' },
+      { decision: 'jev' },
+      ['ferrets may now start sub-ferrets (Pack mode)', 'Jev may now spend on choosing sub-ferret models'],
+    ],
+    [
+      {},
+      { limits: { interactiveChildren: 30 } },
+      ['the sub-ferrets an interactive ferret may run at once goes up from 20 to 30'],
+    ],
+    [{}, { limits: { autoChildren: 8 } }, ['the sub-ferrets an unattended ferret may run at once goes up from 4 to 8']],
+    [{}, { limits: { maxDepth: 3 } }, ['how deep sub-ferrets may nest goes up from 2 to 3']],
+    [{}, { jev: { usdPerDay: 1 } }, ["Jev's daily cap in dollars for choosing models goes up from 0.25 to 1"]],
+  ] as const)('should hold %j → %j, saying %j', (before, after, expected) => {
+    // Act
+    const actual = configLoosening('pack', pack(before as PackFile), pack(after as PackFile));
+
+    // Assert
+    should(actual).deepEqual(expected);
+  });
+
+  it('should apply at once everything that tightens or spends nothing more', () => {
+    // Act
+    const actual = configLoosening(
+      'pack',
+      DEFAULT_PACK_CONFIG,
+      pack({
+        enabled: false,
+        limits: { interactiveChildren: 1, autoChildren: 0, maxDepth: 1 },
+        probe: { timeoutSeconds: 300, cacheSeconds: 0 },
+      }),
+    );
+
+    // Assert
+    should(actual).deepEqual([]);
+    should(
+      configLoosening('pack', pack({ decision: 'jev', enabled: false }), pack({ decision: 'jev', enabled: false })),
+    ).deepEqual([]);
+  });
+
+  it('should never hold a models guide: it widens nothing a ferret may do or spend', () => {
+    // Act
+    const actual = configLoosening('modelsGuide', {}, { useCases: [] });
+
+    // Assert
+    should(actual).deepEqual([]);
+    should(configValue('pack', {})).deepEqual(DEFAULT_PACK_CONFIG);
   });
 });

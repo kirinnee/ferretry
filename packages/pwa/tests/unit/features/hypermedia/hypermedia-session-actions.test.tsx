@@ -16,7 +16,7 @@ import { click, textOf, waitFor, waitForText } from '../../../support/learning-d
 import { sessionView } from '../../../support/sessions.ts';
 
 const DAEMON = daemonConnection({ daemonId: 'daemon/a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
-const LEGACY = sessionView('session-hadi', { config: { teammate: 'hadi' } });
+const LEGACY = sessionView('session-hadi', { config: { teammate: 'hadi', mode: 'interactive' } });
 /** What the wire adds to the shell fixture, so an answer parses against the protocol schema. */
 const WIRE_CONFIG: Partial<SessionConfig> = {
   incarnation: 'session-hadi-1',

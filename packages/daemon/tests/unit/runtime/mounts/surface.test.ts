@@ -28,6 +28,7 @@ import {
   CREDENTIALS,
   configChangeSubsystem,
   consoleSubsystem,
+  dialogSubsystem,
   emptyFeed,
   FakeBrowserLogin,
   FakeSessionControl,
@@ -375,6 +376,25 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  pack: {
+    service: {
+      view: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      recommend: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      newChild: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+    result: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    setSwitch: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionMcp: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -581,6 +601,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionAttach: attachSubsystem(),
   sessionConsole: consoleSubsystem(),
   sessionPermission: permissionSubsystem(),
+  sessionDialog: dialogSubsystem(),
   fleetEvents: fleetEventSubsystem(),
   configChanges: configChangeSubsystem(),
   grants: grantSubsystem(),
@@ -633,8 +654,10 @@ describe('the mounted daemon surface', () => {
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // the permission prompt's answer: a digit or Escape into the same pane, governed the same way
+      1 + // a harness dialog's answer (hooks review, an update, a sign-in): arrows then Enter into the same pane, governed the same way
       1 + // an agent's rename: a new first name or task title
       1 + // a ferret's hypermedia switch, from its next launch (docs/hypermedia.md)
+      5 + // Pack mode: its view, recommend, a sub-ferret start, a result and a ferret's switch (docs/pack-mode.md)
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
@@ -808,6 +831,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/rename',
       'PATCH /v1/sessions/:sessionId/hypermedia',
+      'GET /v1/pack',
+      'POST /v1/pack/recommend',
+      'POST /v1/pack/new',
+      'GET /v1/sessions/:sessionId/result',
+      'PATCH /v1/sessions/:sessionId/pack',
       'POST /v1/sessions/:sessionId/mcp/project/preview',
       'POST /v1/sessions/:sessionId/mcp/login/preview',
       'POST /v1/sessions/:sessionId/mcp/project',
@@ -937,6 +965,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/attach',
       'POST /v1/sessions/:sessionId/console/input',
       'POST /v1/sessions/:sessionId/permission',
+      'POST /v1/sessions/:sessionId/dialog',
     ]);
   });
 

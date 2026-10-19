@@ -20,7 +20,7 @@ export function Section({ title, children, spot }: { title: string; children: Re
 }
 
 const NOTE_TONE = {
-  info: 'border-accent-border bg-accent-bg',
+  info: 'border-accent-border bg-accent-soft',
   warn: 'border-warn-border bg-warn-bg',
   danger: 'border-err-border bg-err-bg',
 } as const;

@@ -356,7 +356,11 @@ export function RuntimeModelControls({
         setNotice('Codex opened its native picker in Terminal. No switch is claimed until Codex reports one.');
       } else if (config.harness === 'codex') {
         setSelectedCodexModel(null);
-        setNotice(`Codex confirmed ${model} · ${effort} from its runtime settings.`);
+        setNotice(
+          effort
+            ? `Codex confirmed ${model} · ${effort} from its runtime settings.`
+            : `Codex confirmed ${model} from its runtime settings.`,
+        );
       } else {
         setNotice('Model command sent. The model chip updates when Claude confirms the switch.');
       }
@@ -438,7 +442,7 @@ export function RuntimeModelControls({
           error={catalogError}
           harness={config.harness}
           onChoose={choice => {
-            if (config.harness === 'codex') setSelectedCodexModel(choice);
+            if (config.harness === 'codex' && choice.reasoningEfforts.length > 0) setSelectedCodexModel(choice);
             else void runModelCommand(choice.value);
           }}
           onCustom={

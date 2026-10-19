@@ -31,6 +31,8 @@ import {
   configFilePath,
   configSchemaId,
   type LearningConfig,
+  type ModelsGuideFile,
+  type PackConfig,
   type VoiceConfig,
   type WardenConfig,
 } from '@ferretry/protocol';
@@ -83,6 +85,9 @@ export interface EffectiveConfig {
   readonly warden: WardenConfig;
   readonly learning: LearningConfig;
   readonly voice: VoiceConfig;
+  readonly pack: PackConfig;
+  /** The guide as written; `useCases` absent means the one derived from the catalogs (docs/pack-mode.md). */
+  readonly modelsGuide: ModelsGuideFile;
   /** This machine's own provider presets (`presets/<id>.yaml`), by id. The built-ins are not here. */
   readonly presets: Readonly<Record<string, ProviderPreset>>;
   /** This machine's own model catalogs (`models/<id>.yaml`), by id: each wins over the published and built-in one. */
@@ -226,6 +231,8 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
       warden: singleton('warden'),
       learning: singleton('learning'),
       voice: singleton('voice'),
+      pack: singleton('pack'),
+      modelsGuide: singleton('modelsGuide'),
       presets: Object.fromEntries(
         [...effective.values()].flatMap(candidate => {
           const address = candidate.checked.address;

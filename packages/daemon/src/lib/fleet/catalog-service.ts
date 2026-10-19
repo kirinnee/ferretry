@@ -178,6 +178,12 @@ export interface FleetCatalogServiceDeps {
   ids(): Promise<RuntimeIds | undefined>;
   /** The harness command this daemon's one rule resolves. Nothing is launched to find it. */
   locate(harness: HarnessKind): string | undefined;
+  /**
+   * Whether every wrapper file this plan would write already holds exactly that content on disk. A
+   * republish whose manifest is unchanged still has to rewrite a wrapper whose harness path moved, which
+   * the manifest does not record. Absent means the caller cannot say, and the manifest alone decides.
+   */
+  wrappersCurrent?(plan: FleetModelApplyPlan): Promise<boolean>;
   /** Whether an MCP server's command resolves on this machine (K6). */
   commandExists(command: string): boolean;
   /** Every session's status, to count the running ones (E20, E32). */
@@ -250,6 +256,18 @@ export const countRunningSessions = (statuses: readonly SessionStatus[]): number
  * Whether a planned manifest says what the published one already says, the moment it was made
  * aside. Anything else that differs — a model, a default, a catalog — is worth publishing again.
  */
+/** The absolute path each located harness resolved to, which a wrapper execs instead of a bare name. */
+export function harnessCommandsOf(
+  locate: (harness: HarnessKind) => string | undefined,
+): Partial<Record<HarnessKind, string>> {
+  const claude = locate('claude');
+  const codex = locate('codex');
+  return {
+    ...(claude === undefined ? {} : { claude }),
+    ...(codex === undefined ? {} : { codex }),
+  };
+}
+
 export function sameManifest(planned: { readonly generatedAt: string }, published: unknown): boolean {
   if (published === null || typeof published !== 'object') return false;
   const { generatedAt: _planned, ...next } = planned;
@@ -415,6 +433,7 @@ export class FleetCatalogService {
         bodies: await this.#bodies(reading.model),
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
+        harnessCommands: harnessCommandsOf(this.deps.locate),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...sources,
@@ -422,7 +441,11 @@ export class FleetCatalogService {
     } catch (error) {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
     }
-    if (sameManifest(plan.manifest, await this.deps.publishedManifest?.())) return 'unchanged';
+    if (
+      sameManifest(plan.manifest, await this.deps.publishedManifest?.()) &&
+      (await this.deps.wrappersCurrent?.(plan)) !== false
+    )
+      return 'unchanged';
     try {
       await this.deps.provisioner.apply(plan, []);
     } catch (error) {
@@ -649,6 +672,7 @@ export class FleetCatalogService {
         bodies,
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
+        harnessCommands: harnessCommandsOf(this.deps.locate),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,

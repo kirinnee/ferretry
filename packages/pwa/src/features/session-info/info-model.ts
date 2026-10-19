@@ -11,7 +11,7 @@
  * WORDS: which tab a fact is on, how it is said, and what its explainer says.
  */
 
-import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
+import { type ManagedWorktreeView, type SessionView, sessionHypermediaEnabled } from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
 
 export type InfoTab = 'overview' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
@@ -50,6 +50,7 @@ export const INFO_HINT = {
     'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
   hypermedia:
     'Whether this ferret is told it may explain with diagrams, drawings, interactive pages and media in chat. A change takes effect when it next starts. Change it in Actions.',
+  pack: 'Pack mode: whether this ferret is told it may delegate to sub-ferrets and pick the model each one runs on. The machine’s own switch and the depth limit still apply. A change takes effect at its next launch. Change it in Actions.',
 } as const;
 
 /** The CLI a harness is, in words. */
@@ -142,12 +143,18 @@ export const lineage = (
 export const learningLabel = (passive: boolean): string =>
   passive ? 'On · instructed to file lessons' : 'Off · not instructed';
 
-/**
- * Whether a ferret is told it may use hypermedia (docs/hypermedia.md). ABSENT MEANS ON: a session
- * started before the switch existed is instructed at its next launch unless the owner turns it off.
- */
-export const hypermediaOn = (view: SessionView): boolean => view.config.hypermedia !== false;
+/** Whether a ferret is told it may use hypermedia: its switch, else its mode's default (docs/hypermedia.md). */
+export const hypermediaOn = (view: SessionView): boolean => sessionHypermediaEnabled(view.config);
 
 /** The Hypermedia row's value: said as what the ferret is told. */
 export const hypermediaLabel = (on: boolean): string =>
   on ? 'On · may explain with diagrams and media' : 'Off · plain text';
+
+/**
+ * Whether a ferret is told it may delegate to sub-ferrets (docs/pack-mode.md). ABSENT MEANS ON, as for
+ * hypermedia: the machine's own switch and the depth limit still apply on top of it.
+ */
+export const packOn = (view: SessionView): boolean => view.config.pack !== false;
+
+/** The Pack mode row's value: said as what the ferret is told, and when a change lands. */
+export const packLabel = (on: boolean): string => (on ? 'On · may delegate to sub-ferrets' : 'Off · works alone');

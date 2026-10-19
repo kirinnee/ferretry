@@ -1,4 +1,6 @@
 import { describe, it } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import should from 'should';
 import { PaneDeliveryError, TmuxPaneDelivery } from '../../../src/adapters/index.ts';
 import { TmuxController } from '../../../src/lib/index.ts';
@@ -66,6 +68,25 @@ describe('tmux pane delivery — readiness', () => {
     await should(subject.waitReady(SESSION)).be.rejectedWith(
       /blocked by a prompt on screen: "Try the new fullscreen renderer\?" — answer it in the terminal/u,
     );
+    should(server.calls.some(call => call[0] === 'send-keys')).be.false();
+  });
+
+  it("should name Codex's hooks-review dialog when it keeps the pane from ever being ready", async () => {
+    // Arrange — the pane Codex 0.156.1 really drew, which no startup rule answers on the person's behalf.
+    const frame = await readFile(
+      join(import.meta.dir, '../../fixtures/harness-dialogs/codex-0.156.1-hooks-review.txt'),
+      'utf8',
+    );
+    // The fake draws a composer under every modal; a real dialog owns the whole screen, footer last.
+    const server = new (class extends FakeTmuxServer {
+      override async execute(argv: readonly string[], stdin?: string) {
+        return argv[0] === 'capture-pane' ? { code: 0, stdout: frame, stderr: '' } : await super.execute(argv, stdin);
+      }
+    })();
+    const { subject } = delivery(server, { readinessAttempts: 2 });
+
+    // Act / Assert
+    await should(subject.waitReady(SESSION)).be.rejectedWith(/Harness dialog — Hooks need review/u);
     should(server.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 

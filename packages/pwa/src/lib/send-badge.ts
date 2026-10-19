@@ -21,6 +21,8 @@ const REASONS: Readonly<Record<SendUnaccountedReason, string>> = {
   session_ended: 'the session ended before it arrived',
   composer_discarded: 'the agent’s queue let go of it before reading it',
   transcript_unreadable: 'the agent’s transcript could not be read, so arrival could not be checked',
+  transcript_unbound:
+    'Ferretry can’t find a transcript it can prove is this session’s, so it can’t check what the agent received',
   pane_unreadable: 'the agent’s screen could not be read, so arrival could not be checked',
   blocked_by_prompt: 'a prompt on the agent’s screen is waiting for an answer, so it could not be typed',
   not_delivered: 'it never reached the agent',

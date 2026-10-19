@@ -34,7 +34,7 @@
 
 import type { ForkSessionFailure, RuntimeControlRequest, RuntimeModelChoice } from '@ferretry/protocol';
 import type { CodexRuntimeCatalogCache } from '../../lib/session/harness/codex-catalog-cache.ts';
-import { codexRuntimeCatalog, codexSwitchContext } from '../../lib/session/harness/model-catalog.ts';
+import { codexSwitchContext } from '../../lib/session/harness/model-catalog.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import type { HarnessRuntimeSwitchRequest } from '../../lib/session/harness/runtime-switch.ts';
 import type { HarnessQuirkService } from '../../lib/session/harness/service.ts';
@@ -235,9 +235,7 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
       // a harness that takes the effort as a command needs no catalogue, and probing for one would
       // make a fork fail on an account whose catalogue is momentarily unreadable but whose effort
       // vocabulary is fixed.
-      ...(wanted.model === undefined
-        ? {}
-        : { catalog: codexSwitchContext(codexRuntimeCatalog(await this.choices(resolved, cwd))) }),
+      ...(wanted.model === undefined ? {} : { catalog: codexSwitchContext(await this.choices(resolved, cwd)) }),
     });
     if (plan.kind === 'refused')
       throw new SessionForkTargetResolutionError(

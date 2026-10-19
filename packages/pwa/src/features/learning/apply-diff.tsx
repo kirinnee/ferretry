@@ -14,7 +14,7 @@ const LINE_CLASS: Readonly<Record<DiffLineKind, string>> = {
 
 export function ApplyDiff({ path, diff }: { readonly path: string; readonly diff: string }) {
   return (
-    <figure className="m-0 min-w-0 overflow-hidden rounded-control border border-border-soft bg-surface-1">
+    <figure className="m-0 min-w-0 overflow-hidden rounded-control border border-border-soft bg-surface">
       <figcaption className="flex min-w-0 items-center gap-2 border-b border-border-soft px-3 py-1.5 text-meta">
         <FileText size={13} aria-hidden="true" className="shrink-0 text-faint" />
         <span className="mono min-w-0 truncate text-fg-soft" title={path}>

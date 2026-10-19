@@ -136,19 +136,22 @@ daemon replays its journal on start, so a takeover or a hand-over outlives a res
 `tools/call`; notifications are never answered). It holds exactly the authority of the agent session
 whose credential is in its environment, and nothing else: it talks only to the daemon on this machine,
 sends no bearer token, and never reads the host's admin token. The fleet's fixed layer adds it to every
-agent runtime as a locked entry, with a short built-in instruction:
+agent runtime as a locked entry, with a short built-in instruction (the tools, then the rules for changing
+Ferretry's own settings) in the system prompt:
 
 - **Claude**: `--mcp-config=<inline JSON for server "ferretry">` (the person's own servers stay; its
   `env` blanks `FY_TOKEN`, since Claude hands a stdio server its whole environment) and
   `--append-system-prompt=<instruction>`. A profile's own `--append-system-prompt` is KEPT: Ferretry's
   instruction is appended after it, in the one flag Claude takes.
 - **Codex**: `-c mcp_servers.ferretry.command/args/env_vars` (forwarding `FY_HOME`, `FY_URL`,
-  `FY_SESSION_ID`, `FY_SESSION_BOARD_CAPABILITY`, `FY_LEARNING_PASSIVE` — never `FY_TOKEN`) and
+  `FY_SESSION_ID`, `FY_SESSION_BOARD_CAPABILITY` — never `FY_TOKEN`) and
   `-c developer_instructions=<instruction>`. A profile's own `developer_instructions` is kept the same
   way: the person's text first, then Ferretry's.
 
-A ferret instructed to learn (`FY_LEARNING_PASSIVE=1`) also gets the lessons teaching in the server's `initialize`
-instructions, and `lessons_suggest` files a lesson through `POST /v1/agent/lessons` ([learning.md](learning.md)).
+The wrapper appends each ferret's own sections to that same value at launch — hypermedia, Pack mode and
+the lessons teaching, each when its switch is on ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
+The server's own `initialize` instructions are one line; `lessons_suggest` files a lesson through
+`POST /v1/agent/lessons` ([learning.md](learning.md)).
 
 MCP tool names use `_` (`terminal_open`), because provider tool APIs refuse `.`; each maps one-to-one to
 the wire tool (`terminal.open`). A refusal comes back as a tool result with `isError: true` and the

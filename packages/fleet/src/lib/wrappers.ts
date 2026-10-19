@@ -24,7 +24,10 @@ import {
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
   CODEX_QUESTIONS_FEATURE,
+  binaryName,
+  FERRET_SECTIONS,
   SESSION_MODE_ENV,
+  tomlString,
 } from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
 
@@ -36,6 +39,12 @@ export interface ResolvedCommand {
   readonly flags: readonly string[];
   /** The alias that produced this command, when it was not declared explicitly. */
   readonly alias: string | undefined;
+  /**
+   * The absolute path the wrapper execs for its harness, as the daemon resolved it (docs/harness-paths.md).
+   * Absent means the harness is not located on this host, and the wrapper then execs the bare name, which
+   * is the one case where it can only fail or find what the person's own PATH holds.
+   */
+  readonly harnessCommand?: string | undefined;
 }
 
 /** Marks a script as generated, so provisioning can tell its own output from anything else. */
@@ -343,6 +352,11 @@ export interface RuntimeWrapperInput {
   readonly trustLaunchFolder?: boolean;
   /** The `fy` executable a wrapper runs to claim a conversation it is about to resume. */
   readonly fyCommand: string;
+  /**
+   * The absolute path the wrapper execs for its harness, as the daemon resolved it (docs/harness-paths.md).
+   * Absent means the harness is not located on this host, and the wrapper then execs the bare name.
+   */
+  readonly harnessCommand?: string | undefined;
   readonly secretsFile?: string | undefined;
   /**
    * Why this runtime cannot launch at all, when it cannot (O4, G5). The wrapper then says so and exits
@@ -455,9 +469,10 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ].join('\n');
   }
   const environment = environmentLines(input.env, input.secretsFile);
+  const sections = input.agent ? ferretSectionLines(input.harness, input.fyCommand) : [];
   const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args]
     .filter(arg => arg !== CLAUDE_NO_QUESTIONS_FLAG)
-    .map(shellQuote)
+    .map(arg => (sections.length > 0 ? instructionArgument(input.harness, arg) : undefined) ?? shellQuote(arg))
     .join(' ');
   return [
     ...header,
@@ -469,10 +484,50 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...historyClaimLines(input.harness, input.fyCommand),
     ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
     ...(input.agent ? questionLines(input.harness) : []),
+    ...sections,
     '',
-    `exec ${HARNESS_BINARIES[input.harness]}${args === '' ? '' : ` ${args}`} "$@"`,
+    `exec ${input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand)}${args === '' ? '' : ` ${args}`} "$@"`,
     '',
   ].join('\n');
+}
+
+/** The shell variable the per-ferret sections are gathered into, already in the harness's own quoting. */
+const SECTIONS_VARIABLE = '_fy_sections';
+
+/**
+ * The per-ferret sections of the appended system prompt (`FERRET_SECTIONS`, `./account/fixed-layer.ts`),
+ * gathered at exec time from the switches the daemon wrote into this ferret's environment. Each is
+ * appended after a blank line only when its variable is exactly `1`, so a wrapper run by hand — where
+ * nothing set them — carries none.
+ *
+ * Codex's value is a TOML basic string, so each section is stored already escaped for one: escaping is
+ * per character, so escaped pieces join into the escaped whole.
+ */
+function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
+  const fy = binaryName(fyCommand);
+  const quoted = (text: string): string => shellQuote(harness === 'codex' ? tomlString(text).slice(1, -1) : text);
+  return [
+    '',
+    "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
+    `${SECTIONS_VARIABLE}=''`,
+    ...FERRET_SECTIONS(fy).map(
+      section =>
+        `if [ "\${${section.env}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
+    ),
+  ];
+}
+
+/**
+ * The instruction argument with this ferret's sections appended, as shell; `undefined` for any other
+ * argument. The literal stays single-quoted and the variable is joined to it double-quoted, so neither
+ * can be split or expanded: Claude's `--append-system-prompt=…`, and Codex's
+ * `developer_instructions="…"` with the sections inside its closing quote.
+ */
+function instructionArgument(harness: HarnessKind, arg: string): string | undefined {
+  if (harness === 'claude')
+    return arg.startsWith('--append-system-prompt=') ? `${shellQuote(arg)}"$${SECTIONS_VARIABLE}"` : undefined;
+  if (!arg.startsWith('developer_instructions="') || !arg.endsWith('"')) return undefined;
+  return `${shellQuote(arg.slice(0, -1))}"$${SECTIONS_VARIABLE}"${shellQuote('"')}`;
 }
 
 /**

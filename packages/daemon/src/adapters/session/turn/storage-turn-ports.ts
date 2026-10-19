@@ -7,6 +7,7 @@ import {
   paneBlockingPrompt,
   paneShowsActiveWork,
   paneShowsPermissionPrompt,
+  parseHarnessDialog,
   parsePermissionPrompt,
   type SessionId,
   type SessionTranscriptTail,
@@ -98,6 +99,7 @@ export class StorageTurnPorts implements SessionTurnPorts {
       permission: request !== undefined || paneShowsPermissionPrompt(pane.visible),
       prompt: paneBlockingPrompt(pane.visible),
       request,
+      dialog: parseHarnessDialog(pane.visible),
     };
   }
 
@@ -121,6 +123,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
       else next.turnPrompt = change.prompt;
       if (change.request === undefined) delete next.permissionRequest;
       else next.permissionRequest = change.request;
+      if (change.dialog === undefined) delete next.harnessDialog;
+      else next.harnessDialog = change.dialog;
       written = true;
       return next as typeof raw;
     });
@@ -134,6 +138,7 @@ export class StorageTurnPorts implements SessionTurnPorts {
       prompt: change.prompt ?? null,
       // The request itself rides the feed, so a page shows the approval card from the event alone.
       permissionRequest: change.request ?? null,
+      harnessDialog: change.dialog ?? null,
     });
     if (change.to === undefined) this.tails.delete(id);
     return true;

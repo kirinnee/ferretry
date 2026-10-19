@@ -1,10 +1,11 @@
-import type { PermissionRequest, SessionState, SessionTurnState } from '@ferretry/protocol';
+import type { HarnessDialog, PermissionRequest, SessionState, SessionTurnState } from '@ferretry/protocol';
 import type { ClockPort } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import {
   isTurnStatus,
   observeTurn,
+  settleHarnessDialog,
   settlePermissionRequest,
   settleTurnPrompt,
   settleTurnState,
@@ -21,7 +22,7 @@ export interface TurnWatchSession {
   readonly id: SessionId;
   readonly state: Pick<
     SessionState,
-    'status' | 'turn' | 'pendingQuestion' | 'turnState' | 'turnPrompt' | 'permissionRequest'
+    'status' | 'turn' | 'pendingQuestion' | 'turnState' | 'turnPrompt' | 'permissionRequest' | 'harnessDialog'
   >;
 }
 
@@ -33,6 +34,8 @@ export interface TurnStateChange {
   readonly prompt?: string | undefined;
   /** The tool-permission prompt behind `to`, recorded as `permissionRequest`; absent clears it. */
   readonly request?: PermissionRequest | undefined;
+  /** The harness's own dialog behind `to`, recorded as `harnessDialog`; absent clears it. */
+  readonly dialog?: HarnessDialog | undefined;
 }
 
 export interface SessionTurnPorts {
@@ -130,13 +133,15 @@ export class SessionTurnWatcher implements TurnWatchLoop {
     const next = settleTurnState(session.state.turnState, observation, this.previous.get(session.id), live);
     const prompt = settleTurnPrompt(session.state.turnPrompt, next, observation);
     const request = settlePermissionRequest(session.state.permissionRequest, next, observation);
+    const dialog = settleHarnessDialog(session.state.harnessDialog, next, observation);
     this.previous.set(session.id, observation);
-    // A request is compared by its id, a digest of everything a person decides on: somebody at the
-    // terminal moving the cursor between rows is not a new request and records nothing.
+    // A request or a dialog is compared by its id, a digest of everything a person decides on: somebody
+    // at the terminal moving the cursor between rows is not a new one and records nothing.
     if (
       next === session.state.turnState &&
       prompt === session.state.turnPrompt &&
-      request?.id === session.state.permissionRequest?.id
+      request?.id === session.state.permissionRequest?.id &&
+      dialog?.id === session.state.harnessDialog?.id
     )
       return undefined;
     const change = {
@@ -144,6 +149,7 @@ export class SessionTurnWatcher implements TurnWatchLoop {
       to: next,
       ...(prompt === undefined ? {} : { prompt }),
       ...(request === undefined ? {} : { request }),
+      ...(dialog === undefined ? {} : { dialog }),
     };
     return (await this.ports.record(session.id, change, this.ports.clock.now())) ? change : undefined;
   }

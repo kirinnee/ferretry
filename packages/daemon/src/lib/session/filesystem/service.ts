@@ -7,7 +7,7 @@ import {
   type SessionFileIndexSkip,
   type SessionFileIndexSkipReason,
 } from '@ferretry/protocol';
-import { gateCandidates, isDeniedPath, looksBinary, normalizeRelativePath } from './path-policy.ts';
+import { deniedSegment, gateCandidates, isDeniedPath, looksBinary, normalizeRelativePath } from './path-policy.ts';
 import type {
   AfterValidationHook,
   ComponentIdentity,
@@ -840,12 +840,47 @@ export class SessionFilesystem {
    */
   private async refusalFor(pinned: PinnedRoot, rel: string, canonical?: string): Promise<FsFileView | undefined> {
     const candidates = gateCandidates(rel, canonical);
-    if (candidates.some(candidate => isDeniedPath(candidate))) {
-      return { path: rel, size: 0, denied: true, reason: 'denylist' };
+    const denied = candidates.map(candidate => deniedSegment(candidate)).find(segment => segment !== undefined);
+    if (denied !== undefined) {
+      return {
+        path: rel,
+        size: 0,
+        denied: true,
+        reason: 'denylist',
+        rule: `the protected-secrets list refuses the name "${denied}"`,
+      };
     }
-    return (await this.isIgnored(pinned, candidates))
-      ? { path: rel, size: 0, ignored: true, reason: 'ignored' }
-      : undefined;
+    const verdict = await this.ignoreVerdict(pinned, candidates);
+    return verdict.ignored ? { path: rel, size: 0, ignored: true, reason: 'ignored', rule: verdict.rule } : undefined;
+  }
+
+  /**
+   * The gitignore verdict WITH the rule that decided it, for a refusal that has to say which rule.
+   *
+   * Two very different things refuse as `ignored`, and a reader must be able to tell them apart: Git
+   * matched an ignore pattern — named here by file, line and pattern — or Git could not answer at all,
+   * which fails closed and names the failure. Collapsing both into "gitignored, a secret, or outside the
+   * folder" is how an agent's freshly written image got refused with no way to find out why.
+   */
+  private async ignoreVerdict(
+    pinned: PinnedRoot,
+    candidates: readonly string[],
+  ): Promise<{ readonly ignored: false } | { readonly ignored: true; readonly rule: string }> {
+    if (candidates.length === 0) return { ignored: false };
+    let hits: ReadonlySet<string>;
+    try {
+      hits = await this.git.ignoredPaths(pinned.policyCwd, candidates);
+    } catch (error) {
+      const why = error instanceof Error ? (error.message.split('\n')[0] ?? '') : '';
+      return {
+        ignored: true,
+        rule: `Git could not confirm it is not ignored, so it is refused (${why || 'git failed'})`,
+      };
+    }
+    const matched = candidates.filter(candidate => hits.has(candidate));
+    if (matched.length === 0) return { ignored: false };
+    const rule = await this.git.ignoreRule(pinned.policyCwd, matched).catch(() => undefined);
+    return { ignored: true, rule: rule === undefined ? 'Git ignores it' : `Git ignores it (${rule})` };
   }
 
   /**

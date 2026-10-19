@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type E2eEnvironment, withE2eEnvironment } from './fixture';
+import { BROWSER_MEDIA_SCRIPT, HYPERMEDIA_FORMS, stageHypermediaReply } from './support/hypermedia-reply';
 import {
   addVirtualAuthenticator,
   type VirtualAuthenticator,
@@ -613,6 +614,10 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
     };
   });
 
+  // Journey 5b: hypermedia, in the production build, from the agent's own reply. Once — the relayed
+  // variant crosses the same renderer, and the screenshots are the same pictures.
+  if (journey === 'j02-j05-core') await hypermediaJourney(page, environment, journey);
+
   await step(journey, 'open-terminal', async () => {
     // A terminal is a tab in the workspace pane beside the chat: ⫼ shows that pane, and its ＋ opens a
     // new shell in it.
@@ -753,6 +758,84 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   }
   await assertNoFurtherPrompts(product, journey, promptsAtUnlock);
   return { daemonId, marker, secretValue: 'fake-e2e-secret-value', sessionUrl };
+}
+
+/**
+ * The agent answers with every `fy-render` form, and the production build draws each one inline:
+ * Mermaid through the (Pages-correct) sandbox shell into an `<img>`, an `html` fragment with
+ * hostile payloads that never run, and pictures, a recording, a chime and a report read from the
+ * session's MEDIA folder (`FY_MEDIA_DIR`), where the fake harness put them. Then every form is
+ * captured at 1440 and 390, light and dark.
+ */
+/**
+ * Brings one form's block to the middle of the transcript. The transcript follows its tail until the
+ * reader scrolls, and a scripted scroll is not a reader — so a wheel turn is sent first, which is
+ * what a person scrolling up does, and the transcript stops pulling the page back down.
+ */
+const showBlock = (form: string): string =>
+  `(async () => {
+    const block = document.querySelector('[data-fy-render-type="${form}"]');
+    if (block === null) return 'absent';
+    let scroller = block.parentElement;
+    while (scroller !== null && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY)))
+      scroller = scroller.parentElement;
+    if (scroller === null) return 'no scroller';
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -120 }));
+      const box = block.getBoundingClientRect();
+      const frame = scroller.getBoundingClientRect();
+      scroller.scrollTop += box.top - frame.top - Math.max(16, (scroller.clientHeight - box.height) / 2);
+      await new Promise(r => setTimeout(r, 250));
+      const after = block.getBoundingClientRect();
+      if (after.top >= frame.top && after.top < frame.top + scroller.clientHeight * 0.6) return 'shown';
+    }
+    return 'not shown';
+  })()`;
+
+async function hypermediaJourney(page: ProductPage, environment: E2eEnvironment, journey: string): Promise<void> {
+  await step(journey, 'hypermedia-renders-inline', async () => {
+    const media = await page.evaluate<{ png: string; webm: string }>(BROWSER_MEDIA_SCRIPT);
+    await stageHypermediaReply(join(environment.paths.root, 'workspace'), media);
+    await page.fill('form.fy-composer :is(textarea, [role="textbox"])', 'show me');
+    await page.click('form.fy-composer button[type="submit"]');
+    await waitUntil(
+      page,
+      `document.querySelectorAll('[data-fy-render-type]').length >= ${String(HYPERMEDIA_FORMS.length)}`,
+      120_000,
+    );
+    for (const { form, rendered } of HYPERMEDIA_FORMS) {
+      // Rendering is lazy — near the viewport — so each block is brought on screen before it is asked about.
+      await page.evaluate(showBlock(form));
+      await waitUntil(page, `document.querySelector(${JSON.stringify(rendered)}) !== null`, 40_000).catch(
+        async (error: unknown) => {
+          const block = await page.evaluate<string>(
+            `document.querySelector('[data-fy-render-type="${form}"]')?.outerHTML.slice(0, 600) ?? 'absent'`,
+          );
+          throw new Error(`${form} did not render: ${String((error as Error).message)}. Block: ${block}`);
+        },
+      );
+    }
+    const pwned = await page.evaluate<string | null>('window.__fyPwned ?? null');
+    if (pwned !== null) throw new Error(`a payload in the html fragment ran: ${pwned}`);
+    return {
+      value: undefined,
+      evidence: `all ${String(HYPERMEDIA_FORMS.length)} forms rendered inline; no fragment payload ran`,
+    };
+  });
+  for (const { form } of HYPERMEDIA_FORMS)
+    for (const [label, size] of [
+      ['1440', { height: 900, width: 1_440 }],
+      ['390', { height: 844, width: 390 }],
+    ] as const)
+      for (const scheme of ['light', 'dark'] as const) {
+        await page.setViewportSize(size);
+        await page.emulateMedia({ colorScheme: scheme });
+        await page.evaluate(showBlock(form));
+        await page.screenshot({ path: join(EVIDENCE_ROOT, journey, `10-hypermedia-${form}-${label}-${scheme}.png`) });
+      }
+  // Back to the journey's own browser, or the steps after this one meet a phone layout.
+  await page.setViewportSize({ height: 900, width: 1_280 });
+  await page.emulateMedia({ colorScheme: null });
 }
 
 describe('the product, from a fresh machine to a working session', () => {

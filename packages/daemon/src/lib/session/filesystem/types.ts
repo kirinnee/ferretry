@@ -190,6 +190,11 @@ export interface FsFileView {
   /** Refused by the gitignore gate, or because we could not prove otherwise. */
   readonly ignored?: boolean;
   readonly reason?: FsRefusalReason;
+  /**
+   * WHICH rule refused it, in words a reader can act on: the ignore file, line and pattern Git matched,
+   * the Git failure that stopped the check, or the denied name. Absent when bytes were served.
+   */
+  readonly rule?: string;
   /** Served from `HEAD` rather than from the working tree. */
   readonly rev?: 'head';
 }

@@ -43,15 +43,16 @@ import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-me
 import { NewSessionMenu } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
-import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
+import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import {
   DEFAULT_LIST_FILTER,
   type SessionsListFilter,
   sessionsBarSubline,
   sessionsBarView,
 } from './sessions-bar-model.ts';
-import { SessionsBarRow } from './sessions-bar-row.tsx';
+import { sessionTree } from './sessions-bar-tree.ts';
+import { SessionsBarTree } from './sessions-bar-tree.tsx';
 import { StatusMark } from './status-mark.tsx';
 
 /** The places at the foot of the bar. Insights is Analytics, Warden and Learning together. */
@@ -388,18 +389,14 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
                 <span className="truncate">{group.name}</span>
                 <span className="fy-sbar__count">{group.rows.length}</span>
               </h2>
-              <ul>
-                {group.rows.map(row => (
-                  <SessionsBarRow
-                    active={row.config.id === activeSessionId}
-                    daemonId={daemonId}
-                    key={row.config.id}
-                    learningPassive={props.learningPassive?.has(row.config.id) === true}
-                    onNavigate={navigate}
-                    view={row}
-                  />
-                ))}
-              </ul>
+              <SessionsBarTree
+                activeSessionId={activeSessionId}
+                daemonId={daemonId}
+                entries={sessionTree(group.rows, sessions ?? [])}
+                isActive={row => row.config.id === activeSessionId}
+                learns={row => props.learningPassive?.has(row.config.id) === true}
+                onNavigate={navigate}
+              />
             </section>
           ))
         )}

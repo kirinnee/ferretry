@@ -436,6 +436,24 @@ describe('RuntimeModelControls', () => {
     await screen.unmount();
   });
 
+  test('switches a Codex model that takes no reasoning level in one step', async () => {
+    const { api, sent } = recorder();
+    const kimi: RuntimeModelCatalog = {
+      harness: 'codex',
+      source: 'codex-app-server',
+      catalog: { id: 'kimi', label: 'Kimi', customIds: false },
+      choices: [{ value: 'kimi-k3', label: 'Kimi K3', tier: 'best', isDefault: true, reasoningEfforts: [] }],
+    };
+    const codex = view({ config: { harness: 'codex' } });
+    const screen = await mount(<RuntimeModelControls {...props({ api, catalogs: resolved(kimi), view: codex })} />);
+
+    await click(byText(screen.container, 'Kimi K3'));
+    expect(sent.map(entry => entry.command)).toEqual([{ action: 'model', model: 'kimi-k3' }]);
+    expect(screen.container.textContent).toContain('Codex confirmed kimi-k3 from its runtime settings.');
+    expect(screen.container.textContent).not.toContain('Back to models');
+    await screen.unmount();
+  });
+
   test('returns to the model list from the reasoning step', async () => {
     const codex = view({ config: { harness: 'codex' } });
     const screen = await mount(<RuntimeModelControls {...props({ catalogs: resolved(codexCatalog), view: codex })} />);

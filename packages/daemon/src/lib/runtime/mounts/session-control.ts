@@ -96,7 +96,11 @@ export type SessionControlFailure =
   /** The callsign reservation store could not be read or written, so no name can be claimed safely. */
   | 'callsign_unavailable'
   /** The launch itself failed, and the session records why. */
-  | 'failed';
+  | 'failed'
+  /** The parent already runs as many sub-ferrets as Pack mode's limit allows (docs/pack-mode.md). */
+  | 'limit_reached'
+  /** A sub-ferret this deep may not start its own (docs/pack-mode.md). */
+  | 'depth_exceeded';
 
 /** A refusal raised by the composition root's session control, in a taxonomy `src/lib` may name. */
 export class SessionControlError extends Error {
@@ -156,6 +160,10 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   callsign_taken: { status: 409, code: 'callsign_taken' },
   callsign_unavailable: { status: 503, code: 'callsign_unavailable' },
   failed: { status: 500, code: 'session_launch_failed' },
+  // 409: the request is well formed and would be served once the parent has fewer running children,
+  // or by a shallower ferret — not by retrying it as it is.
+  limit_reached: { status: 409, code: 'limit_reached' },
+  depth_exceeded: { status: 409, code: 'depth_exceeded' },
 };
 
 /**

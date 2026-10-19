@@ -100,13 +100,21 @@ export function normalizeRelativePath(input: string | undefined | null): string 
  * refused, which is the safe direction to err in.
  */
 export function isDeniedPath(rel: string): boolean {
-  if (rel === '') return false;
-  for (const segment of rel.split('/')) {
-    const folded = segment.toLowerCase();
-    if (DENY_DIRECTORIES.includes(folded)) return true;
-    if (DENY_PATTERNS.some(pattern => pattern.test(segment))) return true;
-  }
-  return false;
+  return deniedSegment(rel) !== undefined;
+}
+
+/**
+ * The first segment of this path the denylist matches, or `undefined` — so a refusal can say WHICH
+ * name it refused rather than only that it refused.
+ */
+export function deniedSegment(rel: string): string | undefined {
+  if (rel === '') return undefined;
+  return rel
+    .split('/')
+    .find(
+      segment =>
+        DENY_DIRECTORIES.includes(segment.toLowerCase()) || DENY_PATTERNS.some(pattern => pattern.test(segment)),
+    );
 }
 
 /**

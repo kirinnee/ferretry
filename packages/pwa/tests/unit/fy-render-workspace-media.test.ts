@@ -172,6 +172,58 @@ describe('readWorkspaceMedia outcomes', () => {
     });
   }
 
+  test('should carry the daemon’s rule with a refusal, so the reader is told which rule', async () => {
+    // Arrange
+    const { fetcher } = answering(() =>
+      file({ ignored: true, reason: 'ignored', rule: 'Git ignores it (.gitignore:3: *.png)' }),
+    );
+
+    // Act
+    const actual = await read(fetcher);
+
+    // Assert
+    should(actual).deepEqual({ ok: false, reason: 'not-served', rule: 'Git ignores it (.gitignore:3: *.png)' });
+  });
+
+  for (const [code, rule] of [
+    ['escapes_root', 'it resolves outside the session folder (a link pointing out of it)'],
+    ['denied', 'the protected-secrets list refuses this name'],
+    ['ignored', 'Git ignores it'],
+  ] as const) {
+    test(`should name the rule behind a path refusal at 403 (${code}) rather than blame the reader’s access`, async () => {
+      // Arrange
+      const { fetcher } = answering(() => json(403, { code, error: 'path is not served' }));
+
+      // Act
+      const actual = await read(fetcher);
+
+      // Assert
+      should(actual).deepEqual({ ok: false, reason: 'not-served', rule });
+    });
+  }
+
+  test('should read a media-folder file by its own path, through the media scope', async () => {
+    // Arrange
+    const { calls, fetcher } = answering(() => file({ base64: 'AAEC' }));
+
+    // Act — no cwd resolution: the path is already relative to the media folder.
+    const actual = await readWorkspaceMedia(
+      connection,
+      scope,
+      'card.png',
+      undefined,
+      fetcher,
+      new AbortController().signal,
+      'media',
+    );
+
+    // Assert
+    should(actual.ok).be.true();
+    should(calls.map(call => call.url)).deepEqual([
+      'https://a.example.test/v1/sessions/session-1/fs/file?format=base64&scope=media&path=card.png',
+    ]);
+  });
+
   test('should answer too-large for a file over the preview bound', async () => {
     // Arrange
     const { fetcher } = answering(() => file({ tooLarge: true }));

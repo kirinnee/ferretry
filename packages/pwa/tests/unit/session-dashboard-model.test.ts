@@ -132,6 +132,14 @@ describe('session dashboard model', () => {
       text: 'Settled',
       live: false,
     });
+    expect(
+      activityLine(
+        view('asks', 'awaiting_question', {
+          activity: 'stale pane text',
+          pendingQuestion: { toolUseId: 't1', questions: [{ question: 'Which database?' }] },
+        }),
+      ),
+    ).toEqual({ text: 'asks: Which database?', live: true });
     expect(activityLine(view('idle', 'running'))).toEqual({ text: 'awaiting activity', live: false });
     expect(activityLine(view('done', 'completed'))).toEqual({ text: 'no activity recorded', live: false });
   });

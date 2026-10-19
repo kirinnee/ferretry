@@ -174,6 +174,54 @@ exit 0
   });
 });
 
+describe('RunnerSessionGit.ignoreRule', () => {
+  it('should name the ignore file, line and pattern that covers a path', async () => {
+    // Arrange
+    const { root } = await tempRepository('ignore-rule');
+    await writeFile(path.join(root, '.gitignore'), 'build/\n*.png\n');
+
+    // Act
+    const rule = await git.ignoreRule(root, ['card.png']);
+
+    // Assert
+    should(rule).eql('.gitignore:2: *.png');
+  });
+
+  it('should name no rule for a path nothing ignores, outside a repository, or for nothing', async () => {
+    // Arrange
+    const { root } = await tempRepository('ignore-rule-none');
+    await writeFile(path.join(root, '.gitignore'), 'build/\n');
+    const plain = await tempDirectory('ignore-rule-no-repo');
+
+    // Act / Assert
+    should(await git.ignoreRule(root, ['README.md'])).be.undefined();
+    should(await git.ignoreRule(plain, ['card.png'])).be.undefined();
+    should(await git.ignoreRule(plain, [''])).be.undefined();
+  });
+
+  it('should THROW when Git cannot tell', async () => {
+    // Arrange
+    const stubbed = await gitOnPath(`#!/bin/sh
+case "$*" in
+  *rev-parse*--is-inside-work-tree*) printf 'true\\n/tmp/x\\n\\n'; exit 0 ;;
+  *rev-parse*HEAD*) exit 0 ;;
+  *check-ignore*) echo 'fatal: oops' >&2; exit 2 ;;
+esac
+exit 0
+`);
+    const plain = await tempDirectory('ignore-rule-broken');
+
+    // Act
+    const failure = await stubbed.ignoreRule(plain, ['a']).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceof(GitCommandError);
+  });
+});
+
 describe('RunnerSessionGit.isTracked', () => {
   it('should confirm a committed file', async () => {
     // Arrange

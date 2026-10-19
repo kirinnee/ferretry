@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { PermissionRequest, SessionTurnState } from '@ferretry/protocol';
+import type { HarnessDialog, PermissionRequest, SessionTurnState } from '@ferretry/protocol';
 import should from 'should';
 import type { TurnPaneEvidence } from '../../../../src/lib/session/turn/policy.ts';
 import {
@@ -50,6 +50,7 @@ const ports = (world: World): SessionTurnPorts => ({
         turnState: change.to as SessionTurnState,
         turnPrompt: change.prompt,
         permissionRequest: change.request,
+        harnessDialog: change.dialog,
       });
     return true;
   },
@@ -130,6 +131,47 @@ describe('SessionTurnWatcher', () => {
       { from: 'needs-input', to: 'needs-input', request: request('bbbbbbbbbbbbbbbb') },
       { from: 'needs-input', to: 'working' },
     ]);
+  });
+
+  it('should record a harness dialog, a new one beside the same needs-input, and not a cursor move', async () => {
+    const w = world();
+    w.states.set(A, { status: 'running', turn: 1 });
+    const dialog = (id: string, selected = 1): HarnessDialog => ({
+      id,
+      harness: 'codex',
+      kind: 'hooks-review',
+      title: 'Hooks need review',
+      options: [
+        { number: 1, label: 'Review hooks', grantsTrust: false },
+        { number: 2, label: 'Trust all and continue', grantsTrust: false },
+      ],
+      selected,
+      escape: 'skip',
+    });
+    const parked = (value: HarnessDialog): TurnPaneEvidence => ({
+      working: false,
+      atPrompt: false,
+      permission: false,
+      dialog: value,
+    });
+    w.panes.set(A, parked(dialog('aaaaaaaaaaaaaaaa')));
+    const watcher = new SessionTurnWatcher(ports(w));
+
+    await watcher.tick();
+    // Somebody at the terminal moved the cursor: the same dialog, nothing to record.
+    w.panes.set(A, parked(dialog('aaaaaaaaaaaaaaaa', 2)));
+    await watcher.tick();
+    w.panes.set(A, parked(dialog('bbbbbbbbbbbbbbbb')));
+    await watcher.tick();
+    w.panes.set(A, BUSY);
+    await watcher.tick();
+
+    should(w.recorded.map(entry => entry.change)).deepEqual([
+      { from: undefined, to: 'needs-input', dialog: dialog('aaaaaaaaaaaaaaaa') },
+      { from: 'needs-input', to: 'needs-input', dialog: dialog('bbbbbbbbbbbbbbbb') },
+      { from: 'needs-input', to: 'working' },
+    ]);
+    should(w.states.get(A)?.harnessDialog).be.undefined();
   });
 
   it('should record a turn start, its end once, and nothing more while nothing changes', async () => {

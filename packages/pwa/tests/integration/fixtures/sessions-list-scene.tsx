@@ -60,6 +60,24 @@ const LAPTOP_SESSIONS: readonly SessionView[] = [
   session('l-ada', 'ada', 'Old deploy check', '/Users/k/site', 300, 'auto', { status: 'stalled' }),
 ];
 
+/** A pack: one lead that started four ferrets, one of which started another. `?tree=1` draws this instead. */
+const child = (id: string, teammate: string, label: string, parent: string, minutes: number, state = {}) => ({
+  ...session(id, teammate, label, '/home/k/ferretry', minutes, 'auto', state),
+  config: {
+    ...session(id, teammate, label, '/home/k/ferretry', minutes, 'auto', state).config,
+    parent,
+  },
+});
+const PACK_SESSIONS: readonly SessionView[] = [
+  session('p-lead', 'ivo', 'Harden the relay carrier', '/home/k/ferretry', 1, 'interactive'),
+  child('p-pim', 'pim', 'Probe carrier A', 'p-lead', 2),
+  child('p-ula', 'ula', 'Probe carrier B', 'p-lead', 3, { status: 'awaiting_user' }),
+  child('p-ada', 'ada', 'Bench the TURN fallback', 'p-lead', 4),
+  child('p-kai', 'kai', 'Parse the bench logs', 'p-ada', 5),
+  child('p-noa', 'noa', 'Probe carrier C', 'p-lead', 90, { status: 'completed' }),
+  session('p-ora', 'ora', 'Draft the weekly notes', '/home/k/ferretry', 12, 'interactive'),
+];
+
 const LEARNING = new Set(['s-ivo', 's-ora']);
 
 const source = (
@@ -90,6 +108,7 @@ const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const two = params.get('machines') === 'two';
 const drawer = params.get('view') === 'drawer';
+const pack = params.get('tree') === '1';
 
 const MACHINES = [
   { daemonId: STUDIO, name: 'studio' },
@@ -101,7 +120,7 @@ function Scene() {
     <div className="kt-shell flex flex-row overflow-hidden" data-scene={drawer ? 'drawer' : 'column'}>
       <SessionsBar
         active={null}
-        activeSessionId="s-ivo"
+        activeSessionId={pack ? 'p-ora' : 's-ivo'}
         daemonId={STUDIO}
         learningPassive={LEARNING}
         machineName="studio"
@@ -113,7 +132,7 @@ function Scene() {
         onOpenPalette={() => undefined}
         presentation={drawer ? 'drawer' : 'column'}
         projects={STUDIO_PROJECTS}
-        sessions={STUDIO_SESSIONS}
+        sessions={pack ? PACK_SESSIONS : STUDIO_SESSIONS}
         {...(two
           ? {
               machineSources: [

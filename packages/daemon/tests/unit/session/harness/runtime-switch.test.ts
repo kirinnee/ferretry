@@ -375,3 +375,59 @@ describe('planRuntimeSwitch for fast mode', () => {
     should(withEffort).match({ kind: 'refused', reason: /on its own/u });
   });
 });
+
+describe('a Codex switch on a login catalog (docs/model-catalog.md)', () => {
+  const catalogued: HarnessRuntimeSwitchContext = {
+    wrapper: 'codex-deepseek',
+    catalog: {
+      choices: [
+        {
+          value: 'deepseek-v4-pro',
+          label: 'DeepSeek V4 Pro',
+          reasoningEfforts: [{ value: 'low' }, { value: 'high' }, { value: 'max' }],
+          defaultReasoningEffort: 'high',
+        },
+        { value: 'kimi-k3', label: 'Kimi K3', reasoningEfforts: [] },
+        { value: 'same-name', label: 'same-name', reasoningEfforts: [{ value: 'low' }], defaultReasoningEffort: 'low' },
+      ],
+    },
+  };
+
+  it('should name the row Codex renders when its display name is not the id', () => {
+    // Act
+    const plan = planRuntimeSwitch({ harness: 'codex', model: 'deepseek-v4-pro', effort: 'max' }, catalogued);
+
+    // Assert
+    should(plan).eql({
+      kind: 'drive_picker',
+      target: { model: 'deepseek-v4-pro', rowName: 'DeepSeek V4 Pro', effort: 'max' },
+    });
+  });
+
+  it('should name no row when the display name is the id', () => {
+    // Act
+    const plan = planRuntimeSwitch({ harness: 'codex', model: 'same-name', effort: 'low' }, catalogued);
+
+    // Assert
+    should(plan).eql({ kind: 'drive_picker', target: { model: 'same-name', effort: 'low' } });
+  });
+
+  it('should switch to a model that has no level to choose without naming one', () => {
+    // Act
+    const plan = planRuntimeSwitch({ harness: 'codex', model: 'kimi-k3' }, catalogued);
+
+    // Assert
+    should(plan).eql({ kind: 'drive_picker', target: { model: 'kimi-k3', rowName: 'Kimi K3' } });
+  });
+
+  it('should still ask for a level when the model has levels to choose from', () => {
+    // Act
+    const plan = planRuntimeSwitch({ harness: 'codex', model: 'deepseek-v4-pro' }, catalogued);
+
+    // Assert
+    should(plan).eql({
+      kind: 'refused',
+      reason: 'a targeted switch on this harness requires both a model and a reasoning effort',
+    });
+  });
+});

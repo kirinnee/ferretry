@@ -33,7 +33,7 @@ function OriginalBrowserLoginBanner() {
   if (connection === undefined) throw new Error('visual fixture requires connection details');
   return (
     <aside
-      className="shrink-0 border-b border-warn/30 bg-warn-soft px-panel py-1.5 text-ui text-warn"
+      className="shrink-0 border-b border-warn/30 bg-warn-bg px-panel py-1.5 text-ui text-warn"
       aria-label="Browser login window"
     >
       <div className="flex min-w-0 items-center gap-xs">

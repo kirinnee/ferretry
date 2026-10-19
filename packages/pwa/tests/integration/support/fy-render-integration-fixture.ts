@@ -66,7 +66,6 @@ let buildTimeoutMs = DEFAULT_BUILD_TIMEOUT_MS;
 const EXPECTED_FILENAMES = {
   appCss: 'app.css',
   appJs: 'app.js',
-  html: 'fy-render-html.html',
   lottie: 'fy-render-lottie.js',
   mermaid: 'fy-render-mermaid.js',
   shell: 'fy-render-sandbox.html',
