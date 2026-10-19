@@ -4,6 +4,7 @@ harness: claude
 summary: Claude Code on Qwen models with a Model Studio Coding Plan key. A Token Plan or pay-as-you-go key uses a different base URL — change it here.
 docs: https://www.alibabacloud.com/help/en/model-studio/claude-code
 verified: '2026-10-16'
+catalog: qwen
 env:
   ANTHROPIC_BASE_URL:
     value: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic
@@ -11,7 +12,6 @@ env:
     secretName: DASHSCOPE_API_KEY
   ANTHROPIC_MODEL:
     value: qwen3.7-plus
-models: [qwen3.7-plus, qwen3.7-max, qwen3.6-flash]
 test:
   kind: inference
   url: '{ANTHROPIC_BASE_URL}/v1/messages'

@@ -1,0 +1,27 @@
+# Claude on Microsoft Foundry. A model here is Claude Code's tier alias: the login's
+# ANTHROPIC_DEFAULT_OPUS/SONNET/HAIKU_MODEL variables name YOUR deployments, so /model opus lands on yours.
+label: Microsoft Foundry
+docs: https://code.claude.com/docs/en/microsoft-foundry
+verified: '2026-10-18'
+customIds: true
+claude:
+  models:
+    - id: opus
+      label: Opus 5.5 (your Opus deployment)
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
+    - id: sonnet
+      label: Sonnet 5.5 (your Sonnet deployment)
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+    - id: haiku
+      label: Haiku 5.5 (your Haiku deployment)
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

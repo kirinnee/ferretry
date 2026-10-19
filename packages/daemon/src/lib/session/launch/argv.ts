@@ -85,19 +85,27 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
  * The recorded provenance is the evidence: Claude's minted id is what the start put on the argv. A
  * session whose document predates provenance still carries the flag in its recorded argv, so that
  * id is kept rather than a new conversation being created. Codex names its own session and takes
- * nothing.
+ * nothing — except a conversation Ferretry ADOPTED, which it was started on with `resume <id>` and
+ * must keep being resumed into.
  */
 export function transcriptLaunchArguments(
   harness: HarnessKind,
   provenance: TranscriptProvenance | undefined,
   recorded: readonly string[],
 ): readonly string[] {
-  if (harness !== 'claude') return [];
+  if (harness !== 'claude') {
+    const adopted = provenance?.identity === 'adopted' ? provenance.harnessSessionId : undefined;
+    const id = adopted ?? (recorded[1] === CODEX_RESUME ? recorded[2] : undefined);
+    return id === undefined ? [] : [CODEX_RESUME, id];
+  }
   if (provenance?.harnessSessionId !== undefined) return claudeSessionArguments(provenance.harnessSessionId);
   const at = recorded.findIndex(token => token === HARNESS_SESSION_FLAG || token === HARNESS_RESUME_FLAG);
   const id = at < 1 ? undefined : recorded[at + 1];
   return id === undefined ? [] : claudeSessionArguments(id);
 }
+
+/** Codex's subcommand for continuing a conversation it already has. */
+const CODEX_RESUME = 'resume';
 
 /** Flags whose VALUE is the next argv entry and that describe the run, not the settings. */
 const RUN_FLAGS: ReadonlySet<string> = new Set([HARNESS_SESSION_FLAG, HARNESS_RESUME_FLAG, '--model', '--effort']);

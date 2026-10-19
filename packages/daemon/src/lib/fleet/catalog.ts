@@ -31,6 +31,8 @@ import {
   layersScope,
   layerWords,
   looksSecret,
+  loginModelCatalog,
+  type ModelCatalogSources,
   type PartialSupport,
   type ProfileScope,
   parseLayerReference,
@@ -39,6 +41,7 @@ import {
   resolveDefaultRuntime,
   resolveProfile,
   runtimeHarness,
+  runtimeModels,
   type SettingsObject,
   type SkippedLayer,
   wouldIncludeItself,
@@ -61,6 +64,7 @@ import type {
   FleetProfileScope,
   FleetRuntimeCatalog,
   FleetRuntimeModelSet,
+  FleetRuntimeModels,
   FleetSettingsEntry,
   FleetStackView,
 } from '@ferretry/protocol';
@@ -171,6 +175,8 @@ export interface CatalogFacts {
   readonly credentialStatus?: Readonly<Record<string, FleetCredentialStatusWord>>;
   /** Whether the installed Claude accepts Auto mode (O4). Measured on the pinned version; nothing is launched to find out. */
   readonly acceptsAutoPermissionMode: boolean;
+  /** The model catalogs and presets in effect (docs/model-catalog.md); absent, runtimes show their model set only. */
+  readonly modelCatalogs?: ModelCatalogSources;
 }
 
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
@@ -552,6 +558,29 @@ function modelSetView(resolved: ResolvedProfile | undefined): FleetRuntimeModelS
   };
 }
 
+/** What a runtime offers from its login's model catalog (docs/model-catalog.md), when it reads one. */
+function modelsView(
+  resolved: ResolvedProfile | undefined,
+  harness: HarnessKind,
+  credential: AccountModel['credentials'][string],
+  sources: ModelCatalogSources | undefined,
+): { readonly models?: FleetRuntimeModels } {
+  if (sources === undefined) return {};
+  const derived = runtimeModels({
+    harness,
+    modelSet: resolved?.modelSet,
+    ...loginModelCatalog(credential, harness, sources),
+  });
+  if (derived.catalog === undefined) return {};
+  return {
+    models: {
+      catalog: derived.catalog,
+      choices: derived.models.map(model => ({ ...model, efforts: [...model.efforts] })),
+      ...(derived.default === undefined ? {} : { default: derived.default }),
+    },
+  };
+}
+
 /** A fixed-layer entry in words: trust and onboarding by what they switch off. */
 const FIXED_ENTRY_WORDS: Readonly<Partial<Record<FixedEntry['purpose'], { key: string; value: string }>>> = {
   trust: { key: 'trust prompt', value: 'off' },
@@ -666,6 +695,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
             agent: runtime.agent,
             stack,
             modelSet: modelSetView(resolved),
+            ...modelsView(resolved, harness, credential, facts.modelCatalogs),
             ...(fixed.view === undefined ? {} : { fixedLayer: fixed.view }),
             launch: act(blocked),
             sameAs: Object.entries(model.runtimes)

@@ -108,6 +108,25 @@ describe('transcriptLaunchArguments', () => {
   });
 });
 
+describe('transcriptLaunchArguments, for a Codex conversation Ferretry adopted', () => {
+  it('should keep resuming the conversation it was adopted on', () => {
+    // Arrange: an adopted conversation started as `codex resume <id>`; a revive must not start afresh.
+    const provenance = {
+      v: 1 as const,
+      home: '/fleet/homes/codex',
+      harnessSessionId: HARNESS_SESSION,
+      identity: 'adopted' as const,
+      file: `/fleet/homes/codex/sessions/rollout-${HARNESS_SESSION}.jsonl`,
+    };
+    const recorded = ['/fleet/bin/codex-auto', 'resume', HARNESS_SESSION];
+
+    // Act / Assert: from the record of adoption, or from the argv a document without one kept.
+    should(transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto'])).eql(['resume', HARNESS_SESSION]);
+    should(transcriptLaunchArguments('codex', undefined, recorded)).eql(['resume', HARNESS_SESSION]);
+    should(transcriptLaunchArguments('codex', undefined, ['/fleet/bin/codex-auto', 'resume'])).eql([]);
+  });
+});
+
 describe('settingsArguments', () => {
   it('should drop what describes the run and keep what describes the settings', () => {
     // Arrange: a model switched with /model, or a revive's resume flag, is not a stale setting.

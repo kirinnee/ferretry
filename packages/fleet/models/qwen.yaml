@@ -1,0 +1,27 @@
+# Qwen models on Alibaba Cloud Model Studio. The Coding Plan maps every slot to qwen3.7-plus;
+# qwen3.7-max and qwen3.6-flash are pay-as-you-go models that a Coding Plan key may not serve.
+label: Qwen / Model Studio
+docs: https://www.alibabacloud.com/help/en/model-studio/claude-code
+verified: '2026-10-18'
+unverified:
+  - Per-model context windows and reasoning controls are not on Alibaba's Claude Code page.
+claude:
+  tiers:
+    opus: qwen3.7-plus
+    sonnet: qwen3.7-plus
+    haiku: qwen3.7-plus
+    subagent: qwen3.7-plus
+  models:
+    - id: qwen3.7-max
+      label: Qwen3.7 Max (pay-as-you-go)
+      tier: best
+      context: 1000000
+    - id: qwen3.7-plus
+      label: Qwen3.7 Plus
+      tier: balanced
+      context: 1000000
+      default: true
+    - id: qwen3.6-flash
+      label: Qwen3.6 Flash (pay-as-you-go)
+      tier: fast
+      context: 1000000

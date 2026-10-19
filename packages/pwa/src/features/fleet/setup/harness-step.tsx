@@ -22,6 +22,7 @@ import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
+import { ConversationPicker } from '../conversations/conversation-picker.tsx';
 import { EnvironmentLogin } from '../credentials/environment-login.tsx';
 import type { MachineData } from '../runtimes/machine-data.ts';
 import { useMachineData } from '../runtimes/machine-data.ts';
@@ -337,6 +338,7 @@ export function OnboardingHarnessStep({
         detail={tool?.installed === true ? `Installed on ${machineName}` : `Not installed on ${machineName}`}
       />
       {body}
+      {have.length === 0 ? null : <HarnessConversations tab={tab} harness={harness} runtimes={runtimes} />}
       {tool?.installed === true ? (
         <ProviderRuntimeSection tab={tab} harness={harness} onMade={() => void read()} />
       ) : null}
@@ -568,5 +570,39 @@ function ProviderRuntime({
         onSubmit={() => void create()}
       />
     </div>
+  );
+}
+
+/** "Your conversations": once this CLI has a runtime, its earlier conversations can be kept as ferrets. */
+function HarnessConversations({
+  tab,
+  harness,
+  runtimes,
+}: {
+  readonly tab: MachineTabProps;
+  readonly harness: SetupHarness;
+  readonly runtimes: readonly FleetRuntimeView[];
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <SetupSection title="Your conversations" name="conversations">
+      {open ? (
+        <ConversationPicker
+          connection={tab.connection}
+          createClient={tab.createClient}
+          harness={harness}
+          runtimes={runtimes}
+        />
+      ) : (
+        <div>
+          <Button type="button" data-harness-conversations="" onClick={() => setOpen(true)}>
+            Choose conversations to keep…
+          </Button>
+          <p className="m-0 mt-1 text-meta leading-base text-muted">
+            Keep earlier {SETUP_HARNESS_NAMES[harness]} conversations as ferrets that resume where they left off.
+          </p>
+        </div>
+      )}
+    </SetupSection>
   );
 }

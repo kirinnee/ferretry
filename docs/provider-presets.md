@@ -93,6 +93,11 @@ provider's documentation, every fact that could not be confirmed there (`unverif
 before anyone relies on it), the `group` it is listed under in the app (`popular`, `cloud`, `self-hosted`), and the clues that **detect** it. A login made from one copies what it needs
 into its own file, so a preset edited or removed later never changes what a login launches with.
 
+A preset names its **model catalog** (`catalog: zai`): the models a login made from it offers, their
+tiers and efforts, and the models Claude Code's tier slots are pinned to — [model-catalog.md](model-catalog.md).
+A preset therefore no longer carries model ids or `ANTHROPIC_DEFAULT_*_MODEL` values of its own; a
+machine's own preset file may still list `models`, which are shown when it names no catalog.
+
 A provider that serves both CLIs has a `claude:` and a `codex:` half, each with its own `env`, `models`,
 optional `docs` and — Codex — `codexProvider`; the Test, the quota source, the pricing and the detection
 clues belong to the provider and sit beside them. A half that cannot be used says why in its own
