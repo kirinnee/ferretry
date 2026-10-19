@@ -332,6 +332,10 @@ const SECTIONS = [
   // an absolutely-positioned popover, and this gallery is a scroller.
   'harness-pickers',
   'harness-picker-failed',
+  // The New session form's runtime buttons: one runtime, many, and none.
+  'harness-new-session-one-runtime',
+  'harness-new-session-many-runtimes',
+  'harness-new-session-no-accounts',
 ] as const;
 
 /**

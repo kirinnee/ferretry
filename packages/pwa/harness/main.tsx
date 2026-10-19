@@ -81,7 +81,6 @@ import { DictationControl, useDictationBundle } from '../src/components/dictatio
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
 import { FileInstanceSurface } from '../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../src/components/files-tab.tsx';
-import type { CaptureMonitor } from '../src/lib/stt/level-monitor.ts';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { Markdown } from '../src/components/markdown.tsx';
 import { MigrateSheet } from '../src/components/migrate-sheet.tsx';
@@ -94,11 +93,11 @@ import { SessionCommandControls } from '../src/components/session-command-contro
 import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
-import { transcriptEntriesFromLog } from '../src/components/session-workspace-model.ts';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
 import { SessionTaskKanban, SessionTaskList } from '../src/components/session-tasks.tsx';
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
+import { transcriptEntriesFromLog } from '../src/components/session-workspace-model.ts';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
@@ -134,6 +133,7 @@ import { MachineSettingsTab } from '../src/features/fleet/machine/settings-tab.t
 import { isMachineSetupStepId } from '../src/features/fleet/setup/onboarding-model.ts';
 import { MachineSetupScreen } from '../src/features/fleet/setup/setup-screen.tsx';
 import type { MachineTabProps, MachineTabSurfaces } from '../src/features/fleet/shell/machines-surface.tsx';
+import { useHypermediaSessionActions } from '../src/features/hypermedia/hypermedia-session-actions.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
@@ -228,6 +228,7 @@ import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, type DaemonProjectsSlice, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import { AppOutdatedError, DaemonOutdatedError } from '../src/lib/relay-carrier.ts';
+import type { DaemonFetch } from '../src/lib/runtime-models.ts';
 import { unlockStaysSentence } from '../src/lib/security-settings-client.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
@@ -242,6 +243,7 @@ import {
   type SpeechRecognitionLike,
   type SpeechRecognitionResultEventLike,
 } from '../src/lib/stt/browser-recognition.ts';
+import type { CaptureMonitor } from '../src/lib/stt/level-monitor.ts';
 import { PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '../src/lib/stt/parakeet-model.ts';
 import type { ParakeetInstallSnapshot, ParakeetVoice } from '../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
@@ -293,8 +295,6 @@ import {
   LearningSettingsHarness,
   useHarnessLearningActions,
 } from './learning-hub.tsx';
-import { useHypermediaSessionActions } from '../src/features/hypermedia/hypermedia-session-actions.tsx';
-import type { DaemonFetch } from '../src/lib/runtime-models.ts';
 import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
@@ -4383,6 +4383,78 @@ const HARNESS_FIRST_RUN_ROSTER = harnessRosterStore(HARNESS_FIRST_RUN_ACCOUNTS);
 /** A host whose only account is the terminal one: nothing here can run a session. */
 const HARNESS_TERMINAL_ONLY_ROSTER = harnessRosterStore(HARNESS_FIRST_RUN_ACCOUNTS.slice(0, 1));
 
+/** A machine that has exactly one runtime that can run a session. */
+const HARNESS_ONE_RUNTIME_ROSTER = harnessRosterStore(HARNESS_FIRST_RUN_ACCOUNTS.slice(1, 2));
+
+/**
+ * A busy machine: Claude and Codex runtimes with long names, a catalog login, an unavailable runtime,
+ * stored health and cached quota on some and nothing on others — so the buttons wrap at 390px and each
+ * evidence line is reviewed against a row with none.
+ */
+const HARNESS_MANY_RUNTIMES = [
+  ...HARNESS_PICKER_ACCOUNTS.filter(account => account.agent),
+  {
+    id: 'cccccccc-1111-4111-8111-111111111111',
+    kind: 'claude',
+    agent: true,
+    wrapper: 'claude-auto-glm',
+    credentialId: 'glm',
+    displayName: 'GLM via Z.ai',
+    defaultModel: 'glm-5.3',
+    models: [{ id: 'glm-5.3', available: true, label: 'GLM-5.3', tier: 'best', efforts: [] }],
+    modelCatalog: { id: 'zai', label: 'GLM / Z.ai', customIds: false },
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: 'cccccccc-2222-4222-8222-222222222222',
+    kind: 'claude',
+    agent: true,
+    wrapper: 'claude-auto-warehouse-night-shift',
+    credentialId: 'warehouse',
+    displayName: 'Warehouse night shift',
+    defaultModel: 'claude-sonnet-5',
+    models: [{ id: 'claude-sonnet-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: 'cccccccc-3333-4333-8333-333333333333',
+    kind: 'codex',
+    agent: true,
+    wrapper: 'codex-auto-review',
+    credentialId: 'review',
+    displayName: 'Review Codex',
+    defaultModel: 'gpt-5.6-sol',
+    models: [{ id: 'gpt-5.6-sol', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+] satisfies readonly PickerAccount[];
+
+const HARNESS_MANY_RUNTIMES_ROSTER = new DaemonAccountPickerStore({
+  catalog: async () => ({ accounts: HARNESS_MANY_RUNTIMES }),
+  health: async () => ({ health: HARNESS_PICKER_HEALTH, error: null }),
+  checkHealth: async () => ({ health: HARNESS_PICKER_HEALTH, error: null }),
+});
+
+const HARNESS_MANY_RUNTIMES_USAGE = new DaemonUsageStore(
+  {
+    usage: async () => ({
+      at: '2026-07-31T11:59:00.000Z',
+      stale: false,
+      accounts: HARNESS_PICKER_USAGE.map(row => ({
+        ...row,
+        usageBased: true,
+        provider: 'anthropic',
+        availability: 'available' as const,
+        unavailable: false,
+      })),
+    }),
+  } satisfies DaemonUsagePort,
+  { isHidden: () => true },
+);
+
 /** Two registered folders, and folders a session has used that no registry names. */
 const HARNESS_PICKER_REGISTRY: readonly FleetProject[] = [
   { name: 'ferretry', path: '/home/pilot/work/ferretry', id: 'p-1', source: 'clone' },
@@ -7129,6 +7201,37 @@ function Shell() {
             onNavigate={() => {}}
             projects={HARNESS_NEW_SESSION_PROJECTS}
             startSession={async () => ({ config: { id: 'harness-created-session' } })}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'New session — one runtime',
+      render: () => (
+        <section aria-label="New session with one runtime" id="harness-new-session-one-runtime">
+          <NewSessionPage
+            accounts={HARNESS_ONE_RUNTIME_ROSTER}
+            connection={daemon}
+            fleet={HARNESS_NEW_SESSION_FLEET}
+            onNavigate={() => {}}
+            projects={HARNESS_NEW_SESSION_PROJECTS}
+            startSession={async () => ({ config: { id: 'harness-created-session' } })}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'New session — many runtimes',
+      render: () => (
+        <section aria-label="New session with many runtimes" id="harness-new-session-many-runtimes">
+          <NewSessionPage
+            accounts={HARNESS_MANY_RUNTIMES_ROSTER}
+            connection={daemon}
+            fleet={HARNESS_NEW_SESSION_FLEET}
+            onNavigate={() => {}}
+            projects={HARNESS_NEW_SESSION_PROJECTS}
+            startSession={async () => ({ config: { id: 'harness-created-session' } })}
+            usage={HARNESS_MANY_RUNTIMES_USAGE}
           />
         </section>
       ),
