@@ -989,6 +989,16 @@ button.fy-receipt {
     width: 44px;
   }
 }
+/* THE DICTATION PANEL LIVES INSIDE THE ROW'S DOCK, so the rule above also reached its buttons and made
+   every one a 44px SQUARE — right for the strip's icons, wrong for the review box's words ("Insert"
+   clipped to "Inser", "Cleaned" over "Raw"). Its buttons keep the 44px floor (min-height/min-width) and
+   size to their content. */
+@media (pointer: coarse) {
+  .fy-composer [data-dictation-panel] button {
+    height: auto;
+    width: auto;
+  }
+}
 /* THE BOX IS THE THEME'S INPUT. Every visual fact — stroke, radius, outline, surface, inset rule and the
    focus ring — is the family's own input token (`.kt-input` in styles/index.css reads the same ones), so
    Neo's thick black frame and square corners, Phosphor's glow and Studio's soft round box all reach the

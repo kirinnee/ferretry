@@ -8,8 +8,8 @@ import {
 } from '../../src/components/dictation-control.tsx';
 import type { ShortcutHost } from '../../src/hooks/use-dictation-shortcut.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { browserMicMeter } from '../../src/lib/stt/level-monitor.ts';
 import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
+import { browserMicMeter } from '../../src/lib/stt/level-monitor.ts';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
@@ -17,7 +17,7 @@ import {
   fakeRecognitionProvider,
   unsupportedRecognitionProvider,
 } from '../support/browser-recognition.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, mount, must, pressKey } from '../support/dom.ts';
 import { settleUntil } from '../support/settle.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'http://127.0.0.1:1', deviceId: 'token-a' });
@@ -68,6 +68,9 @@ const openAndBegin = async (container: HTMLElement, provider: FakeRecognitionPro
   await interact(() => provider.begin());
 };
 
+const reviewText = (container: HTMLElement): HTMLTextAreaElement =>
+  must(container.querySelector<HTMLTextAreaElement>('textarea[data-review-text]'), 'the review text');
+
 const stop = (container: HTMLElement): Promise<void> =>
   clickLabelled(container, 'button[aria-label^="Stop recording"]', 'the stop button');
 
@@ -77,6 +80,7 @@ describe('dictationStatusCopy', () => {
     expect(dictationStatusCopy('recording')).toBe('Recording…');
     expect(dictationStatusCopy('transcribing')).toBe('Finishing in your browser…');
     expect(dictationStatusCopy('transcribing', undefined, 'parakeet')).toBe('Transcribing on this device…');
+    expect(dictationStatusCopy('review')).toBe('Review the text, then insert it.');
     expect(dictationStatusCopy('idle')).toBe('');
   });
 
@@ -95,6 +99,7 @@ describe('dictationTriggerStartsFresh', () => {
     expect(dictationTriggerStartsFresh({ phase: 'recording', hasError: false, wasCapturing: true })).toBe(false);
     expect(dictationTriggerStartsFresh({ phase: 'idle', hasError: true, wasCapturing: false })).toBe(false);
     expect(dictationTriggerStartsFresh({ phase: 'idle', hasError: false, wasCapturing: true })).toBe(false);
+    expect(dictationTriggerStartsFresh({ phase: 'review', hasError: false, wasCapturing: true })).toBe(false);
   });
 });
 
@@ -146,7 +151,7 @@ describe('<DictationControl>', () => {
     await view.unmount();
   });
 
-  it('opens the panel, records, and drops one transcript into the draft', async () => {
+  it('opens the panel, records, reviews the take, and inserts it only on Insert', async () => {
     const provider = promptRecognition();
     const drafts: string[] = [];
     const view = await mount(
@@ -168,8 +173,13 @@ describe('<DictationControl>', () => {
     expect(view.container.textContent).toContain('dictated words');
     await stop(view.container);
 
+    // Stop reaches the review box, not the draft.
+    expect(drafts).toEqual([]);
+    expect(panel(view.container)).not.toBeNull();
+    expect(reviewText(view.container).value).toBe('dictated words');
+
+    await clickLabelled(view.container, 'button[aria-label="Insert at the cursor"]', 'the insert button');
     expect(drafts).toEqual(['note: dictated words']);
-    // A clean pass closes the panel by itself: there is no review step.
     expect(panel(view.container)).toBeNull();
     await view.unmount();
   });
@@ -226,7 +236,106 @@ describe('<DictationControl>', () => {
     await view.unmount();
   });
 
-  it('keeps the panel open on a correction failure, after the words have landed', async () => {
+  it('discards a reviewed take without touching the draft, and closes', async () => {
+    const provider = promptRecognition();
+    const drafts: string[] = [];
+    const view = await mount(
+      <DictationControl {...controlProps({ recognition: provider, onDraftChange: r => drafts.push(r.text) })} />,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('not this'));
+    await stop(view.container);
+
+    await clickLabelled(view.container, 'button[aria-label="Discard dictation"]', 'the discard button');
+    expect(drafts).toEqual([]);
+    expect(panel(view.container)).toBeNull();
+    expect(micButton(view.container).getAttribute('aria-label')).toBe('Dictate a message');
+    await view.unmount();
+  });
+
+  it('discards on Escape from the review text', async () => {
+    const provider = promptRecognition();
+    const drafts: string[] = [];
+    const view = await mount(
+      <DictationControl {...controlProps({ recognition: provider, onDraftChange: r => drafts.push(r.text) })} />,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('not this'));
+    await stop(view.container);
+    await interact(() => pressKey(reviewText(view.container), 'Escape'));
+    expect(drafts).toEqual([]);
+    expect(panel(view.container)).toBeNull();
+    await view.unmount();
+  });
+
+  it('inserts the raw transcript when the person switches to it', async () => {
+    const provider = promptRecognition();
+    const drafts: string[] = [];
+    const view = await mount(
+      <DictationControl
+        {...controlProps({
+          recognition: provider,
+          settings: settingsWith({ enhancementProvider: 'groq' }),
+          enhancementFetch: async () => Response.json({ text: 'Cleaned words.' }),
+          onDraftChange: r => drafts.push(r.text),
+        })}
+      />,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('cleaned words'));
+    await stop(view.container);
+    expect(reviewText(view.container).value).toBe('Cleaned words.');
+
+    await interact(() =>
+      must(
+        [...view.container.querySelectorAll('button')].find(candidate => candidate.textContent === 'Raw'),
+        'the raw segment',
+      ).click(),
+    );
+    await interact(() => pressKey(reviewText(view.container), 'Enter'));
+    expect(drafts).toEqual(['cleaned words']);
+    await view.unmount();
+  });
+
+  it('brings a hidden panel back when the take lands, so it is never stranded', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await mount(<DictationControl {...controlProps({ recognition: provider })} />);
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('quiet words'));
+    await stop(view.container);
+    // Recognition has not settled yet: the panel is still transcribing. Hide it.
+    await clickLabelled(view.container, 'button[aria-label^="Hide dictation"]', 'the hide button');
+    expect(panel(view.container)).toBeNull();
+
+    await interact(async () => {
+      provider.end();
+      await Promise.resolve();
+    });
+    expect(panel(view.container)).not.toBeNull();
+    expect(reviewText(view.container).value).toBe('quiet words');
+    await view.unmount();
+  });
+
+  it('records again from the review box and drops the old take', async () => {
+    const provider = promptRecognition();
+    const drafts: string[] = [];
+    const view = await mount(
+      <DictationControl {...controlProps({ recognition: provider, onDraftChange: r => drafts.push(r.text) })} />,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('first try'));
+    await stop(view.container);
+
+    await clickLabelled(view.container, 'button[aria-label="Record again"]', 'the record-again button');
+    await interact(() => provider.begin());
+    expect(micButton(view.container).getAttribute('aria-pressed')).toBe('true');
+    expect(view.container.querySelector('[data-review-text]')).toBeNull();
+    expect(provider.created).toBe(2);
+    expect(drafts).toEqual([]);
+    await view.unmount();
+  });
+
+  it('reviews the raw words, with the reason, when a correction fails', async () => {
     const provider = promptRecognition();
     const drafts: string[] = [];
     const view = await mount(
@@ -243,11 +352,15 @@ describe('<DictationControl>', () => {
     await interact(() => provider.speak('raw words'));
     await stop(view.container);
 
-    expect(drafts).toEqual(['raw words']);
-    expect(panel(view.container)).not.toBeNull();
-    expect(view.container.textContent).toContain('raw dictation was added');
-    // Nothing to retry: the transcript is already in the draft.
+    // Nothing lands until Insert, and the box says why it is showing the raw words.
+    expect(drafts).toEqual([]);
+    expect(view.container.querySelector('[data-review-notice="cleanup-failed"]')).not.toBeNull();
+    expect(reviewText(view.container).value).toBe('raw words');
     expect(view.container.querySelector('button[aria-label="Try again"]')).toBeNull();
+
+    await clickLabelled(view.container, 'button[aria-label="Insert at the cursor"]', 'the insert button');
+    expect(drafts).toEqual(['raw words']);
+    expect(panel(view.container)).toBeNull();
     await view.unmount();
   });
 
