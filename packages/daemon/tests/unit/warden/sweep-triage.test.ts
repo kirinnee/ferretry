@@ -457,7 +457,7 @@ describe('what a verdict does', () => {
   it('should stop when the owner allowed it', async () => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, failover: true, stop: true } }),
+      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true } }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('KILL', 'STOP — looping') },
       state: finished(),
@@ -469,6 +469,36 @@ describe('what a verdict does', () => {
     // Assert
     should(subject.remedies).deepEqual([{ action: 'stop', sessionId: 's1', detail: 'Warden verdict: looping' }]);
     should(journalTypes(subject)).containEql('fleet.warden_acted');
+  });
+
+  it('should restart a frozen ferret on RESTART, and hold it when the owner did not allow restarts', async () => {
+    // Arrange
+    const allowed = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1', status: 'running' })],
+      reports: { '/r.md': report('RESUME', 'RESTART — the process is frozen') },
+      state: finished(),
+    });
+    const held = harness({
+      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: false, failover: true, stop: false } }),
+      fleet: [session({ id: 's1', status: 'running' })],
+      reports: { '/r.md': report('RESUME', 'RESTART — the process is frozen') },
+      state: finished(),
+    });
+
+    // Act
+    await allowed.service.run({ force: false });
+    await held.service.run({ force: false });
+
+    // Assert
+    should(allowed.remedies).deepEqual([{ action: 'restart', sessionId: 's1', detail: '' }]);
+    should(allowed.state().actions?.[0]).match({
+      action: 'restart',
+      outcome: 'done',
+      detail: 'Restarted with its conversation intact: the process is frozen.',
+    });
+    should(held.remedies).deepEqual([]);
+    should(held.state().actions?.[0]).match({ action: 'restart', outcome: 'held' });
   });
 
   it('should resume on RESUME and fail over on a MIGRATE that names the login', async () => {
@@ -521,7 +551,7 @@ describe('what a verdict does', () => {
   it('should hold a nudge the owner did not let it send alone', async () => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: false, resume: true, failover: true, stop: false } }),
+      config: enabled({ mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false } }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('NUDGE', 'NUDGE — quiet') },
       state: finished(),
@@ -541,7 +571,7 @@ describe('what a verdict does', () => {
   ] as const)('should do nothing on %s', async (_label, text, status) => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, failover: true, stop: true } }),
+      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true } }),
       fleet: [session({ id: 's1', status })],
       reports: { '/r.md': text },
       state: finished(),

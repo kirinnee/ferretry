@@ -52,6 +52,7 @@ const ACTION_DONE: Readonly<Record<WardenActionKind, WardenChip>> = {
   bless: chip('blessed', 'ok'),
   nudge: chip('nudged', 'accent'),
   resume: chip('revived', 'ok'),
+  restart: chip('restarted', 'ok'),
   stop: chip('stopped', 'err'),
   failover: chip('failed over', 'accent'),
 };
@@ -60,6 +61,7 @@ const ACTION_VERB: Readonly<Record<WardenActionKind, string>> = {
   bless: 'bless',
   nudge: 'nudge',
   resume: 'resume',
+  restart: 'restart',
   stop: 'stop',
   failover: 'fail over',
 };

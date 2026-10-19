@@ -197,6 +197,7 @@ const WARDEN_LAYER_WORDS: Readonly<Record<keyof WardenConfig['layers'], string>>
 const WARDEN_ACT_WORDS: Readonly<Record<keyof WardenConfig['mayActAlone'], string>> = {
   nudge: 'nudge a ferret',
   resume: 'resume a ferret',
+  restart: 'restart a ferret',
   failover: 'move a ferret to another login',
   stop: 'stop a ferret',
 };
