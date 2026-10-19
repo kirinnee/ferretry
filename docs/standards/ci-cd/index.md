@@ -135,6 +135,13 @@ into **`E2E Slow Journeys`**.
   workflow lists the paths). Those pull requests get both workflows, and the slow journeys run in
   parallel with the rest. Tag a journey `[slow]` only when its length is the point. A journey that is
   slow because it polls or sleeps should wait on a condition instead.
+- **A hang costs one journey's ceiling, never a shard.** `scripts/test/run-e2e.sh` owns one per-journey
+  ceiling, 150 s, and passes it to Bun as `--timeout`. `scripts/test/e2e-journey-timeouts.ts` runs before
+  the journeys and fails the tier when a journey outside `[slow]` raises its own timeout past that
+  ceiling, because Bun lets a test's own timeout win. A browser call cannot wait forever either. When
+  Bun silently loses the DevTools pipe to Chrome, every call on that browser fails at once with
+  `browser has disconnected`, and the journey retry handles that (`tests/e2e/README.md`). Before this,
+  two journeys hung their shards for 600 s and 900 s.
 - **No build-once job, measured.** A shard spends about 40 s before its first journey. Of that, about
   20 s is the Nix shell (substituted from cache.nixos.org, nothing built), about 2 s is `bun install`,
   about 6 s is compiling every target, and about 3 s is the harness typecheck. A job that compiled
