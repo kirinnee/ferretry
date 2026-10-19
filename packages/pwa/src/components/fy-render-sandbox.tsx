@@ -101,7 +101,8 @@ const FY_RENDER_SHELL_URL = '/fy-render-sandbox.html';
  *   `render`    the library, or the parent's re-admission gate, refused the
  *               DATA. This is the only class the authored bytes cause.
  *   `deadline`  Mermaid did not finish inside its bound and was stopped.
- *   `lifetime`  a Lottie frame reached its total permitted life. Not an error.
+ *   `lifetime`  a Lottie or `html` frame reached its total permitted life. Not an error.
+ *   `navigation` an `html` page navigated its own frame, so it was torn down.
  *
  * `detail` IS NOT READER COPY. It carries the raw library or gate wording —
  * a jison parse dump complete with a slice of the author's own source, or the
@@ -109,7 +110,7 @@ const FY_RENDER_SHELL_URL = '/fy-render-sandbox.html';
  * sentence per class and folds this away underneath it, because author-derived
  * text wearing the app's error styling reads as the app talking.
  */
-export type FyRenderSandboxFailureKind = 'startup' | 'library' | 'render' | 'deadline' | 'lifetime';
+export type FyRenderSandboxFailureKind = 'startup' | 'library' | 'render' | 'deadline' | 'lifetime' | 'navigation';
 
 export interface FyRenderSandboxFailure {
   readonly kind: FyRenderSandboxFailureKind;

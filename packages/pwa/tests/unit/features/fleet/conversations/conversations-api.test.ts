@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { CONVERSATION_ADOPT_PATH, CONVERSATION_IMPORT_PATH } from '@ferretry/protocol';
 import {
   adoptConversations,
+  readConversationPreview,
   readImportableConversations,
 } from '../../../../../src/features/fleet/conversations/conversations-api.ts';
 import { type Call, scripted } from '../account-support.ts';
@@ -22,6 +23,14 @@ describe('conversations api', () => {
     const client = scripted({ [`GET ${path}`]: listing([]) }, calls);
     await readImportableConversations(client, { harness: 'codex', q: 'shop page', limit: 20 });
     expect(calls[0]?.path).toBe(path);
+  });
+
+  it('reads one conversation’s preview at its own address', async () => {
+    const calls: Call[] = [];
+    const preview = { id: 'a-1', harness: 'codex' as const, messages: [{ role: 'user' as const, text: 'Hi' }] };
+    const client = scripted({ [`GET ${CONVERSATION_IMPORT_PATH}/codex/a-1/preview`]: preview }, calls);
+    expect(await readConversationPreview(client, 'codex', 'a-1')).toEqual(preview);
+    expect(calls[0]?.path).toBe(`${CONVERSATION_IMPORT_PATH}/codex/a-1/preview`);
   });
 
   it('posts a parsed adoption, filling start in as off', async () => {

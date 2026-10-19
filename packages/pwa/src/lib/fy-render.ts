@@ -7,18 +7,21 @@
  * timer, no network call, and no side effect, which is why it can be the one
  * place both the renderer and the documentation read their numbers from.
  *
- * THIS BUILD RENDERS FOUR TYPES AND SHOWS ONE AS SOURCE. `svg` and `image`
- * become an `<img>` directly. `mermaid` and `lottie` are handed as DATA to a
- * trusted library running inside an opaque-origin sandbox frame — Mermaid
- * compiles to an SVG which is re-admitted through `fyRenderMermaidSvg` and then
- * reaches the same `<img>` sink, Lottie plays live inside the frame. `html` is
- * parsed, bounded, and rendered as its own escaped text.
+ * FOUR WAYS A BLOCK RENDERS. `svg` and inline `image` become an `<img>`
+ * directly. `mermaid` and `lottie` are handed as DATA to a trusted library
+ * running inside an opaque-origin sandbox frame — Mermaid compiles to an SVG
+ * which is re-admitted through `fyRenderMermaidSvg` and then reaches the same
+ * `<img>` sink, Lottie plays live inside the frame. `html` EXECUTES: it is the
+ * one type whose author code runs, inside its own opaque-origin frame with its
+ * own policy (`fy-render-html-frame.tsx`). `image`, `video`, `audio` and `pdf`
+ * with a `src:` header name bytes that live somewhere else — the session's
+ * workspace or an https URL — and carry no payload at all.
  *
- * THAT LAST ONE IS THE DECLARED GAP, and it is not a missing case. Executing
- * author JavaScript under an enforceable CPU and memory bound is NOT what this
- * build does; `docs/fy-render.md` records the evidence for why. Nothing in the
- * sandbox path weakens the statement above: no author-supplied code executes
- * anywhere, because a library interpreting data is not a payload running code.
+ * `html` RUNNING IS A DECISION, NOT AN OVERSIGHT, and it does not close the
+ * residual `docs/fy-render.md` gap 1 measures: an opaque frame that runs author
+ * script can self-navigate, prerender and open WebRTC, and no browser bounds a
+ * frame's CPU or memory. What the frame cannot reach is this app — its storage,
+ * its document, its daemon tokens. Nothing in THIS module runs anything.
  *
  * THE VALIDATION HERE IS A BOUND, NOT A SANITISER, and not a promise of a
  * precise refusal either. It rejects a few obviously unsupported constructs and
@@ -44,6 +47,11 @@
  * So: weakening a check here is an authoring-feedback regression; changing where
  * these bytes are consumed is a security regression.
  */
+
+import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from './fy-render-bounds.ts';
+import { parseReferenceToken } from './references.ts';
+
+export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
 
 /** The fence info string that opts a block into this grammar, and nothing else. */
 export const FY_RENDER_FENCE_LANGUAGE = 'fy-render';
@@ -92,37 +100,27 @@ const markFences = (node: MdNode): void => {
 
 export const remarkFyRenderFences = () => markFences;
 
-export const FY_RENDER_TYPES = ['html', 'svg', 'lottie', 'mermaid', 'image'] as const;
+export const FY_RENDER_TYPES = ['html', 'svg', 'lottie', 'mermaid', 'image', 'video', 'audio', 'pdf'] as const;
 export type FyRenderType = (typeof FY_RENDER_TYPES)[number];
 
+/** The types a `src:` header may name, and the only ones it may appear on. */
+export const FY_RENDER_MEDIA_TYPES = ['image', 'video', 'audio', 'pdf'] as const;
+export type FyRenderMediaType = (typeof FY_RENDER_MEDIA_TYPES)[number];
+
 /**
- * Every cap in one place, so the renderer, the tests and `docs/fy-render.md`
- * cannot drift into quoting three different numbers for the same limit.
+ * Where a media block's bytes live, and nothing else.
+ *
+ * `workspace` is an `@path` written and parsed exactly as an `@file` reference
+ * is (`parseReferenceToken`), minus a line suffix — a picture has no line 12.
+ * It is resolved against the session's folder at read time, by the reader's own
+ * grants, never here. `https` is a URL the reader's browser fetches after the
+ * gesture. There is no third kind: no `http:`, no `data:`, no `blob:`, no
+ * daemon URL, because each of those is either a downgrade, a second inline
+ * grammar, or a credential-shaped address.
  */
-export const FY_RENDER_LIMITS = {
-  altCharacters: 200,
-  htmlBytes: 200 * 1024,
-  svgBytes: 100 * 1024,
-  svgElements: 500,
-  mermaidCharacters: 20_000,
-  lottieBytes: 1024 * 1024,
-  lottieLayers: 500,
-  lottieDepth: 64,
-  imageBytes: 2 * 1024 * 1024,
-  /** At most 32 filter primitives — the cheapest route to expensive rasterising. */
-  svgFilterPrimitives: 32,
-  /**
-   * Neither axis of anything that reaches a decoder may exceed this, and the
-   * product of the two may not exceed `maxPixels` (4096 × 4096, ≈64 MB at four
-   * bytes per pixel). Both bounds are read from the payload's own declaration
-   * BEFORE a decoder is handed it, because a 50-byte PNG can declare 65535 ×
-   * 65535 and the input-size cap is no defence at all against that.
-   */
-  maxDimension: 8192,
-  maxPixels: 16_777_216,
-  /** How much authored source the source panel prints before it truncates. */
-  sourcePreviewCharacters: 32 * 1024,
-} as const;
+export type FyRenderSource =
+  | { readonly kind: 'workspace'; readonly path: string }
+  | { readonly kind: 'https'; readonly url: string };
 
 /**
  * Raster MIME types only, and static ones.
@@ -155,32 +153,45 @@ interface FyRenderBaseBlock<TType extends FyRenderType> {
   readonly source: string;
 }
 
+/**
+ * A block whose bytes live elsewhere. Its `payload` is always empty — the
+ * grammar refuses one with content — so nothing below may treat it as data.
+ */
+export type FyRenderMediaBlock = FyRenderBaseBlock<FyRenderMediaType> & { readonly src: FyRenderSource };
+
 export type FyRenderBlock =
   | FyRenderBaseBlock<'html'>
   | FyRenderBaseBlock<'svg'>
   | FyRenderBaseBlock<'lottie'>
   | FyRenderBaseBlock<'mermaid'>
-  | (FyRenderBaseBlock<'image'> & { readonly mime: FyRenderImageMime });
+  | (FyRenderBaseBlock<'image'> & { readonly mime: FyRenderImageMime; readonly src?: undefined })
+  | FyRenderMediaBlock;
 
 export type FyRenderParseResult =
   | { readonly ok: true; readonly block: FyRenderBlock }
   | { readonly ok: false; readonly reason: string };
 
+/** True for a block that names its bytes with `src:` rather than carrying them. */
+export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMediaBlock =>
+  'src' in block && block.src !== undefined;
+
 /**
- * How a block is presented in THIS build.
+ * How a block is presented.
  *
- * `visual` types reach an `<img>` directly. `sandbox` types are interpreted by a
- * trusted library inside the opaque sandbox frame — Mermaid compiles to an SVG
+ * `visual` blocks reach an `<img>` directly. `sandbox` blocks are interpreted by
+ * a trusted library inside the opaque sandbox frame — Mermaid compiles to an SVG
  * that then reaches the same `<img>` sink, Lottie plays live inside the frame.
- * `source` types are printed as escaped text with the limitation stated on
- * screen. The switch is exhaustive on purpose: a sixth type is a compile error
- * here rather than a silent fallthrough into whichever branch happens to be last.
+ * `interactive` is `html`: author code running in its own opaque frame. `media`
+ * is any block with a `src:` — its bytes are read or fetched after the gesture.
  *
- * `html` is the one that stays `source`, and that is the declared gap rather
- * than a missing case — see `docs/fy-render.md`.
+ * Decided by the BLOCK rather than the type, because `image` is two things: an
+ * inline base64 payload that is admitted at parse time, and a `src:` whose
+ * bytes do not exist yet. The switch is exhaustive on purpose: a new type is a
+ * compile error here rather than a silent fallthrough into the last branch.
  */
-export function fyRenderPresentation(type: FyRenderType): 'visual' | 'sandbox' | 'source' {
-  switch (type) {
+export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox' | 'interactive' | 'media' {
+  if (isFyRenderMediaBlock(block)) return 'media';
+  switch (block.type) {
     case 'svg':
     case 'image':
       return 'visual';
@@ -188,7 +199,7 @@ export function fyRenderPresentation(type: FyRenderType): 'visual' | 'sandbox' |
     case 'lottie':
       return 'sandbox';
     case 'html':
-      return 'source';
+      return 'interactive';
   }
 }
 
@@ -691,6 +702,65 @@ interface FyRenderHeaders {
   readonly type: FyRenderType;
   readonly alt: string;
   readonly mime: FyRenderImageMime | undefined;
+  readonly src: FyRenderSource | undefined;
+}
+
+const HEADER_KEYS: readonly string[] = ['type', 'alt', 'mime', 'src'];
+const isMediaType = (type: FyRenderType): type is FyRenderMediaType =>
+  FY_RENDER_MEDIA_TYPES.some(media => media === type);
+
+/**
+ * One `src:` value, or the reason it is not one.
+ *
+ * `@path` IS AN `@file` REFERENCE, parsed by the reference grammar's own token
+ * reader rather than a second pattern here, so a path a reader can open from
+ * prose is exactly a path a block can show — and nothing else is. A line suffix
+ * is refused: it is meaningful for source code and meaningless for a picture.
+ *
+ * `https://` is parsed by the platform's URL parser and held to the scheme,
+ * because `http:` would be a downgrade inside an https app and every other
+ * scheme is either a second inline grammar (`data:`), a page-local handle
+ * (`blob:`) or something that is not a fetch at all. Userinfo is refused: a URL
+ * carrying `user:pass@` is a credential written into a transcript.
+ */
+function parseSource(value: string): FyRenderSource | string {
+  if (characterLength(value) > FY_RENDER_LIMITS.srcCharacters)
+    return `The src header exceeds ${FY_RENDER_LIMITS.srcCharacters} characters`;
+  if (value.startsWith('@')) {
+    const reference = parseReferenceToken(value);
+    if (reference?.kind !== 'file' || reference.line !== undefined)
+      return 'A workspace src must be an @path to a file, without a line number';
+    return { kind: 'workspace', path: reference.path };
+  }
+  if (!value.startsWith('https://')) return 'The src header must be an @path or an https:// URL';
+  if (/\s/u.test(value) || hasControlCharacter(value)) return 'The src URL must not contain whitespace';
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return 'The src URL could not be parsed';
+  }
+  if (url.username !== '' || url.password !== '') return 'The src URL must not carry a user name or password';
+  return { kind: 'https', url: url.href };
+}
+
+/**
+ * Which keys go with which type, decided once the type is known.
+ *
+ * `image` is the one type with two shapes, and they are exclusive: `mime:` with
+ * an inline base64 payload, or `src:` with none. Allowing both would leave the
+ * reader guessing which bytes they consented to.
+ */
+function headerShapeRefusal(type: FyRenderType, mime: string | undefined, src: string | undefined): string | null {
+  if (src !== undefined && !isMediaType(type)) return 'The src header is only valid for image, video, audio and pdf';
+  if (type === 'image') {
+    if (mime !== undefined && src !== undefined) return 'An image block takes either a mime header or a src header';
+    if (mime === undefined && src === undefined) return 'Image blocks require a mime header or a src header';
+    return null;
+  }
+  if (mime !== undefined) return 'The mime header is only valid for image blocks';
+  if (isMediaType(type) && src === undefined) return `A ${type} block requires a src header`;
+  return null;
 }
 
 function parseHeaders(lines: readonly string[]): FyRenderHeaders | string {
@@ -701,7 +771,7 @@ function parseHeaders(lines: readonly string[]): FyRenderHeaders | string {
     if (match === null) return 'Headers must use the exact "key: value" form, one per line';
     const key = match[1] ?? '';
     const value = match[2] ?? '';
-    if (key !== 'type' && key !== 'alt' && key !== 'mime') return `Unknown fy-render header: ${key}`;
+    if (!HEADER_KEYS.includes(key)) return `Unknown fy-render header: ${key}`;
     if (headers.has(key)) return `Duplicate fy-render header: ${key}`;
     headers.set(key, value);
   }
@@ -717,15 +787,18 @@ function parseHeaders(lines: readonly string[]): FyRenderHeaders | string {
   const type = headers.get('type') ?? '';
   const alt = headers.get('alt');
   const mime = headers.get('mime');
+  const rawSrc = headers.get('src');
   if (!isFyRenderType(type)) return `Unknown fy-render type: ${type}`;
   if (alt === undefined) return 'Missing required alt header';
   if (alt.length === 0) return 'Alt text must not be empty';
   if (hasControlCharacter(alt)) return 'Alt text must be one line without control characters';
   if (characterLength(alt) > FY_RENDER_LIMITS.altCharacters) return 'Alt text exceeds 200 characters';
-  if (type === 'image' && mime === undefined) return 'Image blocks require a mime header';
-  if (type !== 'image' && mime !== undefined) return 'The mime header is only valid for image blocks';
+  const shape = headerShapeRefusal(type, mime, rawSrc);
+  if (shape !== null) return shape;
   if (mime !== undefined && !isImageMime(mime)) return `Unsupported image MIME type: ${mime}`;
-  return { type, alt, mime };
+  const src = rawSrc === undefined ? undefined : parseSource(rawSrc);
+  if (typeof src === 'string') return src;
+  return { type, alt, mime, src };
 }
 
 /**
@@ -993,19 +1066,91 @@ function parseImageBlock(alt: string, mime: FyRenderImageMime, payload: string, 
   if (decoded === null) return fail('Image payload must be canonical base64');
   if (decoded > FY_RENDER_LIMITS.imageBytes) return fail('Image payload exceeds 2 MiB decoded');
 
-  const header = readRasterHeader(base64Bytes(compact));
-  if (header === null) return fail('Image payload header could not be read');
+  const refusal = fyRenderRasterRefusal(base64Bytes(compact), mime);
+  if (refusal !== null) return fail(refusal);
+  return { ok: true, block: { type: 'image', alt, mime, payload: compact, source } };
+}
+
+/**
+ * The pre-decode admission an inline image passes, for bytes that arrive later.
+ *
+ * ONE POLICY, TWO ARRIVALS. An inline payload is checked at parse time; an
+ * `image` named by `src:` has no bytes until the reader's gesture, so the media
+ * renderer runs the very same checks on what the workspace read or the https
+ * fetch returned, before any decoder is handed it. A second copy of these rules
+ * in the renderer would be a second answer to "what may reach an `<img>`".
+ *
+ * `expected` is the MIME the caller's extension or declaration names; bytes
+ * that disagree are refused, exactly as an inline `mime:` that lies is. Null
+ * accepts whichever of the four signatures the bytes carry — the https case,
+ * where a URL's suffix is not a declaration anybody made.
+ *
+ * Returns null when admitted, or the reason.
+ */
+export function fyRenderRasterRefusal(bytes: Uint8Array, expected: FyRenderImageMime | null): string | null {
+  const header = readRasterHeader(bytes);
+  if (header === null) return 'Image payload header could not be read';
   // The allowlist has to gate the DECODER, not the label an author typed: bytes
   // that disagree with the declared type would otherwise reach whichever decoder
   // they actually ask for.
-  if (header.mime !== mime) return fail(`Image bytes are ${header.mime}, not the declared ${mime}`);
-  if (header.animated) return fail(`Animated ${mime} is not accepted, because this build has no pause control`);
+  if (expected !== null && header.mime !== expected)
+    return `Image bytes are ${header.mime}, not the declared ${expected}`;
+  if (header.animated) return `Animated ${header.mime} is not accepted, because this build has no pause control`;
   if (header.width > FY_RENDER_LIMITS.maxDimension || header.height > FY_RENDER_LIMITS.maxDimension)
-    return fail(`Image exceeds ${FY_RENDER_LIMITS.maxDimension} pixels on an axis`);
+    return `Image exceeds ${FY_RENDER_LIMITS.maxDimension} pixels on an axis`;
   if (header.width * header.height > FY_RENDER_LIMITS.maxPixels)
-    return fail(`Image exceeds ${FY_RENDER_LIMITS.maxPixels} total pixels`);
-  return { ok: true, block: { type: 'image', alt, mime, payload: compact, source } };
+    return `Image exceeds ${FY_RENDER_LIMITS.maxPixels} total pixels`;
+  return null;
 }
+
+/**
+ * The MIME a workspace file is shown as, from its extension, or null when this
+ * type does not show that kind of file.
+ *
+ * The extension decides because the daemon's file route serves bytes, not a
+ * type, and a `Blob` handed to a media element must say what it is. Null is
+ * the `unsupported` fallback card, decided BEFORE any byte is read, so an
+ * unsupported file costs the reader no transfer at all. `image` keeps to the
+ * four static rasters the inline grammar admits — its bytes still go through
+ * `fyRenderRasterRefusal` — and the audio/video lists are the containers every
+ * evergreen browser's native player handles, not every container that exists.
+ */
+const MEDIA_EXTENSIONS: Readonly<Record<FyRenderMediaType, Readonly<Record<string, string>>>> = {
+  audio: {
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+    m4a: 'audio/mp4',
+    mp3: 'audio/mpeg',
+    oga: 'audio/ogg',
+    ogg: 'audio/ogg',
+    opus: 'audio/ogg',
+    wav: 'audio/wav',
+    weba: 'audio/webm',
+  },
+  image: { gif: 'image/gif', jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' },
+  pdf: { pdf: 'application/pdf' },
+  video: { m4v: 'video/mp4', mov: 'video/quicktime', mp4: 'video/mp4', ogv: 'video/ogg', webm: 'video/webm' },
+};
+
+export function fyRenderMediaMime(type: FyRenderMediaType, path: string): string | null {
+  const dot = path.lastIndexOf('.');
+  if (dot === -1 || dot < path.lastIndexOf('/')) return null;
+  return MEDIA_EXTENSIONS[type][path.slice(dot + 1).toLowerCase()] ?? null;
+}
+
+/**
+ * What a workspace read can answer, as a closed set the renderer presents.
+ *
+ * This is the WHOLE seam between a transcript block and a daemon, and its shape
+ * is the security argument: a path goes in, bytes or a refusal come out. No
+ * connection, no URL, no token and no session id crosses it, so the block can
+ * show a file without ever holding anything that could open a second one.
+ */
+export type FyRenderWorkspaceRead =
+  | { readonly ok: true; readonly bytes: Uint8Array<ArrayBuffer> }
+  | { readonly ok: false; readonly reason: 'missing' | 'denied' | 'not-served' | 'too-large' | 'unavailable' };
+
+export type FyRenderWorkspaceReader = (path: string, signal: AbortSignal) => Promise<FyRenderWorkspaceRead>;
 
 /**
  * Reads one fence body. Never throws, never executes, never reaches the network:
@@ -1019,29 +1164,38 @@ export function parseFyRender(source: string): FyRenderParseResult {
 
   const headers = parseHeaders(lines.slice(0, boundary));
   if (typeof headers === 'string') return fail(headers);
-  const { type, alt, mime } = headers;
+  const { type, alt, mime, src } = headers;
 
   const payload = lines.slice(boundary + 1).join('\n');
-  switch (type) {
+  // A media block's bytes are elsewhere; a payload beside a `src:` would be
+  // bytes nobody consented to and nothing reads. Blank lines are not content.
+  if (src !== undefined) {
+    if (payload.trim() !== '') return fail('A block with a src header must have an empty payload');
+    return { ok: true, block: { type: type as FyRenderMediaType, alt, payload: '', source, src } };
+  }
+  // `parseHeaders` refuses a video, audio or pdf block without a `src`, and one
+  // with a `src` returned above, so only the payload-carrying types remain.
+  const kind = type as Exclude<FyRenderType, FyRenderMediaType> | 'image';
+  switch (kind) {
     case 'html': {
       if (byteLength(payload) > FY_RENDER_LIMITS.htmlBytes) return fail('HTML payload exceeds 200 KiB');
-      return { ok: true, block: { type, alt, payload, source } };
+      return { ok: true, block: { type: kind, alt, payload, source } };
     }
     case 'svg': {
       const reason = validateSvg(payload);
-      return reason === null ? { ok: true, block: { type, alt, payload, source } } : fail(reason);
+      return reason === null ? { ok: true, block: { type: kind, alt, payload, source } } : fail(reason);
     }
     case 'mermaid': {
       if (characterLength(payload) > FY_RENDER_LIMITS.mermaidCharacters)
         return fail('Mermaid payload exceeds 20,000 characters');
-      return { ok: true, block: { type, alt, payload, source } };
+      return { ok: true, block: { type: kind, alt, payload, source } };
     }
     case 'lottie': {
       const reason = validateLottie(payload);
-      return reason === null ? { ok: true, block: { type, alt, payload, source } } : fail(reason);
+      return reason === null ? { ok: true, block: { type: kind, alt, payload, source } } : fail(reason);
     }
-    // `mime` is present for every `image` block: `parseHeaders` refuses one
-    // without it, and refuses one on any other type.
+    // `mime` is present for every `image` block without a `src`: `parseHeaders`
+    // refuses one with neither, and refuses `mime` on any other type.
     case 'image':
       return parseImageBlock(alt, mime as FyRenderImageMime, payload, source);
   }
@@ -1058,40 +1212,6 @@ export function fyRenderPayloadBytes(block: FyRenderBlock): number {
   if (block.type !== 'image') return byteLength(block.payload);
   return decodedBase64Bytes(block.payload) ?? 0;
 }
-
-/**
- * The bounds on the sandbox frame — every number the parent and the shell must
- * agree on, in one place, for the same reason `FY_RENDER_LIMITS` exists.
- *
- * The two deadlines are NOT the same kind of thing and the difference is the
- * whole point. `readyDeadlineMs` bounds a handshake and is stood down when the
- * handshake completes. The lifetime bounds are the HARD watchdog: they are armed
- * when the frame mounts and no message the frame sends can clear them, because
- * the frame is exactly the thing they exist to bound. A `rendered` message that
- * could stop the timer would be a hostile payload's first move.
- */
-export const FY_RENDER_SANDBOX_LIMITS = {
-  /** How long the shell has to announce itself before the parent gives up. */
-  readyDeadlineMs: 5_000,
-  /**
-   * Mermaid is a one-shot compile: the frame is destroyed as soon as it hands
-   * back an SVG, so this bounds the whole of its life.
-   */
-  mermaidDeadlineMs: 15_000,
-  /**
-   * Lottie has to stay alive to keep playing, so its bound is a total frame
-   * lifetime rather than a render deadline. It bounds how LONG a payload may
-   * compute, never how hard — see the declared gap in `docs/fy-render.md`.
-   */
-  lottieLifetimeMs: 120_000,
-  /** Every string the frame puts on the wire is cut to this. */
-  messageCharacters: 300,
-  /** The compiled diagram the frame hands back, which is generated, not authored. */
-  mermaidSvgBytes: 512 * 1024,
-  mermaidSvgElements: 4_000,
-  /** Filters are the cheapest route to expensive rasterising, generated or not. */
-  mermaidSvgFilterPrimitives: 64,
-} as const;
 
 /**
  * The two trusted bundles, each with its own closed size cap.
@@ -1126,17 +1246,27 @@ export type FyRenderBoundedTextResult =
   | { readonly ok: true; readonly text: string }
   | { readonly ok: false; readonly reason: string };
 
-export async function fyRenderReadBoundedText(
+export type FyRenderBoundedBytesResult =
+  | { readonly ok: true; readonly bytes: Uint8Array<ArrayBuffer> }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * The byte half of the bounded read, shared by the library fetch and the https
+ * image fetch. `what` names the response in the refusal, because a reader-facing
+ * fold that says "library" about somebody's photograph is wrong twice.
+ */
+export async function fyRenderReadBoundedBytes(
   response: Response,
   maxBytes: number,
-): Promise<FyRenderBoundedTextResult> {
+  what = 'library',
+): Promise<FyRenderBoundedBytesResult> {
   const declared = response.headers.get('content-length');
   if (declared !== null) {
     const length = Number(declared);
-    if (Number.isFinite(length) && length > maxBytes) return { ok: false, reason: 'The library response is too large' };
+    if (Number.isFinite(length) && length > maxBytes) return { ok: false, reason: `The ${what} response is too large` };
   }
   const body = response.body;
-  if (body === null) return { ok: false, reason: 'The library response was empty' };
+  if (body === null) return { ok: false, reason: `The ${what} response was empty` };
 
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
@@ -1148,21 +1278,29 @@ export async function fyRenderReadBoundedText(
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel();
-        return { ok: false, reason: 'The library response is too large' };
+        return { ok: false, reason: `The ${what} response is too large` };
       }
       chunks.push(value);
     }
   } catch {
-    return { ok: false, reason: 'The library response could not be read' };
+    return { ok: false, reason: `The ${what} response could not be read` };
   }
 
-  const joined = new Uint8Array(total);
+  const joined = new Uint8Array(new ArrayBuffer(total));
   let offset = 0;
   for (const chunk of chunks) {
     joined.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return { ok: true, text: new TextDecoder().decode(joined) };
+  return { ok: true, bytes: joined };
+}
+
+export async function fyRenderReadBoundedText(
+  response: Response,
+  maxBytes: number,
+): Promise<FyRenderBoundedTextResult> {
+  const read = await fyRenderReadBoundedBytes(response, maxBytes);
+  return read.ok ? { ok: true, text: new TextDecoder().decode(read.bytes) } : read;
 }
 
 /**
@@ -1184,7 +1322,17 @@ export type FyRenderSandboxMessage =
   | { readonly kind: 'mermaid-svg'; readonly svg: string; readonly theme: FyRenderSandboxTheme }
   | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
   | { readonly kind: 'playing'; readonly playing: boolean }
-  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass };
+  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass }
+  /**
+   * The `html` shell's two messages. `height` is the page's own scroll height,
+   * which the parent clamps — author code can make it say anything within the
+   * dimension bound, so it is a layout hint and never a decision. `escape` is a
+   * keydown forwarded from inside the frame, because a separate document's keys
+   * never reach the app's Escape listener and a reader in fullscreen must be
+   * able to leave.
+   */
+  | { readonly kind: 'height'; readonly height: number }
+  | { readonly kind: 'escape' };
 
 /** Which way the shell was told to paint, echoed back on the compiled diagram. */
 export type FyRenderSandboxTheme = 'dark' | 'light';
@@ -1255,6 +1403,13 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
       if (width === null || height === null) return null;
       return { height, kind: 'rendered', width };
     }
+    case 'height': {
+      if (!hasExactKeys(message, ['kind', 'height'])) return null;
+      const height = boundedDimension(message.height);
+      return height === null ? null : { height, kind: 'height' };
+    }
+    case 'escape':
+      return hasExactKeys(message, ['kind']) ? { kind: 'escape' } : null;
     case 'playing': {
       if (!hasExactKeys(message, ['kind', 'playing'])) return null;
       if (typeof message.playing !== 'boolean') return null;

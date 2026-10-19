@@ -133,4 +133,6 @@ export interface WardenSessionView {
    *  Such a session is never resumable wreckage — resuming it would make a
    *  finished teammate redo its turn. */
   readonly hasDoneMarker?: boolean;
+  /** When the liveness reflex confirmed this ferret frozen, this episode. */
+  readonly frozenAt?: string;
 }

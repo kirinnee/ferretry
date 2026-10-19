@@ -39,7 +39,7 @@
  * the global listener is removed the moment it lands. Everything after that is
  * port-only traffic no other document can reach.
  */
-import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/lib/fy-render.ts';
+import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/lib/fy-render-bounds.ts';
 
 type Reply =
   | { kind: 'shell-ready' }

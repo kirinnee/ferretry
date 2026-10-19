@@ -111,7 +111,7 @@ describe('parseSttSettings', () => {
         enhancementModel: ' llama-3.3 ',
         shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
         engine: 'parakeet',
-        liveWords: false,
+        liveWordsOptIn: false,
       }),
     );
 
@@ -125,8 +125,18 @@ describe('parseSttSettings', () => {
       enhancementModel: 'llama-3.3',
       shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
       engine: 'parakeet',
-      liveWords: false,
+      liveWordsOptIn: false,
     });
+  });
+
+  it('keeps live words OFF by default, and ignores the old default an earlier build left behind', () => {
+    should(DEFAULT_STT_SETTINGS.liveWordsOptIn).be.false();
+    should(parseSttSettings(stored({})).liveWordsOptIn).be.false();
+    // An earlier build defaulted to on and wrote `liveWords: true` for everyone, so it proves no choice.
+    should(parseSttSettings(stored({ engine: 'parakeet', liveWords: true })).liveWordsOptIn).be.false();
+    should(parseSttSettings(stored({ liveWordsOptIn: 'yes' })).liveWordsOptIn).be.false();
+    // A choice made after this shipped is honoured, and survives a round trip through storage.
+    should(parseSttSettings(stored({ liveWordsOptIn: true })).liveWordsOptIn).be.true();
   });
 
   it('reads the voice engine, and leaves an unknown or absent one unchosen', () => {
@@ -235,6 +245,14 @@ describe('SttSettingsStore', () => {
     should(next.enabled).be.true();
     should(store.persisted).be.true();
     should(JSON.parse(storage.writes[0] as string)).have.property('enhancement', false);
+  });
+
+  it('keeps an explicit live-words choice across a reload, and starts a stale default at off', () => {
+    const storage = new MemoryStorage(stored({ engine: 'parakeet', liveWords: true }));
+    const first = new SttSettingsStore(storage);
+    should(first.get().liveWordsOptIn).be.false();
+    first.update({ liveWordsOptIn: true });
+    should(new SttSettingsStore(storage).get().liveWordsOptIn).be.true();
   });
 
   it('normalises a patch on the way in', () => {

@@ -20,6 +20,7 @@ import {
   wardenAttentionView,
   wardenConfigView,
   wardenInvestigateView,
+  wardenLeaveView,
   wardenRunView,
   wardenStatusView,
 } from '../fixtures.ts';
@@ -166,6 +167,15 @@ const CASES: readonly MethodCase[] = [
     body: { sessionId: 'session-1', note: 'CI went red' },
     response: () => jsonResponse(wardenInvestigateView),
     expected: wardenInvestigateView,
+  },
+  {
+    name: 'wardenLeave',
+    invoke: client => client.wardenLeave({ sessionId: 'session-1', duration: '4h' }),
+    verb: 'POST',
+    path: '/v1/warden/leave',
+    body: { sessionId: 'session-1', duration: '4h' },
+    response: () => jsonResponse(wardenLeaveView),
+    expected: wardenLeaveView,
   },
   {
     name: 'cgroupConfig',

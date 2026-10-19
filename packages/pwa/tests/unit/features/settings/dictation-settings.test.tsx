@@ -200,14 +200,14 @@ describe('<DictationSettings>', () => {
     await view.unmount();
   });
 
-  it('offers Live words only while Parakeet is the engine, on by default, through the one update port', async () => {
+  it('offers Live words (experimental) only while Parakeet is the engine, off by default, through the one update port', async () => {
     const patches: SttSettingsPatch[] = [];
     const view = await mount(
       <DictationSettings
         {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'browser' }, voice: null })}
       />,
     );
-    expect(view.container.querySelector('section[aria-label="Live words"]')).toBeNull();
+    expect(view.container.querySelector('section[aria-label="Live words (experimental)"]')).toBeNull();
     await view.render(
       <DictationSettings
         {...settingsProps({
@@ -217,19 +217,23 @@ describe('<DictationSettings>', () => {
         })}
       />,
     );
-    const live = switchNamed(view.container, 'Live words');
-    expect(live.getAttribute('aria-checked')).toBe('true');
-    expect(live.textContent).toContain('On');
+    const live = switchNamed(view.container, 'Live words (experimental)');
+    expect(live.getAttribute('aria-checked')).toBe('false');
+    expect(live.textContent).toContain('Off');
     expect(view.container.textContent).toContain(LIVE_WORDS_EXPLANATION);
+    expect(LIVE_WORDS_EXPLANATION).toContain('Off by default');
     await interact(() => live.click());
-    expect(patches).toEqual([{ liveWords: false }]);
+    expect(patches).toEqual([{ liveWordsOptIn: true }]);
     await view.render(
       <DictationSettings
-        {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, engine: 'parakeet', liveWords: false }, voice: null })}
+        {...settingsProps({
+          settings: { ...DEFAULT_STT_SETTINGS, engine: 'parakeet', liveWordsOptIn: true },
+          voice: null,
+        })}
       />,
     );
-    expect(switchNamed(view.container, 'Live words').getAttribute('aria-checked')).toBe('false');
-    expect(switchNamed(view.container, 'Live words').textContent).toContain('Off');
+    expect(switchNamed(view.container, 'Live words (experimental)').getAttribute('aria-checked')).toBe('true');
+    expect(switchNamed(view.container, 'Live words (experimental)').textContent).toContain('On');
     await view.unmount();
   });
 

@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetHarnessScan, FleetSetupScan } from '@ferretry/protocol';
 import {
+  changedItems,
+  changeList,
+  changeSummary,
   foundRows,
   type HarnessAnswers,
   harnessImportChange,
   harnessProblems,
   importButtonLabel,
+  importCounts,
   importNotes,
+  importSummary,
   makesRuntime,
   missingTools,
   offersSignIn,
@@ -15,8 +20,6 @@ import {
   runtimePlan,
   scanHasHarness,
   scanSignedIn,
-  updateDetail,
-  updateTitle,
 } from '../../../../../src/features/fleet/setup/harness-import-model.ts';
 import { NOTHING_INSTALLED, scan } from './setup-support.ts';
 
@@ -306,32 +309,64 @@ describe('offersSignIn', () => {
   });
 });
 
-describe('updates', () => {
-  it('titles a known kind in words, never the word component', () => {
-    expect(updateTitle('mcp/github')).toBe('MCP server · github');
-    expect(updateTitle('instructions/CLAUDE.md')).toBe('Instructions · CLAUDE.md');
-    expect(updateTitle('skills/pr-review')).toBe('Skills · pr-review');
-    expect(updateTitle('settings/claude')).toBe('Settings · claude');
-    expect(updateTitle('hooks/pre')).toBe('Hooks · pre');
-    expect(updateTitle('modelSets/fast')).toBe('Model set · fast');
+describe('what changed', () => {
+  const skills = {
+    reference: 'skills/skills',
+    // a skill both CLIs hold has two sources: one per CLI
+    sources: ['/h/.claude/skills/agents-sdk', '/h/.codex/skills/agents-sdk', '/h/.claude/skills/pr-review'],
+  };
+  const slack = { reference: 'mcp/slack', sources: ['/h/.claude.json'] };
+
+  it('lists a skill ONCE however many CLIs hold it', () => {
+    expect(changedItems([skills])).toEqual([
+      { kind: 'skills', name: 'agents-sdk' },
+      { kind: 'skills', name: 'pr-review' },
+    ]);
+    expect(changeList([skills])).toEqual([{ kind: 'Skills', names: 'agents-sdk, pr-review' }]);
   });
 
-  it('keeps a name that has slashes in it whole', () => {
-    expect(updateTitle('skills/team/review')).toBe('Skills · team/review');
+  it('summarises in one line, by kind', () => {
+    expect(changeSummary([slack, skills])).toBe('Slack MCP server and 2 skills changed');
+    expect(changeSummary([skills])).toBe('2 skills changed');
+    expect(changeSummary([{ reference: 'skills/skills', sources: ['/a/x'] }])).toBe('1 skill changed');
+    expect(
+      changeSummary([
+        { reference: 'mcp/a', sources: [] },
+        { reference: 'mcp/b', sources: [] },
+      ]),
+    ).toBe('2 MCP servers changed');
+    expect(changeSummary([{ reference: 'settings/claude-settings', sources: ['/s.json'] }])).toBe('Settings changed');
+    expect(changeSummary([{ reference: 'instructions/CLAUDE.md', sources: [] }])).toBe('Instructions changed');
+    expect(changeSummary([{ reference: 'widgets/one', sources: [] }])).toBe('One widgets changed');
   });
 
-  it('shows the reference itself for an unknown kind or a missing name', () => {
-    expect(updateTitle('widgets/one')).toBe('widgets/one');
-    expect(updateTitle('mcp')).toBe('mcp');
-    expect(updateTitle('mcp/')).toBe('mcp/');
-    expect(updateTitle('')).toBe('');
+  it('keeps one entry per reference for the non-skill kinds', () => {
+    expect(changedItems([slack, slack])).toEqual([{ kind: 'mcp', name: 'slack' }]);
+    expect(changeList([slack, { reference: 'hooks/claude-hooks', sources: [] }])).toEqual([
+      { kind: 'MCP server', names: 'slack' },
+      { kind: 'Hooks', names: 'claude-hooks' },
+    ]);
   });
+});
 
-  it('says what changed using file names only', () => {
-    expect(updateDetail(['/home/you/.claude/settings.json'])).toBe('Changed since the last import: settings.json.');
-    expect(updateDetail(['/a/CLAUDE.md', '/b/settings.json', '/c/skill.md'])).toBe(
-      'Changed since the last import: CLAUDE.md, settings.json and skill.md.',
+describe('importSummary', () => {
+  it('counts what the import brought in on ONE line and leaves a zero out', () => {
+    expect(importSummary({ logins: 2, skills: 13, mcpServers: 1, conversations: 312 })).toBe(
+      'Imported 2 logins, 13 skills, 1 MCP server, 312 conversations',
     );
+    expect(importSummary({ logins: 1, skills: 0, mcpServers: 0, conversations: 0 })).toBe('Imported 1 login');
+    expect(importSummary({ logins: 0, skills: 0, mcpServers: 0, conversations: 0 })).toBe('Imported');
+  });
+
+  it('counts a scan: one shareable login, its skills and servers', () => {
+    expect(importCounts(scan(), 'claude', 5)).toEqual({ logins: 1, skills: 2, mcpServers: 3, conversations: 5 });
+    expect(importCounts(withCodex({ account: { state: 'unreadable' } }), 'codex', 0).logins).toBe(0);
+    expect(importCounts(scan({ harnesses: [] }), 'codex', 0)).toEqual({
+      logins: 0,
+      skills: 0,
+      mcpServers: 0,
+      conversations: 0,
+    });
   });
 });
 

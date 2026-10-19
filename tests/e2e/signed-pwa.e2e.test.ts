@@ -16,6 +16,7 @@ import {
   waitInPage,
 } from './support/pwa-release';
 import { harnessTeardown } from './support/relay-harness';
+import { retryOnLostBrowser } from './support/product-harness';
 
 /**
  * Signed PWA releases (#462), verified by the service worker in a real Chrome.
@@ -108,165 +109,167 @@ async function tamperVisible(page: ReleasePage): Promise<boolean> {
 }
 
 describe('signed PWA releases in a real browser', () => {
-  it('should load a signed release, refuse tampered, unsigned and older ones, and keep serving offline', async () => {
-    const teardown = harnessTeardown();
-    try {
-      await withE2eEnvironment(async environment => {
-        // Arrange — one build, released five ways under one throwaway trust root.
-        const root = environment.paths.root;
-        const key = await throwawayKey(join(root, 'keys'), 'release');
-        const build = await viteBuild(join(root, 'vite'), DEAD_DIRECTORY);
-        const good = await release({
-          build,
-          into: join(root, 'good'),
-          key,
-          sequence: 2,
-          commit: 'bbbbbbb',
-          sign: true,
+  it('should load a signed release, refuse tampered, unsigned and older ones, and keep serving offline', () =>
+    retryOnLostBrowser('signed-pwa', async () => {
+      const teardown = harnessTeardown();
+      try {
+        await withE2eEnvironment(async environment => {
+          // Arrange — one build, released five ways under one throwaway trust root.
+          const root = environment.paths.root;
+          const key = await throwawayKey(join(root, 'keys'), 'release');
+          const build = await viteBuild(join(root, 'vite'), DEAD_DIRECTORY);
+          const good = await release({
+            build,
+            into: join(root, 'good'),
+            key,
+            sequence: 2,
+            commit: 'bbbbbbb',
+            sign: true,
+          });
+          const nextBuild = await viteBuild(join(root, 'vite-next'), OTHER_DEAD_DIRECTORY);
+          const tampered = await release({
+            build: nextBuild,
+            into: join(root, 'tampered'),
+            key,
+            sequence: 3,
+            commit: 'ccccccc',
+            sign: true,
+          });
+          const tamperedFile = await tamperChangedScript(tampered, good);
+          const unsigned = await release({
+            build,
+            into: join(root, 'unsigned'),
+            key,
+            sequence: 4,
+            commit: 'ddddddd',
+            sign: false,
+          });
+          const older = await release({
+            build,
+            into: join(root, 'older'),
+            key,
+            sequence: 1,
+            commit: 'aaaaaaa',
+            sign: true,
+          });
+          should((await readFile(join(unsigned, 'release-manifest.sig'), 'utf8')).trim()).equal('unsigned');
+
+          const origin = await startReleaseOrigin(teardown);
+          const browser: ReleaseBrowser = await launchReleaseBrowser(teardown, {
+            host: { name: HOST, port: origin.port },
+          });
+          const { page } = browser;
+          const app = `http://${HOST}:${String(origin.port)}/app`;
+
+          // Act 1 — a signed release, first visit.
+          origin.serve(good);
+          await openControlled(page, app);
+          const installed = await checkNow(page);
+          await page.reload({ waitUntil: 'load' });
+          await Bun.sleep(1_000);
+
+          // Assert 1 — verified, cached under its own commit and sequence, and nothing to warn about.
+          should(installed?.status).be.oneOf('current', 'updated');
+          should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
+          should(await page.evaluate<number>(`document.querySelectorAll('${NOTICE}').length`)).equal(0);
+          await screenshotMatrix(page, SHOTS, '1-signed-release-loaded');
+
+          // Act 2 — the next release has a file changed after it was signed.
+          origin.serve(tampered);
+          const tamperedOutcome = await checkNow(page);
+          await page.reload({ waitUntil: 'load' });
+          const tamperedNotice = await noticeText(page);
+
+          // Assert 2 — refused by name, the old release still served, the changed file never shown.
+          should(tamperedFile).startWith('assets/');
+          should(tamperedOutcome).containEql({ status: 'refused', refusal: 'hash-mismatch', hadRelease: true });
+          should(tamperedNotice).containEql('An update failed verification');
+          should(tamperedNotice).containEql(WORDS.tampered);
+          should(tamperedNotice).containEql('You are still using the version you had');
+          should(await tamperVisible(page)).be.false();
+          should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
+          await screenshotMatrix(page, SHOTS, '2-tampered-refused', NOTICE);
+
+          // Act 3 — the next release is not signed at all.
+          origin.serve(unsigned);
+          const unsignedOutcome = await checkNow(page);
+          await page.reload({ waitUntil: 'load' });
+          const unsignedNotice = await noticeText(page);
+
+          // Assert 3
+          should(unsignedOutcome).containEql({ status: 'refused', refusal: 'unsigned', hadRelease: true });
+          should(unsignedNotice).containEql(WORDS.unsigned);
+          should(unsignedNotice).containEql('You are still using the version you had');
+          should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
+          await screenshotMatrix(page, SHOTS, '3-unsigned-refused', NOTICE);
+
+          // Act 4 — a validly signed but OLDER release: the rollback a compromised host would serve.
+          origin.serve(older);
+          const olderOutcome = await checkNow(page);
+          await page.reload({ waitUntil: 'load' });
+          const olderNotice = await noticeText(page);
+
+          // Assert 4
+          should(olderOutcome).containEql({ status: 'refused', refusal: 'older', hadRelease: true });
+          should(olderNotice).containEql(WORDS.older);
+          should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
+          await screenshotMatrix(page, SHOTS, '4-rollback-refused', NOTICE);
+
+          // Act 5 — the network is gone: the browser is offline AND the origin answers nothing.
+          origin.serve(undefined);
+          await browser.setOffline(true);
+          await page.reload({ waitUntil: 'load', timeout: 30_000 });
+          await Bun.sleep(1_000);
+
+          // Assert 5 — the verified release still renders the app.
+          const offlineBody = await page.evaluate<string>('document.body.innerText');
+          should(offlineBody.trim().length).be.above(0);
+          should(offlineBody).not.containEql('could not be checked against its signed release');
+          should(await page.evaluate<number>("document.querySelectorAll('#root *').length")).be.above(10);
+          await screenshotMatrix(page, SHOTS, '5-offline-after-first-load');
+          await browser.setOffline(false);
         });
-        const nextBuild = await viteBuild(join(root, 'vite-next'), OTHER_DEAD_DIRECTORY);
-        const tampered = await release({
-          build: nextBuild,
-          into: join(root, 'tampered'),
-          key,
-          sequence: 3,
-          commit: 'ccccccc',
-          sign: true,
+      } finally {
+        await teardown.closeAll();
+      }
+    }));
+
+  it('should tell a first visitor that an unsigned copy could not be checked', () =>
+    retryOnLostBrowser('signed-pwa', async () => {
+      const teardown = harnessTeardown();
+      try {
+        await withE2eEnvironment(async environment => {
+          // Arrange — a browser that has never seen this site meets an unsigned build.
+          const root = environment.paths.root;
+          const key = await throwawayKey(join(root, 'keys'), 'release');
+          const build = await viteBuild(join(root, 'vite'), DEAD_DIRECTORY);
+          const unsigned = await release({
+            build,
+            into: join(root, 'unsigned'),
+            key,
+            sequence: 1,
+            commit: 'eeeeeee',
+            sign: false,
+          });
+          const origin = await startReleaseOrigin(teardown);
+          const { page } = await launchReleaseBrowser(teardown, { host: { name: HOST, port: origin.port } });
+          origin.serve(unsigned);
+
+          // Act
+          await openControlled(page, `http://${HOST}:${String(origin.port)}/app`);
+          const outcome = await checkNow(page);
+          await page.reload({ waitUntil: 'load' });
+          const notice = await noticeText(page);
+
+          // Assert — nothing installed, so nothing cached, and the visitor is told plainly.
+          should(outcome).containEql({ status: 'refused', refusal: 'unsigned', hadRelease: false });
+          should(notice).containEql('This copy of the app could not be checked because it was not signed');
+          should(await releaseCaches(page)).eql([]);
+          await screenshotMatrix(page, SHOTS, '0-first-visit-unsigned', NOTICE);
+          should((await readdir(SHOTS)).length).be.above(3);
         });
-        const tamperedFile = await tamperChangedScript(tampered, good);
-        const unsigned = await release({
-          build,
-          into: join(root, 'unsigned'),
-          key,
-          sequence: 4,
-          commit: 'ddddddd',
-          sign: false,
-        });
-        const older = await release({
-          build,
-          into: join(root, 'older'),
-          key,
-          sequence: 1,
-          commit: 'aaaaaaa',
-          sign: true,
-        });
-        should((await readFile(join(unsigned, 'release-manifest.sig'), 'utf8')).trim()).equal('unsigned');
-
-        const origin = await startReleaseOrigin(teardown);
-        const browser: ReleaseBrowser = await launchReleaseBrowser(teardown, {
-          host: { name: HOST, port: origin.port },
-        });
-        const { page } = browser;
-        const app = `http://${HOST}:${String(origin.port)}/app`;
-
-        // Act 1 — a signed release, first visit.
-        origin.serve(good);
-        await openControlled(page, app);
-        const installed = await checkNow(page);
-        await page.reload({ waitUntil: 'load' });
-        await Bun.sleep(1_000);
-
-        // Assert 1 — verified, cached under its own commit and sequence, and nothing to warn about.
-        should(installed?.status).be.oneOf('current', 'updated');
-        should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
-        should(await page.evaluate<number>(`document.querySelectorAll('${NOTICE}').length`)).equal(0);
-        await screenshotMatrix(page, SHOTS, '1-signed-release-loaded');
-
-        // Act 2 — the next release has a file changed after it was signed.
-        origin.serve(tampered);
-        const tamperedOutcome = await checkNow(page);
-        await page.reload({ waitUntil: 'load' });
-        const tamperedNotice = await noticeText(page);
-
-        // Assert 2 — refused by name, the old release still served, the changed file never shown.
-        should(tamperedFile).startWith('assets/');
-        should(tamperedOutcome).containEql({ status: 'refused', refusal: 'hash-mismatch', hadRelease: true });
-        should(tamperedNotice).containEql('An update failed verification');
-        should(tamperedNotice).containEql(WORDS.tampered);
-        should(tamperedNotice).containEql('You are still using the version you had');
-        should(await tamperVisible(page)).be.false();
-        should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
-        await screenshotMatrix(page, SHOTS, '2-tampered-refused', NOTICE);
-
-        // Act 3 — the next release is not signed at all.
-        origin.serve(unsigned);
-        const unsignedOutcome = await checkNow(page);
-        await page.reload({ waitUntil: 'load' });
-        const unsignedNotice = await noticeText(page);
-
-        // Assert 3
-        should(unsignedOutcome).containEql({ status: 'refused', refusal: 'unsigned', hadRelease: true });
-        should(unsignedNotice).containEql(WORDS.unsigned);
-        should(unsignedNotice).containEql('You are still using the version you had');
-        should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
-        await screenshotMatrix(page, SHOTS, '3-unsigned-refused', NOTICE);
-
-        // Act 4 — a validly signed but OLDER release: the rollback a compromised host would serve.
-        origin.serve(older);
-        const olderOutcome = await checkNow(page);
-        await page.reload({ waitUntil: 'load' });
-        const olderNotice = await noticeText(page);
-
-        // Assert 4
-        should(olderOutcome).containEql({ status: 'refused', refusal: 'older', hadRelease: true });
-        should(olderNotice).containEql(WORDS.older);
-        should(await releaseCaches(page)).eql(['fy-release-bbbbbbb-2']);
-        await screenshotMatrix(page, SHOTS, '4-rollback-refused', NOTICE);
-
-        // Act 5 — the network is gone: the browser is offline AND the origin answers nothing.
-        origin.serve(undefined);
-        await browser.setOffline(true);
-        await page.reload({ waitUntil: 'load', timeout: 30_000 });
-        await Bun.sleep(1_000);
-
-        // Assert 5 — the verified release still renders the app.
-        const offlineBody = await page.evaluate<string>('document.body.innerText');
-        should(offlineBody.trim().length).be.above(0);
-        should(offlineBody).not.containEql('could not be checked against its signed release');
-        should(await page.evaluate<number>("document.querySelectorAll('#root *').length")).be.above(10);
-        await screenshotMatrix(page, SHOTS, '5-offline-after-first-load');
-        await browser.setOffline(false);
-      });
-    } finally {
-      await teardown.closeAll();
-    }
-  });
-
-  it('should tell a first visitor that an unsigned copy could not be checked', async () => {
-    const teardown = harnessTeardown();
-    try {
-      await withE2eEnvironment(async environment => {
-        // Arrange — a browser that has never seen this site meets an unsigned build.
-        const root = environment.paths.root;
-        const key = await throwawayKey(join(root, 'keys'), 'release');
-        const build = await viteBuild(join(root, 'vite'), DEAD_DIRECTORY);
-        const unsigned = await release({
-          build,
-          into: join(root, 'unsigned'),
-          key,
-          sequence: 1,
-          commit: 'eeeeeee',
-          sign: false,
-        });
-        const origin = await startReleaseOrigin(teardown);
-        const { page } = await launchReleaseBrowser(teardown, { host: { name: HOST, port: origin.port } });
-        origin.serve(unsigned);
-
-        // Act
-        await openControlled(page, `http://${HOST}:${String(origin.port)}/app`);
-        const outcome = await checkNow(page);
-        await page.reload({ waitUntil: 'load' });
-        const notice = await noticeText(page);
-
-        // Assert — nothing installed, so nothing cached, and the visitor is told plainly.
-        should(outcome).containEql({ status: 'refused', refusal: 'unsigned', hadRelease: false });
-        should(notice).containEql('This copy of the app could not be checked because it was not signed');
-        should(await releaseCaches(page)).eql([]);
-        await screenshotMatrix(page, SHOTS, '0-first-visit-unsigned', NOTICE);
-        should((await readdir(SHOTS)).length).be.above(3);
-      });
-    } finally {
-      await teardown.closeAll();
-    }
-  });
+      } finally {
+        await teardown.closeAll();
+      }
+    }));
 });

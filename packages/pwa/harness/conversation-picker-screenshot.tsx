@@ -1,14 +1,16 @@
 /**
  * "Import conversations" and New session's "Continue a conversation", on a phone and a desktop, in a
  * dark and a light theme: the picker with a few rows kept, one "Start now" on and a row a ferret already
- * keeps, and the Continue search with its CLI and date filters.
+ * keeps; Continue's two sources (the stopped ferrets, and every conversation in Ferretry's history) with
+ * the CLI and date filters; and an open row showing its last exchanges above the button that continues it.
  *
  *   bun harness/conversation-picker-screenshot.tsx      # writes harness/out/conversation-picker-*.png
  *
  * The page entry is written as `.jsx`: `harness/` is in the typecheck, and an untyped fixture must stay out of it.
  *
  * It renders the REAL `ConversationPicker` and `ContinueConversation` against a fake machine that answers
- * the listing with invented folders and messages — no real conversation is read. It fails if either
+ * the listing and the preview with invented folders and messages, and invented stopped ferrets — no real
+ * conversation is read. It fails if either
  * surface scrolls sideways at 390px.
  */
 import { spawnSync } from 'node:child_process';
@@ -46,6 +48,25 @@ const ROWS = [
   { id: 'c5', harness: 'codex', project: '/work/api/services/billing-gateway-with-a-long-folder-name', preview: 'Add retries to the invoice webhook', lastActivityAt: ago(80), turns: 22, model: 'GPT-6' },
   { id: 'c6', harness: 'claude', project: '/work/shop', preview: 'Rename the product grid component', lastActivityAt: ago(24 * 9), turns: 2, model: 'Sonnet 5.5' },
 ];
+const ferret = (id, name, harness, cwd, status, hours) => ({
+  config: { id, name, teammate: name, harness, cwd, updatedAt: ago(hours) },
+  state: { status, lastActivityAt: ago(hours) },
+});
+const SESSIONS = [
+  ferret('notes-weekly', 'wren', 'claude', '/work/notes', 'stopped', 5),
+  ferret('shop-badge', 'otto', 'claude', '/work/shop', 'completed', 30),
+  ferret('billing-retries', 'ash', 'codex', '/work/api/services/billing', 'failed', 80),
+  ferret('live-one', 'pip', 'claude', '/work/shop', 'running', 1),
+];
+ROWS[5].adoptedBy = 'shop-badge';
+const PREVIEW = [
+  { role: 'user', text: 'Summarise this week of meeting notes into a short list' },
+  { role: 'assistant', text: 'Here are the five decisions and three open questions from this week, grouped by team.' },
+  { role: 'user', text: 'Add who owns each open question' },
+  { role: 'assistant', text: 'Done: Mara owns pricing, Theo the launch date, and the partner list is unowned so far.' },
+  { role: 'user', text: 'Turn the unowned one into a task for Monday' },
+  { role: 'assistant', text: 'Added "Find an owner for the partner list" to Monday, linked to the notes.' },
+];
 const RUNTIMES = [
   { name: 'claude-default', wrapper: 'claude-default', harness: 'claude' },
   { name: 'claude-work', wrapper: 'claude-work', harness: 'claude' },
@@ -53,6 +74,10 @@ const RUNTIMES = [
 ];
 const client = {
   request: async (path, schema) => {
+    if (path.endsWith('/preview')) {
+      const id = path.split('/').at(-2);
+      return schema.parse({ id, harness: 'claude', messages: PREVIEW });
+    }
     if (path.startsWith('/v1/imports/conversations')) {
       const query = new URL(path, 'https://machine.test').searchParams;
       const harness = query.get('harness');
@@ -70,8 +95,8 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <main data-fixture="" style={{ margin: '0 auto', maxWidth: 720, padding: '12px 16px' }}>
     <section className="kt-panel p-panel">
-      {view === 'continue' ? (
-        <ContinueConversation connection={connection} createClient={async () => client} onNavigate={() => undefined} now={() => NOW} />
+      {view !== 'picker' ? (
+        <ContinueConversation connection={connection} createClient={async () => client} onNavigate={() => undefined} now={() => NOW} sessions={SESSIONS} resume={async () => undefined} />
       ) : (
         <ConversationPicker connection={connection} createClient={async () => client} harness="claude" runtimes={RUNTIMES} now={() => NOW} />
       )}
@@ -149,16 +174,26 @@ try {
         await context.route('**/*', async route =>
           new URL(route.request().url()).origin !== server.url.origin ? await route.abort() : await route.continue(),
         );
-        for (const view of ['picker', 'continue'] as const) {
+        for (const view of ['picker', 'sessions', 'conversations', 'preview'] as const) {
           const page = await context.newPage();
           await page.goto(`${server.url}?theme=${theme}&view=${view}`);
           if (view === 'picker') {
             await page.locator('[data-conversations-found]').waitFor({ state: 'visible' });
             await pickSome(page);
-          } else await page.locator('[data-continue-count]').waitFor({ state: 'visible' });
+          } else {
+            await page.locator('[data-continue-count]').waitFor({ state: 'visible' });
+            if (view !== 'sessions') {
+              await page.locator('[data-segment="conversations"]').click();
+              await page.locator('[data-continue-row="c1"]').waitFor({ state: 'visible' });
+            }
+            if (view === 'preview') {
+              await page.locator('[data-continue-row="c3"]').click();
+              await page.locator('.fy-convo-exchange').first().waitFor({ state: 'visible' });
+            }
+          }
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${view} ${theme} ${vp} scrolls sideways by ${overflow}px`);
-          const name = view === 'picker' ? 'conversation-picker' : 'conversation-continue';
+          const name = view === 'picker' ? 'conversation-picker' : `conversation-continue-${view}`;
           const file = `${name}-${theme}-${vp}.png`;
           await page.screenshot({ path: join(outDir, file), fullPage: true });
           process.stdout.write(`📸 ${join(outDir, file)}\n`);

@@ -15,10 +15,16 @@ import {
 import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { wardenConfig } from '../../support/warden.ts';
 
-const jev = (overrides: Partial<WardenConfig> = {}): WardenConfig => wardenConfig({ triage: 'jev', ...overrides });
+/** Both layers: Jev in front of an investigation. */
+const jev = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
+  wardenConfig({ layers: { jev: true, llm: true }, ...overrides });
+const jevOnly = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
+  wardenConfig({ layers: { jev: true, llm: false }, ...overrides });
+const llm = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
+  wardenConfig({ layers: { jev: false, llm: true }, ...overrides });
 
 describe('wardenFormErrors', () => {
-  it('should check nothing under Rules only, which spends nothing', () => {
+  it('should check nothing with both layers off, which spends nothing', () => {
     // Arrange
     const config = wardenConfig({
       caps: { jevUsdPerDay: Number.NaN, investigationUsdPerDay: 0, maxInvestigationsPerHour: 0 },
@@ -32,7 +38,7 @@ describe('wardenFormErrors', () => {
     expect(hasWardenFormErrors(errors)).toBe(false);
   });
 
-  it('should name every out-of-range entry under Jev', () => {
+  it('should name every out-of-range entry with both layers on', () => {
     // Arrange
     const config = jev({
       caps: { jevUsdPerDay: 0, investigationUsdPerDay: 101, maxInvestigationsPerHour: 1.5 },
@@ -54,10 +60,24 @@ describe('wardenFormErrors', () => {
     expect(hasWardenFormErrors(errors)).toBe(true);
   });
 
-  it('should ignore the hidden Jev cap under LLM only, and accept the limits themselves', () => {
+  it('should check only Jev’s own cap and the cooldown with Jev alone', () => {
     // Arrange
-    const config = wardenConfig({
-      triage: 'llm',
+    const config = jevOnly({
+      caps: { jevUsdPerDay: 0, investigationUsdPerDay: 101, maxInvestigationsPerHour: 0 },
+      maxAssignedWardens: 9,
+      blessMinutes: 0,
+    });
+
+    // Act / Assert
+    expect(wardenFormErrors(config)).toEqual({
+      jevUsdPerDay: 'Enter a cap between $0.01 and $100.',
+      blessMinutes: '1 to 240 minutes.',
+    });
+  });
+
+  it('should ignore the hidden Jev cap with the LLM alone, and accept the limits themselves', () => {
+    // Arrange
+    const config = llm({
       caps: {
         jevUsdPerDay: Number.NaN,
         investigationUsdPerDay: WARDEN_FORM_LIMITS.capUsd.max,
@@ -80,19 +100,18 @@ describe('wardenSummary', () => {
     );
   });
 
-  it('should say Rules only spends nothing', () => {
+  it('should say rules alone spend nothing', () => {
     // Arrange / Act / Assert
     expect(wardenSummary(wardenConfig({ intervalMinutes: 5 }), false)).toBe(
-      'Every 5 min the sweep flags anomalies and shows them to you. No AI runs and nothing is spent.',
+      'Every 5 min the rules flag anomalies and show them to you. No AI runs and nothing is spent.',
     );
   });
 
-  it('should describe LLM investigations, the cap and what may act alone', () => {
+  it('should describe LLM investigations, the cooldown, the cap and what may act alone', () => {
     // Arrange
-    const config = wardenConfig({
-      triage: 'llm',
+    const config = llm({
       accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }, { agent: 'claude-spare' }],
-      mayActAlone: { nudge: true, resume: false, failover: false, stop: true },
+      mayActAlone: { nudge: true, resume: false, restart: false, failover: false, stop: true },
     });
 
     // Act
@@ -100,22 +119,30 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toBe(
-      'Every 2 min the sweep flags anomalies, and every flag gets a read-only claude-sonnet-5-5 investigation on claude-default (low effort, 1 at a time; failover claude-default → claude-spare), as kteam does. Cap: $2.00/day. When an investigation’s verdict says so, it may nudge and stop on its own.',
+      'Every 2 min the rules flag anomalies, and every flag gets a read-only claude-sonnet-5-5 investigation on claude-default (low effort, 1 at a time; failover claude-default → claude-spare), as kteam does. A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Cap: $2.00/day. When an investigation’s verdict says so, it may nudge and stop on its own.',
     );
+  });
+
+  it('should say the logins take turns when they rotate', () => {
+    // Arrange
+    const config = llm({
+      accounts: [{ agent: 'claude-a' }, { agent: 'codex-b' }],
+      failover: { policy: 'round_robin', failureThreshold: 2, cooldownMinutes: 30 },
+    });
+
+    // Act / Assert
+    expect(wardenSummary(config, true)).toContain('(low effort, 1 at a time; taking turns claude-a → codex-b)');
   });
 
   it('should say every verdict waits when nothing may act alone', () => {
     // Arrange
-    const config = wardenConfig({
-      triage: 'llm',
-      mayActAlone: { nudge: false, resume: false, failover: false, stop: false },
-    });
+    const config = llm({ mayActAlone: { nudge: false, resume: false, restart: false, failover: false, stop: false } });
 
     // Act / Assert
     expect(wardenSummary(config, true)).toContain('Every verdict waits for you; stopping always asks you first.');
   });
 
-  it('should describe the Jev guard, its threshold and both caps', () => {
+  it('should describe Jev in front of the investigation, its threshold and both caps', () => {
     // Arrange
     const config = jev();
 
@@ -124,7 +151,20 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toBe(
-      'Every 2 min the sweep flags anomalies. Jev only guards: it skips a flag (healthy, then blesses that anomaly for 15 min) when it is at least 85% sure. Anything else, including when it is unsure, goes to a read-only investigation on claude-default (low effort, 1 at a time; failover claude-default). Caps: $0.50/day for Jev and $2.00/day for investigations. When an investigation’s verdict says so, it may nudge, resume or revive and fail over to the next login on its own; stopping always asks you first.',
+      'Every 2 min the rules flag anomalies. Jev clears a flag it is at least 85% sure is healthy; anything else, including when it is unsure, goes to a read-only investigation on claude-default (low effort, 1 at a time). A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Caps: $0.50/day for Jev and $2.00/day for investigations. When an investigation’s verdict says so, it may nudge, resume or revive, restart a dead or frozen process and fail over to the next login on its own; stopping always asks you first.',
+    );
+  });
+
+  it('should describe Jev alone: what it does not clear is shown to you', () => {
+    // Act
+    const summary = wardenSummary(jevOnly(), true);
+
+    // Assert
+    expect(summary).toBe(
+      'Every 2 min the rules flag anomalies. Jev clears a flag it is at least 85% sure is healthy; every other flag is shown to you, and no investigation runs. A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Cap: $0.50/day for Jev.',
+    );
+    expect(wardenSummary(jevOnly(), false)).toContain(
+      'Needs a Jev key: until one is added, every flag is shown to you.',
     );
   });
 
@@ -141,8 +181,8 @@ describe('wardenSummary', () => {
     const summary = wardenSummary(config, false);
 
     // Assert
-    expect(summary).toContain('blesses that anomaly for (fix)');
-    expect(summary).toContain('investigation on no login (low effort, (fix) at a time; failover no login)');
+    expect(summary).toContain('left alone for (fix)');
+    expect(summary).toContain('investigation on no login (low effort, (fix) at a time)');
     expect(summary).toContain('Caps: (fix)/day for Jev and (fix)/day for investigations.');
     expect(summary.endsWith(' Needs a Jev key: until one is added, every flag is investigated.')).toBe(true);
   });
@@ -168,10 +208,10 @@ describe('the machine default login', () => {
 
   it('should summarise an empty order as running on the machine default', () => {
     // Act
-    const summary = wardenSummary(wardenConfig({ triage: 'llm', accounts: [] }), true, 'claude-default');
+    const summary = wardenSummary(llm({ accounts: [] }), true, 'claude-default');
 
     // Assert
-    expect(summary).toContain('investigation on claude-default (low effort, 1 at a time; failover claude-default)');
+    expect(summary).toContain('investigation on claude-default (low effort, 1 at a time)');
   });
 });
 
@@ -181,7 +221,7 @@ describe('wardenConfigPatchFrom', () => {
     const base = wardenConfig();
     const next: WardenConfig = {
       ...base,
-      triage: 'jev',
+      layers: { jev: true, llm: false },
       caps: { ...base.caps, jevUsdPerDay: 1 },
     };
 
@@ -189,7 +229,7 @@ describe('wardenConfigPatchFrom', () => {
     const patch = wardenConfigPatchFrom(base, next);
 
     // Assert
-    expect(patch).toEqual({ triage: 'jev', caps: { ...base.caps, jevUsdPerDay: 1 } });
+    expect(patch).toEqual({ layers: { jev: true, llm: false }, caps: { ...base.caps, jevUsdPerDay: 1 } });
     expect(wardenConfigPatchFrom(base, base)).toEqual({});
   });
 });

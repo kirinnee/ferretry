@@ -40,6 +40,7 @@ import {
   type SidePaneFileSelection,
 } from '../shell/side-pane-tab-model.ts';
 import { resolveFsFilePaths } from './files-api.ts';
+import { readWorkspaceMedia } from './fy-render-workspace-media.ts';
 import type { MarkdownProps } from './markdown.tsx';
 
 /** Everything a Markdown reader needs to prove and to open a reference. */
@@ -174,6 +175,9 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     surfaceReferenceResolver: createSurfaceReferenceResolver(scope, terminals, browser),
     resolveFilePaths: async (candidates, signal) =>
       await resolveFsFilePaths(connection, scope, candidates, cwd, fetcher, signal),
+    // A `fy-render` media block's `src: @path`, read through the same route and the same grants an
+    // `@file` click uses. The block receives this one function and never the connection behind it.
+    readWorkspaceMedia: async (path, signal) => await readWorkspaceMedia(connection, scope, path, cwd, fetcher, signal),
     onCodeReferenceOpen: reference => {
       const selection = fileSelection(reference.line, reference.endLine);
       if (destinations.openFile !== undefined) destinations.openFile(reference.path, selection);

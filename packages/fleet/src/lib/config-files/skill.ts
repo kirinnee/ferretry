@@ -39,7 +39,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 | \`components/<kind>/<name>.yaml\` | one component; kind is \`instructions\`, \`mcp\`, \`skills\`, \`settings\`, \`hooks\` or \`modelSets\` |
 | \`profiles/<name>.yaml\` | \`contents:\` — components and other profiles (\`mcp/github\`, \`profile/base\`), in order; a later entry overrides an earlier one |
 | \`runtimes/<name>.yaml\` | one runtime: \`credential\` (a login id), \`profile\`, \`agent: true\` for one Ferretry launches |
-| \`warden.yaml\` | the Warden: \`enabled\`, \`triage\` (rules / llm / jev), \`caps\`, \`mayActAlone\`, \`intervalMinutes\`, \`accounts\`, … |
+| \`warden.yaml\` | the Warden: \`enabled\`, \`layers\` (\`jev\` and \`llm\`, each on or off), \`caps\`, \`mayActAlone\`, \`intervalMinutes\`, \`accounts\`, … |
 | \`learning.yaml\` | lesson mining |
 | \`voice.yaml\` | who cleans up dictated text: \`postProcessing\`: \`provider\` (\`off\`, \`groq\`, \`cerebras\`, \`login\`), \`style\` (\`off\`, \`fix\`, \`polish\`), your own \`prompts\` for each style, \`useConversation\` and \`conversationMessages\` |
 
@@ -54,7 +54,7 @@ JSON Schema of a kind (\`${bin} config schema\` lists the kinds).
 2. **Run \`${bin} config check\` after every edit.** It names each problem by file, line and column, with the
    fix. (\`${bin} config write <file>\` writes from stdin through the daemon and refuses a file that does not check.) A broken file is never half-applied: its last good version stays in effect until it checks.
 3. **A change that loosens what the machine may spend or what agents may do waits for the owner** —
-   a Warden triage that spends (llm or jev), raising a cap, letting the Warden act alone, letting agents control more, sending dictated text to a provider.
+   switching on a Warden layer that spends (\`jev\` or \`llm\`), raising a cap, letting the Warden act alone, letting agents control more, sending dictated text to a provider.
    It is written, but the tighter version stays in effect until the owner runs \`${bin} config confirm\` at
    the machine or confirms it in the app with a passkey. Tell the owner what you changed and why; do not
    try to work around it.

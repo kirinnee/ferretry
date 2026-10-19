@@ -57,11 +57,31 @@ lands on, which Hugging Face may change.
 - The recording is `MediaRecorder` audio decoded and resampled to 16 kHz mono by `decodeAudioData`
   (`lib/stt/audio-capture.ts`) — no AudioWorklet, so no second script for the page policy to allow.
 
-### Live words (near-live)
+### The input meter
 
-Parakeet is not a streaming model, so live words are **near-live** (`lib/stt/near-live.ts`). The
-per-device **Live words** switch (Settings › Voice, shown while Parakeet is the engine) is on by
-default.
+While the microphone is open the dictation strip draws rolling bars, one per ~50 ms of measured
+loudness, so the reader can see that what they say is being captured. Silence is flat, reduced motion
+swaps the scrolling bars for one level bar, and the colour is the theme's accent. It is wired for
+**both** engines through one port (`lib/stt/level-monitor.ts`):
+
+- **Parakeet** taps the stream its own recorder already holds with a read-only `AnalyserNode` that is
+  never connected to a destination. There is no second `getUserMedia`, and the bars move for exactly
+  the audio being transcribed.
+- **Browser voice** owns its microphone and exposes no level, so there is no stream to tap. The hook
+  opens a **meter-only** stream beside it (`audio: true`, nothing recorded), releases it the moment
+  dictation ends, and treats any refusal as "no bars" — never as a failed dictation.
+
+If the meter hears nothing for three seconds the strip says so ("No microphone signal yet").
+
+### Live words (near-live, experimental, off by default)
+
+Parakeet is not a streaming model, so live words are **near-live** (`lib/stt/near-live.ts`). They are
+**experimental and OFF by default**: the default is batch transcription after Stop. The per-device
+**Live words (experimental)** switch (Settings › Voice, shown while Parakeet is the engine) turns them on.
+
+The choice is stored as `liveWordsOptIn`. An earlier build defaulted live words to on and wrote
+`liveWords: true` for everyone, which proves no choice; that key is no longer read, so an existing
+device starts at off and only a choice made after this shipped can turn it on.
 
 - **While recording**, about every 1.2 s the recording so far is decoded (`AudioRecording.peek`) and
   the audio since the last committed point is transcribed again, with word times. Words two passes

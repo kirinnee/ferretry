@@ -32,6 +32,7 @@ import {
   buildPwaBundle,
   clickFirstPresent,
   harnessTeardown,
+  isLostBrowser,
   launchChrome,
   type RendezvousProcess,
   startDirectSinkhole,
@@ -218,7 +219,10 @@ async function settleComposer(page: BrowserPage): Promise<void> {
 async function until<T>(read: () => Promise<T | undefined>, timeoutMs: number): Promise<T | undefined> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const value = await read().catch(() => undefined);
+    const value = await read().catch((error: unknown) => {
+      if (isLostBrowser(error)) throw error;
+      return undefined;
+    });
     if (value !== undefined) return value;
     await Bun.sleep(50);
   }

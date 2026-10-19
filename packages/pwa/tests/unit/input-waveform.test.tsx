@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   browserWaveformRuntime,
-  type CaptureAnalyserTap,
-  type CaptureMonitor,
   displayLevel,
   InputWaveform,
   type InputWaveformRuntime,
@@ -13,6 +11,7 @@ import {
   startInputWaveform,
   waveformAnalyser,
 } from '../../src/components/input-waveform.tsx';
+import type { CaptureAnalyserTap, CaptureMonitor } from '../../src/lib/stt/level-monitor.ts';
 import { interact, mount, must } from '../support/dom.ts';
 
 interface PaintCall {
@@ -182,74 +181,76 @@ describe('waveformAnalyser', () => {
 });
 
 describe('paintInputLevel', () => {
-  it('sizes the bitmap for the device pixel ratio and paints a centre line when silent', () => {
-    const canvas = fakeCanvas();
+  const paint = (
+    history: readonly number[],
+    overrides: Partial<Parameters<typeof paintInputLevel>[2]> = {},
+    bounds: { width: number; height: number } | null = { width: 320, height: 40 },
+  ) => {
+    const canvas = fakeCanvas(bounds);
     const { context, calls } = recordingContext();
     paintInputLevel(canvas, context, {
-      samples: new Float32Array(4),
+      history,
       level: 0,
       reducedMotion: false,
       color: '#fff',
-      pixelRatio: 2,
+      pixelRatio: 1,
+      ...overrides,
     });
+    return { canvas, calls, bars: calls.filter(call => call.op === 'fillRect') };
+  };
+
+  it('sizes the bitmap for the device pixel ratio', () => {
+    const { canvas, calls } = paint([], { pixelRatio: 2 });
     expect(canvas.width).toBe(640);
-    expect(canvas.height).toBe(112);
-    expect(calls.filter(call => call.op === 'stroke')).toHaveLength(1);
+    expect(canvas.height).toBe(80);
     expect(calls.at(-1)?.op).toBe('restore');
   });
 
   it('falls back to a default box and clamps a nonsense pixel ratio', () => {
-    const canvas = fakeCanvas(null);
-    const { context } = recordingContext();
-    paintInputLevel(canvas, context, {
-      samples: new Float32Array(0),
-      level: 0,
-      reducedMotion: false,
-      color: '#fff',
-      pixelRatio: Number.NaN,
-    });
+    const { canvas } = paint([], { pixelRatio: Number.NaN }, null);
     expect(canvas.width).toBe(320);
     expect(canvas.height).toBe(56);
   });
 
-  it('draws the waveform path when there is level and a peak', () => {
-    const canvas = fakeCanvas();
-    const { context, calls } = recordingContext();
-    paintInputLevel(canvas, context, {
-      samples: new Float32Array([0.5, -0.5, Number.NaN, 0.25]),
-      level: 0.8,
-      reducedMotion: false,
-      color: '#fff',
-      pixelRatio: 1,
-    });
-    expect(calls.filter(call => call.op === 'lineTo').length).toBeGreaterThan(1);
-    expect(calls.filter(call => call.op === 'moveTo')).toHaveLength(2);
+  it('draws a full-width row of identical minimum bars when it has heard nothing', () => {
+    const { bars } = paint([]);
+    // 320px at a 5px pitch (3px bar + 2px gap), the last bar without its gap.
+    expect(bars).toHaveLength(64);
+    const heights = new Set(bars.map(call => call.args[3]));
+    expect([...heights]).toEqual([2]);
   });
 
-  it('skips the path when every sample is zero, even with a level', () => {
-    const canvas = fakeCanvas();
-    const { context, calls } = recordingContext();
-    paintInputLevel(canvas, context, {
-      samples: new Float32Array([0, 0, 0]),
-      level: 0.9,
-      reducedMotion: false,
-      color: '#fff',
-      pixelRatio: 1,
-    });
-    expect(calls.filter(call => call.op === 'stroke')).toHaveLength(1);
+  it('keeps every bar flat for a silent history', () => {
+    const { bars } = paint(new Array<number>(80).fill(0));
+    expect(new Set(bars.map(call => call.args[3])).size).toBe(1);
   });
 
-  it('paints a bar meter instead of a waveform under reduced motion', () => {
-    const canvas = fakeCanvas();
-    const { context, calls } = recordingContext();
-    paintInputLevel(canvas, context, {
-      samples: new Float32Array([1, -1]),
-      level: 2,
-      reducedMotion: true,
-      color: '#fff',
-      pixelRatio: 1,
-    });
-    expect(calls.filter(call => call.op === 'fillRect')).toHaveLength(2);
+  it('makes a louder moment a taller bar, centred, and drops the oldest first', () => {
+    const history = [...new Array<number>(70).fill(0), 0.25, 1];
+    const { bars } = paint(history);
+    expect(bars).toHaveLength(64);
+    const heights = bars.map(call => call.args[3] as number);
+    const quiet = heights.at(-2) as number;
+    const loud = heights.at(-1) as number;
+    expect(loud).toBeGreaterThan(quiet);
+    expect(quiet).toBeGreaterThan(2);
+    expect(loud).toBeCloseTo(40 * 0.92, 5);
+    const [left = 0, top = 0] = (bars.at(-1)?.args ?? []) as number[];
+    expect(top).toBeCloseTo((40 - loud) / 2, 5);
+    expect(left + 3).toBeCloseTo(320, 5);
+  });
+
+  it('clamps a level out of range and treats a non-finite one as silence', () => {
+    const { bars } = paint([Number.NaN, -3, 7]);
+    const heights = bars.slice(-3).map(call => call.args[3] as number);
+    expect(heights[0]).toBe(2);
+    expect(heights[1]).toBe(2);
+    expect(heights[2]).toBeCloseTo(40 * 0.92, 5);
+  });
+
+  it('paints one level bar instead of scrolling bars under reduced motion', () => {
+    const { bars, calls } = paint([1, 1, 1], { level: 2, reducedMotion: true });
+    expect(bars).toHaveLength(2);
     expect(calls.some(call => call.op === 'stroke')).toBe(false);
   });
 });

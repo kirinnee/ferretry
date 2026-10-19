@@ -540,7 +540,14 @@ export function SessionChatPage({
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [pendingAction, setPendingAction] = useState<SessionAction | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionFailure, setActionFailure] = useState<{ readonly sentence: string; readonly detail?: string } | null>(
+    null,
+  );
+  const actionError = actionFailure?.sentence ?? null;
+  const setActionError = useCallback(
+    (sentence: string | null): void => setActionFailure(sentence === null ? null : { sentence }),
+    [],
+  );
   const reconnecting = connectionState?.kind === 'reconnecting';
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const dismissActionNotice = useCallback(() => setActionNotice(null), []);
@@ -801,9 +808,15 @@ export function SessionChatPage({
     ))
   );
   const actionAlert = (
-    <p className={actionError === null ? 'sr-only' : 'm-0 px-3 py-1 text-ui text-err'} role="alert">
+    <div className={actionError === null ? 'sr-only' : 'm-0 px-3 py-1 text-ui text-err'} role="alert">
       {actionError === null ? '' : `Session action failed: ${actionError}`}
-    </p>
+      {actionFailure?.detail === undefined ? null : (
+        <details className="mt-1 text-meta text-muted">
+          <summary className="cursor-pointer">Details</summary>
+          <pre className="m-0 mt-1 whitespace-pre-wrap break-words font-mono">{actionFailure.detail}</pre>
+        </details>
+      )}
+    </div>
   );
   const copySessionId = (): void => {
     setActionError(null);
@@ -934,7 +947,7 @@ export function SessionChatPage({
       compact={compact}
       form={actionForm}
       name={agentName}
-      onFailure={sentence => setActionError(sentence)}
+      onFailure={(sentence, detail) => setActionFailure(detail === undefined ? { sentence } : { sentence, detail })}
       onNotice={setActionNotice}
       onFormChange={setActionForm}
       sections={actionSections}

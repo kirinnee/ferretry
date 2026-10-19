@@ -52,6 +52,7 @@ import { LearningPage } from './features/learning/learning-page.tsx';
 import { useLearningSessionActions } from './features/learning/learning-session-actions.tsx';
 import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from './features/learning/learning-settings.tsx';
 import { usePassiveLearning } from './features/learning/passive-learning.tsx';
+import { useHypermediaSessionActions } from './features/hypermedia/hypermedia-session-actions.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
 import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
@@ -680,6 +681,7 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
       fleet={store.fleet}
       projects={store.projects}
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
+      resumeSession={async (daemon, sessionId) => await (await store.clients.client(daemon)).resume(sessionId)}
       usage={store.usage}
       onNavigate={navigate}
       {...launchHint(window.location.search)}
@@ -909,10 +911,12 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     accounts: useAccountPickerSlice(store.accountPicker, connection).catalog?.accounts ?? null,
     onViewLearning: () => navigate(daemonLearningPath(daemonId)),
   });
-  // Every feature's Actions-menu entries for this ferret: Warden, then Learning.
+  // Hypermedia's Actions-menu toggle, and the status line that says it takes effect at the next launch.
+  const hypermediaActions = useHypermediaSessionActions({ connection, fetcher: useDaemonFetch() });
+  // Every feature's Actions-menu entries for this ferret: Warden, then Learning, then Hypermedia.
   const sessionActions = useMemo(
-    () => [...wardenActions, ...learningActions.contributions],
-    [wardenActions, learningActions.contributions],
+    () => [...wardenActions, ...learningActions.contributions, ...hypermediaActions.contributions],
+    [wardenActions, learningActions.contributions, hypermediaActions.contributions],
   );
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
@@ -1211,6 +1215,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         {sessionIssue ?? ''}
       </p>
       {learningActions.host}
+      {hypermediaActions.host}
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}

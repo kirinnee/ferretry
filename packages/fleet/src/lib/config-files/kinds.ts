@@ -185,28 +185,28 @@ function machineLoosening(before: MachineFileValue, after: MachineFileValue): re
   ];
 }
 
-/** How much a triage may spend, cheapest first: rules never, Jev on a guard, LLM on every flag. */
-const TRIAGE_SPEND: Readonly<Record<WardenConfig['triage'], number>> = { rules: 0, jev: 1, llm: 2 };
+/** A layer spends only while the Warden is on AND the layer is. The rules underneath never spend. */
+const layerOn = (config: WardenConfig, layer: keyof WardenConfig['layers']): boolean =>
+  config.enabled && config.layers[layer];
 
-/** The Warden spends only when it is on AND its triage is not rules. */
-const triageSpend = (config: WardenConfig): number => (config.enabled ? TRIAGE_SPEND[config.triage] : 0);
+const WARDEN_LAYER_WORDS: Readonly<Record<keyof WardenConfig['layers'], string>> = {
+  jev: 'the Warden may now spend on Jev decisions',
+  llm: 'the Warden may now spend on AI investigations',
+};
 
 const WARDEN_ACT_WORDS: Readonly<Record<keyof WardenConfig['mayActAlone'], string>> = {
   nudge: 'nudge a ferret',
   resume: 'resume a ferret',
+  restart: 'restart a ferret',
   failover: 'move a ferret to another login',
   stop: 'stop a ferret',
 };
 
 function wardenLoosening(before: WardenConfig, after: WardenConfig): readonly string[] {
   return [
-    ...(triageSpend(after) > triageSpend(before)
-      ? [
-          after.triage === 'jev'
-            ? 'the Warden may now spend on Jev decisions and AI investigations'
-            : 'the Warden may now spend on an AI investigation of every flag',
-        ]
-      : []),
+    ...(Object.keys(WARDEN_LAYER_WORDS) as (keyof WardenConfig['layers'])[]).flatMap(layer =>
+      switchedOn(layerOn(before, layer), layerOn(after, layer), WARDEN_LAYER_WORDS[layer]),
+    ),
     ...(Object.keys(WARDEN_ACT_WORDS) as (keyof WardenConfig['mayActAlone'])[]).flatMap(act =>
       switchedOn(
         before.mayActAlone[act],
@@ -308,7 +308,7 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
   runtime:
     '# A runtime: one login and one profile, launched under this file name.\ncredential: my-login\nprofile: my-profile\nagent: true\n',
   warden:
-    '# The Warden. Triage `rules` shows flags to you and spends nothing; `jev` and `llm` spend, under daily caps.\nenabled: true\ntriage: rules\n',
+    '# The Warden. Its rules flag trouble for free; the Jev and LLM layers each spend, under their own daily cap.\nenabled: true\nlayers:\n  jev: false\n  llm: false\n',
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
   voice:
     '# Voice. Transcription is chosen on each device (Settings › Voice); this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',

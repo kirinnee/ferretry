@@ -46,6 +46,13 @@ import {
 } from '../lib/stt/browser-recognition.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
 import { enhance } from '../lib/stt/enhancement.ts';
+import {
+  browserMicMeter,
+  type CaptureMonitor,
+  type MicMeter,
+  type MicMeterGlobalLike,
+  type MicMeterPort,
+} from '../lib/stt/level-monitor.ts';
 import { joinWords, type NearLiveState } from '../lib/stt/near-live.ts';
 import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
@@ -154,6 +161,12 @@ export interface UseDictationOptions {
   readonly settings: SttSettings;
   /** Browser recognition and visibility surface; injected by tests/harness. */
   readonly recognition?: BrowserRecognitionProvider;
+  /**
+   * Opens the meter-only microphone that browser speech needs for its level bars, since the browser
+   * owns the real one. The page's own when omitted; `null` means no meter. Parakeet never uses it:
+   * its meter taps the recording's own stream.
+   */
+  readonly meter?: MicMeterPort | null;
   /** Parakeet on this device. Read from the app store when omitted; `null` means not available here. */
   readonly parakeet?: ParakeetVoice | null;
   /** The machine's cleanup settings (voice.yaml); the defaults when absent. Only the hosted providers read them. */
@@ -179,6 +192,8 @@ export interface DictationHandle {
   readonly liveInterim: string;
   /** Parakeet near-live words stopped for this take: the device could not keep up. */
   readonly livePaused: boolean;
+  /** The open microphone’s level tap while recording, for the input meter; `null` when there is none. */
+  readonly inputMonitor: CaptureMonitor | null;
   readonly error: DictationError | null;
   readonly busy: boolean;
   /** Call synchronously from the reader gesture. */
@@ -218,12 +233,20 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       : engine === 'browser'
         ? recognition.support.available
         : true;
+  const ambientMeter = useMemo(() => browserMicMeter(globalThis as unknown as MicMeterGlobalLike), []);
+  const meterPort = options.meter === undefined ? ambientMeter : options.meter;
+  const meterPortRef = useRef(meterPort);
+  meterPortRef.current = meterPort;
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
 
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [error, setError] = useState<DictationError | null>(null);
   const [live, setLive] = useState<LiveWords>(NO_LIVE_WORDS);
+  const [inputMonitor, setInputMonitor] = useState<CaptureMonitor | null>(null);
+  const meterRef = useRef<MicMeter | null>(null);
+  /** The take whose meter is open or opening: a mobile engine restarts and reports `start` again. */
+  const meterTakeRef = useRef(-1);
 
   // Refs, not state: recognition and enhancement continuations outlive the
   // render that started them.
@@ -244,9 +267,18 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   const isCurrent = useCallback((token: number): boolean => generationRef.current === token, []);
 
+  /** Close the meter-only microphone, if one is open, and drop the tap. */
+  const releaseMeter = useCallback((): void => {
+    const meter = meterRef.current;
+    meterRef.current = null;
+    meter?.release();
+    setInputMonitor(null);
+  }, []);
+
   /** Cancel every owner and return the next generation token. */
   const invalidate = useCallback((): number => {
     generationRef.current += 1;
+    releaseMeter();
     const live = liveSessionRef.current;
     const finishing = finishingSessionRef.current;
     liveSessionRef.current = null;
@@ -266,7 +298,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     controllerRef.current?.abort();
     controllerRef.current = null;
     return generationRef.current;
-  }, []);
+  }, [releaseMeter]);
 
   // Unmount releases the browser microphone and suppresses every continuation.
   useEffect(() => () => void invalidate(), [invalidate]);
@@ -361,6 +393,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       if (!isCurrent(token) || liveSessionRef.current !== session) return;
       liveSessionRef.current = null;
       finishingSessionRef.current = session;
+      releaseMeter();
       setPhase('transcribing');
 
       let enhancementFailure: DictationError | null = null;
@@ -406,7 +439,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         if (isCurrent(token)) controllerRef.current = null;
       }
     },
-    [commit, enhanceTranscript, isCurrent],
+    [commit, enhanceTranscript, isCurrent, releaseMeter],
   );
 
   const start = useCallback(() => {
@@ -441,7 +474,28 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     try {
       const callbacks: BrowserRecognitionSessionOptions = {
         onStart: () => {
-          if (isCurrent(token)) setPhase('recording');
+          if (!isCurrent(token)) return;
+          setPhase('recording');
+          const port = meterPortRef.current;
+          if (engine !== 'browser' || port === null || meterTakeRef.current === token) return;
+          meterTakeRef.current = token;
+          // Browser speech owns its microphone, so the meter listens through one of its own. It
+          // can only ever fail quietly: bars are a visual aid and must never end a dictation.
+          void port.open().then(
+            meter => {
+              if (meter === null) return;
+              if (!isCurrent(token) || liveSessionRef.current !== session) {
+                meter.release();
+                return;
+              }
+              meterRef.current = meter;
+              setInputMonitor(meter.monitor);
+            },
+            () => undefined,
+          );
+        },
+        onMonitor: monitor => {
+          if (isCurrent(token)) setInputMonitor(monitor);
         },
         onTranscript: text => {
           if (isCurrent(token)) setLive({ text, interim: '', paused: false });
@@ -449,6 +503,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         onFailure: failure => {
           if (!isCurrent(token)) return;
           if (liveSessionRef.current === session) liveSessionRef.current = null;
+          releaseMeter();
           // A cancellation is not a failed take, WHENEVER it arrives. The
           // engine can report `aborted` while recognition is still open — a
           // second recognizer taking the microphone, or the browser abandoning
@@ -488,7 +543,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           );
         session = parakeet.createSession({
           ...callbacks,
-          liveWords: optionsRef.current.settings.liveWords,
+          liveWords: optionsRef.current.settings.liveWordsOptIn,
           onLive: state => {
             if (isCurrent(token)) setLive(liveWordsFrom(state));
           },
@@ -504,7 +559,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       setError({ code: recognitionFailure.code, message: recognitionFailure.message });
       setPhase('error');
     }
-  }, [disabled, engine, finish, invalidate, isCurrent, phase]);
+  }, [disabled, engine, finish, invalidate, isCurrent, phase, releaseMeter]);
 
   const stop = useCallback(() => {
     const session = liveSessionRef.current;
@@ -532,6 +587,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     liveText: live.text,
     liveInterim: live.interim,
     livePaused: live.paused,
+    inputMonitor,
     busy: phase === 'transcribing',
     error,
     start,

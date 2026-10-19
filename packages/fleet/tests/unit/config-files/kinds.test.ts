@@ -273,8 +273,12 @@ describe('configLoosening: warden', () => {
   const wardenWith = (changes: Partial<WardenConfig>): WardenConfig => ({ ...DEFAULT_WARDEN_CONFIG, ...changes });
 
   it.each([
-    [{ triage: 'llm' }, ['the Warden may now spend on an AI investigation of every flag']],
-    [{ triage: 'jev' }, ['the Warden may now spend on Jev decisions and AI investigations']],
+    [{ layers: { jev: false, llm: true } }, ['the Warden may now spend on AI investigations']],
+    [{ layers: { jev: true, llm: false } }, ['the Warden may now spend on Jev decisions']],
+    [
+      { layers: { jev: true, llm: true } },
+      ['the Warden may now spend on Jev decisions', 'the Warden may now spend on AI investigations'],
+    ],
     [
       { mayActAlone: { ...DEFAULT_WARDEN_CONFIG.mayActAlone, stop: true } },
       ['the Warden may now stop a ferret on its own'],
@@ -307,8 +311,8 @@ describe('configLoosening: warden', () => {
   });
 
   it.each([
-    [{ triage: 'rules' }, { triage: 'llm' }],
-    [{ triage: 'jev' }, { triage: 'llm' }],
+    [{ layers: { jev: false, llm: false } }, { layers: { jev: false, llm: true } }],
+    [{ layers: { jev: true, llm: false } }, { layers: { jev: true, llm: true } }],
     [{ maxAssignedWardens: 1 }, { maxAssignedWardens: 3 }],
     [{ intervalMinutes: 2 }, { intervalMinutes: 1 }],
     [{ minSpawnGapMinutes: 15 }, { minSpawnGapMinutes: 0 }],
@@ -320,17 +324,32 @@ describe('configLoosening: warden', () => {
     should(actual).deepEqual([]);
   });
 
-  it('should hold turning the Warden on when its triage already spends, and not when it is rules', () => {
+  it('should hold letting the Warden restart a ferret on its own', () => {
+    // Arrange
+    const off = { ...DEFAULT_WARDEN_CONFIG.mayActAlone, restart: false };
+
+    // Act
+    const actual = configLoosening(
+      'warden',
+      wardenWith({ mayActAlone: off }),
+      wardenWith({ mayActAlone: DEFAULT_WARDEN_CONFIG.mayActAlone }),
+    );
+
+    // Assert
+    should(actual).deepEqual(['the Warden may now restart a ferret on its own']);
+  });
+
+  it('should hold turning the Warden on when a layer already spends, and not when both are off', () => {
     // Act
     const spending = configLoosening(
       'warden',
-      wardenWith({ enabled: false, triage: 'llm' }),
-      wardenWith({ enabled: true, triage: 'llm' }),
+      wardenWith({ enabled: false, layers: { jev: false, llm: true } }),
+      wardenWith({ enabled: true, layers: { jev: false, llm: true } }),
     );
     const free = configLoosening('warden', wardenWith({ enabled: false }), wardenWith({ enabled: true }));
 
     // Assert
-    should(spending).deepEqual(['the Warden may now spend on an AI investigation of every flag']);
+    should(spending).deepEqual(['the Warden may now spend on AI investigations']);
     should(free).deepEqual([]);
   });
 

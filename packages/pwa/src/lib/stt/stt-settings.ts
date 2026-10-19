@@ -142,10 +142,12 @@ export interface SttSettings {
   readonly engine: DictationEngineId | null;
   /**
    * Near-live words while dictating with Parakeet (`near-live.ts`): a rolling window is
-   * re-transcribed about once a second and shown greyed until two passes agree. On by default; it
-   * costs CPU and battery only while the microphone is open. Browser voice is always live.
+   * re-transcribed about once a second and shown greyed until two passes agree. EXPERIMENTAL and
+   * OFF by default; batch transcription after Stop is the default. Persisted as `liveWordsOptIn`,
+   * a name no earlier build wrote, so a `liveWords: true` an older default left behind is ignored
+   * and only a choice made after this shipped can turn it on. Browser voice is always live.
    */
-  readonly liveWords: boolean;
+  readonly liveWordsOptIn: boolean;
 }
 
 export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
@@ -158,7 +160,7 @@ export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
   enhancementModel: DEFAULT_GROQ_ENHANCEMENT_MODEL,
   shortcut: DEFAULT_DICTATION_SHORTCUT,
   engine: null,
-  liveWords: true,
+  liveWordsOptIn: false,
 });
 
 const SHORTCUT_MODIFIERS = ['Meta', 'Control', 'Alt', 'Shift'] as const;
@@ -232,7 +234,8 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
     enhancementModel: parseModel(parsed.enhancementModel),
     shortcut: parseDictationShortcut(parsed.shortcut),
     engine: parseEngine(parsed.engine),
-    liveWords: typeof parsed.liveWords === 'boolean' ? parsed.liveWords : DEFAULT_STT_SETTINGS.liveWords,
+    liveWordsOptIn:
+      typeof parsed.liveWordsOptIn === 'boolean' ? parsed.liveWordsOptIn : DEFAULT_STT_SETTINGS.liveWordsOptIn,
   };
 };
 

@@ -267,6 +267,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   fleetRefresh: { run: async () => undefined },
   conversationImport: {
     list: async () => ({ conversations: [], matched: 0, skipped: 0 }),
+    preview: async () => undefined,
     adopt: async () => ({ adopted: [], refused: [] }),
   },
   foreignHistory: {
@@ -366,6 +367,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionSignal: new FakeSessionSignal(),
   sessionRename: {
     rename: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
+  sessionHypermedia: {
+    set: async () => {
       throw new Error('not exercised by the surface inventory');
     },
   },
@@ -628,14 +634,16 @@ describe('the mounted daemon surface', () => {
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // the permission prompt's answer: a digit or Escape into the same pane, governed the same way
       1 + // an agent's rename: a new first name or task title
+      1 + // a ferret's hypermedia switch, from its next launch (docs/hypermedia.md)
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
       3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      1 + // the owner leaving a ferret alone for longer than the Warden would
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
-      2 + // existing conversations kept as ferrets: the listing and the adoption
+      3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -763,8 +771,10 @@ describe('the mounted daemon surface', () => {
       'GET /v1/imports/history',
       'GET /v1/imports/history/:importId',
       // Existing conversations kept as ferrets: listed and searched, then adopted into sessions that
-      // RESUME them. Both are fleet.configure; neither returns a transcript or a file path.
+      // RESUME them, with the last few exchanges of one on request. All are fleet.configure; none
+      // returns a whole transcript or a file path.
       'GET /v1/imports/conversations',
+      'GET /v1/imports/conversations/:harness/:conversationId/preview',
       'POST /v1/imports/conversations/adopt',
       'GET /v1/gc',
       'POST /v1/gc',
@@ -797,6 +807,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/runtime',
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/rename',
+      'PATCH /v1/sessions/:sessionId/hypermedia',
       'POST /v1/sessions/:sessionId/mcp/project/preview',
       'POST /v1/sessions/:sessionId/mcp/login/preview',
       'POST /v1/sessions/:sessionId/mcp/project',
@@ -911,6 +922,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/warden/run',
       'GET /v1/warden/attention',
       'POST /v1/warden/investigate',
+      'POST /v1/warden/leave',
       'GET /v1/warden/config',
       'PATCH /v1/warden/config',
       // The operator reads: the history the daemon recorded, the screen the agent is looking at, and

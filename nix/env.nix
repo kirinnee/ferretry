@@ -22,6 +22,7 @@ with packages;
     git
     go-task
     jq
+    nodejs_24
     ripgrep
     wrangler
     yq-go

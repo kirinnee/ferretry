@@ -395,3 +395,66 @@ export const resultText = (result: ToolResultData): string | null => {
   if (result.content !== undefined && result.content !== null) return stringifySafe(result.content);
   return null;
 };
+
+/** One question a question tool asked, as the transcript card shows it. */
+export interface AskedQuestion {
+  readonly header?: string;
+  readonly question: string;
+  readonly options: readonly { readonly label: string; readonly description?: string }[];
+  readonly multiSelect: boolean;
+  /** The owner's answer, when the result names it; `undefined` while open or unreadable. */
+  readonly answer?: string;
+}
+
+const QUESTION_TOOLS = /^(askuserquestion|request_user_input)$/iu;
+
+/** Whether a tool name is the structured question tool of either harness. */
+export const isQuestionTool = (name: string | undefined): boolean => name !== undefined && QUESTION_TOOLS.test(name);
+
+const textOf = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() !== '' ? value : undefined;
+
+/** `"question"="answer"` pairs in Claude's result sentence. */
+const answerPairs = (raw: string): ReadonlyMap<string, string> => {
+  const pairs = new Map<string, string>();
+  for (const match of raw.matchAll(/"([^"]+)"="([^"]*)"/gu)) pairs.set(match[1] as string, match[2] as string);
+  return pairs;
+};
+
+/**
+ * The questions a question tool call asked and, once the result is in, what was answered. `null`
+ * when the input carries no readable question — the call then reads as an ordinary tool line.
+ */
+export const readAskedQuestions = (
+  use: ToolUseData,
+  result: ToolResultData | undefined,
+): readonly AskedQuestion[] | null => {
+  if (!isQuestionTool(use.name)) return null;
+  const input = use.input;
+  const list =
+    typeof input === 'object' && input !== null ? (input as { readonly questions?: unknown }).questions : undefined;
+  if (!Array.isArray(list)) return null;
+  const raw = result === undefined ? null : resultText(result);
+  const pairs = raw === null ? new Map<string, string>() : answerPairs(raw);
+  const asked: AskedQuestion[] = [];
+  for (const item of list) {
+    const fields = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>;
+    const question = textOf(fields['question']);
+    if (question === undefined) continue;
+    const options = (Array.isArray(fields['options']) ? fields['options'] : []).flatMap(option => {
+      const label = textOf((option as { label?: unknown } | null)?.label);
+      const description = textOf((option as { description?: unknown } | null)?.description);
+      return label === undefined ? [] : [{ label, ...(description === undefined ? {} : { description }) }];
+    });
+    const header = textOf(fields['header']);
+    const answer = pairs.get(question) ?? (list.length === 1 && raw !== null ? raw.trim() : undefined);
+    asked.push({
+      ...(header === undefined ? {} : { header }),
+      question,
+      options,
+      multiSelect: fields['multiSelect'] === true || fields['multi_select'] === true,
+      ...(answer === undefined || answer === '' ? {} : { answer }),
+    });
+  }
+  return asked.length === 0 ? null : asked;
+};

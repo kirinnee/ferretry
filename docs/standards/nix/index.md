@@ -79,8 +79,8 @@ is deliberately **not** used for it — see
 consumes.
 
 Only `nixpkgs` is wired today, so the file is a single `inherit (pkgs) ...` block:
-`actionlint bash bun git go go-task goreleaser jq pre-commit ripgrep shellcheck treefmt
-yq-go`. When more than one registry is in play, each registry gets its own group in a
+`actionlint bash bun git go go-task goreleaser jq nodejs_24 pre-commit ripgrep
+shellcheck treefmt wrangler yq-go`. When more than one registry is in play, each registry gets its own group in a
 `let all = { ... }` block and the groups merge with `//` in priority order — later groups win.
 
 The shipped executables are built in `nix/ferretry.nix`: a fixed-output Bun dependency derivation
@@ -92,12 +92,12 @@ hermetic without adding product packages to development-shell package aggregatio
 **Purpose**: organize packages into functional groups so each shell includes only what it
 needs.
 
-| Group      | Contents                                                 | Why it exists                               |
-| ---------- | -------------------------------------------------------- | ------------------------------------------- |
-| `main`     | `bash bun git go-task jq ripgrep yq-go`                  | run and build the workspace                 |
-| `lint`     | `actionlint pre-commit ripgrep shellcheck treefmt yq-go` | the gates in [Linting](../linting/index.md) |
-| `dev`      | `git go-task jq`                                         | interactive convenience                     |
-| `releaser` | `git go goreleaser`                                      | release-only tooling                        |
+| Group      | Contents                                                   | Why it exists                               |
+| ---------- | ---------------------------------------------------------- | ------------------------------------------- |
+| `main`     | `bash bun git go-task jq nodejs_24 ripgrep wrangler yq-go` | run and build the workspace                 |
+| `lint`     | `actionlint pre-commit ripgrep shellcheck treefmt yq-go`   | the gates in [Linting](../linting/index.md) |
+| `dev`      | `git go-task jq`                                           | interactive convenience                     |
+| `releaser` | `git go goreleaser`                                        | release-only tooling                        |
 
 The `releaser` group and the `.#releaser` shell are named after their job — running
 [GoReleaser](https://goreleaser.com) at release time. There is no tool of that name in this
@@ -107,6 +107,25 @@ post-build hook swaps the real Bun binary.
 **When to create a new group**: when a set of packages belongs in some shells but not others.
 Release-only tooling is the archetype — `goreleaser` and `go` have no business in the CI lint
 lane, so they live in their own group.
+
+### One toolchain: nothing falls through to the runner image
+
+A package in the flake is only half of "pinned": `PATH` decides which binary a script runs. Several
+`node_modules/.bin` tools — `vite`, `tsc`, `biome`, `knip` — are `#!/usr/bin/env node`, so a devshell
+without Node resolves the **runner image's** Node. That is how the PWA build passed on GitHub's
+`ubuntu-latest` and failed on a Namespace image: `vite` loaded `packages/pwa/vite.config.ts` under a
+Node that cannot strip TypeScript types (`ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".ts"
+for packages/relay/src/lib/index.ts`). The same commit built on two machines with two different
+Nodes.
+
+- `nodejs_24` is in `main`, so every shell that has `bun` has the flake's Node, and `flake.lock`
+  decides its version. Node 24 strips types by default, which the Vite config load relies on.
+- `scripts/validate/pinned-toolchain.sh` fails if `node` or `bun` resolves (after `readlink -f`)
+  outside `/nix/store`. `scripts/ci/test.sh` and `scripts/ci/build-pwa.sh` run it first, so every CI
+  test lane and both PWA builds (`ci.yaml` `pwa-bundle`, `pwa-pages.yaml` `build`) refuse a drifted
+  `PATH` before doing any work. The Pages release build must stay that script, not a bare `task`.
+- Do not add a tool to a workflow with `actions/setup-node` or rely on the image's Node. If a new
+  script needs another runtime, add it to the flake and to the guard's list.
 
 ### nix/shells.nix — development environments
 

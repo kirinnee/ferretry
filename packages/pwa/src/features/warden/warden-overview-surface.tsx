@@ -9,10 +9,11 @@
  * SWEEP NOW is the free deterministic sweep (`spawn: false`): it flags, and whatever the triage then does
  * is the configured triage's business. INVESTIGATE skips Jev and the blessing, waits for a slot and counts
  * against today's cap; the daemon refuses it (409) when the Warden is off or the cap is hit, and its own
- * sentence is shown, because it is the one that knows which.
+ * sentence is shown, because it is the one that knows which. LEAVE IT LONGER keeps the Warden off a
+ * flagged or cleared ferret for a while; the daemon's sentence says for how long.
  */
 
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { IFyApiClient, SessionView, WardenLeaveDuration } from '@ferretry/protocol';
 import { useCallback, useState } from 'react';
 
 import { useWardenPoll, type WardenPollOptions } from '../../hooks/use-warden-poll.ts';
@@ -25,7 +26,7 @@ import { WardenReportDialog, type WardenReportDialogRequest } from './warden-rep
 
 export type WardenOverviewClient = Pick<
   IFyApiClient,
-  'wardenStatus' | 'wardenAttention' | 'wardenRun' | 'wardenInvestigate' | 'wardenReport'
+  'wardenStatus' | 'wardenAttention' | 'wardenRun' | 'wardenInvestigate' | 'wardenLeave' | 'wardenReport'
 >;
 export type WardenOverviewClientFactory = (connection: DaemonConnection) => Promise<WardenOverviewClient>;
 
@@ -63,6 +64,7 @@ function WardenOverviewBody({
   const [sweeping, setSweeping] = useState(false);
   const [notice, setNotice] = useState<WardenNotice | null>(null);
   const [investigating, setInvestigating] = useState<ReadonlySet<string>>(new Set());
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [report, setReport] = useState<WardenReportDialogRequest | null>(null);
 
   const readStatus = useCallback(
@@ -112,6 +114,20 @@ function WardenOverviewBody({
     }
   };
 
+  const leave = async (sessionId: string, duration: WardenLeaveDuration): Promise<void> => {
+    setLeaving(current => new Set([...current, sessionId]));
+    setNotice(null);
+    try {
+      const answer = await (await createClient(connection)).wardenLeave({ sessionId, duration });
+      setNotice({ tone: 'ok', text: answer.message });
+    } catch (cause) {
+      setNotice({ tone: 'err', text: `Not left alone: ${reasonOf(cause)}` });
+    } finally {
+      setLeaving(current => new Set([...current].filter(id => id !== sessionId)));
+      setRevision(current => current + 1);
+    }
+  };
+
   const openReport = (row: WardenRow & { readonly reportPath: string }): void => {
     setReport({
       connection,
@@ -139,6 +155,8 @@ function WardenOverviewBody({
         {...(onNavigate === undefined ? {} : { onNavigate })}
         onSweep={() => void sweep()}
         onInvestigate={sessionId => void investigate(sessionId)}
+        onLeave={(sessionId, duration) => void leave(sessionId, duration)}
+        leaving={leaving}
         onOpenReport={openReport}
       />
       <WardenReportDialog request={report} read={readReport} onClose={() => setReport(null)} />

@@ -48,6 +48,8 @@ export const INFO_HINT = {
   quota: 'The login’s own limits. Ferretry reads them only while someone is looking, at most once a minute.',
   learning:
     'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
+  hypermedia:
+    'Whether this ferret is told it may explain with diagrams, drawings, interactive pages and media in chat. A change takes effect when it next starts. Change it in Actions.',
 } as const;
 
 /** The CLI a harness is, in words. */
@@ -139,3 +141,13 @@ export const lineage = (
 /** The Learning row's value, from the session's passive flag: said as what the ferret was told to do. */
 export const learningLabel = (passive: boolean): string =>
   passive ? 'On · instructed to file lessons' : 'Off · not instructed';
+
+/**
+ * Whether a ferret is told it may use hypermedia (docs/hypermedia.md). ABSENT MEANS ON: a session
+ * started before the switch existed is instructed at its next launch unless the owner turns it off.
+ */
+export const hypermediaOn = (view: SessionView): boolean => view.config.hypermedia !== false;
+
+/** The Hypermedia row's value: said as what the ferret is told. */
+export const hypermediaLabel = (on: boolean): string =>
+  on ? 'On · may explain with diagrams and media' : 'Off · plain text';

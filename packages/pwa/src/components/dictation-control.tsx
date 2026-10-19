@@ -58,6 +58,7 @@ import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
 import { isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
+import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
 import { DictationSheet, type DictationStage, dictationStage } from './dictation-sheet.tsx';
 import type { InputWaveformRuntime } from './input-waveform.tsx';
 
@@ -87,6 +88,8 @@ export interface DictationControlProps {
   readonly settings: SttSettings;
   /** Browser feature/runtime seam; production feature-detects the ambient page. */
   readonly recognition?: BrowserRecognitionProvider;
+  /** The meter-only microphone browser voice listens through; the page's own when omitted, `null` for none. */
+  readonly meter?: MicMeterPort | null;
   readonly enhancementFetch?: RemoteEnhancementFetch;
   /**
    * The keyboard and visibility surfaces push-to-talk listens to. `null` (the
@@ -240,6 +243,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     settings,
     voiceCleanup,
     ...(props.recognition === undefined ? {} : { recognition: props.recognition }),
+    ...(props.meter === undefined ? {} : { meter: props.meter }),
     ...(props.enhancementFetch === undefined ? {} : { enhancementFetch: props.enhancementFetch }),
     disabled: effectiveDisabled,
     onDraft: result => {
@@ -361,6 +365,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
       liveText={dictation.liveText}
       liveInterim={dictation.liveInterim}
       livePaused={dictation.livePaused}
+      inputMonitor={dictation.inputMonitor}
       engine={dictation.engine}
       {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
       {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
