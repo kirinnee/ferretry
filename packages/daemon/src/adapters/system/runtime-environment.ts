@@ -35,9 +35,13 @@ export class RuntimeEnvironment implements EnvironmentPort {
    * THE ENVIRONMENT WINS OVER THE BUILD, so somebody running a fork or pointing a daemon at their
    * own directory has an explicit escape hatch without recompiling. It is a service address, not a
    * secret, and an explicit daemon configuration still wins before discovery is considered.
+   *
+   * `off` asks no directory at all: the daemon is direct-only and says so. Every test tier sets it, so
+   * no test boot reaches the hosted service.
    */
   relayDirectoryOrigin(): string | undefined {
     const configured = this.values.FY_RELAY_DIRECTORY_ORIGIN;
+    if (configured?.trim() === 'off') return undefined;
     if (configured !== undefined && configured.trim() !== '') return configured.trim();
     return compiledRelayDirectory();
   }

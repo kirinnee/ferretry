@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Tests run offline (packages/daemon/tests/support/offline-environment.ts preloads the same): no booted
+# daemon follows the published model catalog or asks the hosted relay directory.
+export FY_MODEL_CATALOG="${FY_MODEL_CATALOG:-off}"
+export FY_RELAY_DIRECTORY_ORIGIN="${FY_RELAY_DIRECTORY_ORIGIN:-off}"
+
 mode="${1:-}"
 group="${2:-}"
 [[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" ]] && echo "❌ usage: $0 <unit|int|sit> [group]" >&2 && exit 2

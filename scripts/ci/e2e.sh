@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Tests run offline (packages/daemon/tests/support/offline-environment.ts preloads the same): no booted
+# daemon follows the published model catalog or asks the hosted relay directory.
+export FY_MODEL_CATALOG="${FY_MODEL_CATALOG:-off}"
+export FY_RELAY_DIRECTORY_ORIGIN="${FY_RELAY_DIRECTORY_ORIGIN:-off}"
+
 # The e2e tier, in CI: the compiled `fy`/`fyd`, the real built PWA, a real Chrome and a local
 # rendezvous, driven through every product journey in `tests/e2e/` (`tests/e2e/README.md`).
 #
