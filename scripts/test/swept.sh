@@ -20,10 +20,12 @@ set -euo pipefail
 
 root_dir="$(git rev-parse --show-toplevel)"
 
-# macOS keeps TMPDIR under /var/folders, long enough that a nested socket path passes the 104-byte
-# sun_path limit; /tmp (/private/tmp) leaves the headroom every suite was written against.
-base="${TMPDIR:-/tmp}"
-[ "$(uname -s)" = "Darwin" ] && base="/tmp"
+# /tmp, not $TMPDIR, whenever it is writable. Suites were written against the paths they got, and some
+# are length-sensitive: a socket path has a 104-108 byte sun_path limit, and a turn instruction that
+# names a deeper file crosses the send-vs-paste threshold. `nix develop` on CI and macOS both set a
+# TMPDIR far longer than /tmp, so a run root under it broke a lifecycle test that passed before.
+base="/tmp"
+[ ! -w "${base}" ] && base="${TMPDIR:-/tmp}"
 run_tmp=""
 
 cleanup() {
