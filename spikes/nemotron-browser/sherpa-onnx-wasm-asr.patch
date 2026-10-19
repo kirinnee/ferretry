@@ -1,0 +1,48 @@
+diff --git a/build-wasm-simd-asr.sh b/build-wasm-simd-asr.sh
+index 7ba86c4..9eb5a82 100755
+--- a/build-wasm-simd-asr.sh
++++ b/build-wasm-simd-asr.sh
+@@ -58,7 +58,7 @@ cmake \
+   -DSHERPA_ONNX_ENABLE_BINARY=OFF \
+   -DSHERPA_ONNX_LINK_LIBSTDCPP_STATICALLY=OFF \
+   ..
+-make -j2
++make -j24
+ make install
+ 
+ ls -lh install/bin/wasm/asr
+diff --git a/wasm/asr/CMakeLists.txt b/wasm/asr/CMakeLists.txt
+index 5b0b307..d8552ed 100644
+--- a/wasm/asr/CMakeLists.txt
++++ b/wasm/asr/CMakeLists.txt
+@@ -2,7 +2,7 @@ if(NOT $ENV{SHERPA_ONNX_IS_USING_BUILD_WASM_SH})
+   message(FATAL_ERROR "Please use ./build-wasm-simd-asr.sh to build for wasm ASR")
+ endif()
+ 
+-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/encoder.onnx")
++if(FALSE)
+   message(FATAL_ERROR "Please read ${CMAKE_CURRENT_SOURCE_DIR}/assets/README.md before you continue")
+ endif()
+ 
+@@ -37,11 +37,10 @@ endforeach()
+ list(JOIN mangled_exported_functions "," all_exported_functions)
+ 
+ include_directories(${CMAKE_SOURCE_DIR})
+-set(MY_FLAGS " -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=512MB -s ALLOW_MEMORY_GROWTH=1")
++set(MY_FLAGS " -s FORCE_FILESYSTEM=1 -s INITIAL_MEMORY=512MB -s ALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4GB -sMODULARIZE=0")
+ string(APPEND MY_FLAGS " -sSTACK_SIZE=10485760 ") # 10MB
+ string(APPEND MY_FLAGS " -sEXPORTED_FUNCTIONS=[_CopyHeap,_malloc,_free,${all_exported_functions}] ")
+-string(APPEND MY_FLAGS "--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/assets@. ")
+-string(APPEND MY_FLAGS " -sEXPORTED_RUNTIME_METHODS=['ccall','stringToUTF8','setValue','getValue','lengthBytesUTF8','UTF8ToString','HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64'] ")
++string(APPEND MY_FLAGS " -sEXPORTED_RUNTIME_METHODS=['ccall','stringToUTF8','setValue','getValue','lengthBytesUTF8','UTF8ToString','HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64','FS'] ")
+ 
+ message(STATUS "MY_FLAGS: ${MY_FLAGS}")
+ 
+@@ -65,7 +64,6 @@ install(
+     "sherpa-onnx-asr.js"
+     "app-asr.js"
+     "$<TARGET_FILE_DIR:sherpa-onnx-wasm-main-asr>/sherpa-onnx-wasm-main-asr.wasm"
+-    "$<TARGET_FILE_DIR:sherpa-onnx-wasm-main-asr>/sherpa-onnx-wasm-main-asr.data"
+   DESTINATION
+     bin/wasm/asr
+ )

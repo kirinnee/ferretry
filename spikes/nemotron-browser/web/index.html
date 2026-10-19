@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Streaming ASR Bench</title>
+<meta name="description" content="Ferretry spike: can NVIDIA Nemotron streaming ASR run in a phone browser? Measures download, load, memory, real-time factor and word latency against Parakeet.">
+<style>
+  :root {
+    --bg: #f7f6f2; --surface: #ffffff; --ink: #1b1b18; --muted: #5d5c55; --line: #d9d7cf;
+    --accent: #2f5d50; --accent-ink: #ffffff; --warn: #8a4b00; --bad: #a3261b; --good: #276738;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141413; --surface: #1e1e1c; --ink: #ecebe6; --muted: #a8a69d; --line: #3a3935;
+      --accent: #7fbfa9; --accent-ink: #10201b; --warn: #e3a35b; --bad: #f08a7e; --good: #7fcf8f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141413; --surface: #1e1e1c; --ink: #ecebe6; --muted: #a8a69d; --line: #3a3935;
+    --accent: #7fbfa9; --accent-ink: #10201b; --warn: #e3a35b; --bad: #f08a7e; --good: #7fcf8f;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px 16px 48px; }
+  h1 { font-size: 1.3rem; margin: 4px 0 2px; }
+  p.lede { color: var(--muted); margin: 0 0 14px; }
+  section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 12px 0; }
+  h2 { font-size: 1rem; margin: 0 0 10px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  select, button { font: inherit; min-height: 44px; border-radius: 10px; }
+  select { width: 100%; padding: 0 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  button { padding: 0 14px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  .hint { color: var(--muted); font-size: .88rem; margin: 6px 0 0; }
+  #status { font-variant-numeric: tabular-nums; min-height: 1.4em; margin-top: 10px; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); }
+  #live { min-height: 3.2em; padding: 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--line); white-space: pre-wrap; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-variant-numeric: tabular-nums; }
+  dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+  .runs { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .85rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  code { font-size: .85em; }
+  @media (max-width: 600px) {
+    #runs thead { display: none; }
+    #runs tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    #runs td { display: grid; grid-template-columns: 9.5em 1fr; gap: 8px; border: 0; padding: 2px 0; }
+    #runs td::before { content: attr(data-label); color: var(--muted); }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Streaming ASR on this device</h1>
+  <p class="lede">A Ferretry spike. Pick a model, load it, then play a bundled clip or speak. Nothing is uploaded: audio stays in this tab and models come straight from Hugging Face.</p>
+
+  <section>
+    <h2>1 · Model</h2>
+    <label for="model">Speech model</label>
+    <select id="model"></select>
+    <p class="hint" id="modelNote"></p>
+    <p class="hint">Use Wi-Fi: the Nemotron and Parakeet models are about 0.66 GB each. Try the small baseline first, then one Nemotron, then Parakeet.</p>
+    <div class="row">
+      <button class="primary" id="load">Load model</button>
+      <button id="clear">Delete downloaded models</button>
+    </div>
+    <div id="status" role="status"></div>
+    <div class="bar"><i id="progress"></i></div>
+  </section>
+
+  <section>
+    <h2>2 · Run</h2>
+    <div class="row" style="margin-top:0">
+      <button class="primary" id="clipLive" disabled>Play clips live</button>
+      <button id="clipFast" disabled>Clips flat-out (RTF)</button>
+      <button id="mic" disabled>Speak (tap again to stop)</button>
+    </div>
+    <p class="hint">“Live” feeds 4 LibriSpeech clips (37 s) at real speed, the way a microphone would. “Flat-out” feeds them as fast as the device can decode. Speak streams your microphone.</p>
+    <p class="hint" style="margin-top:10px"><b>Words as they arrive</b></p>
+    <div id="live" aria-live="off"></div>
+  </section>
+
+  <section>
+    <h2>3 · Results</h2>
+    <dl id="summary"></dl>
+    <div class="runs"><table id="runs"><thead><tr><th>Model</th><th>Run</th><th>RTF</th><th>Step p50/p95 ms</th><th>First word</th><th>Word lag p50/p95</th><th>Final after end</th><th>WER</th><th>Heap</th></tr></thead><tbody></tbody></table></div>
+    <div class="row"><button id="copy">Copy results as JSON</button></div>
+    <p class="hint">RTF = decode time ÷ audio time (under 1 keeps up; under 0.5 is comfortable). Word lag = when a word appeared minus when it was spoken. Heap = WebAssembly memory the engine holds (Parakeet’s runtime does not expose it).</p>
+  </section>
+
+  <section>
+    <h2>This device</h2>
+    <dl id="device"></dl>
+  </section>
+</main>
+<script type="module" src="bench.js"></script>
+</body>
+</html>
