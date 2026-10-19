@@ -598,9 +598,22 @@ describe('Pack mode teaching', () => {
     should(sections.map(section => section.env)).deepEqual([HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV]);
     should(sections[1]?.text).equal(teaching);
     should(PACK_ENV).equal('FY_PACK');
-    for (const step of ['`zz recommend "<part>"`', '`zz new --runtime', '`zz new --auto', '`zz wait <id>`', '`zz stop children'])
+    for (const step of [
+      '`zz recommend "<part>"`',
+      '`zz new --runtime',
+      '`zz new --auto',
+      '`zz wait <id>`',
+      '`zz stop children',
+    ])
       should(teaching).containEql(step);
-    for (const code of ['out_of_quota', 'not_logged_in', 'cli_missing', 'probe_failed', 'limit_reached', 'depth_exceeded'])
+    for (const code of [
+      'out_of_quota',
+      'not_logged_in',
+      'cli_missing',
+      'probe_failed',
+      'limit_reached',
+      'depth_exceeded',
+    ])
       should(teaching).containEql(code);
     should(teaching).not.containEql('fy ');
     should(teaching.length).be.below(1200);

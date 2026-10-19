@@ -615,7 +615,10 @@ describe("each ferret's sections of the appended system prompt", () => {
 
   it('should name the binary the runtime launches, and leave every other argument and a non-agent alone', () => {
     // Arrange
-    const agent = { ...account({ flags: [`--append-system-prompt=${BASE}`, '--other=x'] }), fyCommand: '/opt/f/bin/zz' };
+    const agent = {
+      ...account({ flags: [`--append-system-prompt=${BASE}`, '--other=x'] }),
+      fyCommand: '/opt/f/bin/zz',
+    };
     const person = { ...agent, agent: false };
 
     // Act
@@ -639,7 +642,13 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     SWITCHES.filter((_switch, index) => (mask & (1 << index)) !== 0),
   );
   const wrapperFor = (harness: HarnessKind): string => {
-    const layer = fixedLayerFor({ harness, agentPermissions: 'auto', cwd: '/w', fyCommand: FY, acceptsAutoPermissionMode: true });
+    const layer = fixedLayerFor({
+      harness,
+      agentPermissions: 'auto',
+      cwd: '/w',
+      fyCommand: FY,
+      acceptsAutoPermissionMode: true,
+    });
     if (!layer.ok) throw new Error(layer.refusal.message);
     return render({ ...account({ kind: harness, flags: layer.layer.args }), fyCommand: FY });
   };
@@ -656,7 +665,10 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       const prompt =
         harness === 'claude'
           ? args.find(arg => arg.startsWith('--append-system-prompt='))?.slice('--append-system-prompt='.length)
-          : JSON.parse(args.find(arg => arg.startsWith('developer_instructions='))?.slice('developer_instructions='.length) ?? '""');
+          : JSON.parse(
+              args.find(arg => arg.startsWith('developer_instructions='))?.slice('developer_instructions='.length) ??
+                '""',
+            );
 
       // Assert
       should(prompt).equal(expected);

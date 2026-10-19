@@ -60,7 +60,11 @@ const cases: SchemaCase[] = [
   },
   { name: 'refusal code', schema: pack.PackRefusalCodeSchema, value: 'probe_failed' },
   { name: 'refusal', schema: pack.PackRefusalSchema, value: refusal },
-  { name: 'recommend request', schema: pack.PackRecommendRequestSchema, value: { task: 'rename a symbol', useCase: 'bulk' } },
+  {
+    name: 'recommend request',
+    schema: pack.PackRecommendRequestSchema,
+    value: { task: 'rename a symbol', useCase: 'bulk' },
+  },
   { name: 'candidate view', schema: pack.PackCandidateSchema, value: ready },
   {
     name: 'recommendation',
@@ -76,14 +80,33 @@ const cases: SchemaCase[] = [
   {
     name: 'new request',
     schema: pack.PackNewRequestSchema,
-    value: { task: 'do it', parent: 'p', runtime: 'claude-auto-x', model: 'm', effort: 'low', cwd: '/w', name: 'Do It', mode: 'auto' },
+    value: {
+      task: 'do it',
+      parent: 'p',
+      runtime: 'claude-auto-x',
+      model: 'm',
+      effort: 'low',
+      cwd: '/w',
+      name: 'Do It',
+      mode: 'auto',
+    },
   },
-  { name: 'automatic new request', schema: pack.PackNewRequestSchema, value: { task: 'do it', auto: true, useCase: 'bulk' } },
+  {
+    name: 'automatic new request',
+    schema: pack.PackNewRequestSchema,
+    value: { task: 'do it', auto: true, useCase: 'bulk' },
+  },
   { name: 'attempt', schema: pack.PackAttemptSchema, value: attempt },
   {
     name: 'started',
     schema: pack.PackNewOutcomeSchema,
-    value: { outcome: 'started', view: sessionView, decidedBy: 'guide', attempts: [attempt], note: 'Jev was over its cap.' },
+    value: {
+      outcome: 'started',
+      view: sessionView,
+      decidedBy: 'guide',
+      attempts: [attempt],
+      note: 'Jev was over its cap.',
+    },
   },
   {
     name: 'refused',
@@ -112,7 +135,11 @@ describe('pack schemas', () => {
   it('should refuse what a caller or an editor could get wrong', () => {
     assertRejects([
       { name: 'an unknown key', schema: pack.PackFileSchema, value: { turbo: true } },
-      { name: 'depth zero', schema: pack.PackLimitsSchema, value: { interactiveChildren: 1, autoChildren: 1, maxDepth: 0 } },
+      {
+        name: 'depth zero',
+        schema: pack.PackLimitsSchema,
+        value: { interactiveChildren: 1, autoChildren: 1, maxDepth: 0 },
+      },
       { name: 'a probe too short', schema: pack.PackProbeSchema, value: { timeoutSeconds: 1, cacheSeconds: 0 } },
       { name: 'an upper-case id', schema: pack.GuideUseCaseIdSchema, value: 'Bulk' },
       { name: 'a blank why', schema: pack.GuideCandidateSchema, value: { ...candidate, why: '  ' } },
@@ -122,7 +149,11 @@ describe('pack schemas', () => {
         value: { useCases: [useCase, { ...useCase, title: 'Again' }] },
       },
       { name: 'neither runtime nor auto', schema: pack.PackNewRequestSchema, value: { task: 'x' } },
-      { name: 'auto with a runtime', schema: pack.PackNewRequestSchema, value: { task: 'x', auto: true, runtime: 'r' } },
+      {
+        name: 'auto with a runtime',
+        schema: pack.PackNewRequestSchema,
+        value: { task: 'x', auto: true, runtime: 'r' },
+      },
       { name: 'an unknown code', schema: pack.PackRefusalCodeSchema, value: 'busy' },
     ]);
   });
