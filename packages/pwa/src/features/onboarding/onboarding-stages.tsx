@@ -56,7 +56,7 @@ const CHOICE =
   'min-h-[36px] rounded-control border px-2 text-meta focus-visible:outline-focus focus-visible:outline-offset-focus';
 
 const CHOICE_TONE = {
-  on: 'border-accent bg-accent-bg font-semibold text-fg',
+  on: 'border-accent bg-accent-soft font-semibold text-fg',
   off: 'border-border bg-surface-2 text-muted',
 } as const;
 

@@ -20,7 +20,7 @@ export function SecretPill({ name, set, className, ...rest }: SecretPillProps) {
     <span
       className={cn(
         'inline-flex max-w-full items-center gap-1 self-start break-all rounded-control px-2 py-0.5 font-mono text-meta font-medium',
-        set ? 'bg-accent-soft text-ok' : 'bg-warn-soft text-warn',
+        set ? 'bg-accent-soft text-ok' : 'bg-warn-bg text-warn',
         className,
       )}
       {...rest}

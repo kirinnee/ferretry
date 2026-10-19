@@ -36,6 +36,12 @@ export interface ResolvedCommand {
   readonly flags: readonly string[];
   /** The alias that produced this command, when it was not declared explicitly. */
   readonly alias: string | undefined;
+  /**
+   * The absolute path the wrapper execs for its harness, as the daemon resolved it (docs/harness-paths.md).
+   * Absent means the harness is not located on this host, and the wrapper then execs the bare name, which
+   * is the one case where it can only fail or find what the person's own PATH holds.
+   */
+  readonly harnessCommand?: string | undefined;
 }
 
 /** Marks a script as generated, so provisioning can tell its own output from anything else. */
@@ -343,6 +349,11 @@ export interface RuntimeWrapperInput {
   readonly trustLaunchFolder?: boolean;
   /** The `fy` executable a wrapper runs to claim a conversation it is about to resume. */
   readonly fyCommand: string;
+  /**
+   * The absolute path the wrapper execs for its harness, as the daemon resolved it (docs/harness-paths.md).
+   * Absent means the harness is not located on this host, and the wrapper then execs the bare name.
+   */
+  readonly harnessCommand?: string | undefined;
   readonly secretsFile?: string | undefined;
   /**
    * Why this runtime cannot launch at all, when it cannot (O4, G5). The wrapper then says so and exits
@@ -470,7 +481,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
     ...(input.agent ? questionLines(input.harness) : []),
     '',
-    `exec ${HARNESS_BINARIES[input.harness]}${args === '' ? '' : ` ${args}`} "$@"`,
+    `exec ${input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand)}${args === '' ? '' : ` ${args}`} "$@"`,
     '',
   ].join('\n');
 }

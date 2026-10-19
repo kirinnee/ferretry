@@ -40,6 +40,7 @@ import {
   FleetCatalogRefusal,
   FleetCatalogService,
   type FleetCatalogServiceDeps,
+  harnessCommandsOf,
   machineAuthority,
   sameManifest,
 } from '../../../src/lib/fleet/catalog-service.ts';
@@ -1062,5 +1063,52 @@ describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () =
     should(sameManifest({ generatedAt: 'a', version: 1 } as never, { generatedAt: 'a', version: 2 })).be.false();
     should(sameManifest({ generatedAt: 'a' }, undefined)).be.false();
     should(sameManifest({ generatedAt: 'a' }, 'text')).be.false();
+  });
+});
+
+describe('the harness path a wrapper execs', () => {
+  const sources = async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() });
+
+  it('should hand the located harnesses to the plan, and leave an unlocated one to its name', () => {
+    // Act
+    const both = harnessCommandsOf(harness => `/opt/h/${harness}`);
+    const onlyCodex = harnessCommandsOf(harness => (harness === 'codex' ? '/opt/h/codex' : undefined));
+    const none = harnessCommandsOf(() => undefined);
+
+    // Assert
+    should(both).deepEqual({ claude: '/opt/h/claude', codex: '/opt/h/codex' });
+    should(onlyCodex).deepEqual({ codex: '/opt/h/codex' });
+    should(none).deepEqual({});
+  });
+
+  it('should write wrappers that exec the located path, and rewrite them when only that path moved', async () => {
+    // Arrange
+    let published: unknown;
+    let ids: RuntimeIds | undefined;
+    let current = true;
+    const { service, applied } = world({
+      modelCatalogs: sources,
+      publishedManifest: async () => published,
+      ids: async () => ids,
+      wrappersCurrent: async () => current,
+    });
+
+    // Act
+    const first = await service.republish();
+    published = applied[0]?.plan.manifest;
+    ids = (applied[0]?.plan as FleetModelApplyPlan | undefined)?.ids;
+    const unchanged = await service.republish();
+    current = false;
+    const moved = await service.republish();
+
+    // Assert
+    const wrapper = applied[0]?.plan.operations.find(
+      operation => operation.kind === 'file' && operation.path.endsWith('claude-default'),
+    );
+    should(wrapper)
+      .have.property('content')
+      .match(/\nexec '\/usr\/bin\/claude' /u);
+    should([first, unchanged, moved]).deepEqual(['applied', 'unchanged', 'applied']);
+    should(applied).have.length(2);
   });
 });

@@ -47,7 +47,7 @@ const ICON: Readonly<Record<OnboardingRouteId, ReactNode>> = {
 };
 
 const ROW =
-  'flex w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 px-3 py-3 text-left transition-colors hover:border-accent hover:bg-accent-bg focus-visible:outline-focus focus-visible:outline-offset-focus';
+  'flex w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 px-3 py-3 text-left transition-colors hover:border-accent hover:bg-accent-soft focus-visible:outline-focus focus-visible:outline-offset-focus';
 
 export interface OnboardingChooserProps {
   readonly onChoose: (route: OnboardingRouteId) => void;

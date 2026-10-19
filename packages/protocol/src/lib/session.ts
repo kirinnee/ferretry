@@ -392,13 +392,21 @@ export const SessionConfigSchema = z.object({
   transcript: TranscriptProvenanceSchema.optional(),
   retry: RetryPolicySchema,
   /**
-   * Whether this ferret is told it may explain with hypermedia (docs/hypermedia.md). ABSENT MEANS ON: a
-   * session started before the switch existed is instructed at its next launch unless the owner turns
-   * it off. Read at launch, so a change takes effect at the next launch.
+   * Whether this ferret is told it may explain with hypermedia (docs/hypermedia.md). ABSENT MEANS THE MODE'S DEFAULT: on
+   * for an interactive ferret, off for an auto one, so a session started before the switch existed follows it
+   * at its next launch unless the owner set it explicitly. Read at launch, so a change takes effect at the next launch.
    */
   hypermedia: z.boolean().optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
+
+/**
+ * Whether a ferret is told it may use hypermedia, resolved: the recorded switch, else the default for
+ * its mode — ON for an interactive ferret, OFF for every auto one (a worker, a warden, a miner), which
+ * has no reader to look at a picture (docs/hypermedia.md).
+ */
+export const sessionHypermediaEnabled = (config: Pick<SessionConfig, 'mode' | 'hypermedia'>): boolean =>
+  config.hypermedia ?? config.mode === 'interactive';
 
 export const SessionHealthSchema = z.enum([
   'healthy',

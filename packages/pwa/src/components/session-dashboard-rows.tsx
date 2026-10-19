@@ -26,6 +26,7 @@ import { Badge } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
 import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
+import { pendingQuestionPreview } from '../shell/sessions-bar-model.ts';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
 import {
@@ -385,6 +386,7 @@ export const LeanSessionCard = memo(function LeanSessionCard({
   const cfg = view.config;
   const task = sessionTaskName(cfg);
   const preview = task === '' ? view.state.activity?.trim() : undefined;
+  const question = pendingQuestionPreview(view);
   // A request for a human already says "you" louder than the word would.
   const word = !statusHoisted && !view.state.waiting && !view.state.needsHuman;
   return (
@@ -423,6 +425,11 @@ export const LeanSessionCard = memo(function LeanSessionCard({
           {preview}
         </span>
       ) : null}
+      {question === undefined ? null : (
+        <span className="fy-dashboard-row__question truncate text-ui" data-session-question="" title={question}>
+          {question}
+        </span>
+      )}
     </RouteLink>
   );
 });

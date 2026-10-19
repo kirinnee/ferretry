@@ -134,6 +134,12 @@ export interface MaterialiseInput {
   readonly claudeStatusline: ClaudeStatuslineCommand;
   /** The `fy` executable a wrapper runs to claim a conversation. */
   readonly fyCommand: string;
+  /**
+   * Where each harness lives on this host, absolute, as the daemon resolved it. A wrapper execs this
+   * path rather than the harness's name, so a session runs the Claude or Codex that was configured and
+   * imported, never one a PATH happens to put first (docs/harness-paths.md).
+   */
+  readonly harnessCommands?: Readonly<Partial<Record<HarnessKind, string>>>;
   /** The person's own Codex home (`hostCodexHome`); absent when it cannot be named. */
   readonly hostCodexHome?: string;
   /** Whether the installed Claude accepts `--permission-mode auto` (O4). */
@@ -450,6 +456,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         trustLaunchFolder: runtime.agent && harness === 'codex',
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
+        harnessCommand: input.harnessCommands?.[harness],
         refusal: blocked,
       }),
       mode: EXECUTABLE_MODE,
