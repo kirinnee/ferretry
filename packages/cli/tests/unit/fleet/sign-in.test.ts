@@ -289,6 +289,82 @@ describe('runSignIn', () => {
     should(link.prompt.questions).have.length(1);
   });
 
+  describe('a sign-in that finished but whose login was not found', () => {
+    const NOT_FOUND =
+      'the sign-in finished, but no usable login was found for this credential. Checked the keychain item "Claude Code-credentials" (account "sam") — nothing there.';
+    const missing = (extra: Record<string, unknown> = {}) =>
+      flow({ state: 'failed', reason: NOT_FOUND, remedy: 'sign this login in on the host', recheck: true, ...extra });
+
+    it('should say where it looked, look again when asked, and finish signed in', async () => {
+      // Arrange
+      const world = fakeWorld({ answers: [''], gateway: { startSignIn: () => missing() } });
+
+      // Act
+      const signedIn = await runSignIn(world.deps, 'claude-you');
+
+      // Assert
+      should(signedIn).be.true();
+      should(world.out.text('warn')).equal(NOT_FOUND);
+      should(world.prompt.questions).eql(['Look for the login again, without signing in again? [Y/n]']);
+      should(world.gateway.called('recheckSignIn')[0]?.args).eql(['flow-1']);
+      should(world.gateway.called('startSignIn')).have.length(1);
+      should(world.out.text('success')).equal('Signed in. claude-you is ready to use.');
+    });
+
+    it('should keep looking while asked, then report the failure once declined', async () => {
+      // Arrange
+      const world = fakeWorld({
+        answers: ['y', 'n'],
+        gateway: {
+          startSignIn: () => missing(),
+          recheckSignIn: () => ({ outcome: 'refused', reason: 'still nothing there' }),
+        },
+      });
+
+      // Act
+      const signedIn = await runSignIn(world.deps, 'claude-you');
+
+      // Assert
+      should(signedIn).be.false();
+      should(world.gateway.called('recheckSignIn')).have.length(1);
+      should(world.out.text('warn')).equal(`${NOT_FOUND}\nstill nothing there`);
+      should(world.out.text('error')).equal(`Sign-in did not finish: ${NOT_FOUND}`);
+      should(world.out.exitCode).equal(1);
+    });
+
+    it('should stop asking when the daemon has nothing left to look at, and never offer a Codex link', async () => {
+      // Arrange — a Codex device flow that finished: looking again is the question, not a link.
+      const world = fakeWorld({
+        answers: ['yes'],
+        gateway: {
+          startSignIn: () => missing({ harness: 'codex', credentialId: 'codex-you' }),
+          recheckSignIn: () => ({ outcome: 'conflict', reason: 'start a new sign-in instead' }),
+        },
+      });
+
+      // Act
+      const signedIn = await runSignIn(world.deps, 'codex-you');
+
+      // Assert
+      should(signedIn).be.false();
+      should(world.prompt.questions).eql(['Look for the login again, without signing in again? [Y/n]']);
+      should(world.out.exitCode).equal(1);
+    });
+
+    it('should not ask off a terminal', async () => {
+      // Arrange
+      const world = fakeWorld({ interactive: false, gateway: { startSignIn: () => missing() } });
+
+      // Act
+      const signedIn = await runSignIn(world.deps, 'claude-you');
+
+      // Assert
+      should(signedIn).be.false();
+      should(world.prompt.questions).be.empty();
+      should(world.gateway.called('recheckSignIn')).be.empty();
+    });
+  });
+
   it('should refuse a caller that needs a passkey confirmation, before any sign-in starts', async () => {
     const world = fakeWorld({
       gateway: {

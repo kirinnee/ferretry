@@ -222,6 +222,98 @@ describe('CredentialSignIn', () => {
     await view.unmount();
   });
 
+  describe('a sign-in that finished but whose login was not found', () => {
+    const NOT_FOUND = 'the sign-in finished, but no usable login was found for this credential.';
+    const missing = (finding: string): HarnessLoginFlow => ({
+      harness: 'claude',
+      flowId: 'flow-1',
+      credentialId: 'claude-work',
+      identity: 'claude:you@example.com',
+      startedAt: '2026-10-13T08:00:00.000Z',
+      expiresAt: '2026-10-13T08:10:00.000Z',
+      state: 'failed',
+      reason: `${NOT_FOUND} Checked ${finding}.`,
+      remedy: 'Run fy credential signin claude-work.',
+      recheck: true,
+    });
+    const ITEM = 'the keychain item "Claude Code-credentials" (account "sam") — nothing there';
+
+    it('says where it looked, and finishes on a second look that finds the login', async () => {
+      const { view, calls, signedIn } = await open({
+        [LOGIN]: missing(ITEM),
+        [`POST ${FLOW}`]: { outcome: 'accepted', flow: claudeFlow('complete') },
+      });
+      await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+      expect(state(view.container)).toBe('failed');
+      expect(view.container.textContent).toContain(ITEM);
+
+      await click(view.container.querySelector('[data-sign-in-recheck]'), 'Look for the login again');
+
+      expect(only(calls, `POST ${FLOW}`)[0]?.body).toEqual({ method: 'recheck' });
+      expect(only(calls, LOGIN)).toHaveLength(1);
+      expect(state(view.container)).toBe('complete');
+      expect(signedIn).toEqual(['signed-in']);
+      await view.unmount();
+    });
+
+    it('says a second look found nothing again, and shows what that look found', async () => {
+      const LATER = 'the file /Users/sam/.claude/.credentials.json — nothing there';
+      const { view, calls } = await open({
+        [LOGIN]: missing(ITEM),
+        [`POST ${FLOW}`]: { outcome: 'refused', reason: `${NOT_FOUND} Checked ${LATER}.` },
+        [`GET ${FLOW}`]: missing(LATER),
+      });
+      await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+
+      await click(view.container.querySelector('[data-sign-in-recheck]'), 'Look for the login again');
+
+      expect(only(calls, `GET ${FLOW}`)).toHaveLength(1);
+      expect(state(view.container)).toBe('failed');
+      expect(view.container.textContent).toContain('Looked again just now, and there is still no usable login.');
+      expect(view.container.textContent).toContain(LATER);
+      expect(view.container.querySelector('[data-sign-in-recheck]')).not.toBeNull();
+      await view.unmount();
+    });
+
+    it('says a second look the machine could not answer', async () => {
+      const { view } = await open({
+        [LOGIN]: missing(ITEM),
+        [`POST ${FLOW}`]: new FyHttpError('This machine could not look.', 500, 'internal'),
+      });
+      await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+
+      await click(view.container.querySelector('[data-sign-in-recheck]'), 'Look for the login again');
+
+      expect(view.container.textContent).toContain('This machine could not look.');
+      expect(state(view.container)).toBe('failed');
+      await view.unmount();
+    });
+
+    it('offers no second look on any other ending', async () => {
+      const { view } = await open({ [LOGIN]: claudeFlow('failed') });
+      await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+
+      expect(view.container.querySelector('[data-sign-in-recheck]')).toBeNull();
+      await view.unmount();
+    });
+
+    it('offers a second look on a Codex sign-in too', async () => {
+      const { view } = await open(
+        {
+          [LOGIN]: { ...missing(ITEM), harness: 'codex', credentialId: 'codex', identity: 'codex:you@example.com' },
+          [`POST ${FLOW}`]: { outcome: 'accepted', flow: codexFlow('complete') },
+        },
+        { credential: CODEX },
+      );
+      await click(view.container.querySelector('[data-change-submit]'), 'the start button');
+
+      await click(view.container.querySelector('[data-sign-in-recheck]'), 'Look for the login again');
+
+      expect(state(view.container)).toBe('complete');
+      await view.unmount();
+    });
+  });
+
   it('shows Codex’s link and device code, re-reads while it waits, and finishes by itself', async () => {
     let reads = 0;
     const { view, calls, signedIn } = await open(

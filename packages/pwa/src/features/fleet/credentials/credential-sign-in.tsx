@@ -29,6 +29,7 @@ import {
   type CredentialLoginFlow,
   cancelCredentialSignIn,
   readCredentialSignIn,
+  recheckCredentialSignIn,
   restartCredentialSignIn,
   startCredentialSignIn,
   submitCredentialSignInCode,
@@ -176,6 +177,30 @@ export function CredentialSignIn({
     }
   };
 
+  /**
+   * Look in the store again, launching nothing: for a sign-in whose harness finished but whose login was
+   * not found — it may have landed late. Found, the flow completes; still missing, the flow's own reason
+   * now says what THIS look found, and the refusal says a look was made.
+   */
+  const recheck = async (): Promise<void> => {
+    if (flow === null) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const client = await createClient(connection);
+      const answer = await recheckCredentialSignIn(client, flow.flowId);
+      if (answer.outcome === 'accepted') finished(answer.flow);
+      else {
+        setRefusal('Looked again just now, and there is still no usable login. What that look found is below.');
+        finished(await readCredentialSignIn(client, flow.flowId));
+      }
+    } catch (error) {
+      setRefusal(changeRefusalSentence(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const cancel = async (): Promise<void> => {
     if (flow === null) return;
     setBusy(true);
@@ -247,6 +272,7 @@ export function CredentialSignIn({
     onStart: again,
     onCancel: () => void cancel(),
     ...(waiting(flow) ? { onStartOver: () => void start(true, flow.flowId) } : {}),
+    ...(flow.state === 'failed' && flow.recheck === true ? { onRecheck: () => void recheck() } : {}),
   };
   return (
     <div data-credential-sign-in={flow.state}>

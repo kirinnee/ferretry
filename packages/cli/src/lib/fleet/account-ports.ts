@@ -63,6 +63,8 @@ export interface IAccountGateway {
   startSignIn(credentialId: string, method?: HarnessLoginCodexMethod, restart?: boolean): Promise<HarnessLoginFlow>;
   signInStatus(flowId: string): Promise<HarnessLoginFlow>;
   submitSignInCode(flowId: string, code: string): Promise<HarnessLoginSubmission>;
+  /** Look in the store of a sign-in that ended `recheck` again, launching nothing. */
+  recheckSignIn(flowId: string): Promise<HarnessLoginSubmission>;
   cancelSignIn(flowId: string): Promise<HarnessLoginFlow>;
 }
 

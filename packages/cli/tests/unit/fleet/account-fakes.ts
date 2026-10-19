@@ -246,6 +246,7 @@ export interface FakeAnswers {
   startSignIn: () => HarnessLoginFlow;
   signInStatus: () => HarnessLoginFlow;
   submitSignInCode: () => HarnessLoginSubmission;
+  recheckSignIn: () => HarnessLoginSubmission;
   cancelSignIn: () => HarnessLoginFlow;
 }
 
@@ -280,6 +281,7 @@ class FakeGateway implements IAccountGateway {
       startSignIn: () => flow({ state: 'complete' }),
       signInStatus: () => flow({ state: 'complete' }),
       submitSignInCode: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
+      recheckSignIn: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
       cancelSignIn: () => flow({ state: 'failed', reason: 'cancelled', remedy: 'retry' }),
       ...overrides,
     };
@@ -355,6 +357,9 @@ class FakeGateway implements IAccountGateway {
   }
   submitSignInCode(id: string, code: string) {
     return this.#record('submitSignInCode', [id, code], this.answers.submitSignInCode);
+  }
+  recheckSignIn(id: string) {
+    return this.#record('recheckSignIn', [id], this.answers.recheckSignIn);
   }
   cancelSignIn(id: string) {
     return this.#record('cancelSignIn', [id], this.answers.cancelSignIn);

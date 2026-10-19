@@ -41,6 +41,7 @@ import {
   type Credential,
   type CredentialStatusReason,
   type CredentialStatusView,
+  type CredentialStoreInspection,
   type CredentialStorePaths,
   type CredentialStoreResolution,
   type CredentialSubject,
@@ -49,11 +50,12 @@ import {
   type FleetUsageWindow,
   type HarnessKind,
   HOST_CLAUDE_SECURE_STORAGE,
-  type LocalCredentialReading,
   type PassiveUsageRecord,
   type ProviderPreset,
   resolveCredentialStore,
+  storeInspectionWords,
   type StoredCredentialResolution,
+  usableCredentialReading,
 } from '@ferretry/fleet';
 import {
   type FleetCredentialAct,
@@ -115,8 +117,11 @@ export interface FleetCredentialCatalogDeps {
   /** The machine's account model, or `undefined` when there is no fleet yet. Throws when unreadable. */
   document(): Promise<AccountModel | undefined>;
   readonly paths: CredentialStorePaths;
-  /** The local classification of one store. Never material. */
-  classify(resolution: StoredCredentialResolution): Promise<LocalCredentialReading>;
+  /**
+   * One store read with its trail — the verdict and every place looked in, never material — so a sign-in
+   * that found no usable login can say where it looked and what was there.
+   */
+  inspect(resolution: StoredCredentialResolution): Promise<CredentialStoreInspection>;
   /** Creates a directory a sign-in writes into (0700). */
   ensureDirectory(path: string): Promise<void>;
 }
@@ -137,9 +142,6 @@ const CREDENTIAL_SIGN_IN_DIRECTORY = 'sign-in';
 
 /** The file Claude records the signed-in account in, inside a config directory. */
 const CLAUDE_ACCOUNT_FILE = '.claude.json';
-
-const usable = (reading: LocalCredentialReading): boolean =>
-  reading.state === 'valid' || reading.state === 'refreshable';
 
 /**
  * The machine's credentials, read from its fleet document on every call.
@@ -220,9 +222,18 @@ export class FleetCredentialCatalog {
     const resolution = entry.resolution;
     if (resolution.store === 'environment') return refusedSignIn(entry, environmentReason(entry));
     if ('unavailable' in resolution) return refusedSignIn(entry, resolution.unavailable);
-    const classify = this.deps.classify;
-    const signedIn = async (): Promise<boolean> =>
-      usable(await classify(resolution).catch((): LocalCredentialReading => ({ state: 'unreadable' })));
+    const inspect = this.deps.inspect;
+    const check = async (): Promise<SignInCheck> => {
+      let inspection: CredentialStoreInspection;
+      try {
+        inspection = await inspect(resolution);
+      } catch {
+        return { signedIn: false, finding: 'The store this login is kept in could not be read.' };
+      }
+      return usableCredentialReading(inspection.reading)
+        ? { signedIn: true }
+        : { signedIn: false, finding: storeInspectionWords(inspection) };
+    };
     const launch = credentialLaunch(resolution);
     const ensure = this.deps.ensureDirectory;
     return {
@@ -234,10 +245,16 @@ export class FleetCredentialCatalog {
       prepare: async () => {
         for (const directory of launch.directories) await ensure(directory);
       },
-      signedIn,
+      check,
     };
   }
 }
+
+/**
+ * Whether a sign-in left a usable login in its store — and, when it did not, what looking there found:
+ * which places were checked and what each held, in words, never a value.
+ */
+export type SignInCheck = { readonly signedIn: true } | { readonly signedIn: false; readonly finding: string };
 
 /** What a sign-in by credential id resolves to. */
 export type CredentialSignInTarget =
@@ -251,8 +268,8 @@ export type CredentialSignInTarget =
       readonly arguments: readonly string[];
       /** Creates the directories the login writes into. */
       prepare(): Promise<void>;
-      /** Whether the store now holds a usable login. */
-      signedIn(): Promise<boolean>;
+      /** Whether the store now holds a usable login, and what was found when it does not. Re-reads every call. */
+      check(): Promise<SignInCheck>;
     }
   | { readonly kind: 'refused'; readonly credentialId: string; readonly reason: string };
 

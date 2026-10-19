@@ -134,3 +134,15 @@ export const switchCredentialSignInToLink = async (
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ method: 'link' })),
   });
+
+/**
+ * Looks in the credential's store again, for a sign-in that ended `recheck`: the harness finished, but
+ * its login was not found. Launches nothing on the host and sends nothing but the request itself — a
+ * login that landed late completes the flow; one still missing answers `refused` with what was found.
+ */
+export const recheckCredentialSignIn = async (client: FleetClient, flowId: string): Promise<HarnessLoginSubmission> =>
+  await client.request(flowPath(flowId), HarnessLoginSubmissionSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(HarnessLoginSubmitRequestSchema.parse({ method: 'recheck' })),
+  });

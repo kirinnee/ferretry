@@ -170,6 +170,13 @@ const failureShape = {
    * so and offer a fresh one instead of a host command. Absent for every other failure.
    */
   lastCode: HarnessLoginLastCodeSchema.optional(),
+  /**
+   * Set when the harness's own login finished cleanly but the credential's store then held no usable
+   * login. The login may simply have landed late, or somewhere the daemon could not read at that moment,
+   * so a surface offers to LOOK AGAIN — a `{ method: 'recheck' }` submission, which re-reads the store
+   * without signing in again. `reason` says which places were checked and what each held.
+   */
+  recheck: z.literal(true).optional(),
 };
 
 /**
@@ -292,13 +299,16 @@ const HarnessLoginCodeSubmitSchema = z.strictObject({
 });
 
 /**
- * What a person can send to a running sign-in: the value they brought back, or — for a Codex device
- * code that did not work — "use a link instead". The switch rides the same request because it is the
- * same consent: the step-up this sign-in was started under covers the credential, not the method.
+ * What a person can send to a sign-in: the value they brought back, or — for a Codex device code that did
+ * not work — "use a link instead", or — for a sign-in that ended {@link failureShape} `recheck` — "look
+ * for the login again", which reads the credential's store once more and launches nothing. Each rides the
+ * same request because it is the same consent: the step-up this sign-in was started under covers the
+ * credential, not the method.
  */
 export const HarnessLoginSubmitRequestSchema = z.union([
   HarnessLoginCodeSubmitSchema,
   z.strictObject({ method: z.literal('link') }),
+  z.strictObject({ method: z.literal('recheck') }),
 ]);
 export type HarnessLoginSubmitRequest = z.infer<typeof HarnessLoginSubmitRequestSchema>;
 
