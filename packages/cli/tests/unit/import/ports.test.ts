@@ -43,16 +43,23 @@ describe('ProtocolImportGateway.list', () => {
   it('should carry only the query fields given, in the standard URL grammar', async () => {
     // Arrange
     const fake = client({
-      '/v1/imports/conversations?harness=claude&q=login+bug&since=2026-10-10T00%3A00%3A00.000Z&limit=20': listing([]),
+      '/v1/imports/conversations?source=ferretry&harness=claude&q=login+bug&since=2026-10-10T00%3A00%3A00.000Z&limit=20':
+        listing([]),
     });
     const gateway = new ProtocolImportGateway(fake);
 
     // Act
-    await gateway.list({ harness: 'claude', q: 'login bug', since: '2026-10-10T00:00:00.000Z', limit: 20 });
+    await gateway.list({
+      source: 'ferretry',
+      harness: 'claude',
+      q: 'login bug',
+      since: '2026-10-10T00:00:00.000Z',
+      limit: 20,
+    });
 
     // Assert
     should(fake.sent[0]?.path).equal(
-      '/v1/imports/conversations?harness=claude&q=login+bug&since=2026-10-10T00%3A00%3A00.000Z&limit=20',
+      '/v1/imports/conversations?source=ferretry&harness=claude&q=login+bug&since=2026-10-10T00%3A00%3A00.000Z&limit=20',
     );
   });
 

@@ -4,8 +4,8 @@ import {
   adoptRequest,
   EMPTY_FILTER,
   EMPTY_SELECTION,
-  foundLine,
   folderLabel,
+  foundLine,
   keepButtonLabel,
   listingPath,
   listingQuery,
@@ -171,8 +171,10 @@ describe('runtime choice and the listing query', () => {
 
   it('writes the listing address with a query string only when one is needed', () => {
     expect(listingPath({})).toBe(CONVERSATION_IMPORT_PATH);
-    expect(listingPath({ harness: 'claude', q: 'a b', since: '2026-10-06T08:00:00.000Z', limit: 5 })).toBe(
-      `${CONVERSATION_IMPORT_PATH}?harness=claude&q=a+b&since=2026-10-06T08%3A00%3A00.000Z&limit=5`,
+    expect(
+      listingPath({ source: 'ferretry', harness: 'claude', q: 'a b', since: '2026-10-06T08:00:00.000Z', limit: 5 }),
+    ).toBe(
+      `${CONVERSATION_IMPORT_PATH}?source=ferretry&harness=claude&q=a+b&since=2026-10-06T08%3A00%3A00.000Z&limit=5`,
     );
   });
 });

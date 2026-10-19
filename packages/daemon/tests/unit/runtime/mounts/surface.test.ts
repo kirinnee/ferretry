@@ -267,6 +267,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   fleetRefresh: { run: async () => undefined },
   conversationImport: {
     list: async () => ({ conversations: [], matched: 0, skipped: 0 }),
+    preview: async () => undefined,
     adopt: async () => ({ adopted: [], refused: [] }),
   },
   foreignHistory: {
@@ -635,7 +636,7 @@ describe('the mounted daemon surface', () => {
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
-      2 + // existing conversations kept as ferrets: the listing and the adoption
+      3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -763,8 +764,10 @@ describe('the mounted daemon surface', () => {
       'GET /v1/imports/history',
       'GET /v1/imports/history/:importId',
       // Existing conversations kept as ferrets: listed and searched, then adopted into sessions that
-      // RESUME them. Both are fleet.configure; neither returns a transcript or a file path.
+      // RESUME them, with the last few exchanges of one on request. All are fleet.configure; none
+      // returns a whole transcript or a file path.
       'GET /v1/imports/conversations',
+      'GET /v1/imports/conversations/:harness/:conversationId/preview',
       'POST /v1/imports/conversations/adopt',
       'GET /v1/gc',
       'POST /v1/gc',
