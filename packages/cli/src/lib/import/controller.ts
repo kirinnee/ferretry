@@ -1,7 +1,13 @@
 import type { ConversationAdoptResult, Harness, ImportableConversation } from '@ferretry/protocol';
-import { CONVERSATION_LAUNCH_MAX } from '@ferretry/protocol';
+import {
+  adoptionBatches,
+  CONVERSATION_IMPORT_WINDOW_DAYS,
+  CONVERSATION_LAUNCH_MAX,
+  conversationsToImport,
+  parseImportWindow,
+} from '@ferretry/protocol';
 import type { IImportGateway, IImportOutput } from './ports.ts';
-import { renderAdoptResult, renderImportListing, renderSearchMatches } from './render.ts';
+import { renderAdoptResult, renderImportListing, renderKeepResult, renderSearchMatches } from './render.ts';
 
 /** `<n>d`, `<n>h` or `<n>w` — the only duration grammar `--since` accepts, in either command. */
 const SINCE_PATTERN = /^(\d+)(d|h|w)$/u;
@@ -62,6 +68,16 @@ export interface ImportSelectOptions {
   readonly json?: boolean;
 }
 
+export interface ImportKeepOptions {
+  /** `true` keeps everything; otherwise `since` names the window. */
+  readonly all?: boolean;
+  /** One of the offered windows (`1d`, `3d`, `7d`, `14d`, `30d`). */
+  readonly since?: string;
+  readonly runtime?: string;
+  readonly harness?: Harness;
+  readonly json?: boolean;
+}
+
 /** The daemon's own cap on one query (`ConversationImportQuerySchema.limit`); resolving `--select` wants the lot. */
 const SELECT_RESOLUTION_LIMIT = 5_000;
 
@@ -82,6 +98,41 @@ export class ImportController {
     this.out.success(
       options.json === true ? JSON.stringify(listing, null, 2) : renderImportListing(listing, this.context.binaryName),
     );
+  }
+
+  /** `--all` / `--since <window>`: keep every conversation in the window as a stopped ferret, hard-linked, in batches. */
+  async keep(options: ImportKeepOptions): Promise<void> {
+    const runtime = options.runtime?.trim();
+    if (runtime === undefined || runtime === '') throw new Error('--runtime is required to import conversations');
+    const days = options.all === true ? undefined : parseImportWindow(options.since ?? '');
+    if (options.all !== true && days === undefined) {
+      throw new Error(
+        `--since takes one of ${CONVERSATION_IMPORT_WINDOW_DAYS.map(day => `${day}d`).join(', ')} when importing`,
+      );
+    }
+    const listing = await this.gateway.list({
+      ...(options.harness === undefined ? {} : { harness: options.harness }),
+      limit: SELECT_RESOLUTION_LIMIT,
+    });
+    const ids = conversationsToImport(listing.conversations, days, this.context.now());
+    const byId = new Map(listing.conversations.map(row => [row.id, row] as const));
+    const adopted: ConversationAdoptResult['adopted'] = [];
+    const refused: ConversationAdoptResult['refused'] = [];
+    if (ids.length > 0) {
+      const harness = options.harness ?? inferHarness(ids.map(id => byId.get(id) as ImportableConversation));
+      for (const batch of adoptionBatches(ids)) {
+        const result = await this.gateway.adopt({
+          harness,
+          runtime,
+          conversations: batch.map(id => ({ id, start: false })),
+        });
+        adopted.push(...result.adopted);
+        refused.push(...result.refused);
+      }
+    }
+    const payload = { adopted, refused };
+    this.out.success(options.json === true ? JSON.stringify(payload, null, 2) : renderKeepResult(payload));
+    if (refused.length > 0) this.out.setExitCode(1);
   }
 
   async select(options: ImportSelectOptions): Promise<void> {
@@ -167,7 +218,9 @@ export class ContinueSessionController {
       return;
     }
 
+    // Continue lists Ferretry's own history; only importing reads the computer's CLI homes.
     const listing = await this.gateway.list({
+      source: 'ferretry',
       ...(options.harness === undefined ? {} : { harness: options.harness }),
       ...(options.query === undefined || options.query === '' ? {} : { q: options.query }),
       ...(options.since === undefined ? {} : { since: sinceInstant(options.since, this.context.now) }),

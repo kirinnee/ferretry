@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'bun:test';
+import { FyHttpError } from '@ferretry/protocol/client';
 import type {
   ForkSessionOutcome,
+  IFyApiClient,
   SessionTranscriptMessage,
   SessionTranscriptPage,
   SessionView,
 } from '@ferretry/protocol';
 import {
+  DetailedFailure,
   forkThroughLatest,
   NothingToForkError,
   restartWithResume,
@@ -189,5 +192,33 @@ describe('restartWithResume', () => {
     const result = await restartWithResume(fake, view, 'req-2');
     expect(result).toEqual(state.renamed);
     expect(state.calls).toEqual([{ name: 'migrate', args: ['a1', 'nero', undefined, false, 'req-2'] }]);
+  });
+});
+
+describe('restartWithResume — a refusal because ps failed', () => {
+  const refusal = (message: string, code = 'migration_refused'): FyHttpError => new FyHttpError(message, 409, code);
+  const failing = (error: Error): Pick<IFyApiClient, 'migrate'> => ({
+    migrate: async () => {
+      throw error;
+    },
+  });
+  const raw =
+    'refused: the process table could not be read: ps exited 1: ps: etimes: keyword not found\nin-flight inventory — status running';
+
+  it('says plainly that nothing was restarted and keeps the daemon’s words as the detail', async () => {
+    const thrown = await restartWithResume(failing(refusal(raw)), view, 'req-3').catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(DetailedFailure);
+    expect((thrown as DetailedFailure).message).toBe(
+      "Couldn't check the agent's processes on this machine (ps failed). Nothing was restarted.",
+    );
+    expect((thrown as DetailedFailure).detail).toBe(raw);
+  });
+
+  it('leaves a refusal about real in-flight work, and every other failure, exactly as the daemon said it', async () => {
+    const inflight = refusal('refused: in-flight work is destructive_to_interrupt');
+    const other = refusal(raw, 'session_migrate_failed');
+    const plain = new Error('socket closed');
+    for (const error of [inflight, other, plain])
+      expect(await restartWithResume(failing(error), view, 'req-4').catch((reason: unknown) => reason)).toBe(error);
   });
 });

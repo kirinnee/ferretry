@@ -105,9 +105,9 @@ describe('discovering conversations on disk', () => {
     const service = new ConversationImportService(
       new NodeConversationFiles(),
       [
-        { harness: 'claude', home: join(home, '.claude') },
-        { harness: 'codex', home: join(home, '.codex') },
-        { harness: 'codex', home: join(home, 'absent') },
+        { harness: 'claude', home: join(home, '.claude'), source: 'computer' },
+        { harness: 'codex', home: join(home, '.codex'), source: 'computer' },
+        { harness: 'codex', home: join(home, 'absent'), source: 'ferretry' },
       ],
       { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() },
       { owners: async () => new Map() },
@@ -136,6 +136,17 @@ describe('discovering conversations on disk', () => {
     should(await files.info(join(home, '.claude'))).be.undefined();
     should(await files.text(join(home, 'missing.jsonl'))).be.undefined();
     should(await files.entries(join(home, 'missing'))).deepEqual([]);
+  });
+
+  it('should read at most the first bytes of a document, and nothing for a missing file or a folder', async () => {
+    // Arrange
+    const { home, claudeFile } = await fakeHome();
+    const files = new NodeConversationFiles();
+
+    // Act & Assert
+    should(await files.head(claudeFile, 5)).equal((await Bun.file(claudeFile).text()).slice(0, 5));
+    should(await files.head(join(home, 'missing.md'), 5)).be.undefined();
+    should(await files.head(join(home, '.claude'), 5)).be.undefined();
   });
 });
 

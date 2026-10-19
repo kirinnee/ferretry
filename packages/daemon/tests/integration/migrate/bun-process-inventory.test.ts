@@ -145,7 +145,10 @@ describe('PaneProcessInventory', () => {
     const actual = await new PaneProcessInventory(tmux, probe).collect('isolated-session');
 
     // Assert
-    should(actual).deepEqual({ kind: 'unobservable', reason: 'ps exited 1: cannot allocate memory' });
+    should(actual).deepEqual({
+      kind: 'unobservable',
+      reason: 'the process table could not be read: ps exited 1: cannot allocate memory',
+    });
   });
 
   it('should report a rejected session name instead of silently seeing nothing', async () => {

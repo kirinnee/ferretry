@@ -5,6 +5,7 @@
  */
 
 import type { ForkSessionOutcome, IFyApiClient, SessionView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 
 /** The largest page the messages route serves. */
 const PAGE = 1_000;
@@ -16,6 +17,20 @@ export class NothingToForkError extends Error {
     super('there is no message to fork from yet — send this ferret something first');
   }
 }
+
+/** A failure with a plain sentence for the alert and the daemon's own words kept behind a disclosure. */
+export class DetailedFailure extends Error {
+  constructor(
+    message: string,
+    readonly detail: string,
+  ) {
+    super(message);
+  }
+}
+
+/** The daemon's blind-spot prefix when the process table could not be read (bun-process-inventory.ts). */
+const PS_BLIND_SPOT = 'the process table could not be read';
+const RESTART_PS_FAILED = "Couldn't check the agent's processes on this machine (ps failed). Nothing was restarted.";
 
 type ForkClient = Pick<IFyApiClient, 'messages' | 'fork' | 'rename'>;
 
@@ -58,4 +73,12 @@ export const restartWithResume = async (
   client: Pick<IFyApiClient, 'migrate'>,
   view: SessionView,
   requestId: string,
-): Promise<SessionView> => await client.migrate(view.config.id, view.config.agent, undefined, false, requestId);
+): Promise<SessionView> => {
+  try {
+    return await client.migrate(view.config.id, view.config.agent, undefined, false, requestId);
+  } catch (reason) {
+    if (reason instanceof FyHttpError && reason.code === 'migration_refused' && reason.message.includes(PS_BLIND_SPOT))
+      throw new DetailedFailure(RESTART_PS_FAILED, reason.message);
+    throw reason;
+  }
+};

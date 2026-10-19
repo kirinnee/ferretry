@@ -20,6 +20,8 @@ import type {
 } from '@ferretry/protocol';
 import { countWords, fileName, listWords, type SetupHarness } from './setup-words.ts';
 
+type FleetSetupUpdate = FleetSetupScan['updates'][number];
+
 const scanOf = (scan: FleetSetupScan, harness: SetupHarness): FleetHarnessScan | undefined =>
   scan.harnesses.find(candidate => candidate.harness === harness);
 
@@ -249,29 +251,110 @@ export const harnessImportChange = (
 
 // ── What changed ─────────────────────────────────────────────────────────────────────────────────
 
+/** One thing that changed since the last import: the kind in words, and its name. */
+export interface ChangedItem {
+  readonly kind: string;
+  readonly name: string;
+}
+
 const KIND_WORDS: Readonly<Record<string, string>> = {
   instructions: 'Instructions',
   mcp: 'MCP server',
-  skills: 'Skills',
+  skills: 'Skill',
   settings: 'Settings',
   hooks: 'Hooks',
   modelSets: 'Model set',
 };
 
-/** `mcp/github` → "MCP server · github": the kind in words, never the word "component". */
-export const updateTitle = (reference: string): string => {
-  const [kind = '', ...rest] = reference.split('/');
-  const name = rest.join('/');
-  const word = KIND_WORDS[kind];
-  return word === undefined || name === '' ? reference : `${word} · ${name}`;
+/** Kinds that have one document each, so they read as the kind alone: "Settings changed". */
+const WHOLE_KINDS: readonly string[] = ['instructions', 'settings', 'hooks'];
+
+const kindOf = (reference: string): string => reference.split('/')[0] ?? '';
+const nameOf = (reference: string): string => reference.split('/').slice(1).join('/');
+
+/**
+ * What changed, one entry per thing a person recognises. A skills component names every skill by its
+ * source folder, and a skill both CLIs share has TWO sources (one per CLI) — so skills are named by
+ * folder and de-duplicated, never listed once per source.
+ */
+export const changedItems = (updates: readonly FleetSetupUpdate[]): readonly ChangedItem[] => {
+  const seen = new Set<string>();
+  const items: ChangedItem[] = [];
+  const add = (kind: string, name: string): void => {
+    const key = `${kind}/${name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ kind, name });
+  };
+  for (const update of updates) {
+    const kind = kindOf(update.reference);
+    if (kind === 'skills') for (const source of update.sources) add('skills', fileName(source));
+    else add(kind, nameOf(update.reference));
+  }
+  return items;
 };
 
-/** "Its source changed: settings.json". */
-export const updateDetail = (sources: readonly string[]): string =>
-  `Changed since the last import: ${listWords(sources.map(fileName))}.`;
+const capitalised = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+/** "Slack MCP server and 13 skills changed": one line, the count of each kind, never a list of names. */
+export const changeSummary = (updates: readonly FleetSetupUpdate[]): string => {
+  const items = changedItems(updates);
+  const kinds = [...new Set(items.map(item => item.kind))];
+  const parts = kinds.map(kind => {
+    const named = items.filter(item => item.kind === kind);
+    const noun = (KIND_WORDS[kind] ?? kind).toLowerCase();
+    const word = kind === 'mcp' ? 'MCP server' : noun;
+    const [only] = named;
+    if (named.length === 1 && only !== undefined && kind !== 'skills')
+      return WHOLE_KINDS.includes(kind) ? (KIND_WORDS[kind] ?? kind) : `${capitalised(only.name)} ${word}`;
+    return countWords(named.length, word);
+  });
+  return `${capitalised(listWords(parts))} changed`;
+};
+
+/** The "Show list" lines: the kind in words and its de-duplicated names. */
+export const changeList = (updates: readonly FleetSetupUpdate[]): readonly { kind: string; names: string }[] => {
+  const items = changedItems(updates);
+  return [...new Set(items.map(item => item.kind))].map(kind => ({
+    kind: kind === 'skills' ? 'Skills' : (KIND_WORDS[kind] ?? kind),
+    names: items
+      .filter(item => item.kind === kind)
+      .map(item => item.name)
+      .join(', '),
+  }));
+};
 
 // ── Done ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** The result notes (E4–E9) for the harnesses that were imported. */
 export const importNotes = (scan: FleetSetupScan, include: readonly SetupHarness[]): readonly string[] =>
   scan.notes.filter(note => include.includes(note.harness)).map(note => note.text);
+
+/** What one import brought in, counted from the scan it was sent from. */
+export interface ImportCounts {
+  readonly logins: number;
+  readonly skills: number;
+  readonly mcpServers: number;
+  readonly conversations: number;
+}
+
+export const importCounts = (scan: FleetSetupScan, harness: SetupHarness, conversations: number): ImportCounts => {
+  const found = scanOf(scan, harness);
+  return {
+    logins: found === undefined || ['unreadable', 'not-shareable'].includes(found.account.state) ? 0 : 1,
+    skills: found?.skills.length ?? 0,
+    mcpServers: found?.mcpServers.length ?? 0,
+    conversations,
+  };
+};
+
+/** "Imported 2 logins, 13 skills, 1 MCP server, 312 conversations": ONE line; a zero is left out. */
+export const importSummary = (counts: ImportCounts): string => {
+  const parts = [
+    counts.logins > 0 ? countWords(counts.logins, 'login') : null,
+    counts.skills > 0 ? countWords(counts.skills, 'skill') : null,
+    counts.mcpServers > 0 ? countWords(counts.mcpServers, 'MCP server') : null,
+    counts.conversations > 0 ? countWords(counts.conversations, 'conversation') : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length === 0 ? 'Imported' : `Imported ${parts.join(', ')}`;
+};

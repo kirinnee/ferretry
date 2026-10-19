@@ -357,7 +357,7 @@ export function RuntimeModelControls({
         setSelectedCodexModel(null);
         setNotice(`Codex confirmed ${model} · ${effort} from its runtime settings.`);
       } else {
-        setNotice('Model command sent. Verification updates after the next model response.');
+        setNotice('Model command sent. The model chip updates when Claude confirms the switch.');
       }
     } catch (cause) {
       if (targeted) onSwitchFailed?.();
@@ -740,7 +740,7 @@ export function RuntimeModelChoices({
         <p aria-live="polite" className="m-0 text-meta text-muted leading-base" role="status">
           {harness === 'codex'
             ? 'Live choices from this account’s Codex model catalog. Choose a model, then one of its advertised reasoning levels.'
-            : 'Only this account’s advertised Claude choices are shown. Verification updates after the next model response.'}
+            : 'Only this account’s advertised Claude choices are shown. The model chip updates when Claude confirms a switch.'}
         </p>
       )}
       <RuntimeChoiceMenu

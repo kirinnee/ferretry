@@ -8,6 +8,7 @@ import {
 } from '../../src/components/dictation-control.tsx';
 import type { ShortcutHost } from '../../src/hooks/use-dictation-shortcut.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { browserMicMeter } from '../../src/lib/stt/level-monitor.ts';
 import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
@@ -454,6 +455,58 @@ describe('<DictationControl> machine default engine', () => {
     await interact(() => new Promise(resolve => setTimeout(resolve, 10)));
     expect(reads).toEqual([]);
     expect(micButton(view.container).getAttribute('title')).not.toContain('Parakeet');
+    await view.unmount();
+  });
+});
+
+describe('<DictationControl> input meter', () => {
+  class FakeContext {
+    createMediaStreamSource() {
+      return { connect: () => undefined, disconnect: () => undefined };
+    }
+    createAnalyser() {
+      return { getFloatTimeDomainData: () => undefined };
+    }
+    async close() {}
+  }
+
+  // happy-dom's MediaStream has no tracks API; a browser's does, and release walks it.
+  const realStream = (): MediaStream => Object.assign(new MediaStream(), { getTracks: () => [] });
+
+  const meterOver = (stream: MediaStream, asked: { count: number }) =>
+    browserMicMeter({
+      navigator: {
+        mediaDevices: {
+          getUserMedia: async () => {
+            asked.count += 1;
+            return stream;
+          },
+        },
+      },
+      AudioContext: FakeContext as never,
+    });
+
+  it('shows the bars while recording and takes them away on Stop, for browser voice', async () => {
+    const provider = promptRecognition();
+    const asked = { count: 0 };
+    const view = await mount(
+      <DictationControl {...controlProps({ recognition: provider, meter: meterOver(realStream(), asked) })} />,
+    );
+    await openAndBegin(view.container, provider);
+    await settleUntil(() => panel(view.container)?.querySelector('canvas') != null, 'the input meter', interact);
+    expect(asked.count).toBe(1);
+
+    await stop(view.container);
+    await settleUntil(() => panel(view.container)?.querySelector('canvas') == null, 'the meter to go', interact);
+    await view.unmount();
+  });
+
+  it('shows no bars, and still records, when the page cannot open a meter', async () => {
+    const provider = promptRecognition();
+    const view = await mount(<DictationControl {...controlProps({ recognition: provider, meter: null })} />);
+    await openAndBegin(view.container, provider);
+    expect(panel(view.container)?.getAttribute('data-dictation-panel')).toBe('non-modal');
+    expect(panel(view.container)?.querySelector('canvas') ?? null).toBeNull();
     await view.unmount();
   });
 });

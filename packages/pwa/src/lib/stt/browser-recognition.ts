@@ -22,6 +22,8 @@
  * Home Screen refusal that constructor presence alone cannot prove.
  */
 
+import type { CaptureMonitor } from './level-monitor.ts';
+
 type BrowserRecognitionImplementation = 'standard' | 'webkit';
 type BrowserRecognitionAvailability = 'available' | 'insecure-context' | 'ios-home-screen' | 'unsupported';
 
@@ -293,6 +295,11 @@ export interface BrowserRecognitionSessionOptions {
   onFailure(failure: BrowserRecognitionError): void;
   onAbort(): void;
   onLimit(): void;
+  /**
+   * The microphone's level tap, once the microphone is open, and `null` when it closes. Optional and
+   * visual only: a session that cannot offer one simply never calls it.
+   */
+  onMonitor?(monitor: CaptureMonitor | null): void;
 }
 
 /** The controller-facing slice. `finish` stops capture and settles the words. */
