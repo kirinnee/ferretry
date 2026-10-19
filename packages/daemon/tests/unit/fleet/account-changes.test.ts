@@ -1847,9 +1847,7 @@ describe('deriveAccountChange: a login that drives both CLIs (docs/provider-pres
           store: DUAL.store,
           preset: DUAL.preset,
           claude: {
-            env: Object.fromEntries(
-              Object.entries(DUAL.claude.env).filter(([name]) => name !== 'CLAUDE_CODE_SUBAGENT_MODEL'),
-            ),
+            env: Object.fromEntries(Object.entries(DUAL.claude.env).filter(([name]) => name !== 'ANTHROPIC_BASE_URL')),
           },
           codex: { env: { DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY') } },
         },
@@ -1881,7 +1879,7 @@ describe('deriveAccountChange: a login that drives both CLIs (docs/provider-pres
     // Assert
     const login = edit.model.credentials.deepseek;
     should(login?.env).be.undefined();
-    should(login?.claude?.env?.CLAUDE_CODE_SUBAGENT_MODEL).equal('deepseek-flash');
+    should(login?.claude?.env?.ANTHROPIC_BASE_URL).equal('https://api.deepseek.com/anthropic');
     should(login?.codex?.env).deepEqual({ DEEPSEEK_API_KEY: secretRef('DEEPSEEK_API_KEY') });
   });
 

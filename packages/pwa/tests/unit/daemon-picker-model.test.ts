@@ -77,6 +77,14 @@ describe('accountPickerOptions', () => {
     expect(accountPickerOptions(null, [], null)).toBeNull();
   });
 
+  it('carries the login model catalog onto the option, and none for a login without one', () => {
+    const catalog = { id: 'zai', label: 'GLM / Z.ai', customIds: false };
+    const [withCatalog, without] =
+      accountPickerOptions([{ ...claudeAccount(), modelCatalog: catalog }, codexAccount()], [], null) ?? [];
+    expect(withCatalog?.modelCatalog).toEqual(catalog);
+    expect(without).not.toHaveProperty('modelCatalog');
+  });
+
   it('carries the reset timestamps through onto the joined quota row', () => {
     const usage = [usageRow({ fiveHourResetAt: 1_760_000_000, weeklyResetAt: 1_760_600_000 })];
 

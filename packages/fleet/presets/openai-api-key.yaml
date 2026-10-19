@@ -5,6 +5,7 @@ summary: Codex with an OpenAI platform API key, billed per token, through the Re
 group: popular
 docs: https://developers.openai.com/codex/config-advanced
 verified: '2026-10-16'
+catalog: openai
 env:
   OPENAI_API_KEY:
     secretName: OPENAI_API_KEY
@@ -13,7 +14,6 @@ codexProvider:
   name: OpenAI API
   baseUrl: https://api.openai.com/v1
   keyVariable: OPENAI_API_KEY
-models: []
 test:
   kind: request
   url: https://api.openai.com/v1/models

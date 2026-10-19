@@ -10,6 +10,8 @@ import { describe, it } from 'bun:test';
 import {
   type AccountModel,
   buildCloneBundle,
+  builtInModelCatalogs,
+  builtInPresets,
   FleetApplyFailureError,
   type FleetApplyPlan,
   type FleetDocumentWrite,
@@ -150,7 +152,9 @@ interface World {
   };
 }
 
-function world(options: { overrides?: Partial<FleetSetupServiceDeps> } = {}): World {
+function world(
+  options: { overrides?: Partial<FleetSetupServiceDeps>; catalog?: Partial<FleetSetupServiceDeps['catalog']> } = {},
+): World {
   const applied: World['applied'] = [];
   const secrets = new Map<string, string>();
   let minted = 0;
@@ -223,6 +227,7 @@ function world(options: { overrides?: Partial<FleetSetupServiceDeps> } = {}): Wo
       claudeStatusline: () => "'fy' statusline",
       fyCommand: 'fy',
       acceptsAutoPermissionMode: true,
+      ...options.catalog,
     },
     scan: async () => {
       if (state.scanError !== undefined) throw state.scanError;
@@ -516,6 +521,20 @@ describe('the setup.import executor', () => {
     should(secrets.get('GITHUB_TOKEN')).equal(SECRET_VALUE);
     for (const document of applied[0]?.documents ?? []) should(document.content).not.containEql(SECRET_VALUE);
     should(configTextOf(applied[0]?.documents ?? [])).containEql('agent: true');
+  });
+
+  it("should publish each imported runtime with its login's model catalog (docs/model-catalog.md)", async () => {
+    // Arrange
+    const { service, applied } = world({
+      catalog: { modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }) },
+    });
+
+    // Act
+    await importOnce(service);
+
+    // Assert — a Claude sign-in reads Anthropic's catalog
+    const plan = applied[0]?.plan as { manifest: { accounts: { modelCatalog?: { id: string } }[] } } | undefined;
+    should(plan?.manifest.accounts[0]?.modelCatalog?.id).equal('anthropic');
   });
 
   it('should refuse to apply anything that was not described first, or changed since', async () => {

@@ -66,6 +66,7 @@ export const CONFIG_FILE_KINDS = [
   'learning',
   'voice',
   'preset',
+  'models',
 ] as const;
 export const ConfigFileKindSchema = z.enum(CONFIG_FILE_KINDS);
 export type ConfigFileKind = z.infer<typeof ConfigFileKindSchema>;
@@ -73,7 +74,7 @@ export type ConfigFileKind = z.infer<typeof ConfigFileKindSchema>;
 /** One file the directory can hold, by what it is rather than where. */
 export type ConfigFileAddress =
   | { readonly kind: 'machine' | 'warden' | 'learning' | 'voice' }
-  | { readonly kind: 'login' | 'profile' | 'runtime' | 'preset'; readonly name: string }
+  | { readonly kind: 'login' | 'profile' | 'runtime' | 'preset' | 'models'; readonly name: string }
   | { readonly kind: 'component'; readonly componentKind: ConfigComponentKind; readonly name: string };
 
 /** The singleton files, by kind, and the directory each named kind lives in. */
@@ -84,7 +85,13 @@ const SINGLETON_FILES = {
   voice: 'voice.yaml',
 } as const satisfies Record<string, string>;
 
-const NAMED_DIRECTORIES = { login: 'logins', profile: 'profiles', runtime: 'runtimes', preset: 'presets' } as const;
+const NAMED_DIRECTORIES = {
+  login: 'logins',
+  profile: 'profiles',
+  runtime: 'runtimes',
+  preset: 'presets',
+  models: 'models',
+} as const;
 
 /** The directory components live under; each component kind is one directory below it. */
 export const CONFIG_COMPONENTS_DIRECTORY = 'components' as const;
@@ -159,6 +166,7 @@ export const CONFIG_SCHEMA_IDS = [
   'learning',
   'voice',
   'preset',
+  'models',
 ] as const;
 export const ConfigSchemaIdSchema = z.enum(CONFIG_SCHEMA_IDS);
 export type ConfigSchemaId = z.infer<typeof ConfigSchemaIdSchema>;

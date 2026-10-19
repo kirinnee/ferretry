@@ -4,6 +4,7 @@ summary: Claude Code and Codex through OpenRouter with one key, on Anthropic and
 group: popular
 docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
 verified: '2026-10-16'
+catalog: openrouter
 claude:
   env:
     ANTHROPIC_BASE_URL:
@@ -14,10 +15,6 @@ claude:
       value: ''
       allowEmpty: true
       description: deliberately empty, so the OpenRouter key is the one sent
-    ANTHROPIC_DEFAULT_OPUS_MODEL:
-      value: ~anthropic/claude-opus-latest[1m]
-      required: false
-  models: [~anthropic/claude-opus-latest, ~anthropic/claude-sonnet-latest]
 codex:
   docs: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
   env:
@@ -29,7 +26,6 @@ codex:
     baseUrl: https://openrouter.ai/api/v1
     keyVariable: OPENROUTER_API_KEY
     model: ~openai/gpt-sol-latest
-  models: [~openai/gpt-sol-latest]
 test:
   kind: request
   url: https://openrouter.ai/api/v1/key

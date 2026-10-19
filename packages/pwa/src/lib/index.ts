@@ -376,6 +376,7 @@ export * from './live-counter.ts';
 export * from './local-network-access.ts';
 export * from './md-compose.ts';
 export * from './message-clock.ts';
+export * from './model-tiers.ts';
 export * from './notification-filter.ts';
 export * from './notification-filter-mirror.ts';
 export * from './notification-ledger.ts';

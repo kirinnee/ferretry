@@ -146,6 +146,10 @@ export type RuntimeReasoningChoice = z.infer<typeof RuntimeReasoningChoiceSchema
 
 export const RuntimeModelChoiceSchema = RuntimeModelOptionSchema.extend({
   description: z.string().optional(),
+  /** Where the login's model catalog puts it (docs/model-catalog.md): a picker groups by it. */
+  tier: z.enum(['best', 'balanced', 'fast']).optional(),
+  /** The context window, in tokens, when the catalog says. */
+  context: z.number().int().positive().optional(),
   isDefault: z.literal(true).optional(),
   reasoningEfforts: z.array(RuntimeReasoningChoiceSchema),
   defaultReasoningEffort: z.string().min(1).optional(),
@@ -156,6 +160,11 @@ export const RuntimeModelCatalogSchema = z.object({
   harness: HarnessSchema,
   source: z.enum(['wrapper-inventory', 'codex-app-server']),
   choices: z.array(RuntimeModelChoiceSchema),
+  /**
+   * The login's model catalog, when it reads one. With it, each choice's `reasoningEfforts` is what that
+   * model takes — empty means none — and `customIds` says the session may be switched to any id.
+   */
+  catalog: z.object({ id: z.string().min(1), label: z.string().min(1), customIds: z.boolean() }).optional(),
 });
 export type RuntimeModelCatalog = z.infer<typeof RuntimeModelCatalogSchema>;
 

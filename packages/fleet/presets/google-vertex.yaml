@@ -5,6 +5,7 @@ summary: Claude Code through Vertex AI in your Google Cloud project, using appli
 group: cloud
 docs: https://code.claude.com/docs/en/google-vertex-ai
 verified: '2026-10-16'
+catalog: google-vertex
 unverified:
   - The count-tokens address and whether it is billed could not be confirmed, so no Test is offered.
 env:
@@ -16,19 +17,9 @@ env:
   ANTHROPIC_VERTEX_PROJECT_ID:
     value: ''
     description: your Google Cloud project id
-  ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: claude-opus-5-5
-    required: false
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: claude-haiku-4-5@20251001
-    required: false
 cloudCredential:
   kinds: [gcloud-adc]
   suggested: gcloud-adc
-models:
-  - claude-opus-5-5
-  - claude-sonnet-5
-  - claude-haiku-4-5@20251001
 test:
   kind: none
   reason: Vertex needs a Google access token from your credentials, which Ferretry does not mint. Check them with `gcloud auth application-default print-access-token`.
