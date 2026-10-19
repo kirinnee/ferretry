@@ -50,6 +50,7 @@ import {
   waitForDaemonAtRendezvous,
   waitForDaemonFingerprint,
   plaintextLeaks,
+  isLostBrowser,
 } from './support/relay-harness.ts';
 
 /**
@@ -90,12 +91,15 @@ interface ProductOptions {
 }
 
 /** Boot one machine and one browser, unpaired. Every journey starts here. */
-/** What Playwright says when the browser connection vanished under a journey, not a product answer. */
-const LOST_BROWSER =
-  /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
 
 /** How many times a journey whose browser vanished is started again from nothing. */
 const LOST_BROWSER_RETRIES = 2;
+
+/**
+ * The runner's per-journey ceiling (`scripts/test/run-e2e.sh`). Bun abandons a journey at it but cannot
+ * stop it, so a retry started after it would launch a daemon and a browser beside the next journey.
+ */
+const JOURNEY_CEILING_MS = Number(process.env.FY_E2E_JOURNEY_TIMEOUT_MS ?? Number.POSITIVE_INFINITY);
 
 /**
  * Run one journey, and run it again — at most {@link LOST_BROWSER_RETRIES} more times — if the only
@@ -115,13 +119,15 @@ async function withProduct(
   body: (product: Product) => Promise<void>,
   options: ProductOptions = {},
 ): Promise<void> {
+  const started = Date.now();
   for (let retry = 0; ; retry += 1) {
     try {
       await withProductOnce(journey, body, options);
       return;
     } catch (error) {
       const text = String((error as Error).message ?? error);
-      if (retry >= LOST_BROWSER_RETRIES || !LOST_BROWSER.test(text)) throw error;
+      if (retry >= LOST_BROWSER_RETRIES || !isLostBrowser(error)) throw error;
+      if (Date.now() - started >= JOURNEY_CEILING_MS) throw error;
       await recordStep({
         journey,
         step: 'harness:journey-retried',
