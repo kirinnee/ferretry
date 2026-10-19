@@ -15,6 +15,7 @@ root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 ./scripts/ci/setup.sh
+./scripts/validate/pinned-toolchain.sh
 ./scripts/validate/pages-config.sh
 # The hosted relay's Worker config, deploy workflow and control-plane projections have no test that
 # can fail for them — `bun test` never reads a wrangler config or a workflow's shell. This is the

@@ -24,13 +24,17 @@ behind each other. The heaviest Linux jobs therefore run on **Namespace** runner
 `E2E Shard`s. `Integration Tests` stay on GitHub: its real-Chrome browser journeys and its
 same-filesystem rename checks depend on the `ubuntu-latest` image. The light Linux jobs (pre-commit, compile, the Nix install bundle, the coverage ledgers, the E2E relevance and
 summary) run there too, on smaller `2x4`/`4x8` shapes, so they stop queueing behind GitHub's cap.
-They add capacity rather than replace it — `Integration Tests`, `SIT`, `PWA Static Bundle` (its Vite config load
-resolves the image's own Node), the harness contract, the smoke tests and every macOS job stay on GitHub, where a public repository's minutes are free and the macOS jobs
+They add capacity rather than replace it — `Integration Tests`, `SIT`, the harness contract, the smoke tests and every macOS job stay on GitHub, where a public repository's minutes are free and the macOS jobs
 never queue.
 
 - **One cache volume, tag `ferretry-nix`.** `namespacelabs/nscloud-cache-action` with `cache: nix`
   mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell is already built
   when the job starts. The order is load-bearing: installing Nix first would populate a fresh store.
+- **The image's Node is never the build's Node.** `PWA Static Bundle` runs on Namespace too, because
+  the devshells ship a pinned `nodejs_24` and `scripts/validate/pinned-toolchain.sh` (run first by
+  `scripts/ci/build-pwa.sh`) fails if `node` or `bun` resolves outside `/nix/store`. It used to be
+  held on GitHub because `vite` ran on the image's Node, which on a Namespace image could not load
+  a `.ts` workspace import. See [Nix](../nix/index.md#one-toolchain-nothing-falls-through-to-the-runner-image).
 - **Moving a job back is one label.** Replace the two `nscloud-*` labels with `ubuntu-latest` and
   drop the cache step; nothing else in the job depends on the runner vendor.
 
