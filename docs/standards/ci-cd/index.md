@@ -140,7 +140,9 @@ into **`E2E Slow Journeys`**.
   the journeys and fails the tier when a journey outside `[slow]` raises its own timeout past that
   ceiling, because Bun lets a test's own timeout win. A browser call cannot wait forever either. When
   Bun silently loses the DevTools pipe to Chrome, every call on that browser fails at once with
-  `browser has disconnected`, and the journey retry handles that (`tests/e2e/README.md`). Before this,
+  `browser has disconnected`. The loss is found from Chrome's own log, an unrequested exit, or a
+  probe of Chrome's browser process that gets no reply. The journey retry then runs it again, up to
+  twice (`tests/e2e/README.md`). Before this,
   two journeys hung their shards for 600 s and 900 s.
 - **No build-once job, measured.** A shard spends about 40 s before its first journey. Of that, about
   20 s is the Nix shell (substituted from cache.nixos.org, nothing built), about 2 s is `bun install`,
