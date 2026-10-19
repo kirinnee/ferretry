@@ -497,7 +497,7 @@ function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
   const quoted = (text: string): string => shellQuote(harness === 'codex' ? tomlString(text).slice(1, -1) : text);
   return [
     '',
-    '# This ferret\'s own sections of the appended system prompt: each switch the daemon set to 1.',
+    "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
     `${SECTIONS_VARIABLE}=''`,
     ...FERRET_SECTIONS(fy).map(
       section =>

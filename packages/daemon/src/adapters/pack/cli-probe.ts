@@ -1,4 +1,10 @@
-import { type PackProbeOutcome, type PackProbePort, type PackProbeRequest, PROBE_PROMPT, probeAnswered } from '../../lib/pack/probe.ts';
+import {
+  type PackProbeOutcome,
+  type PackProbePort,
+  type PackProbeRequest,
+  PROBE_PROMPT,
+  probeAnswered,
+} from '../../lib/pack/probe.ts';
 
 /** The launch environment a runtime's wrapper needs: its login's secrets, as a pane is given them. */
 export interface ProbeEnvironment {
@@ -11,7 +17,9 @@ export type ProbeSpawn = (input: {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
-}) => Promise<{ readonly kind: 'exited'; readonly code: number; readonly stdout: string } | { readonly kind: 'timeout' }>;
+}) => Promise<
+  { readonly kind: 'exited'; readonly code: number; readonly stdout: string } | { readonly kind: 'timeout' }
+>;
 
 /**
  * The argv of one probe: the runtime's own wrapper — so the probe runs exactly the login, profile and
@@ -49,12 +57,23 @@ export class CliPackProbe implements PackProbePort {
     try {
       env = { ...this.base, ...(await this.environment.forWrapper(request.wrapper)) };
     } catch (error) {
-      return { ok: false, ms: elapsed(), reason: error instanceof Error ? error.message : 'its login could not be read' };
+      return {
+        ok: false,
+        ms: elapsed(),
+        reason: error instanceof Error ? error.message : 'its login could not be read',
+      };
     }
-    const outcome = await this.spawn({ cmd: probeCommand(request), cwd: request.cwd, env, timeoutMs: request.timeoutMs }).catch(
-      (error: unknown) => ({ kind: 'failed' as const, reason: error instanceof Error ? error.message : String(error) }),
-    );
-    if (outcome.kind === 'failed') return { ok: false, ms: elapsed(), reason: `it could not be started (${outcome.reason})` };
+    const outcome = await this.spawn({
+      cmd: probeCommand(request),
+      cwd: request.cwd,
+      env,
+      timeoutMs: request.timeoutMs,
+    }).catch((error: unknown) => ({
+      kind: 'failed' as const,
+      reason: error instanceof Error ? error.message : String(error),
+    }));
+    if (outcome.kind === 'failed')
+      return { ok: false, ms: elapsed(), reason: `it could not be started (${outcome.reason})` };
     if (outcome.kind === 'timeout')
       return { ok: false, ms: elapsed(), reason: `no answer within ${String(Math.round(request.timeoutMs / 1_000))}s` };
     if (outcome.code !== 0) return { ok: false, ms: elapsed(), reason: `it exited ${String(outcome.code)}` };

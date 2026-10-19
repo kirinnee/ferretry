@@ -1889,7 +1889,10 @@ function createSessionControlSubsystem(
       if (request.parent !== undefined && !stamped.provenance.wardenLineage) {
         const refusal = await pack.admit(request.parent);
         if (refusal !== undefined)
-          throw new SessionControlError(refusal.code === 'depth_exceeded' ? 'depth_exceeded' : 'limit_reached', refusal.message);
+          throw new SessionControlError(
+            refusal.code === 'depth_exceeded' ? 'depth_exceeded' : 'limit_reached',
+            refusal.message,
+          );
       }
       // BEFORE the callsign is claimed, so a start refused over an unusable attachment does not park
       // a pool name for the whole resolution window on a session that never happens.
@@ -3204,7 +3207,8 @@ function createSessionPackSwitch(
   return async (reference, enabled) => {
     const outcome = await service.set(reference, enabled);
     const view = await sessions.get(parseSessionId(reference));
-    if (view === undefined) throw new Error(`session ${reference} was switched but its documents do not satisfy the protocol`);
+    if (view === undefined)
+      throw new Error(`session ${reference} was switched but its documents do not satisfy the protocol`);
     return { view, outcome };
   };
 }
@@ -7673,7 +7677,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           try {
             return await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request));
           } catch (error) {
-            if (error instanceof SessionControlError && (error.failure === 'limit_reached' || error.failure === 'depth_exceeded'))
+            if (
+              error instanceof SessionControlError &&
+              (error.failure === 'limit_reached' || error.failure === 'depth_exceeded')
+            )
               throw new PackStartRefused({ code: error.failure, message: error.message });
             throw error;
           }

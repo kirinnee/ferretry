@@ -17,7 +17,7 @@ and the same filesystem proof.
 | ----------------------- | --------------------------------------------------------------------------------------------- |
 | A ferret's switch       | `config.hypermedia` on its session document; **absent means on**                              |
 | What a launch is handed | `FY_HYPERMEDIA=1` or `0` in the pane environment                                              |
-| Who reads it            | the runtime wrapper, which appends the instruction to the system prompt iff it is `1`        |
+| Who reads it            | the runtime wrapper, which appends the instruction to the system prompt iff it is `1`         |
 | Changing it             | `PATCH /v1/sessions/:sessionId/hypermedia {enabled}` — `operator`                             |
 | The UI                  | Info › Runtime "Hypermedia" row, Actions › "Hypermedia" toggle, an icon on the session header |
 

@@ -20,13 +20,21 @@ export function renderPackRecommendation(recommendation: PackRecommendation): st
     lines.push(`   ${candidate.why}`);
     if (candidate.refusal !== undefined) lines.push(`   ${candidate.refusal.code}: ${candidate.refusal.message}`);
   }
-  lines.push('', recommendation.next === undefined ? 'Nothing can run it here now.' : `Start the first: ${recommendation.next}`);
+  lines.push(
+    '',
+    recommendation.next === undefined ? 'Nothing can run it here now.' : `Start the first: ${recommendation.next}`,
+  );
   return lines.join('\n');
 }
 
 const attemptLine = (attempt: PackAttempt): string => {
   const model = attempt.model === undefined ? '' : ` ${attempt.model}`;
-  const probe = attempt.probe === undefined ? '' : attempt.probe === 'cached' ? ' (probe cached)' : ` (probe ${String(attempt.probeMs ?? 0)}ms)`;
+  const probe =
+    attempt.probe === undefined
+      ? ''
+      : attempt.probe === 'cached'
+        ? ' (probe cached)'
+        : ` (probe ${String(attempt.probeMs ?? 0)}ms)`;
   return attempt.outcome === 'started'
     ? `  started ${attempt.runtime}${model}${probe}`
     : `  refused ${attempt.runtime}${model}${probe} — ${attempt.refusal?.code ?? 'refused'}: ${attempt.refusal?.message ?? ''}`;

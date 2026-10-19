@@ -32,6 +32,9 @@ export class FilePackSpendLedger {
   async record(usd: number): Promise<void> {
     const current = await this.read();
     const base = Number.isFinite(current.usd) ? current.usd : 0;
-    await this.files.writeTextAtomic(this.path, `${JSON.stringify({ day: current.day, usd: base + Math.max(0, usd) })}\n`);
+    await this.files.writeTextAtomic(
+      this.path,
+      `${JSON.stringify({ day: current.day, usd: base + Math.max(0, usd) })}\n`,
+    );
   }
 }

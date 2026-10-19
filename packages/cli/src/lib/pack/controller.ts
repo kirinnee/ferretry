@@ -54,13 +54,16 @@ export class PackController {
       task,
       ...(options.useCase === undefined ? {} : { useCase: options.useCase }),
     });
-    this.deps.out.success(options.json === true ? JSON.stringify(recommendation, null, 2) : renderPackRecommendation(recommendation));
+    this.deps.out.success(
+      options.json === true ? JSON.stringify(recommendation, null, 2) : renderPackRecommendation(recommendation),
+    );
   }
 
   async newChild(words: readonly string[], options: PackNewOptions): Promise<void> {
     const typed = joined(words);
     const task = options.promptFile === undefined ? typed : (await this.deps.readFile(options.promptFile)).trim();
-    if (task === '') throw new Error(`give the brief: ${this.deps.binaryName} new --runtime <runtime> "<complete brief>"`);
+    if (task === '')
+      throw new Error(`give the brief: ${this.deps.binaryName} new --runtime <runtime> "<complete brief>"`);
     const request: PackNewRequest = PackNewRequestSchema.parse({
       task,
       ...(this.deps.parent === undefined ? {} : { parent: this.deps.parent }),
@@ -70,7 +73,11 @@ export class PackController {
       ...(options.auto === true ? { auto: true } : {}),
       ...(options.useCase === undefined ? {} : { useCase: options.useCase }),
       // A sub-ferret runs in its parent's folder unless told otherwise; a person's start runs here.
-      ...(options.cwd !== undefined ? { cwd: options.cwd } : this.deps.parent === undefined ? { cwd: this.deps.cwd } : {}),
+      ...(options.cwd !== undefined
+        ? { cwd: options.cwd }
+        : this.deps.parent === undefined
+          ? { cwd: this.deps.cwd }
+          : {}),
       ...(options.name === undefined ? {} : { name: options.name }),
       ...(options.mode === undefined ? {} : { mode: options.mode }),
     });

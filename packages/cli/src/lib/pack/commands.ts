@@ -10,7 +10,11 @@ export interface PackFailureReporter {
  * Mounts `fy recommend` (docs/pack-mode.md). `fy new` — the start it recommends — shares its verb with
  * `fy new --continue` and is mounted with it (`../import/commands.ts`).
  */
-export function registerRecommendCommand(program: Command, controller: PackController, reporter: PackFailureReporter): void {
+export function registerRecommendCommand(
+  program: Command,
+  controller: PackController,
+  reporter: PackFailureReporter,
+): void {
   program
     .command('recommend')
     .description('which models can run a piece of work here now, best first (Pack mode)')

@@ -31,7 +31,10 @@ export interface PackSubsystem {
   readonly service: Pick<PackService, 'view' | 'recommend' | 'newChild'>;
   /** `undefined` when there is no such session. */
   result(sessionId: string): Promise<SessionResult | undefined>;
-  setSwitch(sessionId: string, enabled: boolean): Promise<{ readonly view: SessionView; readonly outcome: PackSwitchOutcome }>;
+  setSwitch(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ readonly view: SessionView; readonly outcome: PackSwitchOutcome }>;
 }
 
 const USE = { capability: 'fleet', axis: 'use' } as const;

@@ -86,21 +86,46 @@ export function runtimeRefusal(
 ): PackRefusal | undefined {
   const name = runtime.name;
   if (!runtime.agent)
-    return refusal('not_agent', `${name} is for using its CLI yourself and cannot run sub-ferrets.`, 'Pick an agent runtime.');
+    return refusal(
+      'not_agent',
+      `${name} is for using its CLI yourself and cannot run sub-ferrets.`,
+      'Pick an agent runtime.',
+    );
   const tool = facts.tools.find(candidate => candidate.harness === runtime.harness);
   if (tool !== undefined && !tool.installed)
-    return refusal('cli_missing', `${tool.label} is not installed on this machine, so ${name} cannot start.`, `Install ${tool.label}, or pick another runtime.`);
+    return refusal(
+      'cli_missing',
+      `${tool.label} is not installed on this machine, so ${name} cannot start.`,
+      `Install ${tool.label}, or pick another runtime.`,
+    );
   const credential = facts.credentials.find(candidate => candidate.id === runtime.credential.id);
   const missing = credential?.environment?.missingSecrets ?? [];
   if (missing.length > 0)
-    return refusal('not_logged_in', `${name}'s login needs ${missing.join(', ')}, which is not set.`, 'Pick another candidate.');
+    return refusal(
+      'not_logged_in',
+      `${name}'s login needs ${missing.join(', ')}, which is not set.`,
+      'Pick another candidate.',
+    );
   if ((credential?.status.word ?? runtime.credential.status) === 'needs_sign_in')
-    return refusal('not_logged_in', `${name}'s login (${runtime.credential.id}) needs signing in.`, 'Pick another candidate.');
+    return refusal(
+      'not_logged_in',
+      `${name}'s login (${runtime.credential.id}) needs signing in.`,
+      'Pick another candidate.',
+    );
   if (credential !== undefined && exhausted(credential))
-    return refusal('out_of_quota', `${name}'s login (${runtime.credential.id}) is out of quota.`, 'Pick another candidate.');
-  if (!runtime.launch.available) return refusal('not_logged_in', `${name} cannot launch: ${runtime.launch.reason}`, 'Pick another candidate.');
+    return refusal(
+      'out_of_quota',
+      `${name}'s login (${runtime.credential.id}) is out of quota.`,
+      'Pick another candidate.',
+    );
+  if (!runtime.launch.available)
+    return refusal('not_logged_in', `${name} cannot launch: ${runtime.launch.reason}`, 'Pick another candidate.');
   if (model !== undefined && !offers(runtime, model))
-    return refusal('model_unavailable', `${name} does not offer ${model}.`, `\`recommend\` lists the runtimes that do.`);
+    return refusal(
+      'model_unavailable',
+      `${name} does not offer ${model}.`,
+      `\`recommend\` lists the runtimes that do.`,
+    );
   return undefined;
 }
 
@@ -108,7 +133,10 @@ export function runtimeRefusal(
 export function offers(runtime: FleetRuntimeView, model: string): boolean {
   if (runtime.models !== undefined)
     return runtime.models.choices.some(choice => choice.id === model) || runtime.models.catalog.customIds;
-  return runtime.modelSet.source === 'model-set' && runtime.modelSet.models.some(entry => entry.id === model && entry.available);
+  return (
+    runtime.modelSet.source === 'model-set' &&
+    runtime.modelSet.models.some(entry => entry.id === model && entry.available)
+  );
 }
 
 /** The label a catalog gives a model id on this runtime, for display. */
@@ -133,7 +161,8 @@ function servers(
     .map(runtime => ({ runtime, model: candidate.model }));
   if (label === undefined) return exact;
   const alike = runtimes.flatMap(runtime => {
-    if (!harnessFits(runtime) || runtime.models === undefined || runtime.models.catalog.id === candidate.provider) return [];
+    if (!harnessFits(runtime) || runtime.models === undefined || runtime.models.catalog.id === candidate.provider)
+      return [];
     const choice = runtime.models.choices.find(entry => entry.label.toLowerCase() === label.toLowerCase());
     return choice === undefined ? [] : [{ runtime, model: choice.id }];
   });
@@ -189,7 +218,9 @@ function resolve(
 function catalogLabels(runtimes: readonly FleetRuntimeView[]): ReadonlyMap<string, string> {
   return new Map(
     runtimes.flatMap(runtime =>
-      (runtime.models?.choices ?? []).map(choice => [`${runtime.models?.catalog.id ?? ''}\u0000${choice.id}`, choice.label] as const),
+      (runtime.models?.choices ?? []).map(
+        choice => [`${runtime.models?.catalog.id ?? ''}\u0000${choice.id}`, choice.label] as const,
+      ),
     ),
   );
 }

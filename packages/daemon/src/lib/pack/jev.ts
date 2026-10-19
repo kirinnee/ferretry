@@ -40,7 +40,11 @@ export const PACK_JEV_INSTRUCTIONS = [
 const option = (index: number): string => `c${String(index + 1)}`;
 
 /** The request body: the task and one criterion per candidate. */
-export function buildPackJevBody(task: string, candidates: readonly RankableCandidate[], model: string): Record<string, unknown> {
+export function buildPackJevBody(
+  task: string,
+  candidates: readonly RankableCandidate[],
+  model: string,
+): Record<string, unknown> {
   return {
     model,
     state: { task: task.slice(0, PACK_JEV_LIMITS.maxTaskChars) },
@@ -79,7 +83,9 @@ export function parsePackJevReply(payload: unknown, count: number): JevRanking |
   };
   const order = indices.toSorted(
     (left, right) =>
-      Number(option(right) === chosen) - Number(option(left) === chosen) || weight(right) - weight(left) || left - right,
+      Number(option(right) === chosen) - Number(option(left) === chosen) ||
+      weight(right) - weight(left) ||
+      left - right,
   );
   const usage = isRecord(payload.usage) ? payload.usage : {};
   const tokens = typeof usage.input_tokens === 'number' && usage.input_tokens >= 0 ? Math.round(usage.input_tokens) : 0;
@@ -114,6 +120,8 @@ export class JevPackRanker implements PackJevPort {
       maxResponseBytes: PACK_JEV_LIMITS.maxResponseBytes,
     });
     if (outcome.kind !== 'completion') return { kind: 'failed', reason: FAILURE_WORDS[outcome.kind] };
-    return parsePackJevReply(outcome.payload, candidates.length) ?? { kind: 'failed', reason: FAILURE_WORDS.unreadable };
+    return (
+      parsePackJevReply(outcome.payload, candidates.length) ?? { kind: 'failed', reason: FAILURE_WORDS.unreadable }
+    );
   }
 }

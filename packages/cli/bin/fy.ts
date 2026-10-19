@@ -872,7 +872,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         // A settled wait hands back the ferret's result and stops one still running (docs/pack-mode.md).
         (() => {
           const pack = new ProtocolPackGateway(client);
-          return { result: async (id: string) => await pack.result(id), stop: async (id: string, reason: string) => await pack.stop(id, reason) };
+          return {
+            result: async (id: string) => await pack.result(id),
+            stop: async (id: string, reason: string) => await pack.stop(id, reason),
+          };
         })(),
       ),
     ),

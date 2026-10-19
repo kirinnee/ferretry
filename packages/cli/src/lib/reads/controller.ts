@@ -175,7 +175,9 @@ export class ReadsController {
   ): Promise<void> {
     const json = options.json === true;
     const result =
-      outcome.kind === 'settled' && view !== undefined ? await this.results?.result(view.config.id).catch(() => undefined) : undefined;
+      outcome.kind === 'settled' && view !== undefined
+        ? await this.results?.result(view.config.id).catch(() => undefined)
+        : undefined;
     if (view !== undefined) {
       const summary = result?.summary;
       this.out.success(
@@ -186,7 +188,9 @@ export class ReadsController {
     }
     if (outcome.kind === 'settled' && view !== undefined && result?.finished === false && options.keep !== true) {
       await this.results?.stop(view.config.id, 'its result was collected').catch(() => undefined);
-      this.out.error(`${this.binaryName} wait: stopped ${sessionId} now its result is collected (--keep leaves it running)`);
+      this.out.error(
+        `${this.binaryName} wait: stopped ${sessionId} now its result is collected (--keep leaves it running)`,
+      );
     }
     const explanation = renderWaitOutcome(outcome);
     if (explanation !== undefined) this.out.error(`${this.binaryName} wait: ${explanation}`);

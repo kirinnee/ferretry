@@ -116,7 +116,19 @@ export function deriveGuide(catalogs: readonly ModelCatalogView[]): readonly Gui
       title: 'Hard planning, review and critical code',
       description:
         'Designing an approach, reviewing a change, and the hardest or most critical code: security, data loss, concurrency, a migration.',
-      keywords: ['plan', 'design', 'architecture', 'review', 'audit', 'critical', 'security', 'hard', 'tricky', 'root cause', 'migration'],
+      keywords: [
+        'plan',
+        'design',
+        'architecture',
+        'review',
+        'audit',
+        'critical',
+        'security',
+        'hard',
+        'tricky',
+        'root cause',
+        'migration',
+      ],
       candidates: take(best, model => {
         const effort = highestEffort(model.entry);
         return candidateOf(model, effort, tierWhy(model, effort === undefined ? '' : `, at ${effort} effort`));
@@ -134,7 +146,8 @@ export function deriveGuide(catalogs: readonly ModelCatalogView[]): readonly Gui
     {
       id: 'bulk',
       title: 'Mechanical bulk edits',
-      description: 'Renames, formatting, find-and-replace sweeps and boilerplate across many files: one rule applied everywhere.',
+      description:
+        'Renames, formatting, find-and-replace sweeps and boilerplate across many files: one rule applied everywhere.',
       keywords: ['rename', 'bulk', 'mass', 'mechanical', 'format', 'replace', 'sweep', 'chore', 'boilerplate', 'lint'],
       candidates: take(ofTier(models, 'fast'), model => {
         const effort = lowestEffort(model.entry);
@@ -146,13 +159,26 @@ export function deriveGuide(catalogs: readonly ModelCatalogView[]): readonly Gui
       title: 'Second opinion',
       description: 'Checking a plan, a diff or a conclusion with a different model family from the one that made it.',
       keywords: ['second opinion', 'double-check', 'verify', 'cross-check', 'sanity', 'alternative', 'critique'],
-      candidates: take(otherFamilies, model => candidateOf(model, highestEffort(model.entry), tierWhy(model, ', a different family'))),
+      candidates: take(otherFamilies, model =>
+        candidateOf(model, highestEffort(model.entry), tierWhy(model, ', a different family')),
+      ),
     },
     {
       id: 'long-context',
       title: 'Long-context reading',
       description: 'Reading a large codebase, long logs or many documents and reporting what matters.',
-      keywords: ['read', 'summarize', 'survey', 'codebase', 'large', 'logs', 'long', 'document', 'explore', 'investigate'],
+      keywords: [
+        'read',
+        'summarize',
+        'survey',
+        'codebase',
+        'large',
+        'logs',
+        'long',
+        'document',
+        'explore',
+        'investigate',
+      ],
       candidates: take(longest, model =>
         candidateOf(
           model,

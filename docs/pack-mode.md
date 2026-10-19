@@ -11,11 +11,11 @@ This page is the contract. The wire shapes are `packages/protocol/src/lib/pack.t
 
 ## The switches
 
-| Switch            | Where                                                                    | Default |
-| ----------------- | ------------------------------------------------------------------------ | ------- |
-| The machine's     | `pack.yaml` `enabled`; Settings › Pack mode                              | on      |
-| One ferret's      | `config.pack` on its session document (absent = on); `PATCH …/pack`      | on      |
-| What it is told   | `FY_PACK=1` or `0` in its launch environment, written at its start       | —       |
+| Switch          | Where                                                               | Default |
+| --------------- | ------------------------------------------------------------------- | ------- |
+| The machine's   | `pack.yaml` `enabled`; Settings › Pack mode                         | on      |
+| One ferret's    | `config.pack` on its session document (absent = on); `PATCH …/pack` | on      |
+| What it is told | `FY_PACK=1` or `0` in its launch environment, written at its start  | —       |
 
 - A new ferret gets `FY_PACK=1` when the machine's switch is on **and** it sits shallow enough to start a
   sub-ferret of its own. A ferret at the deepest level is never told about a door it cannot open. A
@@ -48,14 +48,14 @@ Built-in subagents are **discouraged, not blocked**: nothing is taken away from 
 
 **Size.** Every Ferretry instruction together is about 3.5 KB (≈ 870 tokens) with every section on:
 
-| Section                                  | Characters | ≈ tokens | When                         |
-| ---------------------------------------- | ---------- | -------- | ---------------------------- |
-| Tools (terminals, browser pages)         | 620        | 155      | every agent runtime          |
-| Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime          |
-| Hypermedia                               | 1,062      | 266      | `FY_HYPERMEDIA=1`            |
-| Pack mode                                | 890        | 223      | `FY_PACK=1`                  |
-| Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`      |
-| The tools server's MCP instructions      | 112        | 28       | always — one line, no rules  |
+| Section                                  | Characters | ≈ tokens | When                        |
+| ---------------------------------------- | ---------- | -------- | --------------------------- |
+| Tools (terminals, browser pages)         | 620        | 155      | every agent runtime         |
+| Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
+| Hypermedia                               | 1,062      | 266      | `FY_HYPERMEDIA=1`           |
+| Pack mode                                | 890        | 223      | `FY_PACK=1`                 |
+| Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
+| The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
 `fy config guide`, which prints it. A test keeps the whole prompt under 4 KB.
@@ -89,9 +89,9 @@ useCases:
   [model-catalog.md](model-catalog.md)) and `model` an id that catalog lists, so a candidate may be any model
   anywhere in the fleet. `harness` says which CLI when a catalog lists the model for both.
 - **No `useCases` key: the derived guide.** A machine that never wrote a guide gets five use cases built from
-  the catalogs in effect — *Hard planning, review and critical code* (`best` tier, highest effort), *Everyday
-  coding* (`balanced`), *Mechanical bulk edits* (`fast`, lowest effort), *Second opinion* (`best`, another
-  family), *Long-context reading* (largest context) — so it moves with the catalogs without a release.
+  the catalogs in effect — _Hard planning, review and critical code_ (`best` tier, highest effort), _Everyday
+  coding_ (`balanced`), _Mechanical bulk edits_ (`fast`, lowest effort), _Second opinion_ (`best`, another
+  family), _Long-context reading_ (largest context) — so it moves with the catalogs without a release.
   Providers are ordered Anthropic, OpenAI, Z.ai, DeepSeek, Kimi, MiniMax, Qwen, Ollama, then the rest, and the
   same model resold by Bedrock, Vertex or a gateway is listed once.
 - **A model the guide names that no runtime here offers is still listed**, flagged, never removed: a guide
@@ -107,15 +107,15 @@ useCases:
 (`--use-case`), else the one whose keywords and title words the task uses most, else `everyday`. Each of its
 candidates is resolved to a runtime on this machine and checked **now**, in the order a person would fix it:
 
-| Check                                | Refusal code        |
-| ------------------------------------ | ------------------- |
-| An agent runtime                     | `not_agent`         |
-| Its CLI is installed                 | `cli_missing`       |
-| Every secret its login names is set  | `not_logged_in`     |
-| Its login is signed in               | `not_logged_in`     |
-| Its quota is not used up             | `out_of_quota`      |
-| It can launch at all                 | `not_logged_in`     |
-| It offers the model                  | `model_unavailable` |
+| Check                               | Refusal code        |
+| ----------------------------------- | ------------------- |
+| An agent runtime                    | `not_agent`         |
+| Its CLI is installed                | `cli_missing`       |
+| Every secret its login names is set | `not_logged_in`     |
+| Its login is signed in              | `not_logged_in`     |
+| Its quota is not used up            | `out_of_quota`      |
+| It can launch at all                | `not_logged_in`     |
+| It offers the model                 | `model_unavailable` |
 
 Ready candidates come first, each group in the guide's order, and `next` is the command that starts the
 first. `--json` prints the payload. (The older `fy fleet recommend` — a team recommender over a routing
@@ -149,16 +149,16 @@ The answer is never an HTTP error for a refusal: it is `{outcome: 'refused', ref
 remedy}, attempts}`, every attempt listed, so a ferret falls back on the code. `fy new` exits **2** on a
 refusal (a failure of the command itself is 1).
 
-| Code                                 | Means                                                         |
-| ------------------------------------ | ------------------------------------------------------------- |
-| `pack_off`                           | the machine's or this ferret's switch is off                  |
-| `limit_reached` / `depth_exceeded`   | see Limits; do the work yourself                              |
-| `unknown_runtime` / `not_agent`      | no such runtime / one that cannot run sessions                |
-| `cli_missing` / `not_logged_in`      | the CLI is not installed / the login needs signing in         |
-| `out_of_quota` / `model_unavailable` | quota used up / the runtime does not offer the model          |
-| `probe_failed`                       | the "reply OK" check did not answer OK in time                |
-| `no_candidate`                       | nothing in the guide can run here now                         |
-| `jev_unavailable` / `jev_cap_reached`| reserved; today both fall back to the guide's order, with a note |
+| Code                                  | Means                                                            |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| `pack_off`                            | the machine's or this ferret's switch is off                     |
+| `limit_reached` / `depth_exceeded`    | see Limits; do the work yourself                                 |
+| `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                   |
+| `cli_missing` / `not_logged_in`       | the CLI is not installed / the login needs signing in            |
+| `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model             |
+| `probe_failed`                        | the "reply OK" check did not answer OK in time                   |
+| `no_candidate`                        | nothing in the guide can run here now                            |
+| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the guide's order, with a note |
 
 ## Who decides
 
@@ -180,11 +180,11 @@ refusal (a failure of the command itself is 1).
 Enforced by the daemon on **every** start that names a parent — `fy new` and a plain `fy start` inside a pane
 alike — before anything is claimed or written. A warden's own spawns are the Warden's to bound.
 
-| Limit                                                    | `pack.yaml`                  | Default |
-| -------------------------------------------------------- | ---------------------------- | ------- |
-| Running sub-ferrets of an interactive ferret             | `limits.interactiveChildren` | 20      |
-| Running sub-ferrets of an unattended ferret              | `limits.autoChildren`        | 4       |
-| Depth (a top-level ferret is 0; a sub-ferret 1)          | `limits.maxDepth`            | 2       |
+| Limit                                           | `pack.yaml`                  | Default |
+| ----------------------------------------------- | ---------------------------- | ------- |
+| Running sub-ferrets of an interactive ferret    | `limits.interactiveChildren` | 20      |
+| Running sub-ferrets of an unattended ferret     | `limits.autoChildren`        | 4       |
+| Depth (a top-level ferret is 0; a sub-ferret 1) | `limits.maxDepth`            | 2       |
 
 With depth 2 a sub-ferret may start its own and those may not. A child counts until it is completed,
 failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_reached` or

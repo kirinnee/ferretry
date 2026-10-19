@@ -277,7 +277,11 @@ function packLoosening(before: PackConfig, after: PackConfig): readonly string[]
       after.limits.interactiveChildren,
       'the sub-ferrets an interactive ferret may run at once',
     ),
-    ...raised(before.limits.autoChildren, after.limits.autoChildren, 'the sub-ferrets an unattended ferret may run at once'),
+    ...raised(
+      before.limits.autoChildren,
+      after.limits.autoChildren,
+      'the sub-ferrets an unattended ferret may run at once',
+    ),
     ...raised(before.limits.maxDepth, after.limits.maxDepth, 'how deep sub-ferrets may nest'),
     ...raised(before.jev.usdPerDay, after.jev.usdPerDay, "Jev's daily cap in dollars for choosing models"),
   ];

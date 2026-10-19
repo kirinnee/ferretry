@@ -268,7 +268,11 @@ export type PackCandidate = z.infer<typeof PackCandidateSchema>;
 
 export const PackRecommendationSchema = z.strictObject({
   task: NonEmpty,
-  useCase: z.strictObject({ id: GuideUseCaseIdSchema, title: NonEmpty, matchedBy: z.enum(['named', 'words', 'fallback']) }),
+  useCase: z.strictObject({
+    id: GuideUseCaseIdSchema,
+    title: NonEmpty,
+    matchedBy: z.enum(['named', 'words', 'fallback']),
+  }),
   guideSource: z.enum(['file', 'derived']),
   /** Ready ones first, each group in the guide's order. */
   candidates: z.array(PackCandidateSchema).readonly(),

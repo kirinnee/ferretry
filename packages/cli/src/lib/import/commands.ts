@@ -124,7 +124,12 @@ export function registerNewCommand(
     .action(
       async (
         words: string[],
-        options: { continue?: boolean; harness?: 'claude' | 'codex'; runtime?: string; since?: string } & PackNewOptions,
+        options: {
+          continue?: boolean;
+          harness?: 'claude' | 'codex';
+          runtime?: string;
+          since?: string;
+        } & PackNewOptions,
       ) => {
         if (options.continue !== true && fresh !== undefined) {
           const { continue: _continue, harness: _harness, since: _since, ...pack } = options;
