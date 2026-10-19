@@ -276,7 +276,8 @@ export class CodexTranscriptParser implements TranscriptParser {
           : (transcriptObject(payload.thread_settings) ?? transcriptObject(record.thread_settings) ?? {});
       const model = transcriptString(settings.model);
       const reasoningEffort = transcriptString(settings.reasoning_effort) ?? transcriptString(settings.effort);
-      if (model === undefined && reasoningEffort === undefined) {
+      const serviceTier = transcriptString(settings.service_tier);
+      if (model === undefined && reasoningEffort === undefined && serviceTier === undefined) {
         issues.push(
           transcriptRecordIssue(
             this.harness,
@@ -291,7 +292,7 @@ export class CodexTranscriptParser implements TranscriptParser {
         events.push({
           ...codexMetadata(record, payload, 'system', context),
           kind: 'settings',
-          settings: { model, reasoningEffort },
+          settings: { model, reasoningEffort, ...(serviceTier === undefined ? {} : { serviceTier }) },
         });
       }
       return { events, issues, recognized: true };

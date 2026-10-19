@@ -3,6 +3,7 @@ import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
+import { FastToggle } from '../../components/composer-fast.tsx';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import type { SendRetry } from '../../components/ledger-message.tsx';
 import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
@@ -1002,6 +1003,16 @@ export function SessionChatPage({
             onOpenTerminal={openConsole}
             view={session}
             {...lifecycle}
+          />
+        )}
+        renderFast={() => (
+          <FastToggle
+            api={runtimeApi}
+            busy={runtimeSwitchBusy}
+            canControl={canControl}
+            catalogs={routedRuntimeCatalogs}
+            daemon={connection}
+            view={session}
           />
         )}
         renderModelControls={lifecycle => (

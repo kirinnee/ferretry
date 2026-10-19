@@ -16,7 +16,9 @@
  *   3. the transcript arguments that name the harness session (`--session-id`);
  *   4. the fixed `Read(...)` rules for the session's own hand-off folders;
  *   5. the session's CURRENT model and reasoning effort;
- *   6. the owner's free-form harness flags, LAST, so an explicitly supplied flag still wins.
+ *   6. fast mode, when the session has a decided state (Codex `-c service_tier=…`; Claude a `--settings`
+ *      overlay, see {@link fastLaunchArguments});
+ *   7. the owner's free-form harness flags, LAST, so an explicitly supplied flag still wins.
  *
  * Pure: strings in, strings out. Which values go in is the relaunch service's decision.
  */
@@ -43,6 +45,17 @@ export interface LaunchArgvParts {
   readonly model?: string;
   /** The reasoning effort to run at. Absent leaves the harness's own setting in charge. */
   readonly effort?: string;
+  /**
+   * Whether to launch in fast mode. Absent leaves the harness's own setting in charge, which is NOT
+   * "off": Codex's fastest models run fast by default, and a login may have saved either answer.
+   */
+  readonly fast?: boolean;
+  /**
+   * The text of the login's fixed `--settings` file, for a Claude launch that names fast mode. Claude
+   * honours ONE `--settings`, the last, so naming fast mode replaces the wrapper's own overlay and has
+   * to carry it along. Empty when the login has no such file.
+   */
+  readonly fixedSettings?: string;
   readonly harnessFlags: readonly string[];
 }
 
@@ -67,6 +80,59 @@ export function effortLaunchArguments(harness: HarnessKind, effort: string | und
   return harness === 'claude' ? ['--effort', effort] : ['-c', `${CODEX_EFFORT_KEY}=${tomlBasicString(effort)}`];
 }
 
+/** The Codex config key its service tier is read from. */
+const CODEX_TIER_KEY = 'service_tier';
+
+/** The service tier ids Codex's `/fast` moves between: `priority` is the fast one. */
+const CODEX_TIER = { fast: 'priority', standard: 'default' } as const;
+
+/** A fixed settings file that is not a JSON object cannot be carried into a replacement overlay. */
+export class FixedSettingsUnreadableError extends Error {
+  constructor() {
+    super('the login’s fixed settings file is not a JSON object, so fast mode cannot be added to its launch');
+    this.name = 'FixedSettingsUnreadableError';
+  }
+}
+
+/**
+ * The launch arguments that start a harness with fast mode on or off.
+ *
+ *   * Codex reads its service tier from configuration, which `-c` overrides for one invocation.
+ *   * Claude has no flag for it. `--settings '{"fastMode":true}'` works, but only ONE `--settings` is
+ *     honoured — the last — and the fleet wrapper already passes the fixed overlay (permission mode,
+ *     skipped prompts). So the overlay is read, `fastMode` is added to it, and the whole object is
+ *     passed inline after the wrapper's own, which it then replaces without losing anything.
+ *
+ * Both are explicit in both directions: a login that saved fast mode with an earlier `/fast on` would
+ * otherwise start every later session fast, whatever it was launched with.
+ *
+ * Throws {@link FixedSettingsUnreadableError} when the fixed file exists and is not a JSON object:
+ * dropping it would launch an unattended agent without its permission mode.
+ */
+export function fastLaunchArguments(
+  harness: HarnessKind,
+  fast: boolean | undefined,
+  fixedSettings: string | undefined,
+): readonly string[] {
+  if (fast === undefined) return [];
+  if (harness === 'codex')
+    return ['-c', `${CODEX_TIER_KEY}=${tomlBasicString(fast ? CODEX_TIER.fast : CODEX_TIER.standard)}`];
+  const text = fixedSettings?.trim() ?? '';
+  let base: Record<string, unknown> = {};
+  if (text !== '') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new FixedSettingsUnreadableError();
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+      throw new FixedSettingsUnreadableError();
+    base = parsed as Record<string, unknown>;
+  }
+  return ['--settings', JSON.stringify({ ...base, fastMode: fast })];
+}
+
 /** The whole argv, in the order the file comment states. */
 export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
   return [
@@ -76,6 +142,7 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
     ...handoffReadArguments(parts.harness, parts.readableFolders),
     ...modelArguments(parts.model),
     ...effortLaunchArguments(parts.harness, parts.effort),
+    ...fastLaunchArguments(parts.harness, parts.fast, parts.fixedSettings),
     ...parts.harnessFlags,
   ];
 }
@@ -118,12 +185,18 @@ const CODEX_RESUME = 'resume';
 
 /** Flags whose VALUE is the next argv entry and that describe the run, not the settings. */
 const RUN_FLAGS: ReadonlySet<string> = new Set([HARNESS_SESSION_FLAG, HARNESS_RESUME_FLAG, '--model', '--effort']);
-/** Codex `-c` overrides that select the model or the effort rather than a setting. */
-const RUN_OVERRIDE = /^(?:model|model_reasoning_effort)=/u;
+/** Codex `-c` overrides that select the model, the effort or the service tier rather than a setting. */
+const RUN_OVERRIDE = /^(?:model|model_reasoning_effort|service_tier)=/u;
+
+/**
+ * Claude's inline `--settings` overlay that carries fast mode. It is a run fact like the model: a
+ * `/fast` typed into the pane changes it without anything having gone stale.
+ */
+const INLINE_SETTINGS = /^\{.*"fastMode":(?:true|false).*\}$/su;
 
 /**
  * The argv with what describes THIS RUN removed: the harness session, its Codex correlation root,
- * the model and the effort.
+ * the model, the effort and fast mode.
  *
  * What is left is the part a relaunch would change if a setting changed — the wrapper, the
  * remote-control surface, the `Read(...)` rules, the owner's flags — which is what a stale-settings
@@ -139,6 +212,7 @@ export function settingsArguments(argv: readonly string[]): readonly string[] {
     if (
       RUN_FLAGS.has(token) ||
       (token === '-c' && next !== undefined && RUN_OVERRIDE.test(next)) ||
+      (token === '--settings' && next !== undefined && INLINE_SETTINGS.test(next)) ||
       isCodexCorrelationPair(token, next)
     ) {
       index += 1;

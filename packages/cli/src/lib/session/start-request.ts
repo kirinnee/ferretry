@@ -32,6 +32,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly parent?: string;
   readonly boardAccess?: TaskBoardAccess;
   readonly model?: string;
+  /** Only set when the caller typed `--fast`/`--no-fast`; unset leaves the harness's own default (off). */
+  readonly fast?: boolean;
   /** Only set when the caller actually passed `--rc`/`--no-rc`; unset leaves the daemon default. */
   readonly remoteControl?: boolean;
   readonly harnessFlags?: readonly string[];
@@ -146,6 +148,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.label === undefined ? {} : { label: flags.label }),
     ...(parent === undefined ? {} : { parent }),
     ...(flags.model === undefined ? {} : { model: flags.model }),
+    ...(flags.fast === undefined ? {} : { fast: flags.fast }),
     ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),
     ...(flags.interval === undefined ? {} : { intervalSeconds: flags.interval }),
     ...(flags.turnTimeout === undefined ? {} : { timeoutSeconds: flags.turnTimeout }),

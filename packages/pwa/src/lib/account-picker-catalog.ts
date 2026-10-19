@@ -43,6 +43,8 @@ export interface PickerModel {
   /** The reasoning efforts it takes; empty when it takes none. Absent when no catalog says. */
   readonly efforts?: readonly string[];
   readonly defaultEffort?: string;
+  /** Whether the CLI offers fast mode on it; absent when the daemon did not say. */
+  readonly fast?: boolean;
   /** Installed on this machine, as the local server (Ollama) reported it, rather than listed by the catalog. */
   readonly local?: true;
 }
@@ -146,6 +148,7 @@ export const pickerAccount = (runtime: FleetRuntimeView): PickerAccount => ({
           ...(choice.context === undefined ? {} : { context: choice.context }),
           efforts: choice.efforts,
           ...(choice.defaultEffort === undefined ? {} : { defaultEffort: choice.defaultEffort }),
+          ...(choice.fast === undefined ? {} : { fast: choice.fast }),
           ...(choice.local === true ? { local: true as const } : {}),
         })),
         modelCatalog: {

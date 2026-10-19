@@ -46,6 +46,8 @@ class Ports implements SessionLaunchPorts {
   subjectValue: LaunchSubject | undefined = legacySubject();
   accountValue: ReturnType<typeof launchAccount> | undefined = launchAccount();
   digest: string | undefined = 'settings-now';
+  /** The login's fixed `--settings` text: empty is a login with none, undefined is unreadable. */
+  fixed: string | undefined = '{"skipAutoPermissionPrompt":true}';
   started = true;
   readonly recorded: RecordedLaunch[] = [];
   readonly planner = planner;
@@ -55,6 +57,7 @@ class Ports implements SessionLaunchPorts {
     this.accountValue === undefined ? undefined : { account: this.accountValue, executable: WRAPPER };
   readableFolders = () => FOLDERS;
   settings = async () => this.digest;
+  fixedSettings = async () => this.fixed;
   transcriptStarted = async (file: string) => file === TRANSCRIPT && this.started;
   authorize = (_executable: string, argv: readonly string[]) => argv;
   record = async (_id: unknown, launch: RecordedLaunch) => {
@@ -160,6 +163,123 @@ describe('SessionLaunchService.relaunch', () => {
     should(await new SessionLaunchService(gone).relaunch(ID)).be.undefined();
     should(await new SessionLaunchService(rekinded).relaunch(ID)).be.undefined();
     should(gone.recorded).be.empty();
+  });
+});
+
+describe('SessionLaunchService.relaunch, with fast mode', () => {
+  it('should keep fast mode on a Claude session across a restart, carrying the fixed overlay with it', async () => {
+    // Arrange: launched fast; nothing reported since.
+    const ports = new Ports();
+    ports.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+
+    // Act
+    const argv = await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    const overlay = '{"skipAutoPermissionPrompt":true,"fastMode":true}';
+    should(argv?.slice(-2)).eql(['--settings', overlay]);
+    should(ports.recorded[0]).containEql({ launchFast: true });
+    should(ports.recorded[0]?.command.slice(-2)).eql(['--settings', overlay]);
+  });
+
+  it('should restart on what the harness last reported when that is newer than the launch', async () => {
+    // Arrange: launched fast, then turned off with /fast off.
+    const ports = new Ports();
+    ports.subjectValue = legacySubject({
+      config: launchConfig({ launchFast: true }),
+      state: launchState({ observedFast: false, observedModelAt: LATER }),
+    });
+
+    // Act
+    const argv = await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    should(argv?.at(-1)).equal('{"skipAutoPermissionPrompt":true,"fastMode":false}');
+    should(ports.recorded[0]).containEql({ launchFast: false });
+  });
+
+  it('should not turn a default into a choice: nothing decided means nothing asserted', async () => {
+    // Arrange / Act
+    const ports = new Ports();
+    const argv = await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    should(argv).not.containEql('--settings');
+    should(ports.recorded[0]).not.have.property('launchFast');
+  });
+
+  it('should read the overlay only for a Claude session that has a decision to carry', async () => {
+    // Arrange
+    let reads = 0;
+    const ports = new Ports();
+    ports.fixedSettings = async () => {
+      reads += 1;
+      return ports.fixed;
+    };
+
+    // Act
+    await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    should(reads).equal(0);
+  });
+
+  it('should set a Codex service tier without reading any overlay', async () => {
+    // Arrange
+    const ports = new Ports();
+    ports.accountValue = launchAccount({ kind: 'codex' });
+    ports.subjectValue = legacySubject({
+      config: launchConfig({ harness: 'codex', launchFast: true }),
+      command: [WRAPPER],
+    });
+    ports.fixed = undefined;
+
+    // Act
+    const argv = await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert
+    should(argv?.slice(-2)).eql(['-c', 'service_tier="priority"']);
+  });
+
+  it('should leave a session to its record when its overlay cannot be read or carried', async () => {
+    // Arrange
+    const unreadable = new Ports();
+    unreadable.fixed = undefined;
+    unreadable.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+    const corrupt = new Ports();
+    corrupt.fixed = '{not json';
+    corrupt.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+
+    // Act / Assert
+    should(await new SessionLaunchService(unreadable).relaunch(ID)).be.undefined();
+    should(await new SessionLaunchService(corrupt).relaunch(ID)).be.undefined();
+    should(unreadable.recorded).be.empty();
+    should(corrupt.recorded).be.empty();
+  });
+
+  it('should treat the fast-mode argument as part of the run, so a live /fast is not a stale setting', async () => {
+    // Arrange: the process runs with the fast overlay it launched with; the owner then typed /fast off.
+    const ports = new Ports();
+    ports.subjectValue = legacySubject({
+      config: launchConfig({ launchFast: true }),
+      state: launchState({ observedFast: false, observedModelAt: LATER }),
+      command: [
+        WRAPPER,
+        '--session-id',
+        HARNESS_SESSION,
+        ...READ_RULES,
+        '--model',
+        'claude-opus-5',
+        '--settings',
+        '{"skipAutoPermissionPrompt":true,"fastMode":true}',
+      ],
+    });
+
+    // Act
+    const drift = await new SessionLaunchService(ports).drift(ID);
+
+    // Assert
+    should(drift).eql({ current: true, reasons: [] });
   });
 });
 

@@ -37,6 +37,7 @@ describe('new session decisions', () => {
       cwd: '',
       model: '',
       mode: 'auto',
+      fast: false,
       label: '',
       prompt: '',
     });
@@ -89,6 +90,11 @@ describe('new session decisions', () => {
       label: 'Morning',
     });
     expect(buildStartSessionRequest(draft({ mode: 'interactive', prompt: ' ' }))).not.toHaveProperty('prompt');
+  });
+
+  test('should send fast mode only when it was asked for', () => {
+    expect(buildStartSessionRequest(draft({ fast: true }))).toMatchObject({ fast: true });
+    expect(buildStartSessionRequest(draft({ fast: false }))).not.toHaveProperty('fast');
   });
 
   test('should use schema validation for an invalid request', () => {

@@ -204,6 +204,25 @@ describe('pickerAccount', () => {
       },
       { id: 'glm-x', available: false, label: 'GLM X', efforts: [] },
     ]);
+    const fastModels = pickerAccount(
+      runtimeView({
+        wrapper: 'claude-auto-a',
+        models: {
+          catalog: {
+            id: 'anthropic',
+            label: 'Anthropic',
+            origin: 'built-in',
+            customIds: false,
+            docs: 'https://x.test',
+          },
+          choices: [
+            { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: [], fast: true, available: true },
+            { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', efforts: [], fast: false, available: true },
+          ],
+        },
+      }),
+    );
+    expect(fastModels.models.map(model => model.fast)).toEqual([true, false]);
     const unset = pickerAccount(
       runtimeView({
         wrapper: 'claude-auto-a',

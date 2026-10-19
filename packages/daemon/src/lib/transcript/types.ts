@@ -168,6 +168,8 @@ export interface TranscriptSettingsEvent extends TranscriptEventMetadata {
   readonly settings: {
     readonly model?: string;
     readonly reasoningEffort?: string;
+    /** The service tier the harness runs at, in its own words (Codex: `priority` is fast, `default` is not). */
+    readonly serviceTier?: string;
   };
 }
 

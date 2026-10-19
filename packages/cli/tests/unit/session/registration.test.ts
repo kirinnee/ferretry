@@ -195,6 +195,23 @@ describe('registerSessionCommands · start', () => {
     should(subject.api.calls[0]?.args[0]).containDeep({ remoteControl: false });
   });
 
+  it('should carry --fast as a decision, and --no-fast as an explicit off', async () => {
+    // Arrange
+    const on = harness();
+    const off = harness();
+    const unset = harness();
+
+    // Act
+    await on.run(['start', 'go', '--agent', 'claude-alpha', '--fast']);
+    await off.run(['start', 'go', '--agent', 'claude-alpha', '--no-fast']);
+    await unset.run(['start', 'go', '--agent', 'claude-alpha']);
+
+    // Assert
+    should(on.api.calls[0]?.args[0]).containDeep({ fast: true });
+    should(off.api.calls[0]?.args[0]).containDeep({ fast: false });
+    should(unset.api.calls[0]?.args[0]).not.have.property('fast');
+  });
+
   it('should pass an explicit parent and a board grant with its capability', async () => {
     // Arrange
     const subject = harness({}, { cwd: '/work/repo', boardCapability: 'cap-1' });

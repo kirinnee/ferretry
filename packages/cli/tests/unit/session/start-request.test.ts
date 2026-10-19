@@ -87,6 +87,19 @@ describe('buildStartRequest', () => {
     should(plan.boardCapability).be.undefined();
   });
 
+  it('should put a typed fast decision on the wire, either way, and nothing otherwise', () => {
+    // Arrange / Act
+    const on = buildStartRequest({ ...auto, fast: true }, HERE);
+    const off = buildStartRequest({ ...auto, fast: false }, HERE);
+    const unset = buildStartRequest(auto, HERE);
+
+    // Assert
+    should(StartSessionRequestSchema.safeParse(on.request).success).be.true();
+    should(on.request).containDeep({ fast: true });
+    should(off.request).containDeep({ fast: false });
+    should(unset.request).not.have.property('fast');
+  });
+
   it('should leave every unset flag off the wire rather than sending a default', () => {
     // Arrange / Act
     const plan = buildStartRequest(auto, HERE);

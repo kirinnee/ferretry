@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, it } from 'bun:test';
 import should from 'should';
-import { readPersistedReasoningEffort } from '../../../../src/adapters/index.ts';
+import { readPersistedFast, readPersistedReasoningEffort } from '../../../../src/adapters/index.ts';
 
 /**
  * Reading the level a runtime will start on from its own home, on a real filesystem.
@@ -44,5 +44,24 @@ describe('readPersistedReasoningEffort', () => {
     should(await readPersistedReasoningEffort('claude', undefined)).be.undefined();
     should(await readPersistedReasoningEffort('claude', 'relative/home')).be.undefined();
     should(await readPersistedReasoningEffort('codex', home({}))).be.undefined();
+  });
+});
+
+describe('readPersistedFast', () => {
+  it("should read a Claude runtime's saved fastMode, on or off", async () => {
+    should(await readPersistedFast('claude', home({ 'settings.json': '{"fastMode":true}' }))).equal(true);
+    should(await readPersistedFast('claude', home({ 'settings.json': '{"fastMode":false}' }))).equal(false);
+  });
+
+  it("should read a Codex runtime's saved service tier, either spelling of fast and the default", async () => {
+    should(await readPersistedFast('codex', home({ 'config.toml': 'service_tier = "fast"\n' }))).equal(true);
+    should(await readPersistedFast('codex', home({ 'config.toml': 'service_tier = "default"\n' }))).equal(false);
+  });
+
+  it('should answer nothing for an absent home, a relative home, a missing file or a file that says nothing', async () => {
+    should(await readPersistedFast('claude', undefined)).be.undefined();
+    should(await readPersistedFast('claude', 'relative/home')).be.undefined();
+    should(await readPersistedFast('codex', home({}))).be.undefined();
+    should(await readPersistedFast('claude', home({ 'settings.json': '{}' }))).be.undefined();
   });
 });

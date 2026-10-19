@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { currentLaunchEffort, currentLaunchModel } from '../../../../src/lib/session/launch/index.ts';
+import {
+  currentLaunchEffort,
+  currentLaunchFast,
+  currentLaunchModel,
+} from '../../../../src/lib/session/launch/index.ts';
 import { launchConfig, launchState } from './support.ts';
 
 const LATER = '2027-01-15T09:00:00.000Z';
@@ -74,5 +78,24 @@ describe('currentLaunchEffort', () => {
       currentLaunchEffort(config, launchState({ observedReasoningEffort: 'max', observedModelAt: EARLIER })),
     ).equal('medium');
     should(currentLaunchEffort(launchConfig(), launchState())).be.undefined();
+  });
+});
+
+describe('currentLaunchFast', () => {
+  it('should prefer a reported state newer than the decision, else the state it was launched in', () => {
+    // Arrange
+    const config = launchConfig({ launchFast: true });
+
+    // Act / Assert
+    should(currentLaunchFast(config, launchState({ observedFast: false, observedModelAt: LATER }))).equal(false);
+    should(currentLaunchFast(config, launchState({ observedFast: false, observedModelAt: EARLIER }))).equal(true);
+    should(currentLaunchFast(config, launchState({ observedFast: false }))).equal(true);
+    should(currentLaunchFast(config, launchState())).equal(true);
+  });
+
+  it('should answer nothing when nothing was ever decided, so a relaunch asserts nothing', () => {
+    // Act / Assert
+    should(currentLaunchFast(launchConfig(), launchState())).be.undefined();
+    should(currentLaunchFast(launchConfig(), launchState({ observedFast: true, observedModelAt: LATER }))).equal(true);
   });
 });

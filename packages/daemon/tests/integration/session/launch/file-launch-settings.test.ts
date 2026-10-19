@@ -57,3 +57,40 @@ describe('FileLaunchSettingsDigest', () => {
     should(await subject.digest(`${wrapper}-missing`, 'claude')).be.undefined();
   });
 });
+
+describe('FileLaunchSettingsDigest.fixedSettings', () => {
+  it('should hand back the fixed settings text exactly, empty for a login without one', async () => {
+    // Arrange
+    const { wrapper, fixed } = await fleet();
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+
+    // Act
+    const none = await subject.fixedSettings(wrapper, 'claude');
+    await writeFile(fixed, '{"skipAutoPermissionPrompt":true}');
+    const present = await subject.fixedSettings(wrapper, 'claude');
+
+    // Assert
+    should(none).equal('');
+    should(present).equal('{"skipAutoPermissionPrompt":true}');
+  });
+
+  it('should say nothing for a wrapper it cannot read, and an empty overlay for one exporting no home', async () => {
+    // Arrange
+    const { wrapper } = await fleet();
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+
+    // Act / Assert — the codex reading of a claude wrapper finds no CODEX_HOME, so there is no file to look for.
+    should(await subject.fixedSettings(`${wrapper}-missing`, 'claude')).be.undefined();
+    should(await subject.fixedSettings(wrapper, 'codex')).equal('');
+  });
+
+  it('should say nothing when the file exists but cannot be read, rather than call it absent', async () => {
+    // Arrange — a directory where the file should be: a read error that is not "no such file".
+    const { wrapper, fixed } = await fleet();
+    await mkdir(fixed, { recursive: true });
+    const subject = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), {});
+
+    // Act / Assert
+    should(await subject.fixedSettings(wrapper, 'claude')).be.undefined();
+  });
+});

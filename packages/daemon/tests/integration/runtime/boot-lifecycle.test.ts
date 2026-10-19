@@ -1992,6 +1992,149 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * Fast mode at launch, through the production composition root.
+   *
+   * WHY THIS TIER. The decisions are made in `bin/fyd.ts` — refuse a model with no fast mode before
+   * anything is written, read the login's fixed overlay, record the state the session launched in — and
+   * that file is outside both ledgers. What matters is the assembled behaviour: a start that names fast
+   * mode launches with the overlay REPLACED (Claude honours one `--settings`, so the permission mode has
+   * to travel with it), a restart keeps the state the pane was last switched to, and a model with no
+   * fast mode is refused with the callsign freed.
+   */
+  it('should launch in fast mode, keep it across a restart, and refuse a model that has none', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-fast-mode');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: (
+        _storage: unknown,
+        relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
+      ) => {
+        reviver.argvFor = relaunch;
+        return reviver;
+      },
+    };
+    const wrapper = await seedFleet(home);
+    const harness = join(home, 'harness');
+    await mkdir(join(harness, '.fy'), { recursive: true });
+    await writeFile(
+      join(harness, '.fy', 'fixed.json'),
+      JSON.stringify({ permissions: { defaultMode: 'auto' }, skipAutoPermissionPrompt: true }),
+    );
+    await publishManifest(home, [
+      {
+        id: BOOT_ACCOUNT,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper,
+        home: harness,
+        displayName: 'Boot',
+        defaultModel: 'claude-opus-5-5',
+        models: [
+          { id: 'claude-opus-5-5', available: true },
+          { id: 'claude-sonnet-5-5', available: true },
+        ],
+        available: true,
+        unavailableReason: null,
+      },
+    ]);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startCall = async (requestId: string, fields: Record<string, unknown>): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...cli, 'x-fy-request-id': requestId },
+        body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'go fast', cwd: home, ...fields }),
+      });
+    const overlay = (argv: readonly string[]): unknown => {
+      const at = argv.indexOf('--settings');
+      return at < 0 ? undefined : JSON.parse(argv[at + 1] ?? 'null');
+    };
+
+    // Act
+    const refused = await startCall('req-fast-1', {
+      model: 'claude-sonnet-5-5',
+      fast: true,
+      teammate: SEEDED_CALLSIGN,
+    });
+    const refusedBody = (await refused.json()) as { readonly code: string; readonly error: string };
+    const fast = await startCall('req-fast-2', { fast: true, teammate: SEEDED_CALLSIGN });
+    const fastRaw: unknown = await fast.json();
+    if (fast.status !== 201) throw new Error(`the fast start failed: ${JSON.stringify(fastRaw)}`);
+    const id = SessionViewSchema.parse(fastRaw).config.id;
+    const plain = await startCall('req-fast-3', {});
+    const plainBody = SessionViewSchema.parse(await plain.json());
+    const configFile = join(home, 'state', 'sessions', id, 'config.json');
+    const stateFile = join(home, 'state', 'sessions', id, 'state.json');
+    const document = async (file: string): Promise<Record<string, unknown>> =>
+      JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    // The owner typed /fast off in the pane; the harness said so after the start decided.
+    await writeFile(
+      stateFile,
+      JSON.stringify({
+        ...(await document(stateFile)),
+        observedFast: false,
+        observedModelAt: '2099-01-01T00:00:00.000Z',
+      }),
+      { mode: 0o600 },
+    );
+    await fetch(`${sessions}/${id}/stop`, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ reason: 'pane died' }),
+    });
+    reviver.pane = { alive: false, dead: false, promptReady: false };
+    const revived = await fetch(`${sessions}/${id}/resume`, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ message: 'pick it back up' }),
+    });
+    const revivedConfig = await document(configFile);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(refused.status).equal(409);
+    should(refusedBody.code).equal('unservable_model');
+    should(refusedBody.error).equal('claude-sonnet-5-5 has no fast mode');
+    // The refusal launched nothing, and the callsign it claimed went to the start that did happen.
+    should(launcher.launched).have.length(2);
+    should(SessionViewSchema.parse(fastRaw).config.teammate).equal(SEEDED_CALLSIGN);
+    // The overlay travels with fast mode: dropping it would launch an unattended agent without its permission mode.
+    should(overlay(launcher.launched[0]?.command ?? [])).deepEqual({
+      permissions: { defaultMode: 'auto' },
+      skipAutoPermissionPrompt: true,
+      fastMode: true,
+    });
+    should(SessionViewSchema.parse(fastRaw).config.launchFast).equal(true);
+    // A start that named nothing asserts nothing and records nothing the login did not save.
+    should(overlay(launcher.launched[1]?.command ?? [])).be.undefined();
+    should(plainBody.config.launchFast).be.undefined();
+    // THE RESTART keeps what the pane was switched to, not what the start asked for.
+    should(revived.status).equal(200);
+    should(overlay(reviver.argv[0] ?? [])).containEql({ fastMode: false });
+    should(revivedConfig.launchFast).equal(false);
+  });
+
+  /**
    * The first start a stranger types: the account `fy fleet ls` lists FIRST, which is the one for
    * using the harness in a terminal and not one this daemon may launch.
    *

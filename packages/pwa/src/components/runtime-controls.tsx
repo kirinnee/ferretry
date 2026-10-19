@@ -78,7 +78,8 @@ export const claudeEffortLevels = (
  *  the details sheet and the composer bar without either owning a transport. */
 export type RuntimeControlCommand =
   | { readonly action: 'model'; readonly model?: string; readonly effort?: string }
-  | { readonly action: 'effort'; readonly effort: string };
+  | { readonly action: 'effort'; readonly effort: string }
+  | { readonly action: 'fast'; readonly fast: boolean };
 
 export interface RuntimeControlApi {
   /** The host must send this to the exact paired daemon it is handed. The request

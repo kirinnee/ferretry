@@ -85,6 +85,18 @@ export interface HarnessRuntimeSwitchRequest {
   readonly harness: HarnessKind;
   readonly model?: string;
   readonly effort?: string;
+  /** Turn fast mode on or off. A switch of its own: it is never combined with a model or an effort. */
+  readonly fast?: boolean;
+}
+
+/** What the planner needs to know about fast mode for the model a session is running. */
+export interface FastModeFacts {
+  /** Whether that model offers fast mode. Absent when nothing can say, which plans as "try it". */
+  readonly supported?: boolean;
+  /** What the refusal calls the model: its label, else its id. */
+  readonly model?: string;
+  /** Whether fast mode is on right now — the harness's report, else the launch's, else the model's default. */
+  readonly current?: boolean;
 }
 
 export interface HarnessRuntimeSwitchContext {
@@ -98,6 +110,8 @@ export interface HarnessRuntimeSwitchContext {
   readonly wrapper: string;
   /** The live catalog, for a harness that switches through its picker. */
   readonly catalog?: CodexModelCatalog;
+  /** Fast mode facts for a fast request. */
+  readonly fast?: FastModeFacts;
 }
 
 export type RuntimeSwitchPlan =
@@ -111,8 +125,14 @@ export type RuntimeSwitchPlan =
       readonly command: string;
       readonly requestedModel?: string;
       readonly requestedEffort?: string;
+      readonly requestedFast?: boolean;
       readonly claimsOutcome: boolean;
     }
+  /**
+   * Nothing to type: the session already is in the state asked for. A harness whose switch only flips
+   * can never be asked to "turn it on" twice without turning it off again.
+   */
+  | { readonly kind: 'unchanged' }
   /**
    * Drive the modal picker to an exact model and effort, then verify.
    *
@@ -196,6 +216,24 @@ function planCodexSwitch(
 }
 
 /**
+ * Plan a fast mode switch.
+ *
+ * Refused on a model with no fast mode before a key is pressed: Codex answers `/fast` on such a model
+ * with "Unrecognized command" and leaves the text sitting in the composer, where the next message
+ * would be typed after it.
+ */
+function planFastSwitch(wanted: boolean, harness: HarnessKind, facts: FastModeFacts | undefined): RuntimeSwitchPlan {
+  if (facts?.supported === false) return refused(`${facts.model ?? 'this model'} has no fast mode`);
+  if (!harnessQuirks(harness).fastIsToggle) {
+    return { kind: 'inject', command: `/fast ${wanted ? 'on' : 'off'}`, requestedFast: wanted, claimsOutcome: true };
+  }
+  if (facts?.current === undefined)
+    return refused('whether fast mode is on is not known yet; send a message first, or switch it in the terminal');
+  if (facts.current === wanted) return { kind: 'unchanged' };
+  return { kind: 'inject', command: '/fast', requestedFast: wanted, claimsOutcome: true };
+}
+
+/**
  * Plan a runtime model or effort switch.
  *
  * A blank string is treated as absent throughout: the source compared untrimmed
@@ -211,6 +249,12 @@ export function planRuntimeSwitch(
   const effort = request.effort?.trim();
   const wantsModel = model !== undefined && model.length > 0;
   const wantsEffort = effort !== undefined && effort.length > 0;
+
+  if (request.fast !== undefined) {
+    if (wantsModel || wantsEffort)
+      return refused('fast mode is switched on its own, not together with a model or effort');
+    return planFastSwitch(request.fast, request.harness, context.fast);
+  }
 
   // Effort alone, which is a different question from "which model": one harness
   // takes it as a command, the other has no way to express it outside the picker.

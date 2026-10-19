@@ -28,7 +28,9 @@ import type { TranscriptEvent } from '../../transcript/types.ts';
 export interface ObservedRuntime {
   readonly model?: string;
   readonly reasoningEffort?: string;
-  /** The timestamp of the newest record that carried either value. */
+  /** Whether fast mode is on, as the harness last stated it. */
+  readonly fast?: boolean;
+  /** The timestamp of the newest record that carried any of these. */
   readonly at?: string;
 }
 
@@ -76,6 +78,33 @@ function claudeModelConfirmed(event: TranscriptEvent): boolean | undefined {
 }
 
 /**
+ * Whether a Codex service tier is the fast one. Only the two tiers `/fast` moves between say anything:
+ * `priority` is fast and `default` is not. Another tier (`ultrafast`, `flex`) is neither, so it is no
+ * evidence about fast mode rather than a claim that it is off.
+ */
+const codexTierIsFast = (tier: string | undefined): boolean | undefined =>
+  tier === 'priority' ? true : tier === 'default' ? false : undefined;
+
+/** SGR colour sequences, which Claude wraps its `↯` glyph in when it prints a local command's answer. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the escape byte is what introduces the styling being removed.
+const ANSI_STYLE = /\x1b\[[0-9;]*m/gu;
+
+/**
+ * Whether Claude Code's printed answer to a local command states fast mode. `/fast on` answers
+ * `↯ Fast mode ON · $8/$40 per Mtok`, `/fast off` answers `Fast mode OFF`, and a `/model` switch to a
+ * model with no fast mode ends `… · Fast mode OFF` — so the statement is read off the answer itself,
+ * not off the command that preceded it. A refusal (`Fast mode unavailable: …`) says neither word and
+ * is no evidence; stderr is never evidence.
+ */
+function claudeFastStated(event: TranscriptEvent): boolean | undefined {
+  if (event.harness !== 'claude' || event.kind !== 'message' || event.role !== 'user') return undefined;
+  const printed = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/u.exec(event.text);
+  if (printed === null) return undefined;
+  const answer = /(?:^|[\s·↯])Fast mode (ON|OFF)\b/u.exec((printed[1] ?? '').replace(ANSI_STYLE, ''));
+  return answer === null ? undefined : answer[1] === 'ON';
+}
+
+/**
  * The runtime evidence ONE event carries, given the `/model` command still awaiting its answer.
  *
  * A CLAUDE SWITCH IS CONFIRMED BY ITS OWN ANSWER, NOT BY THE NEXT TURN. Claude restates its model
@@ -89,10 +118,18 @@ function claudeModelConfirmed(event: TranscriptEvent): boolean | undefined {
 function eventEvidence(
   event: TranscriptEvent,
   requested: string | undefined,
-): { readonly model?: string; readonly effort?: string } | undefined {
-  if (event.kind === 'settings')
-    return { model: stated(event.settings.model), effort: stated(event.settings.reasoningEffort) };
+): { readonly model?: string; readonly effort?: string; readonly fast?: boolean } | undefined {
+  if (event.kind === 'settings') {
+    const fast = codexTierIsFast(stated(event.settings.serviceTier));
+    return {
+      model: stated(event.settings.model),
+      effort: stated(event.settings.reasoningEffort),
+      ...(fast === undefined ? {} : { fast }),
+    };
+  }
   if (event.kind === 'usage') return { model: stated(event.usage.model) };
+  const fast = claudeFastStated(event);
+  if (fast !== undefined) return { fast };
   return requested !== undefined && claudeModelConfirmed(event) === true ? { model: requested } : undefined;
 }
 
@@ -106,6 +143,7 @@ function eventEvidence(
 export function projectObservedRuntime(events: readonly TranscriptEvent[]): ObservedRuntime {
   let model: string | undefined;
   let reasoningEffort: string | undefined;
+  let fast: boolean | undefined;
   let at: string | undefined;
   // The `/model <id>` still waiting for Claude's printed answer. Any answer settles it, taken or not.
   let requested: string | undefined;
@@ -113,14 +151,20 @@ export function projectObservedRuntime(events: readonly TranscriptEvent[]): Obse
     const observed = eventEvidence(event, requested);
     if (claudeModelConfirmed(event) !== undefined) requested = undefined;
     requested = claudeModelCommand(event) ?? requested;
-    if (observed === undefined || (observed.model === undefined && observed.effort === undefined)) continue;
+    if (
+      observed === undefined ||
+      (observed.model === undefined && observed.effort === undefined && observed.fast === undefined)
+    )
+      continue;
     if (observed.model !== undefined) model = observed.model;
     if (observed.effort !== undefined) reasoningEffort = observed.effort;
+    if (observed.fast !== undefined) fast = observed.fast;
     at = instant(event.timestamp) ?? at;
   }
   return {
     ...(model === undefined ? {} : { model }),
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    ...(fast === undefined ? {} : { fast }),
     ...(at === undefined ? {} : { at }),
   };
 }
@@ -139,21 +183,24 @@ export function projectObservedRuntime(events: readonly TranscriptEvent[]): Obse
  * back to `model unavailable` on a session that is running perfectly well.
  */
 export function observedRuntimeStatePatch(
-  current: Pick<SessionState, 'observedModel' | 'observedModelAt' | 'observedReasoningEffort'>,
+  current: Pick<SessionState, 'observedModel' | 'observedModelAt' | 'observedReasoningEffort' | 'observedFast'>,
   observed: ObservedRuntime,
 ): Partial<SessionState> {
   const model = observed.model ?? current.observedModel;
   const reasoningEffort = observed.reasoningEffort ?? current.observedReasoningEffort;
+  const fast = observed.fast ?? current.observedFast;
   const at = observed.at ?? current.observedModelAt;
   if (
     model === current.observedModel &&
     reasoningEffort === current.observedReasoningEffort &&
+    fast === current.observedFast &&
     at === current.observedModelAt
   )
     return {};
   return {
     ...(model === undefined ? {} : { observedModel: model }),
     ...(reasoningEffort === undefined ? {} : { observedReasoningEffort: reasoningEffort }),
+    ...(fast === undefined ? {} : { observedFast: fast }),
     ...(at === undefined ? {} : { observedModelAt: at }),
   };
 }

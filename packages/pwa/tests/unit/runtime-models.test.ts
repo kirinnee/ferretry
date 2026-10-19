@@ -54,6 +54,32 @@ describe('runtime model catalog parsing', () => {
     });
   });
 
+  it('should keep what the daemon says about fast mode, and nothing it did not say', () => {
+    // Arrange
+    const row = (extra: Record<string, unknown>) => ({ value: 'm', label: 'M', reasoningEfforts: [], ...extra });
+    const raw = {
+      harness: 'codex',
+      source: 'codex-app-server',
+      choices: [
+        row({ fast: true, fastDefault: true }),
+        row({ fast: false }),
+        row({ fast: 'yes', fastDefault: false }),
+        row({}),
+      ],
+    };
+
+    // Act
+    const parsed = parseRuntimeModelCatalog(raw).choices;
+
+    // Assert
+    should(parsed[0]).containEql({ fast: true, fastDefault: true });
+    should(parsed[1]).containEql({ fast: false });
+    should(parsed[1]).not.have.property('fastDefault');
+    should(parsed[2]).not.have.property('fast');
+    should(parsed[2]).not.have.property('fastDefault');
+    should(parsed[3]).not.have.property('fast');
+  });
+
   it("should keep a choice's catalog tier and context window, and the login's catalog", () => {
     // Arrange
     const raw = {

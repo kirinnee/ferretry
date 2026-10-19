@@ -68,6 +68,7 @@ import type {
   FleetSettingsEntry,
   FleetStackView,
 } from '@ferretry/protocol';
+import { claudeFastSupport } from '../session/harness/fast-mode.ts';
 import { resolvedEntries } from './resolved-view.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
@@ -575,7 +576,12 @@ function modelsView(
   return {
     models: {
       catalog: derived.catalog,
-      choices: derived.models.map(model => ({ ...model, efforts: [...model.efforts] })),
+      choices: derived.models.map(model => ({
+        ...model,
+        efforts: [...model.efforts],
+        // Claude's fast mode is a rule on the model id; Codex's is the live account's to say.
+        ...(harness === 'claude' ? { fast: claudeFastSupport(model.id) } : {}),
+      })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
       ...(derived.local === undefined ? {} : { local: derived.local }),
     },
