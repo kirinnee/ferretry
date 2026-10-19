@@ -18,32 +18,73 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 ## Runners
 
-GitHub's free hosted runners cap how many jobs run at once, and a busy day queues pull requests
-behind each other. The heaviest Linux jobs therefore run on **Namespace** runners
-(`nscloud-ubuntu-24.04-amd64-4x8-with-cache`): `PWA Settings Geometry` / `Full Gallery`, `Unit Tests` and the
-`E2E Shard`s. `Integration Tests` stay on GitHub: its real-Chrome browser journeys and its
-same-filesystem rename checks depend on the `ubuntu-latest` image. The light Linux jobs (pre-commit, compile, the Nix install bundle, the coverage ledgers, the E2E relevance and
-summary) run there too, on smaller `2x4`/`4x8` shapes, so they stop queueing behind GitHub's cap.
-They add capacity rather than replace it — `Integration Tests`, `SIT`, the harness contract, the smoke tests and every macOS job stay on GitHub, where a public repository's minutes are free and the macOS jobs
-never queue.
+Two pools, chosen per job by measurement. GitHub's hosted runners are free for a public repository
+but cap concurrent jobs; **Namespace** runners are faster and start from a warm `/nix`, but are
+billed and capped at 32 concurrent Linux vCPUs on the Developer plan. That cap, not run time, was
+what made pull requests slow: a 4x8 E2E shard waited three to five minutes for a slot while the
+runs before it held 60 vCPUs between them. So every Namespace job is the smallest shape that does
+not lengthen the critical path, and nothing goes there that is free and as fast on GitHub.
 
-- **One cache volume, tag `ferretry-nix`.** `namespacelabs/nscloud-cache-action` with `cache: nix`
-  mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell is already built
-  when the job starts. The order is load-bearing: installing Nix first would populate a fresh store.
-- **The image's Node is never the build's Node.** `PWA Static Bundle` runs on Namespace too, because
-  the devshells ship a pinned `nodejs_24` and `scripts/validate/pinned-toolchain.sh` (run first by
-  `scripts/ci/build-pwa.sh`) fails if `node` or `bun` resolves outside `/nix/store`. It used to be
-  held on GitHub because `vite` ran on the image's Node, which on a Namespace image could not load
-  a `.ts` workspace import. See [Nix](../nix/index.md#one-toolchain-nothing-falls-through-to-the-runner-image).
-- **Moving a job back is one label.** Replace the two `nscloud-*` labels with `ubuntu-latest` and
-  drop the cache step; nothing else in the job depends on the runner vendor.
+**What Namespace bills**, from its [pricing page](https://namespace.so/pricing) and
+[cache docs](https://namespace.so/docs/architecture/storage/cache-volumes):
+
+- Compute by the minute per vCPU, one-minute floor, the next 15 seconds rounded down: a 2x4 costs
+  $0.002/min prepaid, $0.003/min beyond the plan. A 20-second job is billed a whole minute.
+- The cache volume on its **requested** size, not what it holds: storage per GB-day, plus a snapshot
+  charge of size × the time each job has it attached ($0.002/GB-hour). Every job carrying
+  `-with-cache` pays that, whether or not it mounts `/nix`.
+
+**Where each job runs**, with the busy cores measured by sampling `/proc/stat` every second:
+
+| Job                                              | Runner        | Measured                 | Why                                                       |
+| ------------------------------------------------ | ------------- | ------------------------ | --------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
+| `Pre-Commit (gates)`                             | Namespace 4x8 | ~1.9 cores, 2.8GB        | knip runs out of memory in a 2x4's 4GB                    |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores               | `bun test` runs one file at a time                        |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores               | short builds                                              |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores               | well inside the critical path                             |
+| `PWA Full Gallery (dark)`                        | Namespace 4x8 | three browsers at once   | the longest Namespace job; a 2x4 would make it the path   |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB           | one journey at a time                                     |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores             | free, and five groups keep each under ~2.5 min            |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell    | billed a whole minute and a cache attachment on Namespace |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                        | free; macOS and arm64 have no Namespace equivalent here   |
+
+- **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
+  with `cache: nix` mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell
+  is already built when the job starts. The order is load-bearing: installing Nix first would
+  populate a fresh store. The tag is the key, so every shape shares the one volume. It holds ~2.5GB
+  (dev shell plus install bundle), so `nscloud-cache-size-10gb` replaces the 20GB default and halves
+  both storage and every job's snapshot charge.
+- **Only `main` writes the volume.** Every Namespace job carries
+  `nscloud-cache-allow-commit-from-main`: a pull request reads the volume and its own additions die
+  with its runner, so a PR that bumps `flake.lock` builds its new shell itself until it merges.
+  `main`'s `Build Checks` then runs `scripts/ci/nix-store-hygiene.sh`, which roots the dev shell and
+  the install bundle and collects everything else once `/nix` passes 6GB, because a store only ever
+  grows and a full volume fails every job.
+- **The image's Node is never the build's Node.** The devshells ship a pinned `nodejs_24` and
+  `scripts/validate/pinned-toolchain.sh` fails if `node` or `bun` resolves outside `/nix/store`. The
+  Namespace image's Node once ran `vite` and the int tier's browser worker, and could load neither's
+  `.ts` imports. See [Nix](../nix/index.md#one-toolchain-nothing-falls-through-to-the-runner-image).
+- **`Integration Tests` could run on Namespace, and does not.** Measured there, its groups take
+  80–100s against GitHub's 100–135s once split five ways: about 40 seconds for roughly 40
+  vCPU-minutes a run. One environment difference remains: Namespace's root is an overlay whose files
+  and directories report different `st_dev`, and the shared-history planner refuses a rename it reads
+  as cross-device although `rename(2)` succeeds there. The tests write under `/tmp` by design
+  (`scripts/test/swept.sh`), so that is a product question about overlay filesystems, not a CI knob.
+- **No path filters beyond E2E's.** Of 120 merged pull requests, two changed only documentation, and
+  `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated change would
+  leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could skip run on
+  GitHub, where they cost nothing.
+- **Moving a job between pools is its `runs-on`.** Replace the `nscloud-*` labels with
+  `ubuntu-latest` and drop the cache step, or the reverse; nothing else in a job depends on the
+  runner vendor.
 
 ## Workflow split
 
 | Workflow   | Trigger                                                                                   | Responsibility                                                     |
 | ---------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `CI`       | push to `main`, pull request, manual dispatch                                             | gates, tests, compile, SIT, cross-platform smoke                   |
-| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch                  | the e2e tier's fast journeys in four shards, into `E2E Journeys`   |
+| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch                  | the e2e tier's fast journeys in three shards, into `E2E Journeys`  |
 | `E2E Slow` | nightly, push to `main`, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
 | `Release`  | `CI` completed successfully on `main`                                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
 | `CD`       | push of a `v*.*.*` tag                                                                    | GoReleaser publishes the release and its channels                  |
@@ -53,17 +94,18 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 
 ## CI jobs
 
-| Job              | Runs                                                                          | Notes                                                                |
-| ---------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                      | matrix `[format, gates]`: treefmt, and every other hook, in parallel |
-| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                 | matrix over `config/test-groups.json`                                |
-| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                         | `needs: test`; the unit tier's 100% ledger                           |
-| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                  | matrix over `config/test-groups.json`                                |
-| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                          | `needs: int`; the int tier's 100% ledger                             |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"` | Settings geometry in dark and light, plus the full gallery in dark   |
-| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                            | uploads `cli-binaries` from `dist/bin/`                              |
-| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                | `needs: compile`, downloads the binaries                             |
-| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                       | `needs: compile`, one runner per build target                        |
+| Job              | Runs                                                                             | Notes                                                                         |
+| ---------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `precommit`      | `nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"`                         | matrix `[format, gates]`: treefmt, and every other hook, in parallel          |
+| `build-checks`   | `nix build .#default`, `wrangler deploy --dry-run` ×2, `scripts/ci/build-pwa.sh` | the install bundle, both relay Workers and the Pages bundle, in one job       |
+| `test`           | `nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"`                    | matrix over `config/test-groups.json`                                         |
+| `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                            | `needs: test`; the unit tier's 100% ledger                                    |
+| `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                     | matrix over `config/test-groups.json`                                         |
+| `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                             | `needs: int`; the int tier's 100% ledger                                      |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light, plus the full gallery (Settings included) in dark |
+| `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                       |
+| `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                      |
+| `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one runner per build target                                 |
 
 Notable details:
 
@@ -90,15 +132,17 @@ Notable details:
   downloads them, which is what makes it a black-box test of the shipped thing.
   `download-artifact` drops the executable bit; the scripts restore it.
 - **A browser gate asserts geometry, and never stores pixels.** `pwa-screenshot` runs the PWA's
-  screenshot harness in `--settings-only` mode in both colour schemes and fails on
+  screenshot harness in `--settings-only` mode in light, and the whole gallery in dark, and fails on
   `assertNoSidewaysScroll` — the one layout defect a capture cannot show, because the capture is
   clipped to the viewport it overflows. The PNGs upload with `if: always()` as evidence; nothing
   compares them, and `.gitignore` keeps them out of the tree. The harness asserts its own tally of
   checks and the script requires that closing line, so a refactor that stops the checks running is
   red rather than green. Adding or removing a Settings surface means editing one integer, which is
-  the churn this shape chose over re-baselining a directory of images. A third leg runs the whole
-  gallery once, in dark, so a later section that hangs or fails is red on the PR that broke it
-  rather than on the next person who needs its frames.
+  the churn this shape chose over re-baselining a directory of images. The dark leg walks the whole
+  gallery, so a later section that hangs or fails is red on the PR that broke it rather than on the
+  next person who needs its frames — and it owes the same Settings tallies a dark `--settings-only`
+  leg would, which is why there is no such leg. The harness walks its two viewports at once, one child
+  process each, and the parent holds their summed tallies to the same constants.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
   `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
@@ -116,7 +160,7 @@ harness, owns the suite root and cleans it up.
 | Job         | Check name         | Runs                                                                                      |
 | ----------- | ------------------ | ----------------------------------------------------------------------------------------- |
 | `relevance` | `E2E Relevance`    | `scripts/ci/e2e-relevance.sh`: does this pull request have anything for the tier to prove |
-| `journeys`  | `E2E Shard (1..4)` | `FY_E2E_TIER=fast FY_E2E_SHARD=i/4 ./scripts/ci/e2e.sh`, one share of the journeys each   |
+| `journeys`  | `E2E Shard (1..3)` | `FY_E2E_TIER=fast FY_E2E_SHARD=i/3 ./scripts/ci/e2e.sh`, one share of the journeys each   |
 | `summary`   | **`E2E Journeys`** | `scripts/ci/e2e-summary.sh`: the one status, adding up every shard                        |
 
 `E2E Slow` (`.github/workflows/e2e-slow.yaml`) runs the `[slow]` journeys the same way, one per shard,
