@@ -37,6 +37,12 @@ export const DAEMON_RELEASE_SIGNATURE_CONTEXT = 'ferretry-daemon-release-v1\n';
 /** The `nix profile install` / flake reference for a product. */
 export const releaseFlakeReference = (product: string): string => `github:${RELEASE_OWNER}/${product}`;
 
+/** The Homebrew tap a product's cask lives in: this repository, named `<owner>/<product>`. */
+export const releaseTapName = (product: string): string => `${RELEASE_OWNER}/${product}`;
+
+/** Where that tap is cloned from; the tap is the whole repository, so it has no `homebrew-` prefix. */
+export const releaseTapUrl = (product: string): string => `https://github.com/${RELEASE_OWNER}/${product}`;
+
 /** The GitHub API address of a product's latest published release. */
 export const latestReleaseApiUrl = (product: string): string =>
   `https://api.github.com/repos/${RELEASE_OWNER}/${product}/releases/latest`;
