@@ -103,7 +103,8 @@ echo "🧪 Typechecking the E2E harness..."
 # costs a shard minutes rather than the 10–15 it once did. Bun's `--timeout` is only a default a test can
 # raise, so the check below refuses a journey that raises it past here
 # (scripts/test/e2e-journey-timeouts.ts). The slowest pull-request journey takes about a minute, and a
-# journey whose browser vanished is run once more from nothing, so this holds two runs of it.
+# journey whose browser vanished is run again from nothing, so this holds a retry; the ceiling bounds
+# every attempt together.
 journey_timeout_ms=150000
 bun scripts/test/e2e-journey-timeouts.ts "${journey_timeout_ms}" tests/e2e/*.e2e.test.ts
 

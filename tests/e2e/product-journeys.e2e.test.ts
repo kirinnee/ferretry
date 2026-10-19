@@ -94,34 +94,42 @@ interface ProductOptions {
 const LOST_BROWSER =
   /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
 
+/** How many times a journey whose browser vanished is started again from nothing. */
+const LOST_BROWSER_RETRIES = 2;
+
 /**
- * Run one journey, and run it ONCE more if the only thing that went wrong is that its browser vanished.
+ * Run one journey, and run it again — at most {@link LOST_BROWSER_RETRIES} more times — if the only
+ * thing that went wrong is that its browser vanished.
  *
- * On hosted runners Bun 1.3 occasionally drops the DevTools pipe Playwright holds to Chrome: Chrome keeps
- * running, nothing logs an exit or an error, and every later call answers "Target page, context or
- * browser has been closed". That is the harness's transport failing, not the product, and it is not
- * reproducible on demand. So a journey whose error is exactly that is started again from nothing, in a
- * fresh environment and browser, and the retry is recorded as a FLAG on the journey log so the rate
- * stays visible. Any other failure, including a second lost browser, fails the test.
+ * On hosted runners Bun 1.3 drops the DevTools pipe Playwright holds to Chrome, sometimes twice in one
+ * journey. Playwright either answers "Target page, context or browser has been closed" or is never
+ * told, and then the browser guard (support/relay-harness.ts) answers "browser has disconnected". That
+ * is the harness's transport failing, not the product, and it is not reproducible on demand. So a
+ * journey whose error is exactly that is started again from nothing, in a fresh environment and
+ * browser, and every retry is recorded as a FLAG on the journey log so the rate stays visible. Any
+ * other failure fails the test, and so does a browser lost on the last attempt. The runner's
+ * per-journey ceiling still bounds all the attempts together.
  */
 async function withProduct(
   journey: string,
   body: (product: Product) => Promise<void>,
   options: ProductOptions = {},
 ): Promise<void> {
-  try {
-    await withProductOnce(journey, body, options);
-  } catch (error) {
-    const text = String((error as Error).message ?? error);
-    if (!LOST_BROWSER.test(text)) throw error;
-    await recordStep({
-      journey,
-      step: 'harness:journey-retried',
-      status: 'FLAG',
-      evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing`,
-    });
-    resetSoftFailures(journey);
-    await withProductOnce(journey, body, options);
+  for (let retry = 0; ; retry += 1) {
+    try {
+      await withProductOnce(journey, body, options);
+      return;
+    } catch (error) {
+      const text = String((error as Error).message ?? error);
+      if (retry >= LOST_BROWSER_RETRIES || !LOST_BROWSER.test(text)) throw error;
+      await recordStep({
+        journey,
+        step: 'harness:journey-retried',
+        status: 'FLAG',
+        evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing (retry ${String(retry + 1)} of ${String(LOST_BROWSER_RETRIES)})`,
+      });
+      resetSoftFailures(journey);
+    }
   }
 }
 
