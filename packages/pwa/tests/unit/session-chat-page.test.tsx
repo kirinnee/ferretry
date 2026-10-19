@@ -322,6 +322,53 @@ const fakeDaemon = (options: { readonly migrate?: Error } = {}) => {
 };
 
 describe('SessionChatPage', () => {
+  test('names the ferret that started this one in the header, as a link to it', () => {
+    const parent = sessionView('boss', { config: { teammate: 'hadi' } });
+    const child = sessionView('kid', { config: { parent: 'boss' } });
+    const opened: string[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], child)}
+        connection={alpha}
+        daemonSessions={[parent, child]}
+        entries={[]}
+        onNavigate={to => opened.push(to)}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={child}
+      />,
+    );
+    try {
+      const link = page.root.findByProps({ 'data-session-started-by': '' });
+      expect(textOf(link)).toBe('Started by Hadi · Session boss');
+      run(() => link.props.onClick());
+      expect(opened).toEqual(['/d/alpha/session/boss']);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('draws no "Started by" for a ferret nobody started, or one whose parent is unknown', () => {
+    const lone = sessionView('lone', { config: { parent: 'ghost' } });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], lone)}
+        connection={alpha}
+        daemonSessions={[lone]}
+        entries={[]}
+        onNavigate={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={lone}
+      />,
+    );
+    try {
+      expect(page.root.findAllByProps({ 'data-session-started-by': '' })).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('threads the daemon account and cached usage stores into migration', () => {
     const accountPicker = new DaemonAccountPickerStore({
       catalog: async () => ({ accounts: [] }),

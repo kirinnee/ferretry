@@ -73,6 +73,8 @@ export interface SessionTopBarProps {
   readonly menu?: ReactNode;
   /** Phone only: opens the sessions drawer. */
   readonly onOpenSessions?: () => void;
+  /** The ferret that started this one, as a link to it. Absent for a ferret a person started. */
+  readonly startedBy?: { readonly name: string; readonly onOpen: () => void };
 }
 
 export function SessionTopBar({
@@ -86,6 +88,7 @@ export function SessionTopBar({
   onToggleInfo,
   menu,
   onOpenSessions,
+  startedBy,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
@@ -112,6 +115,17 @@ export function SessionTopBar({
         <h1 className="fy-session-bar__name">{name}</h1>
         {hypermediaOn(session) ? <HypermediaMark /> : null}
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
+        {startedBy === undefined || compact ? null : (
+          <button
+            className="fy-session-bar__started-by"
+            data-session-started-by=""
+            onClick={startedBy.onOpen}
+            title={`Started by ${startedBy.name}`}
+            type="button"
+          >
+            Started by {startedBy.name}
+          </button>
+        )}
         <span
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}
