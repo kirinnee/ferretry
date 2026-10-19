@@ -1908,6 +1908,38 @@ describe('SessionChatPage', () => {
     }
   });
 
+  test('shows an unprovable transcript as its own notice, with Check again and a confirmed Restart', async () => {
+    let refreshed = 0;
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        connectionState={{ kind: 'connected' }}
+        entries={[]}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        refreshError="Session workspace issue: Transcript: session shared has no transcript this daemon can prove is its own"
+        session={sessionView('shared')}
+        transcriptUnbound
+      />,
+    );
+    try {
+      const notice = page.root.findByProps({ 'data-transcript-unbound': '' });
+      expect(textOf(notice)).toContain('Console tab');
+      expect(textOf(notice)).toContain('Restart CLI…');
+      expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
+      await runAsync(async () => {
+        notice.find(node => node.type === 'button' && textOf(node) === 'Check again').props.onClick();
+      });
+      expect(refreshed).toBe(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('keeps a refresh error that is not an outage to one line, with the whole sentence one tap away', () => {
     const page = renderSessionChatPage(
       <SessionChatPage

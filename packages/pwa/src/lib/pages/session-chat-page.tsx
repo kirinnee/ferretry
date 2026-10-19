@@ -24,6 +24,7 @@ import { SessionTopBar, sessionDisplayName } from '../../components/session-top-
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
+import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -151,6 +152,11 @@ export interface SessionChatPageProps {
    * second `role=status` here made assistive tech say it twice.
    */
   readonly refreshError?: string | null;
+  /**
+   * The daemon can prove no transcript is this session's own. Shown as its own notice with its
+   * remedies in place of the one-line issue, because waiting never fixes it and re-sending makes it worse.
+   */
+  readonly transcriptUnbound?: boolean;
   /**
    * This machine's connection health, from the shell. While it is `reconnecting` the page says nothing
    * about the outage itself — the shell's connection notice says it once — and keeps what it last showed.
@@ -338,6 +344,7 @@ export function SessionChatPage({
   presentation,
   canControl = true,
   refreshError = null,
+  transcriptUnbound = false,
   connectionState,
   chatWidth = 'readable',
   composerEnterKey,
@@ -1122,7 +1129,11 @@ export function SessionChatPage({
         here made assistive tech say it twice, and a prefix added here would
         have made the two disagree. Rendered only when there is something to
         render, precisely because it announces nothing. */}
-      {refreshError === null || reconnecting ? null : <CompactIssue sentence={refreshError} />}
+      {reconnecting ? null : transcriptUnbound ? (
+        <TranscriptUnboundNotice onCheckAgain={() => onRefresh?.()} {...(canControl ? { onRestart: restart } : {})} />
+      ) : refreshError === null ? null : (
+        <CompactIssue sentence={refreshError} />
+      )}
       {actionAlert}
     </>
   );

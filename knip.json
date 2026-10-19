@@ -37,6 +37,7 @@
         "harness/model-catalog-screenshot.tsx",
         "harness/runtime-switch-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
+        "harness/transcript-unbound-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",
         "harness/compaction-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
