@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { SESSION_MODE_ENV } from '@ferretry/fleet';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionConversationLeases } from '../conversation-lease.ts';
@@ -105,8 +106,12 @@ export class SessionLifecycleService {
       // tear after making config.json visible, and the opposite order would let a retry adopt a
       // session whose credential exists only as an unrecoverable value in dead daemon memory.
       await this.ports.repository.reserve(id);
-      if (credential !== undefined && this.ports.environment !== undefined)
-        await this.ports.environment.write(id, { [SESSION_BOARD_CAPABILITY_VARIABLE]: credential.capability });
+      if (this.ports.environment !== undefined)
+        await this.ports.environment.write(id, {
+          ...(credential === undefined ? {} : { [SESSION_BOARD_CAPABILITY_VARIABLE]: credential.capability }),
+          // The wrapper decides per ferret whether the question tool is withheld (O3): only an interactive one has an owner.
+          [SESSION_MODE_ENV]: created.record.config.mode,
+        });
       await this.ports.repository.write(created.record, created.event);
       return created.record;
     });

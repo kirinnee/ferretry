@@ -106,6 +106,8 @@ echo "🧪 Typechecking the E2E harness..."
 # journey whose browser vanished is run again from nothing, so this holds a retry; the ceiling bounds
 # every attempt together.
 journey_timeout_ms=150000
+# The journeys read it too: a journey Bun has abandoned at the ceiling must not start a retry.
+export FY_E2E_JOURNEY_TIMEOUT_MS="${journey_timeout_ms}"
 bun scripts/test/e2e-journey-timeouts.ts "${journey_timeout_ms}" tests/e2e/*.e2e.test.ts
 
 # A TIER AND A SHARD (scripts/ci/e2e-shards.ts): `FY_E2E_TIER` is fast (no `[slow]` journey), slow or

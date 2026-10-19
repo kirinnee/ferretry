@@ -18,6 +18,7 @@ import {
   FleetTokenRefreshService,
   HARNESS_BINARIES,
   type HarnessKind,
+  HYPERMEDIA_ENV,
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
@@ -140,6 +141,7 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
+  FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -148,12 +150,11 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
-  FileModelCatalogCache,
   FileSpeedupTestLedger,
   FileUpdateDocuments,
   foreignHistoryRoots,
-  HostedModelCatalog,
   GitHubLatestRelease,
+  HostedModelCatalog,
   HostedRelayDirectory,
   HostInstallFacts,
   HttpUsageSource,
@@ -238,6 +239,7 @@ import {
   TmuxCodexPickerDrive,
   TmuxCodexPickerPane,
 } from '../src/adapters/session/harness/index.ts';
+import { FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
 import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
@@ -296,7 +298,6 @@ import {
   StorageSignalRepository,
 } from '../src/adapters/session/signal/index.ts';
 import { FileLastSnapshotStore } from '../src/adapters/session/snapshot/index.ts';
-import { FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
 import {
   FileHarnessWrapperSource,
   FileSessionTranscriptMessageTokenCodec,
@@ -368,6 +369,7 @@ import {
   watchConfigFiles,
 } from '../src/lib/config-files/index.ts';
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
+import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import {
   createFleetCredentialsSubsystem,
@@ -415,11 +417,6 @@ import {
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
-  buildLaunchArgv,
-  canServeModel,
-  currentLaunchEffort,
-  currentLaunchModel,
-  SessionLaunchService,
   type BootNoticePort,
   type BootRefusal,
   type BrowserLoginLifecycle,
@@ -428,6 +425,7 @@ import {
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
+  buildLaunchArgv,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -444,6 +442,7 @@ import {
   type ConversationLinker,
   CredentialAgentIdentities,
   CredentialUsageSource,
+  canServeModel,
   childGrantRequester,
   chooseRelayCarrierSources,
   claimStartName,
@@ -456,6 +455,8 @@ import {
   createMountedSocketDispatcher,
   createSessionPaths,
   createWardenPaths,
+  currentLaunchEffort,
+  currentLaunchModel,
   type DaemonConfig,
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
@@ -503,6 +504,7 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
+  HOSTED_APP_ORIGIN,
   handoffFolders,
   handoffView,
   harnessAbsentWarning,
@@ -531,9 +533,11 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
+  ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
   messageWithAttachments,
+  modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
   type NameAllocationResult,
@@ -551,17 +555,14 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
-  HOSTED_APP_ORIGIN,
-  ModelCatalogService,
-  modelCatalogsView,
   PinService,
-  PublishedModelCatalogService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
   ProviderQuotaService,
+  PublishedModelCatalogService,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -644,8 +645,11 @@ import {
   SessionHandoverService,
   SessionHealthService,
   type SessionHealthSettings,
+  SessionHypermediaService,
+  type SessionHypermediaSubsystem,
   type SessionId,
   type SessionIdFactory,
+  SessionLaunchService,
   SessionLifecycleConfigSchema,
   type SessionLifecycleLauncher,
   SessionLifecycleService,
@@ -653,6 +657,7 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
+  resolveResumePolicy,
   SessionPermissionService,
   SessionPlanner,
   SessionProvenanceRecorder,
@@ -739,12 +744,15 @@ import {
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
+  WardenLivenessMonitor,
+  withLivenessLedger,
+  backgroundTerminalCount,
+  type ProcessInventoryPort,
   WatchedUsageFeed,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
 } from '../src/lib/index.ts';
-import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
@@ -1921,6 +1929,8 @@ function createSessionControlSubsystem(
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
+        // Every new ferret is told it may use hypermedia until the owner says otherwise (docs/hypermedia.md).
+        hypermedia: true,
         // An incarnation names one RUN of a session: this is its first, and a revive is what mints
         // the next. The generation is the daemon-side counter of those relaunches.
         incarnation: `${id}-1`,
@@ -2243,6 +2253,8 @@ function createConversationAdopter(
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
+        // Every new ferret is told it may use hypermedia until the owner says otherwise (docs/hypermedia.md).
+        hypermedia: true,
         incarnation: `${id}-1`,
         runtimeGeneration: 1,
         boardAccess: 'none',
@@ -3014,6 +3026,55 @@ function createSessionRenameSubsystem(
   };
 }
 
+/** A session status after which no process runs until the session is launched again. */
+const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
+
+/**
+ * Whether a ferret is told to use hypermedia (docs/hypermedia.md), over its own documents.
+ *
+ * The decision is `SessionHypermediaService`'s. This writes the two places the switch lives — the
+ * configuration every surface reads and the launch environment the pane reads — together, under the
+ * session's own lock, so a concurrent environment merge (a task board delivering a grant) cannot lose
+ * either half.
+ */
+function createSessionHypermediaSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  environments: FileSessionEnvironmentStore,
+  serial: KeyedSerialExecutor,
+  clock: ClockPort,
+): SessionHypermediaSubsystem {
+  const service = new SessionHypermediaService({
+    facts: async reference => {
+      const id = tryParseSessionId(reference);
+      const view = id === undefined ? undefined : await sessions.get(id);
+      return view === undefined
+        ? undefined
+        : { enabled: view.config.hypermedia, running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status) };
+    },
+    write: async (reference, enabled, at) => {
+      const id = parseSessionId(reference);
+      await serial.run(`session:${id}`, async () => {
+        await storage.updateConfig(id, current => ({
+          ...(jsonObject(current) ?? {}),
+          hypermedia: enabled,
+          updatedAt: at,
+        }));
+        await environments.write(id, { ...(await environments.read(id)), [HYPERMEDIA_ENV]: enabled ? '1' : '0' });
+      });
+    },
+    now: () => new Date(clock.now()).toISOString(),
+  });
+  return {
+    set: async (reference, enabled) => {
+      const outcome = await service.set(reference, enabled);
+      const view = await sessions.get(parseSessionId(reference));
+      if (view === undefined)
+        throw new Error(`session ${reference} was switched but its documents do not satisfy the protocol`);
+      return { view, outcome };
+    },
+  };
+}
 /**
  * How long the daemon remembers when the last sweep finished, for its own health report.
  *
@@ -3042,6 +3103,15 @@ const WARDEN_ESCALATION_ACTOR: AttentionActor = { kind: 'daemon', cause: 'warden
 
 /** How many transcript lines a Jev snapshot carries. The guard bounds them again; this bounds the read. */
 const WARDEN_TRIAGE_TAIL = 12;
+
+/** How often the liveness monitor looks at every working ferret: kteam's own tick. */
+const WARDEN_LIVENESS_TICK_SECONDS = 30;
+
+/** How many transcript lines the liveness digest covers: enough that a new line always changes it. */
+const WARDEN_LIVENESS_TAIL = 20;
+
+/** A digest of what the liveness monitor looked at: it keeps whether something changed, never the text. */
+const livenessDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 /** The collaborators a warden subsystem needs from the rest of the root. */
 interface WardenParts {
@@ -3085,6 +3155,8 @@ interface WardenParts {
   readonly analytics: Pick<AnalyticsIngestionService, 'read'>;
   /** The live journal append edge, for the events that bring a sweep forward. */
   readonly events: (listener: (event: { readonly type: string; readonly data: unknown }) => void) => () => void;
+  /** The processes under a ferret's pane, on this daemon's own tmux server: the liveness subprocess signal. */
+  readonly processes: ProcessInventoryPort;
 }
 
 /**
@@ -3094,12 +3166,12 @@ interface WardenParts {
  * judges are the sessions the list shows, parsed by the same schemas from the same documents. A
  * private reader would let the warden act on a view nobody else can see.
  *
- * `hasLiveMonitor` IS ALWAYS FALSE, because this daemon runs no per-session monitors, and that is the
- * truth rather than a placeholder. The sweep is told so through `supervisesMonitors` and collapses
- * what would otherwise be one `dead_monitor` anomaly per live session into the single daemon-level
- * fault it is — see `collapseUnsupervisedMonitors`. Reporting the fleet as watched would be the
- * dangerous lie: it would also switch on the sus classifiers, which reason over a liveness ledger
- * nothing here updates.
+ * `hasLiveMonitor` COMES FROM THE LIVENESS MONITOR. It looks at every working ferret each tick — screen,
+ * transcript tail, work counters, pane subprocesses — and a ferret is watched while it has been looked at
+ * recently. Its ledger is laid over the session documents, which is what switches the sus classifiers
+ * on with evidence that moves; a working ferret it cannot look at is a `dead_monitor`, per ferret. The
+ * reflex nudges a quiet ferret only when the owner lets the Warden nudge, and a frozen one becomes a
+ * flag — nothing here stops a ferret.
  *
  * `stopCapability` IS RECORDED AND NOT DELIVERED. The sweep mints an unguessable secret per
  * assignment and the durable state holds it, but this daemon's start declares no field to carry one
@@ -3108,6 +3180,46 @@ interface WardenParts {
  * cannot run.
  */
 function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
+  // The liveness monitor: what the Warden SEES of each working ferret between sweeps. Its ledger is laid
+  // over the session documents the sweep reads, so the sus classifiers reason over real evidence, and a
+  // working ferret it has not been able to look at recently is the `dead_monitor` it claims to be.
+  const liveness = new WardenLivenessMonitor(
+    {
+      targets: async () =>
+        (await parts.sessions.list())
+          .filter(view => view.config.label !== WARDEN_LABEL)
+          .map(view => ({
+            id: view.config.id,
+            status: view.state.status,
+            turn: view.state.turn,
+            mode: view.config.mode,
+            waiting: view.state.waiting !== undefined,
+            nudgeAfterSeconds: view.config.nudgeAfterSeconds,
+            killAfterSeconds: view.config.killAfterSeconds,
+            tmuxSession: sessionTmuxName(parseSessionId(view.config.id), defaultSessionLifecycleSettings),
+          })),
+      // Three looks, each total: what cannot be read this tick is simply not evidence this tick. The screen
+      // and the transcript are the operator reads — already masked by the vault redactor — and only their
+      // digests are kept; the screen itself is read for its work counters and then dropped.
+      sample: async target => {
+        const pane = await parts.reads.snapshot(target.id).catch(() => undefined);
+        const transcript = await parts.reads.logs(target.id, WARDEN_LIVENESS_TAIL).catch(() => undefined);
+        const observed =
+          target.tmuxSession === undefined
+            ? undefined
+            : await parts.processes.collect(target.tmuxSession).catch(() => undefined);
+        const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
+        const background = pane !== undefined && backgroundTerminalCount(pane) > 0;
+        return {
+          ...(pane === undefined ? {} : { pane, paneHash: livenessDigest(pane) }),
+          ...(transcript === undefined ? {} : { transcriptHash: livenessDigest(transcript) }),
+          ...(children === undefined && !background ? {} : { subprocessAlive: children === true || background }),
+        };
+      },
+      nowMs: () => Date.now(),
+    },
+    WARDEN_LIVENESS_TICK_SECONDS,
+  );
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
   const service = new WardenSweepService(
     {
@@ -3135,6 +3247,16 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         },
         resume: async sessionId => {
           await parts.resume.resume({ id: parseSessionId(sessionId), actor: 'warden' });
+        },
+        // A restart is the resume path told to replace the pane even when it looks alive: a frozen process
+        // is still "alive", and typing into it would hand the turn to the very thing that is stuck. The
+        // conversation is resumed in the new process, and the warden policy keeps every automatic guard.
+        restart: async sessionId => {
+          await parts.resume.resume({
+            id: parseSessionId(sessionId),
+            actor: 'warden',
+            policy: { ...resolveResumePolicy('warden'), replaceLiveTerminal: true },
+          });
         },
         stop: async (sessionId, reason) => {
           await parts.control.stop(sessionId, reason);
@@ -3175,7 +3297,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       },
       fleet: {
         fleet: async () =>
-          await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view))),
+          await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view, liveness))),
       },
       spawner: {
         spawn: async request => {
@@ -3282,7 +3404,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // The state home, never an agent's workspace: a warden must not be able to be mistaken for
       // work on a repository, and its own prompt forbids touching one.
       wardenCwd: parts.wardenRoot,
-      supervisesMonitors: false,
+      supervisesMonitors: true,
       mayAct: false,
     },
   );
@@ -3333,6 +3455,9 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       await loop.run(false).catch(() => undefined);
       return await service.investigationStatus(request.sessionId);
     },
+    // Inside the sweep chain, like every other write of the durable state.
+    leave: async request =>
+      await loop.exclusive(async () => await service.leaveAlone(request.sessionId, request.duration)),
     lastSweepAt: async () => await service.lastSweepAt(),
     intervalMs: async () => await service.intervalMs(),
     arm: async () => {
@@ -3355,7 +3480,28 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
           })
           .catch(() => undefined);
       });
+      // The liveness monitor's own tick. One at a time: a slow tick is skipped over, never stacked. What
+      // it finds is acted on inside the sweep chain, and a ferret that froze brings the next sweep forward.
+      liveness.arm();
+      let looking = false;
+      const look = setInterval(() => {
+        if (looking) return;
+        looking = true;
+        void service
+          .currentConfig()
+          .then(async config => await liveness.tick({ nudgeAllowed: config.enabled && config.mayActAlone.nudge }))
+          .then(async events => await loop.exclusive(async () => await service.reflex(events)))
+          .then(result => {
+            if (result.frozen) loop.trigger();
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            looking = false;
+          });
+      }, WARDEN_LIVENESS_TICK_SECONDS * 1000);
       return () => {
+        clearInterval(look);
+        liveness.disarm();
         unsubscribe();
         parts.supervision.armed = false;
         parts.supervision.armedAtMs = undefined;
@@ -3372,7 +3518,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
  * detector's guard is dead and every session whose pane died after its teammate declared the work
  * finished is reported as abandoned wreckage on every sweep.
  */
-async function wardenFleetSession(parts: WardenParts, view: SessionView): Promise<WardenFleetSession> {
+async function wardenFleetSession(
+  parts: WardenParts,
+  view: SessionView,
+  liveness: WardenLivenessMonitor,
+): Promise<WardenFleetSession> {
   const marker = await parts.files.readText(join(view.directory, DONE_MARKER_FILENAME)).catch(() => undefined);
   return {
     config: {
@@ -3404,12 +3554,14 @@ async function wardenFleetSession(parts: WardenParts, view: SessionView): Promis
       ...(view.config.modelHint === undefined ? {} : { modelHint: view.config.modelHint }),
       intervalSeconds: view.config.intervalSeconds,
     },
-    state: view.state,
+    // The session's own documents, with what the liveness monitor saw laid over them.
+    state: withLivenessLedger(view.state, liveness.ledger(view.config.id)),
     directory: view.directory,
     cwd: view.config.cwd,
     turn: view.state.turn,
-    // Always false, and honestly so: no monitor subsystem exists. See `createWardenSubsystem`.
-    hasLiveMonitor: false,
+    // Watched when the liveness monitor has looked at it recently — see `WardenLivenessMonitor.watching`.
+    hasLiveMonitor: liveness.watching(view.config.id),
+    ...(liveness.frozenAt(view.config.id) === undefined ? {} : { frozenAt: liveness.frozenAt(view.config.id) }),
     hasDoneMarker: doneMarkerCertifiesTurn(marker, view.state.turn),
   };
 }
@@ -6836,16 +6988,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       /**
        * The owner's existing conversations, found in Ferretry's shared history FIRST (where every
-       * runtime already sees them) and then in the CLI's own home, as the daemon inherited it. Read
-       * through the same parsers managed sessions use; adopted through the same start machinery.
+       * runtime already sees them, and what Continue lists) and then in the CLI's own home on this
+       * computer, as the daemon inherited it (which only importing lists). Read through the same
+       * parsers managed sessions use; adopted through the same start machinery. A transcript's hand-off
+       * pointer is read back only from a session's own folder, or as an agent coordinator's turn file
+       * (`~/.<coordinator>/<agent>/turns/turn-NNN.md`, kteam's layout).
        */
       const conversationImport = new ConversationImportService(
         new NodeConversationFiles(),
         [
-          { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude') },
-          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude') },
-          { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex') },
-          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex') },
+          { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude'), source: 'ferretry' },
+          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'), source: 'computer' },
+          { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex'), source: 'ferretry' },
+          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex'), source: 'computer' },
         ],
         { claude: claudeTranscriptParser, codex: codexTranscriptParser },
         new StorageConversationOwners(storage),
@@ -6867,6 +7022,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           new NodeConversationLinker(),
         ),
+        { roots: [paths.sessions], coordinatorHomes: [userHome] },
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({
@@ -7549,6 +7705,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
+        sessionHypermedia: createSessionHypermediaSubsystem(
+          storage,
+          sessions,
+          sessionEnvironments,
+          sessionMutations,
+          clock,
+        ),
         sessionRuntime,
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
@@ -7720,6 +7883,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
+          processes: new PaneProcessInventory(launchTmuxCommands, new BunProcessProbe(Bun.which('ps') ?? undefined)),
         }),
         sessionReads: operatorReads,
         sessionAttach,

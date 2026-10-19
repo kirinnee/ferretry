@@ -27,6 +27,7 @@ import {
   reapLeftovers,
   recordStep,
   resetSoftFailures,
+  retryOnLostBrowser,
   softStep,
   assertNoSoftFailures,
   step,
@@ -90,47 +91,17 @@ interface ProductOptions {
 }
 
 /** Boot one machine and one browser, unpaired. Every journey starts here. */
-/** What Playwright says when the browser connection vanished under a journey, not a product answer. */
-const LOST_BROWSER =
-  /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
 
-/** How many times a journey whose browser vanished is started again from nothing. */
-const LOST_BROWSER_RETRIES = 2;
-
-/**
- * Run one journey, and run it again — at most {@link LOST_BROWSER_RETRIES} more times — if the only
- * thing that went wrong is that its browser vanished.
- *
- * On hosted runners Bun 1.3 drops the DevTools pipe Playwright holds to Chrome, sometimes twice in one
- * journey. Playwright either answers "Target page, context or browser has been closed" or is never
- * told, and then the browser guard (support/relay-harness.ts) answers "browser has disconnected". That
- * is the harness's transport failing, not the product, and it is not reproducible on demand. So a
- * journey whose error is exactly that is started again from nothing, in a fresh environment and
- * browser, and every retry is recorded as a FLAG on the journey log so the rate stays visible. Any
- * other failure fails the test, and so does a browser lost on the last attempt. The runner's
- * per-journey ceiling still bounds all the attempts together.
- */
+/** Run one journey, retried from nothing when its browser vanished (`retryOnLostBrowser`). */
 async function withProduct(
   journey: string,
   body: (product: Product) => Promise<void>,
   options: ProductOptions = {},
 ): Promise<void> {
-  for (let retry = 0; ; retry += 1) {
-    try {
-      await withProductOnce(journey, body, options);
-      return;
-    } catch (error) {
-      const text = String((error as Error).message ?? error);
-      if (retry >= LOST_BROWSER_RETRIES || !LOST_BROWSER.test(text)) throw error;
-      await recordStep({
-        journey,
-        step: 'harness:journey-retried',
-        status: 'FLAG',
-        evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing (retry ${String(retry + 1)} of ${String(LOST_BROWSER_RETRIES)})`,
-      });
-      resetSoftFailures(journey);
-    }
-  }
+  await retryOnLostBrowser(journey, async () => {
+    resetSoftFailures(journey);
+    await withProductOnce(journey, body, options);
+  });
 }
 
 async function withProductOnce(
@@ -878,7 +849,19 @@ async function pairAgain(journey: string, stepName: string, page: ProductPage, u
     STALE_DONE_BUG,
   );
   if (first) return 'direct';
-  await page.evaluate(`localStorage.removeItem('fy-onboarding-v4')`);
+  // The failed attempt can leave the app mid-navigation, and an evaluate that lands then dies with
+  // "Execution context was destroyed": that is the page moving, not an answer, so read it again.
+  for (let attempt = 1; ; attempt += 1) {
+    const cleared = await page.evaluate(`localStorage.removeItem('fy-onboarding-v4')`).then(
+      () => true,
+      (error: unknown) => {
+        if (attempt >= 5 || !/Execution context was destroyed/u.test(String((error as Error).message))) throw error;
+        return false;
+      },
+    );
+    if (cleared) break;
+    await Bun.sleep(300);
+  }
   // A fresh document: the same URL again would be a hash-only navigation and keep the old state.
   await page.goto('about:blank');
   const settled = await confirmPairing(page, url);

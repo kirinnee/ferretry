@@ -16,6 +16,7 @@ import {
   viteBuild,
 } from './support/pwa-release';
 import { type HarnessTeardown, harnessTeardown } from './support/relay-harness';
+import { retryOnLostBrowser } from './support/product-harness';
 
 /**
  * Version skew between the app and a daemon, from the side a person sees.
@@ -142,26 +143,27 @@ function sentencesShown(text: string): { readonly olderDaemon: boolean; readonly
 }
 
 describe('version skew between the app and a daemon', () => {
-  it('should tell a new app paired to an OLD daemon to update the daemon', async () => {
-    const teardown = harnessTeardown();
-    try {
-      await withE2eEnvironment(async environment => {
-        // Arrange
-        const appOrigin = await serveApp(environment, teardown);
-        const old = startDialectStandIn(teardown, 'ferretry-relay/1', appOrigin);
-        const { page } = await launchReleaseBrowser(teardown);
+  it('should tell a new app paired to an OLD daemon to update the daemon', () =>
+    retryOnLostBrowser('version-skew', async () => {
+      const teardown = harnessTeardown();
+      try {
+        await withE2eEnvironment(async environment => {
+          // Arrange
+          const appOrigin = await serveApp(environment, teardown);
+          const old = startDialectStandIn(teardown, 'ferretry-relay/1', appOrigin);
+          const { page } = await launchReleaseBrowser(teardown);
 
-        // Act — once per colour scheme, because a failed pairing cannot be reloaded back into view.
-        const shown = await pairInEachScheme(page, appOrigin, old.url, 'new-app-old-daemon');
+          // Act — once per colour scheme, because a failed pairing cannot be reloaded back into view.
+          const shown = await pairInEachScheme(page, appOrigin, old.url, 'new-app-old-daemon');
 
-        // Assert — exactly the one sentence that names the MACHINE as the side to update.
-        for (const text of shown) should(sentencesShown(text)).eql({ olderDaemon: true, olderApp: false }, text);
-        should(old.requests()).containEql('GET /healthz');
-      });
-    } finally {
-      await teardown.closeAll();
-    }
-  });
+          // Assert — exactly the one sentence that names the MACHINE as the side to update.
+          for (const text of shown) should(sentencesShown(text)).eql({ olderDaemon: true, olderApp: false }, text);
+          should(old.requests()).containEql('GET /healthz');
+        });
+      } finally {
+        await teardown.closeAll();
+      }
+    }));
 
   /**
    * PRODUCT BUG (reported to the e2e lead): an app older than the daemon is told to update the DAEMON.
@@ -172,74 +174,79 @@ describe('version skew between the app and a daemon', () => {
    * and to pair again afterwards — while the one action that fixes it, reloading the app, is never
    * mentioned. `OLDER_APP_SENTENCE` exists for exactly this and the app never shows it.
    */
-  it('should tell an app paired to a NEWER daemon to update the app', async () => {
-    const teardown = harnessTeardown();
-    try {
-      await withE2eEnvironment(async environment => {
-        // Arrange
-        const appOrigin = await serveApp(environment, teardown);
-        const newer = startDialectStandIn(teardown, 'ferretry-relay/3', appOrigin);
-        const { page } = await launchReleaseBrowser(teardown);
+  it('should tell an app paired to a NEWER daemon to update the app', () =>
+    retryOnLostBrowser('version-skew', async () => {
+      const teardown = harnessTeardown();
+      try {
+        await withE2eEnvironment(async environment => {
+          // Arrange
+          const appOrigin = await serveApp(environment, teardown);
+          const newer = startDialectStandIn(teardown, 'ferretry-relay/3', appOrigin);
+          const { page } = await launchReleaseBrowser(teardown);
 
-        // Act
-        const shown = await pairInEachScheme(page, appOrigin, newer.url, 'new-app-newer-daemon');
+          // Act
+          const shown = await pairInEachScheme(page, appOrigin, newer.url, 'new-app-newer-daemon');
 
-        // Assert — the APP is the side to update.
-        for (const text of shown) should(sentencesShown(text)).eql({ olderDaemon: false, olderApp: true }, text);
-      });
-    } finally {
-      await teardown.closeAll();
-    }
-  });
-
-  it('should answer an app from before device keys with the one sentence naming the app', async () => {
-    const teardown = harnessTeardown();
-    try {
-      await withE2eEnvironment(async environment => {
-        // Arrange — the REAL daemon, allowing the app's origin as a real install would.
-        const appOrigin = await serveApp(environment, teardown);
-        const configPath = join(environment.paths.root, 'daemon.json');
-        await writeFile(
-          configPath,
-          `${JSON.stringify({
-            host: '127.0.0.1',
-            port: environment.ports.api,
-            corsOrigins: [appOrigin],
-            carriers: [{ kind: 'relay', source: 'discovery', enabled: false }],
-          })}\n`,
-          'utf8',
-        );
-        const platform = process.platform === 'darwin' ? 'darwin' : 'linux';
-        const architecture = process.arch === 'arm64' ? 'arm64' : 'x64-baseline';
-        await environment.startDaemon({
-          command: [
-            process.env.FYD_BIN ?? join(REPOSITORY_ROOT, 'dist', 'bin', `fyd-${platform}-${architecture}`),
-            '--config',
-            configPath,
-          ],
-          readyUrl: environment.httpUrl('/v1/health'),
-          timeoutMs: 60_000,
+          // Assert — the APP is the side to update.
+          for (const text of shown) should(sentencesShown(text)).eql({ olderDaemon: false, olderApp: true }, text);
         });
-        const { page } = await launchReleaseBrowser(teardown);
-        await page.goto(`${appOrigin}/app`, { waitUntil: 'load', timeout: 60_000 });
+      } finally {
+        await teardown.closeAll();
+      }
+    }));
 
-        // Act — from the app's own origin, the request an app from before device keys makes: its
-        // stored `fy_device_…` bearer token, which no daemon accepts any more.
-        const answer = await page.evaluate<{ status: number; body: { error?: string; code?: string } }>(`(async () => {
+  it('should answer an app from before device keys with the one sentence naming the app', () =>
+    retryOnLostBrowser('version-skew', async () => {
+      const teardown = harnessTeardown();
+      try {
+        await withE2eEnvironment(async environment => {
+          // Arrange — the REAL daemon, allowing the app's origin as a real install would.
+          const appOrigin = await serveApp(environment, teardown);
+          const configPath = join(environment.paths.root, 'daemon.json');
+          await writeFile(
+            configPath,
+            `${JSON.stringify({
+              host: '127.0.0.1',
+              port: environment.ports.api,
+              corsOrigins: [appOrigin],
+              carriers: [{ kind: 'relay', source: 'discovery', enabled: false }],
+            })}\n`,
+            'utf8',
+          );
+          const platform = process.platform === 'darwin' ? 'darwin' : 'linux';
+          const architecture = process.arch === 'arm64' ? 'arm64' : 'x64-baseline';
+          await environment.startDaemon({
+            command: [
+              process.env.FYD_BIN ?? join(REPOSITORY_ROOT, 'dist', 'bin', `fyd-${platform}-${architecture}`),
+              '--config',
+              configPath,
+            ],
+            readyUrl: environment.httpUrl('/v1/health'),
+            timeoutMs: 60_000,
+          });
+          const { page } = await launchReleaseBrowser(teardown);
+          await page.goto(`${appOrigin}/app`, { waitUntil: 'load', timeout: 60_000 });
+
+          // Act — from the app's own origin, the request an app from before device keys makes: its
+          // stored `fy_device_…` bearer token, which no daemon accepts any more.
+          const answer = await page.evaluate<{
+            status: number;
+            body: { error?: string; code?: string };
+          }>(`(async () => {
           const response = await fetch('${environment.httpUrl('/v1/sessions')}', {
             headers: { authorization: 'Bearer fy_device_${'B'.repeat(43)}' },
           });
           return { status: response.status, body: await response.json() };
         })()`);
 
-        // Assert — 426, readable cross-origin, and the sentence names the APP and how to update it.
-        should(answer.status).equal(426);
-        should(answer.body.code).equal('app_outdated');
-        should(answer.body.error).equal(OLDER_APP_SENTENCE);
-        should(sentencesShown(answer.body.error ?? '')).eql({ olderDaemon: false, olderApp: true });
-      });
-    } finally {
-      await teardown.closeAll();
-    }
-  });
+          // Assert — 426, readable cross-origin, and the sentence names the APP and how to update it.
+          should(answer.status).equal(426);
+          should(answer.body.code).equal('app_outdated');
+          should(answer.body.error).equal(OLDER_APP_SENTENCE);
+          should(sentencesShown(answer.body.error ?? '')).eql({ olderDaemon: false, olderApp: true });
+        });
+      } finally {
+        await teardown.closeAll();
+      }
+    }));
 });

@@ -7,6 +7,7 @@ import {
   ConversationAdoptResultSchema,
   type ConversationImportListing,
   ConversationImportListingSchema,
+  type ConversationSource,
   type Harness,
   type IFyApiClient,
 } from '@ferretry/protocol';
@@ -20,6 +21,8 @@ export type ImportApiClient = Pick<IFyApiClient, 'request'>;
  * never filters a listing it already has, so a result and its `matched` count always agree.
  */
 export interface ImportSearchQuery {
+  /** Only Ferretry's own history, or only the computer's CLI homes; absent reads both. */
+  readonly source?: ConversationSource;
   readonly harness?: Harness;
   /** Case-insensitive words; each must appear in the preview, the latest message or the project folder. */
   readonly q?: string;
@@ -43,6 +46,7 @@ export interface IImportOutput {
 
 function searchParams(query: ImportSearchQuery): string {
   const params = new URLSearchParams();
+  if (query.source !== undefined) params.set('source', query.source);
   if (query.harness !== undefined) params.set('harness', query.harness);
   if (query.q !== undefined && query.q !== '') params.set('q', query.q);
   if (query.since !== undefined) params.set('since', query.since);

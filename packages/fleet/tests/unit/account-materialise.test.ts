@@ -11,9 +11,9 @@ import {
   RUNTIME_STATE_DIRECTORY,
 } from '../../src/lib/account/materialise.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../src/lib/account/schema.ts';
-import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../src/lib/provisioning.ts';
 import { builtInModelCatalogs } from '../../src/lib/models/catalog.ts';
 import { builtInPresets } from '../../src/lib/presets/catalog.ts';
+import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../src/lib/provisioning.ts';
 import { MANAGED_MARKER } from '../../src/lib/wrappers.ts';
 
 const LAYOUT: FleetLayout = {
@@ -665,7 +665,7 @@ describe('materialiseFleet', () => {
       should(wrapper).containEql('FY_SEED_FIRST_RUN');
       should(wrapper).containEql('hasSeenAutoDefaultNudge');
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--disallowed-tools=AskUserQuestion' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}' '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}' '--settings' '${overlay}' "$@"\n`,
       );
       should(JSON.parse((only(result, overlay) as { content: string }).content)).eql({
         permissions: { defaultMode: 'auto' },
@@ -684,7 +684,7 @@ describe('materialiseFleet', () => {
       // Assert
       const overlay = `${HOME_A}/.fy/fixed.json`;
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--disallowed-tools=AskUserQuestion' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}' '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}' '--settings' '${overlay}' "$@"\n`,
       );
       should(only(result, overlay)).eql({
         kind: 'file',
@@ -706,7 +706,7 @@ describe('materialiseFleet', () => {
 
       // Assert
       should(wrapper).endWith(
-        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,"hide_gpt-5.1-codex-max_migration_prompt"=true}' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE"]' '-c' 'developer_instructions="${AGENT_TOOLS_INSTRUCTION}"' "$@"\n`,
+        `exec codex '-c' 'model="gpt-6"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,"hide_gpt-5.1-codex-max_migration_prompt"=true}' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE","FY_HYPERMEDIA"]' '-c' 'developer_instructions="${AGENT_TOOLS_INSTRUCTION}"' "$@"\n`,
       );
       should(wrapper).containEql('set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"');
       should(wrapper).not.containEql('ferretry-launch-folder');

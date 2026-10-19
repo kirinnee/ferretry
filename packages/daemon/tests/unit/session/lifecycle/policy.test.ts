@@ -331,13 +331,19 @@ describe('session lifecycle policy', () => {
     const contradicted = sessionPaneEnvironment(id, { FY_SESSION_ID: 'somebody-else' });
 
     // Assert
-    should(withNothingStored).deepEqual({ FY_SESSION_ID: 'session-1' });
+    should(withNothingStored).deepEqual({ FY_HYPERMEDIA: '1', FY_SESSION_ID: 'session-1' });
     should(beside).deepEqual({
+      FY_HYPERMEDIA: '1',
       FY_SESSION_BOARD_CAPABILITY: 'secret',
       TASK_BOARD: 'board-7',
       FY_SESSION_ID: 'session-1',
     });
-    should(contradicted).deepEqual({ FY_SESSION_ID: 'session-1' });
+    should(contradicted).deepEqual({ FY_HYPERMEDIA: '1', FY_SESSION_ID: 'session-1' });
+    // Hypermedia defaults on, and an owner's stored switch wins over the default.
+    should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' })).deepEqual({
+      FY_HYPERMEDIA: '0',
+      FY_SESSION_ID: 'session-1',
+    });
     // The name is a wire contract with the CLI, not a local choice, so it is pinned here too.
     should(SESSION_ID_VARIABLE).equal('FY_SESSION_ID');
   });

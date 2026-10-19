@@ -137,7 +137,10 @@ describe('isolated E2E harness', () => {
  * A stand-in for what Playwright's `launch()` hands back: a browser whose calls are never answered,
  * because the DevTools pipe to the process launched with it no longer carries anything.
  */
-function silentBrowser(script: string): () => Promise<{ newContext(): Promise<never>; close(): Promise<void> }> {
+function silentBrowser(
+  script: string,
+  browserProcess?: { send(method: string): Promise<unknown> },
+): () => Promise<{ newContext(): Promise<never>; close(): Promise<void> }> {
   return async () => {
     // Through the module object, at call time: the stdio guard wraps `spawn` there, as Playwright calls it.
     childProcess.spawn('bash', ['-c', script], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -145,6 +148,7 @@ function silentBrowser(script: string): () => Promise<{ newContext(): Promise<ne
       _guid: 'browser@silent',
       newContext: () => new Promise<never>(() => undefined),
       close: async () => undefined,
+      ...(browserProcess === undefined ? {} : { newBrowserCDPSession: async () => browserProcess }),
     };
   };
 }
@@ -189,6 +193,51 @@ describe('a browser whose DevTools pipe goes silent', () => {
       // Assert
       should(actual).match(/^browser has disconnected: Chrome pid \d+ exited on its own \(code=0/u);
       should(Date.now() - started).be.below(10_000);
+    } finally {
+      await closeChromeBounded(browser);
+    }
+  });
+});
+
+describe('a browser whose DevTools pipe stops carrying commands', () => {
+  it('should fail a pending call once Chrome stops answering a probe, though it logs nothing', async () => {
+    // Arrange — Chrome stays up and silent; its browser process never answers.
+    const browser = await launchChromiumWithRetry(
+      silentBrowser('sleep 60', { send: () => new Promise<never>(() => undefined) }),
+    );
+    const started = Date.now();
+
+    try {
+      // Act
+      const actual = await browser.newContext().then(
+        () => 'answered',
+        (error: Error) => error.message,
+      );
+
+      // Assert — one probe after ten seconds, five seconds for its reply.
+      should(actual).match(/^browser has disconnected: .*did not answer Browser\.getVersion within 5000ms/u);
+      should(Date.now() - started).be.below(25_000);
+    } finally {
+      await closeChromeBounded(browser);
+    }
+  });
+
+  it('should keep waiting on a slow call while Chrome still answers the probe', async () => {
+    // Arrange — Chrome's browser process answers at once; only the call itself is slow.
+    const browser = await launchChromiumWithRetry(silentBrowser('sleep 60', { send: async () => ({}) }));
+
+    try {
+      // Act
+      const actual = await Promise.race([
+        browser.newContext().then(
+          () => 'answered',
+          (error: Error) => error.message,
+        ),
+        Bun.sleep(17_000).then(() => 'still waiting'),
+      ]);
+
+      // Assert
+      should(actual).equal('still waiting');
     } finally {
       await closeChromeBounded(browser);
     }

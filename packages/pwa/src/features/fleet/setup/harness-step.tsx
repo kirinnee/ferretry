@@ -18,11 +18,19 @@
  */
 
 import type { FleetRuntimeView, FleetSetupScan } from '@ferretry/protocol';
+import {
+  adoptionBatches,
+  CONVERSATION_IMPORT_WINDOW_DAYS,
+  type ConversationAdoptResult,
+  conversationsToImport,
+  type ImportableConversation,
+} from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
-import { ConversationPicker } from '../conversations/conversation-picker.tsx';
+import { runtimeChoice } from '../conversations/conversation-picker-model.ts';
+import { adoptConversations, readImportableConversations } from '../conversations/conversations-api.ts';
 import { EnvironmentLogin } from '../credentials/environment-login.tsx';
 import type { MachineData } from '../runtimes/machine-data.ts';
 import { useMachineData } from '../runtimes/machine-data.ts';
@@ -32,12 +40,17 @@ import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../she
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { FirstRunSignIn } from './first-run-sign-in.tsx';
 import {
+  changeList,
+  changeSummary,
   foundRows,
   type HarnessAnswers,
   harnessImportChange,
   harnessProblems,
+  type ImportCounts,
   importButtonLabel,
+  importCounts,
   importNotes,
+  importSummary,
   makesRuntime,
   missingTools,
   offersSignIn,
@@ -45,14 +58,12 @@ import {
   runtimePlan,
   scanHasHarness,
   scanSignedIn,
-  updateDetail,
-  updateTitle,
 } from './harness-import-model.ts';
 import type { InstallPhase } from './install-model.ts';
 import { machineItemHash } from './settings-route.ts';
 import { useSetupAccess } from './setup-access.ts';
-import { CheckChoices, SetupBadges, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
-import { listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
+import { SetupBadges, SetupDisclosure, SetupNote, SetupRow, SetupSection } from './setup-ui.tsx';
+import { countWords, listWords, SETUP_HARNESS_NAMES, type SetupHarness } from './setup-words.ts';
 import { ToolInstall } from './tool-install.tsx';
 
 export interface OnboardingHarnessStepProps {
@@ -89,7 +100,8 @@ export function OnboardingHarnessStep({
   const [install, setInstall] = useState<InstallPhase>({ kind: 'choose' });
   const [installSkipped, setInstallSkipped] = useState(false);
   /** The import this visit sent, and the notes it left: shown in place of the form. */
-  const [imported, setImported] = useState<readonly string[] | null>(null);
+  const [imported, setImported] = useState<ImportedResult | null>(null);
+  const [conversationsKept, setConversationsKept] = useState(0);
   const name = SETUP_HARNESS_NAMES[harness];
 
   const latest = useRef({ access, onReady });
@@ -149,7 +161,7 @@ export function OnboardingHarnessStep({
   const send = (): void => {
     void changes.apply(harnessImportChange(harness, plan, answers)).then(async applied => {
       if (applied.kind === 'refused') return;
-      setImported(importNotes(scan, [harness]));
+      setImported({ notes: importNotes(scan, [harness]), counts: importCounts(scan, harness, 0) });
       onAnswers({});
       await read();
     });
@@ -287,21 +299,10 @@ export function OnboardingHarnessStep({
               </div>
             ) : null}
             {scan.updates.length === 0 ? null : (
-              <CheckChoices
-                legend="What changed since the last import"
-                name="updates"
-                values={answers.accepted ?? []}
-                onToggle={(reference, on) => {
-                  const accepted = answers.accepted ?? [];
-                  set({
-                    accepted: on ? [...accepted, reference] : accepted.filter(candidate => candidate !== reference),
-                  });
-                }}
-                options={scan.updates.map(update => ({
-                  id: update.reference,
-                  title: `Update ${updateTitle(update.reference)}`,
-                  detail: updateDetail(update.sources),
-                }))}
+              <ChangedSince
+                updates={scan.updates}
+                accepted={answers.accepted ?? []}
+                onAccept={on => set({ accepted: on ? scan.updates.map(update => update.reference) : [] })}
               />
             )}
             <ChangeApplyPanel
@@ -322,7 +323,13 @@ export function OnboardingHarnessStep({
             </p>
           </SetupSection>
         ) : (
-          <ImportedNote harness={harness} have={have} notes={imported} machineName={machineName} />
+          <ImportedNote
+            harness={harness}
+            have={have}
+            result={imported}
+            conversations={conversationsKept}
+            machineName={machineName}
+          />
         )}
       </>
     );
@@ -338,7 +345,9 @@ export function OnboardingHarnessStep({
         detail={tool?.installed === true ? `Installed on ${machineName}` : `Not installed on ${machineName}`}
       />
       {body}
-      {have.length === 0 ? null : <HarnessConversations tab={tab} harness={harness} runtimes={runtimes} />}
+      {have.length === 0 ? null : (
+        <HarnessConversations tab={tab} harness={harness} runtimes={runtimes} onKept={setConversationsKept} />
+      )}
       {tool?.installed === true ? (
         <ProviderRuntimeSection tab={tab} harness={harness} onMade={() => void read()} />
       ) : null}
@@ -346,36 +355,84 @@ export function OnboardingHarnessStep({
   );
 }
 
-/** What the import made: the runtimes this CLI has now, and any that need a sign-in before they launch. */
+/** What this visit's import brought in, for the one-line result. */
+interface ImportedResult {
+  readonly notes: readonly string[];
+  readonly counts: ImportCounts;
+}
+
+/** "What changed since the last import": one line, one tick to take it, and the names behind a disclosure. */
+function ChangedSince({
+  updates,
+  accepted,
+  onAccept,
+}: {
+  readonly updates: FleetSetupScan['updates'];
+  readonly accepted: readonly string[];
+  readonly onAccept: (on: boolean) => void;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-harness-changed="">
+      <p className="m-0 text-cell text-fg" data-harness-changed-summary="">
+        {changeSummary(updates)} since the last import.
+      </p>
+      <label className="flex min-h-control items-center gap-2 text-cell text-fg">
+        <input
+          type="checkbox"
+          data-harness-update-all=""
+          checked={accepted.length > 0}
+          onChange={event => onAccept(event.target.checked)}
+        />
+        Update {updates.length === 1 ? 'it' : 'them'} too
+      </label>
+      <SetupDisclosure label="Show list" name="changed-list">
+        {changeList(updates).map(line => (
+          <p key={line.kind} className="m-0 [overflow-wrap:anywhere]" data-harness-changed-line={line.kind}>
+            <span className="font-semibold text-fg">{line.kind}:</span> {line.names}
+          </p>
+        ))}
+      </SetupDisclosure>
+    </div>
+  );
+}
+
+/** What the import made, in ONE line; the runtimes and notes sit behind Details, a needed sign-in stays up front. */
 function ImportedNote({
   harness,
   have,
-  notes,
+  result,
+  conversations,
   machineName,
 }: {
   readonly harness: SetupHarness;
   readonly have: readonly FleetRuntimeView[];
-  readonly notes: readonly string[];
+  readonly result: ImportedResult;
+  readonly conversations: number;
   readonly machineName: string;
 }) {
   const needsSignIn = have.filter(runtime => runtime.credential.status === 'needs_sign_in');
+  const ready =
+    have.length === 0
+      ? [`Your ${SETUP_HARNESS_NAMES[harness]} setup is in Ferretry.`]
+      : [
+          `${listWords(have.map(runtime => runtime.name))} ${have.length === 1 ? 'is' : 'are'} ready`,
+          `${SETUP_HARNESS_NAMES[harness]} · ${have.map(runtime => `${runtime.profile} profile`).join(', ')}`,
+        ];
   return (
     <div className="flex min-w-0 flex-col gap-2" data-harness-imported={harness}>
-      <SetupNote
-        live
-        tone="ok"
-        name="import-ready"
-        title={
-          have.length === 0
-            ? 'Imported'
-            : `${listWords(have.map(runtime => runtime.name))} ${have.length === 1 ? 'is' : 'are'} ready`
-        }
-      >
-        <span>
-          {have.length === 0
-            ? `Your ${SETUP_HARNESS_NAMES[harness]} setup is in Ferretry.`
-            : `${SETUP_HARNESS_NAMES[harness]} · ${have.map(runtime => `${runtime.profile} profile`).join(', ')}`}
-        </span>
+      <SetupNote live tone="ok" name="import-ready" title={importSummary({ ...result.counts, conversations })}>
+        <SetupDisclosure label="Details" name="import-details">
+          {ready.map(line => (
+            <p key={line} className="m-0">
+              {line}
+            </p>
+          ))}
+          {result.notes.map(note => (
+            <p key={note} className="m-0" data-setup-note="import-note">
+              {note}
+            </p>
+          ))}
+        </SetupDisclosure>
       </SetupNote>
       {needsSignIn.length === 0 ? null : (
         <SetupNote tone="warn" name="sign-in-later" title="Sign in before you launch">
@@ -392,11 +449,6 @@ function ImportedNote({
           ))}
         </SetupNote>
       )}
-      {notes.map(note => (
-        <SetupNote key={note} name="import-note">
-          <span>{note}</span>
-        </SetupNote>
-      ))}
     </div>
   );
 }
@@ -573,36 +625,202 @@ function ProviderRuntime({
   );
 }
 
-/** "Your conversations": once this CLI has a runtime, its earlier conversations can be kept as ferrets. */
+const WINDOW_LABELS: Readonly<Record<number, string>> = { 1: 'Last 1 day' };
+
+/** The one choice: how far back to import conversations. `all` and `none` bracket the day windows. */
+type Window = 'none' | 'all' | `${number}`;
+
+const windowDays = (choice: Window): number | undefined | null =>
+  choice === 'none' ? null : choice === 'all' ? undefined : Number(choice);
+
+const windowLabel = (choice: Window): string =>
+  choice === 'none' ? 'None' : choice === 'all' ? 'All' : (WINDOW_LABELS[Number(choice)] ?? `Last ${choice} days`);
+
+type KeptListing =
+  | { readonly kind: 'reading' }
+  | { readonly kind: 'refused'; readonly sentence: string }
+  | { readonly kind: 'read'; readonly rows: readonly ImportableConversation[] };
+
+/**
+ * "Import conversations": ONE choice (All, a day window, None) and one button — no per-conversation
+ * picking. A kept conversation is a hard link to the CLI's own file, never a copy, and stays stopped.
+ */
 function HarnessConversations({
   tab,
   harness,
   runtimes,
+  onKept,
 }: {
   readonly tab: MachineTabProps;
   readonly harness: SetupHarness;
   readonly runtimes: readonly FleetRuntimeView[];
+  readonly onKept: (count: number) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const access = useSetupAccess({ connection: tab.connection, createClient: tab.createClient });
+  const { read, act } = access;
+  const [listing, setListing] = useState<KeptListing>({ kind: 'reading' });
+  const [choice, setChoice] = useState<Window>('none');
+  const [picked, setPicked] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [issue, setIssue] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<ConversationAdoptResult | null>(null);
+  const kept = useRef(0);
+  const runtime = runtimeChoice(runtimes, harness);
+
+  const load = useCallback(async (): Promise<void> => {
+    const answer = await read(client => readImportableConversations(client, { harness, limit: 5_000 }));
+    setListing(
+      answer.kind === 'done'
+        ? { kind: 'read', rows: answer.value.conversations }
+        : { kind: 'refused', sentence: answer.sentence },
+    );
+  }, [read, harness]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const name = SETUP_HARNESS_NAMES[harness];
+  let body: ReactNode;
+  if (listing.kind === 'reading')
+    body = (
+      <p role="status" className="m-0 text-cell text-muted" data-conversations-reading="">
+        Looking for {name} conversations…
+      </p>
+    );
+  else if (listing.kind === 'refused')
+    body = (
+      <SetupNote live tone="warn" name="conversations-refused" title="Couldn’t read your conversations">
+        <span>{listing.sentence}</span>
+        <div className="mt-2">
+          <Button type="button" size="sm" data-conversations-retry="" onClick={() => void load()}>
+            Try again
+          </Button>
+        </div>
+      </SetupNote>
+    );
+  else if (listing.rows.length === 0)
+    body = (
+      <SetupNote name="conversations-empty">
+        <span>No {name} conversations on this machine.</span>
+      </SetupNote>
+    );
+  else {
+    const rows = listing.rows;
+    const now = Date.now();
+    const countFor = (option: Window): number => {
+      const days = windowDays(option);
+      return days === null ? 0 : conversationsToImport(rows, days, now).length;
+    };
+    const options: Window[] = ['all', ...CONVERSATION_IMPORT_WINDOW_DAYS.map(days => `${days}` as Window), 'none'];
+    const ids = (() => {
+      const days = windowDays(choice);
+      return days === null ? [] : conversationsToImport(rows, days, now);
+    })();
+    const wrapper = picked ?? (runtime.kind === 'one' ? runtime.runtime.wrapper : undefined) ?? undefined;
+    const send = async (target: string): Promise<void> => {
+      setBusy(true);
+      setIssue(null);
+      const adopted: ConversationAdoptResult['adopted'] = [];
+      const refused: ConversationAdoptResult['refused'] = [];
+      for (const batch of adoptionBatches(ids)) {
+        const answer = await act(client =>
+          adoptConversations(client, {
+            harness,
+            runtime: target,
+            conversations: batch.map(id => ({ id, start: false })),
+          }),
+        );
+        if (answer.kind === 'refused') {
+          setIssue(answer.sentence);
+          break;
+        }
+        adopted.push(...answer.value.adopted);
+        refused.push(...answer.value.refused);
+      }
+      setBusy(false);
+      kept.current += adopted.length;
+      setOutcome({ adopted, refused });
+      onKept(kept.current);
+      setChoice('none');
+      await load();
+    };
+    body = (
+      <div className="flex min-w-0 flex-col gap-2">
+        {outcome === null ? null : (
+          <p role="status" className="m-0 text-cell text-fg" data-conversations-result="">
+            Imported {countWords(outcome.adopted.length, 'conversation')}.
+            {outcome.refused.length === 0
+              ? ''
+              : ` ${countWords(outcome.refused.length, 'conversation')} couldn’t be imported.`}
+          </p>
+        )}
+        {outcome === null || outcome.refused.length === 0 ? null : (
+          <SetupNote tone="warn" name="conversations-refused-some">
+            {outcome.refused.slice(0, 3).map(item => (
+              <span key={item.id}>{item.reason}</span>
+            ))}
+          </SetupNote>
+        )}
+        {issue === null ? null : (
+          <SetupNote live tone="warn" name="conversations-issue">
+            <span>{issue}</span>
+          </SetupNote>
+        )}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <label htmlFor={`conversation-window-${harness}`} className="text-cell font-semibold text-fg">
+            Import conversations
+          </label>
+          <select
+            id={`conversation-window-${harness}`}
+            className="kt-input w-auto min-w-0"
+            data-conversation-window=""
+            value={choice}
+            disabled={busy}
+            onChange={event => setChoice(event.target.value as Window)}
+          >
+            {options.map(option => (
+              <option key={option} value={option}>
+                {option === 'none' ? windowLabel(option) : `${windowLabel(option)} · ${countFor(option)}`}
+              </option>
+            ))}
+          </select>
+          {runtime.kind === 'several' ? (
+            <select
+              className="kt-input w-auto min-w-0"
+              aria-label="Runtime for imported conversations"
+              data-conversation-runtime=""
+              value={picked ?? ''}
+              onChange={event => setPicked(event.target.value === '' ? null : event.target.value)}
+            >
+              <option value="">Runtime…</option>
+              {runtime.runtimes.map(candidate => (
+                <option key={candidate.wrapper} value={candidate.wrapper}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {ids.length === 0 ? null : (
+            <Button
+              type="button"
+              data-conversations-import=""
+              disabled={busy || wrapper === undefined}
+              onClick={() => wrapper !== undefined && void send(wrapper)}
+            >
+              {busy ? 'Importing…' : `Import ${countWords(ids.length, 'conversation')}`}
+            </Button>
+          )}
+        </div>
+        <p className="m-0 text-meta leading-base text-muted">
+          Each one is linked to its original file, not copied, and stays stopped until you resume it.
+        </p>
+      </div>
+    );
+  }
   return (
     <SetupSection title="Your conversations" name="conversations">
-      {open ? (
-        <ConversationPicker
-          connection={tab.connection}
-          createClient={tab.createClient}
-          harness={harness}
-          runtimes={runtimes}
-        />
-      ) : (
-        <div>
-          <Button type="button" data-harness-conversations="" onClick={() => setOpen(true)}>
-            Choose conversations to keep…
-          </Button>
-          <p className="m-0 mt-1 text-meta leading-base text-muted">
-            Keep earlier {SETUP_HARNESS_NAMES[harness]} conversations as ferrets that resume where they left off.
-          </p>
-        </div>
-      )}
+      {body}
     </SetupSection>
   );
 }

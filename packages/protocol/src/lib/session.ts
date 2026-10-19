@@ -390,6 +390,12 @@ export const SessionConfigSchema = z.object({
    */
   transcript: TranscriptProvenanceSchema.optional(),
   retry: RetryPolicySchema,
+  /**
+   * Whether this ferret is told it may explain with hypermedia (docs/hypermedia.md). ABSENT MEANS ON: a
+   * session started before the switch existed is instructed at its next launch unless the owner turns
+   * it off. Read at launch, so a change takes effect at the next launch.
+   */
+  hypermedia: z.boolean().optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
 
@@ -849,6 +855,21 @@ export const RenameSessionRequestSchema = z
     }
   });
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>;
+
+/** `PATCH /v1/sessions/:sessionId/hypermedia` — switch whether one ferret is told to use hypermedia. */
+export const SessionHypermediaPatchSchema = z.strictObject({ enabled: z.boolean() });
+export type SessionHypermediaPatch = z.infer<typeof SessionHypermediaPatchSchema>;
+
+/**
+ * What switching it did. Nothing is sent to the ferret: its instructions were fixed at launch, so a
+ * RUNNING ferret takes the change at its next launch (`restartRequired`), and `note` says so in words.
+ */
+export const SessionHypermediaPatchResultSchema = z.strictObject({
+  view: SessionViewSchema,
+  restartRequired: z.boolean(),
+  note: z.string().min(1),
+});
+export type SessionHypermediaPatchResult = z.infer<typeof SessionHypermediaPatchResultSchema>;
 
 /**
  * What the transport did, said at the moment the send returns. `sent` is a busy pane that took the

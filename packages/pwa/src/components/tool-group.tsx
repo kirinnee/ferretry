@@ -39,15 +39,18 @@ import { cn } from '../lib/class-names.ts';
 import { formatElapsedSeconds, instantMs, wholeSecondsSince } from '../lib/live-counter.ts';
 import type { ToolCall } from '../lib/session-screens.ts';
 import {
+  type AskedQuestion,
   type ExtractedTool,
   extractToolSummary,
   langFromPath,
   parseExecOutput,
+  readAskedQuestions,
   resultText,
   type ToolKind,
   toolColorVar,
 } from '../lib/tool-extract.ts';
 import { CodeBlock } from './code-block.tsx';
+import { QuestionCard } from './question-card.tsx';
 import { Spinner } from './spinner.tsx';
 
 const iconFor = (kind: ToolKind) => {
@@ -119,7 +122,39 @@ export interface ToolGroupProps {
   readonly scheduler?: LiveScheduler;
 }
 
+/**
+ * A question call keeps its weight: it is content the owner answers, not texture. It is split out of
+ * the run so it is never folded into an "N tools" count; the calls around it still collapse.
+ */
 export const ToolGroup = memo(function ToolGroup({ calls, live, isLast, scheduler }: ToolGroupProps) {
+  const segments: { readonly questions?: readonly AskedQuestion[]; readonly calls: ToolCall[] }[] = [];
+  for (const call of calls) {
+    const questions = call.orphanResult ? null : readAskedQuestions(call.use, call.result);
+    const tail = segments[segments.length - 1];
+    if (questions !== null) segments.push({ questions, calls: [call] });
+    else if (tail !== undefined && tail.questions === undefined) tail.calls.push(call);
+    else segments.push({ calls: [call] });
+  }
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.questions === undefined ? (
+          <ToolRun
+            calls={segment.calls}
+            isLast={isLast && index === segments.length - 1}
+            key={segment.calls[0]?.key}
+            live={live}
+            scheduler={scheduler}
+          />
+        ) : (
+          <QuestionCard key={segment.calls[0]?.key} questions={segment.questions} />
+        ),
+      )}
+    </>
+  );
+});
+
+const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGroupProps) {
   const [open, setOpen] = useState(false);
 
   // The trailing unfinished call of a live session is "running".

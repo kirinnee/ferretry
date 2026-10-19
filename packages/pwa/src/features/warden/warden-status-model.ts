@@ -20,9 +20,10 @@ import type {
   WardenFailoverAccountView,
   WardenLogin,
   WardenStatusView,
+  WardenTriageReason,
 } from '@ferretry/protocol';
 import { displayCallsign } from '../../lib/callsign.ts';
-import { ANOMALY_CHIPS, TRIAGE_LABEL } from './warden-vocabulary.ts';
+import { ANOMALY_CHIPS, layersLabel } from './warden-vocabulary.ts';
 
 const NO_CREDENTIALS = /credentials rejected|no credentials/iu;
 
@@ -115,12 +116,24 @@ export const wardenNeedsYouCount = (status: WardenStatusView): number => {
   return sessions.size;
 };
 
-/** `Jev guard`, or the fallback in effect and why: `Rules only (cap hit)`, `Off`. */
+/** Why a layer the owner switched on is off right now, in a few words. */
+const LAYER_OFF: Readonly<Record<Exclude<WardenTriageReason, 'configured' | 'disabled'>, string>> = {
+  jev_cap: 'Jev cap hit',
+  investigation_cap: 'LLM cap hit',
+  no_login: 'no login',
+};
+
+/**
+ * The layers in effect, and any the owner switched on that are off now and why: `Rules + Jev + LLM`,
+ * `Rules + LLM (Jev cap hit)`, `Rules only (no login)`, `Off`.
+ */
 export const wardenTriageLabel = (status: WardenStatusView): string => {
   const { triage } = status;
-  if (!status.config.enabled || triage.reason === 'disabled') return 'Off';
-  if (triage.reason === 'jev_cap' || triage.reason === 'investigation_cap')
-    return `${TRIAGE_LABEL[triage.effective]} (cap hit)`;
-  if (triage.reason === 'no_login') return `${TRIAGE_LABEL[triage.effective]} (no login)`;
-  return TRIAGE_LABEL[triage.effective];
+  if (!status.config.enabled || triage.jev.reason === 'disabled' || triage.llm.reason === 'disabled') return 'Off';
+  const label = layersLabel({ jev: triage.jev.active, llm: triage.llm.active });
+  const off = [triage.jev, triage.llm]
+    .map(layer => layer.reason)
+    .filter((reason): reason is keyof typeof LAYER_OFF => reason in LAYER_OFF)
+    .map(reason => LAYER_OFF[reason]);
+  return off.length === 0 ? label : `${label} (${off.join(', ')})`;
 };

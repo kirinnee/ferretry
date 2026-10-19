@@ -18,6 +18,7 @@ import type {
   WardenConfig,
   WardenConfigView,
   WardenInvestigateView,
+  WardenLeaveView,
   WardenRunView,
   WardenStatusView,
 } from '../src/lib/index.ts';
@@ -166,10 +167,10 @@ export const healthView = {
 
 export const wardenConfig = {
   enabled: true,
-  triage: 'jev',
+  layers: { jev: true, llm: true },
   guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 },
   caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
-  mayActAlone: { nudge: true, resume: true, failover: true, stop: false },
+  mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: false },
   events: { turnEnd: true, question: true, paneDied: true },
   investigation: { effort: 'low' },
   accounts: [{ agent: 'codex-auto-loge', model: 'gpt-5.6-sol' }],
@@ -189,7 +190,10 @@ export const wardenStatusView = {
   config: wardenConfig,
   anomalies: [],
   fingerprint: 'none',
-  triage: { configured: 'jev', effective: 'jev', reason: 'configured' },
+  triage: {
+    jev: { configured: true, active: true, reason: 'configured' },
+    llm: { configured: true, active: true, reason: 'configured' },
+  },
   spend: {
     day: '2026-10-16',
     jevUsd: 0.03,
@@ -197,6 +201,7 @@ export const wardenStatusView = {
     investigationUsd: 1.2,
     investigationCapUsd: 2,
     pendingInvestigations: 0,
+    capsHit: [],
     investigationsLastHour: 1,
     maxInvestigationsPerHour: 6,
   },
@@ -352,3 +357,8 @@ export const daemonUpdateView = {
   autoInstall: false,
   job: null,
 } as const;
+
+export const wardenLeaveView = {
+  blessing: { sessionId: 'session-1', kinds: ['sus_thinking'], expiresAt: INSTANT, by: 'owner' },
+  message: 'Left alone for 4 h: a new kind of trouble or a change of status still raises a flag.',
+} satisfies WardenLeaveView;

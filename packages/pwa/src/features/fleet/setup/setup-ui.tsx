@@ -4,7 +4,7 @@
  * with the rest of Settings.
  */
 
-import { Check } from 'lucide-react';
+import { Check, ChevronRight } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import { Badge } from '../../../shell/primitives.tsx';
@@ -238,5 +238,26 @@ export function CheckChoices<T extends string>({
         />
       )}
     />
+  );
+}
+
+/** A collapsed-by-default disclosure: one quiet line that opens to the detail, so a result stays one line. */
+export function SetupDisclosure({
+  label,
+  children,
+  name,
+}: {
+  readonly label: string;
+  readonly children: ReactNode;
+  readonly name?: string;
+}) {
+  return (
+    <details className="group min-w-0" data-setup-disclosure={name}>
+      <summary className="flex min-h-control cursor-pointer list-none items-center gap-1 text-cell font-semibold text-accent [&::-webkit-details-marker]:hidden">
+        <ChevronRight size={14} aria-hidden="true" className="transition-transform group-open:rotate-90" />
+        {label}
+      </summary>
+      <div className="flex min-w-0 flex-col gap-1 pb-1 text-cell leading-base text-muted">{children}</div>
+    </details>
   );
 }

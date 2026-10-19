@@ -15,6 +15,8 @@ import {
   type FixedLayer,
   type FixedLayerInput,
   fixedLayerFor,
+  HYPERMEDIA_ENV,
+  HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
   PASSIVE_LEARNING_ENV,
   tomlString,
@@ -50,7 +52,7 @@ const CODEX_TOOL_ARGS = [
   '-c',
   'mcp_servers.ferretry.args=["mcp","serve"]',
   '-c',
-  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE"]',
+  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE","FY_HYPERMEDIA"]',
   '-c',
   `developer_instructions="${AGENT_TOOLS_INSTRUCTION}"`,
 ];
@@ -555,5 +557,23 @@ describe('passive learning teaching', () => {
     should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
     should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
     should(teaching).containEql('lessons_suggest');
+  });
+});
+
+describe('hypermedia teaching', () => {
+  it('should hand the per-ferret switch to the tools server and teach every form with one fenced example', () => {
+    // Arrange
+    const forms = ['mermaid', 'svg', 'html', 'image, video, audio, pdf'];
+
+    // Act
+    const lines = HYPERMEDIA_INSTRUCTION.split('\n');
+
+    // Assert
+    should(FERRETRY_MCP_ENV_VARS).containEql(HYPERMEDIA_ENV);
+    should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
+    for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
+    should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
+    should(HYPERMEDIA_INSTRUCTION).containEql('Do not overdo it');
+    should(HYPERMEDIA_INSTRUCTION.length).be.below(1200);
   });
 });

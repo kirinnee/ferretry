@@ -11,7 +11,7 @@
  * - **Speed-ups** — Settings › Speed-ups (`speedups-surface.tsx`): paste → Test → "set ✓".
  * - **Voice** — Settings › Dictation's engine choice (Parakeet, with its download size and optional install,
  *   or phone/browser voice), saved as the MACHINE's default in `voice.yaml`; clean-up is this device's.
- * - **Warden** — Settings › Warden's card, with the Jev guard preselected only when a Jev key was added.
+ * - **Warden** — Settings › Warden's card, with Jev switched on only when a Jev key was added.
  * - **Learning** — the passive-learning default for new ferrets.
  * - **Agent controls** — the Machine tab's own controls and default runtime sections.
  */
@@ -295,7 +295,7 @@ interface WardenLoaded {
 }
 
 /**
- * Settings › Warden's card on this step. It opens on {@link wardenStartingDraft} — the Jev guard when a
+ * Settings › Warden's card on this step. It opens on {@link wardenStartingDraft} — Jev switched on when a
  * Jev key is set and the machine is still on the free default — and nothing changes until Save.
  */
 export function OnboardingWardenStep({
@@ -392,7 +392,7 @@ export function OnboardingWardenStep({
 
 const jevLead = (loaded: WardenLoaded): string =>
   jevKeyStatus(loaded.speedups).state === 'set'
-    ? 'A Jev key is set, so the Jev guard is preselected: it skips healthy flags for fractions of a cent.'
+    ? 'A Jev key is set, so Jev is switched on: it clears healthy flags for fractions of a cent and shows you the rest.'
     : 'Without a Jev key the safe default is rules only: flags are shown to you, and nothing is spent.';
 
 // ── Learning ─────────────────────────────────────────────────────────────────────────────────────

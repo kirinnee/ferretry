@@ -434,6 +434,8 @@ describe('TmuxSessionLifecycleLauncher', () => {
         '-c',
         '/workspace/project',
         '-e',
+        'FY_HYPERMEDIA=1',
+        '-e',
         'FY_SESSION_ID=tmux-session',
         AGENT,
         '--mode',
@@ -1298,7 +1300,8 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     // Assert
     const launch = port.calls.filter(call => call[0] === 'new-session')[0];
     should(launch).containDeep(['-e', 'FY_SESSION_ID=plain-session']);
-    should(launch?.filter(word => word === '-e')).have.length(1);
+    // Its own id, and the hypermedia default every pane carries (docs/hypermedia.md).
+    should(launch?.filter(word => word === '-e')).have.length(2);
   });
 });
 

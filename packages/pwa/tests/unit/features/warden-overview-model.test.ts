@@ -5,6 +5,8 @@ import {
   actionChip,
   actionRows,
   agoLabel,
+  cooldownChip,
+  durationLabel,
   canInvestigate,
   investigationRows,
   investigatorLabel,
@@ -42,10 +44,31 @@ const untargeted = (overrides: Parameters<typeof wardenInvestigation>[0]) => {
   return rest;
 };
 
+const on = { configured: true, active: true, reason: 'configured' } as const;
+const off = { configured: false, active: false, reason: 'configured' } as const;
+const stopped = (reason: 'disabled' | 'jev_cap' | 'investigation_cap' | 'no_login') =>
+  ({ configured: true, active: false, reason }) as const;
+
+/** Both layers on: Jev in front of an investigation. */
 const jevStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView =>
   wardenStatus({
-    config: wardenConfig({ triage: 'jev' }),
-    triage: { configured: 'jev', effective: 'jev', reason: 'configured' },
+    config: wardenConfig({ layers: { jev: true, llm: true } }),
+    triage: { jev: on, llm: on },
+    ...overrides,
+  });
+
+/** Jev alone: what it does not clear is shown to the owner. */
+const jevOnlyStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView =>
+  wardenStatus({
+    config: wardenConfig({ layers: { jev: true, llm: false } }),
+    triage: { jev: on, llm: off },
+    ...overrides,
+  });
+
+const llmStatus = (overrides: Partial<WardenStatusView> = {}): WardenStatusView =>
+  wardenStatus({
+    config: wardenConfig({ layers: { jev: false, llm: true } }),
+    triage: { jev: off, llm: on },
     ...overrides,
   });
 
@@ -65,10 +88,11 @@ describe('vocabulary helpers', () => {
     const jevBless = wardenAction({ action: 'bless', by: 'jev', confidence: 0.96 });
     const jevBlessNoConfidence = wardenAction({ action: 'bless', by: 'jev' });
     const wardenBless = wardenAction({ action: 'bless', by: 'warden' });
+    const ownerBless = wardenAction({ action: 'bless', by: 'owner' });
     const resumed = wardenAction({ action: 'resume' });
 
     // Act
-    const chips = [held, failed, jevBless, jevBlessNoConfidence, wardenBless, resumed].map(actionChip);
+    const chips = [held, failed, jevBless, jevBlessNoConfidence, wardenBless, ownerBless, resumed].map(actionChip);
 
     // Assert
     expect(chips).toEqual([
@@ -77,6 +101,7 @@ describe('vocabulary helpers', () => {
       { label: 'blessed by Jev 96%', tone: 'ok' },
       { label: 'blessed by Jev', tone: 'ok' },
       { label: 'blessed', tone: 'ok' },
+      { label: 'left alone by you', tone: 'accent' },
       { label: 'revived', tone: 'ok' },
     ]);
   });
@@ -100,17 +125,25 @@ describe('time labels', () => {
     expect(nextSweepLabel(ago(1), NOW)).toBe('next sweep due now');
     expect(nextSweepLabel(ago(-1.5), NOW)).toBe('next in 2 min');
   });
+
+  it('should say a quiet stretch in minutes, hours, or both', () => {
+    // Arrange / Act / Assert
+    expect(durationLabel(45 * 60_000)).toBe('45 min');
+    expect(durationLabel(0)).toBe('1 min');
+    expect(durationLabel(120 * 60_000)).toBe('2 h');
+    expect(durationLabel(80 * 60_000)).toBe('1 h 20 min');
+  });
 });
 
 describe('wardenStatusLine', () => {
   it('should say the Warden is off and nothing else', () => {
     // Arrange
-    const off = wardenStatus({ config: wardenConfig({ enabled: false }) });
-    const disabled = wardenStatus({ triage: { configured: 'rules', effective: 'rules', reason: 'disabled' } });
+    const disabledLayers = wardenStatus({ triage: { jev: stopped('disabled'), llm: stopped('disabled') } });
+    const offStatus = wardenStatus({ config: wardenConfig({ enabled: false }) });
 
     // Act / Assert
-    expect(wardenStatusLine(off, NOW)).toEqual({ lead: 'The Warden is off.', parts: ['Nothing is watched.'] });
-    expect(wardenStatusLine(disabled, NOW).lead).toBe('The Warden is off.');
+    expect(wardenStatusLine(offStatus, NOW)).toEqual({ lead: 'The Warden is off.', parts: ['Nothing is watched.'] });
+    expect(wardenStatusLine(disabledLayers, NOW).lead).toBe('The Warden is off.');
   });
 
   it('should leave spend and investigations out of a rules-only line', () => {
@@ -127,7 +160,10 @@ describe('wardenStatusLine', () => {
   it('should give the Jev threshold, the investigator, and spend against both caps', () => {
     // Arrange
     const status = jevStatus({
-      config: wardenConfig({ triage: 'jev', accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }] }),
+      config: wardenConfig({
+        layers: { jev: true, llm: true },
+        accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }],
+      }),
       spend: { ...wardenStatus().spend, jevUsd: 0.02, investigationUsd: 0.4, jevCapUsd: 0.5, investigationCapUsd: 2 },
     });
 
@@ -136,76 +172,61 @@ describe('wardenStatusLine', () => {
 
     // Assert
     expect(line).toEqual({
-      lead: 'Jev guard ≥0.85',
-      parts: ['claude-sonnet-5-5 investigations', 'every 2 min', '$0.42 of $2.50 today', 'not swept yet'],
+      lead: 'Rules + Jev + LLM',
+      parts: [
+        'Jev clears at ≥0.85',
+        'claude-sonnet-5-5 investigations',
+        'every 2 min',
+        '$0.42 of $2.50 today',
+        'not swept yet',
+      ],
     });
   });
 
-  it('should count only the investigation cap for LLM triage', () => {
+  it('should count only the cap of each layer that is on', () => {
     // Arrange
-    const status = wardenStatus({
-      config: wardenConfig({ triage: 'llm' }),
-      triage: { configured: 'llm', effective: 'llm', reason: 'configured' },
-    });
+    const spend = { ...wardenStatus().spend, jevCapUsd: 0.5, investigationCapUsd: 2 };
 
     // Act
-    const line = wardenStatusLine(status, NOW);
+    const llm = wardenStatusLine(llmStatus({ spend }), NOW);
+    const jev = wardenStatusLine(jevOnlyStatus({ spend }), NOW);
 
     // Assert
-    expect(line.lead).toBe('LLM only');
-    expect(line.parts).toContain('claude-default investigations');
-    expect(line.parts).toContain('$0.00 of $2.00 today');
+    expect(llm.lead).toBe('Rules + LLM');
+    expect(llm.parts).toContain('claude-default investigations');
+    expect(llm.parts).toContain('$0.00 of $2.00 today');
+    expect(jev.lead).toBe('Rules + Jev');
+    expect(jev.parts).not.toContain('claude-default investigations');
+    expect(jev.parts).toContain('$0.00 of $0.50 today');
   });
 
-  it('should say out loud every fallback from the configured triage', () => {
+  it('should say out loud every layer a cap, a key or a failure turned aside', () => {
     // Arrange
-    const capped = jevStatus({ triage: { configured: 'jev', effective: 'rules', reason: 'investigation_cap' } });
-    const jevCapped = jevStatus({ triage: { configured: 'jev', effective: 'rules', reason: 'jev_cap' } });
-    const noKey = jevStatus({
-      triage: {
-        configured: 'jev',
-        effective: 'jev',
-        reason: 'configured',
-        guardFailure: { code: 'not_set', at: ago(1) },
-      },
-    });
-    const backoff = jevStatus({
-      triage: { configured: 'jev', effective: 'jev', reason: 'configured', guardBackoffUntil: ago(-3) },
-    });
-    const pastBackoff = jevStatus({
-      triage: { configured: 'jev', effective: 'jev', reason: 'configured', guardBackoffUntil: ago(3) },
-    });
-    const failed = jevStatus({
-      triage: {
-        configured: 'jev',
-        effective: 'jev',
-        reason: 'configured',
-        guardFailure: { code: 'rate_limited', at: ago(1) },
-      },
-    });
-    const llm = wardenStatus({
-      config: wardenConfig({ triage: 'llm' }),
-      triage: {
-        configured: 'llm',
-        effective: 'llm',
-        reason: 'configured',
-        guardFailure: { code: 'not_set', at: ago(1) },
-      },
-    });
+    const statuses = [
+      jevStatus({ triage: { jev: on, llm: stopped('investigation_cap') } }),
+      jevStatus({ triage: { jev: stopped('jev_cap'), llm: on } }),
+      jevOnlyStatus({ triage: { jev: stopped('jev_cap'), llm: off } }),
+      jevStatus({ triage: { jev: on, llm: on, guardFailure: { code: 'not_set', at: ago(1) } } }),
+      jevOnlyStatus({ triage: { jev: on, llm: off, guardFailure: { code: 'not_set', at: ago(1) } } }),
+      jevStatus({ triage: { jev: on, llm: on, guardBackoffUntil: ago(-3) } }),
+      jevStatus({ triage: { jev: on, llm: on, guardBackoffUntil: ago(3) } }),
+      jevOnlyStatus({ triage: { jev: on, llm: off, guardFailure: { code: 'rate_limited', at: ago(1) } } }),
+      llmStatus({ triage: { jev: off, llm: on, guardFailure: { code: 'not_set', at: ago(1) } } }),
+    ];
 
     // Act
-    const warnings = [capped, jevCapped, noKey, backoff, pastBackoff, failed, llm].map(
-      status => wardenStatusLine(status, NOW).warning,
-    );
+    const warnings = statuses.map(status => wardenStatusLine(status, NOW).warning);
 
     // Assert
     expect(warnings).toEqual([
-      'Cap hit — rules only until midnight UTC',
-      'Cap hit — rules only until midnight UTC',
-      'No Jev key — every flag is investigated',
-      'Jev is busy — flags go straight to an investigation',
+      'LLM cap hit — flags wait for you until midnight UTC',
+      'Jev cap hit — every flag goes to an investigation until midnight UTC',
+      'Jev cap hit — every flag waits for you until midnight UTC',
+      'No Jev key — every flag goes to an investigation',
+      'No Jev key — every flag waits for you',
+      'Jev is busy — each flag goes to an investigation',
       undefined,
-      'Jev failed (rate limited) — that flag was investigated',
+      'Jev failed (rate limited) — that flag waits for you',
       undefined,
     ]);
   });
@@ -220,18 +241,18 @@ describe('wardenStatusLine', () => {
     expect(investigatorLabel(empty)).toBe('no login');
   });
 
-  it('should say why AI triage fell back to rules for want of a login, and where to choose one', () => {
+  it('should say investigations are off for want of a login, and where to choose one', () => {
     // Arrange
-    const noLogin = { configured: 'llm', effective: 'rules', reason: 'no_login' } as const;
-    const unset = wardenStatus({ triage: noLogin, login: { source: 'not_set', unknown: [], available: [] } });
-    const older = wardenStatus({ triage: noLogin });
+    const triage = { jev: off, llm: stopped('no_login') };
+    const unset = llmStatus({ triage, login: { source: 'not_set', unknown: [], available: [] } });
+    const older = llmStatus({ triage });
 
     // Act / Assert
     expect(wardenStatusLine(unset, NOW).warning).toBe(
-      'No investigation login is set — rules only until you choose one in Settings › Warden',
+      'No investigation login is set — investigations are off until you choose one in Settings › Warden',
     );
     expect(wardenStatusLine(older, NOW).warning).toBe(
-      'No investigation login — rules only until you choose one in Settings › Warden',
+      'No investigation login — investigations are off until you choose one in Settings › Warden',
     );
   });
 });
@@ -239,11 +260,11 @@ describe('wardenStatusLine', () => {
 describe('wardenSavingsLine', () => {
   it('should say nothing while the Warden is off', () => {
     // Arrange
-    const off = wardenStatus({ config: wardenConfig({ enabled: false }) });
-    const disabled = wardenStatus({ triage: { configured: 'rules', effective: 'rules', reason: 'disabled' } });
+    const offStatus = wardenStatus({ config: wardenConfig({ enabled: false }) });
+    const disabled = wardenStatus({ triage: { jev: stopped('disabled'), llm: stopped('disabled') } });
 
     // Act / Assert
-    expect(wardenSavingsLine(off)).toBeUndefined();
+    expect(wardenSavingsLine(offStatus)).toBeUndefined();
     expect(wardenSavingsLine(disabled)).toBeUndefined();
   });
 
@@ -259,15 +280,24 @@ describe('wardenSavingsLine', () => {
 
   it('should count LLM investigations and any still being priced', () => {
     // Arrange
-    const status = wardenStatus({
-      config: wardenConfig({ triage: 'llm' }),
-      triage: { configured: 'llm', effective: 'llm', reason: 'configured' },
+    const status = llmStatus({
       spend: { ...wardenStatus().spend, investigationUsd: 1.2, pendingInvestigations: 2 },
       savings: { ...wardenStatus().savings, flags: 5, investigations: 5 },
     });
 
     // Act / Assert
     expect(wardenSavingsLine(status)).toBe('Today: 5 flags · 5 investigated ($1.20) · 2 pending');
+  });
+
+  it('should count what Jev cleared and say the rest went to the owner, with investigations off', () => {
+    // Arrange
+    const status = jevOnlyStatus({
+      spend: { ...wardenStatus().spend, jevUsd: 0.02 },
+      savings: { ...wardenStatus().savings, flags: 9, jevSkips: 7 },
+    });
+
+    // Act / Assert
+    expect(wardenSavingsLine(status)).toBe('Today: 9 flags · 7 cleared by Jev ($0.02) · the rest shown to you');
   });
 
   it('should give the Jev saving only when the daemon priced it', () => {
@@ -279,19 +309,21 @@ describe('wardenSavingsLine', () => {
 
     // Act / Assert
     expect(wardenSavingsLine(priced)).toBe(
-      'Today: 41 flags · 37 skipped by Jev ($0.03) · 4 investigated ($1.20) · ~$11.00 saved vs investigating all',
+      'Today: 41 flags · 37 cleared by Jev ($0.03) · 4 investigated ($1.20) · ~$11.00 saved vs investigating all',
     );
-    expect(wardenSavingsLine(unpriced)).toBe('Today: 41 flags · 37 skipped by Jev ($0.03) · 4 investigated ($1.20)');
+    expect(wardenSavingsLine(unpriced)).toBe('Today: 41 flags · 37 cleared by Jev ($0.03) · 4 investigated ($1.20)');
   });
 });
 
 describe('wardenHowItWorks', () => {
-  it('should explain each triage, crediting Jev only with guarding', () => {
+  it('should explain each mix of layers, crediting Jev only with clearing', () => {
     // Arrange / Act / Assert
-    expect(wardenHowItWorks('rules')).toContain('No AI runs and nothing is spent.');
-    expect(wardenHowItWorks('llm')).not.toContain('Jev');
-    expect(wardenHowItWorks('llm')).toContain('Only that verdict ever acts');
-    expect(wardenHowItWorks('jev')).toContain('Jev only guards');
+    expect(wardenHowItWorks({ jev: false, llm: false })).toContain('No AI runs and nothing is spent.');
+    expect(wardenHowItWorks({ jev: false, llm: true })).not.toContain('Jev');
+    expect(wardenHowItWorks({ jev: false, llm: true })).toContain('Only that verdict ever acts');
+    expect(wardenHowItWorks({ jev: true, llm: true })).toContain('anything else goes on');
+    expect(wardenHowItWorks({ jev: true, llm: false })).toContain('anything else is shown to you');
+    expect(wardenHowItWorks({ jev: true, llm: false })).toContain('No investigation runs.');
   });
 });
 
@@ -358,9 +390,11 @@ describe('needsYouRows', () => {
         { label: '+1 more reason', tone: 'pend' },
       ],
       at: ago(40),
+      leave: true,
       reportPath: 'r/a.md',
     });
     expect(rows[1]).toMatchObject({ reason: 'Blocked', chips: [{ label: 'task', tone: 'pend' }] });
+    expect(rows[1]).not.toHaveProperty('leave');
     expect(rows[2]?.reason).toBe('Same');
   });
 
@@ -467,7 +501,7 @@ describe('watchingRows', () => {
     });
 
     // Act
-    const rows = watchingRows(status, undefined, new Set(['needs']));
+    const rows = watchingRows(status, undefined, new Set(['needs']), NOW);
 
     // Assert
     expect(rows.map(row => row.sessionId)).toEqual(['marin', 'jay', 'hadi']);
@@ -483,9 +517,11 @@ describe('watchingRows', () => {
         { label: 'investigating', tone: 'accent', busy: true },
       ],
       at: ago(14),
+      leave: true,
     });
     expect(rows[1]?.chips).toContainEqual({ label: 'queued #1', tone: 'pend' });
     expect(rows[2]?.chips).toContainEqual({ label: 'cleared · Jev 96%', tone: 'ok' });
+    expect(rows[2]?.chips).toContainEqual({ label: 'quiet 10 min', tone: 'ok' });
   });
 
   it('should add flags being judged and sessions a blessing cleared', () => {
@@ -519,7 +555,7 @@ describe('watchingRows', () => {
     });
 
     // Act
-    const rows = watchingRows(status, attention, new Set(['needs']));
+    const rows = watchingRows(status, attention, new Set(['needs']), NOW);
 
     // Assert
     const by = new Map(rows.map(row => [row.sessionId, row]));
@@ -539,8 +575,10 @@ describe('watchingRows', () => {
         { label: 'long command', tone: 'pend' },
         { label: 'long think', tone: 'warn' },
         { label: 'cleared', tone: 'ok' },
+        { label: 'quiet 5 min', tone: 'ok' },
       ],
       at: ago(3),
+      leave: true,
     });
     expect(by.get('quiet')?.chips).toContainEqual({ label: 'cleared', tone: 'ok' });
   });
@@ -552,7 +590,7 @@ describe('watchingRows', () => {
     });
 
     // Act
-    const [row] = watchingRows(status, undefined, new Set());
+    const [row] = watchingRows(status, undefined, new Set(), NOW);
 
     // Assert
     expect(row?.reason).toBe('Judged healthy, so these flags are not raised again for a while.');
@@ -684,5 +722,38 @@ describe('accountChip', () => {
       label: 'claude-default · unavailable',
       tone: 'warn',
     });
+  });
+});
+
+describe('cooldownChip', () => {
+  it('should say how long a cleared ferret stays quiet, and how many clears in a row made it so', () => {
+    // Arrange
+    const blessing = { sessionId: 's', kinds: ['dead_monitor' as const], expiresAt: ago(-90), by: 'jev' as const };
+
+    // Act / Assert
+    expect(cooldownChip(blessing, NOW)).toEqual({ label: 'quiet 1 h 30 min', tone: 'ok' });
+    expect(cooldownChip({ ...blessing, streak: 2 }, NOW)).toEqual({ label: 'quiet 1 h 30 min · ×3', tone: 'ok' });
+    expect(cooldownChip({ ...blessing, untilChange: true }, NOW)).toEqual({
+      label: 'quiet until it changes',
+      tone: 'ok',
+    });
+  });
+
+  it('should credit the owner for a ferret they left alone', () => {
+    // Arrange
+    const status = wardenStatus({
+      blessings: [{ sessionId: 'mine', kinds: ['dead_monitor'], expiresAt: ago(-60), by: 'owner', untilChange: true }],
+      actions: [wardenAction({ sessionId: 'mine', action: 'bless', by: 'owner', detail: 'You left it.' })],
+    });
+
+    // Act
+    const [row] = watchingRows(status, undefined, new Set(), NOW);
+
+    // Assert
+    expect(row?.chips).toEqual([
+      { label: 'pane lost', tone: 'err' },
+      { label: 'left alone by you', tone: 'accent' },
+      { label: 'quiet until it changes', tone: 'ok' },
+    ]);
   });
 });

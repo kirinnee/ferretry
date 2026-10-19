@@ -31,6 +31,7 @@ import {
 import { isTopEscapeLayer, pushEscapeLayer, useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import { cn } from '../../lib/class-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { DetailedFailure } from './session-operations.ts';
 import {
   findSessionAction,
   type SessionActionEntry,
@@ -48,7 +49,7 @@ export interface ActionsMenuProps {
   readonly form: string | null;
   readonly onFormChange: (actionId: string | null) => void;
   /** A failed action, said by the page's one alert line. */
-  readonly onFailure?: (sentence: string) => void;
+  readonly onFailure?: (sentence: string, detail?: string) => void;
   /** What a form settled, said by the page's toast. */
   readonly onNotice?: (sentence: string) => void;
 }
@@ -140,7 +141,9 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
     try {
       await work();
     } catch (reason) {
-      onFailure?.(`${entry.label.replace(/…$/u, '')} failed: ${failureSentence(reason)}`);
+      const sentence = `${entry.label.replace(/…$/u, '')} failed: ${failureSentence(reason)}`;
+      if (reason instanceof DetailedFailure) onFailure?.(sentence, reason.detail);
+      else onFailure?.(sentence);
     } finally {
       setPending(null);
     }

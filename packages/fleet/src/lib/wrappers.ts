@@ -20,7 +20,12 @@
  * Pure: every function here is string in, string out.
  */
 import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
-import { CLAUDE_PROMPTS_SEEN } from './account/fixed-layer.ts';
+import {
+  CLAUDE_NO_QUESTIONS_FLAG,
+  CLAUDE_PROMPTS_SEEN,
+  CODEX_QUESTIONS_FEATURE,
+  SESSION_MODE_ENV,
+} from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
 
 /** A generated executable that runs one runtime's wrapper with flags prepended. */
@@ -450,7 +455,10 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ].join('\n');
   }
   const environment = environmentLines(input.env, input.secretsFile);
-  const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args].map(shellQuote).join(' ');
+  const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args]
+    .filter(arg => arg !== CLAUDE_NO_QUESTIONS_FLAG)
+    .map(shellQuote)
+    .join(' ');
   return [
     ...header,
     ...sourceSecretsLines(input.secretsFile),
@@ -460,10 +468,22 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...(input.seedFirstRun === true ? firstRunSeedLines(input.harness) : []),
     ...historyClaimLines(input.harness, input.fyCommand),
     ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
+    ...(input.agent ? questionLines(input.harness) : []),
     '',
     `exec ${HARNESS_BINARIES[input.harness]}${args === '' ? '' : ` ${args}`} "$@"`,
     '',
   ].join('\n');
+}
+
+/**
+ * The question tool, per ferret (O3). Prepended to `"$@"` in the `=` / non-variadic spelling so the
+ * prompt that follows is never swallowed as a tool name. A launch with no mode is unattended.
+ */
+function questionLines(harness: HarnessKind): string[] {
+  const interactive = `[ "\${${SESSION_MODE_ENV}:-}" = interactive ]`;
+  return harness === 'claude'
+    ? [`${interactive} || set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`]
+    : [`! ${interactive} || set -- --enable ${CODEX_QUESTIONS_FEATURE} "$@"`];
 }
 
 /** What {@link renderCommandScript} needs: the command plus its target's declared wrapper name. */

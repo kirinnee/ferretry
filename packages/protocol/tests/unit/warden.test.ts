@@ -73,7 +73,8 @@ const wardenCases: SchemaCase[] = [
   { name: 'account', schema: warden.WardenAccountSchema, value: wardenConfig.accounts[0] },
   { name: 'failover', schema: warden.WardenFailoverConfigSchema, value: wardenConfig.failover },
   { name: 'provider outage', schema: warden.ProviderOutageConfigSchema, value: wardenConfig.providerOutage },
-  { name: 'triage', schema: warden.WardenTriageSchema, value: 'jev' },
+  { name: 'layers', schema: warden.WardenLayersSchema, value: wardenConfig.layers },
+  { name: 'legacy triage', schema: warden.LegacyWardenTriageSchema, value: 'jev' },
   { name: 'sweep interval', schema: warden.WardenSweepIntervalSchema, value: 2 },
   { name: 'guard', schema: warden.WardenGuardConfigSchema, value: wardenConfig.guard },
   { name: 'caps', schema: warden.WardenCapsSchema, value: wardenConfig.caps },
@@ -112,18 +113,27 @@ const wardenCases: SchemaCase[] = [
   { name: 'triage reason', schema: warden.WardenTriageReasonSchema, value: 'jev_cap' },
   { name: 'guard failure', schema: warden.WardenGuardFailureCodeSchema, value: 'not_set' },
   {
+    name: 'layer status',
+    schema: warden.WardenLayerStatusSchema,
+    value: { configured: true, active: false, reason: 'investigation_cap' },
+  },
+  { name: 'cap', schema: warden.WardenCapSchema, value: 'investigation' },
+  {
     name: 'triage status',
     schema: warden.WardenTriageStatusSchema,
     value: {
-      configured: 'jev',
-      effective: 'rules',
-      reason: 'jev_cap',
+      jev: { configured: true, active: false, reason: 'jev_cap' },
+      llm: { configured: true, active: true, reason: 'configured' },
       guardFailure: { code: 'rate_limited', at: INSTANT },
       guardBackoffUntil: INSTANT,
     },
   },
   { name: 'spend day', schema: warden.WardenSpendDaySchema, value: '2026-10-16' },
-  { name: 'spend', schema: warden.WardenSpendSchema, value: { ...wardenStatusView.spend, capHit: 'jev' } },
+  {
+    name: 'spend',
+    schema: warden.WardenSpendSchema,
+    value: { ...wardenStatusView.spend, capsHit: ['jev', 'investigation'] },
+  },
   {
     name: 'savings',
     schema: warden.WardenSavingsSchema,
@@ -135,10 +145,18 @@ const wardenCases: SchemaCase[] = [
   { name: 'action kind', schema: warden.WardenActionKindSchema, value: 'failover' },
   { name: 'action outcome', schema: warden.WardenActionOutcomeSchema, value: 'held' },
   { name: 'action', schema: warden.WardenActionSchema, value: action },
+  { name: 'cleared by', schema: warden.WardenClearedBySchema, value: 'owner' },
   {
     name: 'blessing',
     schema: warden.WardenBlessingViewSchema,
-    value: { sessionId: 'session-1', kinds: ['sus_thinking'], expiresAt: INSTANT, by: 'jev' },
+    value: {
+      sessionId: 'session-1',
+      kinds: ['sus_thinking'],
+      expiresAt: INSTANT,
+      by: 'owner',
+      streak: 2,
+      untilChange: true,
+    },
   },
   {
     name: 'status',
@@ -149,6 +167,16 @@ const wardenCases: SchemaCase[] = [
   { name: 'run request', schema: warden.WardenRunRequestSchema, value: { spawn: true } },
   { name: 'investigate request', schema: warden.WardenInvestigateRequestSchema, value: { sessionId: 's' } },
   { name: 'investigate view', schema: warden.WardenInvestigateViewSchema, value: wardenInvestigateView },
+  { name: 'leave duration', schema: warden.WardenLeaveDurationSchema, value: 'until_change' },
+  { name: 'leave request', schema: warden.WardenLeaveRequestSchema, value: { sessionId: 's', duration: '4h' } },
+  {
+    name: 'leave view',
+    schema: warden.WardenLeaveViewSchema,
+    value: {
+      blessing: { sessionId: 's', kinds: ['sus_thinking'], expiresAt: INSTANT, by: 'owner' },
+      message: 'Left alone for 4 h.',
+    },
+  },
   { name: 'judgement state', schema: warden.WardenJudgementStateSchema, value: 'pending' },
   { name: 'judge provenance', schema: warden.WardenJudgeProvenanceSchema, value: { agent: 'a', model: 'm' } },
   {
@@ -210,6 +238,13 @@ describe('warden schemas', () => {
         value: { sessionId: 's', note: 'x'.repeat(501) },
       },
       { name: 'malformed day', schema: warden.WardenSpendDaySchema, value: '16/10/2026' },
+      { name: 'legacy triage in a patch', schema: warden.WardenConfigPatchSchema, value: { triage: 'jev' } },
+      { name: 'unknown layer', schema: warden.WardenConfigPatchSchema, value: { layers: { rules: false } } },
+      {
+        name: 'unknown leave duration',
+        schema: warden.WardenLeaveRequestSchema,
+        value: { sessionId: 's', duration: '1d' },
+      },
     ];
 
     // Act + Assert
@@ -220,14 +255,14 @@ describe('warden schemas', () => {
 describe('mergeWardenConfig', () => {
   it('should merge each nested section so one switch never resets its siblings', () => {
     // Arrange
-    const patch = { triage: 'jev', mayActAlone: { stop: true }, caps: { jevUsdPerDay: 1 } } as const;
+    const patch = { layers: { jev: true }, mayActAlone: { stop: true }, caps: { jevUsdPerDay: 1 } } as const;
 
     // Act
     const actual = warden.mergeWardenConfig(DEFAULT_WARDEN_CONFIG, patch);
 
     // Assert
-    should(actual.triage).equal('jev');
-    should(actual.mayActAlone).deepEqual({ nudge: true, resume: true, failover: true, stop: true });
+    should(actual.layers).deepEqual({ jev: true, llm: false });
+    should(actual.mayActAlone).deepEqual({ nudge: true, resume: true, restart: true, failover: true, stop: true });
     should(actual.caps).deepEqual({ jevUsdPerDay: 1, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 });
     should(actual.guard).deepEqual(DEFAULT_WARDEN_CONFIG.guard);
   });
@@ -253,5 +288,103 @@ describe('mergeWardenConfig', () => {
 
     // Assert
     should(act).throw();
+  });
+});
+
+describe('legacy triage', () => {
+  it('should read each legacy triage as the layers it meant', () => {
+    // Arrange
+    const { layers: _layers, ...rest } = wardenConfig;
+    const cases = [
+      ['rules', { jev: false, llm: false }],
+      ['llm', { jev: false, llm: true }],
+      ['jev', { jev: true, llm: true }],
+    ] as const;
+
+    // Act
+    const actual = cases.map(([triage]) => warden.WardenConfigSchema.parse({ ...rest, triage }).layers);
+
+    // Assert
+    should(actual).deepEqual(cases.map(([, layers]) => layers));
+  });
+
+  it('should let an explicit layer win over a legacy triage, field by field', () => {
+    // Arrange
+    const value = { triage: 'jev', layers: { llm: false } };
+
+    // Act
+    const actual = warden.migrateLegacyWardenSettings(value);
+
+    // Assert
+    should(actual).deepEqual({ layers: { jev: true, llm: false } });
+  });
+
+  it('should leave a value with no recognisable legacy triage untouched', () => {
+    // Arrange
+    const values = [undefined, 'jev', [1], { layers: { jev: true } }, { triage: 'ai' }];
+
+    // Act
+    const actual = values.map(warden.migrateLegacyWardenSettings);
+
+    // Assert
+    should(actual).deepEqual(values);
+  });
+
+  it('should read an older daemon’s single triage status as its two layers', () => {
+    // Arrange
+    const legacy = { configured: 'jev', effective: 'rules', reason: 'jev_cap', guardBackoffUntil: INSTANT };
+
+    // Act
+    const actual = warden.WardenTriageStatusSchema.parse(legacy);
+
+    // Assert
+    should(actual).deepEqual({
+      jev: { configured: true, active: false, reason: 'jev_cap' },
+      llm: { configured: true, active: false, reason: 'jev_cap' },
+      guardBackoffUntil: INSTANT,
+    });
+  });
+
+  it('should refuse an older triage status it cannot read', () => {
+    // Arrange
+    const legacy = { configured: 'ai', effective: 'rules', reason: 'configured' };
+
+    // Act
+    const actual = warden.WardenTriageStatusSchema.safeParse(legacy);
+
+    // Assert
+    should(actual.success).be.false();
+  });
+
+  it('should read an older daemon’s single cap as the list of caps hit', () => {
+    // Arrange
+    const { capsHit: _caps, ...spend } = wardenStatusView.spend;
+
+    // Act
+    const actual = [
+      warden.WardenSpendSchema.parse({ ...spend, capHit: 'investigation' }).capsHit,
+      warden.WardenSpendSchema.parse(spend).capsHit,
+    ];
+
+    // Assert
+    should(actual).deepEqual([['investigation'], []]);
+  });
+});
+
+describe('settings from before restart', () => {
+  it('should give restart the owner’s answer for resume, and keep one already stated', () => {
+    // Arrange
+    const { mayActAlone, ...rest } = wardenConfig;
+    const { restart: _restart, ...older } = mayActAlone;
+
+    // Act
+    const off = warden.WardenConfigSchema.parse({ ...rest, mayActAlone: { ...older, resume: false } });
+    const stated = warden.migrateLegacyWardenSettings({ mayActAlone: { resume: false, restart: true } });
+    const absent = warden.migrateLegacyWardenSettings({ mayActAlone: { nudge: true } });
+
+    // Assert
+    should(off.mayActAlone).match({ resume: false, restart: false });
+    should(stated).deepEqual({ mayActAlone: { resume: false, restart: true } });
+    should(absent).deepEqual({ mayActAlone: { nudge: true } });
   });
 });

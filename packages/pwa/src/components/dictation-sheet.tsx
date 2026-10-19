@@ -22,17 +22,21 @@
  *      audio never leaves the device, and the strip says so; with phone/browser
  *      voice the browser sends it to its vendor, and the strip says THAT instead.
  *   2. LIVE WORDS FROM BOTH ENGINES. Interim SpeechRecognition results fill
- *      `liveText`; Parakeet is not a streaming model, so with "Live words" on it
- *      re-transcribes a rolling window (`lib/stt/near-live.ts`): words two passes
+ *      `liveText`; Parakeet is not a streaming model, so only when the person has
+ *      switched on "Live words (experimental)" (off by default) does it
+ *      re-transcribe a rolling window (`lib/stt/near-live.ts`): words two passes
  *      agreed on read normally, the provisional tail (`liveInterim`) is greyed, and
  *      a device too slow to keep up says "live words paused — device too slow".
  *      The caption shows its last two lines, where the new words land. Either way the
  *      completed result, not a provisional caption, is what the controller inserts.
- *   3. THE INPUT METER REMAINS AN OPTIONAL VISUAL SEAM. kteam's sheet declared an
+ *   3. THE INPUT METER IS WIRED FOR EVERY ENGINE. kteam's sheet declared an
  *      `inputMonitor` prop, never destructured it, and `InputWaveform` was
- *      imported by nothing except its own test. It is still usable by isolated
- *      visual fixtures, but production does not open a second microphone stream
- *      merely to paint a waveform beside browser-owned recognition.
+ *      imported by nothing except its own test, so no bars ever showed. Here
+ *      `useDictation` hands one in whichever engine is recording: Parakeet taps
+ *      the stream it is already recording, and browser voice, which owns its
+ *      microphone and exposes no level, gets a meter-only stream beside it
+ *      (`lib/stt/level-monitor.ts`). The bars say "we are capturing what you
+ *      say"; they are flat when nothing is.
  */
 
 import { AlertCircle, EyeOff, Loader2, Mic, RotateCcw, Square, X } from 'lucide-react';
@@ -41,7 +45,8 @@ import type { DictationPhase } from '../hooks/use-dictation.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DictationEngineId } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
-import { type CaptureMonitor, InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
+import type { CaptureMonitor } from '../lib/stt/level-monitor.ts';
+import { InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
 import { NEAR_LIVE_PAUSED_COPY } from '../lib/stt/near-live.ts';
 
 /**

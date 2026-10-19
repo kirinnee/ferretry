@@ -20,29 +20,75 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 
 ## What renders today
 
-Four of the five types render. **`html` alone is shown as its own escaped source, with the limitation
-printed on screen.** That is the current build, not a bug to work around:
+Every type renders, after the reader presses **Render illustration**:
 
-| `type:`   | Today                                                         |
-| --------- | ------------------------------------------------------------- |
-| `svg`     | renders as a picture                                          |
-| `image`   | renders as a picture (raster only)                            |
-| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture |
-| `lottie`  | plays as an animation, with Pause and Play                    |
-| `html`    | shown as source — **nothing executes**                        |
+| `type:`   | Today                                                                       |
+| --------- | --------------------------------------------------------------------------- |
+| `svg`     | renders as a picture                                                        |
+| `image`   | renders as a picture (raster only) — inline base64, or from `src:`          |
+| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture               |
+| `lottie`  | plays as an animation, with Pause and Play                                  |
+| `html`    | **runs** as an interactive page in an isolated frame — your JavaScript runs |
+| `video`   | plays in the browser's own player, from `src:`                              |
+| `audio`   | plays in the browser's own player, from `src:`                              |
+| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link     |
 
 So write `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
-to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, and `lottie`
-when motion genuinely helps.
+to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, `lottie` when
+motion genuinely helps, and `html` when the reader should be able to **do** something — drag a
+slider, step through states, toggle a comparison.
 
-**Do not write `type: html` expecting interactivity.** No JavaScript in it will ever run. If you need
-to show HTML, an ordinary `html` code fence says the same thing with less ceremony.
+### Writing `html` that works
+
+Your page runs in an opaque-origin frame with its own strict policy. Design for exactly that:
+
+- **One self-contained document.** Inline `<style>` and inline `<script>` (classic or
+  `type="module"`) run, in order, after your markup is in place — so you can query the DOM at the top
+  level. `DOMContentLoaded` and `load` are dispatched once for you.
+- **No network, at all.** `fetch`, XHR, WebSocket, external scripts, stylesheets, fonts and remote
+  images are all refused. Images, media and fonts may only be `data:` or `blob:` URIs you build
+  yourself. There is no CDN: no React, no D3 — write plain DOM or `<canvas>`.
+- **No storage, no cookies, no `eval`, no `new Function`, no forms, no popups, no `alert`.**
+- **Never navigate.** Setting `location`, following a link inside the frame or building a meta
+  refresh stops the page: the block replaces it with a note and the source. Authored `<meta>`,
+  `<base>` and `<link>` elements are removed before the page runs.
+- **Respect the reader's theme.** The page defaults to the reader's light or dark `color-scheme` with
+  `Canvas`/`CanvasText` colours; if you set your own background, set your own text colour too.
+- **Keep it short.** Inline, the frame grows to your page's height up to 640px and then scrolls; the
+  reader can open it fullscreen. It stops after ten minutes, with Reload to start it again.
+- **Do not reach for `html` for a static picture.** A diagram is `mermaid` and a drawing is `svg`;
+  they are cheaper, they need no scripts, and they are what a reader expects.
+
+### Showing a file or a link with `src:`
+
+`image`, `video`, `audio` and `pdf` can name their bytes instead of carrying them:
+
+```fy-render
+type: video
+alt: The new onboarding flow, recorded at 390px
+src: @recordings/onboarding.mp4
+---
+```
+
+- **`src: @path`** is a file in your session's workspace, written exactly as an `@file` reference —
+  `@relative/path`, `@./relative/path`, or `@/absolute/path` inside your folder — **without** a
+  `:line`. It is read with the **reader's** access, so a file they could not open from the Files tab
+  shows a card saying so. Gitignored files and protected secrets are never served. **At most 1 MiB**:
+  a longer recording will show a "too large" card, so trim it or link it.
+- **`src: https://…`** is fetched by the reader's browser after they press Render, and the host sees
+  their address. Video and audio play directly. An https **image** must come from a host that allows
+  cross-origin reads (many CDNs and `raw.githubusercontent.com` do); otherwise the reader gets a
+  link. An https **PDF** is always a link. `http:`, `data:` and `blob:` are refused.
+- **Nothing after `---`.** A `src:` block has an empty payload. For `image`, use `src:` **or**
+  `mime:` with base64, never both.
+- File types: `image` — png, jpg/jpeg, gif (still), webp; `video` — mp4, m4v, webm, ogv, mov;
+  `audio` — mp3, m4a, aac, wav, ogg, oga, opus, weba, flac; `pdf` — pdf.
 
 ### What "renders in a sandbox" means for you
 
 `mermaid` and `lottie` are handed to a trusted library running in an isolated frame that has no
-access to the app, no storage, and no ability to fetch anything for itself. **Your payload is data,
-never code.** Two consequences you should design around:
+access to the app, no storage, and no ability to fetch anything for itself. **For these two, your
+payload is data, never code.** Two consequences you should design around:
 
 - **A Lottie expression is refused.** A string-valued `"x"` key anywhere in the animation — the field
   a full player would compile and run as JavaScript — makes the whole block fail to parse. Bezier
@@ -107,13 +153,14 @@ Two consequences worth designing around:
 
 ## Limits
 
-| `type:`   | Payload cap                       |
-| --------- | --------------------------------- |
-| `html`    | 200 KiB                           |
-| `svg`     | 100 KiB, and at most 500 elements |
-| `mermaid` | 20,000 characters                 |
-| `lottie`  | 1 MiB                             |
-| `image`   | 2 MiB decoded                     |
+| `type:`   | Payload cap                                                  |
+| --------- | ------------------------------------------------------------ |
+| `html`    | 200 KiB                                                      |
+| `svg`     | 100 KiB, and at most 500 elements                            |
+| `mermaid` | 20,000 characters                                            |
+| `lottie`  | 1 MiB                                                        |
+| `image`   | 2 MiB decoded                                                |
+| `src:`    | no payload; a workspace file ≤ 1 MiB, an https image ≤ 2 MiB |
 
 Anything that reaches a decoder is also capped at **8192 pixels on either axis and 16,777,216 pixels
 in total**. The two limits are independent, so 4096 × 4096 and 8192 × 2048 are both fine and
@@ -184,7 +231,10 @@ without being shown to the reader as the app's own words.
   pressed Render?
 - For `svg`: does it begin with `<svg`, carry a resolvable `width`/`height` or `viewBox`, stay under
   8192 on each axis and 16,777,216 pixels in total, and reference nothing external?
-- For `image`: is `mime:` present, raster, still, and actually the type the bytes are?
+- For `image`: is `mime:` present, raster, still, and actually the type the bytes are — or is it a
+  `src:` with nothing after `---`?
+- For `html`: is it one self-contained page with no network, no navigation and no external library?
+- For `src: @path`: is the file under 1 MiB, in your workspace, and not gitignored?
 
 The full contract, the threat model and the declared gaps are in
 [docs/fy-render.md](../../../docs/fy-render.md).

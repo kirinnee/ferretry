@@ -90,6 +90,8 @@ export interface WardenSelectionInput {
   readonly usage: readonly WardenAccountHealth[];
   readonly state: WardenFailoverState;
   readonly nowMs: number;
+  /** Accounts that already failed to start this spawn: skipped, so the next login gets its turn now. */
+  readonly excluded?: ReadonlySet<string>;
 }
 
 export type WardenSelection =
@@ -185,7 +187,9 @@ export function selectWardenAccount(input: WardenSelectionInput): WardenSelectio
   const eligible: { readonly index: number; readonly account: WardenAccount }[] = [];
 
   for (const [index, account] of accounts.entries()) {
-    const reason = ineligibilityReason(account, input);
+    const reason = input.excluded?.has(account.agent)
+      ? 'failed to start a moment ago'
+      : ineligibilityReason(account, input);
     if (reason === undefined) eligible.push({ index, account });
     else reasons[account.agent] = reason;
   }

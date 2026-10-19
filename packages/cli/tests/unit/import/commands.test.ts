@@ -2,18 +2,25 @@ import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
 import { registerImportCommands, registerNewCommand } from '../../../src/lib/import/commands.ts';
-import type { ImportListOptions, ImportSelectOptions, NewSessionOptions } from '../../../src/lib/import/controller.ts';
+import type {
+  ImportKeepOptions,
+  ImportListOptions,
+  ImportSelectOptions,
+  NewSessionOptions,
+} from '../../../src/lib/import/controller.ts';
 
 function importProgram() {
   const listCalls: ImportListOptions[] = [];
   const selectCalls: ImportSelectOptions[] = [];
+  const keepCalls: ImportKeepOptions[] = [];
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
   registerImportCommands(program, {
     list: async options => void listCalls.push(options),
     select: async options => void selectCalls.push(options),
+    keep: async options => void keepCalls.push(options),
   });
-  return { program, listCalls, selectCalls };
+  return { program, listCalls, selectCalls, keepCalls };
 }
 
 function newProgram() {
@@ -109,6 +116,39 @@ describe('registerImportCommands', () => {
 
     // Assert
     should(selectCalls).eql([{ select: ['c-1'], start: false, json: false }]);
+  });
+});
+
+describe('registerImportCommands keep mode', () => {
+  it('should keep everything with --all', async () => {
+    const { program, keepCalls, listCalls } = importProgram();
+    await program.parseAsync(['node', 'fy', 'import', 'conversations', '--all', '--runtime', 'claude-work']);
+    should(keepCalls).eql([{ all: true, runtime: 'claude-work', json: false }]);
+    should(listCalls).be.empty();
+  });
+
+  it('should keep a window when --since comes with --runtime', async () => {
+    const { program, keepCalls } = importProgram();
+    await program.parseAsync([
+      'node',
+      'fy',
+      'import',
+      'conversations',
+      '--since',
+      '7d',
+      '--runtime',
+      'c',
+      '--harness',
+      'claude',
+    ]);
+    should(keepCalls).eql([{ since: '7d', runtime: 'c', harness: 'claude', json: false }]);
+  });
+
+  it('should still list when --since stands alone', async () => {
+    const { program, keepCalls, listCalls } = importProgram();
+    await program.parseAsync(['node', 'fy', 'import', 'conversations', '--since', '7d']);
+    should(keepCalls).be.empty();
+    should(listCalls).eql([{ since: '7d', json: false }]);
   });
 });
 

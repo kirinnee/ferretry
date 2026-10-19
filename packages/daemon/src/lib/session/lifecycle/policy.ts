@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
+import { HARNESS_LABEL, HYPERMEDIA_ENV } from '@ferretry/fleet';
 import { assignedTaskDocument as protocolAssignedTaskDocument, turnFileInstruction } from '@ferretry/protocol';
-import { HARNESS_LABEL } from '@ferretry/fleet';
 import type { CoreAccount } from '../../core/inventory.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
@@ -9,8 +9,8 @@ import type { SessionLifecycleSettings } from './settings.ts';
 import {
   type CreateSessionLifecycleRequest,
   type LifecycleSessionStatus,
-  type SessionLifecycleEvent,
   SESSION_ID_VARIABLE,
+  type SessionLifecycleEvent,
   type SessionLifecycleRecord,
   SessionLifecycleRecordSchema,
 } from './types.ts';
@@ -134,12 +134,16 @@ export function firstTurnInstruction(taskFile: string): string {
  * Both launch paths call it — the first launch and the revive that replaces a dead pane — because a
  * session that could identify itself until its pane was replaced is worse than one that never could:
  * the failure arrives later, in the middle of a conversation, and looks like the peer going silent.
+ *
+ * HYPERMEDIA DEFAULTS ON, written FIRST so a stored switch wins: a ferret whose switch was never written —
+ * every ferret that existed before it did — is told it may use hypermedia at its next launch, and only
+ * an explicit `0` the owner set turns it off (docs/hypermedia.md).
  */
 export function sessionPaneEnvironment(
   id: SessionId,
   stored: Readonly<Record<string, string>>,
 ): Readonly<Record<string, string>> {
-  return { ...stored, [SESSION_ID_VARIABLE]: id };
+  return { [HYPERMEDIA_ENV]: '1', ...stored, [SESSION_ID_VARIABLE]: id };
 }
 
 /** Everything the daemon had to resolve before a record could be built. */

@@ -27,6 +27,7 @@ import {
   chromeExecutable,
   closeChromeBounded,
   type HarnessTeardown,
+  isLostBrowser,
   launchChromiumWithRetry,
   resolvePlaywright,
   evidenceScreenshot,
@@ -661,10 +662,56 @@ export async function waitUntil(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await page.evaluate<boolean>(`Boolean(${expression})`).catch(() => false)) return;
+    // A read that failed is "not yet" — unless the browser itself is gone, which no wait outlives.
+    const met = await page.evaluate<boolean>(`Boolean(${expression})`).catch((error: unknown) => {
+      if (isLostBrowser(error)) throw error;
+      return false;
+    });
+    if (met) return;
     await Bun.sleep(150);
   }
   throw new Error(`timed out after ${String(timeoutMs)}ms waiting for ${what} at ${page.url()}`);
+}
+
+/** How many times a journey whose browser vanished is started again from nothing. */
+const LOST_BROWSER_RETRIES = 2;
+
+/**
+ * The runner's per-journey ceiling (`scripts/test/run-e2e.sh`). Bun abandons a journey at it but cannot
+ * stop it, so a retry started after it would launch a daemon and a browser beside the next journey.
+ */
+const JOURNEY_CEILING_MS = Number(process.env.FY_E2E_JOURNEY_TIMEOUT_MS ?? Number.POSITIVE_INFINITY);
+
+/**
+ * Run a whole journey, and run it again — at most {@link LOST_BROWSER_RETRIES} more times — if the only
+ * thing that went wrong is that its browser vanished.
+ *
+ * On hosted runners Bun 1.3 drops the DevTools pipe Playwright holds to Chrome, sometimes twice in one
+ * journey. Playwright either answers "Target page, context or browser has been closed" or is never
+ * told, and then the browser guard (relay-harness.ts) answers "browser has disconnected". That is the
+ * harness's transport failing, not the product, and it is not reproducible on demand. So `run` —
+ * which must build its environment and browser from nothing — is called again, and every retry is
+ * recorded as a FLAG on the journey log so the rate stays visible. Any other failure fails the test,
+ * and so does a browser lost on the last attempt or after the ceiling.
+ */
+export async function retryOnLostBrowser(journey: string, run: () => Promise<void>): Promise<void> {
+  const started = Date.now();
+  for (let retry = 0; ; retry += 1) {
+    try {
+      await run();
+      return;
+    } catch (error) {
+      if (retry >= LOST_BROWSER_RETRIES || !isLostBrowser(error)) throw error;
+      if (Date.now() - started >= JOURNEY_CEILING_MS) throw error;
+      const text = String((error as Error).message ?? error);
+      await recordStep({
+        journey,
+        step: 'harness:journey-retried',
+        status: 'FLAG',
+        evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing (retry ${String(retry + 1)} of ${String(LOST_BROWSER_RETRIES)})`,
+      });
+    }
+  }
 }
 
 /** Soft failures per journey: recorded and reported, and the journey goes on to its later steps. */
