@@ -1478,19 +1478,36 @@ describe('one browser, two machines', () => {
     await withProduct(journey, async product => {
       // Arrange — machine A is set up and has a session; machine B is a second fresh install.
       const page = product.browser.page;
+      // A/B DIAGNOSTIC ONLY: is the PWA origin still listening after each step?
+      const alive = async (label: string): Promise<void> => {
+        const answer = await fetch(`${product.origin.origin.replace('//localhost:', '//127.0.0.1:')}/`, {
+          signal: AbortSignal.timeout(3_000),
+        }).then(
+          response => String(response.status),
+          (error: unknown) => `DEAD (${String((error as Error).message).slice(0, 60)})`,
+        );
+        await recordStep({ journey: 'harness', step: `diag:origin-after:${label}`, status: 'FLAG', evidence: answer });
+      };
       const a = await coreJourney(product, journey);
+      await alive('core');
       await withE2eEnvironment(async second => {
+        await alive('second-env');
         const tools = await installFakeTools(second);
+        await alive('fake-tools');
         const directory = await startRelayDirectory();
         const configPath = await writeDaemonConfig(join(second.paths.root, 'daemon.json'), {
           bindPort: second.ports.api,
           appOrigins: [product.origin.origin],
         });
+        await alive('directory+config');
         await bootDaemon(second, { configPath, directoryOrigin: directory.origin, env: fakeToolEnvironment(tools) });
+        await alive('boot-b');
         await ensureOperatorPassword(second);
+        await alive('password-b');
 
         // Act — pair the SAME browser with B.
         const link = await mintPairingLink(second, product.origin.origin);
+        await alive('mint-b');
         const bId = decodeURIComponent(/(?:^|;)fp=([^;]+)/u.exec(link.fragment)?.[1] ?? '');
         const settled = await pairAgain(journey, 'pair-second-machine-link', page, link.url);
         await softStep(journey, 'pair-second-machine', async () => {
