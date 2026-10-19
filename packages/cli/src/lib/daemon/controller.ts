@@ -18,6 +18,7 @@ import type {
   IResetTreePort,
   IRetiredArtifactPort,
   IServiceDefinitionSupervisor,
+  ISessionTerminalServerPort,
   IStateHomeClaimPort,
   RetiredArtifactOutcome,
 } from './ports.ts';
@@ -130,6 +131,8 @@ export interface DaemonControllerDeps {
   readonly resetTrees: IResetTreePort;
   /** Counts what a reset destroys unrecoverably, from the daemon that still holds it. */
   readonly resetInventory: IResetInventoryPort;
+  /** Ends every session's running agent before a reset removes the home they write into. */
+  readonly sessionTerminals: ISessionTerminalServerPort;
   /** Whether the state home carries the Ferretry marker, which a reset requires before it deletes. */
   readonly claims: IStateHomeClaimPort;
   /** Where the typed reset confirmation is read from; never used off a terminal. */
@@ -372,6 +375,16 @@ export class DaemonController {
    * state out from under a running daemon is how a half-reset happens — an owner hit exactly that, with
    * a log written into a state directory that had already been cleared — and `#pressStop` throwing is
    * the refusal, before a single entry has been unlinked.
+   *
+   * THE SESSIONS' AGENTS ARE ENDED TOO, because stopping the daemon does not stop them: they run under
+   * its private tmux server, which outlives a stop so a session survives a restart. Left running, the
+   * first thing each agent wrote after the removal recreated `<FY_HOME>/fleet/…` with no marker, and
+   * the very next `install` refused that home as one it could not prove was ours.
+   *
+   * AND THE HOME IS CLAIMED AGAIN, EMPTY, once it is gone — the same first step a fresh install takes.
+   * An agent that was mid-write when its server ended, or any other late writer, then lands in a home
+   * that carries our marker, and nothing that happens after a reset can leave the machine refusing to
+   * come back up. A home that was never there is not created: a reset is not an install.
    */
   async #reset(options: DaemonResetOptions): Promise<void> {
     const layout = this.deps.layout;
@@ -399,9 +412,56 @@ export class DaemonController {
     await this.#confirmReset(options);
 
     await this.#bringDown(owner, health);
+    await this.#endSessionTerminals();
     const removals: ResetSurvey[] = [];
     for (const root of roots) removals.push({ root, measure: await this.deps.resetTrees.remove(root.path) });
-    this.deps.out.success(renderResetOutcome(this.#name, removals, this.deps.clientName));
+    const home = removals.find(removal => removal.root.path === layout.stateHome);
+    const reclaimed = home !== undefined && home.measure.kind !== 'absent' && (await this.#reclaimStateHome());
+    this.deps.out.success(
+      renderResetOutcome(this.#name, removals, this.deps.clientName, reclaimed ? layout.stateHome : undefined),
+    );
+  }
+
+  /**
+   * End the private terminal server every session's agent runs under, or say why it could not be.
+   *
+   * NEVER A REFUSAL. By this point the daemon is down and the owner has authorized the removal, so a
+   * reset that stopped here would leave them on exactly the half-state this verb exists to remove.
+   * The re-claim below keeps the next install working either way; what is said here is that agents
+   * may still be running, and the one command that ends them.
+   */
+  async #endSessionTerminals(): Promise<void> {
+    const socket = this.deps.layout.sessionTerminalSocket;
+    const ending = await this.deps.sessionTerminals.end(socket);
+    if (ending.kind === 'ended') {
+      this.deps.out.warn(`ended every ${this.#name} session's running agent (terminal server ${socket})`);
+      return;
+    }
+    if (ending.kind === 'none') return;
+    this.deps.out.warn(
+      `could not end the ${this.#name} session terminal server at ${socket} (${ending.reason}); agents it ` +
+        `still runs may keep writing — end them with \`tmux -S ${socket} kill-server\``,
+    );
+  }
+
+  /**
+   * Claim the just-removed state home again, empty, so nothing written afterwards leaves it unmarked.
+   *
+   * A refusal here is REPORTED rather than thrown: it means something wrote into the home in the
+   * moment between the removal and this claim, and the removal itself — the thing the owner asked
+   * for — has already happened. The refusal names what it found and the command that claims it.
+   */
+  async #reclaimStateHome(): Promise<boolean> {
+    try {
+      await this.deps.claims.claim(this.deps.layout.stateHome);
+      return true;
+    } catch (error: unknown) {
+      this.deps.out.warn(
+        `something wrote into ${this.deps.layout.stateHome} as it was removed, so it could not be claimed again: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+      return false;
+    }
   }
 
   /**

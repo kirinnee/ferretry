@@ -20,11 +20,18 @@ import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileResetTrees } from '../../../src/adapters/daemon/reset-trees.ts';
 import { FileRetiredArtifacts } from '../../../src/adapters/daemon/retired-artifacts.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
+import { TmuxSessionTerminalServer } from '../../../src/adapters/daemon/session-terminals.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
 import { DaemonController, type DaemonControllerDeps } from '../../../src/lib/daemon/controller.ts';
 import { type DaemonLayout, resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
-import type { IDaemonLifecycleClaim } from '../../../src/lib/daemon/ports.ts';
-import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
+import type {
+  CommandOutcome,
+  DaemonStartHandle,
+  DetachedLaunch,
+  IDaemonLifecycleClaim,
+  IDaemonProcessPort,
+} from '../../../src/lib/daemon/ports.ts';
+import { DirectSupervisor, SystemdSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 
 /**
@@ -89,6 +96,11 @@ async function startThroughTheClient(layout: DaemonLayout): Promise<void> {
 
 /** The daemon's own bootstrap, composed the way `packages/daemon/bin/fyd.ts` composes it. */
 async function bootTheDaemon(stateHome: string): Promise<{ created: boolean }> {
+  return (await openTheDaemon(stateHome)).layout;
+}
+
+/** The same boot, keeping the opened storage — which holds the home's lifetime lock until closed. */
+async function openTheDaemon(stateHome: string): Promise<{ storage: DaemonStorage; layout: { created: boolean } }> {
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: stateHome }, () => '/home-must-not-be-used'),
     new StateFileSystemFactory(),
@@ -100,7 +112,7 @@ async function bootTheDaemon(stateHome: string): Promise<{ created: boolean }> {
   );
   const opened = await factory.open();
   stores.add(opened.storage);
-  return opened.layout;
+  return opened;
 }
 
 async function closeStores(): Promise<void> {
@@ -150,6 +162,7 @@ function deps(layout: DaemonLayout, out: string[], serving: HealthView | undefin
     // The daemon is down in every case here, so nothing is ever asked of this. That is the ordinary
     // situation for a reset: somebody is resetting a machine whose daemon will not serve.
     resetInventory: { count: () => Promise.resolve(undefined) },
+    sessionTerminals: new TmuxSessionTerminalServer(new BunDaemonProcess()),
     claims: new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
     prompt: { ask: () => Promise.resolve('') },
     interactive: () => false,
@@ -205,8 +218,8 @@ describe('resetting an installation and starting again on the clean slate', () =
     const out: string[] = [];
     await new DaemonController(deps(layout, out, undefined)).reset({ yes: true });
 
-    // Assert
-    should(await exists(layout.stateHome)).be.false();
+    // Assert — the home is back as a fresh install's first step leaves it: claimed, and nothing else.
+    should(await entriesOf(layout.stateHome)).deepEqual(['layout-version']);
     should(await exists(layout.stateArtifactRoot)).be.false();
     should(out.join('\n')).containEql('removed 2 path(s)');
   });
@@ -271,14 +284,14 @@ describe('resetting an installation and starting again on the clean slate', () =
     await new DaemonController(deps(layout, out, undefined)).reset({ yes: true });
 
     // Assert — both trees gone, both links gone, and every byte on the far side of them still there.
-    should(await exists(layout.stateHome)).be.false();
+    should(await entriesOf(layout.stateHome)).deepEqual(['layout-version']);
     should(await exists(layout.nixGcRoot)).be.false();
     should(await readFile(join(precious, 'bin', 'fyd'), 'utf8')).equal('somebody elses executable');
     // And it was said out loud before anything was destroyed, so nobody had to trust it.
     should(out.join('\n')).containEql('NOTHING it points at is read, followed or removed');
   });
 
-  it('should be safe to run twice, reporting plainly that there was nothing left', async () => {
+  it('should be safe to run twice, reporting plainly that only the empty claimed home was left', async () => {
     // Arrange — somebody who is not sure the first one worked runs it again.
     const layout = layoutFor(await createTemporaryRoot());
     await installation(layout);
@@ -288,8 +301,10 @@ describe('resetting an installation and starting again on the clean slate', () =
     const out: string[] = [];
     await new DaemonController(deps(layout, out, undefined)).reset({ yes: true });
 
-    // Assert
-    should(out.join('\n')).containEql('had no persistent data on this host; nothing was removed');
+    // Assert — the first reset's re-claim is the one file the second finds, and it claims it again.
+    should(out.join('\n')).containEql('removed 1 path(s), 1 files');
+    should(out.join('\n')).containEql(`absent  ${layout.stateArtifactRoot}`);
+    should(await entriesOf(layout.stateHome)).deepEqual(['layout-version']);
   });
 
   it('should refuse a reset whose state home resolves to the invoking home directory', async () => {
@@ -317,5 +332,260 @@ describe('resetting an installation and starting again on the clean slate', () =
       /resolves to the home directory itself/u,
     );
     should(await readFile(join(home, 'documents', 'thesis.txt'), 'utf8')).equal('years of work');
+  });
+});
+
+/**
+ * systemd, played by this test, and the daemon it supervises, played by the daemon's own storage.
+ *
+ * Every `systemctl` the client sends is answered here; everything else — the tmux a reset ends, the
+ * `/proc` lookup that ties a pid to the home's lock — runs for real. "Starting" the unit opens the
+ * daemon's storage IN THIS PROCESS, so the daemon's real layout decision runs on whatever the client
+ * left, and this process genuinely holds the lifetime lock a reset checks before it stops anything.
+ */
+class PlayedSystemd implements IDaemonProcessPort {
+  readonly commands: string[] = [];
+  #serving: DaemonStorage | undefined;
+  readonly #real = new BunDaemonProcess();
+
+  constructor(private readonly stateHome: string) {}
+
+  get serving(): boolean {
+    return this.#serving !== undefined;
+  }
+
+  async run(argv: readonly string[]): Promise<CommandOutcome> {
+    if (argv[0] !== 'systemctl') return await this.#real.run(argv);
+    const verb = argv[2] ?? '';
+    this.commands.push(argv.slice(2).join(' '));
+    if (verb === 'restart' || verb === 'start') {
+      await this.#stop();
+      this.#serving = (await openTheDaemon(this.stateHome)).storage;
+    }
+    if (verb === 'stop' || (verb === 'disable' && argv.includes('--now'))) await this.#stop();
+    if (verb === 'show') {
+      const state = this.serving ? `active\nMainPID=${String(process.pid)}` : 'inactive';
+      return { code: 0, stdout: `LoadState=loaded\nActiveState=${state}\n`, stderr: '' };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  }
+
+  async #stop(): Promise<void> {
+    const serving = this.#serving;
+    this.#serving = undefined;
+    if (serving === undefined) return;
+    stores.delete(serving);
+    await serving.close();
+  }
+
+  spawnDetached(launch: DetachedLaunch): Promise<DaemonStartHandle> {
+    return this.#real.spawnDetached(launch);
+  }
+
+  signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {
+    return this.#real.signal(pid, signal);
+  }
+
+  alive(pid: number): boolean {
+    return this.#real.alive(pid);
+  }
+
+  holdsOpen(pid: number, path: string): Promise<boolean | undefined> {
+    return this.#real.holdsOpen(pid, path);
+  }
+}
+
+/** A health answer the protocol accepts, from the daemon this process is playing. */
+function servingHealth(): HealthView {
+  return {
+    ok: true,
+    bootstrapping: false,
+    bootstrapState: 'complete',
+    bootstrapDegraded: false,
+    version: '1.2.3',
+    pid: process.pid,
+    sessions: 1,
+    running: 1,
+    monitors: 0,
+    unmonitoredRunning: 0,
+    wardenLastSweepSeconds: 1,
+    wardenTimerArmed: true,
+    eventLoopLagMs: 0,
+    lastSelfCheckAt: '2026-08-04T12:00:00.000Z',
+    wedgeCount: 0,
+    scratchGcEnabled: true,
+    scratchReclaimedSessions: 0,
+    scratchReclaimedBytes: 0,
+    bootstrapErrors: 0,
+    time: '2026-08-04T12:00:01.000Z',
+  } as HealthView;
+}
+
+/** The controller `fy daemon …` builds on a systemd host, over the played manager. */
+function supervised(layout: DaemonLayout, systemd: PlayedSystemd, out: string[]): DaemonController {
+  const claims = new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt', {
+    warn: message => out.push(message),
+  });
+  const files = new FileServiceStore();
+  return new DaemonController({
+    ...deps(layout, out, undefined),
+    service: new SystemdSupervisor(layout, systemd, files, claims),
+    direct: new DirectSupervisor(layout, systemd, files, claims),
+    health: { probe: () => Promise.resolve(systemd.serving ? servingHealth() : undefined) },
+    claims,
+    // Real readiness and shutdown loops, against a clock that does not make the suite wait.
+    clock: { now: () => Date.now(), sleep: () => Promise.resolve() },
+  });
+}
+
+/**
+ * What a live agent does the moment its home is removed: the harness writes its own state again, and
+ * \`mkdir -p\` recreates \`<FY_HOME>/fleet/…\` around it. This is the write that left the owner's home
+ * all-Ferretry and unmarked, and \`fy daemon install\` refusing it.
+ */
+async function anAgentWritesItsHomeAgain(layout: DaemonLayout): Promise<string> {
+  const agentHome = join(layout.stateHome, 'fleet', 'homes', 'claude-default');
+  await mkdir(agentHome, { recursive: true });
+  const written = join(agentHome, '.claude.json');
+  await writeFile(written, '{"numStartups":42}');
+  return written;
+}
+
+const TMUX = Bun.which('tmux');
+
+/** A real session terminal server on the daemon's socket, running an agent that keeps writing. */
+async function aLiveAgent(layout: DaemonLayout): Promise<number> {
+  const tmux = TMUX ?? 'tmux';
+  const agentHome = join(layout.stateHome, 'fleet', 'homes', 'claude-default');
+  const loop = `while :; do mkdir -p '${agentHome}' && echo x >> '${agentHome}/history.jsonl'; sleep 0.05; done`;
+  const started = Bun.spawnSync([
+    tmux,
+    '-f',
+    '/dev/null',
+    '-S',
+    layout.sessionTerminalSocket,
+    'new-session',
+    '-d',
+    '-s',
+    'agent',
+    `exec sh -c "${loop}"`,
+  ]);
+  if (started.exitCode !== 0) throw new Error(`tmux would not start: ${started.stderr.toString()}`);
+  sockets.add(layout.sessionTerminalSocket);
+  const shown = Bun.spawnSync([tmux, '-S', layout.sessionTerminalSocket, 'display-message', '-p', '#{pane_pid}']);
+  return Number(shown.stdout.toString().trim());
+}
+
+const sockets = new Set<string>();
+
+afterEach(() => {
+  for (const socket of sockets) Bun.spawnSync([TMUX ?? 'tmux', '-S', socket, 'kill-server']);
+  sockets.clear();
+});
+
+async function eventually(check: () => boolean): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (check()) return true;
+    await Bun.sleep(20);
+  }
+  return check();
+}
+
+describe('installing again after a reset, in every order an owner runs it', () => {
+  it('should install after install, then reset, even when an agent wrote into the home afterwards', async () => {
+    // Arrange — the reported sequence's core: a supervised installation, reset, and a live agent's
+    // first write landing in the removed home before the next install.
+    const layout = layoutFor(await createTemporaryRoot());
+    const systemd = new PlayedSystemd(layout.stateHome);
+    const out: string[] = [];
+    await supervised(layout, systemd, out).install();
+    await supervised(layout, systemd, out).reset({ yes: true });
+    const written = await anAgentWritesItsHomeAgain(layout);
+
+    // Act
+    await supervised(layout, systemd, out).install();
+
+    // Assert — installed and serving, on a home the daemon booted into, and nothing had to be adopted.
+    should(systemd.serving).be.true();
+    should(systemd.commands).containEql('stop fyd.service');
+    should(await readFile(join(layout.stateHome, 'layout-version'), 'utf8')).equal('2\n');
+    should(await exists(written)).be.true();
+    should(out.join('\n')).containEql(`claimed ${layout.stateHome} again, empty`);
+    should(out.join('\n')).not.containEql('refusing');
+  });
+
+  it('should install after uninstall, then reset, which is the order the owner reported', async () => {
+    // Arrange — uninstall first, so the reset runs with no service definition and nothing serving.
+    const layout = layoutFor(await createTemporaryRoot());
+    const systemd = new PlayedSystemd(layout.stateHome);
+    const out: string[] = [];
+    await supervised(layout, systemd, out).install();
+    await supervised(layout, systemd, out).uninstall();
+    should(systemd.serving).be.false();
+    await supervised(layout, systemd, out).reset({ yes: true });
+    await anAgentWritesItsHomeAgain(layout);
+
+    // Act
+    await supervised(layout, systemd, out).install();
+
+    // Assert
+    should(systemd.serving).be.true();
+    should(await exists(layout.systemdUnitFile)).be.true();
+    should(await readFile(join(layout.stateHome, 'layout-version'), 'utf8')).equal('2\n');
+  });
+
+  it('should install after a reset and a status in between', async () => {
+    // Arrange — a read in the middle must create nothing and change nothing.
+    const layout = layoutFor(await createTemporaryRoot());
+    const systemd = new PlayedSystemd(layout.stateHome);
+    const out: string[] = [];
+    await supervised(layout, systemd, out).install();
+    await supervised(layout, systemd, out).reset({ yes: true });
+    await supervised(layout, systemd, out).status({});
+    should(await entriesOf(layout.stateHome)).deepEqual(['layout-version']);
+
+    // Act
+    await supervised(layout, systemd, out).install();
+
+    // Assert
+    should(systemd.serving).be.true();
+  });
+
+  it('should adopt, and say so, a marker-less home an older reset left holding only empty directories', async () => {
+    // Arrange — a home an earlier release's reset left behind: the agents' \`mkdir -p\` recreated the
+    // scaffold, and nothing has been written into it yet.
+    const layout = layoutFor(await createTemporaryRoot());
+    await mkdir(join(layout.stateHome, 'fleet', 'homes', 'claude-default'), { recursive: true });
+    await mkdir(join(layout.stateHome, 'logs'), { recursive: true });
+    await writeFile(join(layout.stateHome, 'logs', 'fyd.log'), 'fyd stopping\n');
+    const systemd = new PlayedSystemd(layout.stateHome);
+    const out: string[] = [];
+
+    // Act
+    await supervised(layout, systemd, out).install();
+
+    // Assert
+    should(systemd.serving).be.true();
+    should(out.join('\n')).containEql('held only empty Ferretry directories and logs (fleet, logs)');
+  });
+
+  it.skipIf(TMUX === null)('should end a live agent before it removes the home that agent writes into', async () => {
+    // Arrange — a real tmux server on the daemon's socket, with an agent writing into its home.
+    const layout = layoutFor(await createTemporaryRoot());
+    const systemd = new PlayedSystemd(layout.stateHome);
+    const out: string[] = [];
+    await supervised(layout, systemd, out).install();
+    const agent = await aLiveAgent(layout);
+    should(await eventually(() => systemd.alive(agent))).be.true();
+
+    // Act
+    await supervised(layout, systemd, out).reset({ yes: true });
+
+    // Assert — the agent is gone, the home is claimed, and the next install just works.
+    should(await eventually(() => !systemd.alive(agent))).be.true();
+    should(out.join('\n')).containEql("ended every fyd session's running agent");
+    should(await readFile(join(layout.stateHome, 'layout-version'), 'utf8')).equal('2\n');
+    await supervised(layout, systemd, out).install();
+    should(systemd.serving).be.true();
   });
 });

@@ -259,6 +259,29 @@ export interface IResetInventoryPort {
   count(): Promise<{ readonly secrets: number; readonly devices: number } | undefined>;
 }
 
+/** What ending the daemon's private session terminal server did. */
+export type SessionTerminalEnding =
+  /** A server was serving that socket, and it has been told to end every session it holds. */
+  | { readonly kind: 'ended' }
+  /** Nothing was listening there — no session had a running agent to end. */
+  | { readonly kind: 'none' }
+  /** A server may still be running; `reason` is what the terminal multiplexer said. */
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * Ending every session's running agent, which a reset has to do before it removes their home.
+ *
+ * The agents run under the daemon's private tmux server, NOT under the daemon, so stopping the daemon
+ * leaves them running — by design, because that is how a session survives a restart. A reset that
+ * stopped only the daemon therefore deleted the home out from under live agents, and the first thing
+ * each of them wrote recreated `<FY_HOME>/fleet/…` with no layout marker: the next `install` met
+ * an unclaimed Ferretry directory and refused it. Reported as a value rather than thrown, because a
+ * reset that could not end the server is still a reset the owner asked for; the controller says so.
+ */
+export interface ISessionTerminalServerPort {
+  end(socket: string): Promise<SessionTerminalEnding>;
+}
+
 /**
  * The typed confirmation a reset asks for, injected so no test blocks on a terminal.
  *
