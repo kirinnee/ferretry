@@ -10,6 +10,7 @@ import {
   type CreateSessionLifecycleRequest,
   type LifecycleSessionStatus,
   SESSION_ID_VARIABLE,
+  SESSION_MEDIA_VARIABLE,
   type SessionLifecycleEvent,
   type SessionLifecycleRecord,
   SessionLifecycleRecordSchema,
@@ -135,18 +136,30 @@ export function firstTurnInstruction(taskFile: string): string {
  * session that could identify itself until its pane was replaced is worse than one that never could:
  * the failure arrives later, in the middle of a conversation, and looks like the peer going silent.
  *
-HYPERMEDIA DEFAULTS BY MODE, written FIRST so a stored switch wins: ON for an interactive ferret, OFF for an
+ * HYPERMEDIA DEFAULTS BY MODE, written FIRST so a stored switch wins: ON for an interactive ferret, OFF for an
  * auto one (a worker, a warden, a miner), so a ferret whose switch was never written follows its mode at the
  * next launch and only an explicit value the owner set overrides it (docs/hypermedia.md). A caller that cannot
  * name the mode gets the off default.
+ *
+ * THE MEDIA FOLDER IS DERIVED TOO, and written last for the same reason as the id: a stored variable
+ * must not be able to point an agent's "show this" files somewhere the media route does not read.
  */
 export function sessionPaneEnvironment(
   id: SessionId,
   stored: Readonly<Record<string, string>>,
   mode?: 'auto' | 'interactive',
+  media?: string,
 ): Readonly<Record<string, string>> {
-  return { [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0', ...stored, [SESSION_ID_VARIABLE]: id };
+  return {
+    [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0',
+    ...stored,
+    [SESSION_ID_VARIABLE]: id,
+    ...(media === undefined ? {} : { [SESSION_MEDIA_VARIABLE]: media }),
+  };
 }
+
+/** Creates (if needed) and names one session's media folder; see `SessionPaths.media`. */
+export type SessionMediaDirectory = (id: SessionId) => Promise<string>;
 
 /** Everything the daemon had to resolve before a record could be built. */
 export interface SessionRecordContext {

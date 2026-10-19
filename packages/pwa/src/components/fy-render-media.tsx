@@ -37,6 +37,7 @@ import {
   type FyRenderImageMime,
   type FyRenderMediaBlock,
   type FyRenderWorkspaceReader,
+  type FyRenderWorkspaceScope,
   fyRenderMediaMime,
   fyRenderRasterRefusal,
   fyRenderReadBoundedBytes,
@@ -58,7 +59,13 @@ type Stage =
   | { readonly phase: 'loading' }
   | { readonly phase: 'ready'; readonly url: string; readonly bytes: number | null }
   | { readonly phase: 'link' }
-  | { readonly phase: 'fallback'; readonly reason: FyRenderMediaFallback; readonly detail: string | null };
+  | {
+      readonly phase: 'fallback';
+      readonly reason: FyRenderMediaFallback;
+      readonly detail: string | null;
+      /** The daemon's rule, for a `not-served` refusal: said in the sentence, never folded away. */
+      readonly rule?: string;
+    };
 
 export interface FyRenderMediaProps {
   readonly block: FyRenderMediaBlock;
@@ -83,7 +90,7 @@ const humanBytes = (bytes: number): string =>
 
 /** The name a row shows: the workspace file's own, or the last segment of a link. */
 const fileName = (block: FyRenderMediaBlock): string => {
-  const path = block.src.kind === 'workspace' ? block.src.path : new URL(block.src.url).pathname;
+  const path = block.src.kind === 'https' ? new URL(block.src.url).pathname : block.src.path;
   const last = path.split('/').filter(Boolean).at(-1);
   return last === undefined ? noun[block.type] : decodeURIComponentSafe(last);
 };
@@ -100,26 +107,32 @@ const decodeURIComponentSafe = (value: string): string => {
 const ROW_ACTION = 'fy-render-row-action';
 
 /** The reader's sentence for each card. One fixed sentence per reason, no machine wording. */
-const fallbackSentence = (block: FyRenderMediaBlock, reason: FyRenderMediaFallback): string => {
+const fallbackSentence = (block: FyRenderMediaBlock, reason: FyRenderMediaFallback, rule?: string): string => {
   const what = noun[block.type];
-  const where = block.src.kind === 'workspace' ? block.src.path : new URL(block.src.url).host;
+  const where = block.src.kind === 'https' ? new URL(block.src.url).host : block.src.path;
+  /** The session's working tree, or its media folder — said as the reader would say it. */
+  const folder = block.src.kind === 'media' ? "this session's media folder" : "this session's workspace";
   switch (reason) {
     case 'no-workspace':
-      return `This ${what} is a file in the session's workspace, which this view cannot read.`;
+      return `This ${what} is a file in ${folder}, which this view cannot read.`;
     case 'missing':
-      return `${where} was not found in this session's workspace.`;
+      return `${where} was not found in ${folder}.`;
     case 'denied':
-      return `You do not have access to ${where} in this session's workspace.`;
+      return `You do not have access to ${where} in ${folder}.`;
     case 'not-served':
-      return `${where} is not served from this session's workspace — it is gitignored, a protected secret, or outside the folder.`;
+      // THE RULE, SAID. "Gitignored, a secret, or outside the folder" left the reader — and the agent
+      // that wrote the file — guessing which of three very different things had happened.
+      return rule === undefined
+        ? `${where} is not served from ${folder}.`
+        : `${where} is not served from ${folder}: ${rule}.`;
     case 'too-large':
-      return block.src.kind === 'workspace'
-        ? `${where} is larger than the ${megabytes(FY_RENDER_LIMITS.workspaceMediaBytes)} a workspace file can be shown at.`
-        : `This ${what} is larger than the ${megabytes(FY_RENDER_LIMITS.httpsImageBytes)} an image link can be shown at.`;
+      return block.src.kind === 'https'
+        ? `This ${what} is larger than the ${megabytes(FY_RENDER_LIMITS.httpsImageBytes)} an image link can be shown at.`
+        : `${where} is larger than the ${megabytes(FY_RENDER_LIMITS.workspaceMediaBytes)} a workspace file can be shown at.`;
     case 'unsupported':
       return `This ${what} is in a format that cannot be shown here.`;
     case 'unavailable':
-      return block.src.kind === 'workspace'
+      return block.src.kind !== 'https'
         ? 'The workspace could not be read just now.'
         : `${where} did not answer with the ${what}.`;
     case 'blocked':
@@ -139,8 +152,8 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
     const settle = (next: Stage): void => {
       if (!controller.signal.aborted) setStage(next);
     };
-    const fallback = (reason: FyRenderMediaFallback, detail: string | null = null): void =>
-      settle({ detail, phase: 'fallback', reason });
+    const fallback = (reason: FyRenderMediaFallback, detail: string | null = null, rule?: string): void =>
+      settle({ detail, phase: 'fallback', reason, ...(rule === undefined ? {} : { rule }) });
     /** The one place a `blob:` is made, so the cleanup below is the one place it goes. */
     const show = (bytes: Uint8Array<ArrayBuffer>, type: string): void => {
       if (controller.signal.aborted) return;
@@ -148,13 +161,13 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
       settle({ bytes: bytes.byteLength, phase: 'ready', url: minted });
     };
 
-    const fromWorkspace = async (path: string): Promise<void> => {
+    const fromWorkspace = async (path: string, folder: FyRenderWorkspaceScope): Promise<void> => {
       if (readWorkspaceMedia === undefined) return fallback('no-workspace');
       // Decided BEFORE the read, so an unshowable file costs no transfer at all.
       const mime = fyRenderMediaMime(block.type, path);
       if (mime === null) return fallback('unsupported', `No ${block.type} type is known for ${path}`);
-      const read = await readWorkspaceMedia(path, controller.signal);
-      if (!read.ok) return fallback(read.reason);
+      const read = await readWorkspaceMedia(path, controller.signal, folder);
+      if (!read.ok) return fallback(read.reason, null, read.rule);
       if (read.bytes.byteLength > FY_RENDER_LIMITS.workspaceMediaBytes) return fallback('too-large');
       if (block.type === 'image') {
         const refusal = fyRenderRasterRefusal(read.bytes, mime as FyRenderImageMime);
@@ -191,7 +204,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
     };
 
     const source = block.src;
-    if (source.kind === 'workspace') void fromWorkspace(source.path).catch(() => fallback('unavailable'));
+    if (source.kind !== 'https') void fromWorkspace(source.path, source.kind).catch(() => fallback('unavailable'));
     else if (block.type === 'image') void imageFromLink(source.url);
     else if (block.type === 'pdf') setStage({ phase: 'link' });
     else setStage({ bytes: null, phase: 'ready', url: source.url });
@@ -273,7 +286,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
           children: link === null ? undefined : openAction(link, 'Open link'),
           detail: stage.detail,
           icon: 'warning',
-          meta: fallbackSentence(block, stage.reason),
+          meta: fallbackSentence(block, stage.reason, stage.rule),
         })}
       </div>
     );

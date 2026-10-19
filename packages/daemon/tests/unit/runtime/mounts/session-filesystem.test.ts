@@ -572,3 +572,66 @@ describe('the working-tree index route', () => {
     should(pinner.lastRoot.closed).be.true();
   });
 });
+
+describe('the media-folder read', () => {
+  const MEDIA = '/fy-home/state/sessions/s1/media';
+
+  const media = (mediaRoot?: (id: string) => string) => {
+    const pinner = new FakeRootPinner({ tree: treeOf(['card.png', textFile('png')]) });
+    const routes = sessionFilesystemRoutes(
+      new SessionFilesystem(pinner, new FakeSessionGit()),
+      sessionDirectory([sessionView('s1')]),
+      mediaRoot,
+    );
+    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
+    return {
+      dispatch: async (query: [string, string][]) =>
+        await dispatcher.dispatch(request({ path: '/v1/sessions/s1/fs/file', query, headers: human })),
+      pinner,
+    };
+  };
+
+  it('should read from the session media folder the daemon names, not from the working tree', async () => {
+    // Arrange
+    const { dispatch, pinner } = media(id => `/fy-home/state/sessions/${id}/media`);
+
+    // Act
+    const response = await dispatch([
+      ['path', 'card.png'],
+      ['scope', 'media'],
+      ['format', 'base64'],
+    ]);
+
+    // Assert — the caller chose a scope, never a directory.
+    should(response.status).eql(200);
+    should(pinner.pinnedCwds).eql([MEDIA]);
+    should(jsonBody(response)).have.property('base64');
+  });
+
+  it('should refuse an unknown scope, a history read of the media folder, and a daemon that keeps none', async () => {
+    // Arrange
+    const wired = media(() => MEDIA);
+    const unwired = media();
+
+    // Act
+    const unknown = await wired.dispatch([
+      ['path', 'card.png'],
+      ['scope', 'home'],
+    ]);
+    const history = await wired.dispatch([
+      ['path', 'card.png'],
+      ['scope', 'media'],
+      ['rev', 'head'],
+    ]);
+    const none = await unwired.dispatch([
+      ['path', 'card.png'],
+      ['scope', 'media'],
+    ]);
+
+    // Assert
+    should(unknown.status).eql(400);
+    should(history.status).eql(400);
+    should(none.status).eql(404);
+    should(wired.pinner.pinnedCwds).eql([]);
+  });
+});

@@ -451,7 +451,14 @@ describe('SessionFilesystem.readFile from the working tree', () => {
     const view = await filesystem.readFile(CWD, '.env');
 
     // Assert
-    should(view).eql({ path: '.env', size: 7, mtime: FAKE_MTIME, denied: true, reason: 'denylist' });
+    should(view).eql({
+      path: '.env',
+      size: 7,
+      mtime: FAKE_MTIME,
+      denied: true,
+      reason: 'denylist',
+      rule: 'the protected-secrets list refuses the name ".env"',
+    });
   });
 
   it('should refuse a path whose CANONICAL location is denylisted', async () => {
@@ -479,6 +486,66 @@ describe('SessionFilesystem.readFile from the working tree', () => {
     // Assert
     should(view.ignored).be.true();
     should(view.reason).eql('ignored');
+  });
+
+  it('should name the ignore file, line and pattern Git matched', async () => {
+    // Arrange
+    const { filesystem } = viewer(
+      { tree: treeOf(['card.png', textFile('x')]) },
+      { ignoreRule: () => '.gitignore:3: *.png', ignoredPaths: () => new Set(['card.png']) },
+    );
+
+    // Act
+    const view = await filesystem.readFile(CWD, 'card.png');
+
+    // Assert — a reader can act on this; "gitignored, a secret, or outside the folder" they could not.
+    should(view.rule).eql('Git ignores it (.gitignore:3: *.png)');
+  });
+
+  it('should still refuse, without a pattern, when Git cannot say which rule matched', async () => {
+    for (const ignoreRule of [
+      () => undefined,
+      () => {
+        throw new Error('check-ignore -v failed');
+      },
+    ]) {
+      // Arrange
+      const { filesystem } = viewer(
+        { tree: treeOf(['card.png', textFile('x')]) },
+        { ignoreRule, ignoredPaths: () => new Set(['card.png']) },
+      );
+
+      // Act
+      const view = await filesystem.readFile(CWD, 'card.png');
+
+      // Assert
+      should(view.ignored).be.true();
+      should(view.rule).eql('Git ignores it');
+    }
+  });
+
+  it('should say Git could not answer, rather than that the file is ignored, when the check fails', async () => {
+    for (const [thrown, why] of [
+      [new Error('fatal: detected dubious ownership\nmore'), 'fatal: detected dubious ownership'],
+      ['not an error', 'git failed'],
+    ] as const) {
+      // Arrange
+      const { filesystem } = viewer(
+        { tree: treeOf(['card.png', textFile('x')]) },
+        {
+          ignoredPaths: () => {
+            throw thrown;
+          },
+        },
+      );
+
+      // Act
+      const view = await filesystem.readFile(CWD, 'card.png');
+
+      // Assert — still refused (fail closed), and the reason is the failure, not a pattern.
+      should(view.ignored).be.true();
+      should(view.rule).eql(`Git could not confirm it is not ignored, so it is refused (${why})`);
+    }
   });
 
   it('should keep the PRE-WALK refusal even when the post-walk verdict is clean', async () => {
@@ -583,7 +650,14 @@ describe('SessionFilesystem.readFile from HEAD', () => {
     const view = await filesystem.readFile(CWD, '.env', { rev: 'head' });
 
     // Assert
-    should(view).eql({ path: '.env', size: 0, denied: true, reason: 'denylist', rev: 'head' });
+    should(view).eql({
+      path: '.env',
+      size: 0,
+      denied: true,
+      reason: 'denylist',
+      rev: 'head',
+      rule: 'the protected-secrets list refuses the name ".env"',
+    });
   });
 
   it('should recheck the ignore gate AFTER the read, since ignore policy is worktree state', async () => {

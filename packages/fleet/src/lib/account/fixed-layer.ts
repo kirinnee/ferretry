@@ -257,8 +257,8 @@ export const HYPERMEDIA_INSTRUCTION = [
   'Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
   '- mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).',
   '- svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.',
-  '- html: one self-contained interactive page with inline CSS and JS; it runs sandboxed, so load nothing from the network.',
-  '- image, video, audio, pdf: put `src: @path/in/your/workspace` or `src: https://…` before `---`, and no payload.',
+  '- html: a static HTML fragment (tables, lists, details, inline SVG, inline CSS); no scripts or event handlers — they are stripped, and nothing runs.',
+  '- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.',
   'Example:',
   '```fy-render',
   'type: mermaid',
@@ -267,7 +267,7 @@ export const HYPERMEDIA_INSTRUCTION = [
   'flowchart LR',
   '  Phone --> Relay --> Daemon',
   '```',
-  'The reader taps Render to show it. Chat only: never write fy-render into files, docs, commits or PR text.',
+  "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PR text.",
 ].join('\n');
 
 /**

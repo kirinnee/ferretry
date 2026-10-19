@@ -54,6 +54,8 @@ export const SessionFsFileSchema = z.object({
   denied: z.boolean().optional(),
   ignored: z.boolean().optional(),
   reason: SessionFsRefusalReasonSchema.optional(),
+  /** Which rule refused it — the ignore file, line and pattern, a Git failure, or the denied name. */
+  rule: z.string().optional(),
   rev: z.literal('head').optional(),
 });
 export type SessionFsFile = z.infer<typeof SessionFsFileSchema>;

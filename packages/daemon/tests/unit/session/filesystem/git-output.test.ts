@@ -6,6 +6,7 @@ import {
   parseBatchCheck,
   parseBranchHeader,
   parseCheckIgnore,
+  parseCheckIgnoreRule,
   parseFileList,
   parseHeadTreeEntry,
   parseNumstat,
@@ -374,6 +375,31 @@ describe('parseBatchCheck', () => {
     // Arrange / Act / Assert
     should(parseBatchCheck('abc123 blob huge\n')).be.undefined();
     should(parseBatchCheck('abc123 blob -1\n')).be.undefined();
+  });
+});
+
+describe('parseCheckIgnoreRule', () => {
+  it('should name the first matching rule as source, line and pattern', () => {
+    // Arrange / Act
+    const rule = parseCheckIgnoreRule(records('.gitignore', '3', '*.png', './card.png', '.gitignore', '4', 'x', './x'));
+
+    // Assert
+    should(rule).eql('.gitignore:3: *.png');
+  });
+
+  it('should skip a negated pattern, which un-ignores rather than refuses', () => {
+    // Arrange / Act
+    const rule = parseCheckIgnoreRule(
+      records('.gitignore', '1', '!keep.png', './keep.png', '/home/me/.config/git/ignore', '2', '*.pdf', './brief.pdf'),
+    );
+
+    // Assert
+    should(rule).eql('/home/me/.config/git/ignore:2: *.pdf');
+  });
+
+  it('should read empty output as no rule', () => {
+    // Arrange / Act / Assert
+    should(parseCheckIgnoreRule('')).be.undefined();
   });
 });
 

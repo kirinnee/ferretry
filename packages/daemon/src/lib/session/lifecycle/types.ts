@@ -197,6 +197,9 @@ export const SESSION_BOARD_CAPABILITY_VARIABLE = 'FY_SESSION_BOARD_CAPABILITY';
  */
 export const SESSION_ID_VARIABLE = 'FY_SESSION_ID';
 
+/** The session's media folder, derived like the id and written after the stored environment. */
+export const SESSION_MEDIA_VARIABLE = 'FY_MEDIA_DIR';
+
 /** The credential a session proves its own identity with, beside the hash the daemon keeps. */
 export interface SessionCredential {
   /** Handed to the session and to nobody else. */

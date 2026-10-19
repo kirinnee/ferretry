@@ -296,6 +296,11 @@ export interface SessionGit {
    */
   listFiles(cwd: GitWorkingDirectory, maxBytes: number, budget?: SpawnBudget): Promise<SessionFileList>;
   ignoredPaths(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<ReadonlySet<string>>;
+  /**
+   * The rule Git applies to the first of these paths it ignores, as `<source>:<line>: <pattern>`, or
+   * `undefined` when none is ignored. Asked only after a refusal, so the reader can be told which rule.
+   */
+  ignoreRule(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<string | undefined>;
   isTracked(cwd: GitWorkingDirectory, rel: string): Promise<boolean>;
   changes(cwd: GitWorkingDirectory): Promise<SessionChangesView>;
   headEntry(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadEntry | undefined>;

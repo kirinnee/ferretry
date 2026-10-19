@@ -73,13 +73,30 @@ record() {
     "$1" "$2" "${parent}" "${sid}" "${at}" "$1" "$(json_escape "$4")" >>"${transcript}"
 }
 
+# A journey that needs a richer reply than the marker — a hypermedia message, say — drops it in the
+# session's workspace as `.fy-e2e-fake-reply.md`, and the next reply is that file, JSON-escaped with its
+# line breaks kept. Files under `.fy-e2e-fake-media/` are copied into `$FY_MEDIA_DIR` first, the
+# session's media folder, exactly where a real agent puts media it made to show the person.
+reply_file="$(pwd)/.fy-e2e-fake-reply.md"
+media_source="$(pwd)/.fy-e2e-fake-media"
+
 printf 'Fake Claude ready\n> '
 n=0
 last=""
 while IFS= read -r line; do
   n=$((n + 1))
   record user "u${n}-${sid}" "${last}" "${line}"
-  record assistant "a${n}-${sid}" "u${n}-${sid}" "FAKE-REPLY ${n}: I read \"${line}\""
+  if [ -f "${reply_file}" ]; then
+    if [ -d "${media_source}" ] && [ -n "${FY_MEDIA_DIR:-}" ]; then
+      mkdir -p "${FY_MEDIA_DIR}" && cp "${media_source}"/* "${FY_MEDIA_DIR}/"
+    fi
+    at="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    text="$(sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' "${reply_file}" | awk '{ printf "%s\\n", $0 }')"
+    printf '{"type":"assistant","uuid":"a%s-%s","parentUuid":"u%s-%s","sessionId":"%s","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}\n' \
+      "${n}" "${sid}" "${n}" "${sid}" "${sid}" "${at}" "${text}" >>"${transcript}"
+  else
+    record assistant "a${n}-${sid}" "u${n}-${sid}" "FAKE-REPLY ${n}: I read \"${line}\""
+  fi
   last="a${n}-${sid}"
   printf 'working\n> '
 done

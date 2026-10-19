@@ -44,6 +44,9 @@ export const fileUrl = (scope: DaemonSessionScope, path: string, rev?: 'head') =
   `${root(scope)}/file${query(path, rev ? { rev } : undefined)}`;
 export const previewUrl = (scope: DaemonSessionScope, path: string) =>
   `${root(scope)}/file${query(path, { format: 'base64' })}`;
+/** One file of the session's MEDIA folder, as base64 — the daemon names the folder; a caller never does. */
+export const mediaPreviewUrl = (scope: DaemonSessionScope, path: string) =>
+  `${root(scope)}/file${query(path, { format: 'base64', scope: 'media' })}`;
 export const indexUrl = (scope: DaemonSessionScope) => `${root(scope)}/index`;
 export const changesUrl = (scope: DaemonSessionScope) => `${root(scope)}/changes`;
 export const diffUrl = (scope: DaemonSessionScope, path: string) => `${root(scope)}/diff${query(path)}`;
@@ -123,6 +126,16 @@ export const fsApi = {
   ): Promise<FsFile> => {
     assertScopeDaemon(daemon, scope);
     return readJson(SessionFsFileSchema, daemon, previewUrl(scope, path), fetcher, signal);
+  },
+  mediaPreview: (
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    path: string,
+    signal: AbortSignal | undefined,
+    fetcher: DaemonFetch,
+  ): Promise<FsFile> => {
+    assertScopeDaemon(daemon, scope);
+    return readJson(SessionFsFileSchema, daemon, mediaPreviewUrl(scope, path), fetcher, signal);
   },
   index: (
     daemon: DaemonConnection,

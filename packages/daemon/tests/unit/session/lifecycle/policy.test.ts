@@ -350,6 +350,19 @@ describe('session lifecycle policy', () => {
     });
     // The name is a wire contract with the CLI, not a local choice, so it is pinned here too.
     should(SESSION_ID_VARIABLE).equal('FY_SESSION_ID');
+    // The media folder is derived like the id: a stored value cannot redirect it.
+    should(
+      sessionPaneEnvironment(
+        id,
+        { FY_MEDIA_DIR: '/elsewhere' },
+        'interactive',
+        '/home/me/.fy/state/sessions/session-1/media',
+      ),
+    ).deepEqual({
+      FY_HYPERMEDIA: '1',
+      FY_MEDIA_DIR: '/home/me/.fy/state/sessions/session-1/media',
+      FY_SESSION_ID: 'session-1',
+    });
   });
 
   describe('unrunnableAccountRefusal', () => {

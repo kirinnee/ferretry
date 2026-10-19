@@ -45,12 +45,10 @@ export interface FyRenderShellArtifacts {
   readonly shell: string;
   readonly mermaid: string;
   readonly lottie: string;
-  /** The `html` shell: author code runs here, under its own policy. */
-  readonly html: string;
 }
 
 /**
- * The four generated names, resolved under whichever directory is asked for.
+ * The three generated names, resolved under whichever directory is asked for.
  *
  * WHY THIS TAKES A DIRECTORY. Production writes them into `public/` for Vite and
  * the deploy pipeline, and that is still the default below. The integration
@@ -61,7 +59,6 @@ export interface FyRenderShellArtifacts {
  * load.
  */
 export const fyRenderShellArtifactsIn = (directory: string): FyRenderShellArtifacts => ({
-  html: resolve(directory, 'fy-render-html.html'),
   lottie: resolve(directory, 'fy-render-lottie.js'),
   mermaid: resolve(directory, 'fy-render-mermaid.js'),
   shell: resolve(directory, 'fy-render-sandbox.html'),
@@ -594,73 +591,6 @@ const shellDocument = (bootstrap: Bundle, libraries: readonly Bundle[]): string 
 `;
 };
 
-/**
- * The `html` shell's policy, and why it is NOT the library shell's.
- *
- * This document exists to run code an agent wrote, so its `script-src` cannot be
- * a list of build-time hashes: it is `'unsafe-inline'`, which also covers the
- * bootstrap. Everything else is closed. `default-src 'none'` and an explicit
- * `connect-src 'none'` refuse fetch, XHR, WebSocket, EventSource and beacons;
- * no `frame-src`, `worker-src` or `object-src` is granted, so they fall back to
- * `'none'`; images, media and fonts may come only from `data:` and `blob:` —
- * what a self-contained page can carry inside itself. `form-action 'none'` and
- * `base-uri 'none'` are stated because they do not fall back to `default-src`.
- * There is no `'unsafe-eval'`: a page that needs `eval` is not an illustration.
- *
- * What this policy does NOT govern is navigation, prerender and WebRTC — the
- * measured residual `docs/fy-render.md` gap 1 states. The frame's opaque origin
- * is what keeps the app's storage, document and tokens out of reach; this policy
- * is what keeps ordinary requests out of the frame.
- */
-const HTML_SHELL_POLICY = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  'img-src data: blob:',
-  'media-src data: blob:',
-  'font-src data:',
-  "connect-src 'none'",
-  "form-action 'none'",
-  "base-uri 'none'",
-].join('; ');
-
-const htmlShellDocument = (bootstrap: string): string => `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="${HTML_SHELL_POLICY}" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <meta name="robots" content="noindex" />
-    <title>fy-render interactive page</title>
-    <style>
-      html {
-        background: Canvas;
-        color: CanvasText;
-        font-family: ui-sans-serif, system-ui, sans-serif;
-      }
-      /* Frameless in the message column, so the page starts flush with the prose around it. */
-      body {
-        margin: 0;
-      }
-    </style>
-  </head>
-  <body>
-    <script>${bootstrap}</script>
-  </body>
-</html>
-`;
-
-/** The same build-time stop the library shell has, for the one that runs author code. */
-const assertHtmlShellContract = (shell: string): void => {
-  const policy = /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/u.exec(shell)?.[1];
-  if (policy !== HTML_SHELL_POLICY) throw new Error('❌ the html shell does not carry its exact policy');
-  for (const forbidden of ["'unsafe-eval'", "'self'", 'http:', 'https:', 'allow-same-origin'])
-    if (shell.includes(forbidden)) throw new Error(`❌ the html shell gained ${forbidden}`);
-  if (/<script[^>]+src=/iu.test(shell)) throw new Error('❌ the html shell carries an external script source');
-  if (/<link[^>]/iu.test(shell) || /\bhref=/iu.test(shell))
-    throw new Error('❌ the html shell carries a linked resource the frame would have to fetch');
-};
-
 interface BuiltShell {
   readonly shell: string;
   readonly bundles: readonly Bundle[];
@@ -705,16 +635,10 @@ export const buildFyRenderShell = async (
   const shell = shellDocument(bootstrap, [mermaid, lottie]);
   assertShellContract(shell, [bootstrap, mermaid, lottie]);
 
-  const htmlBootstrap = escapeForInlineScript(await build('html-bootstrap.ts'));
-  assertInvariants('html-bootstrap', htmlBootstrap);
-  const htmlShell = htmlShellDocument(htmlBootstrap);
-  assertHtmlShellContract(htmlShell);
-
   await mkdir(directory, { recursive: true });
   await writeFile(artifacts.mermaid, mermaid.text, 'utf8');
   await writeFile(artifacts.lottie, lottie.text, 'utf8');
   await writeFile(artifacts.shell, shell, 'utf8');
-  await writeFile(artifacts.html, htmlShell, 'utf8');
 
   return { artifacts, bundles: [bootstrap, mermaid, lottie], shell };
 };
