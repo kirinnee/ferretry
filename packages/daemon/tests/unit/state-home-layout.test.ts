@@ -153,6 +153,7 @@ describe('foundation paths', () => {
       // rather than in a daemon-wide table so a pane can only ever be claimed by the session that
       // owns this directory — the sweep kills nothing it cannot find a registration for here.
       terminalPane: '/tmp/fy-home/state/sessions/session-01/terminal-pane.json',
+      media: '/tmp/fy-home/state/sessions/session-01/media',
     });
   });
 
