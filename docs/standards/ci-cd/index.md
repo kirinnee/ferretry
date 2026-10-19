@@ -20,8 +20,9 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 GitHub's free hosted runners cap how many jobs run at once, and a busy day queues pull requests
 behind each other. The heaviest Linux jobs therefore run on **Namespace** runners
-(`nscloud-ubuntu-24.04-amd64-4x8-with-cache`): `PWA Settings Geometry` / `Full Gallery`, `Unit Tests`,
-`Integration Tests` and the `E2E Shard`s. They add capacity rather than replace it — every other job,
+(`nscloud-ubuntu-24.04-amd64-4x8-with-cache`): `PWA Settings Geometry` / `Full Gallery`, `Unit Tests` and the
+`E2E Shard`s. `Integration Tests` stay on GitHub: its real-Chrome browser journeys and its
+same-filesystem rename checks depend on the `ubuntu-latest` image. They add capacity rather than replace it — every other job,
 and every macOS job, stays on GitHub, where a public repository's minutes are free and the macOS jobs
 never queue.
 
