@@ -57,6 +57,7 @@ import { joinWords, type NearLiveState } from '../lib/stt/near-live.ts';
 import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
+import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
 
 /**
@@ -168,6 +169,8 @@ export interface UseDictationOptions {
   readonly meter?: MicMeterPort | null;
   /** Parakeet on this device. Read from the app store when omitted; `null` means not available here. */
   readonly parakeet?: ParakeetVoice | null;
+  /** The machine's cleanup settings (voice.yaml); the defaults when absent. Only the hosted providers read them. */
+  readonly voiceCleanup?: VoiceCleanup;
   /** Optional text-only correction transport through the paired daemon. */
   readonly enhancementFetch?: RemoteEnhancementFetch;
   readonly disabled?: boolean;
@@ -318,8 +321,11 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     current.onDraft({ ...result, ...(enhancementError ? { enhancementError } : {}) });
   }, []);
 
-  /** Recent conversation for the enhancer, or nothing. Never an error. */
-  const readContext = useCallback(async (): Promise<string[]> => {
+  /**
+   * Recent conversation for the enhancer, or nothing. Never an error. On-device correction mines
+   * vocabulary and wants enough messages to be evidence; a hosted model only spells names from it.
+   */
+  const readContext = useCallback(async (needsEvidence: boolean): Promise<string[]> => {
     const current = optionsRef.current;
     if (current.sessionId === undefined || current.api === undefined) return [];
     try {
@@ -327,7 +333,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         current.api.history(current.sessionId, undefined, CONTEXT_FETCH_LIMIT),
       );
       const recent = extractContextMessages(events);
-      return hasUsableContext(recent) ? recent : [];
+      return !needsEvidence || hasUsableContext(recent) ? recent : [];
     } catch {
       return [];
     }
@@ -340,7 +346,16 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       const active = current.settings;
       if (!active.enhancement) return raw;
       const { entries } = sttDictionary(active);
-      const context = await readContext();
+      const cleanup = current.voiceCleanup ?? DEFAULT_VOICE_CLEANUP;
+      const remote = isRemoteEnhancementProvider(active.enhancementProvider);
+      // Cleanup switched off on the machine: nothing is sent, nothing is spent.
+      if (remote && cleanup.style === 'off') return raw;
+      // A hosted provider sees the conversation only when the machine says so, and only the latest messages.
+      let context: string[] = [];
+      if (!remote) context = await readContext(true);
+      else if (cleanup.useConversation) {
+        context = (await readContext(false)).slice(-cleanup.conversationMessages);
+      }
       if (!isCurrent(token)) return raw;
 
       if (isRemoteEnhancementProvider(active.enhancementProvider)) {

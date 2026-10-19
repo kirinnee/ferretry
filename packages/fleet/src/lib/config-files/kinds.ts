@@ -250,11 +250,15 @@ function learningLoosening(before: LearningConfig, after: LearningConfig): reado
 function voiceLoosening(before: VoiceConfig, after: VoiceConfig): readonly string[] {
   const from = before.postProcessing;
   const to = after.postProcessing;
-  if (to.provider === 'off') return [];
   const destination = to.provider === 'login' ? `the login ${to.login ?? ''}`.trim() : to.provider;
-  return from.provider === to.provider && from.login === to.login
-    ? []
-    : [`dictated text now goes to ${destination} to be cleaned up`];
+  const sends = to.provider !== 'off' && to.style !== 'off';
+  const wasSending = from.provider !== 'off' && from.style !== 'off';
+  const moved = sends && (!wasSending || from.provider !== to.provider || from.login !== to.login);
+  const context = to.useConversation && !from.useConversation && to.style !== 'off';
+  return [
+    ...(moved ? [`dictated text now goes to ${destination} to be cleaned up`] : []),
+    ...(context ? ['recent conversation messages may now go to the cleanup provider to help clean up dictation'] : []),
+  ];
 }
 
 /**
