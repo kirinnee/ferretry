@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  PassiveLearningChip,
+  PASSIVE_LEARNING_LABEL,
+  PassiveLearningMark,
   type PassiveLearningState,
   usePassiveLearning,
 } from '../../../../src/features/learning/passive-learning.tsx';
 import { interact, mount } from '../../../support/dom.ts';
 import { AT, fakeLearningDaemon, learningDaemon } from '../../../support/learning.ts';
-import { textOf, waitFor } from '../../../support/learning-dom.ts';
+import { waitFor } from '../../../support/learning-dom.ts';
 
 describe('passive learning per ferret', () => {
   it('reads which ferrets learn, re-reads on its interval, and records a switch', async () => {
@@ -48,9 +49,15 @@ describe('passive learning per ferret', () => {
     await pending;
   });
 
-  it('renders the chip', async () => {
-    const view = await mount(<PassiveLearningChip />);
-    expect(textOf(view.container)).toBe('Learning: passive');
+  it('renders only the cap, with the whole state in its name and tooltip', async () => {
+    const view = await mount(<PassiveLearningMark />);
+    const mark = view.container.querySelector('[data-learning-passive]');
+    expect(mark?.textContent).toBe('');
+    expect(mark?.querySelector('svg')).not.toBeNull();
+    expect(mark?.getAttribute('role')).toBe('img');
+    expect(mark?.getAttribute('aria-label')).toBe(PASSIVE_LEARNING_LABEL);
+    expect(mark?.getAttribute('title')).toBe(PASSIVE_LEARNING_LABEL);
+    expect(PASSIVE_LEARNING_LABEL.startsWith('Learning: passive')).toBe(true);
     await view.unmount();
   });
 });
