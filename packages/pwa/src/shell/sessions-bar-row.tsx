@@ -8,6 +8,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import type { ReactNode } from 'react';
 import { PassiveLearningMark } from '../features/learning/passive-learning.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -24,6 +25,8 @@ export function SessionsBarRow({
   learningPassive,
   machine,
   onNavigate,
+  depth,
+  children,
 }: {
   readonly view: SessionView;
   /** The machine the session runs on, which its link opens. */
@@ -33,6 +36,10 @@ export function SessionsBarRow({
   /** Names the machine on the row, in place of the badge. Only where nothing else says it. */
   readonly machine?: string;
   readonly onNavigate: (to: string) => void;
+  /** Set on a row inside a branch of the tree: its indent, in steps. */
+  readonly depth?: number;
+  /** The branch beneath the row: its fold button and its children. */
+  readonly children?: ReactNode;
 }) {
   const name = displayCallsign(view.config.teammate) || view.config.label || view.config.id;
   const waiting = needsYou(view);
@@ -40,7 +47,7 @@ export function SessionsBarRow({
   const directory = sessionsBarDirectory(view);
   const question = pendingQuestionPreview(view);
   return (
-    <li>
+    <li data-sbar-depth={depth}>
       <RouteLink
         aria-current={active ? 'page' : undefined}
         className="fy-sbar__session"
@@ -72,6 +79,7 @@ export function SessionsBarRow({
           <bdi>{directory}</bdi>
         </span>
       </RouteLink>
+      {children}
     </li>
   );
 }

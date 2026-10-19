@@ -19,6 +19,8 @@ import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
 import { sessionsBarSubline } from './sessions-bar-model.ts';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
+import { sessionTree } from './sessions-bar-tree.ts';
+import { SessionsBarTree } from './sessions-bar-tree.tsx';
 import { StatusMark } from './status-mark.tsx';
 
 export interface SessionsBarMachinesProps {
@@ -94,18 +96,14 @@ export function SessionsBarMachines({
                     <span className="truncate">{group.name}</span>
                     <span className="fy-sbar__count">{group.rows.length}</span>
                   </h3>
-                  <ul>
-                    {group.rows.map(row => (
-                      <SessionsBarRow
-                        active={active(machine.daemonId, row)}
-                        daemonId={machine.daemonId}
-                        key={row.config.id}
-                        learningPassive={learns(machine.daemonId, row)}
-                        onNavigate={onNavigate}
-                        view={row}
-                      />
-                    ))}
-                  </ul>
+                  <SessionsBarTree
+                    activeSessionId={machine.daemonId === daemonId ? activeSessionId : null}
+                    daemonId={machine.daemonId}
+                    entries={sessionTree(group.rows, machine.sessions)}
+                    isActive={row => active(machine.daemonId, row)}
+                    learns={row => learns(machine.daemonId, row)}
+                    onNavigate={onNavigate}
+                  />
                 </div>
               ))
             )}
