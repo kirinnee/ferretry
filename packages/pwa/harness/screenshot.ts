@@ -46,6 +46,7 @@ import type { Locator, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
+import { assertFixedElementsClear } from './landing-geometry.ts';
 import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -1801,7 +1802,9 @@ if (process.argv.includes('--landing-only')) {
       { name: 'landing', path: '/' },
       { name: 'get-started', path: '/get-started/' },
     ] as const;
-    const shots = VIEWPORTS.flatMap(viewport =>
+    // 360 is the narrowest phone a visitor still has; the fixed-element check runs at every width.
+    const landingViewports = [{ name: 'small', width: 360, height: 740 }, ...VIEWPORTS] as const;
+    const shots = landingViewports.flatMap(viewport =>
       (['light', 'dark'] as const).flatMap(scheme => pages.map(shot => ({ viewport, scheme, shot }))),
     );
     for (const { viewport, scheme, shot } of shots) {
@@ -1819,9 +1822,28 @@ if (process.argv.includes('--landing-only')) {
         });
         const page = await context.newPage();
         await page.goto(new URL(shot.path, landingServer.url).toString());
+        const label = `${shot.name} at ${viewport.width}px in ${scheme}`;
+        const geometry = await assertFixedElementsClear(page, label);
+        process.stdout.write(
+          `📐 ${label}: ${geometry.fixedSeen} fixed-element sightings over ${geometry.stops} scroll stops, none collide\n`,
+        );
+        // A landing that never showed its floating button measured nothing: the check must have had something to check.
+        if (shot.name === 'landing' && geometry.fixedSeen === 0)
+          fail(`${label}: the floating button was never visible`);
         const target = join(outDir, `${shot.name}-${viewport.name}-${scheme}.png`);
         await page.screenshot({ path: target, fullPage: true });
         process.stdout.write(`📸 ${shot.name} ${viewport.name} ${scheme} -> ${target}\n`);
+        // The bottom of the page as a visitor sees it: the closing buttons with a floating button that must not cover them.
+        if (shot.name === 'landing') {
+          // Mid-page, where the floating button is up and nothing else is.
+          await page.evaluate(() => window.scrollTo(0, window.innerHeight * 2));
+          await page.screenshot({ path: join(outDir, `landing-${viewport.name}-${scheme}-floating.png`) });
+        } else {
+          await page.locator('#agent').scrollIntoViewIfNeeded();
+          await page.screenshot({ path: join(outDir, `get-started-${viewport.name}-${scheme}-agent.png`) });
+        }
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        await page.screenshot({ path: join(outDir, `${shot.name}-${viewport.name}-${scheme}-bottom.png`) });
       } finally {
         await context.close();
       }

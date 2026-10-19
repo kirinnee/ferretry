@@ -101,6 +101,13 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
+      .nav-link small {
+        color: var(--muted);
+        font: inherit;
+      }
+      .jump {
+        font-weight: 700;
+      }
       .hero {
         border-bottom: 1px solid var(--line);
       }
@@ -241,6 +248,7 @@
       }
       .tab:focus-visible,
       .copy:focus-visible,
+      .jump:focus-visible,
       .button:focus-visible,
       .brand:focus-visible,
       .nav-link:focus-visible {
@@ -360,6 +368,61 @@
       }
       .command pre code.continued::before {
         content: '  ';
+      }
+      .agent {
+        margin-top: 30px;
+        padding-top: 26px;
+        border-top: 1px solid var(--line);
+      }
+      .agent[hidden] {
+        display: none;
+      }
+      .agent h3 {
+        margin: 0 0 10px;
+        font-family: var(--display);
+        font-size: 1.45rem;
+        font-weight: 500;
+        letter-spacing: -0.03em;
+      }
+      .agent .note {
+        margin-bottom: 16px;
+      }
+      .command.prompt pre {
+        max-height: 340px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .command.prompt pre code {
+        white-space: inherit;
+        font-weight: 500;
+      }
+      .command.prompt pre code::before {
+        content: none;
+      }
+      .more {
+        margin-top: 22px;
+      }
+      .more summary {
+        min-height: 44px;
+        cursor: pointer;
+        color: var(--muted);
+        font: 800 11px/44px var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .more summary:focus-visible {
+        outline: 3px solid var(--lime-deep);
+        outline-offset: 3px;
+      }
+      .more[open] summary {
+        margin-bottom: 8px;
+      }
+      .more .command + .command {
+        margin-top: 22px;
+      }
+      .more .note {
+        margin-bottom: 14px;
       }
       .troubleshooting {
         border-bottom: 1px solid var(--line);
@@ -514,7 +577,9 @@
     <header class="topbar">
       <div class="frame">
         <a class="brand" href="/?stay" aria-label="Ferretry home"><img src="/fleet-grid.svg" alt="" />Ferretry</a>
-        <a class="nav-link" href="/app">Open the app ↗</a>
+        <a class="nav-link" href="/app" title="Already set up? Go to your machines."
+          ><small>Already set up?</small> Open the app ↗</a
+        >
       </div>
     </header>
     <main id="main">
@@ -523,8 +588,11 @@
           <p class="eyebrow">Get started</p>
           <h1 id="title">Four steps to <span>your fleet</span></h1>
           <p class="intro">
-            Install Ferretry on the computer where Claude Code or Codex runs, start its daemon, and pair your phone.
-            About five minutes.
+            Set up a new computer: install Ferretry where Claude Code or Codex runs, start its daemon, and pair your
+            phone. About five minutes.
+          </p>
+          <p class="note after">
+            Rather not type? <a class="jump" href="#agent">Let your agent set it up</a> with one prompt.
           </p>
           <ul class="facts" aria-label="Before you start">
             <li>Latest release <strong>v%FY_RELEASE_VERSION%</strong></li>
@@ -559,7 +627,7 @@
               </div>
               <div class="panel" id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" data-os="macos">
                 <h3 class="panel-title">macOS</h3>
-                <div class="command">
+                <div class="command" data-agent-install>
                   <header><span>Homebrew</span><button class="copy" type="button" hidden>Copy</button></header>
                   <pre><code data-command>brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry</code><code data-command>brew install --cask ferretry</code></pre>
                 </div>
@@ -567,18 +635,18 @@
               </div>
               <div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" data-os="linux">
                 <h3 class="panel-title">Linux</h3>
-                <div class="command">
+                <div class="command" data-agent-install>
                   <header><span>Debian / Ubuntu</span><button class="copy" type="button" hidden>Copy</button></header>
                   <pre><code data-command>echo &quot;deb [trusted=yes] https://apt.fury.io/kirinnee97/ /&quot; | sudo tee /etc/apt/sources.list.d/fury.list</code><code data-command>sudo apt update</code><code data-command>sudo apt install fy</code></pre>
                 </div>
-                <div class="command">
+                <div class="command" data-agent-install>
                   <header><span>Fedora / RHEL</span><button class="copy" type="button" hidden>Copy</button></header>
                   <pre><code data-command>sudo tee /etc/yum.repos.d/fury.repo &lt;&lt;&#39;EOF&#39;</code><code class="continued" data-command>[fury]</code><code class="continued" data-command>name=Gemfury kirinnee97</code><code class="continued" data-command>baseurl=https://yum.fury.io/kirinnee97/</code><code class="continued" data-command>enabled=1</code><code class="continued" data-command>gpgcheck=0</code><code class="continued" data-command>EOF</code><code data-command>sudo dnf install fy</code></pre>
                 </div>
               </div>
               <div class="panel" id="panel-nix" role="tabpanel" aria-labelledby="tab-nix" data-os="nix">
                 <h3 class="panel-title">Nix</h3>
-                <div class="command">
+                <div class="command" data-agent-install>
                   <header><span>Install</span><button class="copy" type="button" hidden>Copy</button></header>
                   <pre><code data-command>nix profile install github:kirinnee/ferretry</code></pre>
                 </div>
@@ -604,6 +672,20 @@
                 It checks the download and puts both programs in <code>~/.local/bin</code>. Every option is in
                 <a href="https://github.com/kirinnee/ferretry/blob/main/INSTALLATION.md">INSTALLATION.md</a>.
               </p>
+              <section class="agent" id="agent" aria-labelledby="agent-title" hidden>
+                <h3 id="agent-title">Or let your agent set it up.</h3>
+                <p class="note">
+                  Paste this into Claude Code or Codex, in a terminal on the machine you want to use. It follows the tab
+                  you picked (<strong data-agent-os></strong>), runs steps 1 to 3 for you, and stops so you can scan.
+                </p>
+                <div class="command prompt">
+                  <header>
+                    <span>Prompt for <span data-agent-os></span></span
+                    ><button class="copy" type="button" hidden>Copy</button>
+                  </header>
+                  <pre tabindex="0" aria-label="Prompt text"><code data-agent-prompt></code></pre>
+                </div>
+              </section>
             </div>
           </div>
         </li>
@@ -621,7 +703,7 @@
             <div class="work">
               <div class="command">
                 <header><span>On your computer</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy daemon install</code></pre>
+                <pre><code data-key="daemon-install" data-command>fy daemon install</code></pre>
               </div>
             </div>
           </div>
@@ -643,8 +725,26 @@
             <div class="work">
               <div class="command">
                 <header><span>On your computer</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy pair</code></pre>
+                <pre><code data-key="pair" data-command>fy pair</code></pre>
               </div>
+              <details class="more">
+                <summary>Pairing from a script or an agent</summary>
+                <p class="note">
+                  <code>fy pair</code> waits up to two minutes for the scan. Add <code>--no-wait</code> to print the QR
+                  code and link and exit instead; add <code>--open</code> too when you are sitting at this computer, to
+                  hand the link to its browser.
+                </p>
+                <div class="command">
+                  <header><span>At this computer</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-key="pair-open" data-command>fy pair --open --no-wait</code></pre>
+                </div>
+                <div class="command">
+                  <header>
+                    <span>Over SSH or from a script</span><button class="copy" type="button" hidden>Copy</button>
+                  </header>
+                  <pre><code data-key="pair-print" data-command>fy pair --no-wait</code></pre>
+                </div>
+              </details>
               <p class="note after">
                 No password to set: your phone registers a passkey, and risky actions ask for it later.
               </p>
@@ -684,7 +784,7 @@
               <p>Says whether it is serving, and what started it.</p>
               <div class="command">
                 <header><span>Status</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy daemon status</code></pre>
+                <pre><code data-key="daemon-status" data-command>fy daemon status</code></pre>
               </div>
             </li>
             <li>
@@ -692,7 +792,7 @@
               <p>Prints the daemon's log.</p>
               <div class="command">
                 <header><span>Logs</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-command>fy daemon logs</code></pre>
+                <pre><code data-key="daemon-logs" data-command>fy daemon logs</code></pre>
               </div>
             </li>
             <li>
@@ -724,8 +824,11 @@
       <section class="finish" aria-labelledby="finish-title">
         <div class="frame">
           <div>
-            <h2 id="finish-title">Already paired?</h2>
-            <p>Open the app on this device. To add another computer, run steps 1 to 3 on it.</p>
+            <h2 id="finish-title">Already set up?</h2>
+            <p>
+              Open the app and go to your machines. This guide is only for a computer that has no Ferretry yet: to add
+              another one, run steps 1 to 3 on it.
+            </p>
           </div>
           <a class="button" href="/app">Open the app</a>
         </div>
@@ -747,17 +850,6 @@
         var panels = Array.prototype.slice.call(group.querySelectorAll('[role="tabpanel"]'));
         var ua = (navigator.userAgent || '') + ' ' + (navigator.platform || '');
         var guess = /Linux|X11|CrOS|Android/.test(ua) && !/Mac/.test(ua) ? 'linux' : 'macos';
-        function select(os, focus) {
-          tabs.forEach(function (tab) {
-            var on = tab.getAttribute('data-os') === os;
-            tab.setAttribute('aria-selected', on ? 'true' : 'false');
-            tab.tabIndex = on ? 0 : -1;
-            if (on && focus) tab.focus();
-          });
-          panels.forEach(function (panel) {
-            panel.hidden = panel.getAttribute('data-os') !== os;
-          });
-        }
         tabs.forEach(function (tab, index) {
           tab.addEventListener('click', function () {
             select(tab.getAttribute('data-os'), false);
@@ -770,22 +862,99 @@
           });
         });
         group.querySelector('[role="tablist"]').hidden = false;
+
+        /* THE AGENT PROMPT IS BUILT FROM THE COMMANDS ON THIS PAGE, never retyped: the install lines come from
+           the selected tab's blocks, the rest from the keyed lines in steps 2 and 3 and in Troubleshooting. A
+           command that changes in INSTALLATION.md and here changes in the prompt with it. */
+        var agent = document.querySelector('.agent');
+        var promptCode = agent.querySelector('[data-agent-prompt]');
+        var osNames = { macos: 'macOS', linux: 'Linux', nix: 'Nix' };
+        function lines(scope) {
+          return Array.prototype.map
+            .call(scope.querySelectorAll('[data-command]'), function (line) {
+              return line.textContent;
+            })
+            .join('\n');
+        }
+        function key(name) {
+          return document.querySelector('[data-key="' + name + '"]').textContent;
+        }
+        function agentPrompt(os) {
+          var fence = '```';
+          var blocks = Array.prototype.slice.call(
+            group.querySelector('[role="tabpanel"][data-os="' + os + '"]').querySelectorAll('[data-agent-install]'),
+          );
+          var install = blocks
+            .map(function (block) {
+              var label = block.querySelector('header span').textContent;
+              return (blocks.length > 1 ? label + ':\n' : '') + fence + 'bash\n' + lines(block) + '\n' + fence;
+            })
+            .join('\n\n');
+          var which =
+            os === 'linux'
+              ? 'Install Ferretry. Use the block for this distribution (apt on Debian or Ubuntu, dnf on Fedora or RHEL):'
+              : 'Install Ferretry (' + osNames[os] + '):';
+          return [
+            'Set up Ferretry on this computer with the commands below, then stop so I can pair my phone.',
+            '',
+            'Rules:',
+            '- Ask me before you run anything that needs sudo.',
+            '- Never print, paste or save a secret, token or the pairing code anywhere but this terminal.',
+            '- Run only the commands listed here. If one fails, show me its error and stop.',
+            '',
+            '1. ' + which,
+            install,
+            '',
+            '2. Start the daemon: ' + key('daemon-install'),
+            '',
+            '3. Check it: ' + key('daemon-status'),
+            '   Success: it says the daemon is serving. If it does not, run ' +
+              key('daemon-logs') +
+              ', tell me what it says, and stop.',
+            '',
+            '4. Pair my phone. If I am sitting at this computer, run ' +
+              key('pair-open') +
+              '; otherwise (SSH, a server) run ' +
+              key('pair-print') +
+              '.',
+            '   Either one prints a QR code and a link, then exits.',
+            '',
+            '5. Stop here. Tell me to scan the QR code with my phone camera within two minutes (the code works once). If the QR is hard to read, tell me to run ' +
+              key('pair') +
+              ' in my own terminal. Do nothing else.',
+          ].join('\n');
+        }
+        function select(os, focus) {
+          tabs.forEach(function (tab) {
+            var on = tab.getAttribute('data-os') === os;
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+            tab.tabIndex = on ? 0 : -1;
+            if (on && focus) tab.focus();
+          });
+          panels.forEach(function (panel) {
+            panel.hidden = panel.getAttribute('data-os') !== os;
+          });
+          promptCode.textContent = agentPrompt(os);
+          Array.prototype.forEach.call(agent.querySelectorAll('[data-agent-os]'), function (name) {
+            name.textContent = osNames[os];
+          });
+        }
+        agent.hidden = false;
         select(guess, false);
 
         var status = document.querySelector('[data-copy-status]');
         Array.prototype.slice.call(document.querySelectorAll('.command')).forEach(function (block) {
           var button = block.querySelector('.copy');
-          var text = Array.prototype.slice
-            .call(block.querySelectorAll('[data-command]'))
-            .map(function (line) {
-              return line.textContent;
-            })
-            .join('\n');
+          var prompt = block.querySelector('[data-agent-prompt]');
+          function current() {
+            return prompt ? prompt.textContent : lines(block);
+          }
           if (!navigator.clipboard) return;
           button.hidden = false;
-          button.setAttribute('aria-label', 'Copy: ' + text);
+          if (!prompt) button.setAttribute('aria-label', 'Copy: ' + current());
+          else button.setAttribute('aria-label', 'Copy the prompt for your agent');
           button.addEventListener('click', function () {
-            navigator.clipboard.writeText(text).then(
+            navigator.clipboard.writeText(current()).then(
               function () {
                 button.textContent = 'Copied';
                 status.textContent = 'Copied to the clipboard.';
