@@ -505,6 +505,28 @@ The tiers exist as separate configs precisely so the inner loop stays fast: `tas
 never compiles a binary. See [Taskfile Conventions](../taskfile/index.md) for the task surface
 and [CI/CD](../ci-cd/index.md) for how these run in the pipeline.
 
+### No test launches a real harness, and no test outlives its tmux server
+
+On 2026-10-19 the dev box held 92 tmux servers left by test runs, some four days old, and three of
+them ran the owner's real Claude Code — a leaked e2e daemon whose runtime wrapper ran `exec claude`
+by name against the host `PATH`. Three rules now hold, and each has a mechanism behind it:
+
+- **Fakes first.** A test that starts a session puts a fake `claude` and `codex` first on the
+  daemon's `PATH` and names its harness explicitly (`FY_CLAUDE_BIN` / `FY_CODEX_BIN` or an absolute
+  wrapper). The e2e fixture does it for every journey (`paths.harnessBin`).
+- **The daemon refuses a real one.** A daemon whose `FY_HOME` is under a temporary directory, or that
+  was started with `FERRETRY_TEST=1`, checks every pane launch: if the program, `claude` or `codex`
+  resolves into a real install, the launch fails with `test mode refused to launch a real harness`
+  (`packages/daemon/src/lib/tmux/harness-guard.ts`).
+- **A leak fails the run.** `scripts/ci/test.sh` and the `task test*` targets run every unit, int and
+  SIT invocation through
+  `scripts/test/swept.sh`, which gives the run its own `TMPDIR`, exports `FERRETRY_TEST=1`, and kills
+  — then fails on — any tmux server still running under that directory when the run ends. The e2e
+  runner does the same for its run root. Killing is by process (`scripts/test/tmux-sweep.ts`), not by
+  socket, because a leaked server usually outlived the socket file its test deleted. A fixture that
+  creates a tmux socket still kills its own server in `afterAll`/`finally`; the sweep is the net, not
+  the cleanup.
+
 ---
 
 ## Quick Checklist

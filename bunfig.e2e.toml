@@ -13,3 +13,5 @@ root = "tests/e2e"
 # this tier is invoked: `scripts/test/run-e2e.sh`.
 # Do not restore the key here — a value that is read by nothing is worse than no
 # value, because the next reader believes it.
+# The suite-level sweep for journeys Bun abandoned at their timeout — see the file.
+preload = ["./tests/e2e/support/teardown.ts"]

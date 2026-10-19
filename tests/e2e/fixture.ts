@@ -17,6 +17,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { constants as osConstants, tmpdir, userInfo } from 'node:os';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { sweepTmuxServers } from '../../scripts/test/tmux-sweep.ts';
 
 export interface CommandResult {
   readonly code: number;
@@ -46,6 +47,12 @@ export interface E2ePaths {
   readonly fyHome: string;
   readonly home: string;
   readonly bin: string;
+  /**
+   * Fake `claude` and `codex`, first on every child's PATH — including a daemon that owns its private
+   * tmux, which gets no `bin` router. A generated runtime wrapper execs its harness BY NAME, so without
+   * this directory that name resolved on the host PATH and a journey launched the owner's real Claude.
+   */
+  readonly harnessBin: string;
   readonly tmuxSocket: string;
   readonly harnessScenario: string;
   readonly harnessInvocations: string;
@@ -87,6 +94,42 @@ interface CapturedProcess {
 const REPOSITORY_ROOT = resolve(import.meta.dir, '../..');
 const FORBIDDEN_HOME_NAMES = ['.kteam', '.ferretry'] as const;
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** The harnesses every environment fakes before anything can look one up on the host PATH. */
+const FAKED_HARNESSES = ['claude', 'codex'] as const;
+
+/**
+ * Every journey root not yet disposed, and the last line of defence for them.
+ *
+ * A journey that times out never reaches its `dispose`: Bun abandons the callback and moves on, and a
+ * runner killed mid-journey runs no `finally` at all. Either way the tmux servers under that root would
+ * outlive the suite. `bun test` emits no `exit` event, so the sweep is an `afterAll` registered by
+ * `support/teardown.ts` (the tier's preload), plus a handler for the signals that end a run early.
+ */
+const LIVE_ROOTS = new Set<string>();
+let signalGuardInstalled = false;
+
+/** Kills every tmux server under a journey root that never reached its own cleanup. */
+export function sweepUndisposedRoots(): void {
+  if (LIVE_ROOTS.size === 0) return;
+  for (const server of sweepTmuxServers([...LIVE_ROOTS]))
+    console.error(`🧹 killed tmux server ${String(server.pid)} of an undisposed journey on ${server.socket}`);
+  LIVE_ROOTS.clear();
+}
+
+function guardProcessExit(): void {
+  if (signalGuardInstalled) return;
+  signalGuardInstalled = true;
+  for (const [signal, code] of [
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+    ['SIGHUP', 129],
+  ] as const) {
+    process.once(signal, () => {
+      sweepUndisposedRoots();
+      process.exit(code);
+    });
+  }
+}
 
 function expandHome(input: string, home: string): string {
   if (input === '~') return home;
@@ -415,11 +458,14 @@ export class E2eEnvironment {
     const suiteRoot = await assertNoLiveStatePath(suiteRootInput, 'E2E run root');
     await mkdir(suiteRoot, { recursive: true });
     const root = await mkdtemp(join(suiteRoot, 'fy-e2e-'));
+    guardProcessExit();
+    LIVE_ROOTS.add(root);
     const paths: E2ePaths = {
       root,
       fyHome: join(root, 'state'),
       home: join(root, 'home'),
       bin: join(root, 'bin'),
+      harnessBin: join(root, 'harness-bin'),
       tmuxSocket: join(root, 'tmux.sock'),
       harnessScenario: join(root, 'harness-scenario.json'),
       harnessInvocations: join(root, 'harness-invocations.jsonl'),
@@ -434,6 +480,7 @@ export class E2eEnvironment {
         mkdir(paths.fyHome, { recursive: true }),
         mkdir(paths.home, { recursive: true }),
         mkdir(paths.bin, { recursive: true }),
+        mkdir(paths.harnessBin, { recursive: true }),
         mkdir(join(paths.home, '.config'), { recursive: true }),
         mkdir(join(paths.home, '.cache'), { recursive: true }),
         mkdir(join(paths.home, '.local', 'state'), { recursive: true }),
@@ -468,6 +515,7 @@ export class E2eEnvironment {
       } else {
         await Promise.allSettled([apiPortLease?.release(), webSocketPortLease?.release()]);
         await rm(root, { recursive: true, force: true });
+        LIVE_ROOTS.delete(root);
       }
       throw error;
     }
@@ -476,6 +524,7 @@ export class E2eEnvironment {
   private async initialize(): Promise<void> {
     await this.installFixtureExecutable('fake-harness.ts', this.fakeHarnessName);
     await this.installFixtureExecutable('scoped-tmux.sh', 'tmux');
+    for (const harness of FAKED_HARNESSES) await this.installFakeHarness(harness);
     await this.setFakeHarnessScenario({ version: 1, steps: [{ type: 'exit', code: 0 }] });
     await writeFile(this.paths.harnessInvocations, '', 'utf8');
 
@@ -511,19 +560,24 @@ export class E2eEnvironment {
     }
   }
 
-  private async installFixtureExecutable(sourceName: string, targetName: string): Promise<string> {
+  private async installFixtureExecutable(
+    sourceName: string,
+    targetName: string,
+    directory: string = this.paths.bin,
+  ): Promise<string> {
     if (!/^[a-zA-Z0-9._-]+$/.test(targetName) || targetName === '.' || targetName === '..') {
       throw new Error(`invalid E2E executable name: ${targetName}`);
     }
     const source = await assertNoLiveStatePath(join(REPOSITORY_ROOT, 'scripts', 'test', sourceName), sourceName);
-    const target = await assertNoLiveStatePath(join(this.paths.bin, targetName), targetName);
+    const target = await assertNoLiveStatePath(join(directory, targetName), targetName);
     await copyFile(source, target);
     await chmod(target, 0o755);
     return target;
   }
 
+  /** A scenario-driven fake, in `harnessBin`, so it is on PATH in both tmux modes. */
   async installFakeHarness(name: string): Promise<string> {
-    return this.installFixtureExecutable('fake-harness.ts', name);
+    return this.installFixtureExecutable('fake-harness.ts', name, this.paths.harnessBin);
   }
 
   childEnvironment(extra: Readonly<Record<string, string>> = {}): NodeJS.ProcessEnv {
@@ -547,8 +601,10 @@ export class E2eEnvironment {
       FY_E2E_TMUX_SOCKET: this.paths.tmuxSocket,
       FY_E2E_HARNESS_SCRIPT: this.paths.harnessScenario,
       FY_E2E_HARNESS_INVOCATIONS: this.paths.harnessInvocations,
-      PATH: `${this.paths.bin}${delimiter}${process.env.PATH ?? ''}`,
+      PATH: [this.paths.bin, this.paths.harnessBin, process.env.PATH ?? ''].join(delimiter),
       NO_COLOR: '1',
+      // Turns on the daemon's launch guard: a session whose harness resolves to a real install fails.
+      FERRETRY_TEST: '1',
     });
     delete env.TMUX;
     delete env.TMUX_PANE;
@@ -782,7 +838,7 @@ export class E2eEnvironment {
 
     const environment = this.childEnvironment(options.env);
     if (options.useDaemonPrivateTmux === true) {
-      environment.PATH = process.env.PATH ?? '';
+      environment.PATH = [this.paths.harnessBin, process.env.PATH ?? ''].join(delimiter);
       delete environment.FY_E2E_REAL_TMUX;
       delete environment.FY_E2E_TMUX_SOCKET;
     }
@@ -850,6 +906,20 @@ export class E2eEnvironment {
         errors.push(new Error(killed.err));
       this.tmuxStarted = false;
     }
+    /**
+     * The daemon's OWN tmux server, which the fixture never started and so never knew to kill. Under
+     * `useDaemonPrivateTmux` it lives at `<FY_HOME>/tmux.sock`, and the `rm` below used to delete that
+     * socket while the server — and whatever harness its panes ran — kept going. A server the socket no
+     * longer reaches is found by its argv instead (`scripts/test/tmux-sweep.ts`), so nothing under this
+     * journey's root outlives it.
+     */
+    await this.runRealTmux(['-S', join(this.paths.fyHome, 'tmux.sock'), 'kill-server']).catch(() => undefined);
+    try {
+      sweepTmuxServers([this.paths.root]);
+    } catch (error) {
+      errors.push(error);
+    }
+    LIVE_ROOTS.delete(this.paths.root);
     await this.releasePortLeases().catch(error => errors.push(error));
 
     const safeRoot = await assertNoLiveStatePath(this.paths.root, 'owned E2E cleanup root').catch(error => {
