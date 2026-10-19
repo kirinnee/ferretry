@@ -15,11 +15,19 @@ import {
   sendLiteralArguments,
 } from './commands.ts';
 import type { PaneState, TmuxCommandPort, TmuxLaunch } from './contracts.ts';
+import type { TmuxLaunchGuard } from './harness-guard.ts';
 import { type PaneIdentity, parsePaneIdentity, parsePaneMetadata, promptIsReady } from './pane.ts';
 
 /** Orchestrates only validated tmux commands; spawning remains in an injected adapter. */
 export class TmuxController {
-  constructor(private readonly commands: TmuxCommandPort) {}
+  /**
+   * @param guard Consulted before every launch, and a refusal it throws fails that launch before any
+   *   pane exists. A controller built without one launches whatever it is given, as it always did.
+   */
+  constructor(
+    private readonly commands: TmuxCommandPort,
+    private readonly guard?: TmuxLaunchGuard,
+  ) {}
 
   async alive(session: string): Promise<boolean> {
     return (await this.commands.execute(hasSessionArguments(session))).code === 0;
@@ -68,6 +76,7 @@ export class TmuxController {
   }
 
   async launch(launch: TmuxLaunch): Promise<void> {
+    await this.guard?.check(launch);
     if (await this.alive(launch.session)) throw new Error(`tmux session already exists: ${launch.session}`);
     const created = await this.commands.execute(newSessionArguments(launch));
     if (created.code !== 0) throw new Error(created.stderr.trim() || 'tmux could not create the session');
