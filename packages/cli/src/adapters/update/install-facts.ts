@@ -1,5 +1,12 @@
-import { realpath } from 'node:fs/promises';
-import { type InstallFacts, parseNixProfileList, type SystemPackageManager } from '@ferretry/protocol';
+import { readlink, realpath } from 'node:fs/promises';
+import {
+  type InstallFacts,
+  parseNixProfileList,
+  passesThroughHomeManagerPath,
+  type SystemPackageManager,
+  storePathHops,
+  symlinkHops,
+} from '@ferretry/protocol';
 import type { InstalledDaemonBinary } from '../../lib/daemon/binary.ts';
 import type { CommandOutcome } from '../../lib/daemon/ports.ts';
 import type { IInstallFactsPort } from '../../lib/update/ports.ts';
@@ -40,6 +47,8 @@ export interface HostInstallFactsOptions {
   /** Where a command is on `PATH`, or `undefined` when it is not. */
   readonly which?: (command: string) => string | undefined;
   readonly realPath?: (path: string) => Promise<string>;
+  /** A link's target, or `undefined` when the path is not a link. */
+  readonly readLink?: (path: string) => Promise<string | undefined>;
   readonly timeoutMs?: number;
 }
 
@@ -58,12 +67,14 @@ export class HostInstallFacts implements IInstallFactsPort {
   private readonly run: BoundedRunner;
   private readonly which: (command: string) => string | undefined;
   private readonly realPath: (path: string) => Promise<string>;
+  private readonly readLink: (path: string) => Promise<string | undefined>;
   private readonly timeoutMs: number;
 
   constructor(private readonly options: HostInstallFactsOptions) {
     this.run = options.run ?? boundedRun;
     this.which = options.which ?? (command => Bun.which(command) ?? undefined);
     this.realPath = options.realPath ?? (path => realpath(path));
+    this.readLink = options.readLink ?? (path => readlink(path).catch(() => undefined));
     this.timeoutMs = options.timeoutMs ?? FACT_TIMEOUT_MS;
   }
 
@@ -78,20 +89,28 @@ export class HostInstallFacts implements IInstallFactsPort {
       platform: this.options.platform,
     };
     if (resolvedPath.startsWith('/nix/store/')) {
-      const profile = await this.#nixProfile(resolvedPath);
-      return { ...base, nixProfileElement: profile.element, homeManagerProfile: profile.homeManager };
+      const hops = await symlinkHops(daemon.path, this.readLink);
+      const profile = await this.#nixProfile([resolvedPath, ...storePathHops(hops)]);
+      return {
+        ...base,
+        nixProfileElement: profile.element,
+        homeManagerProfile: profile.homeManager,
+        viaHomeManagerPath: passesThroughHomeManagerPath(hops),
+      };
     }
     return { ...base, systemPackage: await this.#systemPackage(resolvedPath) };
   }
 
-  async #nixProfile(resolvedPath: string): Promise<{ readonly element?: string; readonly homeManager: boolean }> {
+  async #nixProfile(
+    candidates: readonly string[],
+  ): Promise<{ readonly element?: string; readonly homeManager: boolean }> {
     const listed = await this.run(
       ['nix', '--extra-experimental-features', 'nix-command flakes', 'profile', 'list', '--json'],
       this.timeoutMs,
     );
     if (listed.code !== 0) return { homeManager: false };
     try {
-      return parseNixProfileList(JSON.parse(listed.stdout), resolvedPath);
+      return parseNixProfileList(JSON.parse(listed.stdout), candidates);
     } catch {
       return { homeManager: false };
     }

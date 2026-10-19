@@ -52,6 +52,7 @@ const view = {
 const cases: SchemaCase[] = [
   { name: 'system package manager', schema: update.SystemPackageManagerSchema, value: 'dnf' },
   { name: 'nix module manager', schema: update.NixModuleManagerSchema, value: 'nix-darwin' },
+  { name: 'nix system manager', schema: update.NixSystemManagerSchema, value: 'nixos' },
   { name: 'install method', schema: update.InstallMethodSchema, value: { kind: 'homebrew', cask: 'ferretry' } },
   { name: 'step', schema: update.UpdateStepSchema, value: { command: 'fy daemon restart', note: 'now' } },
   { name: 'plan', schema: update.UpdatePlanSchema, value: view.plan },
@@ -133,6 +134,26 @@ describe('classifyInstallMethod', () => {
     ).deepEqual({ kind: 'nix-module', manager: 'nixos' });
   });
 
+  it('calls a per-user system profile home-manager when home-manager built it', () => {
+    const perUser = { launchedPath: '/etc/profiles/per-user/kirin/bin/fyd', resolvedPath: `${STORE}/bin/fyd` };
+    should(classify({ ...perUser, platform: 'darwin', viaHomeManagerPath: true })).deepEqual({
+      kind: 'nix-module',
+      manager: 'home-manager',
+      via: 'nix-darwin',
+    });
+    should(classify({ ...perUser, viaHomeManagerPath: true })).deepEqual({
+      kind: 'nix-module',
+      manager: 'home-manager',
+      via: 'nixos',
+    });
+    should(classify({ ...perUser, platform: 'darwin', viaHomeManagerPath: false })).deepEqual({
+      kind: 'nix-module',
+      manager: 'nix-darwin',
+    });
+    // The user's own nix profile having a home-manager element says nothing about a system profile.
+    should(classify({ ...perUser, homeManagerProfile: true })).deepEqual({ kind: 'nix-module', manager: 'nixos' });
+  });
+
   it('decides a user profile path by what holds it', () => {
     const viaProfile = { launchedPath: `${HOME}/.nix-profile/bin/fyd`, resolvedPath: `${STORE}/bin/fyd` };
     should(classify({ ...viaProfile, nixProfileElement: 'ferretry' })).deepEqual({
@@ -140,6 +161,10 @@ describe('classifyInstallMethod', () => {
       element: 'ferretry',
     });
     should(classify({ ...viaProfile, homeManagerProfile: true })).deepEqual({
+      kind: 'nix-module',
+      manager: 'home-manager',
+    });
+    should(classify({ ...viaProfile, viaHomeManagerPath: true })).deepEqual({
       kind: 'nix-module',
       manager: 'home-manager',
     });
@@ -176,6 +201,7 @@ describe('planUpdate', () => {
         { kind: 'nix-module', manager: 'home-manager' },
         { kind: 'nix-module', manager: 'nix-darwin' },
         { kind: 'nix-module', manager: 'nixos' },
+        { kind: 'nix-module', manager: 'home-manager', via: 'nix-darwin' },
         { kind: 'system-package', manager: 'apt' },
         { kind: 'system-package', manager: 'dnf' },
         { kind: 'standalone', directory: '/opt/fy' },
@@ -186,6 +212,7 @@ describe('planUpdate', () => {
       ['homebrew', 'self'],
       ['nix-profile', 'self'],
       ['nix-shell', 'switch'],
+      ['nix-module', 'manual'],
       ['nix-module', 'manual'],
       ['nix-module', 'manual'],
       ['nix-module', 'manual'],
@@ -211,12 +238,38 @@ describe('planUpdate', () => {
     should(commands({ kind: 'nix-module', manager: 'home-manager' })[1]).equal('home-manager switch --flake .');
     should(commands({ kind: 'nix-module', manager: 'nix-darwin' })[1]).equal('darwin-rebuild switch --flake .');
     should(commands({ kind: 'nix-module', manager: 'nixos' })[1]).equal('sudo nixos-rebuild switch --flake .');
+    should(commands({ kind: 'nix-module', manager: 'home-manager', via: 'nix-darwin' })).deepEqual([
+      'nix flake update ferretry',
+      'darwin-rebuild switch --flake .',
+      'fy daemon restart',
+    ]);
+    should(commands({ kind: 'nix-module', manager: 'home-manager', via: 'nixos' })[1]).equal(
+      'sudo nixos-rebuild switch --flake .',
+    );
     should(commands({ kind: 'system-package', manager: 'apt' })[0]).equal(
       'sudo apt-get update && sudo apt-get install --only-upgrade fy',
     );
     should(commands({ kind: 'system-package', manager: 'yum' })[0]).equal('sudo yum upgrade fy');
     should(commands({ kind: 'standalone', directory: '/opt/fy' })).deepEqual(['fy daemon update']);
     should(commands({ kind: 'unknown', reason: 'x' })).deepEqual([]);
+  });
+  it('says which system manager applies a home-manager install, in the step text', () => {
+    const inside = plan({ kind: 'nix-module', manager: 'home-manager', via: 'nix-darwin' });
+    should(inside)
+      .have.property('explanation')
+      .match(/home-manager configuration, which nix-darwin applies/u);
+    should(inside.steps.map(step => step.note)).deepEqual([
+      'in the flake that holds your home-manager configuration; the input may have another name',
+      'home-manager is applied by this nix-darwin rebuild; there is no separate home-manager switch',
+      undefined,
+    ]);
+    const standalone = plan({ kind: 'nix-module', manager: 'home-manager' });
+    should(standalone)
+      .have.property('explanation')
+      .match(/from your home-manager configuration, which pins/u);
+    should(plan({ kind: 'nix-module', manager: 'nixos' }))
+      .have.property('explanation')
+      .match(/your nixos configuration/u);
   });
 });
 
@@ -227,6 +280,7 @@ describe('descriptions', () => {
       { kind: 'nix-profile', element: 'ferretry' },
       { kind: 'nix-shell', storePath: STORE },
       { kind: 'nix-module', manager: 'nixos' },
+      { kind: 'nix-module', manager: 'home-manager', via: 'nix-darwin' },
       { kind: 'system-package', manager: 'apt' },
       { kind: 'standalone', directory: '/opt/fy' },
       { kind: 'unknown', reason: 'a dev build' },
@@ -236,11 +290,14 @@ describe('descriptions', () => {
       'nix profile element ferretry',
       `nix shell store path ${STORE}`,
       'nixos module',
+      'home-manager (via nix-darwin) module',
       'apt package',
       'standalone binary in /opt/fy',
       'unrecognised install (a dev build)',
     ]);
-    should(Object.keys(INSTALL_METHOD_LABELS).sort()).deepEqual(methods.map(method => method.kind).sort());
+    should(Object.keys(INSTALL_METHOD_LABELS).sort()).deepEqual(
+      [...new Set(methods.map(method => method.kind))].sort(),
+    );
   });
 
   it('builds the release addresses from the product', () => {
@@ -313,13 +370,13 @@ describe('parseNixProfileList', () => {
     should(
       update.parseNixProfileList(
         { version: 3, elements: { ripgrep: { storePaths: ['/nix/store/x-rg'] }, ferretry: { storePaths: [STORE] } } },
-        daemon,
+        [daemon],
       ),
     ).deepEqual({ element: 'ferretry', homeManager: false });
   });
 
   it('names a version-2 element by its index', () => {
-    should(update.parseNixProfileList({ version: 2, elements: [{}, { storePaths: [STORE] }] }, daemon)).deepEqual({
+    should(update.parseNixProfileList({ version: 2, elements: [{}, { storePaths: [STORE] }] }, [daemon])).deepEqual({
       element: '1',
       homeManager: false,
     });
@@ -329,19 +386,96 @@ describe('parseNixProfileList', () => {
     should(
       update.parseNixProfileList(
         { elements: { 'home-manager-path': { storePaths: ['/nix/store/y-home-manager-path'] } } },
-        daemon,
+        [daemon],
       ),
     ).deepEqual({ element: undefined, homeManager: true });
     should(
-      update.parseNixProfileList({ elements: [{ storePaths: ['/nix/store/y-home-manager-path'] }] }, daemon),
+      update.parseNixProfileList({ elements: [{ storePaths: ['/nix/store/y-home-manager-path'] }] }, [daemon]),
     ).have.property('homeManager', true);
   });
 
   it('answers no element for anything else', () => {
-    should(update.parseNixProfileList('garbage', daemon)).deepEqual({ homeManager: false });
-    should(update.parseNixProfileList({ elements: { other: { storePaths: [`${STORE}-other`] } } }, daemon)).deepEqual({
-      element: undefined,
-      homeManager: false,
+    should(update.parseNixProfileList('garbage', [daemon])).deepEqual({ homeManager: false });
+    should(update.parseNixProfileList({ elements: { other: { storePaths: [`${STORE}-other`] } } }, [daemon])).deepEqual(
+      {
+        element: undefined,
+        homeManager: false,
+      },
+    );
+  });
+});
+
+describe('parseNixProfileList and the link chain', () => {
+  const OUTER = '/nix/store/c2shzv960i5hnnspql90apvg2f2d7bah-ferretry';
+  const INNER = '/nix/store/xlkmzv960i5hnnspql90apvg2f2d7bah-fyd-4.31.0';
+  const HM = '/nix/store/r8lckl3m305x39jxxx5bi5vxiaav6q30-home-manager-path';
+  const profile = {
+    version: 3,
+    elements: {
+      ferretry: { storePaths: [OUTER] },
+      'home-manager-path': { storePaths: [HM] },
+    },
+  };
+
+  it('names the element by the OUTER store path of a symlink-join package, with a home-manager element beside it', () => {
+    should(update.parseNixProfileList(profile, [`${INNER}/bin/fyd`, `${OUTER}/bin/fyd`])).deepEqual({
+      element: 'ferretry',
+      homeManager: true,
     });
+    should(update.parseNixProfileList(profile, [`${INNER}/bin/fyd`])).deepEqual({
+      element: undefined,
+      homeManager: true,
+    });
+  });
+
+  it('never names the home-manager element as the element', () => {
+    should(update.parseNixProfileList(profile, [`${HM}/bin`])).deepEqual({ element: undefined, homeManager: true });
+    should(update.parseNixProfileList({ elements: [{ storePaths: [HM] }] }, [`${HM}/bin`])).deepEqual({
+      element: undefined,
+      homeManager: true,
+    });
+  });
+
+  it('walks the whole chain: a profile link, a symlink join, an inner derivation', async () => {
+    const links: Record<string, string> = {
+      '/home/kirin/.nix-profile': '/home/kirin/.local/state/nix/profiles/profile',
+      '/home/kirin/.local/state/nix/profiles/profile': 'profile-7-link',
+      '/home/kirin/.local/state/nix/profiles/profile-7-link': '/nix/store/00p7zv960i5hnnspql90apvg2f2d7bah-profile',
+      '/nix/store/00p7zv960i5hnnspql90apvg2f2d7bah-profile/bin/fyd': `${OUTER}/bin/fyd`,
+      [`${OUTER}/bin/fyd`]: `${INNER}/bin/fyd`,
+    };
+    const hops = await update.symlinkHops('/home/kirin/.nix-profile/bin/fyd', async path => links[path]);
+    should(hops).deepEqual([
+      '/home/kirin/.local/state/nix/profiles/profile',
+      '/home/kirin/.local/state/nix/profiles/profile-7-link',
+      '/nix/store/00p7zv960i5hnnspql90apvg2f2d7bah-profile',
+      `${OUTER}/bin/fyd`,
+      `${INNER}/bin/fyd`,
+    ]);
+    should(update.storePathHops(hops)).deepEqual([
+      '/nix/store/00p7zv960i5hnnspql90apvg2f2d7bah-profile',
+      `${OUTER}/bin/fyd`,
+      `${INNER}/bin/fyd`,
+    ]);
+    should(update.passesThroughHomeManagerPath(hops)).be.false();
+  });
+
+  it('follows relative targets and dot segments, and sees a directory link into home-manager-path', async () => {
+    const links: Record<string, string> = {
+      '/home/kirin/.nix-profile': '../../nix/./profile',
+      '/nix/profile/bin': `${HM}/bin`,
+    };
+    const hops = await update.symlinkHops('/home/kirin/.nix-profile/bin/fyd', async path => links[path]);
+    should(hops).deepEqual(['/home/kirin/../../nix/./profile', `${HM}/bin`]);
+    should(update.passesThroughHomeManagerPath(hops)).be.true();
+    should(update.passesThroughHomeManagerPath([`${HM}`])).be.true();
+    should(update.passesThroughHomeManagerPath(['/nix/store/zz-not-home-manager-path-2/bin'])).be.false();
+  });
+
+  it('stops on a link loop and answers no hops for a plain file', async () => {
+    const loop = await update.symlinkHops('/a', async () => '/a');
+    should(loop).have.length(40);
+    should(await update.symlinkHops('/x/y', async () => undefined)).deepEqual([]);
+    should(await update.symlinkHops('/x/..', async () => undefined)).deepEqual([]);
   });
 });
