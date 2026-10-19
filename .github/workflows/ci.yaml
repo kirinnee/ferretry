@@ -34,7 +34,10 @@ jobs:
     name: Pre-Commit (${{ matrix.part }})
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-4x8-with-cache
+      - nscloud-cache-tag-ferretry-nix
     # Two parts on parallel runners: the hooks run one after another, and treefmt alone was ~40s of
     # their ~105s. Between them the parts run every hook an unsplit run does (scripts/ci/pre-commit.sh).
     strategy:
@@ -45,6 +48,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: cachix/install-nix-action@v31
       - name: Run pre-commit (${{ matrix.part }})
         env:
@@ -55,11 +62,18 @@ jobs:
     name: Nix Install Bundle
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
+      - nscloud-cache-tag-ferretry-nix
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: cachix/install-nix-action@v31
       # This is the documented `nix shell github:kirinnee/ferretry` package graph. It used to copy
       # Bun's workspace links by hand, so fyd gained @ferretry/relay while this build stayed stale;
@@ -71,11 +85,18 @@ jobs:
     name: Relay Configurations
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
+      - nscloud-cache-tag-ferretry-nix
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: cachix/install-nix-action@v31
       # Compile both deployment shapes with the same flake-locked Wrangler production uses. This
       # catches schema, migration, binding and module-resolution drift before a deploy sees secrets.
@@ -93,11 +114,18 @@ jobs:
     name: PWA Static Bundle
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
+      - nscloud-cache-tag-ferretry-nix
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: cachix/install-nix-action@v31
       # The same gate the Pages deploy runs — but that workflow only fires on a push to `main`, so
       # until now the first thing to notice that the generated `fy-render` sandbox shell and its two
@@ -203,7 +231,10 @@ jobs:
     needs: test
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
+      - nscloud-cache-tag-ferretry-nix
     steps:
       - uses: actions/checkout@v5
         with:
@@ -260,7 +291,10 @@ jobs:
     needs: int
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
+      - nscloud-cache-tag-ferretry-nix
     steps:
       - uses: actions/checkout@v5
         with:
@@ -378,11 +412,18 @@ jobs:
     name: Compile Binaries
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd).
+    runs-on:
+      - nscloud-ubuntu-24.04-amd64-4x8-with-cache
+      - nscloud-cache-tag-ferretry-nix
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: cachix/install-nix-action@v31
       - name: Cross-compile standalone binaries
         run: nix develop .#ci -c ./scripts/release/compile.sh
