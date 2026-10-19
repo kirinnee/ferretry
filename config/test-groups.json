@@ -15,7 +15,14 @@
   "int": [
     { "name": "daemon-runtime", "prefixes": ["packages/daemon/tests/integration/runtime/"] },
     { "name": "daemon", "prefixes": ["packages/daemon/"] },
-    { "name": "pwa-render", "prefixes": ["packages/pwa/tests/integration/fy-render-"] },
+    {
+      "name": "pwa-render",
+      "prefixes": ["packages/pwa/tests/integration/fy-render-", "packages/pwa/tests/integration/composer-"]
+    },
+    {
+      "name": "pwa-chat",
+      "prefixes": ["packages/pwa/tests/integration/add-to-chat", "packages/pwa/tests/integration/release-"]
+    },
     { "name": "everything-else", "prefixes": ["packages/"] }
   ]
 }
