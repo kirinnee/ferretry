@@ -33,11 +33,11 @@ import { useParakeetVoice } from '../../../lib/store.tsx';
 import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../../lib/stt/browser-recognition.ts';
 import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
 import type { SttSettings, SttSettingsPatch } from '../../../lib/stt/stt-settings.ts';
-import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
-import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
 import { Button } from '../../../shell/primitives.tsx';
+import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { PairPhoneSheet } from '../../settings/pair-phone.tsx';
+import { VoiceEngineChoice } from '../../settings/voice-engine-choice.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
 import { SpeedupsSurface } from '../../speedups/speedups-surface.tsx';
 import { jevKeyStatus, WardenConfigCard } from '../../warden/warden-config-card.tsx';
@@ -49,8 +49,8 @@ import { CloneMachine } from './clone.tsx';
 import type { MachineSetupStart, OnboardingDoneRow } from './onboarding-model.ts';
 import { wardenStartingDraft } from './onboarding-model.ts';
 import { useSetupAccess } from './setup-access.ts';
-import { machineVoiceEngine, VOICE_FILE, withMachineVoiceEngine } from './voice-default.ts';
 import { RadioChoices, SetupNote, SetupSection } from './setup-ui.tsx';
+import { machineVoiceEngine, VOICE_FILE, withMachineVoiceEngine } from './voice-default.ts';
 
 /** One step's lead sentence, the same size on every step. */
 function Lead({ children }: { readonly children: ReactNode }) {
@@ -527,19 +527,38 @@ export function OnboardingDoneStep({
   rows,
   machineName,
   onNavigate,
+  createRuntimeHref,
 }: {
   readonly rows: readonly OnboardingDoneRow[];
   readonly machineName: string;
   readonly onNavigate: (to: string) => void;
+  /** Present only while the machine has no runtime: setup is not finished until one exists. */
+  readonly createRuntimeHref?: string;
 }) {
   const later = rows.filter(row => row.later !== undefined);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-onboarding-step-body="done">
       <p className="m-0 text-row font-semibold text-fg">
-        {later.length === 0
-          ? `${machineName} is ready.`
-          : `${machineName} is ready. ${later.length === 1 ? 'One step is' : `${String(later.length)} steps are`} left for later.`}
+        {createRuntimeHref !== undefined
+          ? `${machineName} has no runtime yet, so nothing can start here.`
+          : later.length === 0
+            ? `${machineName} is ready.`
+            : `${machineName} is ready. ${later.length === 1 ? 'One step is' : `${String(later.length)} steps are`} left for later.`}
       </p>
+      {createRuntimeHref === undefined ? null : (
+        <a
+          href={createRuntimeHref}
+          className="kt-btn self-start"
+          data-variant="primary"
+          data-onboarding-create-runtime=""
+          onClick={event => {
+            event.preventDefault();
+            onNavigate(createRuntimeHref);
+          }}
+        >
+          Create a runtime
+        </a>
+      )}
       <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0" data-onboarding-summary="">
         {rows.map(row => (
           <li

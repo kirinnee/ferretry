@@ -155,6 +155,14 @@ export interface TranscriptTurnEvent extends TranscriptEventMetadata {
   readonly state: 'started' | 'completed' | 'aborted';
 }
 
+/** A harness-recorded context compaction boundary. Counts are the harness's own, when it states them. */
+interface TranscriptCompactionEvent extends TranscriptEventMetadata {
+  readonly kind: 'compaction';
+  readonly trigger?: 'manual' | 'auto';
+  readonly tokensBefore?: number;
+  readonly tokensAfter?: number;
+}
+
 export interface TranscriptSettingsEvent extends TranscriptEventMetadata {
   readonly kind: 'settings';
   readonly settings: {
@@ -173,7 +181,8 @@ export type TranscriptEvent =
   | TranscriptErrorEvent
   | TranscriptUsageEvent
   | TranscriptTurnEvent
-  | TranscriptSettingsEvent;
+  | TranscriptSettingsEvent
+  | TranscriptCompactionEvent;
 
 export type TranscriptIssueCode =
   | 'invalid-json'

@@ -5,6 +5,7 @@ import {
   DEFAULT_GROQ_ENHANCEMENT_MODEL,
   DEFAULT_STT_SETTINGS,
   ENHANCEMENT_PROVIDERS,
+  GROQ_FASTER_ENHANCEMENT_MODEL,
   MAX_DICTIONARY_LINE_LENGTH,
   MAX_DICTIONARY_LINES,
   MAX_ENHANCEMENT_MODEL_CHARS,
@@ -14,10 +15,10 @@ import {
   parseSttSettings,
   STT_SETTINGS_KEY,
   STT_SETTINGS_VERSION,
-  sttDictionary,
   type SttSettings,
   type SttSettingsStorage,
   SttSettingsStore,
+  sttDictionary,
 } from '../../../src/lib/stt/stt-settings.ts';
 
 /** Records every write so a refusal and a no-op can each be proved. */
@@ -325,5 +326,12 @@ describe('sttDictionary', () => {
 
     should(parsed.entries).deepEqual([{ term: 'kteam', aliases: ['kteem'] }]);
     should(parsed.problems).have.length(1);
+  });
+
+  it('replaces the retired Groq default a device stored with the current one', () => {
+    const settings = parseSttSettings(stored({ enhancementModel: 'llama-3.1-8b-instant' }));
+    should(settings.enhancementModel).equal(DEFAULT_GROQ_ENHANCEMENT_MODEL);
+    should(DEFAULT_GROQ_ENHANCEMENT_MODEL).equal('openai/gpt-oss-120b');
+    should(GROQ_FASTER_ENHANCEMENT_MODEL).equal('openai/gpt-oss-20b');
   });
 });

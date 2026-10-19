@@ -302,6 +302,8 @@ function body(event: TranscriptEvent): string {
       return `in=${event.usage.inputTokens ?? 0} out=${event.usage.outputTokens ?? 0}`;
     case 'turn':
       return event.state;
+    case 'compaction':
+      return `compacted${event.trigger === undefined ? '' : ` (${event.trigger})`}`;
     default:
       return JSON.stringify(event.settings);
   }

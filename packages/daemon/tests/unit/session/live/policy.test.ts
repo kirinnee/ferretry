@@ -463,3 +463,30 @@ describe('sameLiveReading', () => {
     should(sameLiveReading(withoutVerb, base)).be.false();
   });
 });
+
+describe('a sample that carries a compaction', () => {
+  const done = { phase: 'done', endedAt: atMs(3), tokensBefore: 100, tokensAfter: 10 } as const;
+  const idle = { sessionId: 's1', at: atMs(1), turnStartedAt: undefined, pane: undefined, transcript: undefined };
+
+  it('should carry the compaction with or without a working turn, and none when there is none', () => {
+    // Act
+    const quiet = liveActivitySample({ ...idle, compaction: done });
+    const working = liveActivitySample({ ...idle, turnStartedAt: atMs(0), compaction: done });
+    const absent = liveActivitySample({ ...idle, compaction: undefined });
+
+    // Assert
+    should(quiet).deepEqual({ sessionId: 's1', at: atMs(1), compaction: done });
+    should(working.compaction).deepEqual(done);
+    should(absent).deepEqual({ sessionId: 's1', at: atMs(1) });
+  });
+
+  it('should tell a changed compaction from an unchanged one', () => {
+    // Arrange
+    const base = liveActivitySample({ ...idle, compaction: done });
+
+    // Assert
+    should(sameLiveReading(base, { ...base, at: atMs(9) })).be.true();
+    should(sameLiveReading(base, { ...base, compaction: { ...done, tokensAfter: 11 } })).be.false();
+    should(sameLiveReading(base, { sessionId: 's1', at: atMs(1) })).be.false();
+  });
+});

@@ -1,0 +1,101 @@
+/* ═══ THE COMPACTION CARD AND ITS DIVIDER (components/compaction-card.tsx) ═════════════════════════
+   Every colour is a theme token, so each family restyles it. The bar is an ESTIMATE of progress, and
+   nothing here draws it as a measurement: the figure is `~N%`, the note says where it comes from.
+   Reduced motion is the global still in index.css (`transition` is zeroed there), so the fill simply
+   jumps a second at a time instead of gliding. */
+
+.fy-compaction-card {
+  background: var(--fy-surface-2, var(--surface-2, #f8fafc));
+  border: 1px solid var(--border-strong, var(--border, #d0d5dd));
+  border-radius: 12px;
+  color: var(--fg, #101828);
+  display: grid;
+  gap: 6px;
+  margin-block: var(--flow-live, 12px);
+  max-width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+}
+.fy-compaction-card__head {
+  align-items: baseline;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  justify-content: space-between;
+}
+.fy-compaction-card__head b {
+  font-weight: 600;
+}
+.fy-compaction-card__percent {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.fy-compaction-card__bar {
+  background: color-mix(in srgb, var(--fg, #101828) 14%, transparent);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+.fy-compaction-card__fill {
+  background: var(--accent, #0b6e99);
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  transition: width 1s linear;
+}
+.fy-compaction-card[data-overdue] .fy-compaction-card__fill {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--accent-fg, #fff) 35%, transparent) 6px 12px
+  );
+}
+.fy-compaction-card__meta,
+.fy-compaction-card__note {
+  color: var(--muted, #475467);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+}
+.fy-compaction-card__meta {
+  font-variant-numeric: tabular-nums;
+}
+.fy-compaction-card__note {
+  font-size: 11px;
+}
+
+.fy-compaction-strip {
+  align-items: center;
+  color: var(--muted, #475467);
+  display: flex;
+  font-size: 12px;
+  gap: 10px;
+  margin-block: 6px;
+  min-width: 0;
+}
+.fy-compaction-strip__rule {
+  background: var(--border-strong, var(--border, #d0d5dd));
+  flex: 1 1 12px;
+  height: 1px;
+  min-width: 12px;
+}
+.fy-compaction-strip__text {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.fy-compaction-strip__text b {
+  color: var(--fg, #101828);
+  font-weight: 600;
+}
+
+.fy-compaction-chip {
+  background: color-mix(in srgb, var(--accent, #0b6e99) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #0b6e99) 45%, transparent);
+  border-radius: 999px;
+  color: var(--fg, #101828);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 3px 8px;
+  white-space: nowrap;
+}

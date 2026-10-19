@@ -18,13 +18,13 @@ import { LearningConfigSchema, WardenConfigViewSchema } from '@ferretry/protocol
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { Button } from '../../../shell/primitives.tsx';
 import type { ParakeetVoice } from '../../../lib/stt/parakeet-voice.ts';
+import { Button } from '../../../shell/primitives.tsx';
 import type { PairingClientFactory } from '../../settings/add-device-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { readFleetRuntimes } from '../catalog-api.ts';
 import { jevKeyStatus } from '../../warden/warden-config-card.tsx';
 import { wardenMachineDefaultLogin, wardenSummary } from '../../warden/warden-settings-model.ts';
+import { readFleetRuntimes } from '../catalog-api.ts';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { OnboardingHarnessStep } from './harness-step.tsx';
 import {
@@ -40,6 +40,8 @@ import {
   ONBOARDING_STEPS,
   type OnboardingDoneFacts,
   onboardingDoneRows,
+  onboardingLaterHref,
+  onboardingNeedsRuntime,
   onboardingRailMarker,
   onboardingSetCount,
   onboardingStepLabel,
@@ -227,7 +229,16 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
       case 'controls':
         return <OnboardingControlsStep tab={tab} />;
       case 'done':
-        return <OnboardingDoneStep rows={rows} machineName={machineName} onNavigate={onNavigate} />;
+        return (
+          <OnboardingDoneStep
+            rows={rows}
+            machineName={machineName}
+            onNavigate={onNavigate}
+            {...(onboardingNeedsRuntime(facts)
+              ? { createRuntimeHref: onboardingLaterHref(connection.daemonId, machineName, 'claude') }
+              : {})}
+          />
+        );
     }
   };
 

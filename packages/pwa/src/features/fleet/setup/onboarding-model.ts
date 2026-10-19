@@ -17,12 +17,12 @@
  */
 
 import type { WardenConfig } from '@ferretry/protocol';
-import type { HarnessAnswers } from './harness-import-model.ts';
-import type { SetupHarness } from './setup-words.ts';
 import type { DaemonId } from '../../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../../lib/pages/routes.ts';
 import { type MachineTabId, machineHash } from '../shell/machine-route.ts';
+import type { HarnessAnswers } from './harness-import-model.ts';
 import { machineItemHash } from './settings-route.ts';
+import type { SetupHarness } from './setup-words.ts';
 
 /** The steps, in the order the rail lists them. The ids are what progress stores. */
 export const ONBOARDING_STEPS = [
@@ -269,6 +269,11 @@ export const onboardingDoneRows = (
       ...(shown === 'set' || id === 'pair' ? {} : { later: onboardingLaterHref(daemonId, machineName, id) }),
     };
   });
+
+/** True only when the machine answered and has no runtime on either CLI: an unread machine claims nothing. */
+export const onboardingNeedsRuntime = (facts: OnboardingDoneFacts): boolean =>
+  facts.runtimes !== undefined &&
+  Object.values(facts.runtimes).every(names => names === undefined || names.length === 0);
 
 /** The steps still to do, in words: "Speed-ups and Warden", for Done's heading line. */
 export const onboardingSkippedSteps = (progress: MachineSetupProgress): readonly MachineSetupTaskId[] =>

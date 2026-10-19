@@ -31,6 +31,7 @@ import {
   parseSettings,
   presetLoginRefusal,
   profileScope,
+  resolveDefaultRuntime,
   resolveProfile,
   runtimeHarness,
   type SettingsFormat,
@@ -600,6 +601,11 @@ function putRuntime(
     agent: change.agent,
     ...(change.harness === undefined ? {} : { harness: change.harness }),
   };
+  // The first agent runtime on a machine becomes its default for new agents (and the Warden's login).
+  if (change.create && change.agent && resolveDefaultRuntime(model) === undefined) {
+    draft.machine.defaultRuntime = change.name;
+    consequences.push(`${change.name} is now this machine's default runtime for new agents.`);
+  }
   if (exists) consequences.push('Running sessions keep the old setup until restarted.');
   return exists ? `Change runtime ${change.name}` : `Add runtime ${change.name}`;
 }

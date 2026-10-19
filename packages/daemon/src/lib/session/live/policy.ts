@@ -1,4 +1,4 @@
-import type { SessionLiveActivity, SessionLiveTokensSource } from '@ferretry/protocol';
+import type { SessionCompactionState, SessionLiveActivity, SessionLiveTokensSource } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptHarness, TranscriptUsageEvent } from '../../transcript/types.ts';
 
 /**
@@ -163,12 +163,15 @@ export interface LiveSampleEvidence {
   readonly turnStartedAt: string | undefined;
   readonly pane: PaneLiveReading | undefined;
   readonly transcript: TurnTokens | undefined;
+  /** The compaction the sample saw, when there was one; reported whether or not a turn is working. */
+  readonly compaction?: SessionCompactionState | undefined;
 }
 
 /** One live sample. With no working turn it carries only the session and the instant. */
 export const liveActivitySample = (evidence: LiveSampleEvidence): SessionLiveActivity => {
-  const { sessionId, at, turnStartedAt, pane, transcript } = evidence;
-  if (turnStartedAt === undefined) return { sessionId, at };
+  const { sessionId, at, turnStartedAt, pane, transcript, compaction } = evidence;
+  const compacting = compaction === undefined ? {} : { compaction };
+  if (turnStartedAt === undefined) return { sessionId, at, ...compacting };
   const fromPane = pane?.outputTokens;
   const fromTranscript = transcript?.outputTokens;
   let outputTokens: number | undefined;
@@ -187,6 +190,7 @@ export const liveActivitySample = (evidence: LiveSampleEvidence): SessionLiveAct
     ...(pane === undefined ? {} : { verb: pane.verb }),
     ...(outputTokens === undefined ? {} : { outputTokens, outputSource }),
     ...(transcript?.inputTokens === undefined ? {} : { inputTokens: transcript.inputTokens }),
+    ...compacting,
   };
 };
 
@@ -198,4 +202,5 @@ export const sameLiveReading = (left: SessionLiveActivity | undefined, right: Se
   left.verb === right.verb &&
   left.outputTokens === right.outputTokens &&
   left.inputTokens === right.inputTokens &&
-  left.outputSource === right.outputSource;
+  left.outputSource === right.outputSource &&
+  JSON.stringify(left.compaction) === JSON.stringify(right.compaction);

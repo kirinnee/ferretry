@@ -75,7 +75,7 @@ export function SessionCommandControls({
     setNotice(null);
     try {
       await api.compact(daemon, sessionId);
-      setNotice('Compacting context. Watch the transcript for completion; the conversation remains available.');
+      setNotice('Compacting context. Progress shows in the transcript; the conversation remains available.');
     } catch (cause) {
       if (isSessionCommandUnsupported(cause)) setRestartRequired(true);
       else setFailure(failureMessage(cause));
