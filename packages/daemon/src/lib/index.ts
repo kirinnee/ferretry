@@ -68,6 +68,7 @@ export * from './secrets/index.ts';
 export * from './security/index.ts';
 export * from './session/attach/index.ts';
 export * from './session/console/index.ts';
+export * from './session/dialog/index.ts';
 export * from './session/effects/index.ts';
 export * from './session/events/index.ts';
 export * from './session/filesystem/index.ts';

@@ -1,0 +1,96 @@
+/* ============================================================================
+   The dialog card — a harness's own screen above the Composer. Same footprint as the approval card:
+   one sentence, the harness's words, a wrapping row of answers. A choice that grants trust is drawn in
+   the warning tone and never as the primary action. Theme tokens only.
+   ========================================================================== */
+
+.fy-dialog-card {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: var(--stroke-panel, 1px) solid var(--accent);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+.fy-dialog-card__ask {
+  margin: 0;
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+/* The harness's own lines, kept as it broke them. */
+.fy-dialog-card__body {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.fy-dialog-card__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-dialog-card__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* Up to three lines — the harness's label, its own sub-line, and what trusting grants — so the button
+   grows rather than clipping: `height` becomes a floor. */
+.fy-dialog-card__option.kt-btn {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  height: auto;
+  min-height: var(--control-h);
+  max-width: 100%;
+  padding-block: 4px;
+  text-align: left;
+}
+.fy-dialog-card__option[data-default]:not([data-variant='primary']) {
+  border-color: var(--accent);
+}
+.fy-dialog-card__option[data-grants-trust] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.fy-dialog-card__label {
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.fy-dialog-card__default {
+  font-weight: normal;
+  opacity: 0.85;
+}
+.fy-dialog-card__secondary,
+.fy-dialog-card__trust {
+  font-size: var(--text-2xs);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.fy-dialog-card__secondary {
+  opacity: 0.85;
+}
+.fy-dialog-card__trust {
+  font-weight: var(--weight-strong);
+}
+.fy-dialog-card__status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.fy-dialog-card__status[role='alert'] {
+  color: var(--err);
+}

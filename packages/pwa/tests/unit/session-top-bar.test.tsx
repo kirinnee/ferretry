@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { PermissionRequest } from '@ferretry/protocol';
+import type { HarnessDialog, PermissionRequest } from '@ferretry/protocol';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -167,6 +167,41 @@ describe('SessionTopBar turn word', () => {
     }
   });
 
+  test('says a harness dialog as the harness it is waiting on and its own title', async () => {
+    const harnessDialog: HarnessDialog = {
+      id: '0123456789abcdef',
+      harness: 'codex',
+      kind: 'hooks-review',
+      title: 'Hooks need review',
+      options: [{ number: 1, label: 'Review hooks', grantsTrust: false }],
+      selected: 1,
+    };
+    for (const turn of ['needs-input', 'working'] as const) {
+      view = await mount(
+        <SessionTopBar
+          actions={null}
+          compact={false}
+          project={null}
+          session={sessionView('s1', {
+            state: { status: 'running', turnState: turn, turnPrompt: 'Hooks need review', harnessDialog },
+          })}
+          turn={turn}
+        />,
+      );
+      const status = must(view.container.querySelector('.fy-session-bar__status'), 'the status');
+      const shown = status.querySelector('[data-session-blocked-by]');
+      if (turn === 'needs-input') {
+        expect(status.getAttribute('title')).toBe('Waiting on Codex: Hooks need review');
+        expect(shown?.textContent).toBe(', Waiting on Codex: Hooks need review');
+      } else {
+        expect(status.getAttribute('title')).toBeNull();
+        expect(shown).toBeNull();
+      }
+      await view.unmount();
+      view = null;
+    }
+  });
+
   test("says whose turn it is in the person's words, and marks it for the page", async () => {
     for (const [turn, word] of [
       ['working', 'working'],
@@ -199,7 +234,7 @@ describe('the hypermedia mark', () => {
         compact={false}
         project={null}
         session={sessionView('s1', {
-          config: { teammate: 'hadi', ...(hypermedia === undefined ? {} : { hypermedia }) },
+          config: { teammate: 'hadi', mode: 'interactive', ...(hypermedia === undefined ? {} : { hypermedia }) },
         })}
       />
     );

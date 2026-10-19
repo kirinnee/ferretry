@@ -14,7 +14,7 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
-import { needsYou, sessionsBarDirectory, sessionsBarSubline } from './sessions-bar-model.ts';
+import { needsYou, pendingQuestionPreview, sessionsBarDirectory, sessionsBarSubline } from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
 
 export function SessionsBarRow({
@@ -38,6 +38,7 @@ export function SessionsBarRow({
   const waiting = needsYou(view);
   const task = sessionsBarSubline(view);
   const directory = sessionsBarDirectory(view);
+  const question = pendingQuestionPreview(view);
   return (
     <li>
       <RouteLink
@@ -45,7 +46,7 @@ export function SessionsBarRow({
         className="fy-sbar__session"
         data-sbar-session={view.config.id}
         onNavigate={onNavigate}
-        title={`${name} — ${task}\n${view.config.cwd}`}
+        title={`${name} — ${task}${question === undefined ? '' : `\n${question}`}\n${view.config.cwd}`}
         to={daemonSessionPath(daemonId, view.config.id)}
       >
         <StatusMark view={view} />
@@ -59,6 +60,11 @@ export function SessionsBarRow({
         ) : learningPassive ? (
           <PassiveLearningMark />
         ) : null}
+        {question === undefined ? null : (
+          <span className="fy-sbar__question" data-sbar-question="">
+            {question}
+          </span>
+        )}
         {task === view.config.cwd ? null : <span className="fy-sbar__sub">{task}</span>}
         {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
             the path's slashes reading left to right inside it. */}

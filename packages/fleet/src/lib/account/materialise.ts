@@ -40,6 +40,13 @@ import {
   type HarnessKind,
 } from '../manifest.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
+import {
+  CODEX_CATALOG_FORMAT,
+  CODEX_MODEL_CATALOG_FILE,
+  codexCatalogArguments,
+  codexCatalogModels,
+  renderCodexModelCatalog,
+} from '../models/codex-catalog.ts';
 import { type RuntimeModels, runtimeModels } from '../models/runtime.ts';
 import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
@@ -127,6 +134,12 @@ export interface MaterialiseInput {
   readonly claudeStatusline: ClaudeStatuslineCommand;
   /** The `fy` executable a wrapper runs to claim a conversation. */
   readonly fyCommand: string;
+  /**
+   * Where each harness lives on this host, absolute, as the daemon resolved it. A wrapper execs this
+   * path rather than the harness's name, so a session runs the Claude or Codex that was configured and
+   * imported, never one a PATH happens to put first (docs/harness-paths.md).
+   */
+  readonly harnessCommands?: Readonly<Partial<Record<HarnessKind, string>>>;
   /** The person's own Codex home (`hostCodexHome`); absent when it cannot be named. */
   readonly hostCodexHome?: string;
   /** Whether the installed Claude accepts `--permission-mode auto` (O4). */
@@ -169,6 +182,8 @@ interface PlannedRuntime {
   readonly wrapper: string;
   readonly models: readonly FleetManifestModel[];
   readonly modelCatalog?: FleetManifestModelCatalog;
+  /** The format of the Codex model catalog file its wrapper points Codex at, when it has one. */
+  readonly codexCatalog?: number;
   readonly defaultModel: string | null;
   readonly secretEnv: Readonly<Record<string, string>>;
   /** Why it cannot launch, when it cannot. */
@@ -390,10 +405,21 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     env[STATE_HOME_ENV] = layout.stateHome;
     if (harness === 'codex') env.CODEX_SQLITE_HOME = codexSqliteHome;
 
+    // Codex's own picker lists OpenAI's models and knows nothing of this login's provider, so a runtime on
+    // a third-party catalog is given the catalog as the list to offer (docs/model-catalog.md). A person's
+    // own `model_catalog_json` is theirs, and stands.
+    const codexModels = harness === 'codex' ? codexCatalogModels(derived) : undefined;
+    const codexCatalog =
+      codexModels === undefined || 'model_catalog_json' in adapted.settings.value
+        ? undefined
+        : renderCodexModelCatalog(codexModels, derived.default);
+    const codexCatalogPath = joinPath(joinPath(home, RUNTIME_STATE_DIRECTORY), CODEX_MODEL_CATALOG_FILE);
+
     operations.push(
       ...configDirectoryOperations({
         home,
         harness,
+        codexCatalog,
         entries: adapted.entries,
         absent: adapted.absent,
         settings: adapted.settings,
@@ -422,6 +448,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         env,
         args: [
           ...credentialLaunchArguments(store, defaultModel !== null),
+          ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
           ...(launch === undefined ? resolved.flags.map(flag => flag.flag) : [...launch.args, ...fixedSettingsArgs]),
         ],
         defaultModel: defaultModel ?? undefined,
@@ -429,6 +456,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         trustLaunchFolder: runtime.agent && harness === 'codex',
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
+        harnessCommand: input.harnessCommands?.[harness],
         refusal: blocked,
       }),
       mode: EXECUTABLE_MODE,
@@ -445,6 +473,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       wrapper,
       models,
       ...(modelCatalog === undefined ? {} : { modelCatalog }),
+      ...(codexCatalog === undefined ? {} : { codexCatalog: CODEX_CATALOG_FORMAT }),
       defaultModel,
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
@@ -483,6 +512,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         defaultModel: runtime.defaultModel,
         models: runtime.models,
         ...(runtime.modelCatalog === undefined ? {} : { modelCatalog: runtime.modelCatalog }),
+        ...(runtime.codexCatalog === undefined ? {} : { codexCatalog: runtime.codexCatalog }),
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
@@ -522,6 +552,8 @@ interface ConfigDirectoryInput {
   readonly settings: ReturnType<typeof adaptProfile>['settings'];
   readonly claudeJson: SettingsObject | undefined;
   readonly overlay: SettingsObject | undefined;
+  /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
+  readonly codexCatalog: string | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
   readonly layout: FleetLayout;
 }
@@ -547,7 +579,11 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
     {
       kind: 'prune-directory',
       path: state,
-      keep: [MATERIALISED_RECORD_FILE, ...(input.overlay === undefined ? [] : [FIXED_SETTINGS_FILE])],
+      keep: [
+        MATERIALISED_RECORD_FILE,
+        ...(input.overlay === undefined ? [] : [FIXED_SETTINGS_FILE]),
+        ...(input.codexCatalog === undefined ? [] : [CODEX_MODEL_CATALOG_FILE]),
+      ],
     },
     // The config directory is not: only a link, or a name the last apply recorded, is removed.
     { kind: 'prune-directory', path: home, keep: [], only: input.absent, record },
@@ -593,6 +629,14 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       kind: 'file',
       path: joinPath(state, FIXED_SETTINGS_FILE),
       content: serializeSettings(input.overlay, 'json'),
+      mode: PRIVATE_FILE_MODE,
+    });
+  }
+  if (input.codexCatalog !== undefined) {
+    operations.push({
+      kind: 'file',
+      path: joinPath(state, CODEX_MODEL_CATALOG_FILE),
+      content: input.codexCatalog,
       mode: PRIVATE_FILE_MODE,
     });
   }

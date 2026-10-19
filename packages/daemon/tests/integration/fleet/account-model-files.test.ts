@@ -24,7 +24,7 @@ import {
   readDeclaredAccountModel,
 } from '../../../src/adapters/fleet/account-model-files.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
-import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
+import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
 import { type ConfigHome, configHome, sha256, writeModelFiles } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -66,6 +66,7 @@ interface Machine extends ConfigHome {
   readonly fleet: string;
   readonly config: string;
   readonly catalog: FleetCatalogService;
+  readonly deps: FleetCatalogServiceDeps;
   /** Every file the provisioner acknowledged, by path relative to the configuration directory. */
   readonly acknowledged: { readonly path: string; readonly text: string }[];
   states: unknown[];
@@ -86,6 +87,7 @@ async function machine(model = MODEL): Promise<Machine> {
     fleet: home.paths.fleet,
     config: home.paths.config,
     catalog: undefined as never,
+    deps: undefined as never,
     acknowledged,
     states: [],
   };
@@ -112,7 +114,7 @@ async function machine(model = MODEL): Promise<Machine> {
     },
     configDirectory: home.paths.config,
   });
-  return Object.assign(handle, { catalog: new FleetCatalogService(deps) });
+  return Object.assign(handle, { catalog: new FleetCatalogService(deps), deps });
 }
 
 async function failure(work: Promise<unknown>): Promise<unknown> {
@@ -442,5 +444,37 @@ describe('a reviewed change applied by the real provisioner', () => {
 
     // Assert
     should(error).be.instanceOf(Error);
+  });
+});
+
+describe('whether the launcher scripts on disk are the ones a plan would write', () => {
+  const plan = (...operations: unknown[]) => ({ operations }) as never;
+
+  it('should say current only when every wrapper under the bin directory already holds its planned content', async () => {
+    // Arrange
+    const host = await machine();
+    const bin = host.deps.layout.binDirectory;
+    const wrapper = path.join(bin, 'claude-default');
+    const planned = { kind: 'file', path: wrapper, content: '#!/bin/sh\nexec /opt/h/claude "$@"\n', mode: 0o755 };
+    const outsider = {
+      kind: 'file',
+      path: path.join(host.root, 'elsewhere.txt'),
+      content: 'never written',
+      mode: 0o600,
+    };
+    const prune = { kind: 'prune', path: bin, marker: 'managed', keep: [] };
+
+    // Act
+    const absent = await host.deps.wrappersCurrent?.(plan(planned));
+    await mkdir(bin, { recursive: true });
+    await writeFile(wrapper, '#!/bin/sh\nexec claude "$@"\n');
+    const stale = await host.deps.wrappersCurrent?.(plan(planned));
+    await writeFile(wrapper, planned.content);
+    const current = await host.deps.wrappersCurrent?.(plan(prune, planned, outsider));
+
+    // Assert — a file outside the bin directory and a non-file operation never count against it
+    should(absent).be.false();
+    should(stale).be.false();
+    should(current).be.true();
   });
 });

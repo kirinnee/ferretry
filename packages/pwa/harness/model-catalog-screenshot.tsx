@@ -1,7 +1,7 @@
 /**
- * Screenshots of the model picker on three logins — an Anthropic sign-in, a GLM / Z.ai login and a
- * DeepSeek login — at a 390px phone and a 1440px desktop, in the light and dark studio themes
- * (docs/model-catalog.md). Review evidence; nothing compares the PNGs.
+ * Screenshots of the model picker on three Claude logins — an Anthropic sign-in, a GLM / Z.ai login and a
+ * DeepSeek login — and on a Codex runtime on DeepSeek, at a 390px phone and a 1440px desktop, in the light and
+ * dark studio themes (docs/model-catalog.md). Review evidence; nothing compares the PNGs.
  *
  *   bun harness/model-catalog-screenshot.tsx [out-dir]   # writes model-catalog-*.png (default harness/out)
  *
@@ -44,12 +44,13 @@ import type { RuntimeModelCatalog } from '../../src/lib/runtime-models.ts';
 
 const params = new URLSearchParams(location.search);
 const provider = params.get('provider') ?? 'anthropic';
+const harness = params.get('harness') === 'codex' ? 'codex' : 'claude';
 const presentation = params.get('presentation') === 'popover' ? 'popover' : 'sheet';
 const catalogs = builtInModelCatalogs();
-const derived = runtimeModels({ harness: 'claude', modelSet: undefined, catalog: catalogs[provider] });
+const derived = runtimeModels({ harness, modelSet: undefined, catalog: catalogs[provider] });
 const catalog: RuntimeModelCatalog = {
-  harness: 'claude',
-  source: 'wrapper-inventory',
+  harness,
+  source: harness === 'codex' ? 'codex-app-server' : 'wrapper-inventory',
   catalog: { id: provider, label: derived.catalog?.label ?? provider, customIds: derived.catalog?.customIds ?? false },
   choices: derived.models.map(model => ({
     value: model.id,
@@ -66,8 +67,8 @@ const view = {
   config: {
     id: 'harness-session',
     name: 'Hadi',
-    agent: 'claude-' + provider,
-    harness: 'claude',
+    agent: harness + '-' + provider,
+    harness,
     cwd: '/work/ferretry',
     model: derived.default,
     createdAt: '2026-10-18T00:00:00.000Z',
@@ -143,7 +144,12 @@ const VIEWPORTS = [
   { name: 'narrow', width: 320, height: 640, touch: true, shoot: false, presentation: 'sheet' },
   { name: 'desktop', width: 1_440, height: 900, touch: false, shoot: true, presentation: 'popover' },
 ] as const;
-const PROVIDERS = ['anthropic', 'zai', 'deepseek'] as const;
+const RUNTIMES = [
+  { harness: 'claude', provider: 'anthropic' },
+  { harness: 'claude', provider: 'zai' },
+  { harness: 'claude', provider: 'deepseek' },
+  { harness: 'codex', provider: 'deepseek' },
+] as const;
 
 const executablePath =
   Bun.which('google-chrome') ?? Bun.which('chromium') ?? fail('no system Chrome or Chromium found');
@@ -164,16 +170,19 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
-        for (const provider of PROVIDERS) {
+        for (const { harness, provider } of RUNTIMES) {
           await page.goto(
-            `${server.url}?theme=studio-${scheme}&provider=${provider}&presentation=${viewport.presentation}`,
+            `${server.url}?theme=studio-${scheme}&provider=${provider}&harness=${harness}&presentation=${viewport.presentation}`,
           );
           await page.locator('[role="menuitemradio"]').first().waitFor({ state: 'visible' });
-          const where = `${provider} at ${viewport.name}/${scheme}`;
+          const where = `${harness} ${provider} at ${viewport.name}/${scheme}`;
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${where} scrolls sideways by ${overflow}px`);
           if (!viewport.shoot) continue;
-          const target = join(outDir, `model-catalog-${provider}-${viewport.name}-${scheme}.png`);
+          const target = join(
+            outDir,
+            `model-catalog-${harness === 'codex' ? 'codex-' : ''}${provider}-${viewport.name}-${scheme}.png`,
+          );
           const height = await page.evaluate(() => document.getElementById('root')?.scrollHeight ?? 0);
           await page.screenshot({
             path: target,

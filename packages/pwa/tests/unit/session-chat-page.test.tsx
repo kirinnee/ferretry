@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
+  type HarnessDialog,
   MCP_OAUTH_PATH,
   matchesSessionSearchQuery,
   type PermissionRequest,
@@ -24,6 +25,7 @@ import { SessionAnalyticsSurface } from '../../src/features/analytics/session-an
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
+import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
 import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
@@ -1841,6 +1843,115 @@ describe('SessionChatPage', () => {
         ),
       );
       expect(page.root.findAllByType(ApprovalCard)).toHaveLength(0);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('answers a harness dialog above the Composer through the daemon, and never beside a permission prompt', async () => {
+    const harnessDialog: HarnessDialog = {
+      id: '0123456789abcdef',
+      harness: 'codex',
+      kind: 'hooks-review',
+      title: 'Hooks need review',
+      options: [
+        { number: 1, label: 'Review hooks', grantsTrust: false },
+        { number: 2, label: 'Trust all and continue', grantsTrust: true },
+      ],
+      selected: 1,
+      escape: 'skip',
+    };
+    const parked = sessionView('shared', {
+      config: { teammate: 'hadi' },
+      state: { status: 'running', turnState: 'needs-input', harnessDialog },
+    });
+    const posted: { url: string; body: unknown }[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/dialog')) {
+        posted.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+        return Response.json({ dialogId: harnessDialog.id, cleared: true });
+      }
+      return route(input);
+    }) as typeof fetch;
+    let refreshed = 0;
+    const mountFor = (session: SessionView, canControl = true) => (
+      <SessionChatPage
+        canControl={canControl}
+        client={client([], parked)}
+        connection={alpha}
+        entries={[]}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={session}
+      />
+    );
+    const page = renderSessionChatPage(mountFor(parked));
+    try {
+      const card = page.root.findByType(DialogCard);
+      expect(card.props.agentName).toBe('Hadi');
+      expect(card.props.dialog).toEqual(harnessDialog);
+      const column = page.root.findByProps({ className: 'fy-chat-input__column' });
+      const kinds = column.children.map(child => (typeof child === 'string' ? child : child.type));
+      expect(kinds.indexOf(DialogCard)).toBeLessThan(kinds.indexOf(Composer));
+
+      const scope = daemonSessionScope(alpha, 'shared');
+      expect(await card.props.api.answer(alpha, scope, { kind: 'escape', dialogId: harnessDialog.id })).toEqual({
+        dialogId: harnessDialog.id,
+        cleared: true,
+      });
+      expect(posted).toEqual([
+        {
+          url: 'https://alpha.example.test/v1/sessions/shared/dialog',
+          body: { kind: 'escape', dialogId: harnessDialog.id },
+        },
+      ]);
+      card.props.onSettled();
+      expect(refreshed).toBe(1);
+
+      // Nothing to answer from a device that cannot control the session, or once it is over.
+      run(() => page.update(withSessionSearch(mountFor(parked, false))));
+      expect(page.root.findAllByType(DialogCard)).toHaveLength(0);
+      run(() =>
+        page.update(
+          withSessionSearch(
+            mountFor(
+              sessionView('shared', { state: { status: 'completed', turnState: 'needs-input', harnessDialog } }),
+            ),
+          ),
+        ),
+      );
+      expect(page.root.findAllByType(DialogCard)).toHaveLength(0);
+
+      // A permission prompt owns the pane: the dialog card steps aside.
+      const permissionRequest: PermissionRequest = {
+        id: 'fedcba9876543210',
+        harness: 'codex',
+        tool: 'Shell',
+        action: 'run',
+        what: 'ls',
+        question: 'Run?',
+        options: [
+          { number: 1, label: 'Yes', kind: 'allow' },
+          { number: 2, label: 'No', kind: 'deny' },
+        ],
+        selected: 1,
+      };
+      run(() =>
+        page.update(
+          withSessionSearch(
+            mountFor(
+              sessionView('shared', {
+                state: { status: 'running', turnState: 'needs-input', harnessDialog, permissionRequest },
+              }),
+            ),
+          ),
+        ),
+      );
+      expect(page.root.findAllByType(DialogCard)).toHaveLength(0);
+      expect(page.root.findAllByType(ApprovalCard)).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }

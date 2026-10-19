@@ -263,6 +263,20 @@
   white-space: nowrap;
 }
 /* The directory: mono, the quietest ink, truncated from the LEFT so a worktree's own name survives. */
+.fy-sbar__question {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-soft);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__question::before {
+  content: '? ';
+  color: var(--warn);
+  font-weight: var(--weight-strong);
+}
 .fy-sbar__dir {
   grid-column: 2 / 4;
   min-width: 0;
@@ -275,6 +289,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.fy-sbar__session[aria-current='page'] .fy-sbar__question,
 .fy-sbar__session[aria-current='page'] .fy-sbar__sub,
 .fy-sbar__session[aria-current='page'] .fy-sbar__dir {
   color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));

@@ -18,6 +18,7 @@ import { type McpOAuthSubsystem, mcpOAuthRoutes } from '../../../../src/lib/runt
 import { securityRoutes } from '../../../../src/lib/runtime/mounts/security.ts';
 import { sessionConsoleRoutes } from '../../../../src/lib/runtime/mounts/session-console-input.ts';
 import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import { sessionDialogRoutes } from '../../../../src/lib/runtime/mounts/session-dialog.ts';
 import { sessionPermissionRoutes } from '../../../../src/lib/runtime/mounts/session-permission.ts';
 import { stepUpRoutes } from '../../../../src/lib/runtime/mounts/step-up.ts';
 import { terminalRoutes, terminalSocketRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
@@ -30,11 +31,14 @@ import {
   StepUpService,
   type StoredPasskey,
 } from '../../../../src/lib/step-up/index.ts';
+import { parseHarnessDialog } from '../../../../src/lib/tmux/harness-dialog.ts';
 import { parsePermissionPrompt } from '../../../../src/lib/tmux/permission-prompt.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   consoleSubsystem,
   consoleTmux,
+  DIALOG_FRAME,
+  dialogSubsystem,
   FakeSessionControl,
   FakeTerminals,
   grantSubsystem,
@@ -105,6 +109,8 @@ const verifier: PasskeyVerifierPort = {
 const PROJECT = '/home/owner/projects/app';
 const PERMISSION_ID = parsePermissionPrompt(PERMISSION_FRAME)?.id ?? 'not-parsed';
 const STALE_PERMISSION_ID = '0123456789abcdef';
+const STALE_DIALOG_ID = STALE_PERMISSION_ID;
+const DIALOG_ID = parseHarnessDialog(DIALOG_FRAME)?.id ?? 'not-parsed';
 
 const json = (value: unknown): string => JSON.stringify(value);
 const originBody = json({ origin: ORIGIN });
@@ -155,6 +161,8 @@ async function machine(initial: Partial<SecuritySettings> = {}, granted: Capabil
   const consoleKeys = consoleTmux();
   /** Every tmux command the permission route ran: `commands` are keys sent, `captures` are panes read. */
   const permissionKeys = permissionTmux();
+  /** Every tmux command the dialog route ran, as `permissionKeys` records the permission route's. */
+  const dialogKeys = permissionTmux();
   /** The MCP sign-in, recording every call that reached it — so "refused at the door" is a fact. */
   const mcpCalls: string[] = [];
   const mcp: McpOAuthSubsystem = {
@@ -184,6 +192,7 @@ async function machine(initial: Partial<SecuritySettings> = {}, granted: Capabil
       ...sessionControlRoutes(control, { guard: grants, knownRoots: async () => [PROJECT] }),
       ...sessionConsoleRoutes(consoleSubsystem({}, consoleKeys), sessionDirectory([sessionView('s1')])),
       ...sessionPermissionRoutes(permissionSubsystem({}, permissionKeys), sessionDirectory([sessionView('s1')])),
+      ...sessionDialogRoutes(dialogSubsystem({}, dialogKeys), sessionDirectory([sessionView('s1')])),
     ]),
     credentials,
     grants,
@@ -227,6 +236,8 @@ async function machine(initial: Partial<SecuritySettings> = {}, granted: Capabil
   const typeConsole = () => ask('POST', '/v1/sessions/s1/console/input', json({ data: 'y\r' }));
   const answerPermission = (requestId = PERMISSION_ID) =>
     ask('POST', '/v1/sessions/s1/permission', json({ kind: 'choice', requestId, number: 1 }));
+  const answerDialog = (dialogId = DIALOG_ID) =>
+    ask('POST', '/v1/sessions/s1/dialog', json({ kind: 'choice', dialogId, number: 1 }));
   const upgrade = (terminalId: string) =>
     sockets.upgrade(
       request({ path: `/v1/sessions/s1/terminals/${terminalId}/stream`, device: phone, loopback: false }),
@@ -245,6 +256,8 @@ async function machine(initial: Partial<SecuritySettings> = {}, granted: Capabil
     typeConsole,
     answerPermission,
     permissionKeys,
+    answerDialog,
+    dialogKeys,
     consoleKeys,
     upgrade,
     sockets,
@@ -852,5 +865,139 @@ describe('answering a permission prompt, governed exactly as the Console is (doc
     should(response.status).equal(403);
     should(jsonBody(response)).have.property('code', 'grant_undetermined');
     should([world.permissionKeys.commands, world.permissionKeys.captures]).deepEqual([[], []]);
+  });
+});
+
+describe('answering a harness dialog, governed exactly as the Console is (docs/grants.md)', () => {
+  const dialogPath = '/v1/sessions/s1/dialog';
+  const stale = json({ kind: 'choice', dialogId: STALE_DIALOG_ID, number: 1 });
+  /** A permitted call that reaches the service: the dialog it names is not the one up, so it is 409 gone. */
+  const passedAuthorization = (response: { status: number; body: string }) =>
+    refusedAs(response, 409, 'harness_dialog_gone');
+
+  it('should refuse a locked device 401 unlock_required, before the pane is read or touched', async () => {
+    // Arrange
+    const world = await machine();
+
+    // Act
+    const response = await world.answerDialog();
+
+    // Assert
+    refusedAs(response, 401, UNLOCK_REQUIRED_CODE);
+    should([world.dialogKeys.commands, world.dialogKeys.captures]).deepEqual([[], []]);
+  });
+
+  it('should answer for an unlocked device, as a terminal open is served', async () => {
+    // Arrange
+    const world = await machine();
+    await world.unlock();
+
+    // Act
+    const response = await world.answerDialog();
+
+    // Assert
+    should([response.status, jsonBody(response)]).deepEqual([200, { dialogId: DIALOG_ID, cleared: true }]);
+    should(world.dialogKeys.commands).have.length(1);
+  });
+
+  it('should pass authorization for an unlocked device with no per-act step-up left', async () => {
+    // Arrange
+    const world = await machine();
+    await world.unlock();
+    world.registry.forgetDevice(deviceId);
+
+    // Act
+    const response = await world.ask('POST', dialogPath, stale);
+
+    // Assert
+    passedAuthorization(response);
+    should(world.dialogKeys.commands).deepEqual([]);
+  });
+
+  it('should answer for a caller at the machine, locked or not, because loopback is ungoverned', async () => {
+    // Arrange — no device, no unlock, and `terminal` switched off for everybody who is governed.
+    const world = await machine({}, { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } });
+
+    // Act
+    const response = await world.http.dispatch(
+      request({
+        method: 'POST',
+        path: dialogPath,
+        headers: { authorization: 'Bearer admin-secret', 'x-ferretry-client': 'cli' },
+        loopback: true,
+        body: stale,
+      }),
+    );
+
+    // Assert
+    passedAuthorization(response);
+  });
+
+  it('should refuse an unlocked device when the operator has not granted terminal use', async () => {
+    // Arrange
+    const world = await machine({}, { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } });
+    await world.unlock();
+
+    // Act
+    const response = await world.answerDialog();
+
+    // Assert — an unlock buys what the grants allow and nothing more.
+    should(response.status).equal(403);
+    should(String(jsonBody(response).error)).match(/has not granted the UI the use of session terminals/u);
+    should([world.dialogKeys.commands, world.dialogKeys.captures]).deepEqual([[], []]);
+  });
+
+  it('should treat a RELAYED request as remote, refusing it locked and serving it unlocked', async () => {
+    // Arrange — a relay terminates on this host, so the request looks local in every way but one.
+    const world = await machine();
+    const relayed = () =>
+      world.http.dispatch(
+        tunnelApiRequest(
+          {
+            method: 'POST',
+            path: dialogPath,
+            headers: { host: '127.0.0.1:7432', 'x-forwarded-for': '127.0.0.1' },
+            body: stale,
+          },
+          phone,
+          'rendezvous-session',
+        ),
+      );
+
+    // Act
+    const locked = await relayed();
+    await world.unlock();
+    const unlocked = await relayed();
+
+    // Assert
+    refusedAs(locked, 401, UNLOCK_REQUIRED_CODE);
+    passedAuthorization(unlocked);
+  });
+
+  it('should fail closed when this machine cannot say what it granted', async () => {
+    // Arrange — an unreadable grant document, with the device unlocked.
+    const world = await machine();
+    await world.unlock();
+    const undetermined = new ApiDispatcher(
+      new ApiRouter(sessionDialogRoutes(dialogSubsystem({}, world.dialogKeys), sessionDirectory([sessionView('s1')]))),
+      {
+        admin: 'admin-secret',
+        warden: 'warden-secret',
+        devices: { has: (id: string) => id === deviceId, grants: () => DEFAULT_CAPABILITY_GRANTS },
+      },
+      grantSubsystem({ broken: true }),
+      undefined,
+      world.service,
+    );
+
+    // Act
+    const response = await undetermined.dispatch(
+      request({ method: 'POST', path: dialogPath, device: phone, loopback: false, body: stale }),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response)).have.property('code', 'grant_undetermined');
+    should([world.dialogKeys.commands, world.dialogKeys.captures]).deepEqual([[], []]);
   });
 });

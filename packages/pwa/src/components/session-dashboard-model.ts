@@ -10,6 +10,7 @@ import type { SessionView } from '@ferretry/protocol';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { BadgeTone } from '../shell/primitives.tsx';
+import { pendingQuestionPreview } from '../shell/sessions-bar-model.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 
 export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>> = {
@@ -162,6 +163,8 @@ export function activityLine(view: SessionView): ActivityLine {
     const until = wait.until ? ` (until ${new Date(wait.until).toLocaleTimeString()})` : '';
     return { text: `waiting: ${wait.condition ?? 'external condition'}${until}`, live: true };
   }
+  const question = pendingQuestionPreview(view);
+  if (question !== undefined) return { text: `asks: ${question}`, live: true };
   const activity = view.state.activity?.trim();
   if (activity) return { text: activity, live: !TERMINAL_STATUSES.has(view.state.status) };
   return {

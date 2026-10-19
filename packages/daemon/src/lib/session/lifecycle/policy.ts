@@ -135,15 +135,17 @@ export function firstTurnInstruction(taskFile: string): string {
  * session that could identify itself until its pane was replaced is worse than one that never could:
  * the failure arrives later, in the middle of a conversation, and looks like the peer going silent.
  *
- * HYPERMEDIA DEFAULTS ON, written FIRST so a stored switch wins: a ferret whose switch was never written —
- * every ferret that existed before it did — is told it may use hypermedia at its next launch, and only
- * an explicit `0` the owner set turns it off (docs/hypermedia.md).
+HYPERMEDIA DEFAULTS BY MODE, written FIRST so a stored switch wins: ON for an interactive ferret, OFF for an
+ * auto one (a worker, a warden, a miner), so a ferret whose switch was never written follows its mode at the
+ * next launch and only an explicit value the owner set overrides it (docs/hypermedia.md). A caller that cannot
+ * name the mode gets the off default.
  */
 export function sessionPaneEnvironment(
   id: SessionId,
   stored: Readonly<Record<string, string>>,
+  mode?: 'auto' | 'interactive',
 ): Readonly<Record<string, string>> {
-  return { [HYPERMEDIA_ENV]: '1', ...stored, [SESSION_ID_VARIABLE]: id };
+  return { [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0', ...stored, [SESSION_ID_VARIABLE]: id };
 }
 
 /** Everything the daemon had to resolve before a record could be built. */
