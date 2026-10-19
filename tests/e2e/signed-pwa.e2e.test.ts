@@ -230,7 +230,7 @@ describe('signed PWA releases in a real browser', () => {
     } finally {
       await teardown.closeAll();
     }
-  }, 600_000);
+  });
 
   it('should tell a first visitor that an unsigned copy could not be checked', async () => {
     const teardown = harnessTeardown();
@@ -268,5 +268,5 @@ describe('signed PWA releases in a real browser', () => {
     } finally {
       await teardown.closeAll();
     }
-  }, 300_000);
+  });
 });
