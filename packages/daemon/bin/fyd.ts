@@ -122,6 +122,7 @@ import {
   BunSecretShell,
   BunSqliteIndexFactory,
   CachedUsageFeed,
+  CliUpdateLauncher,
   ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
@@ -144,8 +145,11 @@ import {
   FileSecretKey,
   FileSessionSpawnFacts,
   FileSpeedupTestLedger,
+  FileUpdateDocuments,
   foreignHistoryRoots,
+  GitHubLatestRelease,
   HostedRelayDirectory,
+  HostInstallFacts,
   HttpUsageSource,
   hostCgroupFacts,
   JournalGrantAudit,
@@ -245,6 +249,7 @@ import {
   RuntimeSupervisedLauncher,
   RuntimeSupervisedReaper,
 } from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
+import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -292,7 +297,6 @@ import {
   sessionMessageTokenKeyFile,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
-import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
@@ -435,6 +439,7 @@ import {
   type DaemonConfig,
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
+  DaemonUpdateService,
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
   type DeliveredAttachment,
@@ -478,6 +483,9 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
+  handoffFolders,
+  handoffReadArguments,
+  handoffView,
   harnessAbsentWarning,
   harnessDiscoveryPolicy,
   harnessLocationSummary,
@@ -663,9 +671,6 @@ import {
   secretsMatch,
   selectableAutoAccounts,
   selectBrowserWorker,
-  handoffFolders,
-  handoffReadArguments,
-  handoffView,
   sendRecordView,
   sessionHealthSettingsAt,
   sessionNameClaim,
@@ -733,7 +738,7 @@ import {
   TransferPrepareError,
   WorkspaceFacetContributor,
 } from '../src/lib/transfer/index.ts';
-import { daemonVersion } from '../src/lib/version.ts';
+import { daemonVersion, productName } from '../src/lib/version.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -7242,6 +7247,51 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
           guard: new JevTriageGuard(outboundAuthorizer, speedupStopwatch),
         }),
+        // Updating this daemon (docs/updating.md): its install facts, the latest release from GitHub at
+        // boot and at most every six hours, and `fy daemon update` started detached beside this daemon.
+        daemonUpdate: (() => {
+          const directory = join(paths.state, 'update');
+          const launched = isAbsolute(process.argv0) ? process.argv0 : process.execPath;
+          return new DaemonUpdateService(
+            {
+              current: daemonVersion,
+              product: productName,
+              clientName: CLIENT_NAME,
+              install: new HostInstallFacts({
+                product: productName,
+                argv0: process.argv0,
+                execPath: process.execPath,
+                main: Bun.main,
+                homeDirectory: userHome,
+                platform: process.platform,
+                workingDirectory: process.cwd(),
+                which: name => Bun.which(name) ?? undefined,
+              }),
+              releases: new GitHubLatestRelease(productName, { userAgent: `${DAEMON_NAME}/${daemonVersion}` }),
+              documents: new FileUpdateDocuments(stateFiles, directory),
+              launcher: new CliUpdateLauncher({
+                client: join(dirname(launched), CLIENT_NAME),
+                stateHome: paths.home,
+                files: stateFiles,
+                directory,
+                environment: process.env,
+              }),
+              activity: {
+                midTurn: async () =>
+                  (await turnPorts.sessions()).filter(session => session.state.turnState === 'working').length,
+              },
+              clock: millisecondClock,
+              // A source run has no release to compare with, and an operator or a suite can switch it off.
+              checks: Bun.main.startsWith('/$bunfs/') && process.env.FY_UPDATE_CHECK !== 'off',
+            },
+            {
+              every: (intervalMs, tick) => {
+                const handle = setInterval(tick, intervalMs);
+                return () => clearInterval(handle);
+              },
+            },
+          );
+        })(),
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
@@ -7936,6 +7986,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  /**
+   * The update check, armed after the bind: it asks GitHub once now and then at most every six hours,
+   * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails
+   * a boot — it is reported on the update view instead.
+   */
+  cleanups.push(subsystems.daemonUpdate.arm());
   /**
    * The send tracker, armed after the bind like every loop that can type into a pane: a send proven
    * absent is re-attempted. Arming re-derives every in-flight send from its transcript — a restart

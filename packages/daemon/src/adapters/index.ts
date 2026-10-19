@@ -54,5 +54,6 @@ export * from './system/system-clock.ts';
 export * from './task-boards/index.ts';
 export * from './terminal/index.ts';
 export * from './tmux/index.ts';
+export * from './update/index.ts';
 export * from './usage/index.ts';
 export * from './warden/index.ts';

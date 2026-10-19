@@ -1,4 +1,5 @@
 import type { HealthView } from '@ferretry/protocol';
+import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
 import type { InstalledDaemonBinary } from './binary.ts';
 import type { DaemonLayout } from './layout.ts';
 import { nixStorePathOf } from './nix-store.ts';
@@ -149,6 +150,23 @@ export interface DaemonControllerDeps {
   readonly setupNotice: IMachineSetupNotice;
   readonly readiness?: ReadinessPolicy;
   readonly shutdown?: ShutdownPolicy;
+  /**
+   * The install-method and update lines `status` adds. Optional so the many suites that are about
+   * process control need not stage an install method; the composition root always supplies it.
+   */
+  readonly updateStatus?: IDaemonUpdateStatusReader;
+  /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. */
+  readonly nixShellOffer?: INixShellOffer;
+}
+
+/** Reading what `status` says about installing and updating. Satisfied by `DaemonUpdateStatusReader`. */
+interface IDaemonUpdateStatusReader {
+  read(daemon: InstalledDaemonBinary | undefined, serving: boolean): Promise<DaemonUpdateStatus>;
+}
+
+/** The nix shell → nix profile offer. Satisfied by `NixProfileSwitch`; answers the daemon to install instead. */
+interface INixShellOffer {
+  offer(daemon: InstalledDaemonBinary): Promise<InstalledDaemonBinary | undefined>;
 }
 
 /** Saying, once, that this machine is not set up yet. Satisfied by `MachineSetupNotice`. */
@@ -190,8 +208,10 @@ export class DaemonController {
   async install(): Promise<void> {
     // Before the claim: a host with no daemon executable cannot install one, and learning that
     // after waiting out another invocation's claim is up to 140 seconds spent on a foregone refusal.
-    this.deps.installedDaemon();
-    await this.#serialized('install', () => this.#install());
+    const found = this.deps.installedDaemon();
+    // Before the claim too: the offer can wait on a person, and on `nix profile install`.
+    const daemon = (await this.deps.nixShellOffer?.offer(found)) ?? found;
+    await this.#serialized('install', () => this.#install(daemon));
   }
 
   async uninstall(): Promise<void> {
@@ -237,8 +257,7 @@ export class DaemonController {
     await this.#serialized('reset', () => this.#reset(options));
   }
 
-  async #install(): Promise<void> {
-    const daemon = this.deps.installedDaemon();
+  async #install(daemon: InstalledDaemonBinary): Promise<void> {
     const service = this.#service();
     // Before anything is written: one definition per host, and it may belong to another state home.
     await service.assertServes(undefined);
@@ -448,9 +467,21 @@ export class DaemonController {
     const supervisor = await owner.inspect(this.#handleFor(health));
     const view = decideDaemonStatus(this.#name, supervisor, health);
     const code = statusExitCode(view);
-    if (options.json === true) this.deps.out.success(renderDaemonStatusJson(view));
-    else if (code === 0 && !view.orphan) this.deps.out.success(renderDaemonStatus(view));
-    else this.deps.out.warn(renderDaemonStatus(view));
+    const located = this.#locateDaemon();
+    const update = await this.deps.updateStatus?.read('reason' in located ? undefined : located, health !== undefined);
+    const human = [
+      renderDaemonStatus(view),
+      ...(update === undefined ? [] : renderUpdateStatus(update, this.deps.clientName)),
+    ];
+    if (options.json === true) {
+      this.deps.out.success(
+        renderDaemonStatusJson(
+          view,
+          update === undefined ? {} : { install: update.install ?? null, update: update.update ?? null },
+        ),
+      );
+    } else if (code === 0 && !view.orphan) this.deps.out.success(human.join('\n'));
+    else this.deps.out.warn(human.join('\n'));
     // Still exit 0: an orphan serves, which is the question a script asks. The remedy is said instead.
     if (options.json !== true && view.orphan && health !== undefined) {
       this.deps.out.warn(

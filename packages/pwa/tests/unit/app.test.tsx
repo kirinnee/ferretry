@@ -3381,10 +3381,15 @@ describe('the settings route composition', () => {
     // Settings also asks every paired machine once whether it answers (`/v1/fleet/machine`), so the
     // sidebar can show each one's status, and a machine's tabs read its setup (`/v1/fleet/...`). Those are
     // the account model's reads, proved in their own suites; this test is about the health probe. The
-    // shell also asks the machine on screen whether it may offer "Pair a phone" (`/v1/grants`).
+    // shell also asks the machine on screen whether it may offer "Pair a phone" (`/v1/grants`), and the
+    // machine list asks each machine once whether it has an update, for its dot (`/v1/daemon/update`).
     const probes = () =>
       healthReads.filter(
-        read => read.path !== '/v1/pair/devices' && read.path !== '/v1/grants' && !read.path.startsWith('/v1/fleet/'),
+        read =>
+          read.path !== '/v1/pair/devices' &&
+          read.path !== '/v1/grants' &&
+          read.path !== '/v1/daemon/update' &&
+          !read.path.startsWith('/v1/fleet/'),
       );
 
     // A daemon tab does not read another daemon merely by being visible. Opening

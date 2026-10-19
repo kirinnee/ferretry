@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
 import { type ProjectList, ProjectListSchema, type SessionSkills, SessionSkillsSchema } from '../lib/catalog.ts';
-import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
   FY_BOARD_CAPABILITY_HEADER,
   FY_REQUEST_ID_HEADER,
@@ -13,7 +12,15 @@ import {
   type IFyHttpTransport,
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
-import { type SessionHandoff, SessionHandoffNameSchema, SessionHandoffSchema } from '../lib/turn-handoff.ts';
+import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
+import {
+  type DaemonUpdateSettingsPatch,
+  DaemonUpdateSettingsPatchSchema,
+  type DaemonUpdateStartRequest,
+  DaemonUpdateStartRequestSchema,
+  type DaemonUpdateView,
+  DaemonUpdateViewSchema,
+} from '../lib/daemon-update.ts';
 import {
   type ForeignHistoryListing,
   ForeignHistoryListingSchema,
@@ -50,27 +57,6 @@ import {
   UsageFeedViewSchema,
 } from '../lib/service.ts';
 import {
-  WARDEN_ATTENTION_PATH,
-  WARDEN_INVESTIGATE_PATH,
-  type WardenAttentionView,
-  WardenAttentionViewSchema,
-  type WardenConfigPatch,
-  WardenConfigPatchSchema,
-  type WardenConfigView,
-  WardenConfigViewSchema,
-  type WardenInvestigateRequest,
-  WardenInvestigateRequestSchema,
-  type WardenInvestigateView,
-  WardenInvestigateViewSchema,
-  WardenRunRequestSchema,
-  type WardenRunView,
-  WardenRunViewSchema,
-  type WardenStatusView,
-  WardenStatusViewSchema,
-  type WardenVerdictsView,
-  WardenVerdictsViewSchema,
-} from '../lib/warden.ts';
-import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
   type FyEvent,
@@ -104,21 +90,43 @@ import {
   StartSessionRequestSchema,
   StopSessionRequestSchema,
 } from '../lib/session.ts';
-import { SESSION_LIVE_STREAM_FLAG, type SessionLiveActivity } from '../lib/session-live.ts';
 import {
   type ForkSessionOutcome,
   ForkSessionOutcomeSchema,
   type ForkSessionRequest,
   ForkSessionRequestSchema,
 } from '../lib/session-fork.ts';
+import { SESSION_LIVE_STREAM_FLAG, type SessionLiveActivity } from '../lib/session-live.ts';
 import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
 import { TaskBoardChildGrantRequestSchema, TaskBoardGrantRequestViewSchema } from '../lib/task-boards.ts';
+import { type SessionHandoff, SessionHandoffNameSchema, SessionHandoffSchema } from '../lib/turn-handoff.ts';
 import {
   detectVersionSkew,
   formatUnknownRouteError,
   ProtocolVersionSchema,
   type VersionSkew,
 } from '../lib/version-skew.ts';
+import {
+  WARDEN_ATTENTION_PATH,
+  WARDEN_INVESTIGATE_PATH,
+  type WardenAttentionView,
+  WardenAttentionViewSchema,
+  type WardenConfigPatch,
+  WardenConfigPatchSchema,
+  type WardenConfigView,
+  WardenConfigViewSchema,
+  type WardenInvestigateRequest,
+  WardenInvestigateRequestSchema,
+  type WardenInvestigateView,
+  WardenInvestigateViewSchema,
+  WardenRunRequestSchema,
+  type WardenRunView,
+  WardenRunViewSchema,
+  type WardenStatusView,
+  WardenStatusViewSchema,
+  type WardenVerdictsView,
+  WardenVerdictsViewSchema,
+} from '../lib/warden.ts';
 
 export const FY_REQUEST_TIMEOUT_MS = 120_000;
 export const FY_RECOVERY_TIMEOUT_MS = 15_000;
@@ -485,6 +493,26 @@ export class FyApiClient implements IFyApiClient {
       '/v1/cgroups/config',
       CgroupConfigViewSchema,
       jsonRequest('PATCH', CgroupConfigPatchSchema, patch),
+    );
+  }
+
+  daemonUpdate(): Promise<DaemonUpdateView> {
+    return this.request('/v1/daemon/update', DaemonUpdateViewSchema);
+  }
+
+  startDaemonUpdate(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView> {
+    return this.request(
+      '/v1/daemon/update',
+      DaemonUpdateViewSchema,
+      jsonRequest('POST', DaemonUpdateStartRequestSchema, request),
+    );
+  }
+
+  updateDaemonUpdateSettings(patch: DaemonUpdateSettingsPatch): Promise<DaemonUpdateView> {
+    return this.request(
+      '/v1/daemon/update/settings',
+      DaemonUpdateViewSchema,
+      jsonRequest('PATCH', DaemonUpdateSettingsPatchSchema, patch),
     );
   }
 

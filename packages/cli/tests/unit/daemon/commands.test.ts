@@ -6,6 +6,7 @@ import { DaemonController } from '../../../src/lib/daemon/controller';
 import type { DaemonSupervisorReport } from '../../../src/lib/daemon/ports';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim';
 import { StateHomeController } from '../../../src/lib/state-home/controller';
+import type { DaemonUpdateOptions } from '../../../src/lib/update/updater';
 import { CapturedOutput as CapturedClaimOutput, FakeStateHomeFiles } from '../state-home/fixtures';
 import {
   absentReport,
@@ -42,6 +43,7 @@ function run(
   built: () => number;
   resetTrees: FakeResetTrees;
   prompt: FakePrompt;
+  updates: DaemonUpdateOptions[];
 } {
   const service = new FakeSupervisor('systemd', stoppedReport);
   service.reports = reports;
@@ -49,6 +51,7 @@ function run(
   const logs = new FakeLogs();
   const resetTrees = new FakeResetTrees();
   const prompt = new FakePrompt();
+  const updates: DaemonUpdateOptions[] = [];
   let builds = 0;
   // A home already carrying our marker, so `adopt` in this suite exercises the routing rather than
   // the decision — the decision has its own suite against the real service.
@@ -94,8 +97,15 @@ function run(
       });
     },
     adoptController,
+    () => ({
+      update: (flags: DaemonUpdateOptions) => {
+        updates.push(flags);
+        return Promise.resolve();
+      },
+    }),
   );
   return {
+    updates,
     parsed: program.parseAsync(['node', 'fy', ...argv]),
     service,
     out,
@@ -115,6 +125,39 @@ describe('daemon command surface', () => {
 
     // Assert
     should(service.calls).containEql('install');
+  });
+
+  it('should route update with every flag to the updater', async () => {
+    // Arrange + Act
+    const { parsed, updates } = run([
+      'daemon',
+      'update',
+      '--check',
+      '--to',
+      '4.29.0',
+      '--yes',
+      '--when-idle',
+      '--anyway',
+      '--switch-to-profile',
+      '--report',
+      '/tmp/report.json',
+      '--json',
+    ]);
+    await parsed;
+
+    // Assert
+    should(updates).deepEqual([
+      {
+        check: true,
+        to: '4.29.0',
+        yes: true,
+        whenIdle: true,
+        anyway: true,
+        switchToProfile: true,
+        report: '/tmp/report.json',
+        json: true,
+      },
+    ]);
   });
 
   it('should route uninstall to the controller', async () => {
@@ -300,6 +343,9 @@ describe('daemon command surface', () => {
       },
       () => {
         throw new Error('this test never reaches adopt');
+      },
+      () => {
+        throw new Error('this test never reaches update');
       },
     );
 

@@ -11,6 +11,8 @@ import {
 import type { DaemonSupervisorReport } from '../../../src/lib/daemon/ports';
 import { ResetRefusedError } from '../../../src/lib/daemon/reset';
 import { DaemonOwnershipError, UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervisor';
+import { DaemonUpdateStatusReader } from '../../../src/lib/update/status';
+import { FakeFacts, FakeUpdateView } from '../update/fixtures';
 import {
   absentReport,
   CapturedOutput,
@@ -902,6 +904,57 @@ describe('daemon restart', () => {
     await should(subject.controller.restart()).be.rejectedWith(/cannot find fyd on PATH/u);
     should(trail).be.empty();
     should(subject.service.calls).not.containEql('start');
+  });
+});
+
+describe('daemon status — install and update', () => {
+  const updateStatus = new DaemonUpdateStatusReader(new FakeFacts('homebrew'), new FakeUpdateView([0]));
+
+  it('should add the install method and the available update to the human summary', async () => {
+    const { controller, out } = harness({ probes: [health()], overrides: { updateStatus } });
+    await controller.status({});
+    should(out.text).containEql('  installed via Homebrew cask ferretry');
+    should(out.text).containEql(
+      '  update available 1.2.3 → 1.3.0 (https://github.com/kirinnee/ferretry/releases/tag/v1.3.0)',
+    );
+    should(out.text).containEql('  to update: fy daemon update');
+  });
+
+  it('should add install and update keys to --json, null when unknown', async () => {
+    const { controller, out } = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      overrides: { updateStatus, installedDaemon: noDaemonInstalled() },
+    });
+    await controller.status({ json: true });
+    should(JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '')).match({ install: null, update: null });
+    const serving = harness({ probes: [health()], overrides: { updateStatus } });
+    await serving.controller.status({ json: true });
+    should(JSON.parse(serving.out.lines[0]?.replace('ok: ', '') ?? '')).match({
+      install: { kind: 'homebrew' },
+      update: { available: true },
+    });
+  });
+});
+
+describe('daemon install — nix shell offer', () => {
+  it('should install the daemon the offer answers instead of the one found', async () => {
+    const offered = installedDaemon({ path: '/tmp/fy-home/.nix-profile/bin/fyd', source: 'FY_DAEMON_BIN' });
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      overrides: { nixShellOffer: { offer: () => Promise.resolve(offered) } },
+    });
+    await controller.install();
+    should(service.installedExecutables).deepEqual([offered.path]);
+  });
+
+  it('should install the daemon found when the offer declines', async () => {
+    const { controller, service } = harness({
+      probes: [undefined, health()],
+      overrides: { nixShellOffer: { offer: () => Promise.resolve(undefined) } },
+    });
+    await controller.install();
+    should(service.installedExecutables).deepEqual([installedDaemon().path]);
   });
 });
 
