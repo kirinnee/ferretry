@@ -597,7 +597,9 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   await captureScreens(page, journey, '08-session-transcript');
   await step(journey, 'chat-follow-up', async () => {
     const follow = `${marker}-again`;
-    await page.fill('form.fy-composer textarea', follow);
+    // The composer's field is a live-markdown `role="textbox"` by default and a plain textarea with
+    // formatting off; either is the message box.
+    await page.fill('form.fy-composer :is(textarea, [role="textbox"])', follow);
     const label = String(await textNow(page, 'form.fy-composer button[type="submit"]'));
     const sentAt = Date.now();
     await page.click('form.fy-composer button[type="submit"]');
@@ -781,7 +783,7 @@ describe('the product, from a fresh machine to a working session', () => {
       await coreJourney(product, 'j02-j05-core');
       assertNoSoftFailures('j02-j05-core');
     });
-  }, 600_000);
+  });
 
   it('should do all of it over the local rendezvous when the direct address is unreachable', async () => {
     const journey = 'j06-relay';
@@ -849,7 +851,7 @@ describe('the product, from a fresh machine to a working session', () => {
       },
       { relay: true },
     );
-  }, 600_000);
+  });
 });
 
 const STALE_DONE_BUG =
@@ -1002,7 +1004,7 @@ describe('signing a harness in from the first run', () => {
       );
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 });
 
 /**
@@ -1097,7 +1099,7 @@ describe('signing Claude Code in from the first run', () => {
       await claudeSignInJourney(product, journey);
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 
   it('should do the same over the local rendezvous when the direct address is unreachable', async () => {
     const journey = 'j04-claude-sign-in-relay';
@@ -1109,7 +1111,7 @@ describe('signing Claude Code in from the first run', () => {
       },
       { relay: true },
     );
-  }, 600_000);
+  });
 });
 
 describe('the unlock model: passkeys, unlock, and who may loosen security', () => {
@@ -1289,7 +1291,7 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       });
       assertNoSoftFailures(journey);
     });
-  }, 900_000);
+  });
 });
 
 describe('access ends when it should, and the person is told', () => {
@@ -1410,7 +1412,7 @@ describe('access ends when it should, and the person is told', () => {
       }
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 
   it('should expire a device left idle past the idle period and ask for a new pairing', async () => {
     const journey = 'j07-idle';
@@ -1460,7 +1462,7 @@ describe('access ends when it should, and the person is told', () => {
       );
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 
   it('should record that the lease, idle and session-cap durations have no test seam', async () => {
     // Arrange / Act / Assert — a declared gap, not a pass. See the report's journey 7.
@@ -1629,7 +1631,7 @@ describe('one browser, two machines', () => {
       });
       assertNoSoftFailures(journey);
     });
-  }, 900_000);
+  });
 });
 
 /** The state file under `home` whose text mentions `needle` — how the idle journey finds the device record. */

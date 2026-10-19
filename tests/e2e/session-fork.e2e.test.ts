@@ -370,7 +370,22 @@ describe('compiled daemon conversation fork', () => {
 
         const invocations = await environment.readFakeHarnessInvocations();
         should(invocations).have.length(1);
-        should(invocations[0]).deepEqual({
+        // A Claude target may also READ the folders its messages are handed off through
+        // (packages/daemon/src/lib/session/send/handoff.ts): its own session's turns, channel and
+        // attachments, and its slot under the daemon's attachment root — and nothing else.
+        const handoffReads = invocations[0]?.argv.slice(0, -4) ?? [];
+        const targetDirectory = sessionDirectory(environment, createdTargetId);
+        should(handoffReads).have.length(4);
+        should(handoffReads.slice(0, 3)).deepEqual(
+          ['turns', 'channel', 'attachments'].map(
+            folder => `--allowedTools=Read(/${join(targetDirectory, folder)}/**)`,
+          ),
+        );
+        should(handoffReads[3]).startWith(
+          `--allowedTools=Read(/${join(environment.paths.fyHome, 'state', 'attachments')}/`,
+        );
+        should(handoffReads[3]).endWith(`/${createdTargetId}/**)`);
+        should({ ...invocations[0], argv: invocations[0]?.argv.slice(-4) }).deepEqual({
           wrapper: TARGET_AGENT,
           argv: ['--model', TARGET_MODEL, '--session-id', targetTranscript.harnessSessionId],
           cwd: workspace,

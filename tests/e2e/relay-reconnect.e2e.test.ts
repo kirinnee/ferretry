@@ -624,31 +624,26 @@ describe('a relayed session page that loses its connection', () => {
     900_000,
   );
 
-  it(
-    'should have the daemon re-claim a restarted rendezvous with no browser connected',
-    () =>
-      withJourney('daemon-only', async ({ rendezvous, page }) => {
-        await page.goto('about:blank');
-        await Bun.sleep(3_000);
-        const times: (number | null)[] = [];
-        for (let run = 1; run <= 6; run += 1) {
-          const dropped = await rendezvous.restart();
-          const back = await until(
-            async () =>
-              (await rendezvous.sockets()).some(row => row.roles.includes('daemon')) ? Date.now() : undefined,
-            60_000,
-          );
-          times.push(back === undefined ? null : back - dropped.droppedAt);
-          await note(
-            `- drop ${String(run)} (no browser): daemon re-claimed after ${String(times.at(-1))} ms; closes so far: ${closeSummary(rendezvous.stderr())}`,
-          );
-          await Bun.sleep(2_000);
-        }
-        await note(`\n## summary\n- re-claim times with no browser (ms): ${times.map(String).join(', ')}`);
-        should(times.filter(time => time === null || time > BUDGET_MS)).deepEqual([]);
-      }),
-    600_000,
-  );
+  it('should have the daemon re-claim a restarted rendezvous with no browser connected', () =>
+    withJourney('daemon-only', async ({ rendezvous, page }) => {
+      await page.goto('about:blank');
+      await Bun.sleep(3_000);
+      const times: (number | null)[] = [];
+      for (let run = 1; run <= 6; run += 1) {
+        const dropped = await rendezvous.restart();
+        const back = await until(
+          async () => ((await rendezvous.sockets()).some(row => row.roles.includes('daemon')) ? Date.now() : undefined),
+          60_000,
+        );
+        times.push(back === undefined ? null : back - dropped.droppedAt);
+        await note(
+          `- drop ${String(run)} (no browser): daemon re-claimed after ${String(times.at(-1))} ms; closes so far: ${closeSummary(rendezvous.stderr())}`,
+        );
+        await Bun.sleep(2_000);
+      }
+      await note(`\n## summary\n- re-claim times with no browser (ms): ${times.map(String).join(', ')}`);
+      should(times.filter(time => time === null || time > BUDGET_MS)).deepEqual([]);
+    }));
 
   it(
     'should stay connected and send cleanly after sitting idle [slow]',
