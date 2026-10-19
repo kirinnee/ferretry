@@ -122,6 +122,35 @@ describe('deriveAccountChange: runtime.put', () => {
     should(edit.files).deepEqual([]);
   });
 
+  it('should make the first agent runtime the machine default and say so', () => {
+    // Act
+    const edit = derive(runtimePut({ agent: true }));
+
+    // Assert
+    should(edit.model.machine.defaultRuntime).equal('gamma');
+    should(edit.consequences).deepEqual(["gamma is now this machine's default runtime for new agents."]);
+  });
+
+  it('should keep the default the machine already has when another agent runtime is added', () => {
+    // Arrange
+    const model = modelOf({ machine: { ...modelOf().machine, defaultRuntime: 'beta' } });
+
+    // Act
+    const edit = derive(runtimePut({ agent: true }), model);
+
+    // Assert
+    should(edit.model.machine.defaultRuntime).equal('beta');
+    should(edit.consequences).deepEqual([]);
+  });
+
+  it('should leave the default alone when the new runtime does not launch as an agent', () => {
+    // Act
+    const edit = derive(runtimePut({ agent: false }));
+
+    // Assert
+    should(edit.model.machine.defaultRuntime).be.undefined();
+  });
+
   it('should leave the model it was given untouched', () => {
     // Arrange
     const model = modelOf();

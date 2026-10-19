@@ -696,6 +696,31 @@ describe('OnboardingDoneStep', () => {
     expect(row('warden').textContent).toContain('Rules only');
   });
 
+  it('puts Create a runtime first, and does not call the machine ready, while it has no runtime', async () => {
+    const navigated: string[] = [];
+    await show(
+      <OnboardingDoneStep
+        rows={[SKIPPED]}
+        machineName="studio-mac"
+        onNavigate={to => navigated.push(to)}
+        createRuntimeHref="#settings/studio/runtimes"
+      />,
+    );
+    expect(heading()).toBe('studio-mac has no runtime yet, so nothing can start here.');
+    const link = must(q('[data-onboarding-create-runtime]'), 'the create link') as HTMLAnchorElement;
+    expect(link.textContent).toBe('Create a runtime');
+    expect(link.getAttribute('data-variant')).toBe('primary');
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    await interact(() => link.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(navigated).toEqual(['#settings/studio/runtimes']);
+  });
+
+  it('offers no Create a runtime once a runtime exists', async () => {
+    await done([SET]);
+    expect(q('[data-onboarding-create-runtime]')).toBeNull();
+  });
+
   it('links a step left for later to Settings, navigating in the app instead of the browser', async () => {
     const navigated: string[] = [];
     await done([SET, SKIPPED, UNVISITED], navigated);
