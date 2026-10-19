@@ -175,6 +175,18 @@ shortens a quiet stretch already in force, takes the ferret out of the investiga
 no streak. It is `POST /v1/warden/leave {sessionId, duration}` — `warden.configure`, because it switches the
 Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
 
+**The liveness check.** Every 30 s the Warden looks at each working ferret — a digest of its screen and
+of its transcript tail, the work counters its harness paints, and whether its pane has a live subprocess —
+and keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and
+long-command rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been
+able to see for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
+`nudgeAfterSeconds` (default 300) is nudged once — only while `mayActAlone.nudge` is on — and one with no
+transcript, counter or subprocess sign for its `killAfterSeconds` (default 900; read as "frozen", since the
+Warden never kills) after that is flagged **frozen**: a restart candidate that goes through the layers like
+any other flag. A ferret parked with `signal waiting`, an interactive ferret, or a tick that ran late on a
+starved host is never nudged or flagged. The ledger is kept in memory: a restarted daemon starts every
+clock again rather than judging silence it did not see.
+
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
 a question is waiting or a pane dies (`events.turnEnd`, `events.question`, `events.paneDied`), at most one
 extra sweep a minute.
