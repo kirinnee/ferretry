@@ -202,11 +202,14 @@ A few commands take you from a fresh install to a phone watching an agent work. 
 1. **Start the daemon.**
 
    ```bash
-   fy daemon start
+   fy daemon install
    ```
 
+   This installs a user service (launchd on macOS, systemd on Linux), starts the daemon under it, and
+   brings it back after a restart. `fy daemon start` runs it once without a service instead.
+
    Starting the daemon sets nothing up by itself. A new machine is **not set up** until you choose
-   what to bring in, and the start ends with one line saying so. `fy doctor` checks what else the
+   what to bring in. `fy doctor` checks what else the
    host is missing, and says what each missing program stops.
 
 2. **Set the machine up.** Ferretry asks, one question at a time, whether to use what it found:
@@ -268,3 +271,36 @@ The hosted app at `https://ferretry.pages.dev` is the only browser origin a daem
 If you serve the PWA yourself, add that page's origin to `corsOrigins` in
 `${FY_HOME:-~/.ferretry}/config/daemon.json` and restart the daemon, or the browser's requests are
 refused.
+
+## Troubleshooting
+
+Whether the daemon is serving, and what supervises it:
+
+```bash
+fy daemon status
+```
+
+The daemon's log (add `--follow` to keep streaming it):
+
+```bash
+fy daemon logs
+```
+
+macOS refuses to open `fy` or `fyd`: the binaries are not code-signed. The Homebrew cask clears the
+quarantine flag for you; after any other install, clear it once:
+
+```bash
+xattr -d com.apple.quarantine "$(command -v fy)"
+```
+
+Start over completely. This removes ALL of Ferretry's data on this machine — configuration, sessions
+and transcripts, stored secrets and paired devices — after listing what will go and asking first:
+
+```bash
+fy daemon reset
+```
+
+The landing page's `/get-started` guide (`packages/pwa/get-started/index.html`) shows commands from
+this document. Every command it shows must appear here, in a fenced block, exactly as written —
+`scripts/validate/cli-contracts.sh installation-parity` refuses one that does not, so change a
+command here first.

@@ -201,7 +201,6 @@
         align-items: center;
         justify-content: center;
         gap: 19px;
-        margin-top: 33px;
         padding: 0 23px;
         border: 1px solid var(--ink);
         background: var(--ink);
@@ -228,6 +227,52 @@
       .brand:focus-visible {
         outline: 3px solid var(--lime-deep);
         outline-offset: 4px;
+      }
+      .topnav {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      .nav-app,
+      .nav-cta {
+        font: 800 11px/1 var(--mono);
+        letter-spacing: 0.07em;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+      .nav-app {
+        text-decoration: underline;
+        text-underline-offset: 4px;
+      }
+      .nav-cta {
+        display: inline-flex;
+        min-height: 40px;
+        align-items: center;
+        padding: 0 14px;
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        color: #fffef8;
+      }
+      .nav-app:focus-visible,
+      .nav-cta:focus-visible {
+        outline: 3px solid var(--lime-deep);
+        outline-offset: 4px;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 18px;
+        margin-top: 33px;
+      }
+      .button.secondary {
+        background: transparent;
+        box-shadow: none;
+        color: var(--ink);
+      }
+      .button.secondary:hover {
+        box-shadow: none;
+        transform: none;
+        background: var(--lime);
       }
       .persistent-start {
         position: fixed;
@@ -319,7 +364,7 @@
         box-shadow: 10px 10px 0 var(--lime-deep);
       }
       .account-card div {
-        min-height: 142px;
+        min-height: 112px;
         padding: 18px;
         background: var(--panel);
       }
@@ -337,10 +382,10 @@
         display: block;
         margin-top: 23px;
         font-family: var(--display);
-        font-size: clamp(2.2rem, 5vw, 4.5rem);
+        font-size: clamp(1rem, 1.45vw, 1.35rem);
         font-weight: 500;
-        letter-spacing: -0.1em;
-        line-height: 0.8;
+        letter-spacing: -0.03em;
+        line-height: 1;
       }
       .account-note {
         margin: 19px 0 0;
@@ -408,13 +453,115 @@
         text-align: center;
         transform: translate(-50%, -50%);
       }
-      .peer-segment {
+      .remote-segment code {
+        color: var(--lime);
+        font-size: 0.9em;
+      }
+      .approval-segment {
         background: var(--panel);
       }
-      .peer-segment .frame {
+      .approval-card {
+        border: 1px solid var(--ink);
+        background: var(--paper);
+        box-shadow: 10px 10px 0 var(--lime-deep);
+      }
+      .approval-card header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+        color: var(--lime-deep);
+        font: 800 10px/1.2 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .approval-card p {
+        margin: 0;
+        padding: 22px 16px;
+        font-family: var(--display);
+        font-size: clamp(1.3rem, 2.4vw, 1.75rem);
+        line-height: 1.2;
+      }
+      .approval-card p span {
+        display: inline-block;
+        padding: 2px 6px;
+        background: var(--night);
+        color: var(--lime);
+        font: 700 0.72em/1.3 var(--mono);
+      }
+      .approval-card footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 16px 16px;
+      }
+      .choice {
+        padding: 9px 12px;
+        border: 1px solid var(--ink);
+        font: 800 10px/1 var(--mono);
+        letter-spacing: 0.07em;
+        text-transform: uppercase;
+      }
+      .choice.primary {
+        background: var(--lime);
+        color: #17200f;
+      }
+      .voice-segment {
+        background: var(--night);
+        color: #f8f7f0;
+      }
+      .voice-segment .segment-label,
+      .voice-segment .segment-number {
+        color: var(--lime);
+      }
+      .voice-segment .segment-copy > p:last-child {
+        color: var(--night-muted);
+      }
+      .voice-wave {
+        display: grid;
+        gap: 22px;
+        padding: clamp(24px, 4vw, 44px);
+        border: 1px solid #c9d0c05a;
+      }
+      .voice-bars {
+        display: flex;
+        height: 170px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .voice-bars span {
+        flex: 1;
+        height: 30%;
+        background: var(--lime);
+      }
+      .voice-bars span:nth-child(3n) {
+        height: 72%;
+      }
+      .voice-bars span:nth-child(4n + 1) {
+        height: 48%;
+      }
+      .voice-bars span:nth-child(5n + 2) {
+        height: 92%;
+      }
+      .voice-bars span:nth-child(7n) {
+        height: 18%;
+      }
+      .voice-wave p {
+        margin: 0;
+        color: var(--lime);
+        font: 800 11px/1.2 var(--mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .peer-segment {
+        background: var(--paper-shade);
+      }
+      .segment.flip .frame {
         grid-template-columns: minmax(275px, 0.92fr) minmax(0, 1.08fr);
       }
-      .peer-segment .segment-copy {
+      .segment.flip .segment-copy {
         order: 2;
       }
       .peer-lines {
@@ -451,14 +598,14 @@
       .peer-message:nth-child(2) small {
         color: var(--lime);
       }
-      .quota-segment {
+      .warden-segment {
         background: var(--paper-shade);
       }
-      .quota-board {
+      .warden-board {
         display: grid;
         gap: 10px;
       }
-      .quota-row {
+      .warden-row {
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 12px;
@@ -468,29 +615,29 @@
         background: var(--panel);
         font: 800 11px/1.2 var(--mono);
       }
-      .quota-row::after {
+      .warden-row::after {
         padding: 5px 7px;
         background: var(--lime);
-        content: 'READY';
+        content: 'SKIPPED';
         font-size: 9px;
         letter-spacing: 0.07em;
       }
-      .quota-row:nth-child(2)::after {
+      .warden-row:nth-child(2)::after {
         background: #f1cc65;
-        content: 'AT LIMIT';
+        content: 'INVESTIGATE';
       }
-      .quota-row:nth-child(3)::after {
+      .warden-row:nth-child(3)::after {
         background: #e8a29a;
-        content: 'UNHEALTHY';
+        content: 'NEEDS YOU';
       }
-      .quota-arrow {
+      .warden-arrow {
         margin: 17px 0;
         color: var(--lime-deep);
         font: 800 42px/0.6 var(--display);
         text-align: center;
         transform: rotate(90deg);
       }
-      .quota-result {
+      .warden-result {
         padding: 21px;
         border: 1px solid var(--ink);
         background: var(--night);
@@ -526,12 +673,6 @@
       }
       .history-segment {
         background: var(--panel);
-      }
-      .history-segment .frame {
-        grid-template-columns: minmax(275px, 0.9fr) minmax(0, 1.1fr);
-      }
-      .history-segment .segment-copy {
-        order: 2;
       }
       .history-track {
         position: relative;
@@ -744,6 +885,7 @@
         }
         .hero-bottom,
         .segment .frame,
+        .segment.flip .frame,
         .more .frame {
           grid-template-columns: 1fr;
           gap: 32px;
@@ -790,6 +932,14 @@
           bottom: 12px;
         }
       }
+      @media (max-width: 480px) {
+        .account-card {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .account-card div {
+          min-height: 84px;
+        }
+      }
       @media (max-width: 390px) {
         .brand {
           font-size: 16px;
@@ -801,7 +951,7 @@
           width: calc(100% - 5px);
         }
         .account-card div {
-          min-height: 112px;
+          min-height: 84px;
           padding: 12px;
         }
         .peer-message {
@@ -843,6 +993,10 @@
           background: var(--lime);
           color: #17200f;
         }
+        .peer-message:nth-child(3) small,
+        .history-entry:nth-child(2) span {
+          color: #426c0a;
+        }
         .button {
           border-color: var(--lime);
           background: var(--lime);
@@ -856,7 +1010,16 @@
         .brand:focus-visible {
           outline-color: var(--lime);
         }
-        .quota-row {
+        .nav-cta {
+          border-color: var(--lime);
+          background: var(--lime);
+          color: #17200f;
+        }
+        .nav-app:focus-visible,
+        .nav-cta:focus-visible {
+          outline-color: var(--lime);
+        }
+        .warden-row {
           background: var(--panel);
         }
         .closing .frame::after {
@@ -875,11 +1038,15 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <a class="persistent-start" href="/app">Start now ↗</a>
+    <a class="persistent-start" href="/get-started/">Get started ↗</a>
     <header class="topbar">
       <div class="frame">
-        <a class="brand" href="/" aria-label="Ferretry home"><img src="./fleet-grid.svg" alt="" />Ferretry</a>
+        <a class="brand" href="/?stay" aria-label="Ferretry home"><img src="./fleet-grid.svg" alt="" />Ferretry</a>
         <span class="topline">A control room for agent work</span>
+        <nav class="topnav" aria-label="Primary">
+          <a class="nav-app" href="/app">Open the app</a>
+          <a class="nav-cta" href="/get-started/">Get started</a>
+        </nav>
       </div>
     </header>
     <main id="main">
@@ -890,10 +1057,13 @@
           <div class="hero-bottom">
             <div>
               <p class="intro">
-                Ferretry turns the machines and accounts you already run into one private operating surface — so your
-                agent work has a fleet behind it.
+                Ferretry runs on your own computers and puts every Claude Code and Codex session they run on your phone
+                and desktop — approve, steer and dictate from anywhere.
               </p>
-              <a class="button" href="/app">Start now</a>
+              <div class="cta-row">
+                <a class="button" href="/get-started/">Get started</a>
+                <a class="button secondary" href="/app">Open the app</a>
+              </div>
             </div>
             <p class="truth"><strong>Runs on your machines.</strong> No Ferretry server ever holds your work.</p>
           </div>
@@ -904,29 +1074,30 @@
         <section class="segment account-segment" aria-labelledby="accounts-title">
           <div class="frame">
             <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">01</span> Unlimited accounts</p>
+              <p class="segment-label"><span class="segment-number">01</span> Logins + providers</p>
               <h2 id="accounts-title">A fleet, not an agent.</h2>
               <p>
-                Run as many Claude and Codex accounts as you want. One browser approval per identity, not per wrapper:
-                credentials are cloned to their siblings, so around thirty wrappers need about six sign-ins.
+                Run as many Claude and Codex accounts as you want. Sign in with your own, or add a provider in one click
+                — Amazon Bedrock, Google Vertex, Microsoft Foundry, GLM, Kimi, MiniMax, DeepSeek, OpenRouter and more.
+                Each login shows its real quota, or says plainly when it cannot know.
               </p>
             </div>
-            <div class="visual" aria-label="Thirty wrappers represented by six browser approvals">
+            <div class="visual" aria-label="Sign-in accounts beside built-in provider presets">
               <div class="account-card">
-                <div><span>Identity</span><strong>01</strong></div>
-                <div><span>Wrappers</span><strong>05</strong></div>
-                <div><span>Identity</span><strong>02</strong></div>
-                <div><span>Wrappers</span><strong>05</strong></div>
-                <div><span>Identity</span><strong>03</strong></div>
-                <div><span>Wrappers</span><strong>05</strong></div>
-                <div><span>Identity</span><strong>04</strong></div>
-                <div><span>Wrappers</span><strong>05</strong></div>
-                <div><span>Identity</span><strong>05</strong></div>
-                <div><span>Wrappers</span><strong>05</strong></div>
-                <div><span>Identity</span><strong>06</strong></div>
-                <div><span>Wrappers</span><strong>05</strong></div>
+                <div><span>Sign in</span><strong>Claude</strong></div>
+                <div><span>Sign in</span><strong>Codex</strong></div>
+                <div><span>Cloud</span><strong>Bedrock</strong></div>
+                <div><span>Cloud</span><strong>Vertex</strong></div>
+                <div><span>Cloud</span><strong>Foundry</strong></div>
+                <div><span>Provider</span><strong>GLM</strong></div>
+                <div><span>Provider</span><strong>Kimi</strong></div>
+                <div><span>Provider</span><strong>MiniMax</strong></div>
+                <div><span>Provider</span><strong>DeepSeek</strong></div>
+                <div><span>Gateway</span><strong>OpenRouter</strong></div>
+                <div><span>Gateway</span><strong>LiteLLM</strong></div>
+                <div><span>Local</span><strong>Ollama</strong></div>
               </div>
-              <p class="account-note">6 browser approvals → 30 available wrappers</p>
+              <p class="account-note">Built-in presets · each one a YAML file you can copy and edit</p>
             </div>
           </div>
         </section>
@@ -934,11 +1105,12 @@
         <section class="segment remote-segment" aria-labelledby="remote-title">
           <div class="frame">
             <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">02</span> Encrypted relay</p>
+              <p class="segment-label"><span class="segment-number">02</span> Phone + every machine</p>
               <h2 id="remote-title">Reach it from anywhere.</h2>
               <p>
-                Your fleet on your machines, in your pocket. The end-to-end encrypted relay works behind NAT with
-                nothing to configure; the rendezvous cannot read a session body or device token.
+                Run <code>fy pair</code>, scan the code, and your phone is in. The end-to-end encrypted relay works
+                behind NAT with nothing to configure; the rendezvous cannot read a session body or device token. Pair
+                every computer you run and the app lists all their sessions together, with what needs you on top.
               </p>
             </div>
             <div class="visual relay-map" aria-label="End-to-end encrypted connection between a phone and your machine">
@@ -947,10 +1119,107 @@
           </div>
         </section>
 
-        <section class="segment peer-segment" aria-labelledby="peer-title">
+        <section class="segment approval-segment flip" aria-labelledby="approval-title">
           <div class="frame">
             <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">03</span> Peer sends</p>
+              <p class="segment-label"><span class="segment-number">03</span> Approval cards</p>
+              <h2 id="approval-title">Say yes from your pocket.</h2>
+              <p>
+                When Claude Code or Codex asks permission — to read a file outside its folder, or run a command — the
+                prompt becomes a card in the app: allow once, always allow, or deny with a note. Nothing is answered for
+                you.
+              </p>
+            </div>
+            <div
+              class="visual approval-card"
+              aria-label="Illustration of a permission prompt shown as an approval card"
+            >
+              <header><span>Needs approval</span><span>juno · api</span></header>
+              <p>Juno wants to run <span>bun test --coverage</span></p>
+              <footer>
+                <span class="choice primary">Allow once</span><span class="choice">Always allow</span
+                ><span class="choice">Deny</span>
+              </footer>
+            </div>
+          </div>
+        </section>
+
+        <section class="segment warden-segment" aria-labelledby="warden-title">
+          <div class="frame">
+            <div class="segment-copy">
+              <p class="segment-label"><span class="segment-number">04</span> The Warden</p>
+              <h2 id="warden-title">Something watches the fleet.</h2>
+              <p>
+                The Warden's rules spot sessions that are stuck, looping, sitting on an unanswered question or a dead
+                pane — for free. Turn on review and an investigator reads the session and decides: leave it, nudge it,
+                or bring it to you. A Jev key adds a fast guard that skips the healthy flags, and a daily cap stops
+                surprise spend.
+              </p>
+            </div>
+            <div class="visual warden-board" aria-label="Illustration of a Warden sweep">
+              <div class="warden-row">juno · idle 3 min</div>
+              <div class="warden-row">pax · unanswered question</div>
+              <div class="warden-row">rio · dead pane</div>
+              <div class="warden-arrow">→</div>
+              <div class="warden-result">
+                HEALTHY ONES ARE SKIPPED. THE REST GET A CLOSE READ, AND YOU HEAR ABOUT WHAT NEEDS YOU.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="segment voice-segment flip" aria-labelledby="voice-title">
+          <div class="frame">
+            <div class="segment-copy">
+              <p class="segment-label"><span class="segment-number">05</span> Voice</p>
+              <h2 id="voice-title">Talk instead of type.</h2>
+              <p>
+                Dictate to any session. Parakeet turns speech into text on your device, in the browser, so your audio
+                never leaves it. If you want, Groq or Cerebras tidies the words before you send.
+              </p>
+            </div>
+            <div class="visual voice-wave" aria-label="Illustration of on-device dictation">
+              <div class="voice-bars" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span
+                ><span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <p>On-device · audio stays here</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="segment history-segment" aria-labelledby="history-title">
+          <div class="frame">
+            <div class="segment-copy">
+              <p class="segment-label"><span class="segment-number">06</span> Lessons</p>
+              <h2 id="history-title">Correct it once.</h2>
+              <p>
+                When you correct a ferret, it can file the lesson. You review each one, and Apply writes it into the
+                project's CLAUDE.md or AGENTS.md — or your global instructions — after showing you the diff. Older
+                sessions can be scanned too, with a cost estimate first.
+              </p>
+            </div>
+            <div class="visual history-track" aria-label="A correction becoming a lesson in the project's instructions">
+              <div class="history-entry">
+                <span>You, in chat</span>
+                <p>“Use bun here, not npm.”</p>
+              </div>
+              <div class="history-entry">
+                <span>Lesson · Repo · seen 3×</span>
+                <p>Use bun for every script in this repository.</p>
+              </div>
+              <div class="history-entry">
+                <span>Applied · CLAUDE.md</span>
+                <p>+ Use bun for every script in this repository.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="segment peer-segment flip" aria-labelledby="peer-title">
+          <div class="frame">
+            <div class="segment-copy">
+              <p class="segment-label"><span class="segment-number">07</span> Peer sends</p>
               <h2 id="peer-title">Your agents talk to each other.</h2>
               <p>
                 Agents can hand work across the fleet. A peer send is attributed to the server-derived sender, not a
@@ -969,71 +1238,10 @@
           </div>
         </section>
 
-        <section class="segment quota-segment" aria-labelledby="quota-title">
-          <div class="frame">
-            <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">04</span> Quota + health</p>
-              <h2 id="quota-title">Never lose work to an exhausted account.</h2>
-              <p>
-                Quota probes know who is out. Health probes know who can actually complete a turn. On PATH, in credit,
-                and working are three different questions — the warden moves work off a dying account.
-              </p>
-            </div>
-            <div class="visual quota-board" aria-label="Account health and failover illustration">
-              <div class="quota-row">claude-auto-a</div>
-              <div class="quota-row">codex-auto-b</div>
-              <div class="quota-row">claude-auto-c</div>
-              <div class="quota-arrow">→</div>
-              <div class="quota-result">WORK CONTINUES ON THE ACCOUNT WITH EVIDENCE IT CAN FINISH.</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="segment privacy-segment" aria-labelledby="privacy-title">
-          <div class="frame">
-            <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">05</span> Private by architecture</p>
-              <h2 id="privacy-title">Your machines. Your accounts. Your data.</h2>
-              <p>
-                No Ferretry server holds your work, ever. Claude Code and Codex keep using your accounts; Ferretry
-                brings their running work into an operating surface you control.
-              </p>
-            </div>
-            <div class="visual privacy-mark" aria-label="Ferretry remains on your machines"><span>FY</span></div>
-          </div>
-        </section>
-
-        <section class="segment history-segment" aria-labelledby="history-title">
-          <div class="frame">
-            <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">06</span> Pooled sessions</p>
-              <h2 id="history-title">One history across every account.</h2>
-              <p>
-                Sessions are pooled per harness, so a conversation started under one account is there under another.
-                Existing history migrates with a dry run first.
-              </p>
-            </div>
-            <div class="visual history-track" aria-label="A session history moving safely across accounts">
-              <div class="history-entry">
-                <span>Account A / Claude</span>
-                <p>Start the research with the account that has room.</p>
-              </div>
-              <div class="history-entry">
-                <span>Dry run</span>
-                <p>Confirm what will move before the history changes hands.</p>
-              </div>
-              <div class="history-entry">
-                <span>Account B / Claude</span>
-                <p>Continue the same conversation from the shared harness history.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section class="segment secrets-segment" aria-labelledby="secrets-title">
           <div class="frame">
             <div class="segment-copy">
-              <p class="segment-label"><span class="segment-number">07</span> Transcript-safe secrets</p>
+              <p class="segment-label"><span class="segment-number">08</span> Transcript-safe secrets</p>
               <h2 id="secrets-title">Secrets your agents use and never leak.</h2>
               <p>
                 Agents can use these; they never appear in your transcripts. That is the boundary: the agent gets what
@@ -1051,6 +1259,20 @@
             </div>
           </div>
         </section>
+
+        <section class="segment privacy-segment flip" aria-labelledby="privacy-title">
+          <div class="frame">
+            <div class="segment-copy">
+              <p class="segment-label"><span class="segment-number">09</span> Private by architecture</p>
+              <h2 id="privacy-title">Your machines. Your accounts. Your data.</h2>
+              <p>
+                No Ferretry server holds your work, ever. Claude Code and Codex keep using your accounts; Ferretry
+                brings their running work into an operating surface you control.
+              </p>
+            </div>
+            <div class="visual privacy-mark" aria-label="Ferretry remains on your machines"><span>FY</span></div>
+          </div>
+        </section>
       </div>
 
       <section class="more" aria-labelledby="more-title">
@@ -1063,9 +1285,10 @@
             <li>Task boards</li>
             <li>Attention</li>
             <li>Projects</li>
-            <li>Terminals</li>
+            <li>Terminals and browser pages</li>
             <li>Session search</li>
-            <li>Analytics</li>
+            <li>Insights and analytics</li>
+            <li>Settings as YAML files</li>
             <li><code>fy doctor</code></li>
           </ul>
         </div>
@@ -1077,7 +1300,10 @@
             <p class="segment-label">Your machines, amplified</p>
             <h2 id="closing-title">Keep the harnesses. Gain the fleet.</h2>
             <p>Claude and Codex stay themselves. Ferretry gives their work a place to operate together.</p>
-            <a class="button" href="/app">Start now</a>
+            <div class="cta-row">
+              <a class="button" href="/get-started/">Get started</a>
+              <a class="button secondary" href="/app">Open the app</a>
+            </div>
           </div>
         </div>
       </section>
@@ -1085,12 +1311,12 @@
     <footer class="footer">
       <div class="frame">
         <span class="footer-brand"><img src="./fleet-grid.svg" alt="" />Ferretry</span
-        ><span class="footer-note">Claude and Codex, at fleet scale</span>
+        ><span class="footer-note">Claude and Codex, at fleet scale · v%FY_RELEASE_VERSION%</span>
       </div>
     </footer>
     <noscript
       ><p style="margin: 0; padding: 12px; background: #15151a; color: white; font-family: sans-serif">
-        JavaScript is optional here. <a href="/app" style="color: white">Start now</a>
+        JavaScript is optional here. <a href="/get-started/" style="color: white">Get started</a>
       </p></noscript
     >
   </body>

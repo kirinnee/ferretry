@@ -9,11 +9,22 @@ const redirects = readFileSync(join(packageDir, 'public/_redirects'), 'utf8');
 const headers = readFileSync(join(packageDir, 'public/_headers'), 'utf8');
 
 describe('the static landing document', () => {
-  it('does not boot the PWA bundle and offers only the app as the next step', () => {
+  it('does not boot the PWA bundle, leads with Get started and keeps the app as the second step', () => {
     expect(landing).not.toContain('/src/main.tsx');
     expect(landing).not.toContain('type="module"');
-    expect(landing).toContain('href="/app"');
     expect(landing).not.toContain('href="/setup"');
+    // Every call to action is one of the two: the guide for a newcomer, the app for someone paired.
+    const ctas = [
+      ...landing.matchAll(/<a class="(?:button[^"]*|persistent-start|nav-cta|nav-app)" href="([^"]+)">([^<]+)</g),
+    ].map(match => ({ href: match[1] ?? '', label: (match[2] ?? '').trim() }));
+    expect(ctas).toContainEqual({ href: '/get-started/', label: 'Get started' });
+    expect(ctas).toContainEqual({ href: '/app', label: 'Open the app' });
+    const destinations: readonly string[] = ['/get-started/', '/app'];
+    for (const { href } of ctas) expect(destinations).toContain(href);
+    // The hero's primary button is Get started, and the app follows it.
+    const hero = landing.slice(landing.indexOf('class="cta-row"'));
+    expect(hero.indexOf('href="/get-started/"')).toBeLessThan(hero.indexOf('href="/app"'));
+    expect(landing).not.toContain('Start now');
   });
 
   it('leads with the owner-supplied line and an honest fleet inventory', () => {
@@ -25,6 +36,11 @@ describe('the static landing document', () => {
     expect(landing).toContain('fy doctor');
     expect(landing).toContain('Your agents talk to each other.');
     expect(landing).toContain('server-derived sender');
+    expect(landing).toContain('Parakeet');
+    expect(landing).toContain('Approval cards');
+    expect(landing).toContain('The Warden');
+    expect(landing).toContain('Lessons');
+    expect(landing).toContain('v%FY_RELEASE_VERSION%');
   });
 
   it('does not market known unmounted or unenforced surfaces as complete', () => {
@@ -37,6 +53,9 @@ describe('the static landing document', () => {
     expect(landing).not.toContain('tunnel');
     expect(landing).not.toContain('tailnet');
     expect(landing).not.toContain('runtime model switching');
+    // Wrapper jargon from the kteam era: Ferretry has logins and runtimes, not wrappers.
+    expect(landing).not.toContain('wrapper');
+    expect(landing).not.toContain('claude-auto');
   });
 
   it('keeps a tab favicon without presenting itself as the installable app', () => {

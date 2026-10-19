@@ -78,6 +78,15 @@ const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 const appVersion = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim();
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'fy-release-version',
+      transformIndexHtml: {
+        order: 'pre',
+        handler: html => html.replaceAll('%FY_RELEASE_VERSION%', appVersion),
+      },
+    },
+  ],
   define: {
     __FY_APP_VERSION__: JSON.stringify(appVersion),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
@@ -112,6 +121,7 @@ export default defineConfig({
       input: {
         landing: fileURLToPath(new URL('./index.html', import.meta.url)),
         app: fileURLToPath(new URL('./app/index.html', import.meta.url)),
+        'get-started': fileURLToPath(new URL('./get-started/index.html', import.meta.url)),
       },
     },
   },
