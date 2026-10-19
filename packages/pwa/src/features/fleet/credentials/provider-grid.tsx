@@ -19,7 +19,7 @@ import { presetScope } from './environment-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';
 import { gridSections, PROVIDER_SEARCH_THRESHOLD } from './provider-model.ts';
 
-const TILE =
+export const PROVIDER_TILE =
   'kt-panel flex min-h-control w-full min-w-0 flex-col items-start justify-between gap-1 p-panel text-left hover:border-accent focus-visible:border-accent';
 
 export interface ProviderGridProps {
@@ -79,7 +79,7 @@ export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
           </section>
         ))
       )}
-      <button type="button" className={`${TILE} border-dashed`} data-provider-tile="paste" onClick={onPaste}>
+      <button type="button" className={`${PROVIDER_TILE} border-dashed`} data-provider-tile="paste" onClick={onPaste}>
         <span className="inline-flex items-center gap-2 text-row font-semibold text-fg">
           <ClipboardPaste size={16} aria-hidden="true" className="shrink-0 text-accent" />
           Paste variables…
@@ -116,7 +116,7 @@ function ProviderTile({ preset, noted, onNote, onPick }: ProviderTileProps) {
     <li className="relative flex min-w-0" data-provider-tile-cell={preset.id}>
       <button
         type="button"
-        className={`${TILE} ${offered ? '' : 'border-dashed text-muted hover:border-border'}`}
+        className={`${PROVIDER_TILE} ${offered ? '' : 'border-dashed text-muted hover:border-border'}`}
         aria-disabled={offered ? undefined : true}
         aria-describedby={noteId}
         data-provider-tile={preset.id}
