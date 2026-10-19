@@ -59,6 +59,8 @@ coverage variants `task test:coverage`.
 
 See [README.md](README.md#releasing) and [INSTALLATION.md](INSTALLATION.md).
 Repo invariants live in [scripts/validate/](scripts/validate/) and run from pre-commit.
+How an installed daemon learns of and applies a newer release, per install method (Homebrew, nix
+profile, nix shell, modules, deb/rpm, standalone), is [docs/updating.md](docs/updating.md).
 
 ## Layout
 

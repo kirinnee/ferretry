@@ -18,6 +18,9 @@ import type {
   CgroupConfigPatch,
   CgroupConfigView,
   DaemonCapability,
+  DaemonUpdateSettingsPatch,
+  DaemonUpdateStartRequest,
+  DaemonUpdateView,
   DoctorReport,
   GrantRefusal,
   GrantsView,
@@ -40,6 +43,7 @@ import type {
 } from '@ferretry/protocol';
 import {
   DAEMON_CAPABILITIES,
+  DAEMON_UPDATE_CODES,
   matchesSessionSearchQuery,
   SECRET_SCHEMA_VERSION,
   SESSION_FILE_INDEX_VERSION,
@@ -47,9 +51,11 @@ import {
   sessionSearchTaskHaystack,
   TASK_SCHEMA_VERSION,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import type { ZodType } from 'zod';
 import {
   type AttachmentBlobLoader,
   AttachmentGalleryProvider,
@@ -150,6 +156,7 @@ import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { INFO_TABS, type InfoTab } from '../src/features/session-info/info-model.ts';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { AboutMachineSurface } from '../src/features/settings/about-machine.tsx';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
@@ -859,10 +866,91 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
       />
     ),
   },
+  {
+    id: 'about',
+    label: 'About & updates',
+    description: 'This machine’s version, how it was installed, and updating it.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <AboutMachineSurface connection={connection} createClient={harnessAboutClient} />
+    ),
+  },
 ];
 
 /** Minutes before this page loaded, so the relative times in a capture read as a real recent history. */
 const harnessMinutesAgo = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
+
+/**
+ * SETTINGS › MACHINE › ABOUT, answered in the page (`docs/updating.md`). `?about=manual` makes the
+ * harness daemon a deb install (steps, no button); otherwise it is a Homebrew install with 4.29.0 out,
+ * whose Update press answers `409 update_mid_turn` so the mid-turn choice is reachable by clicking.
+ * The app is stamped 4.29.0 against the machine's 4.28.0, so the version warning is on screen too.
+ */
+(globalThis as { __FY_APP_VERSION__?: string }).__FY_APP_VERSION__ = '4.29.0';
+const HARNESS_ABOUT_MANUAL = new URLSearchParams(window.location.search).get('about') === 'manual';
+const HARNESS_ABOUT_VIEW: DaemonUpdateView = {
+  current: '4.28.0',
+  ...(HARNESS_ABOUT_MANUAL
+    ? {
+        method: { kind: 'system-package', manager: 'apt' },
+        plan: {
+          kind: 'manual',
+          explanation:
+            'This daemon was installed by the system package manager, which needs sudo. Ferretry never asks for it.',
+          steps: [
+            { command: 'sudo apt-get update && sudo apt-get install --only-upgrade fy' },
+            { command: 'fy daemon restart' },
+          ],
+        },
+      }
+    : {
+        method: { kind: 'homebrew', cask: 'ferretry' },
+        plan: {
+          kind: 'self',
+          steps: [{ command: 'brew upgrade --cask ferretry' }, { command: 'fy daemon restart' }],
+          rollback: 'none',
+        },
+      }),
+  check: {
+    state: 'ok',
+    checkedAt: harnessMinutesAgo(42),
+    latest: { version: '4.29.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v4.29.0' },
+  },
+  available: true,
+  midTurn: 2,
+  autoInstall: false,
+  job: null,
+};
+/** The machine list's update dot: the harness daemon says 4.29.0 is out; every other machine says nothing. */
+const HARNESS_UPDATE_CLIENT: FleetClientFactory = async connection => ({
+  request: async <T,>(path: string, schema: ZodType<T>): Promise<T> => {
+    if (connection.daemonId !== daemon.daemonId) throw new Error(`no ${path} on this harness machine`);
+    return schema.parse(HARNESS_ABOUT_VIEW);
+  },
+});
+const harnessAboutClient = async (connection: DaemonConnection) => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  let view = HARNESS_ABOUT_VIEW;
+  return {
+    daemonUpdate: async () => view,
+    startDaemonUpdate: async (request: DaemonUpdateStartRequest): Promise<DaemonUpdateView> => {
+      if (request.when === 'now' && request.confirmMidTurn !== true)
+        throw new FyHttpError('2 ferrets are mid-turn', 409, DAEMON_UPDATE_CODES.midTurn, {
+          error: '2 ferrets are mid-turn',
+          code: DAEMON_UPDATE_CODES.midTurn,
+          midTurn: 2,
+        });
+      view = {
+        ...view,
+        job: { state: 'waiting-for-idle', target: request.target, requestedAt: new Date().toISOString(), midTurn: 2 },
+      };
+      return view;
+    },
+    updateDaemonUpdateSettings: async (patch: DaemonUpdateSettingsPatch) => {
+      view = { ...view, autoInstall: patch.autoInstall };
+      return view;
+    },
+  };
+};
 
 /**
  * The security log the harness daemon answers with: every actor kind, a refusal, a failure, and one
@@ -1023,6 +1111,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       createSecretClient={HARNESS_SECRET_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       createMachineClient={HARNESS_MACHINE_CLIENT}
+      createUpdateClient={HARNESS_UPDATE_CLIENT}
       machineTabs={machineTabs}
       // A stand-in router: the path picks the daemon, the hash is kept on THIS page's address, so a
       // Machines tab or switch stays inside the preview instead of loading a route the harness lacks.

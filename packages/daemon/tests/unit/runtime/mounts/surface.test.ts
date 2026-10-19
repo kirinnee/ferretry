@@ -522,6 +522,18 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   recommend: recommendSubsystem(),
   sttEnhancement: new FakeSttEnhancer(),
   speedups: new FakeSpeedups(),
+  daemonUpdate: {
+    view: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    start: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    setAutoInstall: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    arm: () => () => undefined,
+  },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   secrets: secretSubsystem(),
@@ -615,6 +627,7 @@ describe('the mounted daemon surface', () => {
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
+      3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
@@ -870,6 +883,10 @@ describe('the mounted daemon surface', () => {
       // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
+      // Updating this daemon: the view, starting an update, and the automatic-install setting.
+      'GET /v1/daemon/update',
+      'POST /v1/daemon/update',
+      'PATCH /v1/daemon/update/settings',
       // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',

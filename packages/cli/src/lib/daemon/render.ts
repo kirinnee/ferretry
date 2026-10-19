@@ -74,8 +74,11 @@ export function renderDaemonStatus(view: DaemonStatusView): string {
   return [`${view.daemon} is stopped`, supervised].join('\n');
 }
 
-/** The machine-readable shape of `daemon status --json`. */
-export function renderDaemonStatusJson(view: DaemonStatusView): string {
+/**
+ * The machine-readable shape of `daemon status --json`. `extra` carries the keys another module owns
+ * (`install`, `update`), appended after the ones this function decides.
+ */
+export function renderDaemonStatusJson(view: DaemonStatusView, extra: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify(
     {
       daemon: view.daemon,
@@ -90,6 +93,7 @@ export function renderDaemonStatusJson(view: DaemonStatusView): string {
           : { detail: view.supervisor.detail }),
       },
       ...(view.health === undefined ? {} : { health: view.health }),
+      ...extra,
     },
     null,
     2,

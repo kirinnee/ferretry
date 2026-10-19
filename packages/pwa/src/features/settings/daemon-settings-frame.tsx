@@ -12,6 +12,7 @@ import type { ConnectionChoice } from '@ferretry/relay';
 import {
   ChevronLeft,
   ChevronRight,
+  CircleArrowUp,
   CircleDollarSign,
   FileCode2,
   Fingerprint,
@@ -95,6 +96,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   learning: <GraduationCap size={16} aria-hidden="true" />,
   // A bolt, because the panel holds the optional keys that make the Warden and dictation faster.
   speedups: <Zap size={16} aria-hidden="true" />,
+  // A circled arrow up: the version this machine runs, and moving it to a newer one.
+  about: <CircleArrowUp size={16} aria-hidden="true" />,
 };
 
 /**

@@ -105,6 +105,11 @@ actor phrases (`this computer`, `a supervising agent`, …).
 | `warden.ran`           | `POST /v1/warden/run`, and `POST /v1/warden/investigate` (detail `action: investigate`)                                               |
 | `worktree.removed`     | `POST /v1/worktrees/remove`                                                                                                           |
 
+Starting a daemon update (`POST /v1/daemon/update`, subject `daemon-update`) and changing the
+automatic-install setting (`PATCH /v1/daemon/update/settings`, subject `daemon-update-settings`, with
+`autoInstall` in `detail`) are also `security.changed`: each lets new code run on the machine
+([updating.md](updating.md)).
+
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and
 `auditedSocketRoutes` in `packages/daemon/src/lib/audit/routes.ts`), so a relayed request is recorded
 exactly like a direct one. A step-up is a passkey ceremony, so every reader calls it "Passkey
