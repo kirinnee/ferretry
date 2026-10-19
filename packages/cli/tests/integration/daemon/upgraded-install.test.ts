@@ -240,6 +240,7 @@ function deps(
     // calls it; `reset` has its own integration file, which boots the daemon on what it left behind.
     resetTrees: new FileResetTrees(),
     resetInventory: { count: () => Promise.resolve(undefined) },
+    sessionTerminals: { end: () => Promise.resolve({ kind: 'none' }) },
     claims: new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
     prompt: { ask: () => Promise.resolve('') },
     interactive: () => false,

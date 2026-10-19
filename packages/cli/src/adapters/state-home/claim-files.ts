@@ -11,9 +11,15 @@ import type { IStateHomeFilePort, StateHomeEntry } from '../../lib/state-home/po
  */
 export class FileStateHomeClaim implements IStateHomeFilePort {
   async listHome(home: string): Promise<readonly StateHomeEntry[] | undefined> {
+    return await this.listDirectory(home);
+  }
+
+  async listDirectory(path: string): Promise<readonly StateHomeEntry[] | undefined> {
     try {
-      const entries = await readdir(home, { withFileTypes: true });
-      return entries.map(entry => ({ name: entry.name, directory: entry.isDirectory() }));
+      // `withFileTypes` reports the entry itself, so a symbolic link is neither a directory nor a
+      // regular file here and is never followed — which is what keeps a link out of a scaffold.
+      const entries = await readdir(path, { withFileTypes: true });
+      return entries.map(entry => ({ name: entry.name, directory: entry.isDirectory(), regularFile: entry.isFile() }));
     } catch (error) {
       // An absent home is the normal first-run answer, not a failure. Anything else — a permission
       // denial, a path that is a file — is a real problem and must not read as "nothing there".

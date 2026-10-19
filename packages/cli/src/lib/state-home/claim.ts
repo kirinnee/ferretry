@@ -32,7 +32,17 @@ export type StateHomeClaim =
   /** The home did not exist, or was empty; this client created and claimed it. */
   | { readonly kind: 'claimed'; readonly home: string }
   /** Already carried our marker; nothing was written. */
-  | { readonly kind: 'already-claimed'; readonly home: string };
+  | { readonly kind: 'already-claimed'; readonly home: string }
+  /**
+   * Carried no marker but held only an empty Ferretry scaffold and logs, so it was claimed — and the
+   * entries are carried so the claim can say what it took over rather than doing it silently.
+   */
+  | { readonly kind: 'adopted'; readonly home: string; readonly entries: readonly string[] };
+
+/** Where an unattended adoption is said out loud. The composition root hands it the terminal. */
+export interface IStateHomeClaimNotices {
+  warn(message: string): void;
+}
 
 /**
  * Raised when the client will not write into a directory, naming why and what it found.
@@ -105,6 +115,12 @@ function describe(entries: readonly string[]): string {
  */
 export const DAEMON_LOCK_FILENAME = 'daemon.lock';
 
+/**
+ * The daemon's private tmux socket, mirrored from its composition like the lock above. Exported
+ * because `fy daemon reset` ends that server before it removes the home the sessions write into.
+ */
+export const SESSION_TERMINAL_SOCKET_FILENAME = 'tmux.sock';
+
 /** Enough to recognise a directory; not so many that the message scrolls away. */
 const MAX_NAMED_ENTRIES = 8;
 
@@ -126,6 +142,12 @@ const FERRETRY_HOME_ENTRIES: ReadonlySet<string> = new Set([
   DAEMON_LOCK_FILENAME,
   // Minted by the daemon on first boot, at the top level rather than under `state/`.
   'api-token',
+  'api-warden-token',
+  // The daemon's monitor document and the private tmux server's socket its sessions run under. Both
+  // live at the top level of every home a daemon has served, so an adopt that did not know them
+  // refused exactly the homes it exists for.
+  'monitor.json',
+  SESSION_TERMINAL_SOCKET_FILENAME,
 ]);
 
 /** Atomic writes name their scratch file `<target>.<id>.tmp`; only the marker's is ours to expect. */
@@ -148,22 +170,77 @@ export function unexpectedHomeEntries(entries: readonly StateHomeEntry[]): reado
 export const STATE_HOME_MODE = 0o700;
 
 /**
- * The one shape a CLAIM may adopt without a person looking at it: a lone, unclaimed `logs/`.
+ * The top-level directories an unattended claim may find EMPTY and still adopt.
  *
- * DELIBERATELY NARROWER than what `adopt` accepts, and it mirrors the daemon's `preBootstrapShape`
- * exactly rather than inventing a second opinion. An older `fy` on this same host creates the log
- * directory before launching the daemon and claims nothing, so upgrading to this release meets a
- * home holding exactly that and nothing else — and refusing those hosts would turn a bug fix into a
- * fresh breakage for every existing installation, which is the same failure this change exists to
- * remove. The daemon already treats this shape as legitimate pre-bootstrap state, so treating it as
- * foreign here would also mean the two writers disagreed again, in the opposite direction.
- *
- * Anything else — a `fleet/`, a `config/`, a `daemon.lock` — is NOT auto-adopted. Those say a real
- * installation was provisioned here, and taking one over silently is exactly the judgement `adopt`
- * exists to put in front of a person.
+ * Every one of them is a directory Ferretry creates, and an empty one carries no installation: no
+ * config, no fleet, no session, no secret. That is the shape a reset leaves when anything at all
+ * touches the home after the removal, and the shape an install interrupted between `mkdir` and the
+ * marker leaves. Refusing it sent an owner to `adopt` for a home that held nothing to adopt.
  */
-function isLoneUnclaimedLogDirectory(entries: readonly StateHomeEntry[]): boolean {
-  return entries.length > 0 && entries.every(entry => entry.directory && entry.name === 'logs');
+const SCAFFOLD_DIRECTORIES: ReadonlySet<string> = new Set(['config', 'fleet', 'logs', 'state']);
+
+/** The log directory holds log files and nothing else — the daemon's own `logFileOnly` rule. */
+function isLogFile(entry: StateHomeEntry): boolean {
+  return entry.regularFile && entry.name.length > '.log'.length && entry.name.endsWith('.log');
+}
+
+/**
+ * How many entries an unattended claim will look at before it gives up and leaves the call to
+ * `adopt`. A scaffold is a handful of directories; anything that needs more than this to prove empty
+ * is not one, and a claim runs on every `install`, `start` and `restart`.
+ */
+const MAX_SCAFFOLD_ENTRIES = 256;
+
+/**
+ * Join a child name onto a directory path without spelling the separator twice.
+ *
+ * Plain string joining rather than `node:path`, because this is `src/lib`: the paths are the ones
+ * the layout already resolved, and the claim never normalises or resolves anything.
+ */
+function childOf(directory: string, name: string): string {
+  return directory.endsWith('/') ? `${directory}${name}` : `${directory}/${name}`;
+}
+
+/**
+ * Whether a marker-less home holds ONLY an empty Ferretry scaffold and logs, so a claim may adopt it
+ * without a person looking at it.
+ *
+ * DELIBERATELY NARROWER than what `adopt` accepts, and narrow in the one way that matters: it never
+ * adopts a FILE outside `logs/`. A config document, a fleet manifest, a session, a lock — each says a
+ * real installation was here, and taking one over silently is exactly the judgement `adopt` exists to
+ * put in front of a person. What it does accept is every arrangement of Ferretry's own top-level
+ * directories with nothing in them but further empty directories, plus `<home>/logs/*.log`:
+ *
+ * - a lone `logs/` is what an older `fy` leaves before it launches the daemon, and the daemon's own
+ *   `preBootstrapShape` already accepts it;
+ * - empty `fleet/`, `state/` or `config/` trees are what anything writing into a home after a reset
+ *   leaves — the defect that made `fy daemon install` refuse right after `fy daemon reset`.
+ *
+ * A symbolic link is neither a directory nor a regular file here, so it disqualifies the home.
+ */
+async function holdsOnlyEmptyScaffold(
+  files: IStateHomeFilePort,
+  home: string,
+  entries: readonly StateHomeEntry[],
+): Promise<boolean> {
+  if (entries.length === 0) return false;
+  let budget = MAX_SCAFFOLD_ENTRIES;
+  const pending: Array<{ readonly path: string; readonly logs: boolean }> = [];
+  for (const entry of entries) {
+    if (!entry.directory || !SCAFFOLD_DIRECTORIES.has(entry.name)) return false;
+    pending.push({ path: childOf(home, entry.name), logs: entry.name === 'logs' });
+  }
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    // Vanished between the listings is empty, which is what it now is.
+    const children = (await files.listDirectory(next.path)) ?? [];
+    budget -= children.length;
+    if (budget < 0) return false;
+    for (const child of children) {
+      if (next.logs ? !isLogFile(child) : !child.directory) return false;
+      if (!next.logs) pending.push({ path: childOf(next.path, child.name), logs: false });
+    }
+  }
+  return true;
 }
 
 /**
@@ -178,6 +255,8 @@ export class StateHomeClaimService {
     private readonly files: IStateHomeFilePort,
     /** Named in a refusal so the message carries the fix; the composition root spells the binary. */
     private readonly repairCommand: string,
+    /** Where an unattended adoption is said; omitted, it is still returned to the caller. */
+    private readonly notices?: IStateHomeClaimNotices,
   ) {}
 
   /** Where the marker lives, derived from the shared name rather than spelled a second time. */
@@ -194,10 +273,11 @@ export class StateHomeClaimService {
   async claim(home: string): Promise<StateHomeClaim> {
     const marker = await this.files.readMarker(this.#markerPath(home));
     const entries = (await this.files.listHome(home)) ?? [];
+    const scaffold = marker === undefined && (await holdsOnlyEmptyScaffold(this.files, home, entries));
     const decision = decideLayout(
       marker,
       entries.map(entry => entry.name),
-      isLoneUnclaimedLogDirectory(entries),
+      scaffold,
     );
     if (decision.kind === 'refuse') {
       throw new StateHomeClaimRefusedError(home, decision, unexpectedHomeEntries(entries), this.repairCommand);
@@ -209,7 +289,14 @@ export class StateHomeClaimService {
     // rewrites a marker over a layout it did not create.
     if (decision.kind === 'proceed' || decision.kind === 'upgrade') return { kind: 'already-claimed', home };
     await this.files.writeMarkerAtomic(this.#markerPath(home), layoutVersionContent(), LAYOUT_VERSION_MODE);
-    return { kind: 'claimed', home };
+    if (!scaffold) return { kind: 'claimed', home };
+    const names = entries.map(entry => entry.name).sort();
+    this.notices?.warn(
+      `${home} carried no ${LAYOUT_VERSION_FILENAME} marker but held only empty Ferretry directories ` +
+        `and logs (${names.join(', ')}) — what an interrupted install or reset leaves — so it was claimed ` +
+        "as this release's state home",
+    );
+    return { kind: 'adopted', home, entries: names };
   }
 
   /**

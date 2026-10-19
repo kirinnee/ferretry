@@ -6,14 +6,27 @@ import {
   StateHomeClaimService,
   unexpectedHomeEntries,
 } from '../../../src/lib/state-home/claim';
-import { directories, FakeStateHomeFiles, files } from './fixtures';
+import type { StateHomeEntry } from '../../../src/lib/state-home/ports';
+import { CapturedOutput, directories, FakeStateHomeFiles, files, links } from './fixtures';
 
 const HOME = '/tmp/fy-home/.ferretry';
 const MARKER = `${HOME}/layout-version`;
 
-function service(entries?: readonly { name: string; directory: boolean }[], marker?: string) {
+function service(entries?: readonly StateHomeEntry[], marker?: string) {
   const store = new FakeStateHomeFiles(entries, marker);
-  return { store, claims: new StateHomeClaimService(store, 'fy daemon adopt') };
+  const notices = new CapturedOutput();
+  return {
+    store,
+    notices,
+    claims: new StateHomeClaimService(store, 'fy daemon adopt', { warn: message => notices.success(message) }),
+  };
+}
+
+/** A home whose `fleet/` holds a real manifest — a provisioned installation, not a scaffold. */
+function provisioned(...names: readonly string[]) {
+  const subject = service(directories(...names));
+  subject.store.below.set(`${HOME}/fleet`, files('manifest.json'));
+  return subject;
 }
 
 describe('claiming a state home before writing into it', () => {
@@ -90,15 +103,120 @@ describe('claiming a state home before writing into it', () => {
     const claim = await claims.claim(HOME);
 
     // Assert
-    should(claim.kind).equal('claimed');
+    should(claim).deepEqual({ kind: 'adopted', home: HOME, entries: ['logs'] });
     should(store.writes).have.length(1);
   });
 
-  it('should not silently adopt a provisioned installation the way it adopts a lone log directory', async () => {
-    // Arrange — the tolerance above is exactly as wide as the daemon's `preBootstrapShape` and no
-    // wider. A `fleet/` says a real installation was provisioned here, and taking one over without
-    // anybody looking is the judgement `adopt` exists to put in front of a person.
-    const { store, claims } = service(directories('logs', 'fleet'));
+  it('should adopt a home holding only empty Ferretry directories and logs, and say so', async () => {
+    // Arrange — the shape the reported defect left: `fy daemon reset`, then something wrote into the
+    // home before `fy daemon install` claimed it. Nothing here is an installation — no config, no
+    // manifest, no session — so refusing it sent the owner to `adopt` for a home with nothing in it.
+    const { store, claims, notices } = service(directories('state', 'fleet', 'logs', 'config'));
+    store.below.set(`${HOME}/fleet`, directories('homes'));
+    store.below.set(`${HOME}/fleet/homes`, directories('claude-default'));
+    store.below.set(`${HOME}/logs`, files('fyd.log'));
+
+    // Act
+    const claim = await claims.claim(HOME);
+
+    // Assert — claimed, the whole tree was looked at, and the person is told what was taken over.
+    should(claim).deepEqual({ kind: 'adopted', home: HOME, entries: ['config', 'fleet', 'logs', 'state'] });
+    should(store.writes).deepEqual([{ path: MARKER, contents: '2\n', mode: 0o600 }]);
+    should(store.listed).containEql(`${HOME}/fleet/homes/claude-default`);
+    should(notices.text).equal(
+      `${HOME} carried no layout-version marker but held only empty Ferretry directories and logs ` +
+        '(config, fleet, logs, state) — what an interrupted install or reset leaves — so it was claimed ' +
+        "as this release's state home",
+    );
+  });
+
+  it('should still adopt quietly when nobody handed it a terminal', async () => {
+    // Arrange — the notice is a courtesy; the claim is the work.
+    const store = new FakeStateHomeFiles(directories('state'));
+
+    // Act
+    const claim = await new StateHomeClaimService(store, 'fy daemon adopt').claim(HOME);
+
+    // Assert
+    should(claim.kind).equal('adopted');
+  });
+
+  it('should not adopt a scaffold holding a file anywhere outside the log directory', async () => {
+    // Arrange — one session file deep in `state/` says a daemon really ran here.
+    const { store, claims } = service(directories('state'));
+    store.below.set(`${HOME}/state`, directories('sessions'));
+    store.below.set(`${HOME}/state/sessions`, files('events.jsonl'));
+
+    // Act + Assert
+    await should(claims.claim(HOME)).be.rejectedWith(StateHomeClaimRefusedError);
+    should(store.writes).be.empty();
+  });
+
+  it('should not adopt a log directory holding anything but log files', async () => {
+    // Arrange — a subdirectory, a non-log file, and a link wearing a log's name are none of them ours.
+    for (const inside of [directories('archive'), files('notes.txt'), links('fyd.log'), files('.log')]) {
+      const { store, claims } = service(directories('logs'));
+      store.below.set(`${HOME}/logs`, inside);
+
+      // Act + Assert
+      await should(claims.claim(HOME)).be.rejectedWith(StateHomeClaimRefusedError);
+    }
+  });
+
+  it('should not adopt a scaffold holding a link, or a top-level file, or a directory it does not make', async () => {
+    // Arrange — the lock is ours, but a lock says a daemon started here, so it is `adopt`'s call.
+    for (const entries of [
+      links('fleet'),
+      files('daemon.lock'),
+      directories('Documents'),
+      directories('state', 'cache'),
+    ]) {
+      const { store, claims } = service(entries);
+
+      // Act + Assert
+      await should(claims.claim(HOME)).be.rejectedWith(StateHomeClaimRefusedError);
+      should(store.writes).be.empty();
+    }
+  });
+
+  it('should give up proving a scaffold empty once it has looked at too many entries', async () => {
+    // Arrange — a claim runs on every install, start and restart; an enormous empty tree is not a
+    // scaffold anybody's install left, and the decision belongs to `adopt`.
+    const { store, claims } = service(directories('state'));
+    store.below.set(`${HOME}/state`, directories(...Array.from({ length: 300 }, (_, index) => `d${String(index)}`)));
+
+    // Act + Assert
+    await should(claims.claim(HOME)).be.rejectedWith(StateHomeClaimRefusedError);
+    should(store.listed).deepEqual([`${HOME}/state`]);
+  });
+
+  it('should treat a directory that vanished while it looked as the empty one it now is', async () => {
+    // Arrange
+    const { store, claims } = service(directories('fleet'));
+    store.listDirectory = (path: string) => {
+      store.listed.push(path);
+      return Promise.resolve(undefined);
+    };
+
+    // Act + Assert
+    should((await claims.claim(HOME)).kind).equal('adopted');
+  });
+
+  it('should compose child paths correctly for a home given with a trailing slash', async () => {
+    // Arrange
+    const { store, claims } = service(directories('fleet'));
+
+    // Act
+    await claims.claim(`${HOME}/`);
+
+    // Assert
+    should(store.listed).deepEqual([`${HOME}/fleet`]);
+  });
+
+  it('should not silently adopt a provisioned installation the way it adopts an empty scaffold', async () => {
+    // Arrange — a `fleet/` holding a manifest says a real installation was provisioned here, and
+    // taking one over without anybody looking is the judgement `adopt` exists to put in front of a person.
+    const { store, claims } = provisioned('logs', 'fleet');
 
     // Act + Assert
     await should(claims.claim(HOME)).be.rejectedWith(StateHomeClaimRefusedError);
@@ -109,7 +227,7 @@ describe('claiming a state home before writing into it', () => {
     // Arrange — THE MOST COMMON REFUSAL, not an edge case: `fleet` and `logs` are both entries we
     // write, so a home left by the unclaimed-provisioning defect has NO unexpected entries. This is
     // the message every owner upgrading from a release before the claim reads first.
-    const { claims } = service(directories('fleet', 'logs'));
+    const { claims } = provisioned('fleet', 'logs');
 
     // Act
     const failure = (await claims.claim(HOME).catch((error: unknown) => error)) as Error;
@@ -227,7 +345,8 @@ describe('recognising what Ferretry itself writes at the top of a home', () => {
     // would make the repair command refuse a real owner's home.
     const ours = [
       ...directories('config', 'fleet', 'logs', 'state'),
-      ...files('layout-version', 'daemon.lock', 'api-token'),
+      ...files('layout-version', 'daemon.lock', 'api-token', 'api-warden-token', 'monitor.json'),
+      ...links('tmux.sock'),
     ];
 
     // Act + Assert
