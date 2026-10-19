@@ -23,10 +23,16 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { isRunning, needsYou, type SessionsBarFilter } from '../shell/sessions-bar-model.ts';
+import {
+  listedBeforeMode,
+  matchesMode,
+  needsYou,
+  type SessionsListFilter,
+  listTallies,
+} from '../shell/sessions-bar-model.ts';
 import type { ConnectionHealthState } from './connection-health.ts';
 import type { DaemonId } from './daemon-connection.ts';
-import { type FleetProject, groupByProject, type SessionGroup } from './fleet-grouping.ts';
+import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from './fleet-grouping.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';
 
 /**
@@ -99,8 +105,10 @@ export interface MachineSection {
 export interface AllMachinesView {
   readonly needsYou: readonly NeedsYouEntry[];
   readonly machines: readonly MachineSection[];
-  /** What each sessions-bar filter would show, across every machine. */
-  readonly counts: Readonly<Record<SessionsBarFilter, number>>;
+  /** What each mode segment would show, across every machine, under the stopped rule. */
+  readonly counts: ModeCounts;
+  /** How many stopped sessions ticking "Show stopped" would add, across every machine, under the mode chosen. */
+  readonly hiddenStopped: number;
   /** Every session the list could show before the filter, across every machine. */
   readonly total: number;
   /** True once any machine has answered, so an all-unread list reads as loading. */
@@ -108,19 +116,17 @@ export interface AllMachinesView {
 }
 
 export interface AllMachinesOptions {
-  /** The sessions bar's chip. `all` by default. */
-  readonly filter?: SessionsBarFilter;
+  /** The sessions bar's controls. By default every kind, stopped sessions included. */
+  readonly filter?: SessionsListFilter;
+  /** The session on screen, which stays listed though stopped. It names its machine because ids collide. */
+  readonly keep?: (daemonId: DaemonId, view: SessionView) => boolean;
   /** A screen's own narrowing (the dashboard's search and mode filter), applied first. */
   readonly select?: (sessions: readonly SessionView[]) => readonly SessionView[];
   /** Most recent first inside each project group: what the sessions bar wants, not the table. */
   readonly sortRows?: boolean;
 }
 
-const FILTERS: Readonly<Record<SessionsBarFilter, (view: SessionView) => boolean>> = {
-  all: () => true,
-  'needs-you': needsYou,
-  running: isRunning,
-};
+const SHOW_EVERYTHING: SessionsListFilter = { mode: 'all', showStopped: true };
 
 const everything = (sessions: readonly SessionView[]): readonly SessionView[] => sessions;
 
@@ -133,21 +139,27 @@ const actionable = (reach: ListReach): boolean => reach === 'online';
  */
 export const allMachinesView = (
   machines: readonly MachineSource[],
-  { filter = 'all', select = everything, sortRows = false }: AllMachinesOptions = {},
+  { filter = SHOW_EVERYTHING, select = everything, keep, sortRows = false }: AllMachinesOptions = {},
 ): AllMachinesView => {
   const pinned: (NeedsYouEntry & { readonly order: number })[] = [];
   const sections: MachineSection[] = [];
-  const counts = { all: 0, 'needs-you': 0, running: 0 };
+  let counts: ModeCounts = { all: 0, auto: 0, interactive: 0 };
+  let hiddenStopped = 0;
   let total = 0;
   let loaded = false;
   machines.forEach((machine, order) => {
     if (machine.slice.sessions !== null) loaded = true;
     const pool = select(machine.slice.sessions ?? []);
     total += pool.length;
-    counts.all += pool.length;
-    counts['needs-you'] += pool.filter(needsYou).length;
-    counts.running += pool.filter(isRunning).length;
-    const shown = pool.filter(FILTERS[filter]);
+    const kept = keep === undefined ? undefined : (view: SessionView): boolean => keep(machine.daemonId, view);
+    const tallies = listTallies(pool, filter, kept);
+    counts = {
+      all: counts.all + tallies.counts.all,
+      auto: counts.auto + tallies.counts.auto,
+      interactive: counts.interactive + tallies.counts.interactive,
+    };
+    hiddenStopped += tallies.hiddenStopped;
+    const shown = pool.filter(view => listedBeforeMode(view, filter, kept) && matchesMode(view, filter.mode));
     const moves = actionable(machine.reach) ? shown.filter(needsYou) : [];
     for (const view of moves) pinned.push({ daemonId: machine.daemonId, machineName: machine.name, view, order });
     const stays = moves.length === 0 ? shown : shown.filter(view => !needsYou(view));
@@ -170,10 +182,11 @@ export const allMachinesView = (
   );
   return {
     needsYou: pinned.map(({ order: _order, ...entry }) => entry),
-    // A chip other than All shows only the machines it found something on; All shows every machine,
+    // A kind other than All shows only the machines it found something on; All shows every machine,
     // so an offline one is still said to be offline.
-    machines: filter === 'all' ? sections : sections.filter(section => section.total > 0),
+    machines: filter.mode === 'all' ? sections : sections.filter(section => section.total > 0),
     counts,
+    hiddenStopped,
     total,
     loaded,
   };

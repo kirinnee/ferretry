@@ -23,9 +23,9 @@ import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
-import { ModelSelect } from './model-select.tsx';
 import { projectPickerOptions } from './daemon-picker-model.ts';
 import { DaemonAccountPicker, DaemonProjectPicker } from './daemon-pickers.tsx';
+import { ModelSelect } from './model-select.tsx';
 
 /**
  * The agent runtime a first run makes for Claude Code — the example a person can actually type.
@@ -60,6 +60,12 @@ export interface NewSessionPageProps {
   ) => Promise<{ readonly config: { readonly id: string } }>;
   /** Receives canonical daemon-scoped paths for both cancel and successful creation. */
   readonly onNavigate: (path: string) => void;
+  /**
+   * Resumes a stopped ferret in place, through the same typed client as `startSession`. With `fleet`, it
+   * adds "Ferretry sessions" to Continue: every stopped ferret on this machine, resumed with its
+   * conversation intact.
+   */
+  readonly resumeSession?: (connection: DaemonConnection, sessionId: string) => Promise<unknown>;
   /**
    * The runtime a Launch button named (`?agent=` on this page's address). A HINT ONLY: the Account box
    * fills it in when it offers that runtime as usable and ignores it otherwise. Nothing starts from it.
@@ -246,6 +252,7 @@ export function NewSessionPage({
   connection,
   machineName = daemonDisplayName(connection),
   startSession,
+  resumeSession,
   onNavigate,
   accounts,
   usage,
@@ -320,7 +327,17 @@ export function NewSessionPage({
       {createFleetClient === undefined || !continuing ? null : (
         <Card>
           <PanelBody>
-            <ContinueConversation connection={connection} createClient={createFleetClient} onNavigate={onNavigate} />
+            {fleet === undefined || resumeSession === undefined ? (
+              <ContinueConversation connection={connection} createClient={createFleetClient} onNavigate={onNavigate} />
+            ) : (
+              <ContinueFromMachine
+                connection={connection}
+                createClient={createFleetClient}
+                fleet={fleet}
+                onNavigate={onNavigate}
+                resumeSession={resumeSession}
+              />
+            )}
           </PanelBody>
         </Card>
       )}
@@ -635,6 +652,44 @@ function NoSessionAccounts({
         Open Settings
       </Button>
     </div>
+  );
+}
+
+/**
+ * Continue with both sources: the machine's ferrets come from the session list the app already keeps
+ * (hydrated here, like the Project box, because this form can be a first screen).
+ */
+function ContinueFromMachine({
+  connection,
+  createClient,
+  fleet,
+  onNavigate,
+  resumeSession,
+}: {
+  readonly connection: DaemonConnection;
+  readonly createClient: FleetClientFactory;
+  readonly fleet: DaemonFleetStore;
+  readonly onNavigate: (path: string) => void;
+  readonly resumeSession: (connection: DaemonConnection, sessionId: string) => Promise<unknown>;
+}) {
+  const slice = useSyncExternalStore(
+    listener => fleet.subscribe(listener),
+    () => fleet.fleet(connection.daemonId),
+    () => fleet.fleet(connection.daemonId),
+  );
+  useEffect(() => {
+    void fleet.hydrate(connection).catch(() => {});
+  }, [fleet, connection]);
+  return (
+    <ContinueConversation
+      connection={connection}
+      createClient={createClient}
+      onNavigate={onNavigate}
+      sessions={slice.sessions}
+      resume={async sessionId => {
+        await resumeSession(connection, sessionId);
+      }}
+    />
   );
 }
 

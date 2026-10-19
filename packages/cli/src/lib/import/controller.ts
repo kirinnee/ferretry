@@ -167,7 +167,9 @@ export class ContinueSessionController {
       return;
     }
 
+    // Continue lists Ferretry's own history; only importing reads the computer's CLI homes.
     const listing = await this.gateway.list({
+      source: 'ferretry',
       ...(options.harness === undefined ? {} : { harness: options.harness }),
       ...(options.query === undefined || options.query === '' ? {} : { q: options.query }),
       ...(options.since === undefined ? {} : { since: sinceInstant(options.since, this.context.now) }),

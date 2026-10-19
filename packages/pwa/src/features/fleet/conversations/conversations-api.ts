@@ -1,13 +1,16 @@
 /**
  * The browser's half of keeping existing Claude Code / Codex conversations as ferrets: the listing the
- * daemon searches over its metadata index, and the adoption that makes one session per conversation.
+ * daemon searches over its metadata index, one conversation's last few exchanges, and the adoption that
+ * makes one session per conversation.
  *
- * Both are governed (`fleet` configure), so a surface runs them through `useSetupAccess` and shows a
- * refusal's sentence. Every answer is parsed through the shared schema: metadata only, no transcript.
+ * All are governed (`fleet` configure), so a surface runs them through `useSetupAccess` and shows a
+ * refusal's sentence. Every answer is parsed through the shared schema: metadata and a short preview,
+ * never a whole transcript.
  */
 
 import {
   CONVERSATION_ADOPT_PATH,
+  CONVERSATION_IMPORT_PATH,
   type ConversationAdoptRequest,
   ConversationAdoptRequestSchema,
   type ConversationAdoptResult,
@@ -15,6 +18,9 @@ import {
   type ConversationImportListing,
   ConversationImportListingSchema,
   type ConversationImportQuery,
+  type ConversationPreview,
+  ConversationPreviewSchema,
+  type Harness,
 } from '@ferretry/protocol';
 import type { FleetClient } from '../fleet-client.ts';
 import { listingPath } from './conversation-picker-model.ts';
@@ -35,3 +41,14 @@ export const adoptConversations = async (
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(ConversationAdoptRequestSchema.parse(request)),
   });
+
+/** The last few exchanges of one conversation, cleaned of delivery wrappers, oldest first. */
+export const readConversationPreview = async (
+  client: FleetClient,
+  harness: Harness,
+  id: string,
+): Promise<ConversationPreview> =>
+  await client.request(
+    `${CONVERSATION_IMPORT_PATH}/${harness}/${encodeURIComponent(id)}/preview`,
+    ConversationPreviewSchema,
+  );

@@ -90,23 +90,40 @@ export function Segmented<T extends string>({
 }
 
 /**
- * A conversation in two lines, shared by the picker and the Continue search. First: what it began with
- * (one line, ellipsised) and how long ago it last moved. Second, muted: its folder (the last two segments,
- * which give way first), the CLI, the turns and the model.
+ * A conversation in at most three short lines, shared by the picker and Continue. First: what it began
+ * with (one line, ellipsised) and how long ago it last moved. Second, when it moved on since: the latest
+ * thing the owner said, so two rows that began alike still read apart. Third, faint: its folder (the
+ * last two segments, which give way first), the CLI, the turns and the model, after `lead` when given.
  */
-export function ConversationLines({ row, now }: { readonly row: ImportableConversation; readonly now: number }) {
+export function ConversationLines({
+  row,
+  now,
+  lead,
+}: {
+  readonly row: ImportableConversation;
+  readonly now: number;
+  /** Leads the third line: the ferret's name, on a row that is a ferret. */
+  readonly lead?: string;
+}) {
   const turns = `${row.turns} ${row.turns === 1 ? 'turn' : 'turns'}`;
   return (
     <>
       <span className="flex min-w-0 items-baseline gap-sm">
-        <span className="min-w-0 flex-1 truncate text-row text-fg" title={row.latest ?? undefined}>
+        <span className="min-w-0 flex-1 truncate text-row text-fg" title={row.preview}>
           {previewText(row)}
         </span>
         <span className="mono shrink-0 text-meta text-faint" data-conversation-age="">
           {relativeTime(row.lastActivityAt, now)}
         </span>
       </span>
-      <span className="flex min-w-0 items-baseline gap-1 overflow-hidden text-meta text-muted">
+      {row.latest === undefined ? null : (
+        <span className="min-w-0 truncate text-meta text-muted" title={row.latest} data-conversation-latest="">
+          <span className="sr-only">Latest: </span>
+          {row.latest}
+        </span>
+      )}
+      <span className="flex min-w-0 items-baseline gap-1 overflow-hidden text-meta text-faint">
+        {lead === undefined ? null : <span className="shrink-0 font-medium text-muted">{lead} ·</span>}
         <span className="max-w-[45%] shrink-0 truncate font-mono" title={row.project}>
           {folderLabel(row.project)}
         </span>

@@ -2,13 +2,13 @@
  * ONE SESSION IN THE SESSIONS BAR: the status mark, the agent's name, one mark on the right, a line of
  * what it is doing and the directory it runs in. The open one is a soft filled pill.
  *
- * The mark on the right is the row's one exception: "needs you", else a "Learning: passive" chip — or,
+ * The mark on the right is the row's one exception: "needs you", else the graduation-cap mark of a ferret that learns — or,
  * inside the all-machines Needs you group, the machine's name, because every row there needs you and
  * nothing else on the line says where it runs.
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { PassiveLearningChip } from '../features/learning/passive-learning.tsx';
+import { PassiveLearningMark } from '../features/learning/passive-learning.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
@@ -57,7 +57,7 @@ export function SessionsBarRow({
             needs you
           </span>
         ) : learningPassive ? (
-          <PassiveLearningChip />
+          <PassiveLearningMark />
         ) : null}
         {task === view.config.cwd ? null : <span className="fy-sbar__sub">{task}</span>}
         {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps

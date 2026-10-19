@@ -31,7 +31,18 @@ const cases: SchemaCase[] = [
   {
     name: 'ConversationImportQuerySchema',
     schema: imports.ConversationImportQuerySchema,
-    value: { harness: 'codex', q: 'login', since: INSTANT, limit: 20 },
+    value: { source: 'ferretry', harness: 'codex', q: 'login', since: INSTANT, limit: 20 },
+  },
+  { name: 'ConversationSourceSchema', schema: imports.ConversationSourceSchema, value: 'computer' },
+  {
+    name: 'ConversationExchangeMessageSchema',
+    schema: imports.ConversationExchangeMessageSchema,
+    value: { role: 'assistant', text: 'Fixed it.' },
+  },
+  {
+    name: 'ConversationPreviewSchema',
+    schema: imports.ConversationPreviewSchema,
+    value: { id: ID, harness: 'claude', messages: [{ role: 'user', text: 'Fix the login page' }] },
   },
   { name: 'ConversationAdoptItemSchema', schema: imports.ConversationAdoptItemSchema, value: { id: ID, start: false } },
   { name: 'ConversationAdoptRequestSchema', schema: imports.ConversationAdoptRequestSchema, value: request },
@@ -102,6 +113,13 @@ describe('the conversation import wire contract', () => {
         value: { ...request, conversations: burst },
       },
       { name: 'empty', schema: imports.ConversationAdoptRequestSchema, value: { ...request, conversations: [] } },
+      { name: 'unknown source', schema: imports.ConversationImportQuerySchema, value: { source: 'home' } },
+      {
+        name: 'long exchange',
+        schema: imports.ConversationExchangeMessageSchema,
+        value: { role: 'user', text: 'x'.repeat(imports.CONVERSATION_EXCHANGE_TEXT_MAX + 1) },
+      },
+      { name: 'tool exchange', schema: imports.ConversationExchangeMessageSchema, value: { role: 'tool', text: 'x' } },
     ]);
   });
 });
