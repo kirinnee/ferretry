@@ -1,6 +1,6 @@
 /**
- * The dictation MINI PANEL — tap the mic, keep typing, speak, and watch the
- * words land in your draft on their own.
+ * The dictation MINI PANEL — tap the mic, keep typing, speak, then review the words in a mini box
+ * and choose whether they go into your draft.
  *
  * NON-MODAL IS THE PRODUCT REQUIREMENT, and kteam's `DESIGN-side-pane-tabs.md`
  * reasoning applies here too: the first single-tap redesign used a bottom sheet,
@@ -10,10 +10,15 @@
  * single slim strip anchored directly above the composer, and hiding it does not
  * cancel the recording; the mic button brings it back.
  *
- * A READ-ONLY CAPTION, NOT AN EDITOR. There is no textarea, no review step and
- * no Insert button — on Stop the hook transcribes once, enhances once, and drops
- * the result straight into the draft. The panel only says what is happening and
- * offers Stop / Retry / Cancel / Hide.
+ * WHILE RECORDING IT IS A READ-ONLY CAPTION: the sound wave, plus live words only when the
+ * experimental toggle is on, and Stop / Cancel / Hide. Typing in the composer still works.
+ *
+ * ON STOP THE SAME PANEL BECOMES THE REVIEW MINI BOX (`dictation-review-box.tsx`). The hook
+ * transcribes once, cleans up once (if cleanup is on) and PARKS the result; nothing reaches the draft
+ * until the person presses Insert, which puts it at the composer's caret and never replaces the
+ * draft. Discard throws it away, Retry records again, and when cleanup changed the words a quiet
+ * switch offers the raw transcript instead. A hidden panel reopens by itself when the take lands, so
+ * a finished transcript is never stranded out of sight.
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSheet.tsx`), and WHY.
  *
@@ -28,7 +33,7 @@
  *      agreed on read normally, the provisional tail (`liveInterim`) is greyed, and
  *      a device too slow to keep up says "live words paused — device too slow".
  *      The caption shows its last two lines, where the new words land. Either way the
- *      completed result, not a provisional caption, is what the controller inserts.
+ *      completed result, not a provisional caption, is what the review box offers.
  *   3. THE INPUT METER IS WIRED FOR EVERY ENGINE. kteam's sheet declared an
  *      `inputMonitor` prop, never destructured it, and `InputWaveform` was
  *      imported by nothing except its own test, so no bars ever showed. Here
@@ -41,13 +46,14 @@
 
 import { AlertCircle, EyeOff, Loader2, Mic, RotateCcw, Square, X } from 'lucide-react';
 import { useId } from 'react';
-import type { DictationPhase } from '../hooks/use-dictation.ts';
+import type { DictationPhase, DictationReview } from '../hooks/use-dictation.ts';
 import { cn } from '../lib/class-names.ts';
+import type { CaptureMonitor } from '../lib/stt/level-monitor.ts';
+import { NEAR_LIVE_PAUSED_COPY } from '../lib/stt/near-live.ts';
 import type { DictationEngineId } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
-import type { CaptureMonitor } from '../lib/stt/level-monitor.ts';
+import { DictationReviewBox } from './dictation-review-box.tsx';
 import { InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
-import { NEAR_LIVE_PAUSED_COPY } from '../lib/stt/near-live.ts';
 
 /**
  * The visible step, derived from the capture phase plus whether the mic ever
@@ -55,10 +61,9 @@ import { NEAR_LIVE_PAUSED_COPY } from '../lib/stt/near-live.ts';
  * rule has a test instead of living in JSX. `wasCapturing` distinguishes "just
  * opened, waiting for the mic" from "recorded, but the clip was too short to
  * keep" — both are `idle`, and only the second is a dead end worth telling the
- * reader about. There is no `review` stage: a landed transcript is inserted
- * automatically and the panel closes itself.
+ * reader about. `review` is the landed transcript waiting for Insert or Discard.
  */
-export type DictationStage = 'starting' | 'recording' | 'transcribing' | 'empty' | 'error';
+export type DictationStage = 'starting' | 'recording' | 'transcribing' | 'review' | 'empty' | 'error';
 
 export function dictationStage(input: {
   phase: DictationPhase;
@@ -66,6 +71,7 @@ export function dictationStage(input: {
   wasCapturing: boolean;
 }): DictationStage {
   if (input.hasError || input.phase === 'error') return 'error';
+  if (input.phase === 'review') return 'review';
   if (input.phase === 'transcribing') return 'transcribing';
   if (input.phase === 'requesting') return 'starting';
   if (input.phase === 'recording') return 'recording';
@@ -98,9 +104,9 @@ type StripEngine = DictationEngineId | null;
  * is only the headline and the one actionable hint.
  *
  * The vocabulary is what can actually REACH this panel: the visible half of
- * `BrowserRecognitionErrorCode` (`lib/stt/browser-recognition.ts`) plus the
- * `enhancement-` prefix the hook attaches to a post-transcription correction
- * failure. Two absences are deliberate:
+ * `BrowserRecognitionErrorCode` (`lib/stt/browser-recognition.ts`). A failed cleanup is not here —
+ * it is not a failed take; the review box shows the raw words with the reason. Two absences are
+ * deliberate:
  *
  *   1. `aborted` is a cancellation, not a failed take, and `use-dictation.ts`
  *      converts it to idle in BOTH places the session can report it — the
@@ -114,12 +120,6 @@ type StripEngine = DictationEngineId | null;
  *      proves only that a test can call this function with a string.
  */
 export function dictationFailureCopy(code: string | undefined, engine: StripEngine = 'browser'): DictationFailureCopy {
-  if (code?.startsWith('enhancement-')) {
-    return {
-      title: 'Raw dictation kept',
-      hint: 'Correction failed, but the unmodified transcript was already added to your draft.',
-    };
-  }
   switch (code) {
     case 'permission-denied':
       return {
@@ -178,10 +178,16 @@ export interface DictationSheetProps {
   readonly engine?: StripEngine;
   readonly errorCode?: string;
   readonly errorMessage?: string;
+  /** The finished take, present in stage `review`. */
+  readonly review?: DictationReview | null;
   /** Hide only. Recording and transcription continue in the background. */
   onDismiss(): void;
-  /** Stop recording; the hook finishes and inserts on its own. */
+  /** Stop recording; the hook finishes and parks the transcript for review. */
   onStop(): void;
+  /** Put the reviewed text into the draft at the caret. */
+  onInsert(text: string): void;
+  /** Drop the reviewed take; the draft is untouched. */
+  onDiscard(): void;
   /** Throw the recording away and close. */
   onCancel(): void;
   /** Start over from a fresh recording (empty, error). */
@@ -231,15 +237,17 @@ export function dictationStripStatus(
       if (preview) return paused ? `${preview} · ${NEAR_LIVE_PAUSED_COPY}` : preview;
       return onDevice
         ? 'Speak, then press Stop. Parakeet transcribes on this device; audio never leaves it.'
-        : 'Speak, then press Stop. Your browser sends this audio to its vendor’s servers; Ferretry only updates your draft.';
+        : 'Speak, then press Stop. Your browser sends this audio to its vendor’s servers; Ferretry only shows you the text.';
     case 'transcribing':
       if (onDevice)
         return preview
           ? `Finishing on this device and correcting once… Last heard: ${preview}`
-          : 'Transcribing on this device and correcting once… The result will be added to your draft.';
+          : 'Transcribing on this device and correcting once… You will review the result before it reaches your draft.';
       return `Finishing in your browser and correcting once… ${
-        preview ? `Last heard: ${preview}` : 'The result will be added to your draft.'
+        preview ? `Last heard: ${preview}` : 'You will review the result before it reaches your draft.'
       }`;
+    case 'review':
+      return 'Review the text, then insert it into your draft.';
     case 'empty':
       return 'No speech was captured. Record again when you are ready.';
     case 'error':
@@ -298,12 +306,14 @@ export function DictationSheet({
   errorMessage,
   engine = 'browser',
   onDismiss,
+  review = null,
   onStop,
+  onInsert,
+  onDiscard,
   onCancel,
   onRetry,
 }: DictationSheetProps) {
   const baseId = useId();
-  const enhancementFailure = errorCode?.startsWith('enhancement-') ?? false;
   const titleId = `${baseId}-title`;
   const safetyId = `${baseId}-safety`;
 
@@ -316,11 +326,13 @@ export function DictationSheet({
         : 'Finishing in browser'
       : stage === 'recording'
         ? 'Recording'
-        : stage === 'error'
-          ? failure.title
-          : stage === 'empty'
-            ? "Didn't catch that"
-            : 'Opening microphone';
+        : stage === 'review'
+          ? 'Review dictation'
+          : stage === 'error'
+            ? failure.title
+            : stage === 'empty'
+              ? "Didn't catch that"
+              : 'Opening microphone';
   const status = dictationStripStatus(stage, liveText, errorMessage, failure, engine, livePaused);
   const caption = splitLiveCaption(liveText, liveInterim);
   const showCaption = stage === 'recording' && caption.settled + caption.interim !== '';
@@ -336,99 +348,116 @@ export function DictationSheet({
       onKeyDown={event => {
         // Local Escape only: the panel must never install a document-level
         // handler that intercepts keys while the reader is typing elsewhere.
+        // On a finished take it is Discard (the review's own Escape); otherwise it only hides.
         if (event.key !== 'Escape') return;
         event.stopPropagation();
-        onDismiss();
+        if (stage === 'review') onDiscard();
+        else onDismiss();
       }}
       className={cn(
         'absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-panel border border-l-heavy border-border bg-surface font-ui shadow-panel',
         stage === 'recording' && 'border-l-err',
-        (stage === 'starting' || stage === 'transcribing') && 'border-l-accent',
+        (stage === 'starting' || stage === 'transcribing' || stage === 'review') && 'border-l-accent',
         (stage === 'empty' || stage === 'error') && 'border-l-warn',
       )}
     >
-      <div className="flex min-h-[56px] w-full min-w-0 items-center gap-xs px-2 py-1.5">
-        {stage === 'recording' ? (
-          <LiveDot />
-        ) : stage === 'transcribing' ? (
-          <Loader2
-            size={16}
-            aria-hidden="true"
-            className="shrink-0 animate-spin text-accent motion-reduce:animate-none"
-          />
-        ) : stage === 'error' ? (
-          <AlertCircle size={16} aria-hidden="true" className="shrink-0 text-warn" />
-        ) : (
-          <Mic size={16} aria-hidden="true" className="shrink-0 text-fg-soft" />
-        )}
-        <span id={titleId} className="sr-only">
-          {title}
-        </span>
-        {stage === 'recording' && (
-          <span className="mono shrink-0 tabular-nums text-ui text-muted" aria-hidden="true">
-            {formatElapsed(elapsedMs)}
+      {stage === 'review' && review !== null ? (
+        <>
+          <span id={titleId} className="sr-only">
+            {title}
           </span>
-        )}
-        <p
-          data-live-transcript={liveText.trim() ? 'preview' : 'waiting'}
-          title={status}
-          className={cn(
-            'm-0 min-w-0 flex-1 leading-base text-fg',
-            stage === 'error' ? 'whitespace-normal break-words text-meta' : 'truncate text-ui',
+          <DictationReviewBox
+            key={review.id}
+            review={review}
+            onInsert={onInsert}
+            onDiscard={onDiscard}
+            onRetry={onRetry}
+          />
+        </>
+      ) : (
+        <div className="flex min-h-[56px] w-full min-w-0 items-center gap-xs px-2 py-1.5">
+          {stage === 'recording' ? (
+            <LiveDot />
+          ) : stage === 'transcribing' ? (
+            <Loader2
+              size={16}
+              aria-hidden="true"
+              className="shrink-0 animate-spin text-accent motion-reduce:animate-none"
+            />
+          ) : stage === 'error' ? (
+            <AlertCircle size={16} aria-hidden="true" className="shrink-0 text-warn" />
+          ) : (
+            <Mic size={16} aria-hidden="true" className="shrink-0 text-fg-soft" />
           )}
-        >
-          {showCaption ? <LiveCaption settled={caption.settled} interim={caption.interim} /> : status}
-        </p>
+          <span id={titleId} className="sr-only">
+            {title}
+          </span>
+          {stage === 'recording' && (
+            <span className="mono shrink-0 tabular-nums text-ui text-muted" aria-hidden="true">
+              {formatElapsed(elapsedMs)}
+            </span>
+          )}
+          <p
+            data-live-transcript={liveText.trim() ? 'preview' : 'waiting'}
+            title={status}
+            className={cn(
+              'm-0 min-w-0 flex-1 leading-base text-fg',
+              stage === 'error' ? 'whitespace-normal break-words text-meta' : 'truncate text-ui',
+            )}
+          >
+            {showCaption ? <LiveCaption settled={caption.settled} interim={caption.interim} /> : status}
+          </p>
 
-        {stage === 'recording' && (
+          {stage === 'recording' && (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className={ACTION_CLASS}
+              aria-label="Stop recording and review the text"
+              title="Stop and review the text"
+              onClick={onStop}
+            >
+              <Square size={15} aria-hidden="true" />
+            </Button>
+          )}
+          {(stage === 'empty' || stage === 'error') && (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className={ACTION_CLASS}
+              aria-label={stage === 'empty' ? 'Record again' : 'Try again'}
+              title={stage === 'empty' ? 'Record again' : 'Try again'}
+              onClick={onRetry}
+            >
+              <RotateCcw size={15} aria-hidden="true" />
+            </Button>
+          )}
           <Button
             type="button"
-            variant="primary"
+            variant="ghost"
             size="sm"
             className={ACTION_CLASS}
-            aria-label="Stop recording and add text to your draft"
-            title="Stop and add to draft"
-            onClick={onStop}
+            aria-label={stage === 'empty' ? 'Close dictation' : 'Cancel dictation'}
+            title={stage === 'empty' ? 'Close dictation' : 'Cancel dictation'}
+            onClick={onCancel}
           >
-            <Square size={15} aria-hidden="true" />
+            <X size={15} aria-hidden="true" />
           </Button>
-        )}
-        {(stage === 'empty' || (stage === 'error' && !enhancementFailure)) && (
           <Button
             type="button"
-            variant="primary"
+            variant="ghost"
             size="sm"
             className={ACTION_CLASS}
-            aria-label={stage === 'empty' ? 'Record again' : 'Try again'}
-            title={stage === 'empty' ? 'Record again' : 'Try again'}
-            onClick={onRetry}
+            aria-label="Hide dictation panel; recording continues"
+            title="Hide this panel — recording continues"
+            onClick={onDismiss}
           >
-            <RotateCcw size={15} aria-hidden="true" />
+            <EyeOff size={15} aria-hidden="true" />
           </Button>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={ACTION_CLASS}
-          aria-label={stage === 'empty' || enhancementFailure ? 'Close dictation' : 'Cancel dictation'}
-          title={stage === 'empty' || enhancementFailure ? 'Close dictation' : 'Cancel dictation'}
-          onClick={onCancel}
-        >
-          <X size={15} aria-hidden="true" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className={ACTION_CLASS}
-          aria-label="Hide dictation panel; recording continues"
-          title="Hide this panel — recording continues"
-          onClick={onDismiss}
-        >
-          <EyeOff size={15} aria-hidden="true" />
-        </Button>
-      </div>
+        </div>
+      )}
 
       {/* Parakeet could not keep up: its own full-width row, so a phone shows it beside the words. */}
       {stage === 'recording' && onDevice && livePaused && (
@@ -450,21 +479,21 @@ export function DictationSheet({
           ? 'Recording'
           : stage === 'transcribing'
             ? onDevice
-              ? 'Transcribing on this device, then adding it to your draft'
-              : 'Finishing transcription in your browser, then adding it to your draft'
-            : stage === 'empty'
-              ? 'No speech was captured'
-              : stage === 'error'
-                ? enhancementFailure
-                  ? `Enhancement failed; raw dictation was added: ${errorMessage ?? failure.title}`
-                  : `Dictation failed: ${errorMessage ?? failure.title}`
-                : 'Starting'}
+              ? 'Transcribing on this device; you will review it before it reaches your draft'
+              : 'Finishing transcription in your browser; you will review it before it reaches your draft'
+            : stage === 'review'
+              ? 'Transcript ready. Review it, then insert or discard it'
+              : stage === 'empty'
+                ? 'No speech was captured'
+                : stage === 'error'
+                  ? `Dictation failed: ${errorMessage ?? failure.title}`
+                  : 'Starting'}
       </span>
       <span id={safetyId} className="sr-only">
         {onDevice
           ? 'Parakeet transcribes on this device: audio never leaves it, and Ferretry never sends it to your daemon.'
           : 'Ferretry never sends microphone audio to your daemon, but your browser sends it to its vendor’s servers to transcribe it.'}{' '}
-        Dictation only updates your draft and is never sent automatically.
+        Nothing reaches your draft until you press Insert, and dictation is never sent automatically.
       </span>
     </section>
   );

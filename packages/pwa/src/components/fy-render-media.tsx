@@ -2,11 +2,10 @@
  * The stage of a `src:` block — a picture, a recording or a document whose
  * bytes live in the session's workspace or behind an https link.
  *
- * IT MOUNTS ONLY AFTER THE READER PRESSES RENDER, like every other decoder in
- * `FyRenderBlock`, so a transcript full of media blocks reads nothing and
- * fetches nothing until somebody asks. Unmounting it — new bytes, Reload,
- * scrolling the row away — aborts any read in flight and revokes the object URL
- * it made.
+ * IT MOUNTS ONCE THE BLOCK IS NEAR THE VIEWPORT, like every other decoder in
+ * `FyRenderBlock`, so a long transcript reads and fetches only what a reader
+ * scrolls toward. Unmounting it — new bytes, a retry — aborts any read in flight
+ * and revokes the object URL it made.
  *
  * A WORKSPACE FILE IS READ AS THE READER, through one narrow capability:
  * `readWorkspaceMedia(path) → bytes | refusal`, handed down from the session's
@@ -16,22 +15,23 @@
  * `filesystem` _use_). The bytes become a short-lived object URL, so the only
  * address a media element ever sees is a `blob:` this page minted.
  *
- * AN HTTPS SOURCE IS THE READER'S BROWSER TALKING TO A STRANGER, after the
- * gesture, and the consent note says so. `video` and `audio` hand the URL to the
- * native player — the one consumer `media-src https:` admits. `image` does NOT
- * widen `img-src`: Markdown renders `![](url)` as an `<img>` on every surface
- * without a gesture, so a page-wide widening would make every remote image an
- * automatic request. The parent fetches it instead — no credentials, no
- * referrer, capped — runs the same pre-decode admission an inline image passes,
- * and shows the result as a `blob:`. A host that refuses a cross-origin read
- * gets a link instead. `pdf` over https is always a link: embedding it would
- * mean widening `frame-src` for a stranger's document.
+ * AN HTTPS SOURCE IS THE READER'S BROWSER TALKING TO A STRANGER, and with the
+ * gesture gone it does so as soon as the block is near — `docs/fy-render.md`
+ * says so plainly. `video` and `audio` hand the URL to the native player — the
+ * one consumer `media-src https:` admits. `image` does NOT widen `img-src`:
+ * Markdown renders `![](url)` as an `<img>` on every surface, so a page-wide
+ * widening would make every remote image an automatic request. The parent fetches
+ * it instead — no credentials, no referrer, capped — runs the same pre-decode
+ * admission an inline image passes, and shows the result as a `blob:`. A host
+ * that refuses a cross-origin read gets a link instead. `pdf` over https is
+ * always a link: embedding it would mean widening `frame-src` for a stranger's
+ * document, and a link fetches nothing until it is followed.
  *
- * EVERY REFUSAL IS A CARD THAT SAYS WHICH, never a broken player and never the
+ * A PDF AND EVERY REFUSAL ARE A FILE ROW, never a broken player and never the
  * bytes of a file this reader may not open.
  */
-import { Download, ExternalLink } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Download, ExternalLink, FileText, FileWarning } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
   FY_RENDER_LIMITS,
   type FyRenderImageMime,
@@ -56,7 +56,7 @@ export type FyRenderMediaFallback =
 
 type Stage =
   | { readonly phase: 'loading' }
-  | { readonly phase: 'ready'; readonly url: string }
+  | { readonly phase: 'ready'; readonly url: string; readonly bytes: number | null }
   | { readonly phase: 'link' }
   | { readonly phase: 'fallback'; readonly reason: FyRenderMediaFallback; readonly detail: string | null };
 
@@ -64,6 +64,8 @@ export interface FyRenderMediaProps {
   readonly block: FyRenderMediaBlock;
   /** Absent outside a session workspace; a workspace `src:` then says so rather than guessing. */
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader;
+  /** Told whether this stage is a compact file row rather than a picture or a player. */
+  readonly onShape?: (row: boolean) => void;
 }
 
 const noun: Record<FyRenderMediaBlock['type'], string> = {
@@ -74,6 +76,28 @@ const noun: Record<FyRenderMediaBlock['type'], string> = {
 };
 
 const megabytes = (bytes: number): string => `${Math.round(bytes / (1024 * 1024))} MB`;
+
+/** Rounded to whole units — a reader is sizing a file, not auditing bytes. */
+const humanBytes = (bytes: number): string =>
+  bytes >= 1024 * 1024 ? megabytes(bytes) : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
+
+/** The name a row shows: the workspace file's own, or the last segment of a link. */
+const fileName = (block: FyRenderMediaBlock): string => {
+  const path = block.src.kind === 'workspace' ? block.src.path : new URL(block.src.url).pathname;
+  const last = path.split('/').filter(Boolean).at(-1);
+  return last === undefined ? noun[block.type] : decodeURIComponentSafe(last);
+};
+
+const decodeURIComponentSafe = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+/** A row action. Styled in `fy-render.css`, after the attachment card's, at the pointer-derived touch floor. */
+const ROW_ACTION = 'fy-render-row-action';
 
 /** The reader's sentence for each card. One fixed sentence per reason, no machine wording. */
 const fallbackSentence = (block: FyRenderMediaBlock, reason: FyRenderMediaFallback): string => {
@@ -96,8 +120,8 @@ const fallbackSentence = (block: FyRenderMediaBlock, reason: FyRenderMediaFallba
       return `This ${what} is in a format that cannot be shown here.`;
     case 'unavailable':
       return block.src.kind === 'workspace'
-        ? 'The workspace could not be read just now. Reload to try again.'
-        : `${where} did not answer with the ${what}. Reload to try again.`;
+        ? 'The workspace could not be read just now.'
+        : `${where} did not answer with the ${what}.`;
     case 'blocked':
       return `${where} does not allow this app to show its ${what}. It can still be opened as a link.`;
     case 'decode':
@@ -105,7 +129,7 @@ const fallbackSentence = (block: FyRenderMediaBlock, reason: FyRenderMediaFallba
   }
 };
 
-export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps) {
+export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMediaProps) {
   const [stage, setStage] = useState<Stage>({ phase: 'loading' });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the source is the identity; Reload is a new key
@@ -121,7 +145,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
     const show = (bytes: Uint8Array<ArrayBuffer>, type: string): void => {
       if (controller.signal.aborted) return;
       minted = URL.createObjectURL(new Blob([bytes], { type }));
-      settle({ phase: 'ready', url: minted });
+      settle({ bytes: bytes.byteLength, phase: 'ready', url: minted });
     };
 
     const fromWorkspace = async (path: string): Promise<void> => {
@@ -170,7 +194,7 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
     if (source.kind === 'workspace') void fromWorkspace(source.path).catch(() => fallback('unavailable'));
     else if (block.type === 'image') void imageFromLink(source.url);
     else if (block.type === 'pdf') setStage({ phase: 'link' });
-    else setStage({ phase: 'ready', url: source.url });
+    else setStage({ bytes: null, phase: 'ready', url: source.url });
 
     return () => {
       controller.abort();
@@ -180,44 +204,77 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
 
   const decodeFailed = (): void => setStage({ detail: null, phase: 'fallback', reason: 'decode' });
   const link = block.src.kind === 'https' ? block.src.url : null;
-  const openLink =
-    link === null ? null : (
-      <a className="kt-btn kt-btn--sm fy-render-link" href={link} rel="noopener noreferrer" target="_blank">
-        <ExternalLink aria-hidden="true" size={14} /> Open {noun[block.type]} link
-      </a>
-    );
+  const row = block.type === 'pdf' || stage.phase === 'fallback' || stage.phase === 'link';
+  useEffect(() => onShape?.(row), [onShape, row]);
+
+  /**
+   * A FILE ROW, the shape an attachment already has in this transcript: an icon,
+   * the file's name, one muted line of facts, and the actions. A PDF is always
+   * one; so is every refusal, so a file this reader cannot see reads as a file
+   * that is not there rather than as a broken player.
+   */
+  const fileRow = (props: {
+    readonly icon: 'file' | 'warning';
+    readonly meta: string;
+    readonly detail?: string | null;
+    readonly children?: ReactNode;
+  }) => (
+    <div className="fy-render-row" data-fy-render-row="true" title={props.detail ?? undefined}>
+      {props.icon === 'file' ? (
+        <FileText aria-hidden="true" className="fy-render-row-icon" size={18} />
+      ) : (
+        <FileWarning aria-hidden="true" className="fy-render-row-icon" data-tone="warn" size={18} />
+      )}
+      <div className="fy-render-row-body">
+        <span className="fy-render-row-name" title={fileName(block)}>
+          {fileName(block)}
+        </span>
+        <span className="fy-render-row-meta">{props.meta}</span>
+        {props.children === undefined ? null : <span className="fy-render-row-actions">{props.children}</span>}
+      </div>
+    </div>
+  );
+
+  const openAction = (href: string, label: string) => (
+    <a
+      aria-label={`${label} ${fileName(block)}`}
+      className={ROW_ACTION}
+      href={href}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      <ExternalLink aria-hidden="true" size={14} /> {label}
+    </a>
+  );
 
   if (stage.phase === 'loading')
-    return (
-      <div className="kt-fs-note" data-fy-render-media="loading" role="status">
-        Loading the {noun[block.type]}…
-      </div>
+    return block.type === 'pdf' ? (
+      fileRow({ icon: 'file', meta: 'PDF · loading…' })
+    ) : (
+      // A quiet plane where the picture or player will be, so the prose under it does not jump.
+      <div aria-hidden="true" className="fy-render-placeholder" data-fy-render-media="loading" />
     );
 
   if (stage.phase === 'link')
     return (
-      <div className="kt-fs-note fy-render-fallback" data-fy-render-media="link">
-        <span>This PDF is on {new URL(link as string).host}. It opens in a new tab rather than inside the app.</span>
-        {openLink}
+      <div data-fy-render-media="link">
+        {fileRow({
+          children: openAction(link as string, 'Open'),
+          icon: 'file',
+          meta: `PDF · ${new URL(link as string).host}`,
+        })}
       </div>
     );
 
   if (stage.phase === 'fallback')
     return (
-      <div
-        className="kt-fs-note fy-render-fallback"
-        data-fy-render-fallback={stage.reason}
-        data-fy-render-media="fallback"
-        data-tone="warn"
-      >
-        <span role="status">{fallbackSentence(block, stage.reason)}</span>
-        {stage.detail === null ? null : (
-          <details className="kt-fs-why">
-            <summary>Why</summary>
-            <p className="kt-fs-why-body fy-render-why-body">{stage.detail}</p>
-          </details>
-        )}
-        {openLink}
+      <div data-fy-render-fallback={stage.reason} data-fy-render-media="fallback">
+        {fileRow({
+          children: link === null ? undefined : openAction(link, 'Open link'),
+          detail: stage.detail,
+          icon: 'warning',
+          meta: fallbackSentence(block, stage.reason),
+        })}
       </div>
     );
 
@@ -225,9 +282,8 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
     case 'image':
       return (
         <img
-          // Empty for the reason `fy-render-block.tsx` gives: the caption names the figure.
-          alt=""
-          className="kt-rich-file-image fy-render-image"
+          alt={block.alt}
+          className="fy-render-image"
           data-fy-render-media="image"
           onError={decodeFailed}
           src={stage.url}
@@ -235,8 +291,9 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
       );
     case 'video':
       return (
-        // biome-ignore lint/a11y/useMediaCaption: an agent's recording carries no caption track; the figure caption describes it
+        // biome-ignore lint/a11y/useMediaCaption: an agent's recording carries no caption track; the label describes it
         <video
+          aria-label={block.alt}
           className="fy-render-video"
           controls
           data-fy-render-media="video"
@@ -248,8 +305,9 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
       );
     case 'audio':
       return (
-        // biome-ignore lint/a11y/useMediaCaption: an agent's recording carries no caption track; the figure caption describes it
+        // biome-ignore lint/a11y/useMediaCaption: an agent's recording carries no caption track; the label describes it
         <audio
+          aria-label={block.alt}
           className="fy-render-audio"
           controls
           data-fy-render-media="audio"
@@ -261,29 +319,31 @@ export function FyRenderMedia({ block, readWorkspaceMedia }: FyRenderMediaProps)
     case 'pdf':
       return (
         /**
-         * A CARD, NOT A FRAME, and that is measured rather than preferred. The file
-         * preview's shape — a `blob:` in an `<iframe sandbox="">` — shows "This
-         * page has been blocked by Chrome": Chromium will not run its PDF viewer
-         * in a sandboxed frame, and the app's `default-src 'self'` refuses to frame
-         * a `blob:` at all. Making it work means widening `frame-src` AND dropping
-         * the sandbox on bytes an agent chose, for a viewer a new tab gives for
-         * free. So the admitted bytes stay a `blob:` this page minted and the reader
-         * opens or saves it; no daemon URL is ever in the link.
+         * A ROW, NOT A FRAME, and that is measured rather than preferred. A `blob:`
+         * in an `<iframe sandbox="">` shows "This page has been blocked by Chrome":
+         * Chromium will not run its PDF viewer in a sandboxed frame, and the app's
+         * `default-src 'self'` refuses to frame a `blob:` at all. So the admitted
+         * bytes stay a `blob:` this page minted and the reader opens or saves it in
+         * the browser's own viewer; no daemon URL is ever in the link.
          */
-        <div className="kt-fs-note fy-render-fallback" data-fy-render-media="pdf">
-          <span>The PDF is ready. It opens in a new tab, where the browser's own viewer shows it.</span>
-          <span className="fy-render-links">
-            <a className="kt-btn kt-btn--sm fy-render-link" href={stage.url} rel="noopener noreferrer" target="_blank">
-              <ExternalLink aria-hidden="true" size={14} /> Open PDF
-            </a>
-            <a
-              className="kt-btn kt-btn--sm fy-render-link"
-              download={block.src.kind === 'workspace' ? block.src.path.split('/').at(-1) : 'document.pdf'}
-              href={stage.url}
-            >
-              <Download aria-hidden="true" size={14} /> Download
-            </a>
-          </span>
+        <div data-fy-render-media="pdf">
+          {fileRow({
+            children: (
+              <>
+                {openAction(stage.url, 'Open')}
+                <a
+                  aria-label={`Download ${fileName(block)}`}
+                  className={ROW_ACTION}
+                  download={fileName(block)}
+                  href={stage.url}
+                >
+                  <Download aria-hidden="true" size={14} /> Download
+                </a>
+              </>
+            ),
+            icon: 'file',
+            meta: stage.bytes === null ? 'PDF' : `PDF · ${humanBytes(stage.bytes)}`,
+          })}
         </div>
       );
   }

@@ -6115,6 +6115,8 @@ function Shell() {
                     {...(errorCode ? { errorCode, errorMessage: 'Microphone access was blocked for this site.' } : {})}
                     onDismiss={() => {}}
                     onStop={() => {}}
+                    onInsert={() => {}}
+                    onDiscard={() => {}}
                     onCancel={() => {}}
                     onRetry={() => {}}
                   />
@@ -6150,6 +6152,8 @@ function Shell() {
                     livePaused={paused}
                     onDismiss={() => {}}
                     onStop={() => {}}
+                    onInsert={() => {}}
+                    onDiscard={() => {}}
                     onCancel={() => {}}
                     onRetry={() => {}}
                   />
@@ -6185,6 +6189,8 @@ function Shell() {
                       inputMonitor={monitor}
                       onDismiss={() => {}}
                       onStop={() => {}}
+                      onInsert={() => {}}
+                      onDiscard={() => {}}
                       onCancel={() => {}}
                       onRetry={() => {}}
                     />

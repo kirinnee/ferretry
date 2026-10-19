@@ -13,10 +13,10 @@ import type { IFyApiClient } from '@ferretry/protocol';
 import { Composer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { type FakeRecognitionProvider, fakeRecognitionProvider } from '../support/browser-recognition.ts';
 import { interact, mount, must } from '../support/dom.ts';
-import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 
 /** These takes run on the browser engine, the one this suite's fake recognition stands in for. */
 const BROWSER_VOICE = { ...DEFAULT_STT_SETTINGS, engine: 'browser' } as const;
@@ -77,7 +77,7 @@ describe('Composer dictation slot', () => {
     await composer.unmount();
   });
 
-  it('drops one finished take into the draft at the caret, and sends nothing', async () => {
+  it('holds a finished take in the review box until Insert, then drops it at the caret and sends nothing', async () => {
     const provider = promptRecognition();
     const composer = await mount(
       <Composer
@@ -99,6 +99,17 @@ describe('Composer dictation slot', () => {
       must(
         composer.container.querySelector<HTMLButtonElement>('button[aria-label^="Stop recording"]'),
         'the stop button',
+      ).click(),
+    );
+    await settleFrame();
+
+    // Stop alone changes nothing: the words wait in the mini box.
+    expect(textarea.value).toBe('');
+    expect(composer.container.querySelector('[data-review-text]')).not.toBeNull();
+    await interact(() =>
+      must(
+        composer.container.querySelector<HTMLButtonElement>('button[aria-label="Insert at the cursor"]'),
+        'the insert button',
       ).click(),
     );
     await settleFrame();
@@ -138,6 +149,13 @@ describe('Composer dictation slot', () => {
       must(
         composer.container.querySelector<HTMLButtonElement>('button[aria-label^="Stop recording"]'),
         'the stop button',
+      ).click(),
+    );
+    await settleFrame();
+    await interact(() =>
+      must(
+        composer.container.querySelector<HTMLButtonElement>('button[aria-label="Insert at the cursor"]'),
+        'the insert button',
       ).click(),
     );
     await settleFrame();
