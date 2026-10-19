@@ -390,7 +390,7 @@ describe('RuntimeModelControls', () => {
     expect(sent[0]!.sessionId).toBe('s-1');
     expect(sent[0]!.command).toEqual({ action: 'model', model: 'claude-opus-5' });
     expect(sent[0]!.requestId).toMatch(/^req-\d+$/);
-    expect(screen.container.textContent).toContain('Verification updates after the next model response');
+    expect(screen.container.textContent).toContain('The model chip updates when Claude confirms the switch');
     await screen.unmount();
   });
 

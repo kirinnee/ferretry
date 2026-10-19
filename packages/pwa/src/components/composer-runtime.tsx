@@ -14,9 +14,10 @@
  *     is not a string command at all — its levels are advertised per model and the
  *     daemon drives the native picker.
  *   - Harness-OBSERVED truth wins. The model and (Codex) reasoning readouts go
- *     stale-until-evidence after a switch; Claude effort is shown as the level
- *     last SENT this session (a confirmed persisted write), because Claude does
- *     not echo it back.
+ *     stale-until-evidence after a switch — for a bounded time, after which they
+ *     say the switch went unconfirmed rather than promise it forever. Claude
+ *     effort is shown as the level last SENT this session (a confirmed persisted
+ *     write), because Claude does not echo it back.
  *   - BEFORE THE HARNESS HAS SAID ANYTHING the readouts fall back to the runtime
  *     the session was LAUNCHED with: the model on its launch argv and the level
  *     the start request or the runtime's settings file named, else the harness
@@ -97,6 +98,87 @@ export const codexReasoningObservationChanged = (
   before: CodexReasoningObservation,
   current: CodexReasoningObservation,
 ): boolean => before.effort !== current.effort || before.observedAt !== current.observedAt;
+
+/** Where a submitted switch stands: nothing in flight, awaiting the harness, or given up on. */
+export type RuntimeSwitchState = 'settled' | 'pending' | 'unconfirmed';
+
+/**
+ * How long a chip may say "switching…" before it admits the switch was not confirmed. Long enough
+ * for the daemon's 15-second monitor tick to fold the harness's answer in and a refresh to carry it
+ * here; short enough that nobody stares at a promise the harness never kept.
+ */
+export const RUNTIME_SWITCH_CONFIRM_MS = 20_000;
+
+interface SwitchConfirmation {
+  readonly state: RuntimeSwitchState;
+  readonly mark: () => void;
+  readonly clear: () => void;
+}
+
+/**
+ * The stale-until-evidence bookkeeping for ONE readout, and the bound on it.
+ *
+ * "switching…" is a claim that evidence is on its way, so it must never be permanent. It ends in
+ * exactly one of these ways:
+ *   - the observed fact CHANGES (any change — re-selecting the running value moves only the
+ *     timestamp) → settled, the readout is current again;
+ *   - the submit FAILED → settled, nothing was switched;
+ *   - the session goes BUSY or TERMINAL → settled: a new turn restates the runtime anyway, and a
+ *     finished session will never confirm anything;
+ *   - `timeoutMs` passes with none of the above → unconfirmed, which keeps naming the last OBSERVED
+ *     value and says it could not confirm the switch. Late evidence still settles it.
+ * A different session is a different runtime, so nothing carries across one.
+ */
+function useSwitchConfirmation<T>(
+  evidence: T,
+  changed: (before: T, current: T) => boolean,
+  sessionId: string,
+  busy: boolean,
+  terminal: boolean,
+  timeoutMs: number,
+): SwitchConfirmation {
+  const atSwitch = useRef<T | undefined>(undefined);
+  const [state, setState] = useState<RuntimeSwitchState>('settled');
+
+  // Adjusted DURING render rather than in an effect, so the new session never paints one frame
+  // carrying the previous session's "switching…".
+  const [sessionAtReset, setSessionAtReset] = useState(sessionId);
+  if (sessionAtReset !== sessionId) {
+    setSessionAtReset(sessionId);
+    atSwitch.current = undefined;
+    setState('settled');
+  }
+
+  const clear = useCallback(() => {
+    atSwitch.current = undefined;
+    setState('settled');
+  }, []);
+
+  // No dependency list: the evidence is a fresh object every render, and the check is a comparison.
+  useEffect(() => {
+    const before = atSwitch.current;
+    if (state !== 'settled' && before !== undefined && changed(before, evidence)) clear();
+  });
+
+  useEffect(() => {
+    if (terminal || (busy && state === 'pending')) clear();
+  }, [busy, terminal, state, clear]);
+
+  useEffect(() => {
+    if (state !== 'pending') return;
+    const timer = setTimeout(() => setState('unconfirmed'), timeoutMs);
+    return () => clearTimeout(timer);
+  }, [state, timeoutMs]);
+
+  const evidenceRef = useRef(evidence);
+  evidenceRef.current = evidence;
+  const mark = useCallback(() => {
+    atSwitch.current = evidenceRef.current;
+    setState('pending');
+  }, []);
+
+  return { state, mark, clear };
+}
 
 /**
  * Why a switch cannot be offered, in precedence order, or undefined when it can.
@@ -210,6 +292,8 @@ export interface ComposerRuntimeProps {
    * one is placed against that panel rather than the screen, so a sheet would open half off-screen.
    */
   readonly portalOverlays?: boolean;
+  /** How long "switching…" may stand unconfirmed; {@link RUNTIME_SWITCH_CONFIRM_MS} unless a test shortens it. */
+  readonly switchConfirmMs?: number;
 }
 
 export interface ComposerRuntimeWithKeyboardProps extends ComposerRuntimeProps {
@@ -235,8 +319,20 @@ interface ChipProps {
   readonly label: string;
   /** Only the model and Codex-reasoning readouts are ever "switching"; Claude
    *  effort never claims a stale-until-evidence state — it is not observed. */
-  readonly pending?: boolean;
+  readonly switchState?: RuntimeSwitchState;
 }
+
+/** What a chip appends — on screen, aloud and on hover — for a switch that has not settled. */
+const SWITCH_MARK: Readonly<
+  Record<Exclude<RuntimeSwitchState, 'settled'>, { text: string; aria: string; title: string }>
+> = {
+  pending: { text: '· switching…', aria: ', switching', title: 'Switching — waiting for the harness to confirm' },
+  unconfirmed: {
+    text: '· unconfirmed',
+    aria: ', could not confirm the switch; showing the last reported value',
+    title: 'Couldn’t confirm the switch — showing the last value the harness reported',
+  },
+};
 
 /**
  * One bar chip: a small readout that is also a 44px dialog trigger. It takes the
@@ -256,8 +352,9 @@ function RuntimeChip({
   title,
   leadingIcon,
   label,
-  pending,
+  switchState = 'settled',
 }: ChipProps) {
+  const mark = switchState === 'settled' ? undefined : SWITCH_MARK[switchState];
   return (
     <button
       aria-controls={open ? sheetId : undefined}
@@ -265,7 +362,7 @@ function RuntimeChip({
       aria-disabled={disabled}
       aria-expanded={open}
       aria-haspopup="dialog"
-      aria-label={`${ariaLabel}${pending ? ', switching' : ''}`}
+      aria-label={`${ariaLabel}${mark?.aria ?? ''}`}
       className={cn(
         'fy-composer__runtime mono inline-flex min-w-[44px] items-center gap-xs rounded-control px-1 text-chrome text-fg-soft',
         'hover:text-accent disabled:cursor-not-allowed disabled:hover:text-fg-soft',
@@ -274,14 +371,14 @@ function RuntimeChip({
       id={id}
       onClick={onOpen}
       ref={buttonRef}
-      title={disabledReason ?? title}
+      title={disabledReason ?? mark?.title ?? title}
       type="button"
     >
       {leadingIcon}
       <span className="min-w-0 truncate">{label}</span>
-      {pending ? (
-        <span aria-hidden="true" className="shrink-0 not-italic text-faint">
-          · switching…
+      {mark ? (
+        <span aria-hidden="true" className="shrink-0 not-italic text-faint" data-switch-state={switchState}>
+          {mark.text}
         </span>
       ) : null}
       <ChevronsUpDown aria-hidden="true" className="shrink-0" size={11} />
@@ -466,6 +563,7 @@ export function ComposerRuntimeWithKeyboard({
   renderModelControls,
   renderEffortControls,
   portalOverlays = false,
+  switchConfirmMs = RUNTIME_SWITCH_CONFIRM_MS,
   keyboardOpen,
 }: ComposerRuntimeWithKeyboardProps) {
   const { config, state } = view;
@@ -491,83 +589,51 @@ export function ComposerRuntimeWithKeyboard({
     }
   }, [keyboardOpen]);
 
-  const observedModel = state.observedModel?.trim();
-  const modelAtSwitchRef = useRef<ModelObservation | undefined>(undefined);
-  const [modelPending, setModelPending] = useState(false);
-  useEffect(() => {
-    const before = modelAtSwitchRef.current;
-    if (
-      modelPending &&
-      before &&
-      modelObservationChanged(before, { model: observedModel, observedAt: state.observedModelAt })
-    )
-      setModelPending(false);
-  }, [modelPending, observedModel, state.observedModelAt]);
-
-  const observedReasoning = config.harness === 'codex' ? state.observedReasoningEffort?.trim() : undefined;
-  const reasoningAtSwitchRef = useRef<CodexReasoningObservation | undefined>(undefined);
-  const [reasoningPending, setReasoningPending] = useState(false);
-  useEffect(() => {
-    const before = reasoningAtSwitchRef.current;
-    if (
-      reasoningPending &&
-      before &&
-      codexReasoningObservationChanged(before, { effort: observedReasoning, observedAt: state.observedModelAt })
-    )
-      setReasoningPending(false);
-  }, [reasoningPending, observedReasoning, state.observedModelAt]);
+  const terminal = isTerminalSessionStatus(state.status);
+  const modelSwitch = useSwitchConfirmation<ModelObservation>(
+    { model: state.observedModel?.trim(), observedAt: state.observedModelAt },
+    modelObservationChanged,
+    config.id,
+    busy,
+    terminal,
+    switchConfirmMs,
+  );
+  const reasoningSwitch = useSwitchConfirmation<CodexReasoningObservation>(
+    {
+      effort: config.harness === 'codex' ? state.observedReasoningEffort?.trim() : undefined,
+      observedAt: state.observedModelAt,
+    },
+    codexReasoningObservationChanged,
+    config.id,
+    busy,
+    terminal,
+    switchConfirmMs,
+  );
 
   // Claude effort is not observable, so the chip reflects the level last SENT this
-  // session, and resets when the session does.
+  // session, and resets when the session does — during render, like the switches above,
+  // so a new session never paints one frame with the previous one's level.
   const [sentClaudeEffort, setSentClaudeEffort] = useState<string | undefined>(undefined);
-
-  // A different session is a different runtime: nothing observed about the last one
-  // is evidence about this one. Adjusted DURING render rather than in an effect, so
-  // the new session never paints one frame carrying the previous session's
-  // "switching…" or its last-sent effort.
   const [sessionAtReset, setSessionAtReset] = useState(config.id);
   if (sessionAtReset !== config.id) {
     setSessionAtReset(config.id);
-    modelAtSwitchRef.current = undefined;
-    reasoningAtSwitchRef.current = undefined;
-    setModelPending(false);
-    setReasoningPending(false);
     setSentClaudeEffort(undefined);
   }
-
-  const markModelPending = useCallback(() => {
-    modelAtSwitchRef.current = { model: observedModel, observedAt: state.observedModelAt };
-    setModelPending(true);
-  }, [observedModel, state.observedModelAt]);
-
-  const markReasoningPending = useCallback(() => {
-    reasoningAtSwitchRef.current = { effort: observedReasoning, observedAt: state.observedModelAt };
-    setReasoningPending(true);
-  }, [observedReasoning, state.observedModelAt]);
-
-  const clearModelPending = useCallback(() => {
-    modelAtSwitchRef.current = undefined;
-    setModelPending(false);
-  }, []);
-
-  const clearReasoningPending = useCallback(() => {
-    reasoningAtSwitchRef.current = undefined;
-    setReasoningPending(false);
-  }, []);
 
   // Codex reports model and reasoning together, so either switch makes BOTH
   // readouts stale until one observation confirms them.
   const codex = config.harness === 'codex';
+  const { mark: markModel, clear: clearModel } = modelSwitch;
+  const { mark: markReasoning, clear: clearReasoning } = reasoningSwitch;
   const submitted = useCallback(() => {
-    markModelPending();
-    if (codex) markReasoningPending();
-  }, [codex, markModelPending, markReasoningPending]);
+    markModel();
+    if (codex) markReasoning();
+  }, [codex, markModel, markReasoning]);
   const failed = useCallback(() => {
-    clearModelPending();
-    if (codex) clearReasoningPending();
-  }, [codex, clearModelPending, clearReasoningPending]);
+    clearModel();
+    if (codex) clearReasoning();
+  }, [codex, clearModel, clearReasoning]);
 
-  const terminal = isTerminalSessionStatus(state.status);
   const disabledReason = runtimeSwitchDisabledReason(canControl, terminal, busy);
   const disabled = disabledReason !== undefined;
 
@@ -668,7 +734,7 @@ export function ComposerRuntimeWithKeyboard({
           label={modelLabel}
           onOpen={() => setModelOpen(open => !open)}
           open={modelOpen}
-          pending={modelPending}
+          switchState={modelSwitch.state}
           reasonId={reasonId}
           sheetId={modelSheetId}
           title="Switch model in place"
@@ -683,7 +749,7 @@ export function ComposerRuntimeWithKeyboard({
           leadingIcon={<Brain aria-hidden="true" className="shrink-0" size={11} />}
           onOpen={() => setEffortOpen(open => !open)}
           open={effortOpen}
-          pending={codex && reasoningPending}
+          switchState={codex ? reasoningSwitch.state : 'settled'}
           reasonId={reasonId}
           sheetId={effortSheetId}
           title="Change the reasoning level"
