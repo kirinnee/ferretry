@@ -43,11 +43,20 @@ function titleAt(lines: readonly string[], index: number): string | undefined {
 }
 
 function timeoutOf(lines: readonly string[], index: number): number | 'unreadable' | undefined {
-  const indent = indentOf(lines[index] ?? '');
+  // `it('title', () =>\n  call(async () => {\n  }), 600_000);` closes one level in; a block callback at the call's own level.
+  const expressionCallback = /=>\s*$/u.test(lines[index] ?? '');
+  const indent = indentOf(lines[index] ?? '') + (expressionCallback ? 2 : 0);
   for (let at = index + 1; at < lines.length; at += 1) {
     const line = lines[at] ?? '';
     if (line.trim() === '' || indentOf(line) !== indent) continue;
     const tail = line.trim();
+    if (expressionCallback) {
+      // The expression itself (`call(async () => {`) opens at this level too.
+      if (!/^[})]/u.test(tail)) continue;
+      if (/^\}\)+\s*;?$/u.test(tail)) return undefined;
+      const after = /^\}\)+,\s*([0-9_]+)\s*\)\s*;?$/u.exec(tail);
+      return after?.[1] === undefined ? 'unreadable' : number(after[1]);
+    }
     // `});` — no timeout; `}, 600_000);` — inline; `},` then the timeout alone on the next line.
     if (/^\}\)\s*;?$/u.test(tail)) return undefined;
     // `it(\n  'title',\n  () => …,\n  600_000,\n);` — an expression callback: the timeout, if any, is last.
