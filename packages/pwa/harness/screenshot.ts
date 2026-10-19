@@ -2255,6 +2255,30 @@ try {
             const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
             await captureElement(page, page.locator('#harness-dictation-panel'), dictationPanelTarget);
             process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
+            // The input meter fills at 20 fps, one bar per frame, so give a full-width row of bars
+            // time to scroll in before the shot; a silent meter is flat from its first frame.
+            // The harness runs under reduced motion, which swaps the bars for one level bar: shoot that
+            // as it is, then switch to no-preference (the meter follows the media query live) for the bars.
+            await page.locator('#harness-dictation-meter').scrollIntoViewIfNeeded();
+            const meterReducedTarget = join(outDir, `dictation-input-meter-reduced-motion-${viewport.name}.png`);
+            await captureElement(page, page.locator('#harness-dictation-meter'), meterReducedTarget);
+            process.stdout.write(`📸 Dictation input meter, reduced motion -> ${meterReducedTarget}\n`);
+            await page.emulateMedia({ reducedMotion: 'no-preference' });
+            await page.waitForTimeout(4_000);
+            const meterTarget = join(outDir, `dictation-input-meter-${viewport.name}.png`);
+            await captureElement(page, page.locator('#harness-dictation-meter'), meterTarget);
+            process.stdout.write(`📸 Dictation input meter -> ${meterTarget}\n`);
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+            const liveWordsCard = page.locator('#harness-dictation-live-words');
+            const liveWordsSection = liveWordsCard.getByLabel('Live words (experimental)');
+            const liveWordsOffTarget = join(outDir, `dictation-live-words-off-${viewport.name}.png`);
+            await captureElement(page, liveWordsSection, liveWordsOffTarget);
+            process.stdout.write(`📸 Live words (experimental), off by default -> ${liveWordsOffTarget}\n`);
+            await liveWordsSection.getByRole('switch').click();
+            const liveWordsOnTarget = join(outDir, `dictation-live-words-on-${viewport.name}.png`);
+            await captureElement(page, liveWordsSection, liveWordsOnTarget);
+            process.stdout.write(`📸 Live words (experimental), switched on -> ${liveWordsOnTarget}\n`);
+            await liveWordsSection.getByRole('switch').click();
             const nearLiveTarget = join(outDir, `dictation-near-live-${viewport.name}.png`);
             await captureElement(page, page.locator('#harness-dictation-near-live'), nearLiveTarget);
             process.stdout.write(`📸 Dictation near-live words -> ${nearLiveTarget}\n`);

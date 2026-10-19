@@ -337,3 +337,52 @@ describe('browserAudioCapture', () => {
     should(FakeRecorder.last?.stops).equal(1);
   });
 });
+
+describe('browserAudioCapture — the input meter', () => {
+  class TapContext {
+    static streams: unknown[] = [];
+    createMediaStreamSource(stream: unknown) {
+      TapContext.streams.push(stream);
+      return { connect: () => undefined, disconnect: () => undefined };
+    }
+    createAnalyser() {
+      return {};
+    }
+    async close() {}
+  }
+
+  it('taps the recording’s own stream and never asks for the microphone a second time', async () => {
+    reset();
+    TapContext.streams = [];
+    let asked = 0;
+    const stream = new FakeStream();
+    const capture = browserAudioCapture(
+      fakeGlobal(stream, {
+        navigator: {
+          mediaDevices: {
+            getUserMedia: async () => {
+              asked += 1;
+              return stream;
+            },
+          },
+        },
+        AudioContext: TapContext as never,
+      }),
+    );
+    const recording = await capture.start();
+    recording.monitor?.createAnalyser();
+    should(asked).equal(1);
+    should(TapContext.streams).eql([stream]);
+    // Stopping the take still releases the microphone: the tap is not its owner.
+    FakeRecorder.emitOnStop = [new Blob(['a'])];
+    await recording.stop();
+    should(stream.stopped).equal(2);
+  });
+
+  it('offers no tap on a page without Web Audio, and records all the same', async () => {
+    reset();
+    const recording = await browserAudioCapture(fakeGlobal(new FakeStream())).start();
+    should(recording.monitor).be.null();
+    recording.cancel();
+  });
+});
