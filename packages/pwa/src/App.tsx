@@ -680,6 +680,7 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
       fleet={store.fleet}
       projects={store.projects}
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
+      resumeSession={async (daemon, sessionId) => await (await store.clients.client(daemon)).resume(sessionId)}
       usage={store.usage}
       onNavigate={navigate}
       {...launchHint(window.location.search)}

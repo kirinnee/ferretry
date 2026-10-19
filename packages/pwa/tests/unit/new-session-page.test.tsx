@@ -1105,4 +1105,46 @@ describe('NewSessionPage › Continue a conversation', () => {
     expect(box('fy-new-session-agent').closest('[hidden]')).toBeNull();
     expect(box('fy-new-session-agent').value).toBe('claude-default');
   });
+
+  it('lists the machine’s stopped ferrets first, and resumes one in place through the typed client', async () => {
+    const stoppedFerret = sessionView('s-stop', { config: { name: 'shop' }, state: { status: 'stopped' } });
+    const { props, recorder } = wire({ sessions: [stoppedFerret, sessionView('s-live')] });
+    const resumed: { readonly daemon: DaemonConnection; readonly id: string }[] = [];
+    const client = {
+      request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
+        if (path.startsWith('/v1/imports/conversations'))
+          return schema.parse({ conversations: [], matched: 0, skipped: 0 });
+        throw new Error(`no route ${path}`);
+      },
+    };
+    await show({
+      ...props,
+      createFleetClient: async () => client as never,
+      resumeSession: async (daemon, id) => {
+        resumed.push({ daemon, id });
+      },
+    });
+    const settle = async (): Promise<void> =>
+      await interact(async () => {
+        for (let turn = 0; turn < 6; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    await interact(() =>
+      must(
+        root().querySelector<HTMLElement>('[data-segmented="new-session-kind"] [data-segment="continue"]'),
+        'continue',
+      ).click(),
+    );
+    await settle();
+    const rows = [...root().querySelectorAll('[data-continue-session]')].map(row =>
+      row.getAttribute('data-continue-session'),
+    );
+    expect(rows).toEqual(['s-stop']);
+    await interact(() => must(root().querySelector<HTMLElement>('[data-continue-session="s-stop"]'), 'row').click());
+    await interact(() =>
+      must(root().querySelector<HTMLElement>('[data-continue-action="session:s-stop"]'), 'resume').click(),
+    );
+    await settle();
+    expect(resumed).toEqual([{ daemon: connection, id: 's-stop' }]);
+    expect(recorder.navigated).toEqual(['/d/daemon%2Fa/session/s-stop']);
+  });
 });

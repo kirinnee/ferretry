@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { CodeBlock } from '../../src/components/code-block.tsx';
 import { bodyLanguage, elapsedLabel, summarizeToolRun, ToolGroup } from '../../src/components/tool-group.tsx';
-import { extractToolSummary } from '../../src/lib/tool-extract.ts';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { selectionHeld, transcriptHeldStill, useLiveClock } from '../../src/hooks/use-live-clock.ts';
 import type { ToolCall } from '../../src/lib/session-screens.ts';
+import { extractToolSummary } from '../../src/lib/tool-extract.ts';
 import { manualScheduler } from '../support/live-scheduler.ts';
 import { render, run } from '../support/react.ts';
 
@@ -414,5 +414,106 @@ describe('a running tool’s clock', () => {
     expect(group.root.findAllByProps({ 'data-spinner': '' })).toHaveLength(1);
     expect(iconsOf(group)).not.toContain('lucide-loader-circle');
     run(() => group.unmount());
+  });
+});
+
+describe('a question tool call in the transcript', () => {
+  const asked = {
+    questions: [
+      {
+        header: 'Ship',
+        question: 'Ship the change?',
+        options: [{ label: 'Yes', description: 'Go.' }, { label: 'No' }],
+      },
+      { question: 'Which checks?', multiSelect: true, options: [{ label: 'Unit' }, { label: 'Int' }, { label: 7 }] },
+      { question: '   ' },
+    ],
+  };
+
+  test('shows an open card, outside the tool count, until its result arrives', () => {
+    const group = render(
+      <ToolGroup
+        calls={[
+          call('a', 'Bash', { command: 'ls' }, { result: { text: 'ok' } }),
+          call('b', 'Bash', { command: 'pwd' }, { result: { text: 'ok' } }),
+          call('q', 'AskUserQuestion', asked),
+        ]}
+        isLast
+        live
+      />,
+    );
+    const text = textOf(group);
+
+    expect(text).toContain('2 tools');
+    expect(text).toContain('Waiting for your answer');
+    expect(text).toContain('Ship the change?');
+    expect(text).toContain('Pick one or more');
+    expect(text).not.toContain('Your answer');
+    expect(group.root.findByProps({ 'data-state': 'open' })).toBeDefined();
+  });
+
+  test('shows the answer once the result names it, and marks the chosen option', () => {
+    const group = render(
+      <ToolGroup
+        calls={[
+          call('q', 'AskUserQuestion', asked, {
+            result: {
+              text: 'User has answered your questions: "Ship the change?"="Yes", "Which checks?"="Unit, Int".',
+            },
+          }),
+          call('r', 'read', { file_path: 'a.ts' }, { result: { text: 'x' } }),
+        ]}
+        isLast
+        live={false}
+      />,
+    );
+
+    expect(textOf(group)).toContain('Answered');
+    expect(textOf(group)).toContain('Your answer Yes');
+    expect(group.root.findAllByProps({ 'data-chosen': '' }).length).toBeGreaterThan(0);
+    expect(group.root.findByProps({ 'data-state': 'answered' })).toBeDefined();
+  });
+
+  test('reads a lone question’s whole result as its answer, and an unreadable input as an ordinary tool', () => {
+    const lone = render(
+      <ToolGroup
+        calls={[
+          call(
+            'q',
+            'request_user_input',
+            { questions: [{ question: 'Pick?', multi_select: true }] },
+            { result: { text: ' Alpha ' } },
+          ),
+        ]}
+        isLast={false}
+        live={false}
+      />,
+    );
+    const unreadable = render(
+      <ToolGroup calls={[call('u', 'AskUserQuestion', { questions: 'nope' })]} isLast={false} live={false} />,
+    );
+    const empty = render(
+      <ToolGroup calls={[call('e', 'AskUserQuestion', { questions: [null, {}] })]} isLast={false} live={false} />,
+    );
+    const orphan = render(
+      <ToolGroup
+        calls={[call('o', 'AskUserQuestion', asked, { orphanResult: true, result: { text: 'x' } })]}
+        isLast={false}
+        live={false}
+      />,
+    );
+    const noResultText = render(
+      <ToolGroup
+        calls={[call('n', 'AskUserQuestion', { questions: [{ question: 'Q?' }] }, { result: { text: '  ' } })]}
+        isLast={false}
+        live={false}
+      />,
+    );
+
+    expect(textOf(lone)).toContain('Your answer Alpha');
+    expect(textOf(unreadable)).not.toContain('Waiting');
+    expect(textOf(empty)).not.toContain('Waiting');
+    expect(textOf(orphan)).not.toContain('Waiting');
+    expect(textOf(noResultText)).toContain('Waiting for your answer');
   });
 });

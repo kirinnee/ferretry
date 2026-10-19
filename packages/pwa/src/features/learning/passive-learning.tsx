@@ -13,7 +13,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { fetchSessionLearning, patchSessionLearning } from '../../lib/learning-api.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
 
-/** How often a list that shows the chip re-reads which ferrets learn. */
+/** How often a list that shows the mark re-reads which ferrets learn. */
 export const PASSIVE_LEARNING_POLL_MS = 30_000;
 
 export interface PassiveLearningState {
@@ -46,7 +46,7 @@ export function usePassiveLearning(
       const next = await fetchSessionLearning(connection, fetcher);
       if (alive.current) setSessions(next);
     } catch {
-      // A daemon without the route has no ferret learning; the chip is simply absent.
+      // A daemon without the route has no ferret learning; the mark is simply absent.
     }
   }, [connection, fetcher]);
 
@@ -73,16 +73,25 @@ export function usePassiveLearning(
   return { sessions, passive, refresh, set };
 }
 
-/** The "Learning: passive" chip a ferret's list row carries while it is instructed to learn. */
-export function PassiveLearningChip() {
+/** What the mark says in words: its accessible name, and the tooltip a pointer reads. */
+export const PASSIVE_LEARNING_LABEL = 'Learning: passive — instructed to file lessons with fy lesson suggest';
+
+/**
+ * The mark a ferret's list row carries while it is instructed to learn: the graduation cap alone, since
+ * a row has room for one small mark and the words ("Learning: passive") were wider than the ferret's
+ * name. The full state is the mark's accessible name and its tooltip. It is not a control: a tap on it
+ * is a tap on the row, which opens the session.
+ */
+export function PassiveLearningMark() {
   return (
     <span
-      className="inline-flex items-center gap-1 whitespace-nowrap rounded-badge border border-accent-border bg-accent-soft px-1.5 text-[10.5px] font-medium leading-4 text-accent"
-      title="Instructed to file lessons with fy lesson suggest"
+      aria-label={PASSIVE_LEARNING_LABEL}
+      className="inline-flex shrink-0 items-center text-accent"
       data-learning-passive=""
+      role="img"
+      title={PASSIVE_LEARNING_LABEL}
     >
-      <GraduationCap size={11} aria-hidden="true" />
-      Learning: passive
+      <GraduationCap aria-hidden="true" size={14} />
     </span>
   );
 }
