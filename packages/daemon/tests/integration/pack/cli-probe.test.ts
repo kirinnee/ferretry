@@ -77,7 +77,8 @@ describe('CliPackProbe', () => {
     const spawned: Array<Parameters<ProbeSpawn>[0]> = [];
     const probe = build({
       base: { PATH: '/usr/bin', TOKEN: 'base' },
-      environment: async (wrapper): Promise<Record<string, string>> => (wrapper === '/bin/claude-work' ? { TOKEN: 'login' } : {}),
+      environment: async (wrapper): Promise<Record<string, string>> =>
+        wrapper === '/bin/claude-work' ? { TOKEN: 'login' } : {},
       spawn: async input => {
         spawned.push(input);
         return { kind: 'exited', code: 0, stdout: 'OK\n' };
@@ -120,7 +121,11 @@ describe('CliPackProbe', () => {
     const probe = build({ spawn: async () => ({ kind: 'timeout' }) });
 
     // Act + Assert
-    should(await probe.probe(request({ timeoutMs: 20_000 }))).eql({ ok: false, ms: 250, reason: 'no answer within 20s' });
+    should(await probe.probe(request({ timeoutMs: 20_000 }))).eql({
+      ok: false,
+      ms: 250,
+      reason: 'no answer within 20s',
+    });
   });
 
   it('should fail, not throw, when the process cannot be started', async () => {
@@ -137,8 +142,16 @@ describe('CliPackProbe', () => {
     });
 
     // Act + Assert
-    should(await thrown.probe(request())).eql({ ok: false, ms: 250, reason: 'it could not be started (ENOENT: no such file)' });
-    should(await notAnError.probe(request())).eql({ ok: false, ms: 250, reason: 'it could not be started (plain string)' });
+    should(await thrown.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it could not be started (ENOENT: no such file)',
+    });
+    should(await notAnError.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it could not be started (plain string)',
+    });
   });
 
   it('should fail with the reason when its login cannot be read, never spawning', async () => {
@@ -229,7 +242,12 @@ describe('bunProbeSpawn', () => {
       const started = performance.now();
 
       // Act
-      const outcome = await bunProbeSpawn({ cmd: [fake.path], cwd: fake.dir, env: { PATH: process.env.PATH ?? '' }, timeoutMs: 150 });
+      const outcome = await bunProbeSpawn({
+        cmd: [fake.path],
+        cwd: fake.dir,
+        env: { PATH: process.env.PATH ?? '' },
+        timeoutMs: 150,
+      });
 
       // Assert — it returned at the deadline, not after the sleep.
       should(outcome).eql({ kind: 'timeout' });

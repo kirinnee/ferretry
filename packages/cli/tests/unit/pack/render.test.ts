@@ -30,7 +30,9 @@ describe('renderPackRecommendation', () => {
 
     // Assert
     should(named).startWith('Use case: Bulk edits (bulk, as named; your models guide)');
-    should(fallback).startWith('Use case: Everyday (daily, no use case matched, so the everyday one; the built-in guide)');
+    should(fallback).startWith(
+      'Use case: Everyday (daily, no use case matched, so the everyday one; the built-in guide)',
+    );
   });
 
   it('should show a bare model, a missing runtime and effort, and the refusal of a candidate that cannot run', () => {

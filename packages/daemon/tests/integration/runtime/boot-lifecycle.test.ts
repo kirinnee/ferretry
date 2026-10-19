@@ -1825,7 +1825,13 @@ describe('daemon boot lifecycle', () => {
       await fetch(sessions, {
         method: 'POST',
         headers: { ...headers, 'x-fy-request-id': request },
-        body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'work', cwd: home, ...(parent === undefined ? {} : { parent }) }),
+        body: JSON.stringify({
+          agent: WRAPPER,
+          mode: 'auto',
+          prompt: 'work',
+          cwd: home,
+          ...(parent === undefined ? {} : { parent }),
+        }),
       });
     const environments = new FileSessionEnvironmentStore(id => join(home, 'state', 'sessions', id));
     const pack = async (id: string): Promise<string | undefined> =>
@@ -1843,9 +1849,15 @@ describe('daemon boot lifecycle', () => {
       body: JSON.stringify({ enabled: false }),
     });
     const offBody = SessionPackPatchResultSchema.parse(await off.json());
-    const result = SessionResultSchema.parse(await (await fetch(`${sessions}/${child.config.id}/result`, { headers })).json());
+    const result = SessionResultSchema.parse(
+      await (await fetch(`${sessions}/${child.config.id}/result`, { headers })).json(),
+    );
     const refusals = [await second.json(), await tooDeep.json()] as { code?: string }[];
-    const environment = { root: await pack(root.config.id), child: await pack(child.config.id), grand: await pack(grandchild.config.id) };
+    const environment = {
+      root: await pack(root.config.id),
+      child: await pack(child.config.id),
+      grand: await pack(grandchild.config.id),
+    };
     release();
     const code = await exit;
     await runCleanups(cleanups);

@@ -589,7 +589,10 @@ describe('fy wait collects the result', () => {
   it('should print the summary under the status line for a completed ferret', async () => {
     // Arrange
     const results = new RecordingResults(finishedResult('Done: 3 files changed.'));
-    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'completed' }))] },
+      results,
+    );
 
     // Act
     await controller.wait('s1', {});
@@ -604,7 +607,10 @@ describe('fy wait collects the result', () => {
   it('should carry the summary as a result field in --json', async () => {
     // Arrange
     const results = new RecordingResults(finishedResult('all good'));
-    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'completed' }))] },
+      results,
+    );
 
     // Act
     await controller.wait('s1', { json: true });
@@ -617,7 +623,10 @@ describe('fy wait collects the result', () => {
   it('should print the status alone when the ferret reported no summary', async () => {
     // Arrange
     const results = new RecordingResults(finishedResult());
-    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'completed' }))] },
+      results,
+    );
 
     // Act
     await controller.wait('s1', { json: true });
@@ -632,7 +641,10 @@ describe('fy wait collects the result', () => {
   it('should ignore a result read that fails', async () => {
     // Arrange
     const results = new RecordingResults(new Error('result route gone'));
-    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'completed' }))] },
+      results,
+    );
 
     // Act
     await controller.wait('s1', {});
@@ -646,7 +658,10 @@ describe('fy wait collects the result', () => {
   it('should ignore a result that cannot be read at all', async () => {
     // Arrange
     const results = new RecordingResults(undefined);
-    const { controller, io } = buildWithResults({ views: [sessionView(sessionState({ status: 'completed' }))] }, results);
+    const { controller, io } = buildWithResults(
+      { views: [sessionView(sessionState({ status: 'completed' }))] },
+      results,
+    );
 
     // Act
     await controller.wait('s1', {});

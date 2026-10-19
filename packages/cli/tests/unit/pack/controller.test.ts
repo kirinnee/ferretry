@@ -52,7 +52,9 @@ describe('PackController.recommend', () => {
     const failure = await controller.recommend([' ', ''], {}).catch((error: unknown) => error);
 
     // Assert
-    should(failure).be.instanceof(Error).and.have.property('message', 'describe the part: foo recommend "<what needs doing>"');
+    should(failure)
+      .be.instanceof(Error)
+      .and.have.property('message', 'describe the part: foo recommend "<what needs doing>"');
     should(gateway.recommendCalls).be.empty();
   });
 });
@@ -144,7 +146,9 @@ describe('PackController.newChild', () => {
 
     // Act
     const fromWords = await typed.controller.newChild([], { runtime: 'r' }).catch((error: unknown) => error);
-    const fromFile = await filed.controller.newChild([], { runtime: 'r', promptFile: 'empty.md' }).catch((error: unknown) => error);
+    const fromFile = await filed.controller
+      .newChild([], { runtime: 'r', promptFile: 'empty.md' })
+      .catch((error: unknown) => error);
 
     // Assert
     for (const failure of [fromWords, fromFile])

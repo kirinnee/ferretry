@@ -28,7 +28,7 @@ describe('FilePackSpendLedger', () => {
     }
   });
 
-  it('should read today\'s spend and add each recorded amount to it', async () => {
+  it("should read today's spend and add each recorded amount to it", async () => {
     // Arrange
     const subject = await fixture();
     try {

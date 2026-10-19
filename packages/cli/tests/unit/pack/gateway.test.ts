@@ -18,7 +18,12 @@ function build(answer: unknown) {
   const stops: Array<{ id: string; reason: string }> = [];
   const client = {
     request: async (path: string, schema: unknown, init?: RequestInit, timeoutMs?: number) => {
-      requests.push({ path, schema, ...(init === undefined ? {} : { init }), ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+      requests.push({
+        path,
+        schema,
+        ...(init === undefined ? {} : { init }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      });
       return answer;
     },
     stop: async (id: string, reason: string) => void stops.push({ id, reason }),
