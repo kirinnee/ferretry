@@ -29,18 +29,8 @@ import { FyRenderBlock } from '../../../src/components/fy-render-block.tsx';
 import { parseFyRender } from '../../../src/lib/fy-render.ts';
 import { FY_RENDER_VISUAL_CASES } from './fy-render-visual-cases.ts';
 
-/**
- * `?case=` selects a fixture; `?count=` mounts it more than once.
- *
- * The count exists for one specific claim. A theme change must create zero new
- * frames and zero new fetches until the reader presses Reload, and "zero" is only
- * meaningful at N > 1 — the defect it replaced remounted every compiled block at
- * once, and a single-block scene cannot tell an unbounded fan-out from a bounded
- * one.
- */
-const parameters = new URLSearchParams(location.search);
-const which = parameters.get('case') ?? 'mermaid';
-const count = Math.min(Math.max(Number(parameters.get('count') ?? '1') || 1, 1), 8);
+/** `?case=` selects a fixture. */
+const which = new URLSearchParams(location.search).get('case') ?? 'mermaid';
 
 const source = FY_RENDER_VISUAL_CASES[which];
 if (source === undefined) throw new Error(`no such fy-render fixture: ${which}`);
@@ -53,15 +43,9 @@ if (root === null) throw new Error('the scene has no #root to mount into');
 
 createRoot(root).render(
   <StrictMode>
-    <div className="scene-pad">
-      {Array.from({ length: count }, (_unused, index) => (
-        // The SAME parsed block in every slot: the fan-out claim is about how many
-        // frames one theme change creates, not about distinguishing payloads. The index
-        // IS the identity here for that reason — the blocks are deliberately identical
-        // and the list never reorders.
-        // biome-ignore lint/suspicious/noArrayIndexKey: identical blocks in a fixed-length list
-        <FyRenderBlock block={parsed.block} key={index} />
-      ))}
+    {/* An `.md` column, as in a transcript, so a fallback wears the ordinary fence's styling. */}
+    <div className="scene-pad md">
+      <FyRenderBlock block={parsed.block} />
     </div>
   </StrictMode>,
 );

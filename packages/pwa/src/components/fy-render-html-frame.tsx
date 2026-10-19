@@ -15,10 +15,10 @@
  * here: script in an opaque frame can navigate the frame itself, prerender, and
  * open WebRTC, each measured egressing under a policy like this one. A second
  * `load` on the element is how a navigation shows itself to the parent, and it
- * tears the frame down with a stated note — which bounds what the destination
+ * tears the frame down, leaving the authored source — which bounds what the destination
  * page can then do, not the request that reached it.
  *
- * IT HOLDS NO CREDENTIAL. Its props are a parsed block, a theme, a fullscreen
+ * IT HOLDS NO CREDENTIAL. Its props are a parsed block, its paint, a fullscreen
  * flag and callbacks. No `DaemonConnection`, no session id, no daemon URL, no
  * fetcher — and unlike the library sandbox it fetches nothing at all, because
  * the shell carries its own bootstrap.
@@ -48,10 +48,28 @@ import type { FyRenderSandboxFailure, FyRenderSandboxFailureKind } from './fy-re
 /** Not exported, for the reason `fy-render-sandbox.tsx` gives for its own shell. */
 const FY_RENDER_HTML_SHELL_URL = '/fy-render-html.html';
 
+/**
+ * WHAT THE PAGE IS PAINTED WITH BY DEFAULT, so a frameless page reads as part of
+ * the message: the column's background, text colour and font, and the reader's
+ * mode. Three computed CSS values the reader can already see — nothing else of
+ * the app. Any author stylesheet overrides them like a user-agent default.
+ */
+export interface FyRenderHtmlPaint {
+  readonly background: string;
+  readonly color: string;
+  readonly font: string;
+  readonly scheme: 'dark' | 'light';
+}
+
 export interface FyRenderHtmlFrameProps {
   /** An `html` block. Nothing else reaches this frame. */
   readonly block: FyRenderBlock;
-  readonly theme: 'dark' | 'light';
+  /** Sent with the page, and again whenever it changes, so a theme switch repaints a running page. */
+  readonly paint: FyRenderHtmlPaint;
+  /** The page has drawn once; until then the frame is kept invisible so no unpainted plane flashes. */
+  readonly ready: boolean;
+  /** The frame's accessible name — the block's own description. */
+  readonly title: string;
   /** In fullscreen the stylesheet owns the height and the reported one is ignored. */
   readonly fullscreen: boolean;
   /** The page is in: its scripts have run once and it reported its size. */
@@ -65,7 +83,9 @@ export interface FyRenderHtmlFrameProps {
 
 export function FyRenderHtmlFrame({
   block,
-  theme,
+  paint,
+  ready,
+  title,
   fullscreen,
   onRendered,
   onFailed,
@@ -77,10 +97,16 @@ export function FyRenderHtmlFrame({
   const [height, setHeight] = useState<number | null>(null);
   const done = useRef(false);
   /** Callbacks by ref, so a transcript repaint never rebuilds the bridge and reruns the page. */
-  const latest = useRef({ onEscape, onFailed, onRendered, theme });
+  const latest = useRef({ onEscape, onFailed, onRendered, paint });
   useEffect(() => {
-    latest.current = { onEscape, onFailed, onRendered, theme };
+    latest.current = { onEscape, onFailed, onRendered, paint };
   });
+  const portRef = useRef<MessagePort | null>(null);
+
+  // A repaint is a message on the live port, never a remount — remounting would rerun the page.
+  useEffect(() => {
+    portRef.current?.postMessage({ kind: 'paint', paint });
+  }, [paint]);
 
   const fail = (kind: FyRenderSandboxFailureKind, detail: string | null = null): void => {
     if (done.current) return;
@@ -132,8 +158,14 @@ export function FyRenderHtmlFrame({
       const channel = new MessageChannel();
       channel.port1.onmessage = onPortMessage;
       port = channel.port1;
+      portRef.current = port;
       frame.contentWindow?.postMessage({ kind: 'init' }, '*', [channel.port2]);
-      port.postMessage({ kind: 'render-html', source: block.payload, theme: latest.current.theme });
+      port.postMessage({
+        kind: 'render-html',
+        paint: latest.current.paint,
+        source: block.payload,
+        theme: latest.current.paint.scheme,
+      });
     };
 
     window.addEventListener('message', onGlobalMessage);
@@ -165,6 +197,7 @@ export function FyRenderHtmlFrame({
       window.removeEventListener('message', onGlobalMessage);
       frame.removeEventListener('load', onLoad);
       port?.close();
+      portRef.current = null;
     };
   }, [block.payload, deadlines]);
 
@@ -172,6 +205,7 @@ export function FyRenderHtmlFrame({
     <iframe
       className="fy-render-frame fy-render-frame--html"
       data-fy-render-frame="html"
+      data-fy-render-ready={ready ? 'true' : 'false'}
       ref={frameRef}
       referrerPolicy="no-referrer"
       /** NO `allow-same-origin`, and nothing else either. See the header. */
@@ -184,7 +218,7 @@ export function FyRenderHtmlFrame({
        */
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the framed page is interactive content, see above
       tabIndex={0}
-      title="Interactive HTML illustration"
+      title={title}
     />
   );
 }

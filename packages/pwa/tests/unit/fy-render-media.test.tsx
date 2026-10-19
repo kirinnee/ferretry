@@ -1,10 +1,10 @@
 /**
  * The stage of a `src:` block: what it reads, what it fetches, what it shows,
- * and the card it shows instead.
+ * and the file row it shows instead.
  *
  * WHAT THIS TIER CAN AND CANNOT SAY. Nothing here decodes a picture or plays a
  * recording — `react-test-renderer` has no media pipeline — so the proof is the
- * element and the address it is handed, the request a link causes, and the card
+ * element and the address it is handed, the request a link causes, and the row
  * every refusal becomes. The workspace reader is a fake behind the
  * `FyRenderWorkspaceReader` port, `fetch` and the object-URL pair are stubbed on
  * `globalThis` and restored in `finally`, and no test touches the network.
@@ -216,15 +216,23 @@ const fallbackOf = (tree: ReactTestRenderer): string =>
     .join(',');
 const textOf = (node: ReactTestInstance): string =>
   node.children.map(child => (typeof child === 'string' ? child : textOf(child))).join('');
+/** The row's one muted line of facts — a refusal's sentence, or a file's type and size. */
 const sentenceOf = (tree: ReactTestRenderer): string =>
   tree.root
-    .findAll(node => node.type === 'span' && node.props.role === 'status')
+    .findAll(node => node.type === 'span' && node.props.className === 'fy-render-row-meta')
     .map(textOf)
     .join('|');
+/** The row's file name. */
+const nameOf = (tree: ReactTestRenderer): string =>
+  tree.root
+    .findAll(node => node.type === 'span' && node.props.className === 'fy-render-row-name')
+    .map(textOf)
+    .join('|');
+/** The machine wording, which a row carries as its `title` rather than as copy. */
 const whyOf = (tree: ReactTestRenderer): string =>
   tree.root
-    .findAll(node => node.type === 'p')
-    .map(textOf)
+    .findAll(node => node.type === 'div' && node.props['data-fy-render-row'] === 'true')
+    .map(node => String(node.props.title ?? ''))
     .join('|');
 const hostOf = (tree: ReactTestRenderer, type: string): Record<string, unknown> | null =>
   tree.root.findAll(node => node.type === type)[0]?.props ?? null;
@@ -242,7 +250,7 @@ const audio = (src = '@voice.mp3') => media('type: audio', 'alt: A voice note', 
 const pdf = (src = '@report.pdf') => media('type: pdf', 'alt: The report', `src: ${src}`);
 
 describe('FyRenderMedia workspace source', () => {
-  test('should show a loading note before the read answers', async () => {
+  test('should hold a quiet plane, with no words, before the read answers', async () => {
     // Arrange
     const pending = deferred<FyRenderWorkspaceRead>();
 
@@ -251,7 +259,47 @@ describe('FyRenderMedia workspace source', () => {
 
     // Assert
     should(stageOf(tree)).equal('loading');
-    should(textOf(tree.root.findAll(node => node.type === 'div')[0] as ReactTestInstance)).equal('Loading the video…');
+    should(textOf(tree.root)).equal('');
+  });
+
+  test('should show a PDF as a loading file row before the read answers, and say it is a row', async () => {
+    // Arrange
+    const pending = deferred<FyRenderWorkspaceRead>();
+    const shapes: boolean[] = [];
+
+    // Act
+    const tree = render(
+      <FyRenderMedia
+        block={pdf()}
+        onShape={row => shapes.push(row)}
+        readWorkspaceMedia={reader(() => pending.promise).read}
+      />,
+    );
+    mounted.push(tree);
+
+    // Assert
+    should(nameOf(tree)).equal('report.pdf');
+    should(sentenceOf(tree)).equal('PDF · loading…');
+    should(shapes).deepEqual([true]);
+  });
+
+  test('should say a picture is not a row', async () => {
+    // Arrange
+    const shapes: boolean[] = [];
+    const pending = deferred<FyRenderWorkspaceRead>();
+
+    // Act
+    const tree = render(
+      <FyRenderMedia
+        block={image()}
+        onShape={row => shapes.push(row)}
+        readWorkspaceMedia={reader(() => pending.promise).read}
+      />,
+    );
+    mounted.push(tree);
+
+    // Assert
+    should(shapes).deepEqual([false]);
   });
 
   test('should say it cannot read the workspace when this view has no reader', async () => {
@@ -288,9 +336,9 @@ describe('FyRenderMedia workspace source', () => {
       "clip.mp4 is not served from this session's workspace — it is gitignored, a protected secret, or outside the folder.",
     ],
     ['too-large', 'clip.mp4 is larger than the 1 MB a workspace file can be shown at.'],
-    ['unavailable', 'The workspace could not be read just now. Reload to try again.'],
+    ['unavailable', 'The workspace could not be read just now.'],
   ] as const) {
-    test(`should show the ${reason} card when the reader refuses with ${reason}`, async () => {
+    test(`should show the ${reason} row when the reader refuses with ${reason}`, async () => {
       // Arrange
       const { paths, read } = answers({ ok: false, reason });
 
@@ -336,7 +384,7 @@ describe('FyRenderMedia workspace source', () => {
     should(fallbackOf(tree)).equal('unavailable');
   });
 
-  test('should refuse image bytes that fail the raster admission, with the refusal in the fold', async () => {
+  test('should refuse image bytes that fail the raster admission, with the refusal as the title', async () => {
     // Arrange
     const { read } = answers({ bytes: Uint8Array.from(NOT_AN_IMAGE), ok: true });
 
@@ -353,7 +401,7 @@ describe('FyRenderMedia workspace source', () => {
     });
   });
 
-  test('should show an admitted workspace image as a blob URL with an empty alt', async () => {
+  test('should show an admitted workspace image as a blob URL described by its own alt', async () => {
     // Arrange
     const { read } = answers({ bytes: png(4, 4), ok: true });
 
@@ -367,7 +415,7 @@ describe('FyRenderMedia workspace source', () => {
       should(urls.minted.map(blob => blob.type)).deepEqual(['image/png']);
       const element = hostOf(tree, 'img');
       should(element?.src).equal('blob:https://pwa.example.test/minted-1');
-      should(element?.alt).equal('');
+      should(element?.alt).equal('A screenshot');
     });
   });
 
@@ -387,6 +435,7 @@ describe('FyRenderMedia workspace source', () => {
       should(element?.controls).be.true();
       should(element?.preload).equal('metadata');
       should(element?.playsInline).be.true();
+      should(element?.['aria-label']).equal('A recording');
     });
   });
 
@@ -436,6 +485,9 @@ describe('FyRenderMedia workspace source', () => {
         },
         { download: 'report.pdf', href: 'blob:https://pwa.example.test/minted-1', rel: undefined, target: undefined },
       ]);
+      // A file row: the name, and what it is and how big.
+      should(nameOf(tree)).equal('report.pdf');
+      should(sentenceOf(tree)).equal('PDF · 8 bytes');
     });
   });
 
@@ -491,7 +543,7 @@ describe('FyRenderMedia workspace source', () => {
     should(tree.toJSON()).be.null();
   });
 
-  test('should replace a player the browser cannot decode with the decode card', async () => {
+  test('should replace a player the browser cannot decode with the decode row', async () => {
     // Arrange
     const { read } = answers({ bytes: Uint8Array.from([0, 0, 0, 24]), ok: true });
 
@@ -554,10 +606,27 @@ describe('FyRenderMedia https source', () => {
       should(anchor?.href).equal('https://docs.example.test/report.pdf');
       should(anchor?.target).equal('_blank');
       should(anchor?.rel).equal('noopener noreferrer');
-      should(textOf(tree.root.findAll(node => node.type === 'span')[0] as ReactTestInstance)).equal(
-        'This PDF is on docs.example.test. It opens in a new tab rather than inside the app.',
-      );
+      should(nameOf(tree)).equal('report.pdf');
+      should(sentenceOf(tree)).equal('PDF · docs.example.test');
       should(calls.length).equal(0);
+    });
+  });
+
+  test('should name a linked file by its decoded last segment, its raw one, or what it is', async () => {
+    await withFetch(failFetch, async () => {
+      for (const [url, name] of [
+        ['https://docs.example.test/annual%20report.pdf', 'annual report.pdf'],
+        // A malformed escape is shown as written rather than thrown.
+        ['https://docs.example.test/broken%E0%A4%A.pdf', 'broken%E0%A4%A.pdf'],
+        ['https://docs.example.test/', 'PDF'],
+      ] as const) {
+        // Act
+        const tree = mount(pdf(url));
+        await flush();
+
+        // Assert
+        should(nameOf(tree)).equal(name);
+      }
     });
   });
 
@@ -600,14 +669,12 @@ describe('FyRenderMedia https source', () => {
         );
         should(whyOf(tree)).equal('Failed to fetch');
         should(hostOf(tree, 'a')?.href).equal('https://img.example.test/shot.png');
-        should(textOf(tree.root.findAll(node => node.type === 'a')[0] as ReactTestInstance)).equal(
-          ' Open picture link',
-        );
+        should(textOf(tree.root.findAll(node => node.type === 'a')[0] as ReactTestInstance)).equal(' Open link');
       },
     );
   });
 
-  test('should show no fold when the refusal carries no message', async () => {
+  test('should carry no title when the refusal carries no message', async () => {
     await withFetch(
       async () => {
         throw 'not an Error';
@@ -619,12 +686,12 @@ describe('FyRenderMedia https source', () => {
 
         // Assert
         should(fallbackOf(tree)).equal('blocked');
-        should(countOf(tree, 'details')).equal(0);
+        should(whyOf(tree)).equal('');
       },
     );
   });
 
-  test('should call a non-ok answer unavailable with the status in the fold', async () => {
+  test('should call a non-ok answer unavailable with the status as the title', async () => {
     await withFetch(
       async () => answer({ status: 404 }),
       async () => {
@@ -634,7 +701,7 @@ describe('FyRenderMedia https source', () => {
 
         // Assert
         should(fallbackOf(tree)).equal('unavailable');
-        should(sentenceOf(tree)).equal('img.example.test did not answer with the picture. Reload to try again.');
+        should(sentenceOf(tree)).equal('img.example.test did not answer with the picture.');
         should(whyOf(tree)).equal('HTTP 404');
       },
     );
@@ -693,7 +760,7 @@ describe('FyRenderMedia https source', () => {
     );
   });
 
-  test('should replace a fetched image the browser cannot decode with the decode card and the link', async () => {
+  test('should replace a fetched image the browser cannot decode with the decode row and the link', async () => {
     await withFetch(
       async () => answer({ body: streamOf(png(2, 2)) }),
       async () => {
