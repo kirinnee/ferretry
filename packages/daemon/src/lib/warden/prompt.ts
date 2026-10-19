@@ -142,6 +142,14 @@ function kindGuidance(
       'appearing? A legitimate long task should show movement between two looks a minute apart.',
     ];
   }
+  if (anomaly.kind === 'agent_frozen') {
+    return [
+      'The liveness check saw NO sign of life for a long time: no transcript growth, no advancing work counters and',
+      'no live subprocess — after a nudge, when nudging is allowed. Look at the screen and the transcript tail.',
+      'If the harness is wedged or its process hung, recommend RESTART: it is relaunched with its conversation intact.',
+      'If it is legitimately idle (an awaited external result, a long download) say why, and recommend LEAVE.',
+    ];
+  }
   if (anomaly.kind === 'owner_request') {
     return [
       'The OWNER asked for this investigation; no rule flagged it. Their note is the anomaly detail above.',

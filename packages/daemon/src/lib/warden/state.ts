@@ -56,6 +56,7 @@ export const WARDEN_ANOMALY_KINDS = [
   'peer_wait_unanswerable',
   'sus_thinking',
   'sus_subprocess',
+  'agent_frozen',
   'provider_unavailable',
   'owner_request',
 ] as const satisfies readonly WardenAnomalyKind[];

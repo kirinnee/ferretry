@@ -5,6 +5,8 @@ export * from './config.ts';
 export * from './detect.ts';
 export * from './escalation.ts';
 export * from './failover.ts';
+export * from './liveness.ts';
+export * from './liveness-monitor.ts';
 export * from './feed.ts';
 export * from './marker.ts';
 export * from './paths.ts';

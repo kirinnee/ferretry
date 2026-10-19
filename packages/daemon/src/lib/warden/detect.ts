@@ -24,6 +24,7 @@ export type WardenAnomalyKind =
   | 'peer_wait_unanswerable'
   | 'sus_thinking'
   | 'sus_subprocess'
+  | 'agent_frozen'
   | 'provider_unavailable'
   /** Never detected: the owner asked the Warden to investigate this ferret. */
   | 'owner_request';
@@ -71,6 +72,7 @@ const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
   peer_wait_unanswerable: 'A peer wait cannot be answered',
   sus_thinking: 'Session may be stuck thinking',
   sus_subprocess: 'Session stuck in a subprocess',
+  agent_frozen: 'Session frozen',
   provider_unavailable: 'Provider is unavailable',
   owner_request: 'You asked for an investigation',
 };
@@ -126,7 +128,8 @@ export function isWardenScannableStatus(status: WardenSessionStatus): boolean {
 }
 
 /** Statuses that MUST have a live monitor handle. */
-const ACTIVE_MONITORED: readonly WardenSessionStatus[] = ['running', 'thinking', 'tool_running'];
+/** The statuses a ferret is working in: the ones the liveness layer watches and the reflex judges. */
+export const ACTIVE_MONITORED: readonly WardenSessionStatus[] = ['running', 'thinking', 'tool_running'];
 /** Waiting statuses that, when idle too long, mean nobody answered. */
 const WAITING_IDLE: readonly WardenSessionStatus[] = ['awaiting_question', 'awaiting_user', 'waiting'];
 
@@ -217,6 +220,19 @@ export function detectAnomalies(
         ...base,
         kind: 'dead_monitor',
         detail: `status ${state.status} but no live monitor handle (the daemon is not watching this turn)`,
+      });
+    }
+
+    // FROZEN: the liveness reflex saw no transcript, counter or subprocess sign of life past its frozen
+    // time, after a nudge when the Warden may nudge. One assigned warden judges it; its verdict can
+    // restart it with its conversation intact. Nothing here stops it.
+    if (ACTIVE_MONITORED.includes(state.status) && view.hasLiveMonitor && view.frozenAt !== undefined) {
+      anomalies.push({
+        ...base,
+        kind: 'agent_frozen',
+        detail: `no sign of life since ${view.frozenAt} — the liveness check saw no output, counter or subprocess progress — a restart candidate`,
+        since: view.frozenAt,
+        assignedWarden: true,
       });
     }
 
