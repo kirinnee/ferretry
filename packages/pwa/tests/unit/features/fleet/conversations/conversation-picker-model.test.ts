@@ -5,7 +5,7 @@ import {
   EMPTY_FILTER,
   EMPTY_SELECTION,
   foundLine,
-  groupConversationsByProject,
+  folderLabel,
   keepButtonLabel,
   listingPath,
   listingQuery,
@@ -62,16 +62,12 @@ describe('visible rows and groups', () => {
     expect(shown.rows.map(row => row.id)).toEqual(['c24', 'c23', 'c22', 'c21', 'c20']);
   });
 
-  it('groups by folder, the folder with the newest conversation first', () => {
-    const groups = groupConversationsByProject([
-      conversation('old-shop', { daysAgo: 9 }),
-      conversation('notes', { project: '/work/notes', daysAgo: 1 }),
-      conversation('new-shop', { daysAgo: 2 }),
-    ]);
-    expect(groups.map(group => [group.project, group.rows.map(row => row.id)])).toEqual([
-      ['/work/notes', ['notes']],
-      ['/work/shop', ['new-shop', 'old-shop']],
-    ]);
+  it('names a folder by its last two segments', () => {
+    expect(folderLabel('/work/api/services/billing')).toBe('services/billing');
+    expect(folderLabel('/work/shop')).toBe('work/shop');
+    expect(folderLabel('/shop/')).toBe('shop');
+    expect(folderLabel('C:\\work\\shop')).toBe('work/shop');
+    expect(folderLabel('/')).toBe('/');
   });
 
   it('says how many it found and how many are already kept', () => {
