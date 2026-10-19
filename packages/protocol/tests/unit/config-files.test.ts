@@ -308,7 +308,9 @@ describe('voice.yaml', () => {
     const actual = config.VoiceConfigSchema.parse({});
 
     // Assert
-    should(actual).deepEqual({ postProcessing: { provider: 'off' } });
+    should(actual).deepEqual({
+      postProcessing: { provider: 'off', style: 'fix', prompts: {}, useConversation: false, conversationMessages: 8 },
+    });
     should(config.DEFAULT_VOICE_CONFIG).deepEqual(actual);
   });
 
@@ -329,6 +331,31 @@ describe('voice.yaml', () => {
 
     // Assert
     should(actual.success).be.true();
+  });
+
+  it.each([
+    ['a style', { postProcessing: { style: 'polish' } }, true],
+    ['off as a style', { postProcessing: { style: 'off' } }, true],
+    ['an unknown style', { postProcessing: { style: 'shout' } }, false],
+    ['both prompts', { postProcessing: { prompts: { fix: 'Fix it.', polish: 'Polish it.' } } }, true],
+    ['a blank prompt', { postProcessing: { prompts: { fix: '   ' } } }, false],
+    ['an unknown prompt', { postProcessing: { prompts: { shout: 'hi' } } }, false],
+    ['a prompt over the cap', { postProcessing: { prompts: { fix: 'a'.repeat(2_001) } } }, false],
+    ['ten conversation messages', { postProcessing: { useConversation: true, conversationMessages: 10 } }, true],
+    ['eleven conversation messages', { postProcessing: { conversationMessages: 11 } }, false],
+    ['zero conversation messages', { postProcessing: { conversationMessages: 0 } }, false],
+  ])('should judge %s', (_label, input, accepted) => {
+    // Act
+    const actual = config.VoiceConfigSchema.safeParse(input);
+
+    // Assert
+    should(actual.success).equal(accepted);
+  });
+
+  it('should ship a default prompt for each style a person can rewrite', () => {
+    // Assert
+    should(Object.keys(config.DEFAULT_VOICE_CLEANUP_PROMPTS)).deepEqual(['fix', 'polish']);
+    should([...config.VOICE_CLEANUP_STYLES]).deepEqual(['off', 'fix', 'polish']);
   });
 
   it('should name the two speech engines a machine can default to', () => {
@@ -422,6 +449,8 @@ const cases: SchemaCase[] = [
   },
   { name: 'LearningFileSchema', schema: config.LearningFileSchema, value: { batchSize: 3 } },
   { name: 'VoiceEngineSchema', schema: config.VoiceEngineSchema, value: 'parakeet' },
+  { name: 'VoiceCleanupStyleSchema', schema: config.VoiceCleanupStyleSchema, value: 'polish' },
+  { name: 'VoiceCleanupPromptsSchema', schema: config.VoiceCleanupPromptsSchema, value: { fix: 'Fix it.' } },
   { name: 'VoiceConfigSchema', schema: config.VoiceConfigSchema, value: { postProcessing: { provider: 'groq' } } },
   {
     name: 'VoiceConfigSchema with a default engine',

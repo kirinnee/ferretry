@@ -774,3 +774,100 @@ describe('useDictation with the engine the person chose', () => {
     await view.unmount();
   });
 });
+
+describe('useDictation with the machine’s cleanup settings', () => {
+  const messages: FyEvent[] = Array.from(
+    { length: 12 },
+    (_, index) => ({ type: 'chat.user', data: { text: `message ${index + 1}` } }) as unknown as FyEvent,
+  );
+
+  /** One take through a hosted provider; resolves to what was sent (or `null` when nothing was). */
+  const take = async (
+    voiceCleanup: UseDictationOptions['voiceCleanup'],
+    answer: () => Response = () => Response.json({ text: 'Raw words.' }),
+  ): Promise<{ sent: Record<string, unknown> | null; history: number; text: string | undefined }> => {
+    const provider = fakeRecognitionProvider();
+    let sent: Record<string, unknown> | null = null;
+    let history = 0;
+    const view = await harness({
+      recognition: provider,
+      sessionId: 'session-1',
+      api: {
+        history: async () => {
+          history += 1;
+          return messages;
+        },
+      },
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      ...(voiceCleanup === undefined ? {} : { voiceCleanup }),
+      enhancementFetch: async (_url, init) => {
+        sent = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return answer();
+      },
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await finishTake(view, provider);
+    const text = view.drafts[0]?.text;
+    await view.unmount();
+    return { sent, history, text };
+  };
+
+  const cleanup = (patch: Partial<NonNullable<UseDictationOptions['voiceCleanup']>>) => ({
+    style: 'fix' as const,
+    prompts: {},
+    useConversation: false,
+    conversationMessages: 8,
+    ...patch,
+  });
+
+  it('sends no conversation to a hosted provider by default, and does not even read it', async () => {
+    const result = await take(undefined);
+    expect(result.sent?.context).toEqual([]);
+    expect(result.history).toBe(0);
+  });
+
+  it('sends the latest N messages when the machine turns the conversation on', async () => {
+    const result = await take(cleanup({ useConversation: true, conversationMessages: 3 }));
+    expect(result.sent?.context).toEqual(['message 10', 'message 11', 'message 12']);
+  });
+
+  it('sends everything the history read yields, up to the machine’s count', async () => {
+    const result = await take(cleanup({ useConversation: true }));
+    expect(result.sent?.context).toHaveLength(8);
+  });
+
+  it('sends nothing and spends nothing when the machine has cleanup off', async () => {
+    const result = await take(cleanup({ style: 'off', useConversation: true }));
+    expect(result.sent).toBeNull();
+    expect(result.history).toBe(0);
+    expect(result.text).toBe('raw words');
+  });
+
+  it('inserts the transcript as-is when the daemon kept the raw words', async () => {
+    const result = await take(cleanup({}), () => Response.json({ text: 'raw words', kept: 'raw' }));
+    expect(result.text).toBe('raw words');
+  });
+
+  it('leaves on-device correction on its own context rules whatever the machine says', async () => {
+    const provider = fakeRecognitionProvider();
+    let history = 0;
+    const view = await harness({
+      recognition: provider,
+      sessionId: 'session-1',
+      api: {
+        history: async () => {
+          history += 1;
+          return messages;
+        },
+      },
+      settings: settingsWith({ enhancementProvider: 'local' }),
+      voiceCleanup: cleanup({ style: 'off' }),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await finishTake(view, provider);
+    expect(history).toBe(1);
+    await view.unmount();
+  });
+});

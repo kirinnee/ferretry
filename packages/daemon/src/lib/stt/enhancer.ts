@@ -1,7 +1,9 @@
 import type { SttEnhancementResult } from '@ferretry/protocol';
 import {
   buildEnhancementBody,
+  type CleanupSettings,
   classifyEnhancementOutcome,
+  DEFAULT_CLEANUP_SETTINGS,
   DEFAULT_ENHANCEMENT_PROVIDERS,
   DEFAULT_ENHANCEMENT_TIMEOUT_MS,
   ENHANCEMENT_HEADERS,
@@ -16,6 +18,8 @@ import type { EnhancementAuthorizer, SttMonotonicClockPort } from './ports.ts';
 export interface SttEnhancementServiceOptions {
   readonly providers?: EnhancementProviderTable;
   readonly timeoutMs?: number;
+  /** The machine's cleanup settings (`voice.yaml`), read per call so an edit takes effect at once. */
+  readonly cleanup?: () => CleanupSettings;
 }
 
 /**
@@ -30,6 +34,7 @@ export interface SttEnhancementServiceOptions {
 export class SttEnhancementService {
   private readonly providers: EnhancementProviderTable;
   private readonly timeoutMs: number;
+  private readonly cleanup: () => CleanupSettings;
 
   constructor(
     private readonly authorizer: EnhancementAuthorizer,
@@ -38,6 +43,7 @@ export class SttEnhancementService {
   ) {
     this.providers = options.providers ?? DEFAULT_ENHANCEMENT_PROVIDERS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_ENHANCEMENT_TIMEOUT_MS;
+    this.cleanup = options.cleanup ?? (() => DEFAULT_CLEANUP_SETTINGS);
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new RangeError('timeoutMs must be a positive, finite number');
     }
@@ -49,7 +55,7 @@ export class SttEnhancementService {
   }
 
   async enhance(input: unknown): Promise<SttEnhancementResult> {
-    const request = parseEnhancementRequest(input, this.providers);
+    const request = parseEnhancementRequest(input, this.providers, this.cleanup());
 
     const startedAt = this.clock.monotonicMs();
     const outcome = await this.authorizer.send(request.provider.secretName, request.provider.hosts, {

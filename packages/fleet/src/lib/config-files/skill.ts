@@ -41,7 +41,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 | \`runtimes/<name>.yaml\` | one runtime: \`credential\` (a login id), \`profile\`, \`agent: true\` for one Ferretry launches |
 | \`warden.yaml\` | the Warden: \`enabled\`, \`triage\` (rules / llm / jev), \`caps\`, \`mayActAlone\`, \`intervalMinutes\`, \`accounts\`, … |
 | \`learning.yaml\` | lesson mining |
-| \`voice.yaml\` | who cleans up dictated text: \`postProcessing.provider\` is \`off\`, \`groq\`, \`cerebras\` or \`login\` |
+| \`voice.yaml\` | who cleans up dictated text: \`postProcessing\`: \`provider\` (\`off\`, \`groq\`, \`cerebras\`, \`login\`), \`style\` (\`off\`, \`fix\`, \`polish\`), your own \`prompts\` for each style, \`useConversation\` and \`conversationMessages\` |
 
 Every file starts with a \`# yaml-language-server: $schema=…\` line. \`${bin} config schema <kind>\` prints the
 JSON Schema of a kind (\`${bin} config schema\` lists the kinds).

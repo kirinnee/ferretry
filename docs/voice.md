@@ -126,6 +126,40 @@ words while you speak, and on Chrome, Android and Safari the audio goes to the v
 so it needs a connection and the vendor's privacy policy applies. Firefox does not offer it, and an
 installed iPhone/iPad Home Screen app cannot use it.
 
+## Clean-up: prompts you can edit
+
+Clean-up runs once, after Stop, on the machine's Groq or Cerebras key — and only on a dictation you made.
+It is configured in the machine's `voice.yaml` (Settings › Dictation edits it; so can you, or `fy config`):
+
+```yaml
+postProcessing:
+  provider: groq # off | groq | cerebras
+  model: openai/gpt-oss-120b # Groq default; openai/gpt-oss-20b is the faster one
+  style: fix # off | fix | polish
+  prompts: # optional: your own wording; a style you do not list uses the shipped prompt
+    fix: 'Fix transcription errors; keep my wording.'
+  useConversation: false # send the last few messages as read-only reference
+  conversationMessages: 8 # 1–10
+```
+
+- **Styles are prompts.** _Fix mistakes only_ corrects transcription errors, punctuation and casing and keeps
+  your wording; _Polish_ rewrites into clear sentences with the same meaning; _Off_ does nothing. The shipped
+  wording is `DEFAULT_VOICE_CLEANUP_PROMPTS` in `@ferretry/protocol`. **Reset to default** deletes the override
+  key, so a later change of the shipped wording reaches you.
+- **Use the conversation for context** (off by default) sends the newest N messages of the current session so
+  names and terms are spelled right. The machine decides: a device cannot send more than `voice.yaml` allows.
+  Turning it on is a loosening, so it waits for the owner to confirm like switching clean-up on.
+- **The guard cannot be edited away.** The daemon wraps whichever prompt runs in a fixed system message
+  (`lib/stt/cleanup-guard.ts`): only the text in `<dictation>` is corrected, it is never answered or
+  continued, and conversation and vocabulary are read-only reference that is never merged in. Your prompt is
+  placed under it as a style hint and cannot outrank it. Text inside a block cannot close it.
+- **The reply is checked.** If its length diverges grossly from the dictation (Fix is stricter than Polish), it
+  repeats a run of five words found only in the conversation, or it leaks the wrapper's tags, the daemon returns
+  your raw transcript, marked `kept: "raw"`. A failed check costs nothing but the call.
+- **gpt-oss reasoning.** For a `gpt-oss` model the request asks for `reasoning_effort: low` (and Groq's
+  `include_reasoning: false`); the reply's separate `reasoning` field is never read.
+- Neither the API key nor a transcript is ever logged.
+
 ## Not built yet
 
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):

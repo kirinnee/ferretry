@@ -65,7 +65,11 @@ export type EnhancementProviderId = (typeof ENHANCEMENT_PROVIDERS)[number]['id']
 /** The providers that clean up through the paired daemon, spending a key only it holds. */
 export type RemoteEnhancementProviderId = Exclude<EnhancementProviderId, 'local'>;
 
-export const DEFAULT_GROQ_ENHANCEMENT_MODEL = 'llama-3.1-8b-instant';
+export const DEFAULT_GROQ_ENHANCEMENT_MODEL = 'openai/gpt-oss-120b';
+/** The smaller, faster Groq model offered beside the default. */
+export const GROQ_FASTER_ENHANCEMENT_MODEL = 'openai/gpt-oss-20b';
+/** The model earlier builds defaulted to; it does not clean up dictation, so a stored copy is replaced. */
+const RETIRED_GROQ_ENHANCEMENT_MODEL = 'llama-3.1-8b-instant';
 export const DEFAULT_CEREBRAS_ENHANCEMENT_MODEL = 'gpt-oss-120b';
 
 /** Each hosted provider's default model — the daemon's own default, restated so the picker can show it. */
@@ -204,7 +208,8 @@ const parseEngine = (value: unknown): DictationEngineId | null =>
 
 const parseModel = (value: unknown): string => {
   if (typeof value !== 'string') return DEFAULT_STT_SETTINGS.enhancementModel;
-  return value.trim().slice(0, MAX_ENHANCEMENT_MODEL_CHARS) || DEFAULT_STT_SETTINGS.enhancementModel;
+  const model = value.trim().slice(0, MAX_ENHANCEMENT_MODEL_CHARS);
+  return model === '' || model === RETIRED_GROQ_ENHANCEMENT_MODEL ? DEFAULT_STT_SETTINGS.enhancementModel : model;
 };
 
 /** Defensive parse. Never throws, always returns a usable record. */

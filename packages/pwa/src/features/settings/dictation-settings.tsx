@@ -32,15 +32,18 @@
 
 import { useMemo } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useParakeetVoice } from '../../lib/store.tsx';
 import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../lib/stt/browser-recognition.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import type { ParakeetVoice } from '../../lib/stt/parakeet-voice.ts';
 import {
   DEFAULT_ENHANCEMENT_MODELS,
+  DEFAULT_GROQ_ENHANCEMENT_MODEL,
   type DictationEngineId,
   ENHANCEMENT_PROVIDERS,
   type EnhancementProviderId,
+  GROQ_FASTER_ENHANCEMENT_MODEL,
   isRemoteEnhancementProvider,
   MAX_ENHANCEMENT_MODEL_CHARS,
   MAX_USER_CONTEXT_CHARS,
@@ -50,6 +53,8 @@ import {
 } from '../../lib/stt/stt-settings.ts';
 import { Textarea } from '../../shell/primitives.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
+import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
+import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
 import { VoiceEngineChoice } from './voice-engine-choice.tsx';
 
 export const DICTATION_SAFETY_NOTE =
@@ -141,9 +146,21 @@ export interface DictationSettingsProps {
   readonly recognitionSupport?: BrowserRecognitionSupport;
   /** Parakeet on this device. Read from the app store when omitted. */
   readonly voice?: ParakeetVoice | null;
+  /** The machine whose `voice.yaml` holds the cleanup prompts; the section is absent without one. */
+  readonly daemon?: DaemonConnection;
+  /** Test and harness seam: the machine's cleanup settings, instead of reading them through the app. */
+  readonly voiceCleanup?: MachineVoiceCleanup;
 }
 
-export function DictationSettings({ settings, update, persisted, recognitionSupport, voice }: DictationSettingsProps) {
+export function DictationSettings({
+  settings,
+  update,
+  persisted,
+  recognitionSupport,
+  voice,
+  daemon,
+  voiceCleanup,
+}: DictationSettingsProps) {
   const detectedSupport = useMemo(() => browserRecognitionProvider().support, []);
   const support = recognitionSupport ?? detectedSupport;
   const contextVoice = useParakeetVoice();
@@ -258,15 +275,23 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
                       className="kt-input min-h-[44px]"
                       type="text"
                       spellCheck={false}
+                      list={settings.enhancementProvider === 'groq' ? 'stt-groq-models' : undefined}
                       maxLength={MAX_ENHANCEMENT_MODEL_CHARS}
                       value={settings.enhancementModel}
                       placeholder={DEFAULT_ENHANCEMENT_MODELS[settings.enhancementProvider]}
                       onChange={event => update({ enhancementModel: event.target.value })}
                     />
+                    {settings.enhancementProvider === 'groq' && (
+                      <datalist id="stt-groq-models">
+                        <option value={DEFAULT_GROQ_ENHANCEMENT_MODEL}>Default</option>
+                        <option value={GROQ_FASTER_ENHANCEMENT_MODEL}>Faster</option>
+                      </datalist>
+                    )}
                     <p className="text-meta leading-base text-muted">
                       {REMOTE_EXPLANATIONS[settings.enhancementProvider]}
                     </p>
                     <p className="text-meta leading-base text-faint">{SPEEDUP_KEY_HINT}</p>
+                    <VoiceCleanupSettings daemon={daemon} state={voiceCleanup} />
                   </>
                 ) : (
                   <>

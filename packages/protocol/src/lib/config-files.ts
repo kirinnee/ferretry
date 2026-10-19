@@ -300,6 +300,27 @@ export const VOICE_ENGINES = ['parakeet', 'browser'] as const;
 export const VoiceEngineSchema = z.enum(VOICE_ENGINES);
 export type VoiceEngine = z.infer<typeof VoiceEngineSchema>;
 
+/** What cleanup does: nothing, only fix transcription mistakes, or rewrite into clear sentences. */
+export const VOICE_CLEANUP_STYLES = ['off', 'fix', 'polish'] as const;
+export const VoiceCleanupStyleSchema = z.enum(VOICE_CLEANUP_STYLES);
+export type VoiceCleanupStyle = z.infer<typeof VoiceCleanupStyleSchema>;
+
+export const MAX_VOICE_PROMPT_CHARS = 2_000;
+
+/** The prompts a person may rewrite. The daemon's fixed guard wraps whichever one runs and cannot be removed. */
+export const VoiceCleanupPromptsSchema = z.strictObject({
+  fix: z.string().trim().min(1).max(MAX_VOICE_PROMPT_CHARS).optional(),
+  polish: z.string().trim().min(1).max(MAX_VOICE_PROMPT_CHARS).optional(),
+});
+export type VoiceCleanupPrompts = z.infer<typeof VoiceCleanupPromptsSchema>;
+
+/** The shipped wording of each prompt; "Reset to default" in Settings writes nothing and falls back to these. */
+export const DEFAULT_VOICE_CLEANUP_PROMPTS: Readonly<Record<Exclude<VoiceCleanupStyle, 'off'>, string>> = {
+  fix: 'Fix transcription errors in the dictated text: misheard or misspelled words, punctuation and capitalization. Keep the speaker\u2019s own wording, order and meaning; do not rephrase.',
+  polish:
+    'Rewrite the dictated text into clear, well-formed sentences with correct spelling, punctuation and capitalization. Keep the same meaning and every fact; do not add, answer or explain anything.',
+};
+
 export const VoiceConfigSchema = z.strictObject({
   /**
    * The speech engine a device paired to this machine uses until that device picks its own (New machine
@@ -313,6 +334,14 @@ export const VoiceConfigSchema = z.strictObject({
       login: NonEmptyStringSchema.optional(),
       /** The model the provider runs; the provider's own default when unset. */
       model: NonEmptyStringSchema.optional(),
+      /** What cleanup does to a take: nothing, fix mistakes only, or polish into clear sentences. */
+      style: VoiceCleanupStyleSchema.default('fix'),
+      /** Your own wording of a style's prompt; the shipped default when a style is not listed. */
+      prompts: VoiceCleanupPromptsSchema.prefault({}),
+      /** Send the last few messages of the session as read-only reference so names and terms are spelled right. */
+      useConversation: z.boolean().default(false),
+      /** How many of the latest messages that reference holds. */
+      conversationMessages: z.number().int().min(1).max(10).default(8),
     })
     .check(ctx => {
       const value = ctx.value;

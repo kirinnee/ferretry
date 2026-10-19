@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  CEREBRAS_ENHANCEMENT_EXPLANATION,
   DICTATION_DISABLED_EXPLANATION,
   DICTATION_SAFETY_NOTE,
   DictationSettings,
@@ -7,13 +8,12 @@ import {
   ENHANCEMENT_EXPLANATION,
   ENHANCEMENT_SOURCES_EXPLANATION,
   ENHANCEMENT_TOGGLE_EXPLANATION,
-  CEREBRAS_ENHANCEMENT_EXPLANATION,
   GROQ_ENHANCEMENT_EXPLANATION,
-  LOGIN_CLEANUP_UNAVAILABLE,
   LIVE_WORDS_EXPLANATION,
+  LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
+  LOGIN_CLEANUP_UNAVAILABLE,
   providerChoicePatch,
   SPEEDUP_KEY_HINT,
-  LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
   USER_CONTEXT_EXPLANATION,
 } from '../../../../src/features/settings/dictation-settings.tsx';
 import {
@@ -255,12 +255,34 @@ describe('<DictationSettings>', () => {
       select.value = 'groq';
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    expect(patches).toEqual([{ enhancementProvider: 'groq', enhancementModel: 'llama-3.1-8b-instant' }]);
+    expect(patches).toEqual([{ enhancementProvider: 'groq', enhancementModel: 'openai/gpt-oss-120b' }]);
 
     const groq: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' };
     await view.render(<DictationSettings {...settingsProps({ settings: groq })} />);
     expect(view.container.querySelector('#stt-enhancement-model')).not.toBeNull();
     expect(view.container.textContent).toContain('The daemon holds the Groq API key');
+    await view.unmount();
+  });
+
+  it('offers both Groq gpt-oss models, shows the cleanup prompts for a hosted provider only', async () => {
+    const injected = {
+      cleanup: { style: 'fix' as const, prompts: {}, useConversation: false, conversationMessages: 8 },
+      loaded: true,
+      save: async () => ({ kind: 'applied' as const }),
+    };
+    const groq: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' };
+    const view = await mount(<DictationSettings {...settingsProps({ settings: groq, voiceCleanup: injected })} />);
+    const options = [...view.container.querySelectorAll('#stt-groq-models option')].map(o => o.getAttribute('value'));
+    expect(options).toEqual(['openai/gpt-oss-120b', 'openai/gpt-oss-20b']);
+    expect(view.container.querySelector('[data-voice-cleanup]')).not.toBeNull();
+
+    const cerebras: SttSettings = { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'cerebras' };
+    await view.render(<DictationSettings {...settingsProps({ settings: cerebras, voiceCleanup: injected })} />);
+    expect(view.container.querySelector('#stt-groq-models')).toBeNull();
+    expect(view.container.querySelector('#stt-enhancement-model')?.getAttribute('list')).toBeNull();
+
+    await view.render(<DictationSettings {...settingsProps()} />);
+    expect(view.container.querySelector('[data-voice-cleanup]')).toBeNull();
     await view.unmount();
   });
 

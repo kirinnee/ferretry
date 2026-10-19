@@ -10,6 +10,7 @@ import {
   DEFAULT_WARDEN_CONFIG,
   type LearningConfig,
   type VoiceConfig,
+  VoiceConfigSchema,
   type WardenConfig,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -409,7 +410,8 @@ describe('configLoosening: learning', () => {
 });
 
 describe('configLoosening: voice', () => {
-  const voiceWith = (postProcessing: VoiceConfig['postProcessing']): VoiceConfig => ({ postProcessing });
+  const voiceWith = (postProcessing: Partial<VoiceConfig['postProcessing']>): VoiceConfig =>
+    VoiceConfigSchema.parse({ postProcessing });
 
   it.each([
     [{ provider: 'groq' }, 'dictated text now goes to groq to be cleaned up'],
@@ -445,7 +447,7 @@ describe('configLoosening: voice', () => {
 
   it('should name a login provider that holds no login without a stray space', () => {
     // Arrange — the schema refuses this shape; the rule must still say something sensible for it.
-    const bare = voiceWith({ provider: 'login' });
+    const bare: VoiceConfig = { postProcessing: { ...DEFAULT_VOICE_CONFIG.postProcessing, provider: 'login' } };
 
     // Act
     const actual = configLoosening('voice', DEFAULT_VOICE_CONFIG, bare);
@@ -468,6 +470,56 @@ describe('configLoosening: voice', () => {
       'voice',
       voiceWith({ provider: 'groq' }),
       voiceWith({ provider: 'groq', model: 'another-model' }),
+    );
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  it('should hold sharing the conversation with the provider', () => {
+    // Act
+    const actual = configLoosening(
+      'voice',
+      voiceWith({ provider: 'groq' }),
+      voiceWith({ provider: 'groq', useConversation: true }),
+    );
+
+    // Assert
+    should(actual).deepEqual([
+      'recent conversation messages may now go to the cleanup provider to help clean up dictation',
+    ]);
+  });
+
+  it('should apply sharing less of the conversation, or none, at once', () => {
+    // Act
+    const actual = configLoosening(
+      'voice',
+      voiceWith({ provider: 'groq', useConversation: true }),
+      voiceWith({ provider: 'groq', useConversation: true, conversationMessages: 3 }),
+    );
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  it('should hold switching the cleanup style back on from off', () => {
+    // Act
+    const actual = configLoosening(
+      'voice',
+      voiceWith({ provider: 'groq', style: 'off' }),
+      voiceWith({ provider: 'groq', style: 'polish' }),
+    );
+
+    // Assert
+    should(actual).deepEqual(['dictated text now goes to groq to be cleaned up']);
+  });
+
+  it('should apply editing a prompt at once', () => {
+    // Act
+    const actual = configLoosening(
+      'voice',
+      voiceWith({ provider: 'groq' }),
+      voiceWith({ provider: 'groq', prompts: { fix: 'Fix it.' } }),
     );
 
     // Assert

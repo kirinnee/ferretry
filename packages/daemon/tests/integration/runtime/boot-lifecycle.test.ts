@@ -745,7 +745,7 @@ class RecordingSttEnhancer {
 
   async enhance(input: unknown): Promise<SttEnhancementResult> {
     this.seen.push(input);
-    return { text: 'Ship the protocol package.', provider: 'groq', model: 'llama-3.1-8b-instant', latencyMs: 7 };
+    return { text: 'Ship the protocol package.', provider: 'groq', model: 'openai/gpt-oss-120b', latencyMs: 7 };
   }
 }
 
