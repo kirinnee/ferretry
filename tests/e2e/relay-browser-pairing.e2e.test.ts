@@ -806,7 +806,7 @@ describe('a real browser, a compiled daemon and a real relay', () => {
     } finally {
       await teardown.closeAll();
     }
-  }, 240_000);
+  });
 
   it('should carry a first pairing and a live stream over the relay', async () => {
     // Arrange
@@ -1910,5 +1910,5 @@ describe('a real browser, a compiled daemon and a real relay', () => {
       await teardown.closeAll().catch(() => undefined);
     }
     if (journeyError !== undefined) await reportAndRethrow(journeyError, REPORT_PATH);
-  }, 300_000);
+  });
 });

@@ -161,7 +161,7 @@ describe('version skew between the app and a daemon', () => {
     } finally {
       await teardown.closeAll();
     }
-  }, 300_000);
+  });
 
   /**
    * PRODUCT BUG (reported to the e2e lead): an app older than the daemon is told to update the DAEMON.
@@ -190,7 +190,7 @@ describe('version skew between the app and a daemon', () => {
     } finally {
       await teardown.closeAll();
     }
-  }, 300_000);
+  });
 
   it('should answer an app from before device keys with the one sentence naming the app', async () => {
     const teardown = harnessTeardown();
@@ -241,5 +241,5 @@ describe('version skew between the app and a daemon', () => {
     } finally {
       await teardown.closeAll();
     }
-  }, 300_000);
+  });
 });
