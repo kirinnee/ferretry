@@ -7,7 +7,7 @@
  *
  * Two presentations of the same rules (`stepper-model.ts`):
  *
- * - `inline` — inside Settings (Clone, Add a login, Install…): ‹ Back, "Step n of m", Cancel, the named
+ * - `inline` — inside Settings (Clone, Install…): ‹ Back, "Step n of m", Cancel, the named
  *   steps, the page title, then the step.
  * - `embedded` — inside a step of New machine setup (Start from › Clone). That rail is the only stepper
  *   on screen, so this draws NO step list, no "Step n of m" and no title of its own: only the page and,

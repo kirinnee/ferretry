@@ -15,6 +15,25 @@ The interface says "audio never leaves this device" **only while Parakeet is the
 (`features/settings/voice-engine-choice.tsx`, `components/dictation-sheet.tsx`). Anywhere else it
 would be a promise the active engine does not keep.
 
+## The review box: nothing reaches the draft without Insert
+
+Both engines end the same way. While you record, the strip above the composer shows the sound wave
+(and live words only if you switched on the experimental toggle in Settings › Voice) and stays
+non-modal: you can keep typing. On **Stop** the strip becomes a compact **review box**
+(`components/dictation-review-box.tsx`):
+
+- the transcript — after clean-up, if clean-up is on — as small, editable text;
+- **Insert** (primary) puts it at the composer's caret **as it is at that moment** and never replaces
+  the draft; **Discard** drops it; **Record again** throws it away and starts a new take;
+- if clean-up changed the words, a quiet **Cleaned | Raw** switch shows and inserts either; each side
+  keeps its own edits. If clean-up failed there is no switch: the box says so and shows the raw words;
+- keys, when focus is in the text: **Enter** or **⌘/Ctrl+Enter** inserts, **Esc** discards,
+  **Shift+Enter** is a newline. The box never takes focus by itself — you may be typing in the composer.
+
+A hidden panel reopens when the take lands, so a finished transcript is never stranded. The hook
+(`hooks/use-dictation.ts`) holds the take as `review`; `insert(text)` is the only call that reaches
+`onDraft`, so the draft cannot change without the person pressing Insert.
+
 ## Parakeet on this device
 
 Ported from kteam's browser engine (`parakeet-browser-v3`): NVIDIA's Parakeet TDT 0.6B v3 (CC-BY-4.0,

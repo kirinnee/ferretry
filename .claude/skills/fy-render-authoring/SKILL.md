@@ -20,7 +20,8 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 
 ## What renders today
 
-Every type renders, after the reader presses **Render illustration**:
+Every type renders **by itself, inline in the message**, as soon as it scrolls near the screen — no
+button, no card, no caption:
 
 | `type:`   | Today                                                                       |
 | --------- | --------------------------------------------------------------------------- |
@@ -52,10 +53,11 @@ Your page runs in an opaque-origin frame with its own strict policy. Design for 
 - **Never navigate.** Setting `location`, following a link inside the frame or building a meta
   refresh stops the page: the block replaces it with a note and the source. Authored `<meta>`,
   `<base>` and `<link>` elements are removed before the page runs.
-- **Respect the reader's theme.** The page defaults to the reader's light or dark `color-scheme` with
-  `Canvas`/`CanvasText` colours; if you set your own background, set your own text colour too.
+- **Respect the reader's theme.** The page is frameless and defaults to the conversation's own
+  background, text colour and font, in the reader's light or dark `color-scheme` — so it reads as
+  part of the message. If you set your own background, set your own text colour too.
 - **Keep it short.** Inline, the frame grows to your page's height up to 640px and then scrolls; the
-  reader can open it fullscreen. It stops after ten minutes, with Reload to start it again.
+  reader can open it fullscreen. It stops after ten minutes, with Run again to restart it.
 - **Do not reach for `html` for a static picture.** A diagram is `mermaid` and a drawing is `svg`;
   they are cheaper, they need no scripts, and they are what a reader expects.
 
@@ -73,10 +75,11 @@ src: @recordings/onboarding.mp4
 - **`src: @path`** is a file in your session's workspace, written exactly as an `@file` reference —
   `@relative/path`, `@./relative/path`, or `@/absolute/path` inside your folder — **without** a
   `:line`. It is read with the **reader's** access, so a file they could not open from the Files tab
-  shows a card saying so. Gitignored files and protected secrets are never served. **At most 1 MiB**:
-  a longer recording will show a "too large" card, so trim it or link it.
-- **`src: https://…`** is fetched by the reader's browser after they press Render, and the host sees
-  their address. Video and audio play directly. An https **image** must come from a host that allows
+  shows a file row saying so. Gitignored files and protected secrets are never served. **At most 1 MiB**:
+  a longer recording will show a "too large" row, so trim it or link it.
+- **`src: https://…`** is fetched by the reader's browser as soon as the block is near the screen, and
+  the host sees their address — so link only hosts you would be comfortable having the reader's
+  browser contact. Video and audio play directly. An https **image** must come from a host that allows
   cross-origin reads (many CDNs and `raw.githubusercontent.com` do); otherwise the reader gets a
   link. An https **PDF** is always a link. `http:`, `data:` and `blob:` are refused.
 - **Nothing after `---`.** A `src:` block has an empty payload. For `image`, use `src:` **or**
@@ -97,16 +100,17 @@ payload is data, never code.** Two consequences you should design around:
 - **A Lottie animation cannot load remote assets.** Embed images as `data:` URIs or leave them out;
   anything fetched from a URL will silently not appear.
 
-### Nothing renders until the reader asks
+### It renders inline, as if it were part of the message
 
-Every picture, diagram and animation starts as an **offer**, not a render. The reader presses
-_Render illustration_ and only then does anything decode, download or draw. For `mermaid` and
-`lottie` that first press may also download the renderer, which is why the offer says so.
+There is no offer and no Render button. A block draws itself where it sits, sized to the message
+column, once it comes near the screen; a block far down a long transcript costs nothing until the
+reader scrolls toward it. There is no caption under it and no status line — the picture is the
+explanation, so write the prose around it as you would around any figure.
 
-Two things follow for you as an author. **Assume the reader may never press it** — so the `alt:`
-description has to carry the point on its own, because for some readers it is the only thing there.
-And **a rewritten message starts the decision over**: consent belongs to the exact bytes, so editing
-a streamed illustration withdraws it.
+Two things follow for you as an author. **Your `alt:` is still required**, but it is now the
+picture's accessible description rather than a visible caption: write it for someone who cannot see
+the picture. And **while your message streams**, the block waits for your bytes to stop changing for
+a moment before it redraws, so a half-written diagram is not redrawn on every token.
 
 ## The shape
 
@@ -122,7 +126,7 @@ Four rules, and every one of them is a parse error if you break it:
 1. The info string is exactly `fy-render`. Not `fy-render svg`, not `fy-render-diagram`.
 2. **`type:` is the first line.** Always. It is what makes a block readable from its opening line.
 3. **`alt:` is required** — one line, at most 200 characters. It is the accessible description and
-   the visible caption, so write it for someone who cannot see the picture. "Diagram" is not a
+   what a screen reader says for the picture, so write it for someone who cannot see it. "Diagram" is not a
    description; "The pairing handshake, browser to daemon to browser" is.
 4. A line that is exactly `---` separates the headers from the payload.
 
@@ -133,23 +137,12 @@ base64; wrapping it across lines is fine.
 
 If any of that is wrong, your block renders as a plain code fence. It will not warn you.
 
-## The reader has to press a button
+## If it cannot be drawn
 
-**Your illustration does not draw itself.** The block offers a **Render illustration** control, and
-**no browser image decoder mounts until the reader presses it**. Your block is still read
-automatically — the header, the base64, the container's records — so inputs that fail those admission
-checks are refused whether or not anybody presses anything. They are a signature, record ordering, a
-terminal shape and the declared size; a file can pass all of them and still be corrupt inside, which
-the browser finds out only when it decodes. What the press gates is that decode: the size of a
-payload is bounded, the work of drawing it is not, and you are not the person whose device pays.
-
-Two consequences worth designing around:
-
-- Write an `alt:` that stands on its own, because for many readers it is all there will be.
-- Approval is to the exact bytes, so **any** change while your message streams withdraws it and the
-  block returns to **Render illustration**. There is no Reload to press afterwards; once the stream
-  settles the reader makes a fresh choice. (A reader who presses mid-stream sees whatever your SVG
-  amounted to at that moment, and then gets the offer again when the next bytes land.)
+If the browser cannot decode your payload, or Mermaid cannot parse your diagram, the block quietly
+becomes an ordinary code block showing exactly what you wrote. Nothing in the app's voice says it
+failed — so check that your diagram actually drew. When the renderer itself failed to load (not your
+bytes), a small **Try rendering again** link sits under the code.
 
 ## Limits
 
@@ -171,7 +164,7 @@ the `width`, `height` and `viewBox` you declare.
 control and the build will not show you a loop nobody can stop. Use a still frame — or `lottie`,
 which is the one animated type here and does have Pause and Play. A Lottie animation starts paused
 for a reader who has asked for reduced motion, and stops on its own after two minutes of playback,
-with Reload to start it again.
+with Replay to start it again.
 
 An SVG is also refused if it declares a `<!DOCTYPE>` or `<!ENTITY>`, contains `<script>`,
 `<foreignObject>` or `<use>`, uses more than 32 filter primitives, has an unterminated comment or
@@ -212,16 +205,14 @@ blank or incomplete, an external reference is the first thing to check.
 
 ## What the reader gets
 
-A caption (your `alt`), a **Render illustration** control, a **Source** button that shows exactly
-what you wrote, and a **Fullscreen** button; once the render has **started**, **Reload** takes the
-Render control's place. "Started" rather than "rendered" is exact for `mermaid` and `lottie`: pressing
-Render also fetches a renderer, so both controls appear while the frame may still be working, and the
-block says `Preparing the Mermaid renderer…` until it is ready.
-
-If the browser cannot decode your payload, the block says so and opens the source instead of showing
-an empty frame. For `mermaid` and `lottie` a failure is one plain sentence with the library's own
-wording folded under a **Why** disclosure — so a parse error quoting your source is available to you
-without being shown to the reader as the app's own words.
+The picture, inline. Hovering it — or a long press on a phone, or tabbing to it — shows two small icons
+in its corner: **Source** (exactly what you wrote) and **Fullscreen**. A Lottie animation plays by
+itself while on screen and adds a **Pause/Play** icon; under a reduced-motion preference it starts
+paused with Play showing. An `html` page runs by itself, frameless, painted with the conversation's
+own background, text colour and font, so leave its background unset unless you need one. A `pdf` is
+a compact file row — name, size, **Open** and **Download** — never an embedded viewer. An animation
+stops after two minutes and an `html` page after ten; each leaves one muted line with a way to run it
+again.
 
 ## Before you paste one
 
