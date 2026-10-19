@@ -2,24 +2,26 @@
  * EVERY TEST TIER RUNS OFFLINE. Preloaded by each `bunfig.*.toml`, before any test file.
  *
  * A booted `fyd` phones out on its own: it follows the published model catalog
- * (`https://ferretry.pages.dev/catalog/…`, docs/model-catalog.md) and asks the hosted relay directory
- * which carrier is advertised. A test must never reach either, so these defaults switch both off for
- * this process and for every child that inherits its environment — the fixtures that spawn `fy`/`fyd`
- * pass `process.env` on. A test that wants one of them sets the variable itself; that wins.
+ * (`https://ferretry.pages.dev/catalog/…`, docs/model-catalog.md), asks the hosted relay directory
+ * which carrier is advertised, and — compiled — checks GitHub for a newer release. A test must never
+ * reach any of them, so these defaults switch all three off for this process and for every child that
+ * inherits its environment — the fixtures that spawn `fy`/`fyd` pass `process.env` on. A test that
+ * wants one of them sets the variable itself; that wins.
  *
- * THE GUARD. In-process `fetch` to a Ferretry-hosted origin is refused outright, so a code path that
+ * THE GUARD. In-process `fetch` to one of those hosts is refused outright, so a code path that
  * forgets the switch fails loudly in the test that took it rather than quietly reaching production.
  */
 export const OFFLINE_TEST_ENVIRONMENT = {
   FY_MODEL_CATALOG: 'off',
   FY_RELAY_DIRECTORY_ORIGIN: 'off',
+  FY_UPDATE_CHECK: 'off',
 } as const;
 
 for (const [name, value] of Object.entries(OFFLINE_TEST_ENVIRONMENT)) process.env[name] ??= value;
 
-/** Hosts a test may never reach: the hosted app and the hosted relay. */
+/** Hosts a test may never reach: the hosted app, the hosted relay, and GitHub's release API. */
 export const FORBIDDEN_TEST_HOST =
-  /(^|\.)ferretry\.pages\.dev$|(^|\.)ferretry-hosted-relay\.[a-z0-9-]+\.workers\.dev$/u;
+  /(^|\.)ferretry\.pages\.dev$|^api\.github\.com$|(^|\.)ferretry-hosted-relay\.[a-z0-9-]+\.workers\.dev$/u;
 
 const realFetch = globalThis.fetch;
 const guarded = (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {

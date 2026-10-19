@@ -134,8 +134,8 @@ reads.
 
 **Switches.** `FY_MODEL_CATALOG=off` follows no published catalog; `FY_MODEL_CATALOG_ORIGIN=<origin>`
 reads it from another origin (a self-hosted app built from this repository). Every test tier runs with
-`FY_MODEL_CATALOG=off` and `FY_RELAY_DIRECTORY_ORIGIN=off` (`packages/daemon/tests/support/offline-environment.ts`,
-preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferretry-hosted origin.
+`FY_MODEL_CATALOG=off`, `FY_RELAY_DIRECTORY_ORIGIN=off` and `FY_UPDATE_CHECK=off` (`packages/daemon/tests/support/offline-environment.ts`,
+preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferretry-hosted origin or GitHub's release API.
 
 ### How to update the model list
 

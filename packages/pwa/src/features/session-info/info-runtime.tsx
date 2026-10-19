@@ -14,6 +14,7 @@ import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { effortLabel, harnessLabel, INFO_HINT, learningLabel, loginScope, modelFacts } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
+import { type InfoRelaunchRead, InfoRelaunchRow } from './info-relaunch.tsx';
 
 /** A list read once for a row: unread, read, or failed with a reason. */
 export type InfoListRead =
@@ -37,6 +38,10 @@ export interface InfoRuntimeProps {
    * and the row is not drawn.
    */
   readonly learning?: boolean | null;
+  /** Whether a Restart would relaunch it on different settings. Absent: no Settings row. */
+  readonly relaunch?: InfoRelaunchRead;
+  /** The Restart the Settings row offers when it is behind. */
+  readonly onRestart?: () => Promise<void>;
 }
 
 const listText = (read: InfoListRead, empty: string): ReactNode =>
@@ -50,7 +55,16 @@ const listText = (read: InfoListRead, empty: string): ReactNode =>
     read.items.join(', ')
   );
 
-export function InfoRuntime({ view, mcp, instructions, skills, controls, learning }: InfoRuntimeProps) {
+export function InfoRuntime({
+  view,
+  mcp,
+  instructions,
+  skills,
+  controls,
+  learning,
+  relaunch,
+  onRestart,
+}: InfoRuntimeProps) {
   const model = modelFacts(view);
   return (
     <InfoSection>
@@ -83,6 +97,9 @@ export function InfoRuntime({ view, mcp, instructions, skills, controls, learnin
         {effortLabel(view)}
       </InfoRow>
       {controls === undefined ? null : <InfoRow label="Change">{controls}</InfoRow>}
+      {relaunch === undefined ? null : (
+        <InfoRelaunchRow read={relaunch} {...(onRestart === undefined ? {} : { onRestart })} />
+      )}
       <InfoRow hint={INFO_HINT.mode} label="Mode">
         {view.config.mode}
       </InfoRow>

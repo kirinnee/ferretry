@@ -10,6 +10,7 @@ describe('the offline test environment', () => {
   it('should refuse a fetch to a Ferretry-hosted origin, and only those', async () => {
     await should(fetch('https://ferretry.pages.dev/catalog/version.json')).be.rejectedWith(/tests run offline/);
     should(FORBIDDEN_TEST_HOST.test('ferretry-hosted-relay.someone.workers.dev')).be.true();
+    should(FORBIDDEN_TEST_HOST.test('api.github.com')).be.true();
     should(FORBIDDEN_TEST_HOST.test('example.com')).be.false();
   });
 });

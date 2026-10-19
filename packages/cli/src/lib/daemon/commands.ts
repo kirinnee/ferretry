@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { StateHomeAdoptOptions, StateHomeController } from '../state-home/controller.ts';
+import type { DaemonUpdateOptions, DaemonUpdater } from '../update/updater.ts';
 import type { DaemonCommandOptions, DaemonController, DaemonResetOptions } from './controller.ts';
 
 /**
@@ -40,6 +41,7 @@ export function registerDaemonCommands(
   program: Command,
   controller: () => DaemonController,
   stateHome: () => StateHomeController,
+  updater: () => Pick<DaemonUpdater, 'update'>,
 ): void {
   const daemon = program.command('daemon').description('manage the daemon process on this host');
 
@@ -76,6 +78,32 @@ export function registerDaemonCommands(
     .description('stop the daemon, wait for it to go quiet, then start it again')
     .action(async () => {
       await controller().restart();
+    });
+
+  daemon
+    .command('update')
+    .description('update the daemon the way this host installed it, restart it, and roll back if it does not come up')
+    .option('--check', 'only report the install method, the latest release and what updating takes')
+    .option('--to <version>', 'update to this version rather than the latest release')
+    .option('-y, --yes', 'skip the confirmation; required when not on a terminal')
+    .option('--when-idle', 'wait until no ferret is mid-turn before restarting')
+    .option('--anyway', 'restart even though ferrets are mid-turn')
+    .option(
+      '--switch-to-profile',
+      'move a daemon run from a nix shell into your nix profile, which fixes updates for good',
+    )
+    .option('--report <file>', 'write the outcome to this file as JSON when finished')
+    .option('--json', 'print the machine-readable outcome instead of the human summary')
+    .addHelpText(
+      'after',
+      `
+Homebrew and nix profile installs, and standalone binaries, update themselves.
+A daemon run from a nix shell is offered a switch to a nix profile install;
+home-manager, nix-darwin, NixOS and apt/dnf installs get the exact steps.
+See docs/updating.md.`,
+    )
+    .action(async (flags: DaemonUpdateOptions) => {
+      await updater().update(flags);
     });
 
   daemon

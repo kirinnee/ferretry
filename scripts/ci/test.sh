@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Tests run offline (packages/daemon/tests/support/offline-environment.ts preloads the same): no booted
-# daemon follows the published model catalog or asks the hosted relay directory.
+# daemon follows the published model catalog, asks the hosted relay directory or checks for updates.
 export FY_MODEL_CATALOG="${FY_MODEL_CATALOG:-off}"
 export FY_RELAY_DIRECTORY_ORIGIN="${FY_RELAY_DIRECTORY_ORIGIN:-off}"
+export FY_UPDATE_CHECK="${FY_UPDATE_CHECK:-off}"
 
 mode="${1:-}"
 group="${2:-}"

@@ -26,6 +26,7 @@ import type { SessionRuntimeSubsystem } from '../../session/runtime-control/type
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { TurnWatchLoop } from '../../session/turn/service.ts';
 import type { StepUpService } from '../../step-up/index.ts';
+import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
@@ -38,6 +39,7 @@ import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
 import { type ConversationImportSubsystem, conversationImportRoutes } from './conversation-import.ts';
+import { daemonUpdateRoutes } from './daemon-update.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetCatalogSubsystem, fleetCatalogRoutes } from './fleet-catalog.ts';
 import { type FleetCredentialsSubsystem, fleetCredentialRoutes } from './fleet-credentials.ts';
@@ -319,6 +321,9 @@ export interface MountedSubsystems {
   readonly speedups: SpeedupsSubsystem;
   /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). */
   readonly models: ModelsSubsystem;
+  /** How this machine's daemon was installed, the latest release, and starting an update. The
+   *  subsystem owns its check loop as well as its routes — see `mounts/daemon-update.ts`. */
+  readonly daemonUpdate: DaemonUpdateSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -543,6 +548,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...speedupRoutes(subsystems.speedups),
         // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
         ...modelRoutes(subsystems.models),
+        // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
+        ...daemonUpdateRoutes(subsystems.daemonUpdate),
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.

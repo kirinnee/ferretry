@@ -23,6 +23,19 @@ export interface SettingsMachineEntry {
   readonly daemonId: DaemonId;
   readonly name: string;
   readonly reach: ShownReach;
+  /** Its daemon said a newer release exists (`useMachineUpdates`); absent reads as "no". */
+  readonly updateAvailable?: boolean;
+}
+
+/** The machine-list dot for an available update: a mark beside the name, said once in words. */
+function UpdateDot({ shown }: { readonly shown: boolean | undefined }) {
+  if (shown !== true) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center" data-settings-machine-update="">
+      <span aria-hidden="true" className="kt-dot bg-accent" />
+      <span className="sr-only">, update available</span>
+    </span>
+  );
 }
 
 /** The sections that belong to this browser rather than to a machine, with their glyphs. */
@@ -97,7 +110,10 @@ export function SettingsSidebar({
                   <AccountStatus word={reachWord(machine.reach)} label={reachLabel(machine.reach)} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">{machine.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="block truncate">{machine.name}</span>
+                    <UpdateDot shown={machine.updateAvailable} />
+                  </span>
                   <span className="kt-navpill__sub truncate">{shownReachSummary(machine.reach)}</span>
                 </span>
               </button>
@@ -180,7 +196,10 @@ export function SettingsHome({
                     <AccountStatus word={reachWord(machine.reach)} label={reachLabel(machine.reach)} />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-semibold">{machine.name}</span>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate font-semibold">{machine.name}</span>
+                      <UpdateDot shown={machine.updateAvailable} />
+                    </span>
                     <span className="truncate text-meta text-muted">{shownReachSummary(machine.reach)}</span>
                   </span>
                 </GroupRow>

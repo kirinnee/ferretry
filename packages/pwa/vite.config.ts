@@ -37,6 +37,7 @@
 
 import autoprefixer from 'autoprefixer';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
@@ -67,8 +68,18 @@ import tailwindConfig from './tailwind.config.ts';
  */
 const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 
+/**
+ * THE APP'S OWN RELEASE VERSION, stamped from the repository's `VERSION` — the release semantic-release
+ * last cut, and the number the signed release list carries (`scripts/build-release.ts`). Settings ›
+ * Machine › About shows it beside the machine's, and the "Ferretry updated" line compares it with the
+ * last one this browser saw (`src/lib/app-version.ts`).
+ * The file is part of every checkout, so a build without one fails rather than ships an unknown version.
+ */
+const appVersion = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim();
+
 export default defineConfig({
   define: {
+    __FY_APP_VERSION__: JSON.stringify(appVersion),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
     ),

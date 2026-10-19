@@ -82,6 +82,16 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     fixedSubject: 'security-settings',
     responseSettings: ['view', 'settings'],
   },
+  // Updating this machine runs new code on it, and turning on automatic updates lets it do so unasked:
+  // both are kept as changes to the machine's security, like its settings.
+  { method: 'POST', path: '/v1/daemon/update', event: 'security.changed', fixedSubject: 'daemon-update' },
+  {
+    method: 'PATCH',
+    path: '/v1/daemon/update/settings',
+    event: 'security.changed',
+    fixedSubject: 'daemon-update-settings',
+    responseSettings: [],
+  },
   { method: 'POST', path: '/v1/passkeys', event: 'passkey.registered' },
   {
     method: 'POST',
