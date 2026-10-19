@@ -80,6 +80,7 @@ import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
+import { type ModelsSubsystem, modelRoutes } from './models.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
@@ -316,6 +317,8 @@ export interface MountedSubsystems {
   /** Optional provider keys (Jev, Groq, Cerebras): which are set, and a Test that spends one once through
    *  the daemon's outbound holder. No key travels on either route — see `mounts/speedups.ts`. */
   readonly speedups: SpeedupsSubsystem;
+  /** The model catalogs in effect and the published catalog this machine follows (docs/model-catalog.md). */
+  readonly models: ModelsSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -538,6 +541,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...sttEnhancementRoutes(subsystems.sttEnhancement),
         // Fixed literals under `/v1/speedups`, which no other subsystem uses: none can shadow or be shadowed.
         ...speedupRoutes(subsystems.speedups),
+        // Fixed literals under `/v1/models`, which no other subsystem uses: none can shadow or be shadowed.
+        ...modelRoutes(subsystems.models),
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.

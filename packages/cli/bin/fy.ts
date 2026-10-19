@@ -124,6 +124,8 @@ import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
+import { registerModelsCommands } from '../src/lib/models/commands';
+import { ModelsController } from '../src/lib/models/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
@@ -873,6 +875,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new ContinueSessionController(gateway, world.io, world.prompt, { ...context, interactive: world.interactive }),
     );
   },
+  // `fy models list` and `fy models refresh` (docs/model-catalog.md): the catalogs the daemon reads.
+  ({ program, world, client }) => registerModelsCommands(program, new ModelsController(client, world.io)),
 ];
 
 /**

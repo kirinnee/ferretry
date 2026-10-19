@@ -522,6 +522,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   recommend: recommendSubsystem(),
   sttEnhancement: new FakeSttEnhancer(),
   speedups: new FakeSpeedups(),
+  models: {
+    view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),
+    refresh: async () => ({ outcome: 'disabled' as const }),
+  },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   secrets: secretSubsystem(),
@@ -618,6 +622,7 @@ describe('the mounted daemon surface', () => {
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       2 + // existing conversations kept as ferrets: the listing and the adoption
+      2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
@@ -868,6 +873,9 @@ describe('the mounted daemon surface', () => {
       // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
+      // The model catalogs: the list and a check for a newer published catalog. Fixed literals, no other user.
+      'GET /v1/models',
+      'POST /v1/models/refresh',
       // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',

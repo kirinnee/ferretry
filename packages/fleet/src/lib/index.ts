@@ -27,6 +27,7 @@ export * from './health.ts';
 export * from './identity.ts';
 export * from './manifest.ts';
 export * from './models/catalog.ts';
+export * from './models/published.ts';
 export * from './models/runtime.ts';
 export * from './models/schema.ts';
 export * from './paths.ts';
