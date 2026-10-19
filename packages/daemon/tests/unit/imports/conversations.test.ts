@@ -101,6 +101,14 @@ class FakeFiles implements ConversationFiles {
     const node = this.node(file);
     return typeof node === 'string' && !node.startsWith('UNREADABLE') ? node : undefined;
   }
+
+  readonly heads: { readonly file: string; readonly maxBytes: number }[] = [];
+
+  async head(file: string, maxBytes: number): Promise<string | undefined> {
+    this.heads.push({ file, maxBytes });
+    const node = this.node(file);
+    return typeof node === 'string' ? node.slice(0, maxBytes) : undefined;
+  }
 }
 
 const parsers = { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() };
@@ -161,9 +169,9 @@ const tree: Tree = {
 };
 
 const ROOTS: readonly ConversationRoot[] = [
-  { harness: 'claude', home: '/pool/claude' },
-  { harness: 'claude', home: '/host/claude' },
-  { harness: 'codex', home: '/host/codex' },
+  { harness: 'claude', home: '/pool/claude', source: 'ferretry' },
+  { harness: 'claude', home: '/host/claude', source: 'computer' },
+  { harness: 'codex', home: '/host/codex', source: 'computer' },
 ];
 
 class RecordingAdopter implements ConversationAdopter {
@@ -222,7 +230,7 @@ describe('conversation discovery', () => {
     // Act
     const listing = await new ConversationImportService(
       new FakeFiles(tree),
-      [{ harness: 'claude', home: '/host/claude' }],
+      [{ harness: 'claude', home: '/host/claude', source: 'computer' }],
       parsers,
       { owners: async () => new Map() },
       new RecordingAdopter(),
@@ -462,5 +470,117 @@ describe('a link that could not be made', () => {
       'The runtime could not reach the conversation file (EACCES).',
     );
     should(conversationLinkFailure(undefined).reason).match(/unknown error/u);
+  });
+});
+
+describe('where a listing reads and what its rows say', () => {
+  const POINTED = '44444444-4444-4444-8444-444444444444';
+  const pointer = (path: string): string =>
+    `Read the file ${path} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
+  const reply = (text: string, at: string): string =>
+    JSON.stringify({
+      type: 'assistant',
+      sessionId: POINTED,
+      cwd: '/work/ferret',
+      timestamp: at,
+      message: { id: `m-${at}`, role: 'assistant', content: [{ type: 'text', text }] },
+    });
+  const said = (text: string, at: string): string => claude(text, at, { sessionId: POINTED, cwd: '/work/ferret' });
+  const handoffTree: Tree = {
+    ...tree,
+    pool: {
+      claude: {
+        projects: {
+          '-work-ferret': {
+            [`${POINTED}.jsonl`]: [
+              said(pointer('/fy/state/sessions/s-1/turns/turn-001.md'), '2026-10-18T08:00:00.000Z'),
+              reply('Looking at the cart.', '2026-10-18T08:01:00.000Z'),
+              said(pointer('/elsewhere/turns/turn-002.md'), '2026-10-18T08:02:00.000Z'),
+              said(pointer('/fy/state/sessions/s-1/turns/turn-003.md'), '2026-10-18T08:03:00.000Z'),
+              said('Ship it <system-reminder>be brief</system-reminder>', '2026-10-18T08:04:00.000Z'),
+              reply('Shipped.', '2026-10-18T08:05:00.000Z'),
+            ].join('\n'),
+          },
+        },
+      },
+    },
+    fy: { state: { sessions: { 's-1': { turns: { 'turn-001.md': '# Assigned task\n\nFix the cart total\n' } } } } },
+    elsewhere: { turns: { 'turn-002.md': 'Not read: outside every allowed folder' } },
+  };
+  const service = (files: FakeFiles) =>
+    new ConversationImportService(files, ROOTS, parsers, { owners: async () => new Map() }, new RecordingAdopter(), {
+      roots: ['/fy/state/sessions'],
+      coordinatorHomes: [],
+    });
+
+  it('should list only Ferretry’s own history, or only the computer’s, when asked', async () => {
+    // Arrange
+    const subjectService = subject();
+
+    // Act
+    const ferretry = await subjectService.list({ source: 'ferretry' });
+    const computer = await subjectService.list({ source: 'computer' });
+
+    // Assert
+    should(ferretry.conversations.map(row => row.id)).deepEqual([CLAUDE_ID]);
+    should(computer.conversations.map(row => row.id)).deepEqual([CLAUDE_ID, CODEX_ID, CLAUDE_OLD]);
+  });
+
+  it('should read a pointer’s document inside the allowed folders only, and skip one it cannot read', async () => {
+    // Arrange
+    const files = new FakeFiles(handoffTree);
+
+    // Act
+    const listing = await service(files).list({ source: 'ferretry' });
+
+    // Assert
+    should(listing.conversations[0]).containDeep({
+      id: POINTED,
+      preview: 'Fix the cart total',
+      latest: 'Ship it',
+      turns: 2,
+    });
+    should(files.heads.map(read => read.file)).deepEqual([
+      '/fy/state/sessions/s-1/turns/turn-001.md',
+      '/fy/state/sessions/s-1/turns/turn-003.md',
+    ]);
+    should(files.heads.every(read => read.maxBytes === 64 * 1024)).be.true();
+  });
+
+  it('should preview the last exchanges of one conversation, cleaned the same way', async () => {
+    // Arrange
+    const subjectService = service(new FakeFiles(handoffTree));
+
+    // Act
+    const preview = await subjectService.preview('claude', POINTED);
+
+    // Assert
+    should(preview).deepEqual({
+      id: POINTED,
+      harness: 'claude',
+      messages: [
+        { role: 'user', text: 'Fix the cart total' },
+        { role: 'assistant', text: 'Looking at the cart.' },
+        { role: 'user', text: 'Ship it' },
+        { role: 'assistant', text: 'Shipped.' },
+      ],
+    });
+  });
+
+  it('should preview nothing for a conversation no home holds or whose file is unreadable', async () => {
+    // Arrange
+    const unreadable: Tree = {
+      pool: {
+        claude: { projects: { '-work-ferret': { [`${POINTED}.jsonl`]: said('Hello', '2026-10-18T08:00:00Z') } } },
+      },
+    };
+    const files = new FakeFiles(unreadable);
+    const subjectService = service(files);
+    await subjectService.list();
+    files.text = async () => undefined;
+
+    // Act & Assert
+    should(await subjectService.preview('claude', 'missing')).be.undefined();
+    should(await subjectService.preview('claude', POINTED)).be.undefined();
   });
 });

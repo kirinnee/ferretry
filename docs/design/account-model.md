@@ -1052,7 +1052,13 @@ Each is easy to change later.
   are created **with the agent flag on**: running agents is Ferretry's purpose, and the person's own
   `claude` stays their own CLI.
 - **O3 — `--disallowed-tools=AskUserQuestion`** belongs to the Claude fixed layer (agent runtimes
-  only: nobody is there to answer).
+  only), but is **per ferret**: an unattended (`auto`) ferret has nobody to answer, so the wrapper
+  withholds the tool; an **interactive** ferret has the owner and keeps it, and the PWA shows its
+  question as an answerable card. The daemon writes `FY_SESSION_MODE` (`interactive`|`auto`) into the
+  ferret's launch environment at creation and the generated wrapper prepends the flag at exec time
+  unless it is `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`
+  behind `default_mode_request_user_input`, so the same line passes `--enable` for an interactive
+  ferret only.
 - **O4 — Claude "Auto mode"** needs `--permission-mode auto`. If the pinned Claude does not accept it,
   the agent runtime **refuses to launch** with a message naming the fix (switch Agent permissions or
   update Claude). Auto is never silently mapped to a weaker or stronger mode.

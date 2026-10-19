@@ -19,4 +19,6 @@ cd "${root_dir}"
 
 echo "🧪 Proving descriptor containment on $(uname -sm)..."
 bun test --config=bunfig.int.toml packages/daemon/tests/integration/session/filesystem/
-echo "✅ Containment holds on $(uname -sm)"
+echo "🧪 Proving the process inventory reads this kernel's ps..."
+bun test --config=bunfig.int.toml packages/daemon/tests/integration/migrate/real-ps-inventory.test.ts
+echo "✅ Containment and the process inventory hold on $(uname -sm)"

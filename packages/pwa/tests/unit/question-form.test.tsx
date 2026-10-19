@@ -165,4 +165,27 @@ describe('QuestionForm', () => {
       ],
     ]);
   });
+
+  test('reads the typed Other text while the event is live, because React clears currentTarget afterwards', () => {
+    const form = render(
+      <QuestionForm
+        api={{ answer: async () => ({}) }}
+        daemon={daemonA}
+        question={{ toolUseId: 'live', questions: [{ question: 'What else?', options: [{ label: 'Known option' }] }] }}
+        sessionId="live-session"
+      />,
+    );
+    run(() => form.root.findAllByType('input')[1]?.props.onChange());
+    let live = true;
+    const event = {
+      get currentTarget() {
+        return live ? { value: 'typed' } : null;
+      },
+    };
+    run(() => {
+      form.root.findByType('textarea').props.onChange(event);
+      live = false;
+    });
+    expect(form.root.findByType('textarea').props.value).toBe('typed');
+  });
 });

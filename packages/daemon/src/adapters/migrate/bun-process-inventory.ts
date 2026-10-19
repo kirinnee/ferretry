@@ -11,7 +11,7 @@ import type { PaneSnapshotPort } from '../../lib/migrate/preflight-service.ts';
 import { capturePaneArguments, hasSessionArguments, panePidArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 
-const processTableArguments = ['-Ao', 'pid=,ppid=,etimes=,args='] as const;
+const processTableArguments = ['-Ao', 'pid=,ppid=,etime=,args='] as const;
 
 function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -83,7 +83,7 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       if (!Number.isFinite(panePid) || panePid <= 1)
         return unobservable(`tmux reported an unusable pane pid ${JSON.stringify(pane.stdout.trim())}`);
       const table = await this.probe.processTable();
-      if (table.kind === 'failed') return unobservable(table.reason);
+      if (table.kind === 'failed') return unobservable(`the process table could not be read: ${table.reason}`);
       const rows = descendantsOf(panePid, parseProcessTable(table.stdout));
       const cwdByPid = new Map<number, string | undefined>();
       for (const row of rows) cwdByPid.set(row.pid, await this.probe.workingDirectory(row.pid));

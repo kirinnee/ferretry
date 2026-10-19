@@ -1,9 +1,21 @@
 # Keeping existing conversations as ferrets
 
 An owner who used Claude Code or Codex before Ferretry already has conversations on the machine. They
-can keep any of them "on" as a ferret, either from the import picker (onboarding's Claude Code / Codex
-steps, and Settings › Runtimes › Import conversations…) or from New session › Continue a conversation.
-The CLI equivalents are `fy import conversations` and `fy new --continue`.
+can keep any of them "on" as a ferret from the import picker (onboarding's Claude Code / Codex steps, and
+Settings › Runtimes › Import conversations…). The CLI equivalent is `fy import conversations`.
+
+New session › Continue a conversation picks up work already IN Ferretry (`fy new --continue` searches the second source), from
+one of two sources:
+
+- **Ferretry sessions** — every stopped ferret on the machine, resumed in place with its conversation
+  intact through the session's own resume.
+- **All conversations** — every conversation in Ferretry's shared history (`source=ferretry`), which
+  holds what its sessions said and everything imported. It never lists the computer's own `~/.claude` /
+  `~/.codex`: importing is the only thing that reads those. A conversation a stopped ferret keeps
+  resumes that ferret; one a running ferret keeps opens it; any other is adopted and started.
+
+Tapping a row shows its last few exchanges (`GET /v1/imports/conversations/:harness/:id/preview`, four
+exchanges, each message cut to 280 characters) before the button that continues it.
 
 The wire contract is `packages/protocol/src/lib/conversation-import.ts`; the daemon side is
 `packages/daemon/src/lib/imports/conversations.ts` (discovery, search, adoption rules) and
@@ -11,17 +23,22 @@ The wire contract is `packages/protocol/src/lib/conversation-import.ts`; the dae
 
 ## What is read
 
-- **Where:** Ferretry's shared history pool (`<FY_HOME>/fleet/shared/<harness>`) first, then the CLI's
-  own home as the daemon inherited it (`CLAUDE_CONFIG_DIR` or `~/.claude`; `CODEX_HOME` or `~/.codex`).
+- **Where:** Ferretry's shared history pool (`<FY_HOME>/fleet/shared/<harness>`, `source=ferretry`)
+  first, then the CLI's own home as the daemon inherited it (`CLAUDE_CONFIG_DIR` or `~/.claude`;
+  `CODEX_HOME` or `~/.codex`; `source=computer`). A listing with no `source` reads both.
   Claude: `projects/<folder>/<id>.jsonl` (a conversation's sub-agent files are not listed). Codex:
   `sessions/YYYY/MM/DD/rollout-*.jsonl`. Links are never followed.
 - **What:** metadata only, through the same parsers managed sessions use: the project folder, the first
   and latest thing the owner typed (each cut to 120 characters), the last activity, the turn count, the
-  model, and which session already keeps it. Text the CLI injected (anything opening with a tag) is not
-  a preview. Search (`q`, `harness`, `since`, `limit`) runs on the daemon over that index, which is
+  model, and which session already keeps it. A message is what the owner SAID: a turn-file pointer
+  ("Read the file …/turns/turn-NNN.md now, …", written by Ferretry or by kteam) is replaced by the task in
+  that file, read at most 64 KiB and only from a session's own folder or `~/.kteam`; a pointer whose file
+  is gone says nothing, so the next real message describes the conversation. Reminder blocks, the
+  delivered-files list, interruption markers and text the CLI injected (anything opening with a tag) are
+  dropped the same way (`lib/imports/conversation-text.ts`). Search (`q`, `harness`, `since`, `limit`) runs on the daemon over that index, which is
   re-parsed only when a file's size or time changes.
-- **Who may:** both routes are `fleet.configure`. A caller off the host needs the passkey step-up. The
-  answers carry no transcript and no file path, only to the owner's own devices.
+- **Who may:** every route is `fleet.configure`. A caller off the host needs the passkey step-up. The
+  answers carry no whole transcript and no file path, only to the owner's own devices.
 
 ## What adoption does
 

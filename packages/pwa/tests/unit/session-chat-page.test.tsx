@@ -52,7 +52,7 @@ import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-prefe
 import { createSurfaceEventHub } from '../../src/lib/surface-control.ts';
 import { DaemonClientProvider } from '../../src/lib/store.tsx';
 import { daemonSessionPath } from '../../src/lib/pages/routes.ts';
-import type { FyApiClient } from '@ferretry/protocol/client';
+import { FyHttpError, type FyApiClient } from '@ferretry/protocol/client';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
@@ -2623,6 +2623,33 @@ describe('SessionChatPage Info and Actions', () => {
       expect(JSON.stringify(page.toJSON())).toContain(
         'Session action failed: Restart CLI failed: in-flight work would be lost',
       );
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a Restart CLI refused because ps failed says so plainly and keeps the daemon words behind Details', async () => {
+    const daemon = fakeDaemon({
+      migrate: new FyHttpError(
+        'refused: the process table could not be read: ps exited 1: ps: etimes: keyword not found',
+        409,
+        'migration_refused',
+      ),
+    });
+    const page = renderSessionChatPage(chatPage(), daemon.factory);
+    try {
+      chooseAction(page.root, 'restart');
+      await runAsync(async () => {
+        page.root.findByProps({ 'data-menu-confirm-yes': '' }).props.onClick();
+        await Promise.resolve();
+      });
+      await flush();
+      const alert = JSON.stringify(page.toJSON());
+      expect(alert).toContain(
+        "Session action failed: Restart CLI failed: Couldn't check the agent's processes on this machine (ps failed). Nothing was restarted.",
+      );
+      expect(alert).toContain('Details');
+      expect(alert).toContain('ps: etimes: keyword not found');
     } finally {
       run(() => page.unmount());
     }
