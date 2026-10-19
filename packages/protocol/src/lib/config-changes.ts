@@ -37,6 +37,8 @@ export const CONFIG_CHANGE_KINDS = [
   'learning',
   'voice',
   'presets',
+  /** `pack.yaml` and `models-guide.yaml`: Pack mode's settings and its models guide. */
+  'pack',
 ] as const;
 export const ConfigChangeKindSchema = z.enum(CONFIG_CHANGE_KINDS);
 export type ConfigChangeKind = z.infer<typeof ConfigChangeKindSchema>;
@@ -57,8 +59,10 @@ const KINDS_BY_FILE: Readonly<Record<ConfigFileAddress['kind'], readonly ConfigC
   warden: ['warden'],
   learning: ['learning'],
   voice: ['voice'],
+  pack: ['pack'],
+  modelsGuide: ['pack'],
   preset: ['presets', 'credentials'],
-  models: ['runtimes'],
+  models: ['runtimes', 'pack'],
 };
 
 /**

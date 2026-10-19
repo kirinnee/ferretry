@@ -67,6 +67,8 @@ export const CONFIG_KIND_WORDS: Readonly<Record<ConfigFileKind, string>> = {
   warden: 'Warden',
   learning: 'Learning',
   voice: 'Voice',
+  pack: 'Pack mode',
+  modelsGuide: 'Models guide',
   preset: 'Provider presets',
   models: 'Model catalogs',
 };
