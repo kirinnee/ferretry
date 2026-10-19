@@ -97,6 +97,7 @@ import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import { sessionTurn } from '../session-activity.ts';
+import { lineageLabel } from '../lineage.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
 import type { ConnectionHealthState } from '../connection-health.ts';
@@ -1113,6 +1114,15 @@ export function SessionChatPage({
           ),
         };
 
+  const parentSession = daemonSessions?.find(candidate => candidate.config.id === session.config.parent);
+  const startedBy =
+    parentSession === undefined || onNavigate === undefined
+      ? undefined
+      : {
+          name: lineageLabel(parentSession).text,
+          onOpen: () => onNavigate(daemonSessionPath(connection.daemonId, parentSession.config.id)),
+        };
+
   const header = (): ReactNode => (
     <>
       <SessionTopBar
@@ -1135,6 +1145,7 @@ export function SessionChatPage({
         }
         {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
+        {...(startedBy === undefined ? {} : { startedBy })}
       />
       {/* NOT a live region. App.tsx owns the single announcement for a refresh
         failure and hands down a finished sentence; a second `role=status`
