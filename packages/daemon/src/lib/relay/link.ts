@@ -365,6 +365,10 @@ export interface RelayLinkDependencies {
 /** What the link is doing, for a surface that has to say whether this daemon is reachable at all. */
 export interface RelayLinkReport {
   readonly claimed: boolean;
+  /** The rendezvous agreed to answer `probe` (§5): only then may the carrier ask it whether the claim holds. */
+  readonly claimProbe: boolean;
+  /** `held` answers received on this link, so "answered since the probe" is a comparison, not a clock. */
+  readonly held: number;
   readonly sessions: number;
   /** The last refusal this link made or was told about. Absent is "nothing has gone wrong yet". */
   readonly lastRefusal?: string;
@@ -544,6 +548,8 @@ export class RelayLink {
    *  {@link RELAY_ENDED_SESSION_GRACE_MS}. */
   readonly #ended = new Map<string, RelayLinkTimer>();
   #claimed = false;
+  #claimProbe = false;
+  #held = 0;
   #lastRefusal: string | undefined;
   /** Serialises everything that assigns a sequence number, because a record's nonce IS its sequence
    *  and two sealers racing would produce two records under one nonce. */
@@ -554,6 +560,8 @@ export class RelayLink {
   report(): RelayLinkReport {
     return {
       claimed: this.#claimed,
+      claimProbe: this.#claimProbe,
+      held: this.#held,
       sessions: this.#sessions.size,
       ...(this.#lastRefusal === undefined ? {} : { lastRefusal: this.#lastRefusal }),
     };
@@ -562,6 +570,21 @@ export class RelayLink {
   /** The heartbeat this side owes: text, so the edge can answer it without waking anything. */
   heartbeat(): void {
     this.deps.socket.sendText(HEARTBEAT_REQUEST);
+  }
+
+  /**
+   * Ask the rendezvous's own code whether it still holds this daemon's claim — the question `fy-ping`
+   * cannot ask, because the edge answers that without consulting anything. A no is a `4410` close, so
+   * the only answer that arrives as a message is `held`. Sent only to a rendezvous that said it speaks it.
+   */
+  probeClaim(): void {
+    if (!this.#claimProbe) return;
+    this.#sendFrame({
+      kind: FRAME_KINDS.control,
+      sessionId: RENDEZVOUS_SESSION_ID,
+      sequence: 0,
+      payload: encodeControlMessage({ t: 'probe' }),
+    });
   }
 
   /**
@@ -648,6 +671,10 @@ export class RelayLink {
         return;
       case 'claimed':
         this.#claimed = true;
+        this.#claimProbe = message.features?.includes('claim-probe') === true;
+        return;
+      case 'held':
+        this.#held += 1;
         return;
       case 'open':
         this.#onOpen(frame.sessionId);

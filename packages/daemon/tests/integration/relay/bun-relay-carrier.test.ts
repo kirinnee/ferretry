@@ -444,6 +444,7 @@ describe('a daemon reachable through a rendezvous it dialled', () => {
 });
 
 interface FakeSocket extends RelayWebSocket {
+  readonly url: string;
   readonly sent: Array<Uint8Array | string>;
   readonly closes: Array<{ code?: number; reason?: string }>;
 }
@@ -452,8 +453,9 @@ function fakeSockets(): { readonly sockets: FakeSocket[]; readonly factory: (url
   const sockets: FakeSocket[] = [];
   return {
     sockets,
-    factory: () => {
+    factory: url => {
       const socket: FakeSocket = {
+        url,
         binaryType: '',
         onopen: null,
         onmessage: null,
@@ -596,6 +598,7 @@ describe('what a socket does that a protocol does not', () => {
     // Arrange — a socket that cannot be written to. Handing a frame to the link therefore throws
     // where nothing in the protocol can recover, which is the one case the carrier has to absorb.
     const broken: FakeSocket = {
+      url: 'wss://relay.example',
       binaryType: '',
       onopen: null,
       onmessage: null,
@@ -812,7 +815,7 @@ function redialingCarrier(patch: Record<string, unknown> = {}, random = 1) {
     return socket;
   };
   /** The rendezvous half of a successful claim: challenge, the daemon's claim, then the acceptance. */
-  const claimOn = async (socket: FakeSocket): Promise<void> => {
+  const claimOn = async (socket: FakeSocket, claimed: ControlMessage = CLAIMED): Promise<void> => {
     socket.onmessage?.({
       data: controlFrame({
         t: 'challenge',
@@ -823,7 +826,7 @@ function redialingCarrier(patch: Record<string, unknown> = {}, random = 1) {
       }),
     });
     await until(() => socket.sent.at(-1), 'the claim');
-    socket.onmessage?.({ data: controlFrame(CLAIMED) });
+    socket.onmessage?.({ data: controlFrame(claimed) });
     await until(() => (carrier.status().phase === 'carrying' ? true : undefined), 'the carrier to carry');
   };
   return { carrier, fake, clock, lines, socketAt, claimOn };
@@ -1137,6 +1140,111 @@ describe('a carrier that notices a dead path in seconds', () => {
       'relay https://relay.example: liveness: nothing received for 60.0s (limit 45.0s) — dropping the socket',
       'relay https://relay.example: disconnected (4408 no answer within the heartbeat deadline) — redial attempt 1 in 0ms',
     ]);
+    carrier.stop();
+  });
+});
+
+describe('a carrier that asks the rendezvous itself whether it still holds the claim', () => {
+  const PROBING = { ...CLAIMED, features: ['claim-probe'] } as const;
+  const probesIn = (socket: FakeSocket): number =>
+    socket.sent.filter(data => {
+      if (typeof data === 'string') return false;
+      const decoded = decodeFrame(data);
+      return decoded.ok && decodeControlMessage(decoded.frame.payload)?.t === 'probe';
+    }).length;
+
+  it('should ask for the probe in the query, never the path, and keep the logged origin clean', () => {
+    const { carrier, socketAt, lines } = redialingCarrier({ url: 'wss://relay.example/hosted/path' });
+    carrier.start();
+    const url = new URL(socketAt(0).url);
+    should(url.searchParams.get('features')).equal('claim-probe');
+    should(url.pathname).match(/^\/hosted\/path\/v1\/rendezvous\/fy_daemon_[A-Za-z0-9_-]{43}\/daemon$/u);
+    should(carrier.status().relayUrl).not.match(/features/u);
+    should(lines.join('\n')).not.match(/features/u);
+    carrier.stop();
+  });
+
+  it('should probe on every keepalive once the rendezvous agreed, and keep a socket whose claim is held', async () => {
+    const { carrier, clock, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+    await claimOn(socket, PROBING);
+
+    for (let round = 0; round < 3; round += 1) {
+      clock.advance(20_000 - (round === 0 ? 0 : 1_000));
+      socket.onmessage?.({ data: 'fy-pong' });
+      socket.onmessage?.({ data: controlFrame({ t: 'held' }) });
+      // Binary frames are handled on the carrier's inbox chain; let it run before the deadline is read.
+      await Bun.sleep(1);
+      clock.advance(1_000);
+    }
+    clock.advance(10_000);
+
+    should(probesIn(socket)).equal(3);
+    should(socket.closes).be.empty();
+    should(carrier.status().phase).equal('carrying');
+    carrier.stop();
+  });
+
+  it('should never probe a rendezvous that did not offer it', async () => {
+    const { carrier, clock, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+    await claimOn(socket);
+
+    clock.advance(20_000);
+    socket.onmessage?.({ data: 'fy-pong' });
+    clock.advance(10_000);
+
+    should(probesIn(socket)).equal(0);
+    should(socket.closes).be.empty();
+    carrier.stop();
+  });
+
+  it('should drop and re-claim when the edge answers the ping but the rendezvous never confirms the claim', async () => {
+    // The incident, from the daemon's side: fy-pong kept arriving, so nothing looked wrong for 16 minutes.
+    const { carrier, fake, clock, lines, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+    await claimOn(socket, PROBING);
+    lines.length = 0;
+
+    clock.advance(20_000);
+    socket.onmessage?.({ data: 'fy-pong' });
+    clock.advance(10_000);
+
+    should(socket.closes).deepEqual([{ code: 4408, reason: 'the rendezvous did not confirm the claim' }]);
+    should(carrier.status().detail).match(/stopped confirming the claim/u);
+    should(lines[0]).equal(
+      'relay https://relay.example: liveness: the edge answered but the rendezvous did not confirm the claim within 10.0s — dropping the socket to claim again',
+    );
+    clock.advance(0);
+    should(fake.sockets).have.length(2);
+    carrier.stop();
+  });
+
+  it('should say so plainly, and redial at once, when the rendezvous reports the claim lost', async () => {
+    const { carrier, fake, clock, lines, socketAt, claimOn } = redialingCarrier();
+    carrier.start();
+    const socket = socketAt(0);
+    socket.onopen?.(undefined);
+    await claimOn(socket, PROBING);
+    lines.length = 0;
+
+    socket.onmessage?.({
+      data: controlFrame({ t: 'error', code: 4410, reason: 'this rendezvous no longer holds the claim' }),
+    });
+    socket.onclose?.({ code: 4410, reason: 'this rendezvous no longer holds the claim' });
+
+    should(lines).deepEqual([
+      'relay https://relay.example: liveness: the rendezvous no longer held this daemon’s claim — claiming again',
+      'relay https://relay.example: disconnected (4410 this rendezvous no longer holds the claim; the relay said: error 4410 this rendezvous no longer holds the claim) — redial attempt 1 in 0ms',
+    ]);
+    clock.advance(0);
+    should(fake.sockets).have.length(2);
     carrier.stop();
   });
 });

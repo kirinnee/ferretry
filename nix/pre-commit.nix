@@ -137,7 +137,7 @@ pre-commit-lib.run {
       entry = validator "scripts/validate/relay-config.sh";
       # Both ends import the same source default, and the release compiler is deliberately included
       # so a per-build define cannot return while Nix remains direct-only.
-      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/relay-directory-origin|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(relay-hosted|cd|pwa-pages)\\.yaml)$";
+      files = "^(packages/relay/(wrangler\\.(hosted\\.json|jsonc)|src/(adapters/(worker|hosted-control)\\.ts|lib/(hosted-directory-default|index)\\.ts))|packages/protocol/package\\.json|packages/daemon/src/(lib/relay/discovery|adapters/system/runtime-environment)\\.ts|packages/pwa/(src/features/onboarding/hosted-relay|vite\\.config)\\.ts|scripts/(ci/relay-directory-origin|release/compile|validate/relay-config)\\.sh|\\.github/workflows/(relay-hosted|cd|pwa-pages)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };

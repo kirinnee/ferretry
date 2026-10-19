@@ -30,8 +30,8 @@
  * the harmless reading.
  */
 
-import type { ClaimVerdict } from './claim.ts';
 import { toBase64Url } from './binary.ts';
+import type { ClaimVerdict } from './claim.ts';
 import {
   CLAIM_DEADLINE_SECONDS,
   CONNECTION_RATE_LIMIT,
@@ -42,6 +42,7 @@ import {
   MAX_SESSIONS_PER_RENDEZVOUS,
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
+  type RelayFeature,
 } from './constants.ts';
 import { type ControlMessage, decodeControlMessage, encodeControlMessage, RELAY_LIMITS } from './control.ts';
 import { grantCredit, maySend, newSendWindow, recordSent, type SendWindow } from './flow.ts';
@@ -49,8 +50,8 @@ import {
   decodeCreditPayload,
   FRAME_KINDS,
   isRendezvousSessionId,
-  type RelayFrame,
   RENDEZVOUS_SESSION_ID,
+  type RelayFrame,
   type SessionId,
 } from './frames.ts';
 
@@ -61,11 +62,20 @@ export interface PendingDaemonSocket {
   readonly deadlineAt: number;
   /** True once a claim from this socket is out for verification, so a second claim is refused. */
   readonly verifying: boolean;
+  /** What the daemon asked for on its route that this rendezvous speaks. Absent is none. */
+  readonly features?: readonly RelayFeature[];
 }
 
 export interface DaemonSlot {
   readonly socketId: string;
   readonly since: number;
+  readonly features?: readonly RelayFeature[];
+  /**
+   * The stored state had lost this claim and {@link reconcileRendezvous} restored it from the socket's
+   * own claim marker. Nothing about the sessions it was serving survived, so a frame it sends for one
+   * of them is answered with that session's `closed` rather than read as a protocol error.
+   */
+  readonly restored?: boolean;
 }
 
 export interface RendezvousSession {
@@ -140,6 +150,7 @@ export type RendezvousEvent =
       readonly challenge: Uint8Array;
       readonly host: string;
       readonly at: number;
+      readonly features?: readonly RelayFeature[];
     }
   | { readonly kind: 'client-arrived'; readonly socketId: string; readonly sessionId: SessionId; readonly at: number }
   | { readonly kind: 'claim-verdict'; readonly socketId: string; readonly verdict: ClaimVerdict; readonly at: number }
@@ -299,6 +310,7 @@ function onDaemonArrived(
     host: event.host,
     deadlineAt: event.at + CLAIM_DEADLINE_SECONDS * 1000,
     verifying: false,
+    ...(event.features === undefined || event.features.length === 0 ? {} : { features: event.features }),
   };
   const next = { ...limited.state, pending: [...limited.state.pending, pending] };
   return {
@@ -386,7 +398,11 @@ function onClaimVerdict(
       effects: refuse(event.socketId, RELAY_CLOSE_CODES.rendezvousClaimed, 'a daemon already holds this rendezvous'),
     };
   }
-  const next: RendezvousState = { ...withoutPending, daemon: { socketId: event.socketId, since: event.at } };
+  const features = pending.features === undefined ? {} : { features: [...pending.features] };
+  const next: RendezvousState = {
+    ...withoutPending,
+    daemon: { socketId: event.socketId, since: event.at, ...features },
+  };
   return {
     state: next,
     effects: [
@@ -394,6 +410,7 @@ function onClaimVerdict(
         t: 'claimed',
         protocol: RELAY_PROTOCOL_ID,
         limits: RELAY_LIMITS,
+        ...features,
       }),
       ...nextAlarm(next, event.at),
     ],
@@ -484,10 +501,27 @@ function forward(
 }
 
 function onDaemonFrame(state: RendezvousState, daemon: DaemonSlot, frame: RelayFrame, at: number): RendezvousStep {
+  if (isClaimProbe(frame)) {
+    return { state, effects: [sendControl(daemon.socketId, RENDEZVOUS_SESSION_ID, { t: 'held' })] };
+  }
   const session = sessionFor(state, frame.sessionId);
   if (session === undefined) {
     // In flight across a close this rendezvous made: dropped, and the daemon keeps its socket.
     if (recentlyEnded(state, frame.sessionId, at)) return { state, effects: [] };
+    if (daemon.restored === true && !isRendezvousSessionId(frame.sessionId)) {
+      // A session from before the claim was restored. Its client's state went with the stored state, so
+      // the daemon is told it ended — once; the rest of its stragglers are dropped as `ended` ones are.
+      return {
+        state: endedByRendezvous(state, frame.sessionId, at),
+        effects: [
+          sendControl(daemon.socketId, frame.sessionId, {
+            t: 'closed',
+            code: RELAY_CLOSE_CODES.relayInternal,
+            reason: 'the rendezvous lost this session',
+          }),
+        ],
+      };
+    }
     return { state, effects: refuse(daemon.socketId, RELAY_CLOSE_CODES.protocolError, 'frame names no live session') };
   }
   if (frame.kind === FRAME_KINDS.control) {
@@ -568,6 +602,14 @@ function onFrame(state: RendezvousState, event: Extract<RendezvousEvent, { kind:
   }
   const session = state.sessions.find(entry => entry.clientSocketId === event.socketId);
   if (session !== undefined) return onClientFrame(state, session, event.frame, event.at);
+  if (isClaimProbe(event.frame)) {
+    // A daemon asking after a claim this state does not name. Its socket is live — it just spoke — so
+    // the slot is what was lost, and the remedy is a fresh claim rather than a guess about the socket.
+    return {
+      state,
+      effects: refuse(event.socketId, RELAY_CLOSE_CODES.claimLost, 'this rendezvous no longer holds the claim'),
+    };
+  }
   return {
     state,
     effects: refuse(event.socketId, RELAY_CLOSE_CODES.protocolError, 'socket is not part of this rendezvous'),
@@ -646,6 +688,91 @@ function onAlarm(state: RendezvousState, event: Extract<RendezvousEvent, { kind:
   }
 
   return { state: next, effects: [...effects, ...nextAlarm(next, event.at)] };
+}
+
+// ─── reconciliation ───────────────────────────────────────────────────────────────────────────
+
+/** A daemon's `{ "t": "probe" }` on the rendezvous's own session: hop-by-hop, never forwarded or metered. */
+export function isClaimProbe(frame: RelayFrame): boolean {
+  if (frame.kind !== FRAME_KINDS.control || !isRendezvousSessionId(frame.sessionId)) return false;
+  return decodeControlMessage(frame.payload)?.t === 'probe';
+}
+
+/**
+ * One socket the runtime still holds, as the rendezvous marked it.
+ *
+ * `claim` is present only while the socket holds a proved claim: it is written on the socket itself the
+ * moment the claim is accepted and erased before this side ever closes it, so it travels with the
+ * socket through hibernation, eviction and anything that happens to the stored state.
+ */
+export interface AttachedSocket {
+  readonly socketId: string;
+  readonly claim?: { readonly features?: readonly RelayFeature[] };
+}
+
+/**
+ * MAKE THE STORED STATE AGREE WITH THE SOCKETS THAT ARE ACTUALLY THERE, or null when it already does.
+ *
+ * The state is a document in storage and the sockets are the runtime's, and nothing used to compare
+ * them. When they disagreed the rendezvous believed the document: a daemon socket the runtime still
+ * held — still answered `fy-pong` by the auto-responder, so the daemon was sure it was connected — was
+ * no longer named as the holder, and every phone was told `4404` until somebody restarted the daemon.
+ * So every handler runs this first, and the sockets win wherever they can prove something:
+ *
+ * - a slot, pending socket or session whose socket the runtime no longer holds is gone, exactly as if
+ *   its close had been delivered (a close that a reset swallowed is still a close);
+ * - an empty slot with a claimed socket attached is that socket's again — its claim was proved, its
+ *   socket is live, and only the document forgot. It is marked `restored`, because what it was
+ *   carrying was not restored with it;
+ * - any OTHER claimed socket is refused `4410`, so a daemon on a socket the slot does not name finds
+ *   out at once and claims again, instead of sitting on a socket nobody can reach it through.
+ */
+export function reconcileRendezvous(
+  state: RendezvousState,
+  attached: readonly AttachedSocket[],
+  at: number,
+): RendezvousStep | null {
+  const present = new Set(attached.map(socket => socket.socketId));
+  const effects: RendezvousEffect[] = [];
+  let next: RendezvousState = { ...state, pending: state.pending.filter(entry => present.has(entry.socketId)) };
+  let changed = next.pending.length !== state.pending.length;
+
+  if (next.daemon !== null && !present.has(next.daemon.socketId)) {
+    const dropped = dropDaemon(next, RELAY_CLOSE_CODES.daemonAbsent, 'the daemon disconnected');
+    next = dropped.state;
+    effects.push(...dropped.effects);
+    changed = true;
+  }
+
+  for (const session of next.sessions) {
+    if (present.has(session.clientSocketId)) continue;
+    effects.push(...tellDaemon(next, session, RELAY_CLOSE_CODES.daemonAbsent, 'the client disconnected'));
+    next = endedByRendezvous(next, session.sessionId, at);
+    changed = true;
+  }
+
+  const claimants = attached.filter(socket => socket.claim !== undefined);
+  const restored = claimants[0];
+  if (next.daemon === null && restored !== undefined) {
+    const features = restored.claim?.features;
+    next = {
+      ...next,
+      daemon: {
+        socketId: restored.socketId,
+        since: at,
+        restored: true,
+        ...(features === undefined || features.length === 0 ? {} : { features: [...features] }),
+      },
+    };
+    changed = true;
+  }
+  for (const socket of claimants) {
+    if (socket.socketId === next.daemon?.socketId) continue;
+    effects.push(...refuse(socket.socketId, RELAY_CLOSE_CODES.claimLost, 'this rendezvous no longer holds the claim'));
+    changed = true;
+  }
+
+  return changed ? { state: next, effects: [...effects, ...nextAlarm(next, at)] } : null;
 }
 
 // ─── entry point ──────────────────────────────────────────────────────────────────────────────

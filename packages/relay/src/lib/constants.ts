@@ -156,6 +156,27 @@ export const DEVICE_ROTATE_LABEL = 'ferretry-device-rotate-v2' as const;
 export const APP_SESSION_BYTES = 16 as const;
 
 /**
+ * What a daemon may ask a rendezvous for beyond `ferretry-relay/1`, and the query parameter it asks in.
+ *
+ * Every control message is a strict shape, so a peer that sends one the other side does not know gets
+ * its socket closed. A feature is therefore never ASSUMED: the daemon names the ones it speaks in the
+ * daemon route's query string, which an older rendezvous ignores; a rendezvous that speaks one echoes it
+ * in `claimed`, which it only ever sends to a daemon that asked; and neither side uses a feature the
+ * other did not name. Old daemon and new relay, or new daemon and old relay, both stay on plain `/1`.
+ */
+export const RELAY_FEATURES_PARAM = 'features' as const;
+
+/**
+ * `claim-probe`: the daemon asks the rendezvous's OWN code whether this socket still holds the claim.
+ *
+ * `fy-ping` cannot answer that. It is answered by Cloudflare's auto-responder, which consults neither
+ * the stored rendezvous state nor the object's code, so a daemon whose claim the state no longer names
+ * kept passing every heartbeat for sixteen minutes while every phone was told `4404`.
+ */
+export const RELAY_FEATURES = ['claim-probe'] as const;
+export type RelayFeature = (typeof RELAY_FEATURES)[number];
+
+/**
  * WebSocket close codes.
  *
  * The 4000-4999 range is reserved for applications, so these never collide with a protocol-level
@@ -175,6 +196,11 @@ export const RELAY_CLOSE_CODES = {
   daemonAbsent: 4404,
   /** The socket stopped answering heartbeats within the grace window. */
   heartbeatTimeout: 4408,
+  /**
+   * This daemon socket is attached but the rendezvous no longer holds its claim. Claim again at once:
+   * the socket is live, so the only thing wrong is the slot, and a fresh claim restores it.
+   */
+  claimLost: 4410,
   /** A second daemon claimed a rendezvous an authenticated daemon already holds. */
   rendezvousClaimed: 4409,
   /** A frame exceeded {@link MAX_FRAME_BYTES}. */

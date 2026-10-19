@@ -12,19 +12,21 @@ import {
   FRAME_KINDS,
   HEARTBEAT_GRACE_SECONDS,
   initialRendezvousState,
+  isClaimProbe,
   MAX_ENDED_SESSIONS,
   MAX_PENDING_DAEMON_SOCKETS,
   MAX_SESSIONS_PER_RENDEZVOUS,
   newSendWindow,
-  reduceRendezvous,
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
+  RENDEZVOUS_SESSION_ID,
   type RelayFrame,
   type RendezvousEffect,
   type RendezvousState,
-  RENDEZVOUS_SESSION_ID,
-  sessionIdFromBytes,
+  reconcileRendezvous,
+  reduceRendezvous,
   type SessionId,
+  sessionIdFromBytes,
 } from '@ferretry/relay';
 import should from 'should';
 
@@ -773,5 +775,207 @@ describe('rendezvous: departures and the sweep', () => {
     ]);
     should(step.state.daemon?.socketId).equal('daemon');
     should(messagesTo(step.effects, 'daemon')[0]).match({ code: RELAY_CLOSE_CODES.heartbeatTimeout });
+  });
+});
+
+describe('rendezvous: the claim probe', () => {
+  function withProbingDaemon(at = 1_000): RendezvousState {
+    const arrived = reduceRendezvous(initialRendezvousState(daemonId), {
+      kind: 'daemon-arrived',
+      socketId: 'daemon',
+      challenge: new Uint8Array(32).fill(7),
+      host,
+      features: ['claim-probe'],
+      at,
+    });
+    return reduceRendezvous(arrived.state, { kind: 'claim-verdict', socketId: 'daemon', verdict: goodVerdict, at })
+      .state;
+  }
+
+  it('should echo the features a daemon asked for in claimed, and add no key for one that asked none', () => {
+    const arrived = reduceRendezvous(initialRendezvousState(daemonId), {
+      kind: 'daemon-arrived',
+      socketId: 'daemon',
+      challenge: new Uint8Array(32).fill(7),
+      host,
+      features: ['claim-probe'],
+      at: 1_000,
+    });
+    const claimed = reduceRendezvous(arrived.state, {
+      kind: 'claim-verdict',
+      socketId: 'daemon',
+      verdict: goodVerdict,
+      at: 1_000,
+    });
+    should(messagesTo(claimed.effects, 'daemon')).match([
+      { t: 'claimed', protocol: RELAY_PROTOCOL_ID, features: ['claim-probe'] },
+    ]);
+    should(claimed.state.daemon?.features).deepEqual(['claim-probe']);
+
+    const plain = reduceRendezvous(withDaemon(), {
+      kind: 'client-arrived',
+      socketId: 'phone',
+      sessionId: sessionId(1),
+      at: 2_000,
+    });
+    should(plain.state.daemon).not.have.property('features');
+    const unasked = reduceRendezvous(initialRendezvousState(daemonId), {
+      kind: 'daemon-arrived',
+      socketId: 'daemon',
+      challenge: new Uint8Array(32).fill(7),
+      host,
+      features: [],
+      at: 1_000,
+    });
+    should(unasked.state.pending[0]).not.have.property('features');
+  });
+
+  it('should answer the holder with held, and refuse a socket the slot does not name with 4410', () => {
+    const state = withProbingDaemon();
+    const probe = control(RENDEZVOUS_SESSION_ID, { t: 'probe' });
+
+    const held = reduceRendezvous(state, { kind: 'frame', socketId: 'daemon', frame: probe, at: 2_000 });
+    should(held.state).equal(state);
+    should(messagesTo(held.effects, 'daemon')).deepEqual([{ t: 'held' }]);
+
+    const lost = reduceRendezvous(state, { kind: 'frame', socketId: 'stranger', frame: probe, at: 2_000 });
+    should(closures(lost.effects)).deepEqual([
+      { socketId: 'stranger', code: RELAY_CLOSE_CODES.claimLost, reason: 'this rendezvous no longer holds the claim' },
+    ]);
+    should(messagesTo(lost.effects, 'stranger')).match([{ t: 'error', code: RELAY_CLOSE_CODES.claimLost }]);
+  });
+
+  it('should recognise only a probe on the rendezvous session as one', () => {
+    should(isClaimProbe(control(RENDEZVOUS_SESSION_ID, { t: 'probe' }))).be.true();
+    should(isClaimProbe(control(sessionId(1), { t: 'probe' }))).be.false();
+    should(isClaimProbe(control(RENDEZVOUS_SESSION_ID, { t: 'held' }))).be.false();
+    should(isClaimProbe(record(RENDEZVOUS_SESSION_ID, 1))).be.false();
+  });
+});
+
+describe('rendezvous: reconciling the stored state with the attached sockets', () => {
+  it('should change nothing when the state and the sockets agree', () => {
+    const state = withClient().state;
+    should(reconcileRendezvous(state, [{ socketId: 'daemon', claim: {} }, { socketId: 'phone' }], 3_000)).be.null();
+    should(reconcileRendezvous(initialRendezvousState(daemonId), [], 3_000)).be.null();
+  });
+
+  it('should restore a claim the state forgot from the live socket that holds it, and serve the next phone', () => {
+    // The incident: the document said nobody held the rendezvous; the runtime still held the daemon.
+    const forgotten: RendezvousState = { ...withDaemon(), daemon: null };
+    const step = reconcileRendezvous(forgotten, [{ socketId: 'daemon', claim: { features: ['claim-probe'] } }], 5_000);
+    should(step?.state.daemon).deepEqual({
+      socketId: 'daemon',
+      since: 5_000,
+      restored: true,
+      features: ['claim-probe'],
+    });
+    should(step?.effects).containEql({ kind: 'schedule-alarm', at: 5_000 + 30_000 });
+
+    const phone = reduceRendezvous(step?.state ?? forgotten, {
+      kind: 'client-arrived',
+      socketId: 'phone',
+      sessionId: sessionId(1),
+      at: 5_001,
+    });
+    should(messagesTo(phone.effects, 'phone')).match([{ t: 'ready' }]);
+    should(messagesTo(phone.effects, 'daemon')).deepEqual([{ t: 'open' }]);
+
+    const plain = reconcileRendezvous(forgotten, [{ socketId: 'daemon', claim: {} }], 5_000);
+    should(plain?.state.daemon).not.have.property('features');
+  });
+
+  it('should refuse every claimed socket the slot does not name, so its daemon claims again', () => {
+    const state = withDaemon();
+    const step = reconcileRendezvous(
+      state,
+      [
+        { socketId: 'daemon', claim: {} },
+        { socketId: 'ghost', claim: {} },
+      ],
+      5_000,
+    );
+    should(step?.state.daemon?.socketId).equal('daemon');
+    should(closures(step?.effects ?? [])).deepEqual([
+      { socketId: 'ghost', code: RELAY_CLOSE_CODES.claimLost, reason: 'this rendezvous no longer holds the claim' },
+    ]);
+
+    const forgotten: RendezvousState = { ...state, daemon: null };
+    const two = reconcileRendezvous(
+      forgotten,
+      [
+        { socketId: 'first', claim: {} },
+        { socketId: 'second', claim: {} },
+      ],
+      5_000,
+    );
+    should(two?.state.daemon?.socketId).equal('first');
+    should(closures(two?.effects ?? []).map(closure => closure.socketId)).deepEqual(['second']);
+  });
+
+  it('should let go of a slot, an unproved socket and a session whose sockets the runtime no longer holds', () => {
+    // A reset that never delivered the close used to leave the slot "held" — every redial refused 4409.
+    const state = withClient().state;
+    const gone = reconcileRendezvous(state, [{ socketId: 'phone' }], 5_000);
+    should(gone?.state.daemon).be.null();
+    should(gone?.state.sessions).be.empty();
+    should(closures(gone?.effects ?? [])).match([{ socketId: 'phone', code: RELAY_CLOSE_CODES.daemonAbsent }]);
+
+    const phoneGone = reconcileRendezvous(state, [{ socketId: 'daemon', claim: {} }], 5_000);
+    should(phoneGone?.state.sessions).be.empty();
+    should(phoneGone?.state.ended?.map(entry => entry.sessionId)).deepEqual([sessionId(1).text]);
+    should(messagesTo(phoneGone?.effects ?? [], 'daemon')).match([
+      { t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent },
+    ]);
+
+    const pending = reduceRendezvous(initialRendezvousState(daemonId), {
+      kind: 'daemon-arrived',
+      socketId: 'unproved',
+      challenge: new Uint8Array(32).fill(7),
+      host,
+      at: 1_000,
+    }).state;
+    const dropped = reconcileRendezvous(pending, [], 5_000);
+    should(dropped?.state.pending).be.empty();
+    should(dropped?.effects).be.empty();
+  });
+
+  it('should tell a restored daemon once that a session from before is gone, then drop its stragglers', () => {
+    const restored = reconcileRendezvous({ ...withDaemon(), daemon: null }, [{ socketId: 'daemon', claim: {} }], 5_000);
+    const state = restored?.state ?? withDaemon();
+    const told = reduceRendezvous(state, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: record(sessionId(9), 4),
+      at: 5_001,
+    });
+    should(closures(told.effects)).be.empty();
+    should(messagesTo(told.effects, 'daemon')).deepEqual([
+      { t: 'closed', code: RELAY_CLOSE_CODES.relayInternal, reason: 'the rendezvous lost this session' },
+    ]);
+    const straggler = reduceRendezvous(told.state, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: record(sessionId(9), 5),
+      at: 5_002,
+    });
+    should(straggler.effects).be.empty();
+
+    // A daemon that was never restored still loses its socket for the same frame: that is a real bug.
+    const strict = reduceRendezvous(withDaemon(), {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: record(sessionId(9), 4),
+      at: 5_001,
+    });
+    should(closures(strict.effects)).match([{ socketId: 'daemon', code: RELAY_CLOSE_CODES.protocolError }]);
+    // And the rendezvous session itself is never a "lost session".
+    const odd = reduceRendezvous(state, {
+      kind: 'frame',
+      socketId: 'daemon',
+      frame: record(RENDEZVOUS_SESSION_ID, 1),
+      at: 5_001,
+    });
+    should(closures(odd.effects)).match([{ socketId: 'daemon', code: RELAY_CLOSE_CODES.protocolError }]);
   });
 });
