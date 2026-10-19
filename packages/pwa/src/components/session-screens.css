@@ -2006,6 +2006,18 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 .fy-dashboard-row__task .text-fg {
   color: var(--fg-soft);
 }
+/* A waiting question is the row's reason to be in Needs you, so it reads in full ink under the task. */
+.fy-dashboard-row__question {
+  min-width: 0;
+  max-width: 100%;
+  padding-inline-start: calc(12px + var(--gap-sm));
+  color: var(--fg);
+}
+.fy-dashboard-row__question::before {
+  content: '? ';
+  color: var(--warn);
+  font-weight: var(--weight-strong);
+}
 
 /* ---- CONVERSATION ROWS (features/fleet/conversations) ----
    "Import conversations" and "Continue a conversation" as the Sessions list: ONE container (`.kt-panel

@@ -55,6 +55,24 @@ export const needsYou = (view: SessionView): boolean => {
   );
 };
 
+/** The longest question the list echoes; the row truncates visually, this just keeps the DOM small. */
+const QUESTION_PREVIEW_MAX = 160;
+
+/**
+ * The one line a list shows for a ferret waiting on a question: the first question, whitespace
+ * collapsed and capped, with how many more follow. `undefined` when nothing is pending.
+ */
+export const pendingQuestionPreview = (view: SessionView): string | undefined => {
+  const pending = view.state.pendingQuestion;
+  if (pending === null || pending === undefined || TERMINAL_STATUSES.has(view.state.status)) return undefined;
+  const [first] = pending.questions;
+  const text = (first?.question ?? '').replace(/\s+/gu, ' ').trim();
+  if (text === '') return undefined;
+  const clipped = text.length > QUESTION_PREVIEW_MAX ? `${text.slice(0, QUESTION_PREVIEW_MAX - 1)}…` : text;
+  const more = pending.questions.length - 1;
+  return more > 0 ? `${clipped} (+${more} more)` : clipped;
+};
+
 /** The session is over: its terminal is gone and nothing will move it again. */
 export const isStopped = (view: SessionView): boolean => TERMINAL_STATUSES.has(view.state.status);
 
