@@ -226,6 +226,19 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       return { events, issues, recognized: true };
     }
 
+    if (recordType === 'system' && record.subtype === 'compact_boundary') {
+      const meta = transcriptObject(record.compactMetadata);
+      const trigger = meta?.trigger === 'manual' || meta?.trigger === 'auto' ? meta.trigger : undefined;
+      events.push({
+        ...metadata('system'),
+        kind: 'compaction',
+        trigger,
+        tokensBefore: transcriptNumber(meta?.preTokens),
+        tokensAfter: transcriptNumber(meta?.postTokens),
+      });
+      return { events, issues, recognized: true };
+    }
+
     if (recordType === 'system' && (record.subtype === 'error' || record.subtype === 'api_error')) {
       const normalized = claudeErrorMessage(record.error ?? record.message ?? record.content);
       if (normalized.message === undefined) {

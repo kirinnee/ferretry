@@ -258,7 +258,7 @@ import {
   RuntimeSupervisedLauncher,
   RuntimeSupervisedReaper,
 } from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
-import { StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
+import { FileCompactionHistory, StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -7319,6 +7319,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         createSessionTranscriptTail(storage),
         clock,
+        new FileCompactionHistory(stateFiles, join(paths.home, 'compaction-history.json')),
       );
       // The catalogue runs the setup service's import and clone as two of its reviewed changes.
       const fleetCatalog = new FleetCatalogService({

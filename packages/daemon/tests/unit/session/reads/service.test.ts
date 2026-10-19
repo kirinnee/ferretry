@@ -874,3 +874,19 @@ describe('renderTranscript', () => {
     should(renderTranscript([])).equal('');
   });
 });
+
+describe('renderTranscript compaction boundaries', () => {
+  it('should render a compaction with its trigger when the harness stated one', () => {
+    // Arrange
+    const events = [
+      { kind: 'compaction', harness: 'claude', role: 'system', trigger: 'auto' },
+      { kind: 'compaction', harness: 'codex', role: 'system' },
+    ] as unknown as readonly TranscriptEvent[];
+
+    // Act / Assert
+    should(renderTranscript(events).split('\n')).eql([
+      'system/compaction: compacted (auto)',
+      'system/compaction: compacted',
+    ]);
+  });
+});

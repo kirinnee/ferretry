@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
+import compactionFixture from '../../fixtures/transcript/claude-compaction.jsonl' with { type: 'text' };
 
 describe('ClaudeTranscriptParser', () => {
   it('should normalize the synthetic fixture into the common event model', () => {
@@ -305,5 +306,40 @@ describe('ClaudeTranscriptParser', () => {
     should(plain.events).containDeep([{ kind: 'tool-result', result: { text: 'plain output' } }]);
     should(mixed.events).containDeep([{ kind: 'tool-result', result: { text: 'typed output' } }]);
     should(object.events).containDeep([{ kind: 'tool-result', result: { text: undefined } }]);
+  });
+});
+
+describe('ClaudeTranscriptParser compaction boundaries', () => {
+  it('should turn a compact_boundary record into a compaction event with the counts it states', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+
+    // Act
+    const actual = subject.parse({
+      text: compactionFixture,
+      source: 'claude-compaction.jsonl',
+      observedAt: '2026-01-02T03:14:00.000Z',
+    });
+
+    // Assert — a count that is not a number, and a record with no metadata, say nothing rather than guess.
+    should(actual.issues).have.length(0);
+    should(actual.events.map(event => event.kind)).deepEqual([
+      'message',
+      'usage',
+      'compaction',
+      'compaction',
+      'compaction',
+    ]);
+    should(actual.events[2]).containDeep({
+      role: 'system',
+      trigger: 'auto',
+      tokensBefore: 150_510,
+      tokensAfter: 9_000,
+      timestamp: '2026-01-02T03:11:00.000Z',
+    });
+    should(actual.events[3]).containDeep({ trigger: 'manual' });
+    should(actual.events[3]).not.have.property('tokensBefore', 'many');
+    should((actual.events[3] as { tokensBefore?: number }).tokensBefore).be.undefined();
+    should((actual.events[4] as { trigger?: string }).trigger).be.undefined();
   });
 });
