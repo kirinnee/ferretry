@@ -4,6 +4,7 @@ set -euo pipefail
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
+./scripts/validate/pinned-toolchain.sh
 ./scripts/validate/pages-config.sh
 
 cd packages/pwa
