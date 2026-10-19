@@ -638,6 +638,10 @@ const htmlShellDocument = (bootstrap: string): string => `<!doctype html>
         color: CanvasText;
         font-family: ui-sans-serif, system-ui, sans-serif;
       }
+      /* Frameless in the message column, so the page starts flush with the prose around it. */
+      body {
+        margin: 0;
+      }
     </style>
   </head>
   <body>
