@@ -1,14 +1,29 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import {
+  FY_RENDER_FENCE_ATTRIBUTE,
   FY_RENDER_FENCE_LANGUAGE,
   FY_RENDER_IMAGE_MIMES,
   FY_RENDER_LIMITS,
+  FY_RENDER_MEDIA_TYPES,
+  FY_RENDER_SANDBOX_LIMITS,
   FY_RENDER_TYPES,
+  type FyRenderBlock,
   type FyRenderParseResult,
+  fyRenderMediaMime,
+  fyRenderPayloadBytes,
   fyRenderPresentation,
+  fyRenderRasterRefusal,
+  fyRenderReadBoundedBytes,
+  fyRenderReadBoundedText,
+  isFyRenderMediaBlock,
   parseFyRender,
+  remarkFyRenderFences,
 } from '../../src/lib/fy-render.ts';
+import {
+  FY_RENDER_LIMITS as BOUNDS_LIMITS,
+  FY_RENDER_SANDBOX_LIMITS as BOUNDS_SANDBOX_LIMITS,
+} from '../../src/lib/fy-render-bounds.ts';
 
 /**
  * The grammar, read as a grammar: every assertion here is about what
@@ -210,8 +225,19 @@ describe('fy-render fence language', () => {
     should(FY_RENDER_FENCE_LANGUAGE).equal('fy-render');
   });
 
-  test('should declare the five types the block grammar accepts', () => {
-    should([...FY_RENDER_TYPES]).eql(['html', 'svg', 'lottie', 'mermaid', 'image']);
+  test('should declare the eight types the block grammar accepts', () => {
+    should([...FY_RENDER_TYPES]).eql(['html', 'svg', 'lottie', 'mermaid', 'image', 'video', 'audio', 'pdf']);
+  });
+
+  test('should allow a src header on exactly the four media types', () => {
+    should([...FY_RENDER_MEDIA_TYPES]).eql(['image', 'video', 'audio', 'pdf']);
+  });
+
+  test('should re-export the bounds module rather than keep a second copy of the numbers', () => {
+    // Assert — the sandbox shells import the bounds module directly and every
+    // other reader imports the grammar, so the two must be the same objects.
+    should(FY_RENDER_LIMITS).equal(BOUNDS_LIMITS);
+    should(FY_RENDER_SANDBOX_LIMITS).equal(BOUNDS_SANDBOX_LIMITS);
   });
 
   test('should keep the image MIME allowlist raster-only', () => {
@@ -221,21 +247,95 @@ describe('fy-render fence language', () => {
   });
 });
 
-describe('fy-render presentation', () => {
-  test('should route each type to the surface that can actually render it', () => {
-    // Act
-    const presentation = FY_RENDER_TYPES.map(type => [type, fyRenderPresentation(type)]);
+describe('fy-render fence marking', () => {
+  interface Node {
+    type: string;
+    lang?: string | null;
+    meta?: string | null;
+    children?: Node[];
+    data?: { hProperties?: Record<string, unknown> };
+  }
+  const fence = (lang: string | null, meta: string | null = null, data?: Node['data']): Node => ({
+    type: 'code',
+    lang,
+    meta,
+    ...(data === undefined ? {} : { data }),
+  });
+  const marked = (node: Node): boolean => node.data?.hProperties?.[FY_RENDER_FENCE_ATTRIBUTE] === 'true';
 
-    // Assert — `html` is the ONE type still shown as source, and that is the
-    // declared gap rather than a missing case. A type moving out of `source`
-    // means a new execution surface and wants the threat model re-read.
+  test('should mark only a code fence whose info string is exactly the language', () => {
+    // Arrange — a fence with metadata after the token is a different fence, and
+    // so is any other language.
+    const exact = fence('fy-render');
+    const withMeta = fence('fy-render', 'notes');
+    const other = fence('ts');
+    const notCode: Node = { type: 'inlineCode', lang: 'fy-render' };
+    const root: Node = { type: 'root', children: [exact, withMeta, other, notCode] };
+
+    // Act
+    remarkFyRenderFences()(root);
+
+    // Assert
+    should([exact, withMeta, other, notCode].map(marked)).eql([true, false, false, false]);
+  });
+
+  test('should mark a fence at any depth and keep the properties it already carries', () => {
+    // Arrange — inside a list item inside a blockquote, with a label already set.
+    const nested = fence('fy-render', '', { hProperties: { 'data-label': 'x' } });
+    const root: Node = {
+      type: 'root',
+      children: [{ type: 'blockquote', children: [{ type: 'listItem', children: [nested] }] }],
+    };
+
+    // Act
+    remarkFyRenderFences()(root);
+
+    // Assert
+    should(nested.data?.hProperties).eql({ 'data-label': 'x', [FY_RENDER_FENCE_ATTRIBUTE]: 'true' });
+  });
+});
+
+describe('fy-render presentation', () => {
+  const accepted = (source: string): FyRenderBlock => {
+    const result = parseFyRender(source);
+    if (!result.ok) throw new Error(result.reason);
+    return result.block;
+  };
+
+  test('should route each payload-carrying type to the surface that can actually render it', () => {
+    // Arrange
+    const blocks = [
+      accepted(body('type: html', 'alt: A widget', '---', '<p>hi</p>')),
+      accepted(body('type: svg', 'alt: A square', '---', SQUARE)),
+      accepted(body('type: lottie', 'alt: A spinner', '---', '{"layers":[]}')),
+      accepted(body('type: mermaid', 'alt: A graph', '---', 'graph TD;')),
+      accepted(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL)),
+    ];
+
+    // Act
+    const presentation = blocks.map(block => [block.type, fyRenderPresentation(block)]);
+
+    // Assert — `html` is `interactive`: the one type whose author code runs,
+    // in its own frame. A type moving between these means a different execution
+    // surface and wants the threat model re-read.
     should(presentation).eql([
-      ['html', 'source'],
+      ['html', 'interactive'],
       ['svg', 'visual'],
       ['lottie', 'sandbox'],
       ['mermaid', 'sandbox'],
       ['image', 'visual'],
     ]);
+  });
+
+  test('should present every src block as media, an image included', () => {
+    // Arrange — `image` is the one type with two shapes, which is why the
+    // presentation is decided by the block and not by its type.
+    const blocks = FY_RENDER_MEDIA_TYPES.map(type =>
+      accepted(body(`type: ${type}`, 'alt: A file', 'src: https://example.com/file', '---')),
+    );
+
+    // Act / Assert
+    should(blocks.map(block => fyRenderPresentation(block))).eql(['media', 'media', 'media', 'media']);
   });
 });
 
@@ -320,9 +420,9 @@ describe('fy-render headers', () => {
     should(parseFyRender(body('type: svg', `alt: ${alt}`, '---', SQUARE)).ok).be.true();
   });
 
-  test('should refuse an image block with no mime', () => {
+  test('should refuse an image block with neither a mime nor a src', () => {
     should(reasonOf(parseFyRender(body('type: image', 'alt: A pixel', '---', PIXEL)))).equal(
-      'Image blocks require a mime header',
+      'Image blocks require a mime header or a src header',
     );
   });
 
@@ -1068,5 +1168,372 @@ describe('fy-render raster header bounds', () => {
 
     // Assert
     for (const [mime, payload] of over) should(image(mime, payload).ok).be.false();
+  });
+});
+
+/**
+ * THE `src:` HEADER. A media block names bytes that live in the session's
+ * workspace or behind an https URL, and carries none of its own. Every refusal
+ * here is a value an author could plausibly type, so each is pinned by its
+ * exact wording.
+ */
+describe('fy-render src headers', () => {
+  const media = (type: string, src: string, ...rest: readonly string[]): FyRenderParseResult =>
+    parseFyRender(body(`type: ${type}`, 'alt: A file', `src: ${src}`, '---', ...rest));
+
+  test('should read an @path as a workspace source, session-relative, dot-relative or absolute', () => {
+    // Act / Assert — the path is kept exactly as written; resolving it against the
+    // session's folder is the reader's job, at read time.
+    for (const path of ['docs/chart.png', './chart.png', '/abs/chart.png'])
+      should(media('image', `@${path}`)).match({ ok: true, block: { src: { kind: 'workspace', path } } });
+  });
+
+  test('should keep the whole body as the source and leave the payload empty', () => {
+    // Arrange
+    const source = body('type: video', 'alt: A clip', 'src: @clip.mp4', '---');
+
+    // Act / Assert
+    should(parseFyRender(source)).eql({
+      ok: true,
+      block: { alt: 'A clip', payload: '', source, src: { kind: 'workspace', path: 'clip.mp4' }, type: 'video' },
+    });
+  });
+
+  test('should refuse an @path with a line number, or anything that is not a file reference', () => {
+    // Assert — a line suffix means something for source code and nothing for a
+    // picture; a bare sigil and a parent traversal are not file references at all.
+    for (const src of ['@chart.png:12', '@chart.png:3-4', '@', '@../chart.png', '@a b.png'])
+      should(reasonOf(media('image', src))).equal('A workspace src must be an @path to a file, without a line number');
+  });
+
+  test('should read an https URL as an https source, in its canonical form', () => {
+    should(media('audio', 'https://Example.com/a/../song.mp3')).match({
+      ok: true,
+      block: { src: { kind: 'https', url: 'https://example.com/song.mp3' } },
+    });
+  });
+
+  test('should refuse every scheme that is not https, http included', () => {
+    for (const src of [
+      'http://example.com/a.png',
+      'data:image/png;base64,AAAA',
+      'blob:x',
+      'chart.png',
+      'HTTPS://a.com/x',
+    ])
+      should(reasonOf(media('image', src))).equal('The src header must be an @path or an https:// URL');
+  });
+
+  test('should refuse whitespace or a control character inside the URL', () => {
+    should(reasonOf(media('image', 'https://example.com/a b.png'))).equal('The src URL must not contain whitespace');
+    should(reasonOf(media('image', 'https://example.com/a\u0001.png'))).equal(
+      'The src URL must not contain whitespace',
+    );
+  });
+
+  test('should refuse a URL the platform cannot parse', () => {
+    should(reasonOf(media('image', 'https://['))).equal('The src URL could not be parsed');
+  });
+
+  test('should refuse a URL carrying credentials, because that is a password in a transcript', () => {
+    should(reasonOf(media('image', 'https://user:secret@example.com/a.png'))).equal(
+      'The src URL must not carry a user name or password',
+    );
+    should(reasonOf(media('image', 'https://user@example.com/a.png'))).equal(
+      'The src URL must not carry a user name or password',
+    );
+  });
+
+  test('should hold the src header to its character cap, in either form', () => {
+    // Arrange — `https://a.com/` is 14 characters and `@` is one.
+    const url = (length: number): string => `https://a.com/${'x'.repeat(length - 14)}`;
+    const path = (length: number): string => `@${'x'.repeat(length - 1)}`;
+
+    // Assert
+    should(media('image', url(FY_RENDER_LIMITS.srcCharacters)).ok).be.true();
+    should(media('image', path(FY_RENDER_LIMITS.srcCharacters)).ok).be.true();
+    should(reasonOf(media('image', url(FY_RENDER_LIMITS.srcCharacters + 1)))).equal(
+      'The src header exceeds 2048 characters',
+    );
+    should(reasonOf(media('image', path(FY_RENDER_LIMITS.srcCharacters + 1)))).equal(
+      'The src header exceeds 2048 characters',
+    );
+  });
+
+  test('should refuse a src header on a type that carries its own payload', () => {
+    for (const type of ['svg', 'html', 'mermaid', 'lottie'])
+      should(reasonOf(media(type, '@a.png'))).equal('The src header is only valid for image, video, audio and pdf');
+  });
+
+  test('should refuse an image that names both a mime and a src', () => {
+    // Assert — two sources of bytes would leave the reader guessing which one
+    // they consented to.
+    should(reasonOf(parseFyRender(body('type: image', 'alt: A pixel', 'mime: image/png', 'src: @a.png', '---')))).equal(
+      'An image block takes either a mime header or a src header',
+    );
+  });
+
+  test('should refuse a video, audio or pdf block without a src', () => {
+    for (const type of ['video', 'audio', 'pdf'])
+      should(reasonOf(parseFyRender(body(`type: ${type}`, 'alt: A file', '---')))).equal(
+        `A ${type} block requires a src header`,
+      );
+  });
+
+  test('should refuse a mime header on a media type that is not image', () => {
+    should(reasonOf(parseFyRender(body('type: video', 'alt: A clip', 'mime: image/png', 'src: @a.mp4', '---')))).equal(
+      'The mime header is only valid for image blocks',
+    );
+  });
+
+  test('should refuse a payload beside a src, and accept blank lines as no payload', () => {
+    should(reasonOf(media('pdf', '@a.pdf', 'JVBERi0='))).equal('A block with a src header must have an empty payload');
+    should(media('pdf', '@a.pdf', '', '   ', '')).match({ ok: true, block: { payload: '', type: 'pdf' } });
+  });
+});
+
+describe('fy-render media blocks', () => {
+  const block = (source: string): FyRenderBlock => {
+    const result = parseFyRender(source);
+    if (!result.ok) throw new Error(result.reason);
+    return result.block;
+  };
+
+  test('should name a src block as media and an inline one as not', () => {
+    // Assert — an inline image is the same type as a src one and must not be
+    // mistaken for it.
+    should(isFyRenderMediaBlock(block(body('type: image', 'alt: A file', 'src: @a.png', '---')))).be.true();
+    should(
+      isFyRenderMediaBlock(block(body('type: video', 'alt: A clip', 'src: https://a.com/v.mp4', '---'))),
+    ).be.true();
+    should(
+      isFyRenderMediaBlock(block(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL))),
+    ).be.false();
+    should(isFyRenderMediaBlock(block(body('type: svg', 'alt: A square', '---', SQUARE)))).be.false();
+  });
+
+  test('should report no payload bytes for a media block, whatever its type', () => {
+    // Assert — the consent control names this number, and a src block's bytes
+    // are not known until they are read.
+    should(fyRenderPayloadBytes(block(body('type: image', 'alt: A file', 'src: @a.png', '---')))).equal(0);
+    should(fyRenderPayloadBytes(block(body('type: audio', 'alt: A song', 'src: @a.mp3', '---')))).equal(0);
+  });
+
+  test('should report the bytes an inline payload actually spends', () => {
+    // Assert — UTF-8 bytes for text, decoded bytes for base64.
+    should(fyRenderPayloadBytes(block(body('type: html', 'alt: A widget', '---', 'é')))).equal(2);
+    should(fyRenderPayloadBytes(block(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL)))).equal(
+      png(1, 1).byteLength,
+    );
+  });
+});
+
+describe('fy-render media MIME by extension', () => {
+  test('should map every extension each media type shows', () => {
+    // Arrange
+    const expected: readonly (readonly [Parameters<typeof fyRenderMediaMime>[0], string, string])[] = [
+      ['audio', 'aac', 'audio/aac'],
+      ['audio', 'flac', 'audio/flac'],
+      ['audio', 'm4a', 'audio/mp4'],
+      ['audio', 'mp3', 'audio/mpeg'],
+      ['audio', 'oga', 'audio/ogg'],
+      ['audio', 'ogg', 'audio/ogg'],
+      ['audio', 'opus', 'audio/ogg'],
+      ['audio', 'wav', 'audio/wav'],
+      ['audio', 'weba', 'audio/webm'],
+      ['image', 'gif', 'image/gif'],
+      ['image', 'jpeg', 'image/jpeg'],
+      ['image', 'jpg', 'image/jpeg'],
+      ['image', 'png', 'image/png'],
+      ['image', 'webp', 'image/webp'],
+      ['pdf', 'pdf', 'application/pdf'],
+      ['video', 'm4v', 'video/mp4'],
+      ['video', 'mov', 'video/quicktime'],
+      ['video', 'mp4', 'video/mp4'],
+      ['video', 'ogv', 'video/ogg'],
+      ['video', 'webm', 'video/webm'],
+    ];
+
+    // Act / Assert
+    for (const [type, extension, mime] of expected)
+      should(fyRenderMediaMime(type, `dir/file.${extension}`)).equal(mime);
+  });
+
+  test('should read the extension case-insensitively', () => {
+    should(fyRenderMediaMime('image', 'Photo.PNG')).equal('image/png');
+    should(fyRenderMediaMime('pdf', 'REPORT.Pdf')).equal('application/pdf');
+  });
+
+  test('should show nothing for a file with no extension of its own', () => {
+    // Assert — a dot in a DIRECTORY name is not the file's extension.
+    should(fyRenderMediaMime('image', 'README')).be.null();
+    should(fyRenderMediaMime('image', 'a.b/c')).be.null();
+    should(fyRenderMediaMime('image', 'photos.png/raw')).be.null();
+  });
+
+  test('should show nothing for an extension the type does not handle', () => {
+    // Assert — an extension is only meaningful for its own type: an mp4 is not an
+    // image, and an svg goes through `type: svg`, never through `src:`.
+    should(fyRenderMediaMime('image', 'clip.mp4')).be.null();
+    should(fyRenderMediaMime('image', 'logo.svg')).be.null();
+    should(fyRenderMediaMime('video', 'song.mp3')).be.null();
+    should(fyRenderMediaMime('pdf', 'notes.txt')).be.null();
+  });
+});
+
+/**
+ * THE SAME ADMISSION, FOR BYTES THAT ARRIVE LATER. A `src:` image has no bytes
+ * at parse time, so the renderer runs this gate on what the read returned; these
+ * pin that it is the same gate the inline path uses.
+ */
+describe('fy-render raster refusal for fetched bytes', () => {
+  test('should accept any of the four rasters when nothing was declared', () => {
+    // Assert — the https case, where a URL suffix is not a declaration.
+    for (const raster of [png(64, 48), jpeg(sof(64, 48)), gif(64, 48), webp(64, 48)])
+      should(fyRenderRasterRefusal(raster, null)).be.null();
+  });
+
+  test('should accept bytes that are the type that was declared', () => {
+    should(fyRenderRasterRefusal(png(64, 48), 'image/png')).be.null();
+    should(fyRenderRasterRefusal(webp(64, 48), 'image/webp')).be.null();
+  });
+
+  test('should refuse bytes that are not the type the extension declared', () => {
+    should(fyRenderRasterRefusal(gif(10, 10), 'image/jpeg')).equal(
+      'Image bytes are image/gif, not the declared image/jpeg',
+    );
+  });
+
+  test('should refuse an animation, even with nothing declared', () => {
+    should(fyRenderRasterRefusal(gif(10, 10, 2), null)).equal(
+      'Animated image/gif is not accepted, because this build has no pause control',
+    );
+  });
+
+  test('should refuse an oversized axis and an oversized area', () => {
+    should(fyRenderRasterRefusal(png(8193, 1), null)).equal('Image exceeds 8192 pixels on an axis');
+    should(fyRenderRasterRefusal(png(4096, 4097), null)).equal('Image exceeds 16777216 total pixels');
+  });
+
+  test('should refuse bytes it cannot read, whatever was declared', () => {
+    should(fyRenderRasterRefusal(new Uint8Array(0), null)).equal('Image payload header could not be read');
+    should(fyRenderRasterRefusal(bytes(...chars('%PDF-1.7')), 'image/png')).equal(
+      'Image payload header could not be read',
+    );
+  });
+});
+
+describe('fy-render bounded byte reading', () => {
+  const streamOf = (chunks: readonly Uint8Array[]): ReadableStream<Uint8Array> =>
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+  const reasonOfRead = (result: { readonly ok: true } | { readonly ok: false; readonly reason: string }): string =>
+    result.ok ? '<accepted>' : result.reason;
+
+  test('should join every chunk of a body inside the cap', async () => {
+    // Act
+    const result = await fyRenderReadBoundedBytes(new Response(streamOf([bytes(1, 2), bytes(3), bytes(4, 5)])), 5);
+
+    // Assert — exactly at the cap is inside it.
+    should(result.ok).be.true();
+    should(result.ok ? [...result.bytes] : []).eql([1, 2, 3, 4, 5]);
+  });
+
+  test('should read an empty body as zero bytes rather than as a missing one', async () => {
+    // Act
+    const result = await fyRenderReadBoundedBytes(new Response(streamOf([])), 5);
+
+    // Assert
+    should(result.ok ? result.bytes.byteLength : -1).equal(0);
+  });
+
+  test('should refuse a declared length over the cap without reading the body', async () => {
+    // Arrange — the body is a stream that records whether it was ever pulled.
+    let pulled = false;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulled = true;
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const response = new Response(body, { headers: { 'content-length': '6' } });
+
+    // Act
+    const result = await fyRenderReadBoundedBytes(response, 5);
+
+    // Assert
+    should(reasonOfRead(result)).equal('The library response is too large');
+    should(pulled).be.false();
+  });
+
+  test('should ignore a declared length it cannot read and count the bytes instead', async () => {
+    // Act
+    const result = await fyRenderReadBoundedBytes(
+      new Response(streamOf([bytes(1)]), { headers: { 'content-length': 'lots' } }),
+      5,
+    );
+
+    // Assert
+    should(result.ok).be.true();
+  });
+
+  test('should cancel a stream at the chunk that crosses the cap', async () => {
+    // Arrange — a stream that never ends on its own, so only a cancel stops it.
+    let cancelled = false;
+    let sent = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent += 1;
+        controller.enqueue(new Uint8Array(4));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    // Act
+    const result = await fyRenderReadBoundedBytes(new Response(endless), 10, 'image');
+
+    // Assert — the third chunk takes the total to 12, past the cap of 10.
+    should(reasonOfRead(result)).equal('The image response is too large');
+    should(cancelled).be.true();
+    should(sent).be.belowOrEqual(4);
+  });
+
+  test('should refuse a response with no body at all', async () => {
+    should(reasonOfRead(await fyRenderReadBoundedBytes(new Response(null, { status: 204 }), 5, 'image'))).equal(
+      'The image response was empty',
+    );
+  });
+
+  test('should refuse a stream that fails mid-read', async () => {
+    // Arrange
+    const failing = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes(1));
+        controller.error(new Error('connection reset'));
+      },
+    });
+
+    // Act / Assert
+    should(reasonOfRead(await fyRenderReadBoundedBytes(new Response(failing), 5, 'image'))).equal(
+      'The image response could not be read',
+    );
+  });
+
+  test('should still decode text through the byte reader and pass its refusals through', async () => {
+    // Assert — the text reader is a wrapper, and its refusals name a library.
+    should(await fyRenderReadBoundedText(new Response('héllo'), 10)).eql({ ok: true, text: 'héllo' });
+    should(await fyRenderReadBoundedText(new Response('héllo'), 5)).eql({
+      ok: false,
+      reason: 'The library response is too large',
+    });
   });
 });

@@ -1,11 +1,15 @@
 /**
- * The inert renderer for a parsed `fy-render` fence.
+ * The renderer for a parsed `fy-render` fence.
  *
- * NOTHING IN THIS COMPONENT EXECUTES AUTHOR-SUPPLIED CODE, and the way it
- * avoids doing so is structural rather than a policy it follows. There is no
- * `iframe`, no `srcdoc`, no `dangerouslySetInnerHTML`, no `eval`, no `Function`,
- * and no script element anywhere below. Every payload that is not a vector or a
- * raster reaches a `<pre>` as escaped text through React's own escaping.
+ * NOTHING IN THIS COMPONENT EXECUTES AUTHOR-SUPPLIED CODE IN THIS DOCUMENT, and
+ * the way it avoids doing so is structural rather than a policy it follows. There
+ * is no `srcdoc`, no `dangerouslySetInnerHTML`, no `eval`, no `Function`, and no
+ * script element anywhere below. The one type whose author code runs at all —
+ * `html` — runs in `FyRenderHtmlFrame`, a separate opaque-origin document with
+ * its own policy, reached only as data over a message port. The only frames this
+ * file mounts are that one and the library sandbox (a PDF is a card of links,
+ * never a frame); every authored source reaches a `<pre>` as
+ * escaped text through React's own escaping.
  *
  * NO DECODER MOUNTS WITHOUT A GESTURE. A bounded payload is still an unbounded
  * amount of rasterising, and a transcript is written by an agent rather than by
@@ -43,12 +47,15 @@
  * fails to decode. That fires `error`, and the block shows its source with the
  * failure said out loud rather than an empty frame.
  *
- * IT HOLDS NO CREDENTIAL. Its props are a parsed block and nothing else: no
- * `DaemonConnection`, no session id, no daemon URL, no fetcher. The type proves
- * that no such field is present today (soundness); it cannot prove a careless
- * future prop addition impossible (completeness), which is why this paragraph is
- * here and why a reviewer should read the props before the body — the same
- * stance `rich-file-preview.tsx` takes for file previews.
+ * IT HOLDS NO CREDENTIAL. Its props are a parsed block and ONE narrow
+ * capability: `readWorkspaceMedia(path) → bytes | refusal`, which a media
+ * block's `src: @path` needs and which the session's reference surface builds
+ * around its own connection. No `DaemonConnection`, no session id, no daemon
+ * URL, no token and no fetcher crosses into this file. The type proves that no
+ * such field is present today (soundness); it cannot prove a careless future
+ * prop addition impossible (completeness), which is why this paragraph is here
+ * and why a reviewer should read the props before the body — the same stance
+ * `rich-file-preview.tsx` takes for file previews.
  *
  * `mermaid` AND `lottie` NOW RENDER, and the way they do it does not weaken the
  * paragraph above. Neither runs author code: a trusted library interprets
@@ -73,16 +80,24 @@
  * (`failed` versus `sandboxError`), presented by different elements, on purpose.
  *
  * AND A FAILURE IS CLASSIFIED, NEVER MATCHED ON. `FyRenderSandboxFailure` names
- * five kinds; this component writes one fixed reader sentence per kind and folds
+ * six kinds; this component writes one fixed reader sentence per kind and folds
  * the raw library or gate wording away underneath it. Two of those kinds are not
- * the payload's fault, and one — a Lottie frame reaching its permitted life — is
+ * the payload's fault, and one — a frame reaching its permitted life — is
  * not a fault at all and is presented in the app's neutral voice with no source
  * panel unfurled beneath it.
  *
- * `html` still renders as its own source with the limitation stated on screen.
- * That remains this build's declared gap: executing author JavaScript, bounded
- * in CPU and memory, is NOT what this component does. `docs/fy-render.md` says
- * so in those words.
+ * `html` EXECUTES, in `FyRenderHtmlFrame`: an opaque-origin frame on its own
+ * static shell, with no storage, no reach into this document, no forms, popups
+ * or top navigation, and no ordinary network. It is the one place author code
+ * runs, and it carries the residual `docs/fy-render.md` gap 1 measures — the
+ * frame can still navigate itself, prerender and open WebRTC, and nothing bounds
+ * its CPU or memory. A second `load` tears it down as a `navigation` failure;
+ * a ten-minute wall clock ends it as a `lifetime` stop.
+ *
+ * `src:` BLOCKS — `image`, `video`, `audio`, `pdf` — mount `FyRenderMedia`
+ * after the gesture, which reads the workspace through the capability above or
+ * has the reader's browser fetch an https link, and shows a card saying which
+ * when it cannot.
  */
 
 import { Code2, ImageIcon, Maximize2, Minimize2, Pause, Play, RotateCcw } from 'lucide-react';
@@ -91,12 +106,16 @@ import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import {
   FY_RENDER_LIMITS,
   type FyRenderSandboxTheme,
+  type FyRenderWorkspaceReader,
   fyRenderMermaidSvg,
   fyRenderPayloadBytes,
   fyRenderPresentation,
+  isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
 import { Button } from '../shell/primitives.tsx';
+import { FyRenderHtmlFrame } from './fy-render-html-frame.tsx';
+import { FyRenderMedia } from './fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
 
 /**
@@ -124,8 +143,13 @@ const documentTheme = (): 'dark' | 'light' => {
 };
 
 export interface FyRenderBlockProps {
-  /** The only input. See the credential note above before adding a second. */
   readonly block: ParsedBlock;
+  /**
+   * THE ONE CAPABILITY BESIDE THE BLOCK, and it is deliberately not a connection. A media block's
+   * `src: @path` needs a workspace file read as the reader; this is that read, as a function from a
+   * path to bytes or a refusal. See the credential note above before adding anything else.
+   */
+  readonly readWorkspaceMedia?: FyRenderWorkspaceReader;
 }
 
 /**
@@ -142,6 +166,9 @@ const humanType: Record<ParsedBlock['type'], string> = {
   image: 'image',
   mermaid: 'Mermaid',
   lottie: 'Lottie',
+  video: 'video',
+  audio: 'audio',
+  pdf: 'PDF',
 };
 
 /**
@@ -180,7 +207,16 @@ const sandboxFailureSentence = (type: ParsedBlock['type'], kind: FyRenderSandbox
     case 'deadline':
       return 'The diagram did not finish rendering in time and was stopped. Reload to try again.';
     case 'lifetime':
-      return 'Playback was stopped after two minutes. Reload to play it again.';
+      return type === 'html'
+        ? 'The interactive page was stopped after ten minutes. Reload to run it again.'
+        : 'Playback was stopped after two minutes. Reload to play it again.';
+    /**
+     * THE PAGE LEFT, AND THE FRAME WENT WITH IT. Only an `html` page can navigate its own
+     * frame, and once it has, what is on screen is no longer what the reader consented to.
+     * Said plainly, because the request the navigation made has already happened.
+     */
+    case 'navigation':
+      return 'The interactive page tried to navigate away, so it was stopped. The authored source is shown below.';
   }
 };
 
@@ -197,6 +233,44 @@ const sandboxFailureSentence = (type: ParsedBlock['type'], kind: FyRenderSandbox
 const sandboxTone = (kind: FyRenderSandboxFailure['kind']): 'err' | undefined =>
   kind === 'lifetime' ? undefined : 'err';
 
+/**
+ * What pressing Render will DO, said before it is done. One sentence per kind of
+ * consequence, because the kinds differ in what they cross: a decode, a renderer
+ * download, author code running, a file read as the reader, or the reader's
+ * browser introducing itself to somebody else's server.
+ */
+const consentSentence = (block: ParsedBlock): string => {
+  if (isFyRenderMediaBlock(block)) {
+    if (block.src.kind === 'workspace')
+      return `Rendering starts only when you choose. It then reads ${block.src.path} from this session's workspace with your own access.`;
+    const host = new URL(block.src.url).host;
+    return block.type === 'pdf'
+      ? `Rendering starts only when you choose. It then offers this PDF on ${host} as a link to open.`
+      : `Rendering starts only when you choose. Your browser then fetches it from ${host}, which will see your address.`;
+  }
+  switch (fyRenderPresentation(block)) {
+    case 'sandbox':
+      return `Rendering starts only when you choose. It may download the ${humanType[block.type]} renderer on first use — cached bytes are revalidated — and may use substantial browser resources.`;
+    case 'interactive':
+      return "Rendering starts only when you choose. It runs this page's own scripts in an isolated frame that cannot reach the app or this session, and may use substantial browser resources.";
+    default:
+      return 'Rendering starts only when you choose and may use substantial browser resources.';
+  }
+};
+
+/**
+ * The control's accessible name. The visible label stays the short "Render
+ * illustration" so the row fits at 390px; the name carries what it costs or
+ * where it reaches, per the rule each kind's sentence above explains.
+ */
+const consentActionName = (block: ParsedBlock, payloadSize: string): string => {
+  if (isFyRenderMediaBlock(block))
+    return `Render illustration (${humanType[block.type]}, ${block.src.kind === 'workspace' ? 'from the workspace' : `from ${new URL(block.src.url).host}`})`;
+  return fyRenderPresentation(block) === 'sandbox'
+    ? `Render illustration (${humanType[block.type]})`
+    : `Render illustration (${humanType[block.type]}, ${payloadSize})`;
+};
+
 /** Rounded to whole units — the reader is sizing a decision, not auditing bytes. */
 const humanBytes = (bytes: number): string =>
   bytes >= 1024 * 1024
@@ -205,9 +279,9 @@ const humanBytes = (bytes: number): string =>
       ? `${Math.round(bytes / 1024)} KB`
       : `${bytes} bytes`;
 
-export function FyRenderBlock({ block }: FyRenderBlockProps) {
+export function FyRenderBlock({ block, readWorkspaceMedia }: FyRenderBlockProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const presentation = fyRenderPresentation(block.type);
+  const presentation = fyRenderPresentation(block);
   const sourcePanelId = useId();
 
   /**
@@ -217,9 +291,7 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
    * failure does, or a streamed illustration finishes correct with an
    * unsolicited wall of markup underneath it.
    */
-  const [sourcePanel, setSourcePanel] = useState<'closed' | 'opened' | 'failure'>(
-    presentation === 'source' ? 'opened' : 'closed',
-  );
+  const [sourcePanel, setSourcePanel] = useState<'closed' | 'opened' | 'failure'>('closed');
   const showSource = sourcePanel !== 'closed';
   const [fullscreen, setFullscreen] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -291,9 +363,8 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
    * one and fails an image that is perfectly fine.
    */
   const [renderedSource, setRenderedSource] = useState(block.source);
-  const [renderedPresentation, setRenderedPresentation] = useState(presentation);
   const generation = useRef(0);
-  if (renderedSource !== block.source || renderedPresentation !== presentation) {
+  if (renderedSource !== block.source) {
     setRenderedSource(block.source);
     generation.current += 1;
     setFailed(false);
@@ -322,27 +393,12 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
      * out from under them and leaves a full-viewport overlay holding one line of
      * consent text — escapable by keyboard, and by nothing at all on touch,
      * where Exit is the only dismiss affordance.
-     *
-     * A source-only update keeps fullscreen: it still has source to show, and
-     * its Exit control never goes away.
      */
-    if (presentation !== 'source') setFullscreen(false);
-    if (renderedPresentation === presentation) {
-      // Same kind of block, new bytes: the panel is the READER's, except one a
-      // failure opened, which goes when the failure does.
-      setSourcePanel(panel => (panel === 'failure' ? 'closed' : panel));
-    } else {
-      /**
-       * THE KIND OF BLOCK CHANGED, so the panel is re-derived rather than
-       * inherited. A block that becomes source-only while its panel is closed —
-       * the default for a visual type — otherwise shows a note saying "the
-       * authored source is shown below" above nothing at all: no picture, no
-       * source, one sentence pointing at an empty space. Reachable when a
-       * transcript entry with a stable id is rewritten rather than appended to.
-       */
-      setRenderedPresentation(presentation);
-      setSourcePanel(presentation === 'source' ? 'opened' : 'closed');
-    }
+    setFullscreen(false);
+    // New bytes: the panel is the READER's, except one a failure opened, which
+    // goes when the failure does. Every type is now offered, so there is no
+    // source-only kind left to re-derive a panel for.
+    setSourcePanel(panel => (panel === 'failure' ? 'closed' : panel));
   }
 
   const collapse = useCallback(() => setFullscreen(false), []);
@@ -484,13 +540,17 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
   const preview = block.source.slice(0, FY_RENDER_LIMITS.sourcePreviewCharacters);
   const truncated = block.source.length > preview.length;
   const sandboxed = presentation === 'sandbox';
-  /** Types a reader can choose to render, and so the ones that get a gate. */
-  const offerable = presentation === 'visual' || sandboxed;
+  /** `html`: author code in its own frame. Async like a sandbox type, so it shares the status region. */
+  const interactive = presentation === 'interactive';
+  /** A `src:` block — its stage is `FyRenderMedia`, which owns its own loading and refusal states. */
+  const media = presentation === 'media' && approved;
+  /** The blocks whose render is asynchronous and reported through the status region. */
+  const reported = sandboxed || interactive;
   const rendered = presentation === 'visual' && approved && !failed;
   /** Mermaid has finished and the frame is gone; what remains is an image. */
   const diagram = sandboxed && block.type === 'mermaid' && compiled !== null && sandboxError === null;
-  /** Lottie stays live, and Mermaid keeps its frame only until it yields one. */
-  const framed = sandboxed && approved && sandboxError === null && !diagram;
+  /** Lottie and `html` stay live, and Mermaid keeps its frame only until it yields one. */
+  const framed = reported && approved && sandboxError === null && !diagram;
   const payloadSize = humanBytes(fyRenderPayloadBytes(block));
 
   /**
@@ -581,9 +641,13 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
           // the behaviour before that left an unreadable diagram with nothing said.
           'The theme changed. Reload to redraw this diagram.'
         : sandboxPhase === 'ready'
-          ? `The ${humanType[block.type]} illustration is ready.`
+          ? interactive
+            ? 'The interactive page is running.'
+            : `The ${humanType[block.type]} illustration is ready.`
           : sandboxPhase === 'preparing'
-            ? `Preparing the ${humanType[block.type]} renderer…`
+            ? interactive
+              ? 'Starting the interactive page…'
+              : `Preparing the ${humanType[block.type]} renderer…`
             : '';
 
   /**
@@ -611,6 +675,21 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
       onError={onDecodeFailure(generation.current)}
       src={svgDataUrl(compiled?.svg as string)}
     />
+  ) : framed && interactive ? (
+    /**
+     * AUTHOR CODE RUNS HERE, in its own opaque frame with its own policy — see
+     * `fy-render-html-frame.tsx`. Reload is a new key for the same reason as the
+     * library frame below: removing the element is the only way to stop it.
+     */
+    <FyRenderHtmlFrame
+      block={block}
+      fullscreen={fullscreen}
+      key={`html:${generation.current}:${revision}`}
+      onEscape={collapse}
+      onFailed={failSandbox}
+      onRendered={onRendered}
+      theme={documentTheme()}
+    />
   ) : framed ? (
     /**
      * A NEW `key` PER REVISION, because removing the element from the DOM is the
@@ -626,6 +705,13 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
       playing={playing}
       theme={documentTheme()}
     />
+  ) : media && isFyRenderMediaBlock(block) ? (
+    /** Reads or fetches only now, after the gesture; owns its own loading and refusal card. */
+    <FyRenderMedia
+      block={block}
+      key={`media:${generation.current}:${revision}`}
+      {...(readWorkspaceMedia === undefined ? {} : { readWorkspaceMedia })}
+    />
   ) : rendered ? (
     <img
       // EMPTY ON PURPOSE. The required description is already the visible
@@ -637,12 +723,12 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
       className="kt-rich-file-image fy-render-image"
       key={`${generation.current}:${revision}`}
       onError={onDecodeFailure(generation.current)}
-      src={block.type === 'image' ? `data:${block.mime};base64,${block.payload}` : svgDataUrl(block.payload)}
+      src={'mime' in block ? `data:${block.mime};base64,${block.payload}` : svgDataUrl(block.payload)}
     />
-  ) : offerable ? (
+  ) : (
     /**
      * NO TONE. This is the resting state of every illustration in every
-     * transcript, and an offer is not a warning: `warn` belongs to the declared
+     * transcript, and an offer is not a warning: `warn` belongs to a stated
      * limitation and `err` to a failure, so wearing `warn` here made all three
      * read as the same kind of event and made "nothing has happened yet" look
      * like something had gone wrong. One sentence, and the price is on the
@@ -656,14 +742,13 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
           of magnitude. It is also a once-per-deploy cost, since the bundle
           revalidates to a 304 for every later block, which is why this says
           "the first time" instead of quoting a number that would be wrong for
-          every block after the first. */}
-      {sandboxed
-        ? `Rendering starts only when you choose. It may download the ${humanType[block.type]} renderer on first use — cached bytes are revalidated — and may use substantial browser resources.`
-        : 'Rendering starts only when you choose and may use substantial browser resources.'}
-    </div>
-  ) : (
-    <div className="kt-fs-note" data-tone="warn">
-      This build does not run {humanType[block.type]} illustrations. The authored source is shown below.
+          every block after the first.
+
+          `html` and `src:` blocks say WHAT pressing does, because each crosses a
+          line the other types do not: one runs code the agent wrote, the other
+          reads a file as the reader or has the reader's browser talk to a
+          stranger, who then sees the reader's address. */}
+      {consentSentence(block)}
     </div>
   );
 
@@ -734,7 +819,7 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
               removed the border and collapsed them in fullscreen. */}
           <div
             className="fy-render-stage"
-            data-fy-render-stage={rendered || diagram ? 'image' : framed ? 'sandbox' : 'note'}
+            data-fy-render-stage={rendered || diagram ? 'image' : framed ? 'sandbox' : media ? 'media' : 'note'}
           >
             {stage}
           </div>
@@ -754,7 +839,7 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
               `role="status"` sits on an inner span so that `aria-atomic` covers
               the sentence and NOT the fold beside it: a `<details>` inside the
               atomic region would put "Why" on the end of every announcement. */}
-          {sandboxed ? (
+          {reported ? (
             <div
               className={sandboxStatusToned ? 'kt-fs-note fy-render-status' : 'fy-render-status'}
               data-fy-render-sandbox-status={sandboxPhase}
@@ -865,53 +950,46 @@ export function FyRenderBlock({ block }: FyRenderBlockProps) {
               {playing ? 'Pause' : 'Play'}
             </Button>
           ) : null}
-          {offerable ? (
-            approved ? (
-              <Button onClick={reload} size="sm" type="button">
-                <RotateCcw aria-hidden="true" size={14} /> Reload
-              </Button>
-            ) : (
-              <Button
-                /**
-                 * NO BYTE FIGURE FOR A SANDBOX TYPE, because the honest number
-                 * is not the one we have. `payloadSize` is the authored source,
-                 * which for `svg` and `image` IS the whole cost — but pressing
-                 * Render on a 20 KB Mermaid block also fetches a 3.4 MiB
-                 * renderer. Quoting "Mermaid, 20 KB" would understate that by
-                 * two orders of magnitude, and quoting the renderer instead
-                 * would overstate every block after the first, since the bundle
-                 * revalidates to a 304. A figure that means one thing for two
-                 * types and something else for the other two is worse than no
-                 * figure, so these say what they are and not what they weigh.
-                 */
-                aria-label={
-                  sandboxed
-                    ? `Render illustration (${humanType[block.type]})`
-                    : `Render illustration (${humanType[block.type]}, ${payloadSize})`
-                }
-                data-fy-render-consent-action="true"
-                onClick={() => {
-                  setApproved(true);
-                  // THE PREFERENCE IS READ HERE, at the gesture. A transcript row
-                  // mounts when the message arrives and may sit unread for an
-                  // hour; what matters is the setting in force when somebody
-                  // actually asks for the animation.
-                  if (!chosen) setPlaying(!prefersReducedMotion());
-                }}
-                size="sm"
-                type="button"
-              >
-                <ImageIcon aria-hidden="true" size={14} /> Render illustration
-              </Button>
-            )
-          ) : null}
+          {approved ? (
+            <Button onClick={reload} size="sm" type="button">
+              <RotateCcw aria-hidden="true" size={14} /> Reload
+            </Button>
+          ) : (
+            <Button
+              /**
+               * NO BYTE FIGURE FOR A SANDBOX TYPE, because the honest number
+               * is not the one we have. `payloadSize` is the authored source,
+               * which for `svg`, `image` and `html` IS the whole cost — but
+               * pressing Render on a 20 KB Mermaid block also fetches a 3.4 MiB
+               * renderer. Quoting "Mermaid, 20 KB" would understate that by two
+               * orders of magnitude, and quoting the renderer instead would
+               * overstate every block after the first, since the bundle
+               * revalidates to a 304. A `src:` block has no payload at all, so it
+               * names where it reaches instead. See `consentActionName`.
+               */
+              aria-label={consentActionName(block, payloadSize)}
+              data-fy-render-consent-action="true"
+              onClick={() => {
+                setApproved(true);
+                // THE PREFERENCE IS READ HERE, at the gesture. A transcript row
+                // mounts when the message arrives and may sit unread for an
+                // hour; what matters is the setting in force when somebody
+                // actually asks for the animation.
+                if (!chosen) setPlaying(!prefersReducedMotion());
+              }}
+              size="sm"
+              type="button"
+            >
+              <ImageIcon aria-hidden="true" size={14} /> Render illustration
+            </Button>
+          )}
           {/* HIDDEN UNTIL THERE IS SOMETHING TO ENLARGE. Before consent a visual
               block has no picture, no source and no failure, so fullscreen gave
               a full-viewport overlay holding one line of text and 839px of empty
               background. The same rule Reload already follows: a control that
               cannot act is hidden, not shown. The changing label carries the
               state, so there is no `aria-pressed` to disagree with it. */}
-          {presentation === 'source' || approved || failed || sandboxError !== null ? (
+          {approved || failed || sandboxError !== null ? (
             <Button onClick={() => setFullscreen(value => !value)} size="sm" type="button">
               {fullscreen ? <Minimize2 aria-hidden="true" size={14} /> : <Maximize2 aria-hidden="true" size={14} />}
               {fullscreen ? 'Exit fullscreen' : 'Fullscreen'}

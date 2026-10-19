@@ -65,6 +65,21 @@ require_in_block '/fy-render-sandbox.html' "^  Content-Security-Policy: frame-an
 require_in_block '/fy-render-sandbox.html' '^  X-Content-Type-Options: nosniff$'
 require_in_block '/fy-render-sandbox.html' '^  Cache-Control: no-cache$'
 
+# The `html` shell is the same shape for the same reasons, and is the one that runs author code —
+# so losing its detach line or its response-level sandbox is the costlier mistake of the two.
+require_in_block '/fy-render-html.html' '^  ! Content-Security-Policy$'
+require_in_block '/fy-render-html.html' "^  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts$"
+require_in_block '/fy-render-html.html' '^  X-Content-Type-Options: nosniff$'
+require_in_block '/fy-render-html.html' '^  Cache-Control: no-cache$'
+
+# A `video`/`audio` block with an https `src:` plays through the app's own <video>/<audio>, which only
+# `media-src https:` allows; nothing but a block the reader pressed Render on creates one. IMAGES ARE
+# NOT WIDENED, deliberately: Markdown renders `![](url)` as an <img> in every surface without a gesture,
+# so `img-src https:` would turn every remote image an agent writes into an automatic request. An https
+# `image` block is fetched and admitted by the parent instead (docs/fy-render.md).
+require_in_block '/*' "media-src 'self' blob: https:;"
+refuse_in_block '/*' 'img-src[^;]*https:' 'widened img-src to https:, which makes every Markdown image an automatic request'
+
 # The shell's CONTENT policy lives in the generated document, not here. Assert the
 # `/*` policy was not widened to accommodate it: the app still frames nothing, and
 # it never gained the `'unsafe-eval'` the sandbox deliberately does without.
