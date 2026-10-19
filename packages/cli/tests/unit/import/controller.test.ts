@@ -420,3 +420,84 @@ describe('ContinueSessionController.run', () => {
     );
   });
 });
+
+describe('ImportController.keep', () => {
+  const old = conversation({ id: 'old', lastActivityAt: new Date(NOW_MS - 20 * 86_400_000).toISOString() });
+  const fresh = conversation({ id: 'fresh', lastActivityAt: new Date(NOW_MS - 3_600_000).toISOString() });
+  const owned = conversation({ id: 'owned', adoptedBy: 'ferret-1' });
+  const answer = { adopted: [], refused: [] };
+
+  it('should require a runtime', async () => {
+    const { subject } = importController();
+    await should(subject.keep({ all: true })).be.rejectedWith('--runtime is required to import conversations');
+  });
+
+  it('should refuse a window the import does not offer', async () => {
+    const { subject, gateway } = importController();
+    await should(subject.keep({ since: '2d', runtime: 'r' })).be.rejectedWith(
+      /--since takes one of 1d, 3d, 7d, 14d, 30d/,
+    );
+    should(gateway.queries).be.empty();
+  });
+
+  it('should adopt every un-owned conversation for --all, stopped', async () => {
+    const gateway = new RecordingImportGateway(listing([fresh, old, owned]), answer);
+    const { subject, out } = importController(gateway);
+    await subject.keep({ all: true, runtime: 'r' });
+    should(gateway.adoptRequests).eql([
+      {
+        harness: 'claude',
+        runtime: 'r',
+        conversations: [
+          { id: 'fresh', start: false },
+          { id: 'old', start: false },
+        ],
+      },
+    ]);
+    should(out.messages).eql(['nothing to import']);
+  });
+
+  it('should keep only the window for --since', async () => {
+    const gateway = new RecordingImportGateway(listing([fresh, old]), answer);
+    const { subject } = importController(gateway);
+    await subject.keep({ since: '7d', runtime: 'r' });
+    should(gateway.adoptRequests[0]?.conversations).eql([{ id: 'fresh', start: false }]);
+  });
+
+  it('should send nothing when nothing is in the window', async () => {
+    const gateway = new RecordingImportGateway(listing([old]), answer);
+    const { subject, out } = importController(gateway);
+    await subject.keep({ since: '1d', runtime: 'r' });
+    should(gateway.adoptRequests).be.empty();
+    should(out.messages).eql(['nothing to import']);
+  });
+
+  it('should split a large import into adoption-sized requests', async () => {
+    const many = Array.from({ length: 450 }, (_, index) => conversation({ id: `c-${index}` }));
+    const gateway = new RecordingImportGateway(listing(many), answer);
+    const { subject } = importController(gateway);
+    await subject.keep({ all: true, runtime: 'r' });
+    should(gateway.adoptRequests.map(request => request.conversations.length)).eql([200, 200, 50]);
+  });
+
+  it('should summarise in one line, list refusals, and set the exit code', async () => {
+    const adopted = { id: 'fresh', name: 'n', session: 's', status: 'stopped' } as never;
+    const gateway = new RecordingImportGateway(listing([fresh]), {
+      adopted: [adopted],
+      refused: [{ id: 'x', code: 'not_found', reason: 'gone' }],
+    });
+    const { subject, out } = importController(gateway);
+    await subject.keep({ all: true, runtime: 'r' });
+    should(out.messages[0]).equal(
+      'imported 1 conversation as stopped ferrets (hard-linked, never copied)\nrefused  x  — gone',
+    );
+    should(out.exitCode).equal(1);
+  });
+
+  it('should print the payload for --json', async () => {
+    const gateway = new RecordingImportGateway(listing([fresh]), answer);
+    const { subject, out } = importController(gateway);
+    await subject.keep({ all: true, runtime: 'r', json: true, harness: 'claude' });
+    should(JSON.parse(out.messages[0] ?? '')).eql({ adopted: [], refused: [] });
+  });
+});

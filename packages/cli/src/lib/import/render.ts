@@ -65,3 +65,15 @@ export function renderSearchMatches(rows: readonly ImportableConversation[]): st
     )
     .join('\n');
 }
+
+/** What `--all` / `--since` did: one summary line, then only the refusals that need a look. */
+export function renderKeepResult(result: ConversationAdoptResult): string {
+  const kept = result.adopted.length;
+  const lines = [
+    kept === 0 && result.refused.length === 0
+      ? 'nothing to import'
+      : `imported ${kept} conversation${kept === 1 ? '' : 's'} as stopped ferrets (hard-linked, never copied)`,
+  ];
+  for (const item of result.refused) lines.push(`refused  ${item.id}  — ${item.reason}`);
+  return lines.join('\n');
+}

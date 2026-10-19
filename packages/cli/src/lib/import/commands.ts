@@ -20,19 +20,25 @@ function harnessOption(description: string): Option {
 const SINCE_HELP = 'only conversations active within this long: <n>d, <n>h or <n>w (e.g. 7d)';
 
 /** Mounts `fy import conversations` — list existing CLI conversations, or adopt named ones as ferrets. */
-export function registerImportCommands(program: Command, controller: Pick<ImportController, 'list' | 'select'>): void {
+export function registerImportCommands(
+  program: Command,
+  controller: Pick<ImportController, 'keep' | 'list' | 'select'>,
+): void {
   const group = program
     .command('import')
     .description('bring an existing Claude Code or Codex conversation on as a ferret');
 
   group
     .command('conversations')
-    .description('list conversations already on this machine, or adopt chosen ones as ferrets')
+    .description(
+      'list conversations on this machine, adopt chosen ones, or import a window with --all or --since <1d|3d|7d|14d|30d> --runtime <name>',
+    )
     .argument('[query...]', 'search words; each must appear in the preview, latest message or project folder')
     .addOption(harnessOption('only this harness'))
     .option('--since <duration>', SINCE_HELP, sinceArgument)
     .option('--select <id...>', 'adopt these conversation ids instead of listing')
     .option('--runtime <name>', 'the runtime every adopted ferret runs on (required with --select)')
+    .option('--all', 'import every conversation as a stopped ferret (needs --runtime; hard-linked, never copied)')
     .option('--start', 'launch every selected conversation now (at most 10 at once)')
     .option('--json', 'print the protocol payload instead of the human rendering')
     .action(
@@ -42,11 +48,23 @@ export function registerImportCommands(program: Command, controller: Pick<Import
           harness?: 'claude' | 'codex';
           since?: string;
           select?: string[];
+          all?: boolean;
           runtime?: string;
           start?: boolean;
           json?: boolean;
         },
       ) => {
+        const keeping = options.all === true || (options.since !== undefined && options.runtime !== undefined);
+        if (keeping && options.select === undefined) {
+          await controller.keep({
+            ...(options.all === true ? { all: true } : {}),
+            ...(options.since === undefined ? {} : { since: options.since }),
+            ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+            ...(options.harness === undefined ? {} : { harness: options.harness }),
+            json: options.json === true,
+          });
+          return;
+        }
         const query = words.join(' ');
         if (options.select === undefined) {
           await controller.list({
