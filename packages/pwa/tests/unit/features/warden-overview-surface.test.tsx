@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { WardenInvestigateRequest, WardenStatusView } from '@ferretry/protocol';
+import type { WardenInvestigateRequest, WardenLeaveRequest, WardenStatusView } from '@ferretry/protocol';
 
 import {
   type WardenOverviewClient,
@@ -32,10 +32,16 @@ interface FakeOptions {
   readonly status?: WardenStatusView;
   readonly run?: WardenOverviewClient['wardenRun'];
   readonly investigate?: WardenOverviewClient['wardenInvestigate'];
+  readonly leave?: WardenOverviewClient['wardenLeave'];
 }
 
 const fake = (options: FakeOptions = {}) => {
-  const calls = { status: 0, runs: [] as (boolean | undefined)[], investigations: [] as WardenInvestigateRequest[] };
+  const calls = {
+    status: 0,
+    runs: [] as (boolean | undefined)[],
+    investigations: [] as WardenInvestigateRequest[],
+    leaves: [] as WardenLeaveRequest[],
+  };
   const client: WardenOverviewClient = {
     wardenStatus: async () => {
       calls.status += 1;
@@ -70,6 +76,19 @@ const fake = (options: FakeOptions = {}) => {
         options.investigate ??
         (async () => ({ sessionId: request.sessionId, state: 'queued' as const, message: 'Queued: next in line.' }))
       )(request);
+    },
+    wardenLeave: async request => {
+      calls.leaves.push(request);
+      if (options.leave !== undefined) return await options.leave(request);
+      return {
+        blessing: {
+          sessionId: request.sessionId,
+          kinds: ['dead_monitor'],
+          expiresAt: '2026-07-31T13:00:00.000Z',
+          by: 'owner',
+        },
+        message: 'Left alone for 1 h.',
+      };
     },
     wardenReport: async path => `# Evidence from ${path}`,
   };
@@ -210,6 +229,57 @@ describe('WardenOverviewSurface', () => {
       expect(accepted.calls.investigations).toEqual([{ sessionId: 'sess-flag' }]);
       expect(ok.container.textContent).toContain('Queued: next in line.');
       expect(no.container.textContent).toContain('No investigation: 409: the daily investigation cap is hit');
+    } finally {
+      await ok.unmount();
+      await no.unmount();
+    }
+  });
+
+  it('should leave a flagged ferret alone longer and show the daemon’s answer or its refusal', async () => {
+    // Arrange
+    const accepted = fake();
+    const refused = fake({
+      leave: async () => {
+        throw new Error('409: nothing is flagged');
+      },
+    });
+    const ok = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => accepted.client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    const no = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => refused.client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    try {
+      await settle();
+      const choose = (container: HTMLElement, value: string) => {
+        const select = must(
+          container.querySelector<HTMLSelectElement>('select[aria-label="Leave it longer"]'),
+          'leave',
+        );
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      // Act
+      await interact(() => choose(ok.container, ''));
+      await interact(() => choose(ok.container, 'until_change'));
+      await interact(() => choose(no.container, '1h'));
+      await settle();
+
+      // Assert
+      expect(accepted.calls.leaves).toEqual([{ sessionId: 'sess-flag', duration: 'until_change' }]);
+      expect(ok.container.textContent).toContain('Left alone for 1 h.');
+      expect(no.container.textContent).toContain('Not left alone: 409: nothing is flagged');
     } finally {
       await ok.unmount();
       await no.unmount();

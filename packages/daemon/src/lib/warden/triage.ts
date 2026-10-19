@@ -8,15 +8,21 @@
  * vocabulary is `skip` or `investigate`. It never acts on a ferret. A skip is believed only at or above
  * the owner's threshold; anything else, a failure included, is an investigation. So a broken, unsure or
  * unreachable guard costs money and never hides a stuck ferret — the doctrine's direction: on missing
- * evidence, refuse to bless.
+ * evidence, refuse to bless. With investigations off, "investigate" means the owner is shown the flag.
  *
  * ═══ NO UNATTENDED SPEND BY SURPRISE ═══
  *
- * `rules` is the default and spends nothing. Jev and investigations each have a daily cap counted per
- * UTC day; a cap that is reached drops the Warden to rules until midnight and the status says so. An
- * investigation is priced from its own transcript after it finishes, so while one is still unpriced its
- * cost is estimated from the average of the ones that were — an estimate used only to GATE, never shown
- * as spend.
+ * The rules are always on and spend nothing; Jev and investigations are each an opt-in LAYER with a
+ * daily cap counted per UTC day. A cap that is reached turns off its own layer until midnight, and the
+ * status says so. An investigation is priced from its own transcript after it finishes, so while one is
+ * still unpriced its cost is estimated from the average of the ones that were — an estimate used only
+ * to GATE, never shown as spend.
+ *
+ * ═══ JEV IS ASKED ONCE PER FLAG ═══
+ *
+ * A flag Jev passed on is remembered for as long as it persists in the same status
+ * ({@link passedOnKey}), so a flag that waits for the owner — or for a free slot — is not paid for
+ * again every sweep.
  *
  * Pure: no IO, no clock, no globals.
  */
@@ -27,7 +33,9 @@ import type {
   WardenInvestigationOrigin,
   WardenSavings,
   WardenSpend,
-  WardenTriage,
+  WardenCap,
+  WardenLayers,
+  WardenLayerStatus,
   WardenTriageReason,
 } from '@ferretry/protocol';
 import type { TriageDecision, TriageSnapshot } from '../speedups/jev.ts';
@@ -125,7 +133,7 @@ export interface WardenSpendInput {
 }
 
 /**
- * Today's spend against both caps.
+ * Today's spend against both caps. Either, both or neither may be hit: each is its own layer's.
  *
  * An unpriced investigation is gated at the average priced one: it has happened and it will cost
  * something, and gating it at zero would let a run of unpriced investigations walk straight past the
@@ -136,12 +144,10 @@ export function wardenSpend(input: WardenSpendInput): WardenSpend {
   const investigationUsd = today.reduce((sum, record) => sum + (record.costUsd ?? 0), 0);
   const pending = today.filter(record => record.costUsd === undefined).length;
   const estimate = investigationUsd + pending * (averageInvestigationUsd(input.average) ?? 0);
-  const capHit =
-    input.today.jevUsd >= input.caps.jevUsdPerDay
-      ? 'jev'
-      : estimate >= input.caps.investigationUsdPerDay
-        ? 'investigation'
-        : undefined;
+  const capsHit: WardenCap[] = [
+    ...(input.today.jevUsd >= input.caps.jevUsdPerDay ? (['jev'] as const) : []),
+    ...(estimate >= input.caps.investigationUsdPerDay ? (['investigation'] as const) : []),
+  ];
   return {
     day: input.today.day,
     jevUsd: input.today.jevUsd,
@@ -149,33 +155,50 @@ export function wardenSpend(input: WardenSpendInput): WardenSpend {
     investigationUsd,
     investigationCapUsd: input.caps.investigationUsdPerDay,
     pendingInvestigations: pending,
-    ...(capHit === undefined ? {} : { capHit }),
+    capsHit,
     investigationsLastHour: investigationsInLastHour(input.records, input.nowMs),
     maxInvestigationsPerHour: input.caps.maxInvestigationsPerHour,
   };
 }
 
+/** Each layer in effect right now, with the reason it is off when the owner switched it on. */
+export interface WardenLayersInEffect {
+  readonly jev: WardenLayerStatus;
+  readonly llm: WardenLayerStatus;
+}
+
+/** A layer as configured, switched off for `off` when that is set. */
+function layerStatus(configured: boolean, off: WardenTriageReason | undefined): WardenLayerStatus {
+  if (!configured) return { configured, active: false, reason: 'configured' };
+  return off === undefined
+    ? { configured, active: true, reason: 'configured' }
+    : { configured, active: false, reason: off };
+}
+
 /**
- * The triage actually in effect.
+ * The layers actually in effect.
  *
- * A Jev cap matters only to a Jev triage — an LLM triage never asks Jev — while the investigation cap
- * stops both, because both end in investigations. Either way the fallback is `rules`, never a cheaper
- * AI tier: a cap is the owner's ceiling, and the only tier certain to stay under it is the free one.
- * With no usable investigation login there is nothing an AI triage could end in, so it is `rules` too,
- * said as `no_login` rather than spent on a name this machine does not have.
+ * EACH CAP TURNS OFF ONLY ITS OWN LAYER. The Jev cap stops Jev and leaves investigations to look at
+ * every flag; the investigation cap stops investigations and leaves Jev clearing what it can, so the
+ * owner is shown only the flags Jev did not. The rules underneath cost nothing and never stop. With no
+ * usable investigation login an investigation has nothing to run on, so that layer is off as
+ * `no_login` rather than spent on a name this machine does not have. Jev needs no login.
  */
-export function effectiveTriage(
-  configured: WardenTriage,
+export function effectiveLayers(
+  layers: WardenLayers,
   enabled: boolean,
-  spend: Pick<WardenSpend, 'capHit'>,
+  spend: Pick<WardenSpend, 'capsHit'>,
   hasLogin = true,
-): { readonly effective: WardenTriage; readonly reason: WardenTriageReason } {
-  if (!enabled) return { effective: 'rules', reason: 'disabled' };
-  if (configured === 'rules') return { effective: 'rules', reason: 'configured' };
-  if (!hasLogin) return { effective: 'rules', reason: 'no_login' };
-  if (spend.capHit === 'investigation') return { effective: 'rules', reason: 'investigation_cap' };
-  if (spend.capHit === 'jev' && configured === 'jev') return { effective: 'rules', reason: 'jev_cap' };
-  return { effective: configured, reason: 'configured' };
+): WardenLayersInEffect {
+  const jevOff = !enabled ? 'disabled' : spend.capsHit.includes('jev') ? 'jev_cap' : undefined;
+  const llmOff = !enabled
+    ? 'disabled'
+    : !hasLogin
+      ? 'no_login'
+      : spend.capsHit.includes('investigation')
+        ? 'investigation_cap'
+        : undefined;
+  return { jev: layerStatus(layers.jev, jevOff), llm: layerStatus(layers.llm, llmOff) };
 }
 
 /** What the guard's answer means for one flag, after the owner's threshold. */
@@ -325,4 +348,25 @@ export async function redactTriageSnapshot(
     recentTurns,
     ...(snapshot.paneTail === undefined ? {} : { paneTail: await redactor.redact(snapshot.paneTail) }),
   };
+}
+
+// ── Flags Jev passed on ──────────────────────────────────────────────────────────────────────────
+
+/** Identity of one flag Jev passed on: its kind, its ferret, and the status the ferret was in. */
+export function passedOnKey(anomaly: Pick<WardenAnomaly, 'kind' | 'sessionId' | 'status'>): string {
+  return `${anomaly.kind}\u0000${anomaly.sessionId}\u0000${anomaly.status}`;
+}
+
+/**
+ * The flags Jev passed on that still stand. A flag that is gone, or whose ferret changed status, is a
+ * new situation: if it comes back, Jev is asked again.
+ */
+export function prunePassedOn(passedOn: readonly string[], current: readonly WardenAnomaly[]): readonly string[] {
+  const standing = new Set(current.map(passedOnKey));
+  return passedOn.filter(key => standing.has(key));
+}
+
+/** Forget what Jev said about one ferret: an investigation is about to look at it for itself. */
+export function forgetPassedOn(passedOn: readonly string[], sessionId: string): readonly string[] {
+  return passedOn.filter(key => key.split('\u0000')[1] !== sessionId);
 }

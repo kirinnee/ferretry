@@ -32,6 +32,8 @@ import {
   type WardenAttentionView,
   type WardenConfigView,
   type WardenInvestigateRequest,
+  type WardenLeaveRequest,
+  type WardenLeaveView,
   type WardenInvestigateView,
   type WardenRunView,
   type WardenStatusView,
@@ -1754,6 +1756,7 @@ export class FakeWarden implements WardenSubsystem {
   readonly runs: boolean[] = [];
   readonly patches: unknown[] = [];
   readonly investigations: WardenInvestigateRequest[] = [];
+  readonly leaves: WardenLeaveRequest[] = [];
   armed = 0;
   disarmed = 0;
 
@@ -1768,7 +1771,10 @@ export class FakeWarden implements WardenSubsystem {
       anomalies: [],
       fingerprint: '',
       failover: FAKE_FAILOVER,
-      triage: { configured: 'rules', effective: 'rules', reason: 'configured' },
+      triage: {
+        jev: { configured: false, active: false, reason: 'configured' },
+        llm: { configured: false, active: false, reason: 'configured' },
+      },
       spend: {
         day: '2026-07-31',
         jevUsd: 0,
@@ -1776,6 +1782,7 @@ export class FakeWarden implements WardenSubsystem {
         investigationUsd: 0,
         investigationCapUsd: 2,
         pendingInvestigations: 0,
+        capsHit: [],
         investigationsLastHour: 0,
         maxInvestigationsPerHour: 6,
       },
@@ -1801,6 +1808,20 @@ export class FakeWarden implements WardenSubsystem {
     if (this.failure !== undefined) throw this.failure;
     this.investigations.push(request);
     return { sessionId: request.sessionId, state: 'queued', position: 1, message: 'Queued.' };
+  }
+
+  async leave(request: WardenLeaveRequest): Promise<WardenLeaveView> {
+    if (this.failure !== undefined) throw this.failure;
+    this.leaves.push(request);
+    return {
+      blessing: {
+        sessionId: request.sessionId,
+        kinds: ['sus_thinking'],
+        expiresAt: '2026-07-31T04:00:00.000Z',
+        by: 'owner',
+      },
+      message: 'Left alone for 4 h.',
+    };
   }
 
   async verdicts(): Promise<WardenVerdictsView> {

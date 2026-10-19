@@ -81,7 +81,7 @@ import { DictationControl, useDictationBundle } from '../src/components/dictatio
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
 import { FileInstanceSurface } from '../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../src/components/files-tab.tsx';
-import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
+import type { CaptureMonitor } from '../src/lib/stt/level-monitor.ts';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { Markdown } from '../src/components/markdown.tsx';
 import { MigrateSheet } from '../src/components/migrate-sheet.tsx';
@@ -478,26 +478,40 @@ const HARNESS_STT_SETTINGS: SttSettings = {
 };
 
 /**
- * A stand-in analyser branch. It paints a real waveform from a synthetic tone,
- * so the meter in a screenshot is the actual paint path rather than an empty
- * box — headless Chrome has no microphone to open.
+ * A stand-in analyser branch fed a fake LEVEL, so the meter in a screenshot is the real paint path
+ * rather than an empty box — headless Chrome has no microphone to open. `level` is the amplitude of
+ * the tone at a moment; the speaking fixture swells and drops like syllables, the silent one is zero.
  */
-const harnessMonitor: CaptureMonitor = {
-  createAnalyser: () => ({
-    analyser: {
-      fftSize: 512,
-      smoothingTimeConstant: 0.5,
-      minDecibels: -90,
-      maxDecibels: -10,
-      getFloatTimeDomainData: (target: Float32Array) => {
-        for (let index = 0; index < target.length; index += 1) {
-          target[index] = 0.34 * Math.sin((index / target.length) * Math.PI * 12);
-        }
+const levelMonitor = (level: (seconds: number) => number): CaptureMonitor => ({
+  createAnalyser: () => {
+    const born = performance.now();
+    return {
+      analyser: {
+        fftSize: 512,
+        smoothingTimeConstant: 0.5,
+        minDecibels: -90,
+        maxDecibels: -10,
+        getFloatTimeDomainData: (target: Float32Array) => {
+          const amplitude = level((performance.now() - born) / 1_000);
+          for (let index = 0; index < target.length; index += 1) {
+            target[index] = amplitude * Math.sin((index / target.length) * Math.PI * 12);
+          }
+        },
       },
-    },
-    disconnect: () => undefined,
-  }),
-};
+      disconnect: () => undefined,
+    };
+  },
+});
+
+/** Speech-like: syllable swells over a slower phrase envelope, with the brief gaps between words. */
+const harnessMonitor: CaptureMonitor = levelMonitor(seconds => {
+  const phrase = Math.abs(Math.sin(seconds * 1.1));
+  const syllable = Math.abs(Math.sin(seconds * 7.3)) ** 1.5;
+  return 0.01 + 0.2 * phrase * syllable;
+});
+
+/** Nothing said: the mic is open and the room is quiet. */
+const harnessSilentMonitor: CaptureMonitor = levelMonitor(() => 0);
 
 /**
  * The dictation fixtures.
@@ -689,6 +703,27 @@ const harnessElapsedClock = (): (() => number) => {
  * colour are all derived the way a real session derives them. A hand-written
  * stage could drift from the component; this cannot.
  */
+/**
+ * Settings › Voice with Parakeet chosen: the Live words (experimental) switch starts OFF, exactly as
+ * a fresh install or an upgrading device would see it, and the card is interactive.
+ */
+function HarnessLiveWordsSetting() {
+  const [settings, setSettings] = useState<SttSettings>({ ...DEFAULT_STT_SETTINGS, engine: 'parakeet' });
+  return (
+    <Card aria-label="Dictation live words setting" className="min-w-0" id="harness-dictation-live-words">
+      <PanelBody>
+        <DictationSettings
+          settings={settings}
+          update={patch => setSettings(current => ({ ...current, ...patch }))}
+          persisted
+          recognitionSupport={HARNESS_RECOGNITION_AVAILABLE}
+          voice={null}
+        />
+      </PanelBody>
+    </Card>
+  );
+}
+
 function DictationFlowHarness({
   label,
   recognition,
@@ -2085,6 +2120,15 @@ const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
     position: 1,
     message: 'Queued: next in line for an investigation.',
   }),
+  wardenLeave: async ({ sessionId }: { readonly sessionId: string }) => ({
+    blessing: {
+      sessionId,
+      kinds: ['sus_thinking' as const],
+      expiresAt: new Date(WARDEN_FIXTURE_NOW + 4 * 3_600_000).toISOString(),
+      by: 'owner' as const,
+    },
+    message: 'Left alone for 4 h. A new kind of trouble, or a change of status, still raises a flag.',
+  }),
   wardenReport: async (reportPath: string) => `# Verdict: KILL\n\nEvidence from ${reportPath}.`,
 });
 
@@ -3117,6 +3161,20 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     sessionRoute.rest === 'runtime-models'
   )
     return harnessJson(NEW_SESSION_RUNTIME_MODELS.claude);
+  // `?restart-ps-fails`: Restart CLI refused because the host's ps would not list the process table.
+  if (
+    method === 'POST' &&
+    sessionRoute?.rest === 'migrate' &&
+    new URLSearchParams(window.location.search).has('restart-ps-fails')
+  )
+    return new Response(
+      JSON.stringify({
+        error:
+          'refused: the process table could not be read: ps exited 1: ps: etimes: keyword not found\nin-flight inventory — status running, turn 2, worst: UNKNOWN\n  blind [UNKNOWN] the process table could not be read: ps exited 1: ps: etimes: keyword not found',
+        code: 'migration_refused',
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    );
   // An attachment upload answers with the daemon's own view of the file it now holds.
   if (method === 'POST' && sessionRoute?.rest === 'attachments') {
     const body = JSON.parse(String(init?.body ?? '{}')) as { filename?: string; mime?: string; base64?: string };
@@ -5349,6 +5407,7 @@ function Shell() {
             settingsHref="#warden"
             onSweep={() => {}}
             onInvestigate={() => {}}
+            onLeave={() => {}}
             onOpenReport={() => {}}
           />
         </div>
@@ -6026,6 +6085,47 @@ function Shell() {
           </PanelBody>
         </Card>
       ),
+    },
+    {
+      // "We are capturing what you say": the same panel for both engines, speaking and then silent.
+      label: 'Dictation input meter',
+      render: () => (
+        <Card aria-label="Dictation input meter" className="min-w-0" id="harness-dictation-meter">
+          <PanelBody className="flex flex-col gap-4">
+            {(
+              [
+                ['Parakeet, speaking', 'parakeet', harnessMonitor],
+                ['Browser voice, speaking', 'browser', harnessMonitor],
+                ['Parakeet, silent', 'parakeet', harnessSilentMonitor],
+              ] as ReadonlyArray<readonly [string, 'parakeet' | 'browser', CaptureMonitor]>
+            ).map(([name, engine, monitor]) => (
+              <div key={name} className="flex min-w-0 flex-col gap-1">
+                <Label>{name}</Label>
+                <div className="relative h-[160px] min-w-0">
+                  <div className="absolute inset-x-0 top-[160px]">
+                    <DictationSheet
+                      open
+                      stage="recording"
+                      engine={engine}
+                      elapsedMs={9_000}
+                      inputMonitor={monitor}
+                      onDismiss={() => {}}
+                      onStop={() => {}}
+                      onCancel={() => {}}
+                      onRetry={() => {}}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      // The Settings switch for near-live words: OFF by default, labelled experimental.
+      label: 'Dictation live words setting',
+      render: () => <HarnessLiveWordsSetting />,
     },
     {
       label: 'Dictation mic button',

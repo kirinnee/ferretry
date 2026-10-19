@@ -1,11 +1,11 @@
 /**
- * The Warden's words: every anomaly code as a plain chip, and each triage by name.
+ * The Warden's words: every anomaly code as a plain chip, and the layers by name.
  *
  * One table for the whole app — the Warden page, the fleet-checks strip and Settings all say "long
  * think", never `sus_thinking`. A raw code on screen is a bug.
  */
 
-import type { WardenAnomalyKind, WardenTriage } from '@ferretry/protocol';
+import type { WardenAnomalyKind, WardenLayers } from '@ferretry/protocol';
 
 /** The Badge tones the Warden draws with. No new colours: these are the theme's own. */
 export type WardenChipTone = 'ok' | 'warn' | 'err' | 'pend' | 'accent';
@@ -34,8 +34,11 @@ export const ANOMALY_CHIPS: Readonly<Record<WardenAnomalyKind, WardenChip>> = {
   owner_request: chip('you asked', 'accent'),
 };
 
-export const TRIAGE_LABEL: Readonly<Record<WardenTriage, string>> = {
-  jev: 'Jev guard',
-  llm: 'LLM only',
-  rules: 'Rules only',
-};
+/**
+ * The layers by name, rules first because they are always there: `Rules only`, `Rules + Jev`,
+ * `Rules + LLM`, `Rules + Jev + LLM`.
+ */
+export const layersLabel = (layers: WardenLayers): string =>
+  !layers.jev && !layers.llm
+    ? 'Rules only'
+    : ['Rules', ...(layers.jev ? ['Jev'] : []), ...(layers.llm ? ['LLM'] : [])].join(' + ');

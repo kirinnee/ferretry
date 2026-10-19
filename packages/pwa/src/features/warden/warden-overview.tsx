@@ -10,7 +10,13 @@
  * its buttons sit beside the link, never inside it.
  */
 
-import type { SessionView, WardenAttentionView, WardenStatusView } from '@ferretry/protocol';
+import {
+  type SessionView,
+  WARDEN_LEAVE_DURATIONS,
+  type WardenAttentionView,
+  type WardenLeaveDuration,
+  type WardenStatusView,
+} from '@ferretry/protocol';
 import { AlertTriangle, FileText, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -62,6 +68,10 @@ export interface WardenOverviewProps {
   readonly onNavigate?: (to: string) => void;
   readonly onSweep: () => void;
   readonly onInvestigate: (sessionId: string) => void;
+  /** Leave a flagged or cleared ferret alone for longer. Absent: the control is not offered. */
+  readonly onLeave?: (sessionId: string, duration: WardenLeaveDuration) => void;
+  /** Sessions whose leave request is in flight. */
+  readonly leaving?: ReadonlySet<string>;
   readonly onOpenReport: (row: WardenRow & { readonly reportPath: string }) => void;
 }
 
@@ -92,13 +102,15 @@ export function WardenOverview({
   onNavigate,
   onSweep,
   onInvestigate,
+  onLeave,
+  leaving = new Set<string>(),
   onOpenReport,
 }: WardenOverviewProps) {
   const statusView = readView(status);
   const attentionView = readView(attention);
   const needs = attentionView === undefined ? [] : needsYouRows(attentionView);
   const needIds = new Set(needs.map(row => row.sessionId));
-  const watching = statusView === undefined ? [] : watchingRows(statusView, attentionView, needIds);
+  const watching = statusView === undefined ? [] : watchingRows(statusView, attentionView, needIds, now);
   const bySession = new Map((sessions ?? []).map(session => [session.config.id, session]));
   const row = (entry: WardenRow, actions?: ReactNode) => (
     <SessionRow
@@ -111,6 +123,10 @@ export function WardenOverview({
       actions={actions}
     />
   );
+  const leaveControl = (entry: WardenRow) =>
+    entry.leave !== true || onLeave === undefined ? null : (
+      <LeaveLonger sessionId={entry.sessionId} busy={leaving.has(entry.sessionId)} onLeave={onLeave} />
+    );
   const reportButton = ({ reportPath, ...entry }: WardenRow) =>
     reportPath === undefined ? null : (
       <button
@@ -190,6 +206,7 @@ export function WardenOverview({
                     Investigate
                   </button>
                 )}
+                {leaveControl(entry)}
                 {reportButton(entry)}
               </>,
             ),
@@ -200,7 +217,7 @@ export function WardenOverview({
       {statusView !== undefined && (
         <>
           <Group title="Watching" count={watching.length} empty="Nothing is being watched right now.">
-            {watching.map(entry => row(entry))}
+            {watching.map(entry => row(entry, leaveControl(entry)))}
           </Group>
           <Group title="Investigations" count={statusView.investigations.length} empty="No investigations yet today.">
             {investigationRows(statusView).map(entry => row(entry, reportButton(entry)))}
@@ -274,7 +291,7 @@ function StatusSummary({
           {savings}
         </p>
       )}
-      <p className="m-0 text-meta leading-base text-faint">{wardenHowItWorks(view.triage.configured)}</p>
+      <p className="m-0 text-meta leading-base text-faint">{wardenHowItWorks(view.config.layers)}</p>
     </div>
   );
 }
@@ -449,5 +466,46 @@ function AccountSummary({
         Edit in Settings ›
       </RouteLink>
     </p>
+  );
+}
+
+const LEAVE_LABELS: Readonly<Record<WardenLeaveDuration, string>> = {
+  '1h': 'For 1 hour',
+  '4h': 'For 4 hours',
+  until_change: 'Until it changes',
+};
+
+/**
+ * "Leave it longer": the owner keeps the Warden off a flagged or cleared ferret for an hour, four, or
+ * until its status changes. A native select, so it is one control at 44px on a phone and a keyboard
+ * reaches every choice; picking one sends it at once.
+ */
+function LeaveLonger({
+  sessionId,
+  busy,
+  onLeave,
+}: {
+  readonly sessionId: string;
+  readonly busy: boolean;
+  readonly onLeave: (sessionId: string, duration: WardenLeaveDuration) => void;
+}) {
+  return (
+    <select
+      aria-label="Leave it longer"
+      className="kt-input min-h-[44px] max-w-[11rem] rounded-control border border-border bg-surface-2 px-2 text-meta text-fg"
+      value=""
+      disabled={busy}
+      onChange={event => {
+        const choice = WARDEN_LEAVE_DURATIONS.find(duration => duration === event.target.value);
+        if (choice !== undefined) onLeave(sessionId, choice);
+      }}
+    >
+      <option value="">{busy ? 'Leaving it…' : 'Leave it longer…'}</option>
+      {WARDEN_LEAVE_DURATIONS.map(duration => (
+        <option key={duration} value={duration}>
+          {LEAVE_LABELS[duration]}
+        </option>
+      ))}
+    </select>
   );
 }

@@ -68,6 +68,7 @@ describe('FyApiClient construction and generic requests', () => {
       'wardenAttention',
       'wardenConfig',
       'wardenInvestigate',
+      'wardenLeave',
       'wardenReport',
       'wardenRun',
       'wardenStatus',

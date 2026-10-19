@@ -165,7 +165,7 @@ describe('warden.yaml', () => {
 
     // Assert
     should(actual).deepEqual(config.DEFAULT_WARDEN_CONFIG);
-    should(actual.triage).equal('rules');
+    should(actual.layers).deepEqual({ jev: false, llm: false });
     should(actual.mayActAlone.stop).be.false();
   });
 
@@ -217,6 +217,18 @@ describe('warden.yaml', () => {
     should(actual.investigation).deepEqual({ effort: 'high' });
   });
 
+  it('should read a legacy triage as its layers, with an explicit layer winning', () => {
+    // Arrange
+    const input = config.WardenFileSchema.parse({ triage: 'jev', layers: { llm: false } });
+
+    // Act
+    const actual = config.wardenConfigFromFile(input);
+
+    // Assert
+    should(actual.layers).deepEqual({ jev: true, llm: false });
+    should(actual).not.have.property('triage');
+  });
+
   it('should replace the account list whole rather than merging it into the default one', () => {
     // Arrange
     const input = config.WardenFileSchema.parse({ accounts: [{ agent: 'claude-work', model: 'm' }] });
@@ -239,6 +251,7 @@ describe('warden.yaml', () => {
     ['a non-boolean enabled', { enabled: 'yes' }],
     ['an interval nobody can pick', { intervalMinutes: 7 }],
     ['an unknown triage', { triage: 'ai' }],
+    ['an unknown layer', { layers: { rules: true } }],
     ['an unknown key inside caps', { caps: { usd: 1 } }],
     ['a threshold below the floor', { guard: { threshold: 0.5 } }],
   ])('should refuse %s', (_label, input) => {

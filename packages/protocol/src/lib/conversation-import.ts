@@ -167,3 +167,37 @@ export const ConversationAdoptResultSchema = z.strictObject({
   refused: z.array(ConversationAdoptRefusedSchema),
 });
 export type ConversationAdoptResult = z.infer<typeof ConversationAdoptResultSchema>;
+
+/** The windows "Import conversations" offers, in days: setup in the browser and `--since` on the CLI agree. */
+export const CONVERSATION_IMPORT_WINDOW_DAYS = [1, 3, 7, 14, 30] as const;
+export type ConversationImportWindowDays = (typeof CONVERSATION_IMPORT_WINDOW_DAYS)[number];
+
+/** `7d` → 7; undefined for any duration the import does not offer. */
+export const parseImportWindow = (text: string): ConversationImportWindowDays | undefined =>
+  CONVERSATION_IMPORT_WINDOW_DAYS.find(days => `${days}d` === text.trim());
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The ids an import of `days` (or of everything, when `days` is undefined) would keep: rows no ferret owns
+ * yet, active inside the window.
+ */
+export const conversationsToImport = (
+  rows: readonly ImportableConversation[],
+  days: number | undefined,
+  now: number,
+): readonly string[] =>
+  rows
+    .filter(
+      row =>
+        row.adoptedBy === undefined && (days === undefined || Date.parse(row.lastActivityAt) >= now - days * DAY_MS),
+    )
+    .map(row => row.id);
+
+/** Splits ids into adoption-sized requests: one adoption may name at most `CONVERSATION_ADOPT_MAX`. */
+export const adoptionBatches = (ids: readonly string[]): readonly (readonly string[])[] => {
+  const batches: string[][] = [];
+  for (let at = 0; at < ids.length; at += CONVERSATION_ADOPT_MAX)
+    batches.push(ids.slice(at, at + CONVERSATION_ADOPT_MAX));
+  return batches;
+};

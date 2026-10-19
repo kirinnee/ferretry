@@ -5,6 +5,9 @@ import {
   type WardenInvestigateRequest,
   WardenInvestigateRequestSchema,
   type WardenInvestigateView,
+  type WardenLeaveRequest,
+  WardenLeaveRequestSchema,
+  type WardenLeaveView,
   WardenRunRequestSchema,
   type WardenRunView,
   type WardenStatusView,
@@ -19,7 +22,8 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
  * Warden supervision: `/v1/warden/status`, `/v1/warden/run`, `/v1/warden/config`, the "who needs you"
- * feed at `/v1/warden/attention` and the owner's own request at `/v1/warden/investigate`.
+ * feed at `/v1/warden/attention`, the owner's own request at `/v1/warden/investigate`, and the owner
+ * leaving a ferret alone for longer at `/v1/warden/leave`.
  *
  * THIS MOUNT IS WHY SIX MODULES ARE PRODUCTION CODE. `packages/daemon/src/lib/warden/` held the
  * anomaly detector, the sus classifiers, the fleet-wide concurrency gate, the blessing store, the
@@ -93,6 +97,11 @@ export interface WardenSubsystem {
    * it starts if a slot is free. Refusals are {@link WardenRequestError}s.
    */
   investigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
+  /**
+   * The owner leaves a flagged or cleared ferret alone for longer than the Warden would. Refusals are
+   * {@link WardenRequestError}s.
+   */
+  leave(request: WardenLeaveRequest): Promise<WardenLeaveView>;
   /** Arms the sweep timer and returns the disarm. */
   arm(): Promise<() => void>;
   /** The last completed sweep, for the daemon's own health report. `undefined` means no sweep has
@@ -115,6 +124,7 @@ const REQUEST_REFUSALS: Readonly<Record<WardenRequestFailure, { readonly status:
   finished: { status: 409, code: 'session_finished' },
   cap: { status: 409, code: 'warden_cap_reached' },
   no_login: { status: 409, code: 'warden_no_login' },
+  not_flagged: { status: 409, code: 'warden_nothing_flagged' },
 };
 
 /** Restates a warden refusal in the HTTP vocabulary. */
@@ -161,6 +171,14 @@ async function patchConfig(subsystem: WardenSubsystem, context: RouteContext): P
 async function investigate(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
   const request = await parseBody(context.request, WardenInvestigateRequestSchema);
   return jsonResponse(await subsystem.investigate(request).catch(refuse));
+}
+
+/**
+ * The owner leaves a ferret alone for longer. The body is REQUIRED: it names the ferret and how long.
+ */
+async function leave(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const request = await parseBody(context.request, WardenLeaveRequestSchema);
+  return jsonResponse(await subsystem.leave(request).catch(refuse));
 }
 
 async function report(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
@@ -230,6 +248,16 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async context => await investigate(subsystem, context),
+    },
+    // CONFIGURE, not use: leaving a ferret alone switches the Warden's supervision of it off for a while,
+    // which is how the Warden behaves on this host — and a remote warden can never reach it.
+    {
+      method: 'POST',
+      path: '/v1/warden/leave',
+      minimum: 'operator',
+      capability: { capability: 'warden', axis: 'configure' },
+      noStore: true,
+      handle: async context => await leave(subsystem, context),
     },
     {
       method: 'GET',

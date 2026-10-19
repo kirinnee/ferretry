@@ -8,18 +8,32 @@ export interface ProcRow {
   readonly argv: string;
 }
 
-/** Parses `ps -Ao pid=,ppid=,etimes=,args=` output and drops malformed rows. */
+const ELAPSED_SECONDS_PER_UNIT = [1, 60, 3600] as const;
+const SECONDS_PER_DAY = 86_400;
+
+/**
+ * `ps -o etime=` as seconds: `[[dd-]hh:]mm:ss`, or a bare `ss`. It is the one elapsed-time keyword
+ * both procps (Linux) and BSD `ps` (macOS) accept — `etimes` is procps-only.
+ */
+export function parseElapsed(text: string): number | undefined {
+  const match = text.match(/^(?:(\d+)-)?(\d+(?::\d+){0,2})$/);
+  if (!match) return undefined;
+  const fields = match[2]!.split(':').map(Number).reverse();
+  const clock = fields.reduce((sum, value, index) => sum + value * ELAPSED_SECONDS_PER_UNIT[index]!, 0);
+  return Number(match[1] ?? 0) * SECONDS_PER_DAY + clock;
+}
+
+/** Parses `ps -Ao pid=,ppid=,etime=,args=` output and drops malformed rows. */
 export function parseProcessTable(stdout: string): readonly ProcRow[] {
   const rows: ProcRow[] = [];
   for (const line of stdout.split('\n')) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
     if (!match) continue;
     const pid = Number(match[1]);
     const ppid = Number(match[2]);
-    const startedSecondsAgo = Number(match[3]);
+    const startedSecondsAgo = parseElapsed(match[3]!);
     const argv = match[4]!.trim();
-    if (pid > 1 && Number.isFinite(ppid) && Number.isFinite(startedSecondsAgo))
-      rows.push({ pid, ppid, startedSecondsAgo, argv });
+    if (pid > 1 && startedSecondsAgo !== undefined) rows.push({ pid, ppid, startedSecondsAgo, argv });
   }
   return rows;
 }
