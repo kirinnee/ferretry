@@ -6,7 +6,7 @@
  * interactive pages and media. Its instructions were fixed when it started, so a change takes effect at
  * its next launch and nothing is sent to it; the daemon's own `note` says so, and the host shows it.
  *
- * The state is the session's own `config.hypermedia` (absent means on). Until the list re-reads that
+ * The state is the session's own `config.hypermedia` (absent means the mode default: on for interactive, off for auto). Until the list re-reads that
  * session, the answer the daemon gave is what the toggle shows, so it never flips back under the reader.
  */
 

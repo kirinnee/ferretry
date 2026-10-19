@@ -11,7 +11,7 @@
  * WORDS: which tab a fact is on, how it is said, and what its explainer says.
  */
 
-import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
+import { type ManagedWorktreeView, type SessionView, sessionHypermediaEnabled } from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
 
 export type InfoTab = 'overview' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
@@ -142,11 +142,8 @@ export const lineage = (
 export const learningLabel = (passive: boolean): string =>
   passive ? 'On · instructed to file lessons' : 'Off · not instructed';
 
-/**
- * Whether a ferret is told it may use hypermedia (docs/hypermedia.md). ABSENT MEANS ON: a session
- * started before the switch existed is instructed at its next launch unless the owner turns it off.
- */
-export const hypermediaOn = (view: SessionView): boolean => view.config.hypermedia !== false;
+/** Whether a ferret is told it may use hypermedia: its switch, else its mode's default (docs/hypermedia.md). */
+export const hypermediaOn = (view: SessionView): boolean => sessionHypermediaEnabled(view.config);
 
 /** The Hypermedia row's value: said as what the ferret is told. */
 export const hypermediaLabel = (on: boolean): string =>

@@ -1722,7 +1722,7 @@ describe('daemon boot lifecycle', () => {
    * ledgers; the unit suite proves the decision and nothing below this proves the assembled daemon
    * records it where `fy mcp serve` will read it.
    */
-  it('should start every ferret with hypermedia on and switch it for the next launch', async () => {
+  it('should start an auto ferret with hypermedia off, and let the owner switch it on and off for the next launch', async () => {
     // Arrange
     const home = await tempDirectory('fyd-hypermedia');
     const port = await freeLoopbackPort();
@@ -1763,6 +1763,9 @@ describe('daemon boot lifecycle', () => {
         })
       ).json(),
     );
+    const on = await switchTo(started.config.id, true);
+    const onBody = SessionHypermediaPatchResultSchema.parse(await on.json());
+    const storedOn = await environments.read(parseSessionId(started.config.id));
     const off = await switchTo(started.config.id, false);
     const offBody = SessionHypermediaPatchResultSchema.parse(await off.json());
     const stored = await environments.read(parseSessionId(started.config.id));
@@ -1773,7 +1776,14 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(0);
-    should(started.config.hypermedia).be.true();
+    // An auto ferret starts with hypermedia off; the owner's explicit switch is what turns it on or off.
+    should(started.config.hypermedia).be.false();
+    should(onBody.view.config.hypermedia).be.true();
+    should(onBody.note).startWith('Hypermedia is on');
+    should(sessionPaneEnvironment(parseSessionId(started.config.id), storedOn, 'auto')).have.property(
+      'FY_HYPERMEDIA',
+      '1',
+    );
     should(off.status).equal(200);
     should(offBody.view.config.hypermedia).be.false();
     should(offBody.note).startWith('Hypermedia is off');

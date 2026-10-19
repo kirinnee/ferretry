@@ -199,7 +199,7 @@ describe('the hypermedia mark', () => {
         compact={false}
         project={null}
         session={sessionView('s1', {
-          config: { teammate: 'hadi', ...(hypermedia === undefined ? {} : { hypermedia }) },
+          config: { teammate: 'hadi', mode: 'interactive', ...(hypermedia === undefined ? {} : { hypermedia }) },
         })}
       />
     );

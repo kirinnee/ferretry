@@ -214,8 +214,10 @@ describe('learningLabel', () => {
 });
 
 describe('hypermedia', () => {
-  it('reads a session from before the switch as on, and only an explicit false as off', () => {
-    expect(hypermediaOn(sessionView('legacy'))).toBe(true);
+  it('reads a session with no switch as its mode default (on interactive, off auto), and an explicit value as itself', () => {
+    expect(hypermediaOn(sessionView('legacy', { config: { mode: 'interactive' } }))).toBe(true);
+    expect(hypermediaOn(sessionView('legacy-auto', { config: { mode: 'auto' } }))).toBe(false);
+    expect(hypermediaOn(sessionView('forced', { config: { mode: 'auto', hypermedia: true } }))).toBe(true);
     expect(hypermediaOn(sessionView('on', { config: { hypermedia: true } }))).toBe(true);
     expect(hypermediaOn(sessionView('off', { config: { hypermedia: false } }))).toBe(false);
   });
