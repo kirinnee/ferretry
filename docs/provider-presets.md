@@ -211,12 +211,13 @@ community sources or search results only — and said so in the preset's `unveri
 | Ollama (local)                | Codex          | —                                               | `GET localhost:11434/api/tags`       | none                                                     |
 
 (¹) GLM's Codex half is in the preset but **not offered**: Codex runs GLM only with a
-`model_catalog_json` file Ferretry would have to write into a Codex home, so a GLM login drives Claude
-Code only.
+`model_catalog_json` file. Ferretry now writes one for every third-party Codex login
+([model-catalog.md](model-catalog.md#codexs-own-picker)), but GLM's Codex models have not been verified, so a
+GLM login drives Claude Code only.
 
 Codex accepts only `wire_api = "responses"` (`chat` was removed on 2026-02-01). Every Codex half above
-documents a Responses endpoint, so none is hidden for lacking one; GLM's is hidden for the model
-catalogue file instead.
+documents a Responses endpoint, so none is hidden for lacking one; GLM's is hidden until its Codex models are
+verified.
 
 ## Declared gaps
 

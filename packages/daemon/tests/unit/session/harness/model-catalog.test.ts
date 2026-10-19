@@ -120,14 +120,14 @@ describe('the runtime model catalog', () => {
     should(catalog.choices).have.length(1);
   });
 
-  it('should narrow a catalog to the values a targeted switch is planned against', async () => {
-    // The plan needs the model values, their levels and each model's own default; nothing else about
-    // a choice can change which keystrokes reach a target.
-    // Arrange
-    const catalog = codexRuntimeCatalog([
+  it('should narrow the advertised choices to the values and row names a targeted switch is planned against', async () => {
+    // The plan needs the model values, the names Codex renders them under, their levels and each
+    // model's own default; nothing else about a choice can change which keystrokes reach a target.
+    // Act
+    const context = codexSwitchContext([
       {
         value: 'gpt-5.6-codex',
-        label: 'GPT-5.6 Codex',
+        label: 'GPT-5.6-Codex',
         description: 'not part of the decision',
         reasoningEfforts: [{ value: 'medium' }, { value: 'high', description: 'also not' }],
         defaultReasoningEffort: 'medium',
@@ -135,20 +135,36 @@ describe('the runtime model catalog', () => {
       { value: 'gpt-5.6-terra', label: 'Terra', reasoningEfforts: [] },
     ]);
 
-    // Act
-    const context = codexSwitchContext(catalog);
-
     // Assert
     should(context).deepEqual({
       choices: [
         {
           value: 'gpt-5.6-codex',
+          label: 'GPT-5.6-Codex',
           reasoningEfforts: [{ value: 'medium' }, { value: 'high' }],
           defaultReasoningEffort: 'medium',
         },
-        { value: 'gpt-5.6-terra', reasoningEfforts: [] },
+        { value: 'gpt-5.6-terra', label: 'Terra', reasoningEfforts: [] },
       ],
     });
+  });
+
+  it('should mark the model the runtime launches with as the default, not the first Codex listed', () => {
+    // Arrange — a catalog's models come back in its order, and Codex flags the first as its default
+    const advertised = [
+      { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', isDefault: true as const, reasoningEfforts: [] },
+      { value: 'deepseek-flash', label: 'DeepSeek Flash', reasoningEfforts: [] },
+    ];
+
+    // Act
+    const marked = codexRuntimeCatalog(advertised, { models: [], defaultModel: 'deepseek-flash' });
+    const unknown = codexRuntimeCatalog(advertised, { models: [], defaultModel: 'gpt-6' });
+    const none = codexRuntimeCatalog(advertised, { models: [], defaultModel: null });
+
+    // Assert
+    should(marked.choices.map(choice => choice.isDefault)).eql([undefined, true]);
+    should(unknown.choices.map(choice => choice.isDefault)).eql([true, undefined]);
+    should(none.choices.map(choice => choice.isDefault)).eql([true, undefined]);
   });
 });
 

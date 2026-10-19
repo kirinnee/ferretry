@@ -27,7 +27,7 @@ codex:
     baseUrl: https://api.z.ai/api/v1
     keyVariable: ZAI_API_KEY
     model: glm-5.3
-  unavailable: Z.ai serves the Responses API, but Codex only runs GLM with a model catalogue file (model_catalog_json) that Ferretry would have to write into a Codex home. Use this login with Claude Code instead.
+  unavailable: Z.ai serves the Responses API, but Codex only runs GLM with a model catalogue file (model_catalog_json) and this preset has no verified Codex model list yet. Use this login with Claude Code instead.
 test:
   kind: request
   url: https://api.z.ai/api/monitor/usage/quota/limit

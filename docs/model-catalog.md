@@ -5,7 +5,9 @@ login the GLM coding models, a DeepSeek login DeepSeek's. The list, its labels, 
 reasoning efforts each model takes come from one **model catalog** per provider. Every model picker
 reads it: the composer's chip, Info › Runtime, the new-session form, Settings › Warden and a lessons
 scan. So does the launch: Claude Code's tier slots (`/model opus|sonnet|haiku`) are pinned to the
-catalog's models, so a slash command and Ferretry's picker always land on the same model.
+catalog's models, so a slash command and Ferretry's picker always land on the same model — and a Codex
+runtime on a third-party provider is given the catalog as the list its own `/model` picker offers
+(§ Codex's own picker).
 
 ## What a catalog says
 
@@ -84,6 +86,64 @@ whenever what a catalog makes the runtimes offer would change: when it starts wi
 catalog, and whenever the configuration files are reloaded. A manifest that would read the same is left
 alone.
 
+## Codex's own picker
+
+Codex lists the models in ITS catalog — the OpenAI models it ships — in its in-chat `/model` picker and
+over its app-server, which is also where Ferretry's composer chip reads a live Codex session's choices
+from. It knows nothing of what DeepSeek, Kimi or OpenRouter serve, so a runtime on one of those logins
+used to offer GPT models its provider cannot run.
+
+A Codex runtime whose login reads a catalog of someone else's models is therefore launched with
+`-c model_catalog_json="<home>/.fy/codex-model-catalog.json"`, a file the apply writes from the login's
+catalog (`packages/fleet/src/lib/models/codex-catalog.ts`). Then, in every place that asks Codex:
+
+- Codex's `/model` picker lists exactly the catalog's models — by label, with the catalog's efforts per
+  model and a one-line description (tier, context window, note);
+- the composer chip lists the same set, since it reads the same app-server, and adds the catalog's tier
+  grouping;
+- the multi-agent tool's "available model overrides" name those models rather than OpenAI's;
+- the context window and default effort in the catalog reach Codex, so its context meter and
+  auto-compaction use the model's real window;
+- Codex stops warning that it has no metadata for the model.
+
+The model the runtime launches with is listed first, because Codex calls its first model the default.
+A switch from either place lands on the same model: the chip drives Codex's own picker by the name the
+row carries (the catalog's label), and the switch is confirmed the way it always was, by what the session
+reports back (`thread_settings_applied`). A model with no efforts is switched to by its row alone; the
+chip sends it without an effort.
+
+**What the file carries.** Once a model has an entry, Codex stops using its fallback metadata for it and
+the entry's `base_instructions` is the model's whole system prompt. Every other field therefore repeats
+what Codex uses for a model it has no entry for, and the prompt is the one Codex sends in that case
+(`packages/fleet/codex/default-instructions.txt`). Measured on Codex 0.145.0 and 0.156.1, the request a
+runtime sends is byte-identical to the one it sent without the file — the system prompt, the tools —
+except that the reasoning effort is now sent and the sub-agent tool names the right models. Borrowing an
+OpenAI model's entry instead would give a DeepSeek model GPT's persona and code-mode-only tools.
+
+**What gets no file.**
+
+- A **sign-in** login, and a catalog of models Codex ships (`openai`, `azure-openai`): Codex's bundled
+  entries are richer than anything written here, and a ChatGPT account's list is refreshed per account.
+  They keep Codex's list; the catalog adds the label and tier in the chip as before.
+- A login with no catalog, and a catalog whose models the login cannot use.
+- A runtime whose profile settings already name a `model_catalog_json`: the person's own file is theirs,
+  and it is also the way out should a future Codex ever refuse the file Ferretry writes.
+
+**When it is written.** By every apply and republish, in the runtime's `.fy/` folder (Ferretry's own
+corner, swept down to what the apply writes), and pointed at by its wrapper. The manifest publishes the
+file's format (`codexCatalog`), so a machine that updated Ferretry rewrites its wrappers the first time
+the daemon starts, without anyone editing a login. Changing what the renderer writes means bumping
+`CODEX_CATALOG_FORMAT`; a test pins the text and fails until it is bumped.
+
+**Keeping it valid.** Codex refuses to START on a catalog file it cannot parse, and ignores keys it does
+not know, so the file carries the union of the keys the measured Codex versions require. After bumping
+Codex, run both:
+
+- `bun scripts/local/check-codex-model-catalog.ts --codex <codex>` — renders every built-in catalog's file
+  and asks that Codex to load it and list the catalog's models, in order, with their efforts;
+- `bun scripts/local/refresh-codex-default-instructions.ts --codex <codex>` — re-measures the system
+  prompt Codex sends for an unknown model (against a local server, no account) and rewrites the file.
+
 ## Changing the list
 
 **For everyone:** edit `packages/fleet/models/<id>.yaml`, check it against the provider's documentation,
@@ -152,9 +212,16 @@ preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferret
 - **Ollama's detected models are not read yet.** The Ollama catalog lists the gpt-oss models Ollama's
   Codex guide suggests and offers "Custom id…"; a live Codex session's picker already lists what Codex
   itself reports. Reading `localhost:11434/api/tags` into the other pickers is not built.
-- **A live Codex session's list is Codex's own.** Codex switches models only through its own picker, so a
-  running Codex session offers exactly what its app-server reports; the catalog adds the tier and name
-  where an id matches.
+- **A live Codex session's list is Codex's own for OpenAI's models.** Codex switches models only through its
+  own picker, so a running session offers exactly what its app-server reports. On a third-party login that
+  is the catalog (§ Codex's own picker); on a sign-in or an OpenAI/Azure key it is Codex's bundled list,
+  and the catalog adds the tier and name where an id matches.
+- **A Codex session only learns a changed catalog when it restarts.** The file is read when Codex starts, so
+  a catalog update reaches new sessions; a running one keeps the list it started with.
+- **A model typed with "Custom id…" is not in Codex's picker.** Codex has no entry for it and uses fallback
+  metadata, as it did before this file existed.
+- **Z.ai's Codex half is still not offered.** The file it needed now exists, but its models, efforts and
+  Responses endpoint have not been verified against Z.ai's documentation for Codex.
 - **A release-key rotation pauses updates.** A daemon trusts the key it was built with. After the hosted
   app rotates its release key, an older daemon refuses newer catalogs (and keeps the one it holds) until
   it is upgraded.
