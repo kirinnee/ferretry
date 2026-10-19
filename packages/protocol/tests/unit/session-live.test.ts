@@ -16,6 +16,22 @@ const sample = {
 const cases: SchemaCase[] = [
   { name: 'live sample', schema: live.SessionLiveActivitySchema, value: sample },
   { name: 'tokens source', schema: live.SessionLiveTokensSourceSchema, value: 'pane' },
+  { name: 'compaction basis', schema: live.SessionCompactionBasisSchema, value: 'history' },
+  {
+    name: 'running compaction',
+    schema: live.SessionCompactionRunningSchema,
+    value: { phase: 'running', startedAt: '2026-10-18T07:00:00.000Z', expectedMs: 60_000, basis: 'typical' },
+  },
+  {
+    name: 'finished compaction',
+    schema: live.SessionCompactionDoneSchema,
+    value: { phase: 'done', endedAt: '2026-10-18T07:00:41.000Z' },
+  },
+  {
+    name: 'compaction',
+    schema: live.SessionCompactionSchema,
+    value: { phase: 'done', endedAt: '2026-10-18T07:00:41.000Z', tokensBefore: 10 },
+  },
 ];
 
 describe('the session live readout protocol', () => {
@@ -76,5 +92,64 @@ describe('the session live readout protocol', () => {
 
     // Act + Assert
     assertRejects(refused);
+  });
+});
+
+describe('the compaction readout', () => {
+  const running = {
+    phase: 'running',
+    startedAt: '2026-10-18T07:00:00.000Z',
+    tokensBefore: 150_000,
+    expectedMs: 60_000,
+    basis: 'history',
+  } satisfies live.SessionCompactionRunning;
+  const done = {
+    phase: 'done',
+    trigger: 'auto',
+    startedAt: '2026-10-18T07:00:00.000Z',
+    endedAt: '2026-10-18T07:00:41.000Z',
+    tokensBefore: 150_000,
+    tokensAfter: 9_000,
+  } satisfies live.SessionCompactionDone;
+  const startMs = Date.parse(running.startedAt);
+
+  it('should round-trip both phases through the one discriminated schema', () => {
+    should(live.SessionCompactionSchema.parse(running)).deepEqual(running);
+    should(live.SessionCompactionSchema.parse(done)).deepEqual(done);
+    should(live.SessionCompactionSchema.parse({ phase: 'done', endedAt: done.endedAt })).deepEqual({
+      phase: 'done',
+      endedAt: done.endedAt,
+    });
+    should(live.SessionCompactionBasisSchema.parse('typical')).equal('typical');
+    should(live.SessionCompactionRunningSchema.safeParse(running).success).be.true();
+    should(live.SessionCompactionDoneSchema.safeParse(done).success).be.true();
+  });
+
+  it('should refuse an unknown phase, an unknown field, a non-positive estimate and an unknown basis', () => {
+    should(live.SessionCompactionSchema.safeParse({ ...running, phase: 'queued' }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, percent: 40 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, expectedMs: 0 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, basis: 'guess' }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...done, tokensAfter: -1 }).success).be.false();
+  });
+
+  it('should ride on a live sample as an optional field', () => {
+    should(live.SessionLiveActivitySchema.parse({ ...sample, compaction: running }).compaction).deepEqual(running);
+  });
+
+  it('should estimate linearly in elapsed time, never above the cap, never below zero', () => {
+    should(live.compactionPercent(running, startMs)).equal(0);
+    should(live.compactionPercent(running, startMs + 24_000)).equal(40);
+    should(live.compactionPercent(running, startMs + 59_000)).equal(live.COMPACTION_PERCENT_CAP);
+    should(live.compactionPercent(running, startMs + 600_000)).equal(95);
+    should(live.compactionPercent(running, startMs - 5_000)).equal(0);
+    should(live.compactionPercent({ ...running, startedAt: 'not a time' }, startMs)).equal(0);
+  });
+
+  it('should state what a compaction freed only when both ends are known and the context shrank', () => {
+    should(live.compactionFreed(done)).equal(141_000);
+    should(live.compactionFreed({ phase: 'done', endedAt: done.endedAt, tokensBefore: 5 })).be.undefined();
+    should(live.compactionFreed({ phase: 'done', endedAt: done.endedAt, tokensAfter: 5 })).be.undefined();
+    should(live.compactionFreed({ ...done, tokensBefore: 10, tokensAfter: 20 })).be.undefined();
   });
 });

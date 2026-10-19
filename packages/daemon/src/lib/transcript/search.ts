@@ -47,6 +47,7 @@ function searchableText(event: TranscriptEvent): string | undefined {
       return attachmentText(event.attachment);
     case 'error':
       return event.error.message;
+    case 'compaction':
     case 'settings':
     case 'turn':
     case 'usage':

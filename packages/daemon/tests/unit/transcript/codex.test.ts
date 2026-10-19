@@ -13,7 +13,7 @@ describe('CodexTranscriptParser', () => {
 
     // Assert
     should(actual.issues).have.length(0);
-    should(actual.events).have.length(12);
+    should(actual.events).have.length(13);
     should(actual.observedInputs).containDeep([
       { harness: 'codex', text: 'Please inspect the Codex fixture.', proofKey: 'message-user' },
     ]);
@@ -28,6 +28,7 @@ describe('CodexTranscriptParser', () => {
       'settings',
       'turn',
       'turn',
+      'compaction',
       'message',
       'error',
     ]);
@@ -49,8 +50,9 @@ describe('CodexTranscriptParser', () => {
       },
     });
     should(actual.events[7]).containDeep({ settings: { model: 'gpt-synthetic', reasoningEffort: 'high' } });
-    should(actual.events[10]).containDeep({ kind: 'message', role: 'system', text: 'Synthetic context summary.' });
-    should(actual.events[11]).containDeep({ error: { code: 'fixture_error', recoverable: true } });
+    should(actual.events[10]).containDeep({ kind: 'compaction', role: 'system' });
+    should(actual.events[11]).containDeep({ kind: 'message', role: 'system', text: 'Synthetic context summary.' });
+    should(actual.events[12]).containDeep({ error: { code: 'fixture_error', recoverable: true } });
   });
 
   it('should preserve malformed embedded tool arguments and report them', () => {

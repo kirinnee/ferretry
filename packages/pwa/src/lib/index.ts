@@ -24,6 +24,7 @@ export * from '../components/input-waveform.tsx';
 // into the blocks above on the lead's instruction: a second PR is landing one export into this same
 // file, and an alphabetical insertion would put the two diffs in adjacent hunks.
 export * from '../components/live-stream-indicator.tsx';
+export * from './compaction-readout.ts';
 export * from '../components/markdown.tsx';
 export * as migrateModel from '../components/migrate-model.ts';
 export * from '../components/migrate-sheet.tsx';

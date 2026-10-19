@@ -391,6 +391,7 @@ export class CodexTranscriptParser implements TranscriptParser {
           ),
         );
       } else {
+        events.push({ ...codexMetadata(record, payload, 'system', context), kind: 'compaction' });
         events.push({ ...codexMetadata(record, payload, 'system', context), kind: 'message', text });
       }
       return { events, issues, recognized: true };

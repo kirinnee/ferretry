@@ -1,5 +1,5 @@
 import type { SessionLiveActivity } from '@ferretry/protocol';
-import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, type MouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInputModality } from '../hooks/use-input-modality.ts';
 import { useTranscriptHold } from '../hooks/use-live-clock.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
@@ -13,6 +13,8 @@ import { newTailRows, prependedAbove, prependRestoreTarget } from '../lib/transc
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
 import { JumpToLatest } from './jump-to-latest.tsx';
 import type { SendRetry } from './ledger-message.tsx';
+import { compactionStripIndex } from '../lib/compaction-readout.ts';
+import { CompactionCard, CompactionStrip } from './compaction-card.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
@@ -114,6 +116,14 @@ export function Transcript({
   const hold = useTranscriptHold();
   const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
   const items = transcriptItems(shown.entries);
+  const compaction = shown.live?.compaction;
+  const stripAt =
+    compaction?.phase === 'done'
+      ? compactionStripIndex(
+          compaction,
+          items.map(item => item.entry),
+        )
+      : null;
   const ids = items.map(item => item.entry.id);
   const lastId = ids.at(-1) ?? null;
   const firstId = ids[0] ?? null;
@@ -217,17 +227,23 @@ export function Transcript({
       >
         <div className="fy-transcript-content" ref={contentRef}>
           {items.map((item, index) => (
-            <TranscriptRow
-              answered={item.answered === true}
-              entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
-              isLast={index === items.length - 1}
-              key={item.entry.id}
-              live={shown.busy}
-              onRetry={onRetry}
-              previous={item.previous}
-            />
+            <Fragment key={item.entry.id}>
+              {compaction?.phase === 'done' && stripAt === index ? <CompactionStrip compaction={compaction} /> : null}
+              <TranscriptRow
+                answered={item.answered === true}
+                entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
+                isLast={index === items.length - 1}
+                live={shown.busy}
+                onRetry={onRetry}
+                previous={item.previous}
+              />
+            </Fragment>
           ))}
-          {shown.busy ? (
+          {compaction?.phase === 'done' && stripAt === items.length ? (
+            <CompactionStrip compaction={compaction} />
+          ) : null}
+          {compaction?.phase === 'running' ? <CompactionCard compaction={compaction} /> : null}
+          {shown.busy && compaction?.phase !== 'running' ? (
             <LiveActivityLine
               activity={shown.activity}
               fallback={shown.activityFallback}

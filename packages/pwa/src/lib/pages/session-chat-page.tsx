@@ -6,6 +6,7 @@ import type { ComposerSuggestionSwitches } from '../../components/composer-autoc
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import type { SendRetry } from '../../components/ledger-message.tsx';
 import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
+import { CompactionChip } from '../../components/compaction-card.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
@@ -1106,6 +1107,7 @@ export function SessionChatPage({
         status={
           <>
             {needsYou}
+            {liveSample?.compaction?.phase === 'running' ? <CompactionChip compaction={liveSample.compaction} /> : null}
             {/* THE LIVE FEED'S OWN STATE, folded into the status dot: nothing visible while it is
                 healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
                 lock or a Wi-Fi roam most often drops the socket. */}
