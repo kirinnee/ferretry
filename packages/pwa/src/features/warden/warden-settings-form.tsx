@@ -552,6 +552,7 @@ export function WardenSettingsForm({
                     defaultModel={runtime.defaultModel}
                     disabled={base === undefined}
                     id={`${name}-model`}
+                    local={runtime.modelCatalog.local}
                     models={runtime.models}
                     onChange={setModel}
                     value={head?.model ?? ''}

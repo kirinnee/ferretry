@@ -1,10 +1,10 @@
 /**
  * EVERY TEST TIER RUNS OFFLINE. Preloaded by each `bunfig.*.toml`, before any test file.
  *
- * A booted `fyd` phones out on its own: it follows the published model catalog
+ * A booted `fyd` phones out on its own (and reads Ollama on this machine, which a developer may be running): it follows the published model catalog
  * (`https://ferretry.pages.dev/catalog/…`, docs/model-catalog.md), asks the hosted relay directory
  * which carrier is advertised, and — compiled — checks GitHub for a newer release. A test must never
- * reach any of them, so these defaults switch all three off for this process and for every child that
+ * reach any of them, so these defaults switch all of them off for this process and for every child that
  * inherits its environment — the fixtures that spawn `fy`/`fyd` pass `process.env` on. A test that
  * wants one of them sets the variable itself; that wins.
  *
@@ -15,6 +15,7 @@ export const OFFLINE_TEST_ENVIRONMENT = {
   FY_MODEL_CATALOG: 'off',
   FY_RELAY_DIRECTORY_ORIGIN: 'off',
   FY_UPDATE_CHECK: 'off',
+  FY_LOCAL_MODELS: 'off',
 } as const;
 
 for (const [name, value] of Object.entries(OFFLINE_TEST_ENVIRONMENT)) process.env[name] ??= value;

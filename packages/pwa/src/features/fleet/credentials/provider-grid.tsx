@@ -14,6 +14,7 @@
 import type { FleetProviderPresetView } from '@ferretry/protocol';
 import { ClipboardPaste, Search } from 'lucide-react';
 import { type PointerEvent, useEffect, useId, useRef, useState } from 'react';
+import { LOCAL_TONE_CLASS, type LocalModelsRead, OLLAMA_PRESET_ID, tileWords } from '../../../lib/local-models.ts';
 import { LONG_PRESS_MS } from '../../../shell/agent-sidebar-model.ts';
 import { presetScope } from './environment-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';
@@ -26,9 +27,11 @@ export interface ProviderGridProps {
   readonly presets: readonly FleetProviderPresetView[];
   readonly onPick: (presetId: string) => void;
   readonly onPaste: () => void;
+  /** What the daemon last read from Ollama on this machine; shown on the Ollama tile's second line. */
+  readonly local?: LocalModelsRead;
 }
 
-export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
+export function ProviderGrid({ presets, onPick, onPaste, local }: ProviderGridProps) {
   const [query, setQuery] = useState('');
   const [noted, setNoted] = useState<string | null>(null);
   const searchId = useId();
@@ -71,6 +74,7 @@ export function ProviderGrid({ presets, onPick, onPaste }: ProviderGridProps) {
                   key={preset.id}
                   preset={preset}
                   noted={noted === preset.id}
+                  {...(preset.id === OLLAMA_PRESET_ID && local !== undefined ? { local } : {})}
                   onNote={show => setNoted(previous => (show ? preset.id : previous === preset.id ? null : previous))}
                   onPick={onPick}
                 />
@@ -97,9 +101,11 @@ interface ProviderTileProps {
   readonly noted: boolean;
   readonly onNote: (show: boolean) => void;
   readonly onPick: (presetId: string) => void;
+  readonly local?: LocalModelsRead;
 }
 
-function ProviderTile({ preset, noted, onNote, onPick }: ProviderTileProps) {
+function ProviderTile({ preset, noted, onNote, onPick, local }: ProviderTileProps) {
+  const detected = local === undefined ? null : tileWords(local);
   const noteId = useId();
   const press = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Set when a long press showed the note, so the click that ends the press does not also open the form.
@@ -164,6 +170,14 @@ function ProviderTile({ preset, noted, onNote, onPick }: ProviderTileProps) {
           {offered ? null : (
             <span className="text-meta text-warn" data-provider-tile-unoffered="">
               Not offered here
+            </span>
+          )}
+          {detected === null ? null : (
+            <span
+              className={`text-meta font-semibold ${LOCAL_TONE_CLASS[detected.tone]}`}
+              data-provider-tile-local={local?.snapshot?.state ?? 'pending'}
+            >
+              {detected.text}
             </span>
           )}
         </span>

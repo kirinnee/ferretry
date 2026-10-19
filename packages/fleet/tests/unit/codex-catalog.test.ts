@@ -1,5 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { builtInModelCatalogs } from '../../src/lib/models/catalog.ts';
+import { runtimeModels } from '../../src/lib/models/runtime.ts';
+import type { ModelCatalog } from '../../src/lib/models/schema.ts';
 import {
   CODEX_CATALOG_FORMAT,
   CODEX_MODEL_CATALOG_FILE,
@@ -223,5 +226,37 @@ describe('codexCatalogArguments', () => {
       'model_catalog_json="/fy/home/.fy/codex-model-catalog.json"',
     ]);
     should(codexCatalogArguments('/a "b"/c')[1]).equal('model_catalog_json="/a \\"b\\"/c"');
+  });
+});
+
+describe('Codex’s picker for the models Ollama has installed', () => {
+  it('should list the installed models, the launch default first, and not the suggestions that are absent', () => {
+    // Arrange
+    const local = {
+      provider: 'ollama' as const,
+      baseUrl: 'http://127.0.0.1:11434',
+      state: 'found' as const,
+      models: [
+        { id: 'llama3.2:latest', label: 'llama3.2:latest' },
+        { id: 'gpt-oss:120b', label: 'gpt-oss:120b' },
+      ],
+      checkedAt: '2026-10-19T00:00:00.000Z',
+      message: 'Ollama has 2 models installed on this machine.',
+      pullCommand: 'ollama pull gpt-oss:20b',
+    };
+    const ollama = builtInModelCatalogs().ollama as ModelCatalog;
+
+    // Act
+    const runtime = runtimeModels({ harness: 'codex', modelSet: undefined, catalog: ollama, local });
+    const slugs = (
+      JSON.parse(renderCodexModelCatalog(codexCatalogModels(runtime) ?? [], runtime.default)) as {
+        models: { slug: string; context_window?: number }[];
+      }
+    ).models;
+
+    // Assert
+    should(slugs.map(entry => entry.slug)).eql(['gpt-oss:120b', 'llama3.2:latest']);
+    should(slugs[0]?.context_window).equal(128_000);
+    should(slugs[1]?.context_window).be.undefined();
   });
 });

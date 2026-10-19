@@ -11,6 +11,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
+import { OLLAMA_PRESET_ID } from '../../../lib/local-models.ts';
 import { Badge, Button } from '../../../shell/primitives.tsx';
 import { HARNESS_NAMES } from '../components/component-model.ts';
 import { checkFleetCredential } from '../credentials-api.ts';
@@ -40,7 +41,9 @@ import {
   usageBars,
   usageBarText,
 } from './credentials-model.ts';
+import { LocalModelsPanel } from './local-models-panel.tsx';
 import { LoginScopeChip } from './login-scope-chip.tsx';
+import { useLocalModels } from './use-local-models.ts';
 
 export function UsageBars({ credential, now }: { readonly credential: FleetCredentialView; readonly now: number }) {
   const bars = usageBars(credential, now);
@@ -133,6 +136,9 @@ function CredentialPage({
   const word = checking ? 'checking' : credential.status.word;
   const needsSignIn = credential.status.word === 'needs_sign_in';
   const runtimesUsing = data.runtimes.runtimes.filter(runtime => credential.usedBy.includes(runtime.name));
+  // An Ollama login lists what Ollama has installed: read once when its page opens, then on Check again.
+  const ollama = credential.environment?.preset?.id === OLLAMA_PRESET_ID;
+  const local = useLocalModels({ connection, createClient, enabled: ollama });
 
   const check = async (): Promise<void> => {
     setNotice(null);
@@ -223,6 +229,8 @@ function CredentialPage({
           online={online}
         />
       )}
+
+      {ollama ? <LocalModelsPanel machineName={machineName} read={local} onCheck={local.check} /> : null}
 
       {notice === null ? null : (
         <p role="status" className="m-0 text-cell leading-base text-fg" data-credential-notice="">

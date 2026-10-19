@@ -607,6 +607,8 @@ export class E2eEnvironment {
       FERRETRY_TEST: '1',
       // A compiled daemon asks GitHub for the latest release at boot; a suite never dials out.
       FY_UPDATE_CHECK: 'off',
+      // A daemon reads Ollama on this machine at boot; a suite never depends on one a developer runs.
+      FY_LOCAL_MODELS: 'off',
     });
     delete env.TMUX;
     delete env.TMUX_PANE;

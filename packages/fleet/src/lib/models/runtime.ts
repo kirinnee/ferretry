@@ -18,6 +18,7 @@
  *
  * Pure.
  */
+import type { LocalModels } from '@ferretry/protocol';
 import type { ResolvedModelSet } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
@@ -42,6 +43,8 @@ export interface RuntimeModelEntry {
   readonly defaultEffort?: string;
   readonly note?: string;
   readonly available: boolean;
+  /** Installed on this machine, as the local server reported it. */
+  readonly local?: true;
 }
 
 /** The catalog a runtime's models came from, as a picker names it. */
@@ -61,6 +64,8 @@ export interface RuntimeModels {
   readonly default: string | undefined;
   /** The variables the catalog pins for this runtime, to be laid over the login's. */
   readonly env: Readonly<Record<string, string>>;
+  /** What the last read of the local server found, when this catalog detects one and it was read. */
+  readonly local?: LocalModels;
 }
 
 export interface RuntimeModelsInput {
@@ -71,6 +76,8 @@ export interface RuntimeModelsInput {
   readonly personOwned?: ReadonlySet<string>;
   /** The model ids the login can use (E23); absent when nobody knows. */
   readonly availableModels?: readonly string[];
+  /** What the local server the catalog detects reported (docs/model-catalog.md § Local models). */
+  readonly local?: LocalModels;
 }
 
 const fromModelSet = (modelSet: ResolvedModelSet | undefined): RuntimeModels => {
@@ -100,12 +107,40 @@ const entry = (model: CatalogHalf['models'][number], usable: ReadonlySet<string>
   };
 };
 
+/**
+ * A local server's installed models, in place of the catalog's list. The catalog still describes a model
+ * it knows (tier, context, efforts) — a model the server has that the catalog does not is listed as it
+ * is, by id — and a catalog model the server does not have is left out, because it could not launch.
+ * Only a server that answered with models changes the list: every other state keeps the catalog's
+ * suggestions, so a person can still pick one and read the sentence that says how to install it.
+ */
+function withLocalModels(
+  half: CatalogHalf,
+  models: readonly RuntimeModelEntry[],
+  local: LocalModels | undefined,
+): readonly RuntimeModelEntry[] {
+  if (local === undefined || local.state !== 'found') return models;
+  const installed = new Set(local.models.map(model => model.id));
+  const known = new Set(half.models.map(model => catalogModelValue(model)));
+  const fromCatalog = models
+    .filter(model => installed.has(model.id))
+    .map(model => ({ ...model, local: true as const }));
+  const extra = local.models
+    .filter(model => !known.has(model.id))
+    .map(model => ({ id: model.id, label: model.label, efforts: [], available: true, local: true as const }));
+  return [...fromCatalog, ...extra];
+}
+
 /** The runtime's models, default and pinned variables (module doc). */
 export function runtimeModels(input: RuntimeModelsInput): RuntimeModels {
   const half = input.catalog === undefined ? undefined : catalogHalf(input.catalog, input.harness);
   if (input.catalog === undefined || half === undefined) return fromModelSet(input.modelSet);
   const usable = input.availableModels === undefined ? undefined : new Set(input.availableModels);
-  const models = half.models.map(model => entry(model, usable));
+  const models = withLocalModels(
+    half,
+    half.models.map(model => entry(model, usable)),
+    input.local,
+  );
   const isAvailable = (value: string) => models.some(model => model.id === value && model.available);
   const declared =
     input.modelSet?.source === 'model-set' ? catalogModelFor(half, input.modelSet.declaredDefault) : undefined;
@@ -129,5 +164,6 @@ export function runtimeModels(input: RuntimeModelsInput): RuntimeModels {
     env: Object.fromEntries(
       Object.entries(catalogTierEnvironment(half)).filter(([variable]) => !personOwned.has(variable)),
     ),
+    ...(input.local === undefined ? {} : { local: input.local }),
   };
 }

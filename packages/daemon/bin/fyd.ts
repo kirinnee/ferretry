@@ -538,6 +538,7 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
+  LocalModelsService,
   ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
@@ -568,6 +569,7 @@ import {
   ProviderProbeService,
   ProviderQuotaService,
   PublishedModelCatalogService,
+  suggestedOllamaModel,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -7385,9 +7387,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return await publishedModelCatalog.catalogs();
         },
         presets: async () => await providerPresets.presets(),
+        ollama: () => localModels.snapshot(),
+      });
+      // The models Ollama has installed on this machine (docs/model-catalog.md § Local models): read at
+      // boot and whenever a person opens Settings or a login's setup — never on a timer — through the
+      // same keyless, loopback-only read a login Test makes. A different set moves what runtimes offer.
+      const keylessProbe = new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport());
+      const localModels = new LocalModelsService({
+        probe: keylessProbe,
+        address: process.env.OLLAMA_HOST,
+        enabled: process.env.FY_LOCAL_MODELS !== 'off',
+        suggested: async () => suggestedOllamaModel(await modelCatalogService.catalogs()),
+        now: () => clock.now(),
+        onChanged: async () => {
+          await fleetCatalog.republish().catch(() => undefined);
+        },
       });
       const providerProbe = new ProviderProbeService({
-        probe: new AuthorizedProviderProbe(outboundAuthorizer, new FetchEnhancementTransport()),
+        probe: keylessProbe,
         clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
       });
       // Provider quotas for environment logins (docs/provider-quotas.md): read through the SAME outbound
@@ -8037,6 +8054,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(await publishedModelCatalog.status()),
             }),
           refresh: async () => await publishedModelCatalog.refresh(true),
+          refreshLocal: async () => await localModels.refresh(),
         },
         speedups: new SpeedupsService({
           authorizer: outboundAuthorizer,
@@ -8786,6 +8804,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // the absence is already visible as `wardenTimerArmed: false` on its own health report.
   // The configuration files: first load, editors' schemas, and the watcher (docs/config-files.md).
   cleanups.push(await subsystems.configFiles.arm());
+  // Which models Ollama has installed, read once now that the fleet can be republished with them.
+  void subsystems.models.refreshLocal().catch(() => undefined);
   await subsystems.warden
     .arm()
     .then(disarm => cleanups.push(disarm))

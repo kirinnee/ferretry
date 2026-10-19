@@ -7,9 +7,13 @@
  * The live session pickers (the composer's chip and Info › Runtime) are menus instead, because choosing
  * there is an action sent to a running harness; they group by the same tiers (`../lib/model-tiers.ts`).
  */
+import type { LocalModels } from '@ferretry/protocol';
 import { useId, useState } from 'react';
+import type { ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import type { PickerModel } from '../lib/account-picker-catalog.ts';
+import { localNote } from '../lib/local-models.ts';
 import { CUSTOM_MODEL_ID, contextWords, groupByTier } from '../lib/model-tiers.ts';
+import { LocalModelsNote } from './local-models-note.tsx';
 
 /** The option that reveals the custom id box. Not a model id: the grammar has no leading space. */
 const CUSTOM = ' custom';
@@ -28,6 +32,10 @@ export interface ModelSelectProps {
   readonly customIds: boolean;
   readonly disabled?: boolean;
   readonly 'aria-describedby'?: string;
+  /** What the daemon last read from a local server (Ollama), for a login whose catalog detects one. */
+  readonly local?: LocalModels | null;
+  /** The clipboard the note's copy button writes to; the browser's by default. */
+  readonly write?: ClipboardWriter;
 }
 
 const nameOf = (models: readonly PickerModel[], id: string | null): string | undefined =>
@@ -38,6 +46,7 @@ const optionText = (model: PickerModel, defaultModel: string | null): string =>
   [
     model.label ?? model.id,
     model.id === defaultModel ? 'default' : undefined,
+    model.local === true ? 'installed here' : undefined,
     contextWords(model.context),
     model.available ? undefined : 'not on this login',
   ]
@@ -51,20 +60,26 @@ export function ModelSelect({
   disabled = false,
   id,
   models,
+  local,
   onChange,
   value,
+  write,
   'aria-describedby': describedBy,
 }: ModelSelectProps) {
   const listed = value === '' || models.some(model => model.id === value);
   const [custom, setCustom] = useState(!listed);
   const customId = useId();
+  const noteId = useId();
+  const described = [describedBy, localNote(local) === null ? undefined : noteId]
+    .filter(part => part !== undefined)
+    .join(' ');
   const typed = value.trim();
   const problem = custom && typed.length > 0 && !CUSTOM_MODEL_ID.test(typed);
   const defaultName = nameOf(models, defaultModel);
   return (
     <>
       <select
-        aria-describedby={describedBy}
+        aria-describedby={described === '' ? undefined : described}
         className="kt-input w-full"
         disabled={disabled}
         id={id}
@@ -100,6 +115,7 @@ export function ModelSelect({
         )}
         {customIds ? <option value={CUSTOM}>Custom id…</option> : null}
       </select>
+      <LocalModelsNote id={noteId} local={local} {...(write === undefined ? {} : { write })} />
       {custom ? (
         <>
           <input
