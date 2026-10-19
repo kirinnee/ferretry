@@ -36,6 +36,7 @@
  *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
+ *   bun harness/screenshot.ts --viewport=mobile [--light]   # one viewport alone; a bare run forks one per viewport
  */
 
 import { spawnSync } from 'node:child_process';
@@ -111,6 +112,17 @@ const FILES_ONLY = process.argv.includes('--files-only');
 const PAIRING_FAILURES_ONLY = process.argv.includes('--pairing-failures-only');
 /** Just the session page's layout geometry (`session-layout-geometry.ts`), capturing its evidence frames. */
 const SESSION_LAYOUT_ONLY = process.argv.includes('--session-layout-only');
+/**
+ * `--viewport=<mobile|desktop>`: walk ONE viewport and report its tallies instead of asserting them.
+ *
+ * A run with no `--viewport` walks both at once as two child processes of itself, and holds their summed
+ * tallies to the same constants a one-process walk owed. One after the other the two walks were ~2.5
+ * minutes each, and the full gallery was the CI critical path. Processes rather than concurrent pages
+ * in this one: the passes share nothing but a static server, and a process apiece keeps the walk below
+ * exactly as it reads. `--prebuilt` is how the parent tells its children the bundle is already built.
+ */
+const VIEWPORT_ONLY = process.argv.find(arg => arg.startsWith('--viewport='))?.slice('--viewport='.length);
+const PREBUILT = process.argv.includes('--prebuilt');
 
 /**
  * Whether this invocation walks the Settings block at all, which decides which tally it owes.
@@ -1855,18 +1867,51 @@ if (process.argv.includes('--landing-only')) {
   process.exit(0);
 }
 
-process.stdout.write('📦 bundling the harness page…\n');
-run('bun', ['build', 'harness/main.tsx', '--outdir', 'harness/out', '--target', 'browser']);
+if (VIEWPORT_ONLY !== undefined && !VIEWPORTS.some(viewport => viewport.name === VIEWPORT_ONLY))
+  fail(`--viewport=${VIEWPORT_ONLY} names no viewport; the harness walks ${VIEWPORTS.map(v => v.name).join(' and ')}`);
 
-process.stdout.write('🎨 compiling the design system…\n');
-run('./node_modules/.bin/tailwindcss', [
-  '--config',
-  'tailwind.config.ts',
-  '--input',
-  'src/styles/index.css',
-  '--output',
-  'harness/out/app.css',
-]);
+if (!PREBUILT) {
+  process.stdout.write('📦 bundling the harness page…\n');
+  run('bun', ['build', 'harness/main.tsx', '--outdir', 'harness/out', '--target', 'browser']);
+
+  process.stdout.write('🎨 compiling the design system…\n');
+  run('./node_modules/.bin/tailwindcss', [
+    '--config',
+    'tailwind.config.ts',
+    '--input',
+    'src/styles/index.css',
+    '--output',
+    'harness/out/app.css',
+  ]);
+}
+
+/**
+ * One viewport's walk in a child process of this run, its output passed through a whole line at a time
+ * so two walks interleave readably. Resolves to the child's tallies; a child that fails, or exits without
+ * reporting them, fails this run, because a walk that stopped early is the failure the tallies exist for.
+ */
+const walkInChild = async (name: string): Promise<readonly [number, number, number]> => {
+  const child = Bun.spawn([process.execPath, Bun.main, ...process.argv.slice(2), `--viewport=${name}`, '--prebuilt'], {
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
+  process.on('exit', () => child.kill());
+  const decoder = new TextDecoder();
+  let pending = '';
+  let tally: RegExpExecArray | null = null;
+  for await (const chunk of child.stdout) {
+    const lines = (pending + decoder.decode(chunk, { stream: true })).split('\n');
+    pending = lines.pop() ?? '';
+    for (const line of lines) {
+      tally = /^🧮 viewport tally: sideways=(\d+) machines=(\d+) terminal=(\d+)$/u.exec(line) ?? tally;
+      process.stdout.write(`${line}\n`);
+    }
+  }
+  const code = await child.exited;
+  if (code !== 0) fail(`the ${name} viewport walk exited ${code}`);
+  if (tally === null) fail(`the ${name} viewport walk exited 0 without reporting its tally`);
+  return [Number(tally[1]), Number(tally[2]), Number(tally[3])];
+};
 
 /**
  * THE GALLERY RUNS UNDER THE SHIPPED TRUSTED TYPES RULE (docs/cross-daemon.md §2b). The two directives
@@ -1914,7 +1959,7 @@ const watchTrustedTypes = (page: Page): void => {
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const path = new URL(request.url).pathname;
     if (path === '/')
       return new Response(Bun.file(join(harnessDir, 'index.html')), {
@@ -1933,7 +1978,10 @@ const server = Bun.serve({
       return new Response(Bun.file(join(packageDir, 'public/oauth/mcp-callback.js')), {
         headers: { 'content-type': 'text/javascript; charset=utf-8' },
       });
-    return new Response(Bun.file(join(outDir, path)));
+    // A 404, never a Response over a file that is not there: Bun answers that with a 500 AND marks the
+    // whole process failed, so a stray `/favicon.ico` from Chrome turned a fully green run red at exit.
+    const file = Bun.file(join(outDir, path));
+    return (await file.exists()) ? new Response(file) : new Response(null, { status: 404 });
   },
 });
 
@@ -1946,9 +1994,12 @@ try {
   const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
   if (chrome === null) fail('no system Chrome or Chromium found');
 
+  // Both viewports in child processes, started before this process does its own share: the session
+  // layout pass, which the children leave to it.
+  const children = VIEWPORT_ONLY === undefined && !SESSION_LAYOUT_ONLY ? VIEWPORTS.map(v => walkInChild(v.name)) : [];
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of SESSION_LAYOUT_ONLY ? [] : VIEWPORTS) {
+    for (const viewport of VIEWPORTS.filter(v => v.name === VIEWPORT_ONLY)) {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -3843,8 +3894,8 @@ try {
     }
 
     // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
-    // every theme family. Its own contexts and viewports, so it runs after both viewport passes.
-    const owesSessionLayout = WALKS_SETTINGS || SESSION_LAYOUT_ONLY;
+    // every theme family. Its own contexts and viewports, so the parent runs it while its children walk.
+    const owesSessionLayout = (WALKS_SETTINGS || SESSION_LAYOUT_ONLY) && VIEWPORT_ONLY === undefined;
     const sessionLayoutChecks = owesSessionLayout
       ? await runSessionLayoutGeometry({
           browser,
@@ -3865,13 +3916,26 @@ try {
         `✅ session layout geometry checks: ${sessionLayoutChecks}/${SESSION_LAYOUT_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
 
+    // A one-viewport child reports its share and leaves the judging to its parent, which adds every
+    // child's share to its own and is then held to exactly what one process walking both viewports owed.
+    const judged = VIEWPORT_ONLY === undefined;
+    if (!judged)
+      process.stdout.write(
+        `🧮 viewport tally: sideways=${sidewaysChecks} machines=${machinesGeometryChecks} terminal=${terminalGeometryChecks}\n`,
+      );
+    for (const [sideways, machines, terminal] of await Promise.all(children)) {
+      sidewaysChecks += sideways;
+      machinesGeometryChecks += machines;
+      terminalGeometryChecks += terminal;
+    }
+
     // THE CLOSING LINE, and the only one the CI script insists on. It is reached after both viewports
     // have completed, so a run that died halfway prints nothing here and the job goes red on a
     // missing sentinel rather than on a green summary nobody re-reads. A tally that is short is the
     // same failure as an assertion that broke: in both cases a surface this gate is supposed to be
     // measuring was not measured.
     const owed = WALKS_SETTINGS ? SETTINGS_SIDEWAYS_CHECKS : 0;
-    if (sidewaysChecks !== owed)
+    if (judged && sidewaysChecks !== owed)
       fail(
         `the run made ${sidewaysChecks} sideways-scroll checks instead of the ${owed} this mode owes — ` +
           (WALKS_SETTINGS
@@ -3882,27 +3946,27 @@ try {
               `skips Settings cleanly`),
       );
     const owedGeometry = WALKS_SETTINGS ? MACHINES_GEOMETRY_CHECKS : 0;
-    if (machinesGeometryChecks !== owedGeometry)
+    if (judged && machinesGeometryChecks !== owedGeometry)
       fail(
         `the run made ${machinesGeometryChecks} Machines geometry checks instead of the ${owedGeometry} this mode ` +
           `owes — a Machines frame was added, removed or skipped, so either restore the call site or update ` +
           `MACHINES_GEOMETRY_CHECKS and say in the pull request which frames the gate covers now`,
       );
-    if (WALKS_SETTINGS)
+    if (WALKS_SETTINGS && judged)
       process.stdout.write(
         `✅ settings sideways-scroll checks: ${sidewaysChecks}/${SETTINGS_SIDEWAYS_CHECKS} in ${SCHEME}\n`,
       );
     const owedTerminal = WALKS_SETTINGS ? TERMINAL_GEOMETRY_CHECKS : 0;
-    if (terminalGeometryChecks !== owedTerminal)
+    if (judged && terminalGeometryChecks !== owedTerminal)
       fail(
         `the run made ${terminalGeometryChecks} terminal geometry checks instead of the ${owedTerminal} this mode ` +
           `owes — a theme family was skipped or the loop ended early`,
       );
-    if (WALKS_SETTINGS)
+    if (WALKS_SETTINGS && judged)
       process.stdout.write(
         `✅ machines geometry checks: ${machinesGeometryChecks}/${MACHINES_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
-    if (WALKS_SETTINGS)
+    if (WALKS_SETTINGS && judged)
       process.stdout.write(
         `✅ terminal geometry checks: ${terminalGeometryChecks}/${TERMINAL_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
