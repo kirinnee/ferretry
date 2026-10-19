@@ -210,12 +210,14 @@ export function buildAssignedWardenPrompt(
       ? [
           `- NUDGE — \`${cli} send ${id} <message>\` if it looks wedged but recoverable.`,
           `- RESUME — \`${cli} resume ${id}\` if the turn is dead but the session should continue.`,
+          '  If its PROCESS is dead or frozen rather than just its turn, recommend RESTART: it is relaunched with its conversation intact.',
           `- KILL — \`${cli} stop ${id}\` ONLY with clear evidence it is burning time with no progress.`,
           '  (Your credential can stop only this one assigned session.)',
         ]
       : [
           '- NUDGE — it looks wedged but recoverable; recommend a nudge and say what to send.',
           '- RESUME — the turn is dead but the session should continue.',
+          '  If its PROCESS is dead or frozen rather than just its turn, recommend RESTART: it is relaunched with its conversation intact.',
           '- KILL — clear evidence it is burning time with no progress. Recommend STOP; do not attempt it.',
         ]),
     '- NEEDS_HUMAN — the rare exception: use it only when you are genuinely uncertain whether KILL would destroy needed work or cause irreversible harm. State that exact uncertainty; never use it merely because acting feels risky.',

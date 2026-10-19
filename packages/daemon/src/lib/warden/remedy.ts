@@ -21,6 +21,8 @@ import type { WardenRecommendation, WardenVerdictKind } from './verdicts.ts';
 export interface WardenRemedyPort {
   nudge(sessionId: string, message: string): Promise<void>;
   resume(sessionId: string): Promise<void>;
+  /** Relaunch a dead or frozen process with its conversation intact, even over a pane that looks alive. */
+  restart(sessionId: string): Promise<void>;
   stop(sessionId: string, reason: string): Promise<void>;
   failover(sessionId: string, agent: string): Promise<void>;
 }
@@ -33,6 +35,7 @@ export type WardenVerdictAct =
 const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless'>, string>> = {
   nudge: 'it looks wedged but recoverable',
   resume: 'its turn died but the work should continue',
+  restart: 'its process is dead or frozen',
   stop: 'it is burning time with no progress',
   failover: 'its login is out of quota',
 };
@@ -40,9 +43,9 @@ const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless'>, strin
 /**
  * The act an explicit verdict asks for, or `undefined` for a verdict that asks for none.
  *
- * `structured` is the marker's verdict and nothing else. A `MIGRATE (agent)` recommendation is the one
- * act no verdict word names, so it is read from the recommendation line — but only alongside a marker,
- * and only when it names the account to move to.
+ * `structured` is the marker's verdict and nothing else. `MIGRATE (agent)` and `RESTART` are the acts no
+ * verdict word names, so they are read from the recommendation line — but only alongside a marker that
+ * is not a clear, and a migration only when it names the account to move to.
  */
 export function verdictAct(
   structured: WardenVerdictKind | undefined,
@@ -53,6 +56,8 @@ export function verdictAct(
     recommendation?.reason !== undefined && recommendation.reason.trim() !== '' ? recommendation.reason : fallback;
   if (recommendation?.action === 'migrate' && recommendation.agent !== undefined && structured !== 'cleared')
     return { action: 'failover', agent: recommendation.agent, reason: reason(DEFAULT_REASONS.failover) };
+  if (recommendation?.action === 'restart' && structured !== 'cleared')
+    return { action: 'restart', reason: reason(DEFAULT_REASONS.restart) };
   switch (structured) {
     case 'nudged':
       return { action: 'nudge', reason: reason(DEFAULT_REASONS.nudge) };
@@ -78,6 +83,7 @@ export function wardenNudgeMessage(reason: string): string {
 const PAST: Readonly<Record<WardenVerdictAct['action'], string>> = {
   nudge: 'Nudged',
   resume: 'Resumed',
+  restart: 'Restarted with its conversation intact',
   stop: 'Stopped',
   failover: 'Moved to another login',
 };
@@ -85,6 +91,7 @@ const PAST: Readonly<Record<WardenVerdictAct['action'], string>> = {
 const ASKS: Readonly<Record<WardenVerdictAct['action'], string>> = {
   nudge: 'The Warden recommends a nudge',
   resume: 'The Warden recommends resuming it',
+  restart: 'The Warden recommends restarting it with its conversation intact',
   stop: 'The Warden recommends stopping it',
   failover: 'The Warden recommends moving it to another login',
 };

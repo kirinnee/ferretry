@@ -654,6 +654,7 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
+  resolveResumePolicy,
   SessionPermissionService,
   SessionPlanner,
   SessionProvenanceRecorder,
@@ -3135,6 +3136,16 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         },
         resume: async sessionId => {
           await parts.resume.resume({ id: parseSessionId(sessionId), actor: 'warden' });
+        },
+        // A restart is the resume path told to replace the pane even when it looks alive: a frozen process
+        // is still "alive", and typing into it would hand the turn to the very thing that is stuck. The
+        // conversation is resumed in the new process, and the warden policy keeps every automatic guard.
+        restart: async sessionId => {
+          await parts.resume.resume({
+            id: parseSessionId(sessionId),
+            actor: 'warden',
+            policy: { ...resolveResumePolicy('warden'), replaceLiveTerminal: true },
+          });
         },
         stop: async (sessionId, reason) => {
           await parts.control.stop(sessionId, reason);

@@ -190,6 +190,7 @@ export function harness(
     remedies: {
       nudge: async (sessionId, message) => remedy('nudge', sessionId, message),
       resume: async sessionId => remedy('resume', sessionId, ''),
+      restart: async sessionId => remedy('restart', sessionId, ''),
       stop: async (sessionId, reason) => remedy('stop', sessionId, reason),
       failover: async (sessionId, agent) => remedy('failover', sessionId, agent),
     },

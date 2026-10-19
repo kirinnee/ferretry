@@ -262,7 +262,7 @@ describe('mergeWardenConfig', () => {
 
     // Assert
     should(actual.layers).deepEqual({ jev: true, llm: false });
-    should(actual.mayActAlone).deepEqual({ nudge: true, resume: true, failover: true, stop: true });
+    should(actual.mayActAlone).deepEqual({ nudge: true, resume: true, restart: true, failover: true, stop: true });
     should(actual.caps).deepEqual({ jevUsdPerDay: 1, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 });
     should(actual.guard).deepEqual(DEFAULT_WARDEN_CONFIG.guard);
   });
@@ -313,7 +313,7 @@ describe('legacy triage', () => {
     const value = { triage: 'jev', layers: { llm: false } };
 
     // Act
-    const actual = warden.migrateLegacyWardenTriage(value);
+    const actual = warden.migrateLegacyWardenSettings(value);
 
     // Assert
     should(actual).deepEqual({ layers: { jev: true, llm: false } });
@@ -324,7 +324,7 @@ describe('legacy triage', () => {
     const values = [undefined, 'jev', [1], { layers: { jev: true } }, { triage: 'ai' }];
 
     // Act
-    const actual = values.map(warden.migrateLegacyWardenTriage);
+    const actual = values.map(warden.migrateLegacyWardenSettings);
 
     // Assert
     should(actual).deepEqual(values);
@@ -368,5 +368,23 @@ describe('legacy triage', () => {
 
     // Assert
     should(actual).deepEqual([['investigation'], []]);
+  });
+});
+
+describe('settings from before restart', () => {
+  it('should give restart the owner’s answer for resume, and keep one already stated', () => {
+    // Arrange
+    const { mayActAlone, ...rest } = wardenConfig;
+    const { restart: _restart, ...older } = mayActAlone;
+
+    // Act
+    const off = warden.WardenConfigSchema.parse({ ...rest, mayActAlone: { ...older, resume: false } });
+    const stated = warden.migrateLegacyWardenSettings({ mayActAlone: { resume: false, restart: true } });
+    const absent = warden.migrateLegacyWardenSettings({ mayActAlone: { nudge: true } });
+
+    // Assert
+    should(off.mayActAlone).match({ resume: false, restart: false });
+    should(stated).deepEqual({ mayActAlone: { resume: false, restart: true } });
+    should(absent).deepEqual({ mayActAlone: { nudge: true } });
   });
 });

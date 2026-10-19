@@ -134,7 +134,10 @@ through the outbound holder ([docs/secrets.md](secrets.md)); `guard.endpoint` ca
 Investigations run on your own login and read the transcript, pane, diffs and CI. The rules send nothing.
 
 **Only an investigation acts.** Its explicit `Verdict:` line is what acts — never prose — and only as far as
-`mayActAlone` allows: `nudge`, `resume` and `failover` default on, **`stop` defaults off**. An act it may not
+`mayActAlone` allows: `nudge`, `resume`, `restart` and `failover` default on, **`stop` defaults off**.
+`restart` relaunches a dead or frozen process with its conversation intact — the resume path, replacing a
+pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
+`restart` gives `restart` the same answer. An act it may not
 do alone is held and listed under Needs you for you to decide. Every act and every Jev skip is listed under
 Recent actions with who decided it.
 

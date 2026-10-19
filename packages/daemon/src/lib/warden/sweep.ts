@@ -1497,6 +1497,7 @@ export class WardenSweepService {
       if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
       else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, wardenNudgeMessage(act.reason));
       else if (act.action === 'resume') await this.ports.remedies.resume(targetId);
+      else if (act.action === 'restart') await this.ports.remedies.restart(targetId);
       else await this.ports.remedies.stop(targetId, `Warden verdict: ${act.reason}`);
     } catch (error) {
       const message = failureMessage(error);
