@@ -120,13 +120,46 @@ type Reply =
     }
   };
 
-  const reportHeight = (): void => send({ height: bounded(root.scrollHeight), kind: 'height' });
+  const styleOf = getComputedStyle;
+  /**
+   * THE PAGE'S OWN HEIGHT, measured from the body rather than the root. A root's
+   * `scrollHeight` is never less than the frame's viewport, so a page shorter
+   * than the frame's first size would be reported at that size forever and sit
+   * on a band of empty background.
+   */
+  const pageHeight = (): number => {
+    const rect = body.getBoundingClientRect();
+    const margin = Number.parseFloat(styleOf(body).marginBottom) || 0;
+    const measured = rect.bottom + margin;
+    return measured > body.scrollHeight ? measured : body.scrollHeight;
+  };
+  const reportHeight = (): void => send({ height: bounded(pageHeight()), kind: 'height' });
 
-  const renderHtml = (source: unknown, theme: unknown): void => {
+  /**
+   * THE APP'S PAINT AS THE PAGE'S DEFAULT, so a frameless page reads as part of
+   * the message: background, text colour and font, set on the root where any
+   * author stylesheet overrides them. Each is a short string handed to
+   * `setProperty`, which ignores a value that does not parse — and none of the
+   * three properties can name a URL, so a value is paint and nothing else.
+   */
+  const applyPaint = (paint: unknown): void => {
+    if (paint === null || typeof paint !== 'object') return;
+    const value = paint as { background?: unknown; color?: unknown; font?: unknown; scheme?: unknown };
+    const set = (property: string, text: unknown): void => {
+      if (typeof text === 'string' && text.length > 0 && text.length <= 300) root.style.setProperty(property, text);
+    };
+    if (value.scheme === 'dark' || value.scheme === 'light') root.style.colorScheme = value.scheme;
+    set('background-color', value.background);
+    set('color', value.color);
+    set('font-family', value.font);
+  };
+
+  const renderHtml = (source: unknown, theme: unknown, paint: unknown): void => {
     if (typeof source !== 'string') return send({ class: 'render', kind: 'error', message: 'The page was not text.' });
     // The reader's mode, as the page's DEFAULT — `Canvas`/`CanvasText` follow it,
     // and an author stylesheet overrides it like any other user-agent default.
     root.style.colorScheme = theme === 'dark' ? 'dark' : 'light';
+    applyPaint(paint);
 
     // Escape is forwarded from a CAPTURE listener registered before any author
     // code exists, so a page cannot swallow the one key that leaves fullscreen.
@@ -156,18 +189,24 @@ type Reply =
     dispatchOnDocument(new Event('DOMContentLoaded', { bubbles: true }));
     dispatchOnWindow(new Event('load'));
 
-    if (Observer !== null) new Observer(reportHeight).observe(root);
+    if (Observer !== null) {
+      const observer = new Observer(reportHeight);
+      observer.observe(root);
+      observer.observe(body);
+    }
     reportHeight();
-    send({ height: bounded(root.scrollHeight), kind: 'rendered', width: bounded(root.scrollWidth) });
+    send({ height: bounded(pageHeight()), kind: 'rendered', width: bounded(root.scrollWidth) });
   };
 
   const onCommand = (event: MessageEvent): void => {
     const data: unknown = event.data;
-    if (data === null || typeof data !== 'object' || consumed) return;
-    const command = data as { kind?: unknown; source?: unknown; theme?: unknown };
-    if (command.kind !== 'render-html') return;
+    if (data === null || typeof data !== 'object') return;
+    const command = data as { kind?: unknown; source?: unknown; theme?: unknown; paint?: unknown };
+    // A repaint follows the reader's theme for as long as the page runs.
+    if (command.kind === 'paint') return applyPaint(command.paint);
+    if (command.kind !== 'render-html' || consumed) return;
     consumed = true;
-    renderHtml(command.source, command.theme);
+    renderHtml(command.source, command.theme, command.paint);
   };
 
   const onGlobalMessage = (event: MessageEvent): void => {

@@ -34,15 +34,16 @@
  * bundle only says which one is listening.
  */
 
-import { useMachineVoiceEngine } from '../features/fleet/setup/voice-default.ts';
 import type { IFyApiClient } from '@ferretry/protocol';
 import { Mic } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMachineVoiceEngine } from '../features/fleet/setup/voice-default.ts';
 import {
   type DictationShortcutBinding,
   dictationShortcutAria,
   dictationShortcutLabel,
 } from '../features/settings/dictation-shortcut.ts';
+import { useMachineVoiceCleanup } from '../features/settings/use-machine-voice-cleanup.ts';
 import {
   type DictationDraftResult,
   type DictationHandle,
@@ -55,7 +56,7 @@ import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
-import type { SttSettings } from '../lib/stt/stt-settings.ts';
+import { isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
 import { DictationSheet, type DictationStage, dictationStage } from './dictation-sheet.tsx';
@@ -190,6 +191,9 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   } = props;
   // A device that has not picked an engine dictates with its machine's default (voice.yaml), if it names one.
   const machineEngine = useMachineVoiceEngine(deviceSettings.engine === null ? props.daemon : undefined);
+  const voiceCleanup = useMachineVoiceCleanup(
+    isRemoteEnhancementProvider(deviceSettings.enhancementProvider) ? props.daemon : undefined,
+  ).cleanup;
   const settings = useMemo(
     () =>
       deviceSettings.engine === null && machineEngine !== null
@@ -237,6 +241,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     draft,
     ...(props.selectionRef === undefined ? {} : { selectionRef: props.selectionRef }),
     settings,
+    voiceCleanup,
     ...(props.recognition === undefined ? {} : { recognition: props.recognition }),
     ...(props.meter === undefined ? {} : { meter: props.meter }),
     ...(props.enhancementFetch === undefined ? {} : { enhancementFetch: props.enhancementFetch }),

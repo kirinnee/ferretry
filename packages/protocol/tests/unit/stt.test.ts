@@ -233,6 +233,11 @@ describe('stt schemas', () => {
         value: { ...enhancementResult, text: 'a'.repeat(16_001) },
       },
       {
+        name: 'result kept for any reason but the raw transcript',
+        schema: stt.SttEnhancementResultSchema,
+        value: { ...enhancementResult, kept: 'cleaned' },
+      },
+      {
         name: 'result without a model',
         schema: stt.SttEnhancementResultSchema,
         value: { ...enhancementResult, model: '' },
