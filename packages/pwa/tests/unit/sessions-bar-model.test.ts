@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  isRunning,
+  DEFAULT_LIST_FILTER,
+  isStopped,
+  listTallies,
+  matchesMode,
   needsYou,
   sessionsBarDirectory,
   sessionsBarSubline,
@@ -34,14 +37,34 @@ describe('who needs the reader', () => {
     expect(needsYou(sessionView('c', { state: { status: 'completed', needsHuman: 'stale ask' } }))).toBe(false);
   });
 
-  test('running is the status mark’s own active class', () => {
-    expect(isRunning(sessionView('a'))).toBe(true);
-    expect(isRunning(sessionView('b', { state: { status: 'waiting' } }))).toBe(false);
-    expect(isRunning(sessionView('c', { state: { status: 'completed' } }))).toBe(false);
+  test('stopped is the status mark’s own finished class, kill_failed included', () => {
+    expect(isStopped(sessionView('a'))).toBe(false);
+    expect(isStopped(sessionView('b', { state: { status: 'waiting' } }))).toBe(false);
+    for (const status of ['completed', 'failed', 'stalled', 'stopped', 'kill_failed'] as const)
+      expect(isStopped(sessionView(status, { state: { status } }))).toBe(true);
+  });
+
+  test('a kind of session is its mode; All is every mode', () => {
+    const agent = sessionView('a', { config: { mode: 'auto' } });
+    const person = sessionView('p', { config: { mode: 'interactive' } });
+    expect([agent, person].map(view => matchesMode(view, 'all'))).toEqual([true, true]);
+    expect([agent, person].map(view => matchesMode(view, 'auto'))).toEqual([true, false]);
+    expect([agent, person].map(view => matchesMode(view, 'interactive'))).toEqual([false, true]);
   });
 });
 
+const SHOW_STOPPED = { ...DEFAULT_LIST_FILTER, showStopped: true };
+
 describe('which sessions the bar lists', () => {
+  test('stopped sessions are hidden by default, however recently they stopped', () => {
+    const alive = sessionView('alive');
+    const done = sessionView('done', { state: { status: 'completed', lastActivityAt: ago(1_000) } });
+    const view = sessionsBarView([alive, done], [], DEFAULT_LIST_FILTER);
+    expect(view.groups.flatMap(group => group.rows.map(row => row.config.id))).toEqual(['alive']);
+    expect(view.counts.all).toBe(1);
+    expect(view.hiddenStopped).toBe(1);
+  });
+
   test('every session, however long ago it finished — nothing is cut by age', () => {
     const alive = sessionView('alive', { state: { lastActivityAt: ago(10 * DAY) } });
     const old = sessionView('old', { state: { status: 'completed', lastActivityAt: ago(30 * DAY) } });
@@ -50,8 +73,9 @@ describe('which sessions the bar lists', () => {
       state: { status: 'stopped', lastActivityAt: undefined as never },
     });
 
-    const view = sessionsBarView([alive, old, undated], [], 'all');
+    const view = sessionsBarView([alive, old, undated], [], SHOW_STOPPED);
     expect(view.counts.all).toBe(3);
+    expect(view.hiddenStopped).toBe(0);
     expect(view.groups.flatMap(group => group.rows.map(row => row.config.id)).sort()).toEqual([
       'alive',
       'old',
@@ -59,14 +83,17 @@ describe('which sessions the bar lists', () => {
     ]);
   });
 
-  test('groups by project, newest first, and counts each filter over the same pool', () => {
+  test('groups by project, newest first, and counts each kind over the same pool', () => {
     const sessions = [
       sessionView('a', { config: { cwd: '/work/ferretry' }, state: { lastActivityAt: ago(5_000) } }),
       sessionView('b', {
         config: { cwd: '/work/ferretry/packages' },
         state: { status: 'awaiting_user', lastActivityAt: ago(1_000) },
       }),
-      sessionView('c', { config: { cwd: '/work/nitroso' }, state: { status: 'waiting', lastActivityAt: ago(2_000) } }),
+      sessionView('c', {
+        config: { cwd: '/work/nitroso', mode: 'interactive' },
+        state: { status: 'waiting', lastActivityAt: ago(2_000) },
+      }),
       sessionView('gone', {
         config: { cwd: '/work/nitroso' },
         state: { status: 'completed', lastActivityAt: ago(3 * DAY) },
@@ -74,17 +101,38 @@ describe('which sessions the bar lists', () => {
     ];
     const projects = [{ name: 'ferretry', path: '/work/ferretry' }];
 
-    const all = sessionsBarView(sessions, projects, 'all');
-    expect(all.counts).toEqual({ all: 4, 'needs-you': 1, running: 1 });
+    const all = sessionsBarView(sessions, projects, SHOW_STOPPED);
+    expect(all.counts).toEqual({ all: 4, auto: 3, interactive: 1 });
     expect(all.groups.map(group => [group.name, group.rows.map(row => row.config.id)])).toEqual([
       ['ferretry', ['b', 'a']],
       ['nitroso', ['c', 'gone']],
     ]);
 
-    expect(sessionsBarView(sessions, projects, 'needs-you').groups.map(group => group.name)).toEqual(['ferretry']);
-    expect(
-      sessionsBarView(sessions, projects, 'running').groups.flatMap(group => group.rows.map(row => row.config.id)),
-    ).toEqual(['a']);
+    const interactive = sessionsBarView(sessions, projects, { ...SHOW_STOPPED, mode: 'interactive' });
+    expect(interactive.groups.flatMap(group => group.rows.map(row => row.config.id))).toEqual(['c']);
+    // Choosing a kind never changes what the other segments say they would show.
+    expect(interactive.counts).toEqual(all.counts);
+    const agents = sessionsBarView(sessions, projects, { mode: 'auto', showStopped: false });
+    expect(agents.groups.flatMap(group => group.rows.map(row => row.config.id))).toEqual(['b', 'a']);
+    expect(agents.counts).toEqual({ all: 3, auto: 2, interactive: 1 });
+  });
+
+  test('"Show stopped" counts the stopped sessions of the kind chosen, and the open one stays listed', () => {
+    const sessions = [
+      sessionView('live'),
+      sessionView('agent-done', { state: { status: 'completed' } }),
+      sessionView('person-done', { config: { mode: 'interactive' }, state: { status: 'stopped' } }),
+    ];
+    expect(listTallies(sessions, DEFAULT_LIST_FILTER).hiddenStopped).toBe(2);
+    expect(listTallies(sessions, { mode: 'auto', showStopped: false }).hiddenStopped).toBe(1);
+    expect(listTallies(sessions, { mode: 'interactive', showStopped: false }).hiddenStopped).toBe(1);
+    expect(listTallies(sessions, SHOW_STOPPED).hiddenStopped).toBe(0);
+
+    const open = (view: (typeof sessions)[number]) => view.config.id === 'agent-done';
+    const kept = sessionsBarView(sessions, [], DEFAULT_LIST_FILTER, open);
+    expect(kept.groups.flatMap(group => group.rows.map(row => row.config.id)).sort()).toEqual(['agent-done', 'live']);
+    expect(kept.counts.all).toBe(2);
+    expect(kept.hiddenStopped).toBe(1);
   });
 
   test('the line under a name is the task, else its name, else its folder', () => {

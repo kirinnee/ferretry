@@ -111,7 +111,8 @@ describe('allMachinesView', () => {
     expect(studio?.groups.flatMap(group => group.rows.map(row => row.config.id))).toEqual(['b']);
     expect(view.machines[1]?.groups).toEqual([]);
     // The human flag rides on a running session, so it counts as both.
-    expect(view.counts).toEqual({ all: 4, 'needs-you': 3, running: 2 });
+    expect(view.counts).toEqual({ all: 4, auto: 4, interactive: 0 });
+    expect(view.hiddenStopped).toBe(0);
     expect(view.total).toBe(4);
     expect(view.loaded).toBe(true);
   });
@@ -134,18 +135,36 @@ describe('allMachinesView', () => {
     expect(allMachinesView([machine(STUDIO, [])]).machines[0]?.readAt).toBeNull();
   });
 
-  test('a chip other than All shows only the machines it found something on; select narrows first', () => {
-    const parked = sessionView('l', { state: { status: 'awaiting_user' } });
-    const machines = [machine(STUDIO, [busy, you]), machine(LAPTOP, [parked], 'offline')];
-    const running = allMachinesView(machines, { filter: 'running' });
-    expect(running.machines.map(section => section.daemonId)).toEqual([STUDIO]);
-    expect(running.needsYou).toEqual([]);
-    const waiting = allMachinesView(machines, { filter: 'needs-you' });
-    expect(waiting.needsYou.map(entry => entry.view.config.id)).toEqual(['y']);
-    expect(waiting.machines.map(section => section.daemonId)).toEqual([STUDIO, LAPTOP]);
+  test('a kind other than All shows only the machines it found something on; select narrows first', () => {
+    const person = sessionView('p', { config: { mode: 'interactive' }, state: { status: 'awaiting_user' } });
+    const machines = [machine(STUDIO, [busy, you]), machine(LAPTOP, [person], 'offline')];
+    const agents = allMachinesView(machines, { filter: { mode: 'auto', showStopped: true } });
+    expect(agents.machines.map(section => section.daemonId)).toEqual([STUDIO]);
+    expect(agents.needsYou.map(entry => entry.view.config.id)).toEqual(['y']);
+    const people = allMachinesView(machines, { filter: { mode: 'interactive', showStopped: true } });
+    expect(people.needsYou).toEqual([]);
+    expect(people.machines.map(section => section.daemonId)).toEqual([LAPTOP]);
+    const everyone = allMachinesView(machines, { filter: { mode: 'all', showStopped: true } });
+    expect(everyone.machines.map(section => section.daemonId)).toEqual([STUDIO, LAPTOP]);
     const narrowed = allMachinesView(machines, { select: sessions => sessions.filter(view => view.config.id !== 'y') });
     expect(narrowed.total).toBe(2);
     expect(narrowed.needsYou.map(entry => entry.view.config.id)).toEqual([]);
+  });
+
+  test('hides stopped sessions across machines until asked, and keeps the open one of ITS machine', () => {
+    const done = sessionView('same-id', { state: { status: 'completed' } });
+    const machines = [machine(STUDIO, [busy, done]), machine(LAPTOP, [done])];
+    const hidden = allMachinesView(machines, { filter: { mode: 'all', showStopped: false } });
+    expect(hidden.counts.all).toBe(1);
+    expect(hidden.hiddenStopped).toBe(2);
+    expect(hidden.machines.map(section => section.groups.length)).toEqual([1, 0]);
+    const keepStudios = allMachinesView(machines, {
+      filter: { mode: 'all', showStopped: false },
+      keep: (daemonId, view) => daemonId === STUDIO && view.config.id === 'same-id',
+    });
+    expect(keepStudios.counts.all).toBe(2);
+    expect(keepStudios.hiddenStopped).toBe(1);
+    expect(keepStudios.machines.map(section => section.total)).toEqual([2, 0]);
   });
 
   test('reads as loading until any machine has answered', () => {
