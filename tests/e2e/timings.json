@@ -1,7 +1,7 @@
 {
   "tests/e2e/attention-lifecycle.e2e.test.ts": {
-    "attention lifecycle against a real fyd (E2E) > dismisses a multiple-choice item and keeps it in the audit with its note": 3,
-    "attention lifecycle against a real fyd (E2E) > raises, lists, answers, and audits an attention item through the live session registry": 3.3
+    "attention lifecycle against a real fyd (E2E) > dismisses a multiple-choice item and keeps it in the audit with its note": 3.2,
+    "attention lifecycle against a real fyd (E2E) > raises, lists, answers, and audits an attention item through the live session registry": 3.6
   },
   "tests/e2e/browser-cors-preflight.e2e.test.ts": {
     "a real browser at another origin, and a compiled daemon > should let a cross-origin page send the request-id header and refuse a lookalike": 1.3
@@ -9,12 +9,12 @@
   "tests/e2e/command-groups.e2e.test.ts": {
     "command group journeys > should ask for a session id rather than acting on an unnamed board": 0.4,
     "command group journeys > should emit machine-readable output under --json": 0.4,
-    "command group journeys > should list a pin board through the shipped binary": 0.4,
+    "command group journeys > should list a pin board through the shipped binary": 0.5,
     "command group journeys > should push a notification through the shipped binary": 0.4,
     "command group journeys > should raise and answer an attention item through the shipped binary": 0.7,
     "command group journeys > should refuse to run without a daemon token instead of guessing one": 0.4,
     "command group journeys > should remove a pin named by the short id the listing printed": 0.4,
-    "command group journeys > should render an analytics table through the shipped binary": 0.4,
+    "command group journeys > should render an analytics table through the shipped binary": 0.5,
     "command group journeys > should report an unknown daemon route without a stack trace": 0.4
   },
   "tests/e2e/daemon-control.e2e.test.ts": {
@@ -22,66 +22,66 @@
     "daemon control journeys > should fail when the daemon does not answer, so a script can branch on it": 0.4,
     "daemon control journeys > should keep --help working on a host with no daemon, token, or executable": 0.4,
     "daemon control journeys > should report a serving daemon as a human summary": 0.4,
-    "daemon control journeys > should require a live executable only for the verbs that launch one": 1,
+    "daemon control journeys > should require a live executable only for the verbs that launch one": 0.9,
     "daemon control journeys > should say the log does not exist yet rather than print nothing": 0.4,
     "daemon control journeys > should stream the log it configured the service manager to write": 0.4
   },
   "tests/e2e/first-install.e2e.test.ts": {
-    "first install with the real daemon > should find a daemon whose bind is recorded in the carriers spelling": 1.5,
+    "first install with the real daemon > should find a daemon whose bind is recorded in the carriers spelling": 2,
     "first install with the real daemon > should import nothing on start, refuse setup without a terminal, and import claude by command": 6.6,
-    "first install with the real daemon > should keep serving after the terminal that started it has gone": 6.3
+    "first install with the real daemon > should keep serving after the terminal that started it has gone": 6.2
   },
   "tests/e2e/fresh-home-bootstrap.e2e.test.ts": {
-    "first-run daemon bootstrap > should boot after setup was attempted first, which is the order the reporter used": 4.3,
-    "first-run daemon bootstrap > should refuse a directory that is somebody else s, from both commands": 1.5,
-    "first-run daemon bootstrap > should refuse to start once the installed daemon is gone, rather than launch something else": 4.3,
-    "first-run daemon bootstrap > should repair a home provisioned before layout claims existed": 3.6,
+    "first-run daemon bootstrap > should boot after setup was attempted first, which is the order the reporter used": 4.4,
+    "first-run daemon bootstrap > should refuse a directory that is somebody else s, from both commands": 1.6,
+    "first-run daemon bootstrap > should refuse to start once the installed daemon is gone, rather than launch something else": 4.4,
+    "first-run daemon bootstrap > should repair a home provisioned before layout claims existed": 3.4,
     "first-run daemon bootstrap > should start a daemon against a state home that does not exist yet": 3.4,
-    "first-run daemon bootstrap > should start again on a home it has already initialized": 6.2,
-    "first-run daemon bootstrap > should start when logs already holds the log of a previous failed attempt": 3.3
+    "first-run daemon bootstrap > should start again on a home it has already initialized": 6.7,
+    "first-run daemon bootstrap > should start when logs already holds the log of a previous failed attempt": 4.4
   },
   "tests/e2e/harness.e2e.test.ts": {
     "isolated E2E harness > should accept safe relative and missing paths after resolving them": 0,
-    "isolated E2E harness > should allocate collision-free state, sockets, and ports for parallel journeys": 0.1,
+    "isolated E2E harness > should allocate collision-free state, sockets, and ports for parallel journeys": 0.2,
     "isolated E2E harness > should reject the live .ferretry state path before setup IO": 0,
     "isolated E2E harness > should reject the live .kteam state path before setup IO": 0,
     "isolated E2E harness > should run a declarative fake agent in isolated tmux and drive the compiled CLI": 0.5,
-    "isolated E2E harness > should start and stop a daemon stub and await a WebSocket event": 0.1,
+    "isolated E2E harness > should start and stop a daemon stub and await a WebSocket event": 0.2,
     "isolated E2E harness > should tear down tmux when a scoped journey fails": 0.1
   },
   "tests/e2e/product-journeys.e2e.test.ts": {
-    "access ends when it should, and the person is told > should cut a revoked device off at once, say so, and pair again": 41.4,
-    "access ends when it should, and the person is told > should expire a device left idle past the idle period and ask for a new pairing": 39.1,
+    "access ends when it should, and the person is told > should cut a revoked device off at once, say so, and pair again": 38.9,
+    "access ends when it should, and the person is told > should expire a device left idle past the idle period and ask for a new pairing": 45.4,
     "access ends when it should, and the person is told > should record that the lease, idle and session-cap durations have no test seam": 0,
-    "one browser, two machines > should hold two machines apart: separate pairings, separate sessions, revoking one leaves the other": 39.1,
-    "signing Claude Code in from the first run > should do the same over the local rendezvous when the direct address is unreachable": 11.1,
-    "signing Claude Code in from the first run > should sign the host Claude login in from the first run, link out and code back": 10.3,
-    "signing a harness in from the first run > should sign Codex in from the first run with the paste-a-link flow": 15.8,
-    "the product, from a fresh machine to a working session > should do all of it over the local rendezvous when the direct address is unreachable": 42.5,
-    "the product, from a fresh machine to a working session > should pair, set the machine up, run an agent, open a terminal, use a secret and change a setting": 54.9,
-    "the unlock model: passkeys, unlock, and who may loosen security > should re-lock on restart, tighten from the device, loosen only at the machine, and audit both": 15.8
+    "one browser, two machines > should hold two machines apart: separate pairings, separate sessions, revoking one leaves the other": 47,
+    "signing a harness in from the first run > should sign Codex in from the first run with the paste-a-link flow": 16.3,
+    "signing Claude Code in from the first run > should do the same over the local rendezvous when the direct address is unreachable": 11,
+    "signing Claude Code in from the first run > should sign the host Claude login in from the first run, link out and code back": 10,
+    "the product, from a fresh machine to a working session > should do all of it over the local rendezvous when the direct address is unreachable": 48.3,
+    "the product, from a fresh machine to a working session > should pair, set the machine up, run an agent, open a terminal, use a secret and change a setting": 54.5,
+    "the unlock model: passkeys, unlock, and who may loosen security > should re-lock on restart, tighten from the device, loosen only at the machine, and audit both": 39.6
   },
   "tests/e2e/relay-browser-pairing.e2e.test.ts": {
-    "a real browser, a compiled daemon and a real relay > should carry a first pairing and a live stream over the relay": 8.9,
-    "a real browser, a compiled daemon and a real relay > should stand up every moving part of the relay journey harness": 3
+    "a real browser, a compiled daemon and a real relay > should carry a first pairing and a live stream over the relay": 37.9,
+    "a real browser, a compiled daemon and a real relay > should stand up every moving part of the relay journey harness": 3.1
   },
   "tests/e2e/relay-reconnect.e2e.test.ts": {
-    "a relayed session page that loses its connection > should bring the page back unaided with no lost or duplicated send when the relay restarts [slow]": 68.1,
-    "a relayed session page that loses its connection > should have the daemon re-claim a restarted rendezvous with no browser connected": 29.8,
-    "a relayed session page that loses its connection > should recover unaided after the page was frozen past the relay eviction grace [slow]": 93,
-    "a relayed session page that loses its connection > should stay connected and send cleanly after sitting idle [slow]": 193.2
+    "a relayed session page that loses its connection > should bring the page back unaided with no lost or duplicated send when the relay restarts [slow]": 72.5,
+    "a relayed session page that loses its connection > should have the daemon re-claim a restarted rendezvous with no browser connected": 37.1,
+    "a relayed session page that loses its connection > should recover unaided after the page was frozen past the relay eviction grace [slow]": 111.1,
+    "a relayed session page that loses its connection > should stay connected and send cleanly after sitting idle [slow]": 204.3
   },
   "tests/e2e/session-fork.e2e.test.ts": {
-    "compiled daemon conversation fork > should fork across harnesses once and replay the frozen outcome after restart": 2.8
+    "compiled daemon conversation fork > should fork across harnesses once and replay the frozen outcome after restart": 2.5
   },
   "tests/e2e/signed-pwa.e2e.test.ts": {
-    "signed PWA releases in a real browser > should load a signed release, refuse tampered, unsigned and older ones, and keep serving offline": 19.2,
-    "signed PWA releases in a real browser > should tell a first visitor that an unsigned copy could not be checked": 9
+    "signed PWA releases in a real browser > should load a signed release, refuse tampered, unsigned and older ones, and keep serving offline": 25.3,
+    "signed PWA releases in a real browser > should tell a first visitor that an unsigned copy could not be checked": 8.2
   },
   "tests/e2e/version-skew.e2e.test.ts": {
-    "version skew between the app and a daemon > should answer an app from before device keys with the one sentence naming the app": 7.5,
-    "version skew between the app and a daemon > should tell a new app paired to an OLD daemon to update the daemon": 9.4,
-    "version skew between the app and a daemon > should tell an app paired to a NEWER daemon to update the app": 9.4
+    "version skew between the app and a daemon > should answer an app from before device keys with the one sentence naming the app": 7.8,
+    "version skew between the app and a daemon > should tell a new app paired to an OLD daemon to update the daemon": 17.5,
+    "version skew between the app and a daemon > should tell an app paired to a NEWER daemon to update the app": 16.7
   },
   "tests/e2e/worktrees.e2e.test.ts": {
     "managed worktree journeys against a real daemon > should fork, list, check and remove a checkout through the shipped binaries": 3.6,
