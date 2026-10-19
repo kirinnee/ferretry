@@ -60,17 +60,17 @@ refuse_in_block() {
 # The detach line is the one most likely to be "tidied" away. Without it Cloudflare
 # comma-joins this policy onto the `/*` one, which carries `frame-ancestors 'none'`
 # — the shell then cannot be framed by anything and the feature is silently inert.
-require_in_block '/fy-render-sandbox.html' '^  ! Content-Security-Policy$'
-require_in_block '/fy-render-sandbox.html' "^  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts$"
-require_in_block '/fy-render-sandbox.html' '^  X-Content-Type-Options: nosniff$'
-require_in_block '/fy-render-sandbox.html' '^  Cache-Control: no-cache$'
-
-# The `html` shell is the same shape for the same reasons, and is the one that runs author code —
-# so losing its detach line or its response-level sandbox is the costlier mistake of the two.
-require_in_block '/fy-render-html.html' '^  ! Content-Security-Policy$'
-require_in_block '/fy-render-html.html' "^  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts$"
-require_in_block '/fy-render-html.html' '^  X-Content-Type-Options: nosniff$'
-require_in_block '/fy-render-html.html' '^  Cache-Control: no-cache$'
+# The `html` shell is the same shape for the same reasons, and is the one that runs author code.
+#
+# EACH SHELL NEEDS TWO RULES. Pages' pretty URLs redirect `/<name>.html` to `/<name>`, and
+# `_headers` matches the REQUESTED path, so the document itself is served under the extensionless
+# rule. Shipping only the `.html` rule framed every shell with `frame-ancestors 'none'` in production.
+for shell in /fy-render-sandbox.html /fy-render-sandbox /fy-render-html.html /fy-render-html; do
+  require_in_block "${shell}" '^  ! Content-Security-Policy$'
+  require_in_block "${shell}" "^  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts$"
+  require_in_block "${shell}" '^  X-Content-Type-Options: nosniff$'
+  require_in_block "${shell}" '^  Cache-Control: no-cache$'
+done
 
 # A `video`/`audio` block with an https `src:` plays through the app's own <video>/<audio>, which only
 # `media-src https:` allows; nothing but a block the reader pressed Render on creates one. IMAGES ARE
