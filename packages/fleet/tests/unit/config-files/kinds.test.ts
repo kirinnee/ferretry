@@ -323,6 +323,21 @@ describe('configLoosening: warden', () => {
     should(actual).deepEqual([]);
   });
 
+  it('should hold letting the Warden restart a ferret on its own', () => {
+    // Arrange
+    const off = { ...DEFAULT_WARDEN_CONFIG.mayActAlone, restart: false };
+
+    // Act
+    const actual = configLoosening(
+      'warden',
+      wardenWith({ mayActAlone: off }),
+      wardenWith({ mayActAlone: DEFAULT_WARDEN_CONFIG.mayActAlone }),
+    );
+
+    // Assert
+    should(actual).deepEqual(['the Warden may now restart a ferret on its own']);
+  });
+
   it('should hold turning the Warden on when a layer already spends, and not when both are off', () => {
     // Act
     const spending = configLoosening(

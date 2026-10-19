@@ -14,7 +14,7 @@ import {
   WardenMayActAloneSchema,
   WardenSweepIntervalSchema,
   LegacyWardenTriageSchema,
-  migrateLegacyWardenTriage,
+  migrateLegacyWardenSettings,
   WardenLayersSchema,
 } from './warden.ts';
 
@@ -215,7 +215,7 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   layers: { jev: false, llm: false },
   guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 },
   caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
-  mayActAlone: { nudge: true, resume: true, failover: true, stop: false },
+  mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: false },
   events: { turnEnd: true, question: true, paneDied: true },
   investigation: { effort: 'low' },
   // None: the machine's default runtime, resolved when it is read. No login name is compiled in.
@@ -263,7 +263,7 @@ export type WardenFile = z.infer<typeof WardenFileSchema>;
 
 /** The Warden settings a parsed `warden.yaml` means. */
 export function wardenConfigFromFile(file: WardenFile): WardenConfig {
-  return mergeWardenConfig(DEFAULT_WARDEN_CONFIG, migrateLegacyWardenTriage(file) as Omit<WardenFile, 'triage'>);
+  return mergeWardenConfig(DEFAULT_WARDEN_CONFIG, migrateLegacyWardenSettings(file) as Omit<WardenFile, 'triage'>);
 }
 
 // ── Learning ─────────────────────────────────────────────────────────────────────────────────────

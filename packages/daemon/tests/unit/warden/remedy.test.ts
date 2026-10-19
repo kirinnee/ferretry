@@ -47,11 +47,24 @@ describe('the act a verdict asks for', () => {
     should(cleared).be.undefined();
     should(noReason).deepEqual({ action: 'failover', agent: 'claude-work', reason: 'its login is out of quota' });
   });
+
+  it('should restart on a RESTART recommendation beside any marker but a clear', () => {
+    // Act
+    const restarted = verdictAct('revived', { action: 'restart', reason: 'the process is frozen' });
+    const plain = verdictAct('needs_human', { action: 'restart', reason: ' ' });
+    const cleared = verdictAct('cleared', { action: 'restart', reason: 'the process is frozen' });
+
+    // Assert
+    should(restarted).deepEqual({ action: 'restart', reason: 'the process is frozen' });
+    should(plain).deepEqual({ action: 'restart', reason: 'its process is dead or frozen' });
+    should(cleared).be.undefined();
+  });
 });
 
 describe('what the Warden may do alone', () => {
-  it('should never stop by default, and nudge, resume and fail over by default', () => {
+  it('should never stop by default, and nudge, resume, restart and fail over by default', () => {
     // Act / Assert
+    should(mayActAlone({ action: 'restart', reason: 'r' }, DEFAULT_WARDEN_CONFIG.mayActAlone)).be.true();
     should(mayActAlone({ action: 'stop', reason: 'r' }, DEFAULT_WARDEN_CONFIG.mayActAlone)).be.false();
     should(mayActAlone({ action: 'nudge', reason: 'r' }, DEFAULT_WARDEN_CONFIG.mayActAlone)).be.true();
     should(

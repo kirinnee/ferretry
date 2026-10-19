@@ -72,7 +72,12 @@ const EVENTS: readonly { readonly id: WardenEventTrigger; readonly label: string
 const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label: string; readonly detail: string }[] =
   [
     { id: 'nudge', label: 'Nudge', detail: 'Sends a short “still there?” message.' },
-    { id: 'resume', label: 'Resume or revive', detail: 'Restarts the CLI in its pane with resume.' },
+    { id: 'resume', label: 'Resume or revive', detail: 'Hands a dead turn back to the ferret.' },
+    {
+      id: 'restart',
+      label: 'Restart',
+      detail: 'Relaunches a dead or frozen process with its conversation intact.',
+    },
     { id: 'failover', label: 'Fail over', detail: 'Moves to the next login in the failover order when quota is out.' },
     { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: a KILL verdict asks you first.' },
   ];
