@@ -169,8 +169,10 @@ into **`E2E Slow Journeys`**.
   product bug passes `softStep` a `knownWhen` pattern. While that exact failure reproduces, the step is
   logged as `KNOWN` with its bug note. Once it passes, the run fails with "remove the marker". Any other
   failure of that step is an ordinary failure.
-- **About five minutes per pull request** on `ubuntu-latest`. Before the split, the tier was one job
-  of 13–25 minutes, with 12–15 of them spent in the journeys. Each shard has `timeout-minutes: 20`
+- **About three and a half to four and a half minutes per pull request** on `ubuntu-latest`. Four
+  shards each run about 2–2.5 minutes of journeys after about 40 s of setup. `E2E Slow` takes about
+  five minutes; the idle journey alone runs for about four. Before the split, the tier was one job of
+  13–25 minutes, with 12–24 of them spent in the journeys. Each shard has `timeout-minutes: 20`
   (`E2E Slow`: 25), so a wedged browser cannot hold a runner for six hours.
 
 ## One run per commit
