@@ -1,7 +1,7 @@
 /**
  * The account model's stepper, as data (docs/design/account-model.md §4.1).
  *
- * Every flow on the Machines surface — first run, Add runtime, Build a profile, Add a login, Clone —
+ * Every flow on the Machines surface — first run, Add runtime, Build a profile, Clone —
  * is a stack of steppers: the flow a person started, plus any sub-stepper it opened to create a
  * missing thing in place ("+ Add a new login", "+ Build a new profile"). The rules live here once so
  * the five tabs cannot each invent their own Back:

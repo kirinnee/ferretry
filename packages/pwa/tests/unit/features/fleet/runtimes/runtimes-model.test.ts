@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { FleetRuntimeView } from '@ferretry/protocol';
 import {
+  firstRuntimeFor,
   harnessInstalled,
   KIND_NAMES,
   launchLabel,
@@ -392,5 +393,33 @@ describe('runtimeProfileLine', () => {
   it('leaves out skipped when none were and layers when the profile is gone', () => {
     expect(runtimeProfileLine(runtimeNamed('claude-default'), profileNamed('Review'))).toBe('1 layer · 2 parts');
     expect(runtimeProfileLine(runtimeNamed('claude-default'), undefined)).toBe('2 parts');
+  });
+});
+
+describe('firstRuntimeFor', () => {
+  const codexScoped = profile({ name: 'Codex work', scope: { kind: 'scoped', scope: 'codex' } });
+
+  it('uses the profile a runtime of that CLI already runs, under a free name, and is not needed', () => {
+    expect(firstRuntimeFor(['claude'], RUNTIMES.runtimes, PROFILES.profiles)).toEqual({
+      harness: 'claude',
+      profile: 'Default',
+      name: 'claude-default-2',
+      needed: false,
+    });
+  });
+
+  it('takes the first profile that fits when no runtime runs that CLI, and is needed', () => {
+    expect(firstRuntimeFor(['codex'], [], [codexScoped])).toEqual({
+      harness: 'codex',
+      profile: 'Codex work',
+      name: 'codex-codex-work',
+      needed: true,
+    });
+  });
+
+  it('moves on to the next CLI a login drives when no profile runs the first, else there is none', () => {
+    expect(firstRuntimeFor(['claude', 'codex'], [], [codexScoped])?.harness).toBe('codex');
+    expect(firstRuntimeFor(['claude'], [], [codexScoped])).toBeNull();
+    expect(firstRuntimeFor([], RUNTIMES.runtimes, PROFILES.profiles)).toBeNull();
   });
 });
