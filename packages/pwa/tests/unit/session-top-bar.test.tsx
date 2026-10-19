@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { PermissionRequest } from '@ferretry/protocol';
+import type { HarnessDialog, PermissionRequest } from '@ferretry/protocol';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -57,6 +57,23 @@ describe('SessionTopBar', () => {
     expect(info.hasAttribute('aria-label')).toBe(false);
     await interact(() => info.click());
     expect(toggled).toBe(1);
+  });
+
+  test('says who started the ferret as a link, and drops it on a phone', async () => {
+    let opened = 0;
+    const props = {
+      actions: null,
+      project: 'ferretry',
+      session: sessionView('s1'),
+      startedBy: { name: 'Hadi', onOpen: () => (opened += 1) },
+    };
+    view = await mount(<SessionTopBar {...props} compact={false} />);
+    const link = must(view.container.querySelector<HTMLButtonElement>('[data-session-started-by]'), 'the link');
+    expect(link.textContent).toBe('Started by Hadi');
+    await interact(() => link.click());
+    expect(opened).toBe(1);
+    await view.render(<SessionTopBar {...props} compact />);
+    expect(view.container.querySelector('[data-session-started-by]')).toBeNull();
   });
 
   test('on a phone it keeps the name and the dot, drops the project, and opens the sessions drawer', async () => {
@@ -167,6 +184,41 @@ describe('SessionTopBar turn word', () => {
     }
   });
 
+  test('says a harness dialog as the harness it is waiting on and its own title', async () => {
+    const harnessDialog: HarnessDialog = {
+      id: '0123456789abcdef',
+      harness: 'codex',
+      kind: 'hooks-review',
+      title: 'Hooks need review',
+      options: [{ number: 1, label: 'Review hooks', grantsTrust: false }],
+      selected: 1,
+    };
+    for (const turn of ['needs-input', 'working'] as const) {
+      view = await mount(
+        <SessionTopBar
+          actions={null}
+          compact={false}
+          project={null}
+          session={sessionView('s1', {
+            state: { status: 'running', turnState: turn, turnPrompt: 'Hooks need review', harnessDialog },
+          })}
+          turn={turn}
+        />,
+      );
+      const status = must(view.container.querySelector('.fy-session-bar__status'), 'the status');
+      const shown = status.querySelector('[data-session-blocked-by]');
+      if (turn === 'needs-input') {
+        expect(status.getAttribute('title')).toBe('Waiting on Codex: Hooks need review');
+        expect(shown?.textContent).toBe(', Waiting on Codex: Hooks need review');
+      } else {
+        expect(status.getAttribute('title')).toBeNull();
+        expect(shown).toBeNull();
+      }
+      await view.unmount();
+      view = null;
+    }
+  });
+
   test("says whose turn it is in the person's words, and marks it for the page", async () => {
     for (const [turn, word] of [
       ['working', 'working'],
@@ -199,7 +251,7 @@ describe('the hypermedia mark', () => {
         compact={false}
         project={null}
         session={sessionView('s1', {
-          config: { teammate: 'hadi', ...(hypermedia === undefined ? {} : { hypermedia }) },
+          config: { teammate: 'hadi', mode: 'interactive', ...(hypermedia === undefined ? {} : { hypermedia }) },
         })}
       />
     );

@@ -578,6 +578,20 @@ describe('materialiseFleet', () => {
     should(wrapperOf(result, 'claude-default')).endWith('exec claude "$@"\n');
   });
 
+  it('should have each wrapper exec the harness path the caller resolved, per harness', () => {
+    // Arrange
+    const model = modelOf();
+
+    // Act
+    const located = plan(model, { harnessCommands: { claude: '/opt/h/claude' } });
+    const unlocated = plan(model);
+
+    // Assert
+    should(wrapperOf(located, 'claude-default')).containEql(`exec '/opt/h/claude' `);
+    should(wrapperOf(located, 'codex-default')).containEql('exec codex ');
+    should(wrapperOf(unlocated, 'claude-default')).containEql('exec claude ');
+  });
+
   it('should pool every harness, every runtime of it included', () => {
     // Act / Assert
     should(plan(modelOf()).sharedHistoryRequests).eql([

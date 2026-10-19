@@ -72,7 +72,7 @@ export interface SpeedupCardProps {
 
 function StatusChip({ status, vaultReadable }: { readonly status: SpeedupStatus; readonly vaultReadable: boolean }) {
   if (!vaultReadable)
-    return <span className="rounded-control bg-warn-soft px-2 py-0.5 text-meta font-medium text-warn">Can’t tell</span>;
+    return <span className="rounded-control bg-warn-bg px-2 py-0.5 text-meta font-medium text-warn">Can’t tell</span>;
   if (status.set)
     return (
       <span

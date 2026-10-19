@@ -63,6 +63,7 @@ import {
   SessionConfigSchema,
   type SessionHandoff,
   SessionStateSchema,
+  sessionHypermediaEnabled,
   type SessionView,
   type SignalSessionRequest,
   type StartSessionRequest,
@@ -640,6 +641,7 @@ import {
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
+  SessionDialogService,
   type SessionDirectorySubsystem,
   SessionFilesystem,
   SessionHandoverService,
@@ -1929,8 +1931,8 @@ function createSessionControlSubsystem(
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
-        // Every new ferret is told it may use hypermedia until the owner says otherwise (docs/hypermedia.md).
-        hypermedia: true,
+        // An interactive ferret is told it may use hypermedia and an auto one is not, until the owner says otherwise (docs/hypermedia.md).
+        hypermedia: request.mode === 'interactive',
         // An incarnation names one RUN of a session: this is its first, and a revive is what mints
         // the next. The generation is the daemon-side counter of those relaunches.
         incarnation: `${id}-1`,
@@ -3050,7 +3052,7 @@ function createSessionHypermediaSubsystem(
       const view = id === undefined ? undefined : await sessions.get(id);
       return view === undefined
         ? undefined
-        : { enabled: view.config.hypermedia, running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status) };
+        : { enabled: sessionHypermediaEnabled(view.config), running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status) };
     },
     write: async (reference, enabled, at) => {
       const id = parseSessionId(reference);
@@ -6060,6 +6062,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The executable, so a revive can resolve the same profile the first launch did. Without
           // it a profile-authenticated account would come back with no credential at all.
           agent: config.agent,
+          mode: config.mode,
         };
       },
       new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
@@ -7896,6 +7899,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const typing = new SessionConsoleService(sessionAttach, launchTmuxCommands);
           const capture = new ProvedPaneCapture(sessionAttach, launchTmuxCommands);
           return new SessionPermissionService(
+            {
+              capture: async id => await capture.capture(id),
+              write: async (id, bytes) => await typing.write(id, bytes),
+            },
+            milliseconds => Bun.sleep(milliseconds),
+          );
+        })(),
+        // A dialog answer does the same, on the same proved pane.
+        sessionDialog: (() => {
+          const typing = new SessionConsoleService(sessionAttach, launchTmuxCommands);
+          const capture = new ProvedPaneCapture(sessionAttach, launchTmuxCommands);
+          return new SessionDialogService(
             {
               capture: async id => await capture.capture(id),
               write: async (id, bytes) => await typing.write(id, bytes),

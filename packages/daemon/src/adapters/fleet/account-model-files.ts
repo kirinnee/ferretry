@@ -17,6 +17,7 @@ import {
   claudeStatuslineCommand,
   type FleetDocumentWrite,
   type FleetLayout,
+  type FleetModelApplyPlan,
   fleetFileEdits,
   parseRuntimeIds,
   RETIRED_FLEET_CONFIG_FILE,
@@ -160,6 +161,16 @@ function acknowledgingProvisioner(
   };
 }
 
+/** Whether every launcher script a plan would write under `binDirectory` already holds exactly that content. */
+async function wrappersCurrent(binDirectory: string, operations: FleetModelApplyPlan['operations']): Promise<boolean> {
+  for (const operation of operations) {
+    if (operation.kind !== 'file' || relative(binDirectory, operation.path).startsWith('..')) continue;
+    const onDisk = await readFile(operation.path, 'utf8').catch(() => undefined);
+    if (onDisk !== operation.content) return false;
+  }
+  return true;
+}
+
 /**
  * The catalogue's collaborators over this machine's files.
  *
@@ -202,6 +213,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     ids,
     locate: options.locate,
     commandExists: command => Bun.which(command) !== null,
+    wrappersCurrent: async plan => await wrappersCurrent(layout.binDirectory, plan.operations),
     sessionStatuses: async () =>
       (await options.sessionStates()).flatMap(raw => {
         const state = SessionStateSchema.safeParse(raw);

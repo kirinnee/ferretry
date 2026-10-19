@@ -25,10 +25,10 @@
 import type { SessionView } from '@ferretry/protocol';
 import {
   listedBeforeMode,
+  listTallies,
   matchesMode,
   needsYou,
   type SessionsListFilter,
-  listTallies,
 } from '../shell/sessions-bar-model.ts';
 import type { ConnectionHealthState } from './connection-health.ts';
 import type { DaemonId } from './daemon-connection.ts';
@@ -100,6 +100,8 @@ export interface MachineSection {
   /** How many of them moved up into Needs you. */
   readonly needsYou: number;
   readonly groups: readonly SessionGroup[];
+  /** Everything the machine listed, so a row's parent can be named though the filter hid it. */
+  readonly sessions: readonly SessionView[];
 }
 
 export interface AllMachinesView {
@@ -171,6 +173,7 @@ export const allMachinesView = (
       total: shown.length,
       needsYou: moves.length,
       groups: groupByProject(stays, machine.projects, sortRows),
+      sessions: pool,
     });
   });
   pinned.sort(

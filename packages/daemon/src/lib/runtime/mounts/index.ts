@@ -75,6 +75,7 @@ import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
+import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dialog.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
@@ -352,6 +353,8 @@ export interface MountedSubsystems {
   readonly sessionConsole: SessionConsoleSubsystem;
   /** Answering the harness's permission prompt on a session's own pane, governed as the Console is. */
   readonly sessionPermission: SessionPermissionSubsystem;
+  /** Answering the harness's own dialog (hooks review, an MCP server, a sign-in) the same way. */
+  readonly sessionDialog: SessionDialogSubsystem;
   /** This daemon's bounded recent event tail followed by its own live journal appends. */
   readonly fleetEvents: FleetEventStreamSubsystem;
   /**
@@ -576,6 +579,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // A permission answer: one segment under `/v1/sessions/:sessionId`, ending in the literal
         // `permission` no other route uses, so it can neither shadow nor be shadowed.
         ...sessionPermissionRoutes(subsystems.sessionPermission, subsystems.sessions),
+        ...sessionDialogRoutes(subsystems.sessionDialog, subsystems.sessions),
         // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
         // only the request/response table carries — the socket table's `/v1/events` matches GET on one
         // segment less — so the two cannot shadow each other and a POST here is never an upgrade.

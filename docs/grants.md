@@ -117,6 +117,12 @@ governed exactly as the Console is — a relayed answer is a remote one. It is a
 with `detail.mode: 'permission'`, never with the choice. How the prompt is read and why the answer is a
 single key is [docs/permission-prompts.md](permission-prompts.md).
 
+**So is answering a harness dialog.** `POST /v1/sessions/:sessionId/dialog` answers the harness's own
+dialog — Codex's hook review, Claude's MCP-server approval — with arrows, then Enter or Esc, into the same
+proved pane, so it is declared `terminal` / `use` and governed exactly as the Console is. It is audited as
+`terminal.input` with `detail.mode: 'dialog'`, never with the choice. See
+[docs/harness-dialogs.md](harness-dialogs.md).
+
 Each has two axes, and they are different questions:
 
 - **use** — may the caller exercise the capability at all?

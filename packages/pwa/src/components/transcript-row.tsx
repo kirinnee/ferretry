@@ -1,12 +1,15 @@
+import { type HandoffPointer, parsePeerEnvelope } from '@ferretry/protocol';
+import type { ReactNode } from 'react';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
-import { HandoffMessage } from './handoff-message.tsx';
+import { HandoffBody, HandoffView, useHandoffReading } from './handoff-message.tsx';
 import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
+import { SentMessageRow } from './sent-message.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -40,6 +43,8 @@ export function TranscriptRow({
   answered = false,
 }: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
+  if (entry.sent !== undefined)
+    return <SentMessageRow entry={entry} isLast={isLast} live={live} rhythm={rhythm} sent={entry.sent} />;
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
@@ -63,11 +68,65 @@ export function TranscriptRow({
   }
   if (entry.kind === 'user' && entry.peer !== undefined)
     return <PeerMessageRow entry={entry} peer={entry.peer} rhythm={rhythm} />;
+  if (entry.kind === 'user' && entry.handoff !== undefined)
+    return <HandoffRow answered={answered} entry={entry} handoff={entry.handoff} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
 }
 
+/**
+ * A message the agent was handed through a FILE, which is either the reader's own or a ferret's: only
+ * the document says which, because a ferret's message carries its banner there. A delivered send that
+ * names its sender says so sooner, while the document is still being read, so a ferret's message never
+ * flashes up as the reader's own bubble first.
+ */
+function HandoffRow({
+  entry,
+  handoff,
+  rhythm,
+  answered,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly handoff: HandoffPointer;
+  readonly rhythm: Record<string, string | undefined>;
+  readonly answered: boolean;
+}) {
+  const { reading, source } = useHandoffReading(handoff.name);
+  const parsed = reading.state === 'read' ? parsePeerEnvelope(reading.handoff.message) : null;
+  if (parsed !== null && source !== null && reading.state === 'read')
+    return (
+      <PeerMessageRow
+        body={<HandoffBody handoff={{ ...reading.handoff, message: parsed.body }} source={source} />}
+        entry={entry}
+        peer={parsed.envelope}
+        rhythm={rhythm}
+      />
+    );
+  const sender = entry.send?.from;
+  if (sender !== undefined && entry.send !== undefined)
+    return (
+      <PeerMessageRow
+        body={
+          <HandoffView explain={false} pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
+        }
+        entry={entry}
+        peer={{
+          name: entry.send.fromName ?? sender,
+          sessionId: sender,
+          kind: entry.send.replyExpected === true ? 'question' : 'message',
+          replyExpected: entry.send.replyExpected === true,
+          note: '',
+        }}
+        rhythm={rhythm}
+      />
+    );
+  return (
+    <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm}>
+      <HandoffView pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
+    </OwnMessageRow>
+  );
+}
 /**
  * The reader's own message: no "You · 14:02:55" header — the bubble's alignment already says who — and
  * its time and receipt as one small faded line at its foot (`send-receipt.tsx`), on the reader's own
@@ -78,19 +137,18 @@ function OwnMessageRow({
   entry,
   rhythm,
   answered,
+  children,
 }: {
   readonly entry: TranscriptEntry;
   readonly rhythm: Record<string, string | undefined>;
   readonly answered: boolean;
+  /** What the message holds, when it is not `entry.text` — a hand-off's document. */
+  readonly children?: ReactNode;
 }) {
   return (
     <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
       <span className="sr-only">You said:</span>
-      {entry.handoff === undefined ? (
-        <p>{entry.text}</p>
-      ) : (
-        <HandoffMessage pointer={entry.handoff} pointerText={entry.text} />
-      )}
+      {children ?? <p>{entry.text}</p>}
       <MessageFooter answered={answered} clock={clockOfInstant(entry.at)} record={entry.send} side="own" />
     </article>
   );
@@ -141,10 +199,13 @@ function transcriptRhythm(
 }
 
 function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
+  // A message this ferret sent is a message, though a tool call carried it.
+  if (entry.sent !== undefined) return 'message';
   return entry.kind === 'user' || entry.kind === 'assistant' || entry.kind === 'ledger' ? 'message' : 'chrome';
 }
 
 function speakerOf(entry: TranscriptEntry): string | undefined {
+  if (entry.sent !== undefined) return 'assistant';
   // Another agent is its own speaker, so a peer message after yours reads as a change of turn.
   if (entry.kind === 'user' && entry.peer !== undefined) return `peer:${entry.peer.name}`;
   if (entry.kind === 'user' || entry.kind === 'ledger') return 'user';

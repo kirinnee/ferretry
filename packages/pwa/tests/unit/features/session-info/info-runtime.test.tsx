@@ -175,12 +175,17 @@ describe('InfoRuntime — learning', () => {
 });
 
 describe('InfoRuntime — hypermedia', () => {
-  it('reads the switch off the session itself, absent as on', async () => {
-    const root = await show();
+  it('reads the switch off the session itself, absent as the mode default', async () => {
+    const root = await show({ view: sessionView('session-a', { config: { mode: 'interactive' } }) });
     expect(must(root.querySelector('[data-info-row="Hypermedia"]'), 'hypermedia row').textContent).toContain(
       'On · may explain with diagrams and media',
     );
     expect(root.querySelector('[data-info-hypermedia="on"]')).not.toBeNull();
+  });
+
+  it('says plain text for an auto ferret that has no switch', async () => {
+    const root = await show();
+    expect(root.querySelector('[data-info-hypermedia="off"]')?.textContent).toBe('Off · plain text');
   });
 
   it('says plain text when the owner switched it off', async () => {
