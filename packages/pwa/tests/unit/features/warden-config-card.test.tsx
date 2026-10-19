@@ -513,6 +513,37 @@ describe('WardenConfigSurface', () => {
       run(() => renderer.unmount());
     });
 
+    it('should pick up a runtime made while the page is open: its login, no longer "not set"', async () => {
+      // Arrange: a machine with no runtime, so no login is set.
+      const notSet: WardenConfigView = {
+        config: wardenConfig({ triage: 'llm', accounts: [] }),
+        accounts: [],
+        warnings: [],
+        login: { source: 'not_set', unknown: [], available: [] },
+      };
+      const daemon = changing(notSet);
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => daemon.make()} />),
+      );
+      await settle();
+      expect(json(renderer)).toContain('Not set — choose a login');
+
+      // Act: a runtime is created elsewhere and becomes the machine default.
+      daemon.state.view = {
+        ...notSet,
+        accounts: [{ agent: 'first' }],
+        login: { source: 'machine_default', unknown: [], available: ['first'] },
+      };
+      await harness.move(['runtimes']);
+      await settle();
+
+      // Assert
+      expect(json(renderer)).toContain('Machine default — first');
+      expect(json(renderer)).not.toContain('Not set — choose a login');
+      run(() => renderer.unmount());
+    });
+
     it('should not read for a kind the card does not show', async () => {
       // Arrange
       const daemon = changing(view());
@@ -523,7 +554,7 @@ describe('WardenConfigSurface', () => {
       await settle();
 
       // Act
-      await harness.move(['runtimes']);
+      await harness.move(['voice']);
       await settle();
 
       // Assert

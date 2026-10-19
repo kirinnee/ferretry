@@ -11,9 +11,11 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } fro
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FleetCloneBundleSchema } from '@ferretry/protocol';
+import { resolveDefaultRuntime } from '@ferretry/fleet';
 import should from 'should';
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/adapters/fleet/account-model-files.ts';
 import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
+import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
 import { type ConfigHome, configHome } from './config-files-fixture.ts';
@@ -170,6 +172,47 @@ describe('the first run and Clone over real files', () => {
     // The catalogue reads back exactly what the import wrote.
     const runtimes = await studio.catalog.runtimes();
     should(runtimes.runtimes.map(runtime => runtime.name)).deepEqual(['claude-default']);
+  });
+
+  it('should make the first runtime created on a bare machine its default runtime', async () => {
+    // Arrange: a machine with one login and one profile and no runtime.
+    const bare = await machine('bare', { claude: false });
+    const login = await bare.catalog.propose({ kind: 'credential.add', id: 'work', harness: 'claude' });
+    await bare.catalog.apply(login.id, { governed: false } as never);
+    const component = await bare.catalog.propose({
+      kind: 'component.put',
+      name: 'house',
+      component: { kind: 'instructions' },
+      content: 'Be kind.\n',
+      create: true,
+    } as never);
+    await bare.catalog.apply(component.id, { governed: false } as never);
+    const profile = await bare.catalog.propose({
+      kind: 'profile.put',
+      name: 'plain',
+      layers: ['instructions/house'],
+      create: true,
+    });
+    await bare.catalog.apply(profile.id, { governed: false } as never);
+
+    // Act: the runtime goes through the same propose/apply route the app uses.
+    const staged = await bare.catalog.propose({
+      kind: 'runtime.put',
+      name: 'first',
+      credential: 'work',
+      profile: 'plain',
+      agent: true,
+      create: true,
+    });
+    await bare.catalog.apply(staged.id, { governed: false } as never);
+
+    // Assert: it is the default, so the Warden's login resolves to it instead of "not set".
+    const model = await declared(bare);
+    should(model.machine.defaultRuntime).equal('first');
+    should(resolveWardenLogin({ accounts: [] } as never, ['first'], resolveDefaultRuntime(model))).match({
+      usable: true,
+      login: { source: 'machine_default', available: ['first'] },
+    });
   });
 
   it('should copy one machine onto another as a reviewed change, each login an empty slot', async () => {

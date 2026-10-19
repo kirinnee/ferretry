@@ -134,7 +134,8 @@ type WardenClient = Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'update
 export type WardenClientFactory = (connection: DaemonConnection) => Promise<WardenClient>;
 
 /** The card shows the Warden's settings and whether its Jev key is set in Speed-ups. */
-const WARDEN_CARD_KINDS = ['warden', 'speedups'] as const;
+// A runtime or the machine default moving changes which login the Warden resolves, so they refresh it too.
+const WARDEN_CARD_KINDS = ['warden', 'speedups', 'machine', 'runtimes', 'credentials'] as const;
 
 interface Loaded {
   readonly daemonId: DaemonConnection['daemonId'];
@@ -146,6 +147,12 @@ interface Loaded {
   /** The runtimes and the models each offers (docs/model-catalog.md), for the model field; empty when unread. */
   readonly runtimes: readonly PickerAccount[];
 }
+
+const loginOptionsOf = (
+  view: WardenConfigView,
+  status: { readonly failover?: { readonly accounts: readonly { readonly agent: string }[] } | undefined } | null,
+): readonly WardenAccount[] =>
+  (view.login?.available ?? status?.failover?.accounts.map(account => account.agent) ?? []).map(agent => ({ agent }));
 
 const reasonOf = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
@@ -199,9 +206,7 @@ export function WardenConfigSurface({
           jevKey: jevKeyStatus(speedups),
           // Every login this machine has, so a Warden with none chosen yet can be given one. A daemon that
           // predates the list offers the ones in its failover order.
-          loginOptions: (view.login?.available ?? status?.failover?.accounts.map(account => account.agent) ?? []).map(
-            agent => ({ agent }),
-          ),
+          loginOptions: loginOptionsOf(view, status),
           runtimes,
         });
       })
@@ -221,12 +226,26 @@ export function WardenConfigSurface({
   useConfigChangeEffect(connection.daemonId, WARDEN_CARD_KINDS, () => {
     const before = loadedRef.current;
     if (before === null || before.daemonId !== connection.daemonId) return;
-    void Promise.all([before.client.wardenConfig(), readSpeedups(before.client).catch(() => null)])
-      .then(([view, speedups]) => {
+    void Promise.all([
+      before.client.wardenConfig(),
+      readSpeedups(before.client).catch(() => null),
+      readAccountPickerCatalog(before.client).then(
+        catalog => catalog.accounts,
+        () => null,
+      ),
+    ])
+      .then(([view, speedups, runtimes]) => {
         setLoaded(current => {
           if (current === null || current.daemonId !== before.daemonId) return current;
           const untouched = JSON.stringify(current.draft) === JSON.stringify(current.view.config);
-          return { ...current, view, draft: untouched ? view.config : current.draft, jevKey: jevKeyStatus(speedups) };
+          return {
+            ...current,
+            view,
+            draft: untouched ? view.config : current.draft,
+            jevKey: jevKeyStatus(speedups),
+            loginOptions: loginOptionsOf(view, null),
+            runtimes: runtimes ?? current.runtimes,
+          };
         });
       })
       .catch(() => undefined);
