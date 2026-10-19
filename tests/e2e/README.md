@@ -91,6 +91,23 @@ locally with `FY_E2E_TIER=fast|slow|all FY_E2E_SHARD=i/N task test:e2e`.
 counts as 10 s until the timings are regenerated from a run's JUnit reports. See
 [CI/CD](../../docs/standards/ci-cd/index.md#e2e-tier).
 
+**Every other journey ends at the runner's ceiling** (`journey_timeout_ms` in
+`scripts/test/run-e2e.sh`, 150 s). Do not give an `it` a longer timeout of its own:
+`scripts/test/e2e-journey-timeouts.ts` refuses one, and a `setDefaultTimeout` above the
+ceiling, before any journey runs. Two journeys once declared 600 and 900 seconds, and a
+hang in either held its shard for that long. A journey that really needs longer is waiting
+on purpose, so it belongs in `[slow]`.
+
+**No browser call can wait forever.** On hosted runners Bun sometimes stops servicing the
+DevTools pipe Playwright uses to drive Chrome, after the launch has succeeded. Playwright is
+never told: Chrome logs `Could not write into pipe`, or reads EOF and exits, and every call
+without its own timeout (`evaluate`, a CDP `send`, `newPage`) waits forever. The browser from
+`launchChromiumWithRetry` (`support/relay-harness.ts`) watches for both signs. When it sees
+one, every pending and later call on that browser and its contexts, pages and CDP sessions
+fails at once with `browser has disconnected: …`, which the product journeys' retry already
+handles. A call that carries no timeout of its own and never answers fails after 60 s and
+says which call it was.
+
 ## Browser journeys
 
 `support/relay-harness.ts` adds the four things a browser journey needs that the

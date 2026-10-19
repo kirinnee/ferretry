@@ -94,34 +94,42 @@ interface ProductOptions {
 const LOST_BROWSER =
   /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/u;
 
+/** How many times a journey whose browser vanished is started again from nothing. */
+const LOST_BROWSER_RETRIES = 2;
+
 /**
- * Run one journey, and run it ONCE more if the only thing that went wrong is that its browser vanished.
+ * Run one journey, and run it again — at most {@link LOST_BROWSER_RETRIES} more times — if the only
+ * thing that went wrong is that its browser vanished.
  *
- * On hosted runners Bun 1.3 occasionally drops the DevTools pipe Playwright holds to Chrome: Chrome keeps
- * running, nothing logs an exit or an error, and every later call answers "Target page, context or
- * browser has been closed". That is the harness's transport failing, not the product, and it is not
- * reproducible on demand. So a journey whose error is exactly that is started again from nothing, in a
- * fresh environment and browser, and the retry is recorded as a FLAG on the journey log so the rate
- * stays visible. Any other failure, including a second lost browser, fails the test.
+ * On hosted runners Bun 1.3 drops the DevTools pipe Playwright holds to Chrome, sometimes twice in one
+ * journey. Playwright either answers "Target page, context or browser has been closed" or is never
+ * told, and then the browser guard (support/relay-harness.ts) answers "browser has disconnected". That
+ * is the harness's transport failing, not the product, and it is not reproducible on demand. So a
+ * journey whose error is exactly that is started again from nothing, in a fresh environment and
+ * browser, and every retry is recorded as a FLAG on the journey log so the rate stays visible. Any
+ * other failure fails the test, and so does a browser lost on the last attempt. The runner's
+ * per-journey ceiling still bounds all the attempts together.
  */
 async function withProduct(
   journey: string,
   body: (product: Product) => Promise<void>,
   options: ProductOptions = {},
 ): Promise<void> {
-  try {
-    await withProductOnce(journey, body, options);
-  } catch (error) {
-    const text = String((error as Error).message ?? error);
-    if (!LOST_BROWSER.test(text)) throw error;
-    await recordStep({
-      journey,
-      step: 'harness:journey-retried',
-      status: 'FLAG',
-      evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing`,
-    });
-    resetSoftFailures(journey);
-    await withProductOnce(journey, body, options);
+  for (let retry = 0; ; retry += 1) {
+    try {
+      await withProductOnce(journey, body, options);
+      return;
+    } catch (error) {
+      const text = String((error as Error).message ?? error);
+      if (retry >= LOST_BROWSER_RETRIES || !LOST_BROWSER.test(text)) throw error;
+      await recordStep({
+        journey,
+        step: 'harness:journey-retried',
+        status: 'FLAG',
+        evidence: `the browser connection vanished (${text.split('\n')[0]?.slice(0, 200) ?? ''}); the journey was run again from nothing (retry ${String(retry + 1)} of ${String(LOST_BROWSER_RETRIES)})`,
+      });
+      resetSoftFailures(journey);
+    }
   }
 }
 
@@ -597,7 +605,9 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
   await captureScreens(page, journey, '08-session-transcript');
   await step(journey, 'chat-follow-up', async () => {
     const follow = `${marker}-again`;
-    await page.fill('form.fy-composer textarea', follow);
+    // The composer's field is a live-markdown `role="textbox"` by default and a plain textarea with
+    // formatting off; either is the message box.
+    await page.fill('form.fy-composer :is(textarea, [role="textbox"])', follow);
     const label = String(await textNow(page, 'form.fy-composer button[type="submit"]'));
     const sentAt = Date.now();
     await page.click('form.fy-composer button[type="submit"]');
@@ -781,7 +791,7 @@ describe('the product, from a fresh machine to a working session', () => {
       await coreJourney(product, 'j02-j05-core');
       assertNoSoftFailures('j02-j05-core');
     });
-  }, 600_000);
+  });
 
   it('should do all of it over the local rendezvous when the direct address is unreachable', async () => {
     const journey = 'j06-relay';
@@ -849,7 +859,7 @@ describe('the product, from a fresh machine to a working session', () => {
       },
       { relay: true },
     );
-  }, 600_000);
+  });
 });
 
 const STALE_DONE_BUG =
@@ -1002,7 +1012,7 @@ describe('signing a harness in from the first run', () => {
       );
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 });
 
 /**
@@ -1097,7 +1107,7 @@ describe('signing Claude Code in from the first run', () => {
       await claudeSignInJourney(product, journey);
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 
   it('should do the same over the local rendezvous when the direct address is unreachable', async () => {
     const journey = 'j04-claude-sign-in-relay';
@@ -1109,7 +1119,7 @@ describe('signing Claude Code in from the first run', () => {
       },
       { relay: true },
     );
-  }, 600_000);
+  });
 });
 
 describe('the unlock model: passkeys, unlock, and who may loosen security', () => {
@@ -1289,7 +1299,7 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       });
       assertNoSoftFailures(journey);
     });
-  }, 900_000);
+  });
 });
 
 describe('access ends when it should, and the person is told', () => {
@@ -1410,7 +1420,7 @@ describe('access ends when it should, and the person is told', () => {
       }
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 
   it('should expire a device left idle past the idle period and ask for a new pairing', async () => {
     const journey = 'j07-idle';
@@ -1460,7 +1470,7 @@ describe('access ends when it should, and the person is told', () => {
       );
       assertNoSoftFailures(journey);
     });
-  }, 600_000);
+  });
 
   it('should record that the lease, idle and session-cap durations have no test seam', async () => {
     // Arrange / Act / Assert — a declared gap, not a pass. See the report's journey 7.
@@ -1629,7 +1639,7 @@ describe('one browser, two machines', () => {
       });
       assertNoSoftFailures(journey);
     });
-  }, 900_000);
+  });
 });
 
 /** The state file under `home` whose text mentions `needle` — how the idle journey finds the device record. */
