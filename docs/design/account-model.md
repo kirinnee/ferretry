@@ -372,10 +372,24 @@ form. Components are created on the Components tab; the editor only arranges wha
 
 ### 4.6 Add a login
 
-**Choose tool** (skipped when opened for a known harness) → **Sign in** → **Label** (only when the
-same email already has a login of that harness, E26). Sign-in is the existing link-and-code panel
-(Claude: open the page, paste the code; Codex: device code, §8.2). "The login is kept on _machine_."
-The new credential is `store: ferretry`.
+**One screen, no stepper.** The providers are tiles: **Sign in** (Claude Code, Codex — a subscription;
+a tool that is not installed says so and opens nothing), then every API-key provider the machine offers
+(docs/provider-presets.md § One-click add) and **Paste variables…**. A tap folds the tiles to the one
+chosen (**Change** while nothing is made) and shows under it only what that provider needs, and ONE
+button. It adds the login and, when no runtime on the machine runs that CLI yet, the runtime on it — the
+profile a runtime of that CLI already uses, else the first that fits, under the suggested name; a
+checked box says which, and turns it off or on. No fitting profile: no runtime, said in place.
+
+- **Sign in**: the same click makes the empty login (`store: ferretry`) and starts the harness's sign-in;
+  the existing link-and-code panel appears under it (Claude: open the page, paste the code; Codex: device
+  code, §8.2). "The login is kept on _machine_." Signed in to an email that already has a login of that
+  harness asks for both **labels** in place (E26).
+- **API key**: the provider's minimal form; the key is stored first, then the login added, then
+  **Test** is offered.
+
+Progress is the button's own words ("Creating claude-default…", "Starting sign-in…"); a refusal is
+one sentence beside it. A refused runtime keeps the login and says so. Leaving once a provider is
+chosen asks first; a machine asleep or offline pauses the screen (O5).
 
 ### 4.7 Clone from another machine
 
