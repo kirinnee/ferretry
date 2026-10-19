@@ -147,7 +147,9 @@ const yamlValue = (text: string, key: string): string | undefined => {
 export const providersNeededBy = (path: string, text: string): readonly SpeedupProvider[] => {
   if (path === 'warden.yaml') {
     const enabled = yamlValue(text, 'enabled');
-    return yamlValue(text, 'triage') === 'jev' && enabled !== 'false' ? ['jev'] : [];
+    // The layer, or the single `triage: jev` a file from before the layers still says.
+    const jev = yamlValue(text, 'jev') === 'true' || yamlValue(text, 'triage') === 'jev';
+    return jev && enabled !== 'false' ? ['jev'] : [];
   }
   if (path === 'voice.yaml') {
     const provider = yamlValue(text, 'provider');

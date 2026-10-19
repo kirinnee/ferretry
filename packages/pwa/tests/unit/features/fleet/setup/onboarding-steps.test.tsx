@@ -416,13 +416,9 @@ describe('OnboardingVoiceStep', () => {
 // ── Warden ───────────────────────────────────────────────────────────────────────────────────────
 
 describe('OnboardingWardenStep', () => {
-  const triage = (id: string): HTMLInputElement =>
-    must(
-      Array.from(view?.container.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? []).find(input =>
-        input.closest('label')?.textContent?.startsWith(id),
-      ),
-      `the ${id} radio`,
-    );
+  const jevSwitch = (): HTMLButtonElement =>
+    must(view?.container.querySelector<HTMLButtonElement>('[aria-label="Jev on"]'), 'the Jev switch');
+  const jevOn = (): boolean => jevSwitch().getAttribute('aria-checked') === 'true';
 
   it('says it is reading while the Warden answers', async () => {
     const never = new Promise<void>(() => undefined);
@@ -439,22 +435,21 @@ describe('OnboardingWardenStep', () => {
     expect(note).toContain('set it up later in Settings › Warden');
   });
 
-  it('preselects the Jev guard when a Jev key is set, and nothing is saved until Save', async () => {
+  it('switches Jev on when a Jev key is set, and nothing is saved until Save', async () => {
     const { tab, calls } = tabFor({
       '/v1/warden/config': byMethod(wardenView(), wardenView()),
       '/v1/speedups': speedups('set'),
     });
     await show(<OnboardingWardenStep tab={tab} onSaved={() => undefined} />);
-    expect(text('[data-onboarding-step-body="warden"]')).toContain('A Jev key is set, so the Jev guard is preselected');
-    expect(triage('Jev guard').checked).toBe(true);
-    expect(triage('Rules only').checked).toBe(false);
+    expect(text('[data-onboarding-step-body="warden"]')).toContain('A Jev key is set, so Jev is switched on');
+    expect(jevOn()).toBe(true);
     expect(text('[data-onboarding-warden-unsaved]')).toContain('Not saved yet');
     expect(buttonLabelled('Save').disabled).toBe(false);
     expect(calls.some(call => call.body !== undefined)).toBe(false);
   });
 
   it('saves with a PATCH of what changed, reports it, and shows saved', async () => {
-    const saved = wardenView({ triage: 'jev' });
+    const saved = wardenView({ layers: { jev: true, llm: false } });
     const { tab, calls } = tabFor({
       '/v1/warden/config': byMethod(wardenView(), saved),
       '/v1/speedups': speedups('set'),
@@ -471,7 +466,7 @@ describe('OnboardingWardenStep', () => {
     await click(buttonLabelled('Save'), 'Save');
     const patches = calls.filter(call => call.body !== undefined);
     expect(patches).toHaveLength(1);
-    expect(patches[0]?.body).toEqual({ triage: 'jev' });
+    expect(patches[0]?.body).toEqual({ layers: { jev: true, llm: false } });
     expect(patches[0]?.headers['content-type']).toBe('application/json');
     expect(onSaved).toBe(1);
     expect(text('[role="status"]')).toContain('Saved — in effect now.');
@@ -479,7 +474,7 @@ describe('OnboardingWardenStep', () => {
   });
 
   it('forgets “saved” again as soon as the draft changes', async () => {
-    const saved = wardenView({ triage: 'jev' });
+    const saved = wardenView({ layers: { jev: true, llm: false } });
     const { tab } = tabFor({
       '/v1/warden/config': byMethod(wardenView(), saved),
       '/v1/speedups': speedups('set'),
@@ -487,7 +482,7 @@ describe('OnboardingWardenStep', () => {
     await show(<OnboardingWardenStep tab={tab} onSaved={() => undefined} />);
     await click(buttonLabelled('Save'), 'Save');
     expect(text()).toContain('Saved — in effect now.');
-    await click(triage('Rules only'), 'Rules only');
+    await click(jevSwitch(), 'the Jev switch');
     expect(text()).not.toContain('Saved — in effect now.');
     expect(q('[data-onboarding-warden-unsaved]')).not.toBeNull();
   });
@@ -509,7 +504,7 @@ describe('OnboardingWardenStep', () => {
     await click(buttonLabelled('Save'), 'Save');
     expect(must(q('[role="alert"]'), 'the error').textContent).not.toBe('');
     expect(onSaved).toBe(0);
-    expect(triage('Jev guard').checked).toBe(true);
+    expect(jevOn()).toBe(true);
     expect(text()).not.toContain('Saved — in effect now.');
   });
 
@@ -520,7 +515,7 @@ describe('OnboardingWardenStep', () => {
     });
     await show(<OnboardingWardenStep tab={tab} onSaved={() => undefined} />);
     expect(text('[data-onboarding-step-body="warden"]')).toContain('Without a Jev key the safe default is rules only');
-    expect(triage('Rules only').checked).toBe(true);
+    expect(jevOn()).toBe(false);
     expect(q('[data-onboarding-warden-unsaved]')).toBeNull();
   });
 
@@ -528,7 +523,7 @@ describe('OnboardingWardenStep', () => {
     const { tab } = tabFor({ '/v1/warden/config': byMethod(wardenView(), wardenView()) });
     await show(<OnboardingWardenStep tab={tab} onSaved={() => undefined} />);
     expect(text('[data-onboarding-step-body="warden"]')).toContain('Without a Jev key the safe default is rules only');
-    expect(triage('Rules only').checked).toBe(true);
+    expect(jevOn()).toBe(false);
   });
 });
 

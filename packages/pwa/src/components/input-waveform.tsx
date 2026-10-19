@@ -1,38 +1,30 @@
 /**
- * A truthful microphone indicator.
+ * A truthful microphone indicator: rolling bars, one per ~50 ms of real input loudness.
  *
  * The recorder hands this component a read-only analyser branch off the exact
- * stream and audio graph it is already using; this file never asks for device
- * access and never creates a second audio graph. The Web Audio objects and the
- * paint loop live entirely behind refs, so a 20 fps waveform is not 20 React
- * renders (which would wake the composer and the transcript with it).
+ * stream it is already using (`lib/stt/level-monitor.ts`); this file never asks
+ * for device access. The Web Audio objects and the paint loop live entirely
+ * behind refs, so a 20 fps waveform is not 20 React renders (which would wake the
+ * composer and the transcript with it).
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/InputWaveform.tsx`). There, the
  * analyser arrived as a real `AnalyserNode` because capture built its Web Audio
- * graph inline. Here the tap is a PORT declared below, so
- * `CaptureAnalyserTap.analyser` is `unknown` — anything at all. It is therefore
- * PARSED at this boundary rather than cast: `waveformAnalyser` returns null for
- * a tap that cannot answer `getFloatTimeDomainData`, and the component says the
- * meter is unavailable instead of throwing inside a rAF callback. That is the
- * one behavioural difference, and it only fires where kteam would have crashed.
+ * graph inline. Here the tap is a PORT, so `CaptureAnalyserTap.analyser` is
+ * `unknown` — anything at all. It is therefore PARSED at this boundary rather
+ * than cast: `waveformAnalyser` returns null for a tap that cannot answer
+ * `getFloatTimeDomainData`, and the component says the meter is unavailable
+ * instead of throwing inside a rAF callback. The paint is also different: kteam
+ * drew the raw time-domain trace; this draws a scrolling history of loudness as
+ * bars, which reads at a glance on a phone and is flat when nothing is said.
  *
- * WHY THIS SOURCE OUTLIVES ITS PRODUCER. Browser SpeechRecognition owns its own
- * microphone and exposes no amplitude stream, so nothing in production hands
- * this component a tap today; opening a SECOND microphone purely to paint a
- * meter beside browser-owned recognition would be a worse lie than showing no
- * meter at all. The fidelity rules — the noise gate, the RMS mapping, the
- * transition-only no-signal detector — are kept here, with their tests, for a
- * future host that genuinely owns an audio graph.
+ * HONESTY RULES. Silence is flat (the noise gate maps self-noise to level 0 and a
+ * zero level is the minimum bar, never an idle animation). Bars move only with
+ * measured RMS. Reduced motion swaps the scrolling bars for one level bar.
  */
 
 import { useEffect, useRef } from 'react';
 
-/** A visual-only branch off a recorder's already-running audio graph. */
-export interface CaptureAnalyserTap {
-  readonly analyser: unknown;
-  /** Disconnect this branch without touching the recorder or its tracks. */
-  disconnect(): void;
-}
+import type { CaptureMonitor } from '../lib/stt/level-monitor.ts';
 
 const INPUT_WAVEFORM_FPS = 20;
 export const NO_SIGNAL_AFTER_MS = 3_000;
@@ -51,11 +43,6 @@ export interface WaveformAnalyser {
   minDecibels: number;
   maxDecibels: number;
   getFloatTimeDomainData(target: Float32Array): void;
-}
-
-/** The read-only analyser factory shared with the recorder's live capture. */
-export interface CaptureMonitor {
-  createAnalyser(): CaptureAnalyserTap | null;
 }
 
 /**
@@ -113,8 +100,16 @@ export function nextNoSignalReading(
   return { silentSince: since, noSignal: now - since >= delayMs };
 }
 
+/** Bars: width and gap in CSS pixels, and the shortest bar a silent frame still draws. */
+const BAR_WIDTH = 3;
+const BAR_GAP = 2;
+const BAR_MIN_HEIGHT = 2;
+/** More history than any canvas can show, so a resize never starts from empty. */
+const HISTORY_CAP = 256;
+
 interface PaintOptions {
-  samples: Float32Array;
+  /** Recent display levels (0..1), oldest first. The newest is drawn at the right edge. */
+  history: readonly number[];
   level: number;
   reducedMotion: boolean;
   color: string;
@@ -122,13 +117,13 @@ interface PaintOptions {
 }
 
 /**
- * Paint either the live waveform or the reduced-motion level meter. Exported so
+ * Paint either the rolling level bars or the reduced-motion level meter. Exported so
  * both modes can be verified without pretending a test has a microphone.
  */
 export function paintInputLevel(
   canvas: HTMLCanvasElement,
   context: CanvasRenderingContext2D,
-  { samples, level, reducedMotion, color, pixelRatio }: PaintOptions,
+  { history, level, reducedMotion, color, pixelRatio }: PaintOptions,
 ): void {
   const bounds = canvas.getBoundingClientRect();
   const width = Math.max(1, bounds.width || canvas.clientWidth || 320);
@@ -158,31 +153,19 @@ export function paintInputLevel(
     return;
   }
 
-  // Silence has a quiet centre line rather than an animated-looking minimum.
-  context.globalAlpha = 0.22;
-  context.lineWidth = 1;
-  context.beginPath();
-  context.moveTo(0, height / 2);
-  context.lineTo(width, height / 2);
-  context.stroke();
-
-  if (level > 0 && samples.length > 1) {
-    let peak = 0;
-    for (const sample of samples) peak = Math.max(peak, Math.abs(Number.isFinite(sample) ? sample : 0));
-    if (peak > 0) {
-      const amplitude = height * 0.42 * Math.min(1, Math.max(0, level));
-      context.globalAlpha = 0.95;
-      context.lineWidth = 1.5;
-      context.beginPath();
-      for (let index = 0; index < samples.length; index += 1) {
-        const x = (index / (samples.length - 1)) * width;
-        const sample = Number.isFinite(samples[index]) ? (samples[index] as number) : 0;
-        const y = height / 2 - (sample / peak) * amplitude;
-        if (index === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-      }
-      context.stroke();
-    }
+  const pitch = BAR_WIDTH + BAR_GAP;
+  const visible = Math.max(1, Math.floor((width + BAR_GAP) / pitch));
+  const recent = history.slice(-visible);
+  // Right-aligned: new sound enters at the right edge and scrolls left. Before the history fills the
+  // canvas the rest is flat, so a silent meter already reads as a full-width flat line.
+  const shown = [...new Array<number>(visible - recent.length).fill(0), ...recent];
+  const offset = width - (visible * pitch - BAR_GAP);
+  const maxHeight = height * 0.92;
+  for (let index = 0; index < shown.length; index += 1) {
+    const value = Math.min(1, Math.max(0, Number.isFinite(shown[index]) ? (shown[index] as number) : 0));
+    const barHeight = Math.max(BAR_MIN_HEIGHT, value * maxHeight);
+    context.globalAlpha = value > 0 ? 0.95 : 0.3;
+    context.fillRect(offset + index * pitch, (height - barHeight) / 2, BAR_WIDTH, barHeight);
   }
   context.restore();
 }
@@ -237,6 +220,7 @@ export function startInputWaveform({
   let lastPaintAt = Number.NEGATIVE_INFINITY;
   let silentSince: number | null = null;
   let noSignalVisible = false;
+  const history: number[] = [];
 
   const closeGraph = (): void => {
     if (graphClosed) return;
@@ -316,9 +300,12 @@ export function startInputWaveform({
           noSignalVisible = reading.noSignal;
           noSignalElement.hidden = !reading.noSignal;
         }
+        const level = displayLevel(rms);
+        history.push(level);
+        if (history.length > HISTORY_CAP) history.shift();
         paintInputLevel(canvas, drawing, {
-          samples,
-          level: displayLevel(rms),
+          history,
+          level,
           reducedMotion,
           color: runtime.color,
           pixelRatio: runtime.pixelRatio,
@@ -390,7 +377,7 @@ export function InputWaveform({ monitor, runtime = browserWaveformRuntime }: Inp
         aria-hidden="true"
         className="overflow-hidden rounded-control border border-border-soft bg-surface-2 px-2 text-accent"
       >
-        <canvas ref={canvasRef} width={640} height={112} className="block h-14 w-full" />
+        <canvas ref={canvasRef} width={640} height={80} className="block h-10 w-full" />
       </div>
       <p ref={noSignalRef} hidden role="status" aria-live="polite" className="text-meta text-warn">
         No microphone signal yet. Check that your mic is unmuted and the right input is selected.

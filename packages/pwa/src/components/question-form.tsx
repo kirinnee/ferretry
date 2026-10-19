@@ -185,7 +185,12 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
                 <textarea
                   aria-label={`Other answer for question ${index + 1}`}
                   disabled={submitting}
-                  onChange={event => setAnswers(current => updateOther(current, index, event.currentTarget.value))}
+                  onChange={event => {
+                    // Read BEFORE the updater: React clears `currentTarget` once the handler returns, and
+                    // the updater runs later — reading it there throws and unmounts the whole page.
+                    const { value } = event.currentTarget;
+                    setAnswers(current => updateOther(current, index, value));
+                  }}
                   placeholder="Type your response"
                   value={answers.others[index] ?? ''}
                 />

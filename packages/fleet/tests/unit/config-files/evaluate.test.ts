@@ -23,7 +23,7 @@ const evaluate = (
 const withText = (files: readonly ConfigFileText[], path: string, text: string): ConfigFileText[] =>
   files.map(entry => (entry.path === path ? file(path, text) : entry));
 
-const WARDEN_ON = 'triage: llm\n';
+const WARDEN_ON = 'layers:\n  llm: true\n';
 const MACHINE_FERRETRY = 'agentControl:\n  ferretrySettings: true\n';
 const LEARNING_OFF = 'enabled: false\n';
 
@@ -260,7 +260,7 @@ describe('evaluateConfigFiles: last good wins', () => {
 
 describe('evaluateConfigFiles: loosening waits', () => {
   it.each([
-    ['warden.yaml', WARDEN_ON, 'the Warden may now spend on an AI investigation of every flag'],
+    ['warden.yaml', WARDEN_ON, 'the Warden may now spend on AI investigations'],
     ['machine.yaml', MACHINE_FERRETRY, 'agents may now control Ferretry settings'],
     ['machine.yaml', 'agentPermissions: skip\n', 'agents now skip every permission prompt'],
     ['learning.yaml', 'maxMinersPerRun: 9\n', 'the lesson miners one run may start goes up from 2 to 9'],
@@ -285,7 +285,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
     const actual = evaluate([file('warden.yaml', 'triage: llm\nintervalMinutes: 10\n')], accepted);
 
     // Assert
-    should(actual.effective.warden.triage).equal('rules');
+    should(actual.effective.warden.layers.llm).be.false();
     should(actual.effective.warden.intervalMinutes).equal(10);
     should(actual.accepted).deepEqual(accepted);
   });
@@ -325,7 +325,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
     );
 
     // Assert
-    should(actual.effective.warden.triage).equal('rules');
+    should(actual.effective.warden.layers.llm).be.false();
     should(actual.effective.model.machine.agentPermissions).equal('auto');
     should(actual.pending).deepEqual([]);
     should(actual.files.map(entry => entry.state)).deepEqual(['ok', 'ok']);
@@ -341,7 +341,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
     const actual = evaluate([file('warden.yaml', WARDEN_ON)], confirmed);
 
     // Assert
-    should(actual.effective.warden.triage).equal('llm');
+    should(actual.effective.warden.layers.llm).be.true();
     should(actual.pending).deepEqual([]);
     should(actual.files[0]?.state).equal('ok');
     should(actual.accepted).deepEqual(confirmed);
@@ -368,7 +368,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
 
     // Assert
     should(second.pending).deepEqual(first.pending);
-    should(second.effective.warden.triage).equal('rules');
+    should(second.effective.warden.layers.llm).be.false();
   });
 
   it('should hold a NEW edit over a confirmed one: confirming names one etag only', () => {
@@ -382,7 +382,7 @@ describe('evaluateConfigFiles: loosening waits', () => {
     // Assert
     should(actual.pending[0]?.etag).equal(digest(edited));
     should(actual.pending[0]?.changes).deepEqual(['the number of wardens that may run at once goes up from 1 to 4']);
-    should(actual.effective.warden.triage).equal('llm');
+    should(actual.effective.warden.layers.llm).be.true();
     should(actual.effective.warden.maxAssignedWardens).equal(1);
   });
 });

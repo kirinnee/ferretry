@@ -449,7 +449,11 @@ describe('MachineOnboarding · steps that save through their own surface', () =>
         ...SET_UP_READS,
         'PATCH /v1/warden/config': (call: Call) => {
           patched.push(call);
-          return { config: wardenConfig({ triage: 'jev' }), accounts: wardenConfig().accounts, warnings: [] };
+          return {
+            config: wardenConfig({ layers: { jev: true, llm: true } }),
+            accounts: wardenConfig().accounts,
+            warnings: [],
+          };
         },
       },
     });

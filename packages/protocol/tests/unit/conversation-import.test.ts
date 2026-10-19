@@ -123,3 +123,38 @@ describe('the conversation import wire contract', () => {
     ]);
   });
 });
+
+describe('conversation import windows', () => {
+  const NOW = Date.parse('2026-10-19T12:00:00Z');
+  const at = (id: string, daysAgo: number, adoptedBy?: string): imports.ImportableConversation => ({
+    ...row,
+    harness: 'claude' as const,
+    id,
+    lastActivityAt: new Date(NOW - daysAgo * 86_400_000).toISOString(),
+    ...(adoptedBy === undefined ? {} : { adoptedBy }),
+  });
+
+  it('parseImportWindow takes only the offered windows', () => {
+    should(imports.parseImportWindow('7d')).equal(7);
+    should(imports.parseImportWindow(' 30d ')).equal(30);
+    should(imports.parseImportWindow('2d')).equal(undefined);
+    should(imports.parseImportWindow('7h')).equal(undefined);
+  });
+
+  it('conversationsToImport keeps un-owned rows inside the window; undefined means all', () => {
+    const rows = [at('a', 0.5), at('b', 2), at('c', 20), at('d', 0.1, 'owned')];
+    should(imports.conversationsToImport(rows, 1, NOW)).eql(['a']);
+    should(imports.conversationsToImport(rows, 3, NOW)).eql(['a', 'b']);
+    should(imports.conversationsToImport(rows, undefined, NOW)).eql(['a', 'b', 'c']);
+  });
+
+  it('adoptionBatches splits at the adoption cap', () => {
+    const ids = Array.from({ length: imports.CONVERSATION_ADOPT_MAX * 2 + 1 }, (_, index) => `id${index}`);
+    should(imports.adoptionBatches(ids).map(batch => batch.length)).eql([
+      imports.CONVERSATION_ADOPT_MAX,
+      imports.CONVERSATION_ADOPT_MAX,
+      1,
+    ]);
+    should(imports.adoptionBatches([])).eql([]);
+  });
+});

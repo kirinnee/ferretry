@@ -5,8 +5,8 @@
  * Only agent runtimes get it (F1). Its contents are exactly three things and never a credential or
  * an identity (F3): no trust prompt, no onboarding screens, and the permission mode from the
  * machine's **Agent permissions** (F4). Two carried-over launch flags join it because nobody is
- * there to answer an agent: Claude's `--disallowed-tools=AskUserQuestion` (owner question O3,
- * built with the lead's default) and Codex's `--no-alt-screen`.
+ * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (owner question O3,
+ * now per ferret — an interactive ferret has the owner and keeps its question tool) and Codex's `--no-alt-screen`.
  *
  * It also puts the Ferretry tools in every agent runtime — the `fy mcp serve` MCP server, through which
  * an agent drives terminals and browser pages by name — and a short instruction saying they exist and
@@ -180,8 +180,19 @@ export const CODEX_PERMISSIONS: Readonly<
   skip: { approvalPolicy: 'never', sandboxMode: 'danger-full-access' },
 };
 
-/** O3: an agent has nobody to answer a question, so the tool that asks one is withheld. */
+/**
+ * O3: an unattended (`auto`) ferret has nobody to answer a question, so the tool that asks one is
+ * withheld. An INTERACTIVE ferret has the owner, so it keeps it — which makes this per FERRET, not per
+ * runtime: the wrapper (`../wrappers.ts`) applies the flag at exec time unless the daemon-written
+ * {@link SESSION_MODE_ENV} is `interactive`. A launch with no mode is treated as unattended.
+ */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
+
+/** Codex gates `request_user_input` outside Plan mode behind this feature; only interactive ferrets enable it. */
+export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
+
+/** The launch variable naming a ferret's mode (`interactive` or `auto`); written by the daemon at creation. */
+export const SESSION_MODE_ENV = 'FY_SESSION_MODE';
 
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 

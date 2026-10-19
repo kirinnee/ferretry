@@ -23,15 +23,16 @@ import type {
   WardenAnomaly,
   WardenAttentionOutcome,
   WardenAttentionView,
+  WardenBlessingView,
   WardenFailoverAccountView,
   WardenInvestigation,
   WardenJudgement,
   WardenStatusView,
-  WardenTriage,
+  WardenLayers,
   WardenVerdictKind,
 } from '@ferretry/protocol';
 import { wardenAccountLabel, wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
-import { ANOMALY_CHIPS, chip, TRIAGE_LABEL, type WardenChip } from './warden-vocabulary.ts';
+import { ANOMALY_CHIPS, chip, layersLabel, type WardenChip } from './warden-vocabulary.ts';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ const plural = (count: number, one: string, many = `${one}s`): string => `${coun
 export const actionChip = (action: WardenAction): WardenChip => {
   if (action.outcome === 'held') return chip(`${ACTION_VERB[action.action]} · asks you`, 'warn');
   if (action.outcome === 'failed') return chip(`${ACTION_VERB[action.action]} failed`, 'err');
+  if (action.action === 'bless' && action.by === 'owner') return chip('left alone by you', 'accent');
   if (action.action === 'bless' && action.by === 'jev')
     return chip(
       action.confidence === undefined ? 'blessed by Jev' : `blessed by Jev ${percent(action.confidence)}`,
@@ -123,35 +125,36 @@ export const investigatorLabel = (status: Pick<WardenStatusView, 'config' | 'fai
   return head?.model ?? (head === undefined ? 'no login' : wardenAccountLabel(head));
 };
 
+/** What becomes of a flag Jev did not clear: an investigation while that layer runs, the owner otherwise. */
+const passedTo = (status: WardenStatusView): string =>
+  status.triage.llm.active ? 'goes to an investigation' : 'waits for you';
+
 const guardWarning = (status: WardenStatusView, now: number): string | undefined => {
-  const { triage } = status;
-  if (triage.reason === 'jev_cap' || triage.reason === 'investigation_cap')
-    return 'Cap hit — rules only until midnight UTC';
-  if (triage.reason === 'no_login')
-    return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — rules only until you choose one in Settings › Warden`;
-  if (triage.configured !== 'jev') return undefined;
-  if (triage.guardFailure?.code === 'not_set') return 'No Jev key — every flag is investigated';
-  const backoff = Date.parse(triage.guardBackoffUntil ?? '');
-  if (Number.isFinite(backoff) && backoff > now) return 'Jev is busy — flags go straight to an investigation';
-  if (triage.guardFailure !== undefined)
-    return `Jev failed (${triage.guardFailure.code.replaceAll('_', ' ')}) — that flag was investigated`;
+  const { jev, llm } = status.triage;
+  if (llm.reason === 'investigation_cap') return 'LLM cap hit — flags wait for you until midnight UTC';
+  if (llm.reason === 'no_login')
+    return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — investigations are off until you choose one in Settings › Warden`;
+  if (jev.reason === 'jev_cap') return `Jev cap hit — every flag ${passedTo(status)} until midnight UTC`;
+  if (!jev.configured) return undefined;
+  if (status.triage.guardFailure?.code === 'not_set') return `No Jev key — every flag ${passedTo(status)}`;
+  const backoff = Date.parse(status.triage.guardBackoffUntil ?? '');
+  if (Number.isFinite(backoff) && backoff > now) return `Jev is busy — each flag ${passedTo(status)}`;
+  if (status.triage.guardFailure !== undefined)
+    return `Jev failed (${status.triage.guardFailure.code.replaceAll('_', ' ')}) — that flag ${passedTo(status)}`;
   return undefined;
 };
 
 export const wardenStatusLine = (status: WardenStatusView, now: number): WardenStatusLine => {
-  if (!status.config.enabled || status.triage.reason === 'disabled')
+  if (!status.config.enabled || status.triage.jev.reason === 'disabled')
     return { lead: 'The Warden is off.', parts: ['Nothing is watched.'] };
-  const { configured } = status.triage;
-  const lead =
-    configured === 'jev'
-      ? `${TRIAGE_LABEL.jev} ≥${status.config.guard.threshold.toFixed(2)}`
-      : TRIAGE_LABEL[configured];
+  const { layers } = status.config;
   const parts: string[] = [];
-  if (configured !== 'rules') parts.push(`${investigatorLabel(status)} investigations`);
+  if (layers.jev) parts.push(`Jev clears at ≥${status.config.guard.threshold.toFixed(2)}`);
+  if (layers.llm) parts.push(`${investigatorLabel(status)} investigations`);
   parts.push(`every ${status.config.intervalMinutes} min`);
-  if (configured !== 'rules') {
+  if (layers.jev || layers.llm) {
     const { spend } = status;
-    const cap = (configured === 'jev' ? spend.jevCapUsd : 0) + spend.investigationCapUsd;
+    const cap = (layers.jev ? spend.jevCapUsd : 0) + (layers.llm ? spend.investigationCapUsd : 0);
     parts.push(`${usd(spend.jevUsd + spend.investigationUsd)} of ${usd(cap)} today`);
   }
   const swept = agoLabel(status.lastSweepAt, now);
@@ -159,36 +162,36 @@ export const wardenStatusLine = (status: WardenStatusView, now: number): WardenS
   const next = nextSweepLabel(status.nextSweepAt, now);
   if (next !== undefined) parts.push(next);
   const warning = guardWarning(status, now);
+  const lead = layersLabel(layers);
   return warning === undefined ? { lead, parts } : { lead, parts, warning };
 };
 
 /** Today's flags and what became of them. Undefined while the Warden is off. */
 export const wardenSavingsLine = (status: WardenStatusView): string | undefined => {
-  if (!status.config.enabled || status.triage.reason === 'disabled') return undefined;
+  if (!status.config.enabled || status.triage.jev.reason === 'disabled') return undefined;
   const { savings, spend } = status;
+  const { layers } = status.config;
   const flags = plural(savings.flags, 'flag');
   const pending = spend.pendingInvestigations > 0 ? ` · ${spend.pendingInvestigations} pending` : '';
   const investigated = `${savings.investigations} investigated (${usd(spend.investigationUsd)})${pending}`;
-  switch (status.triage.configured) {
-    case 'rules':
-      return `Today: ${flags} shown to you · no AI · $0.00`;
-    case 'llm':
-      return `Today: ${flags} · ${investigated}`;
-    case 'jev': {
-      const saved = savings.savedUsd === undefined ? '' : ` · ~${usd(savings.savedUsd)} saved vs investigating all`;
-      return `Today: ${flags} · ${savings.jevSkips} skipped by Jev (${usd(spend.jevUsd)}) · ${investigated}${saved}`;
-    }
-  }
+  const cleared = `${savings.jevSkips} cleared by Jev (${usd(spend.jevUsd)})`;
+  if (!layers.jev && !layers.llm) return `Today: ${flags} shown to you · no AI · $0.00`;
+  if (!layers.jev) return `Today: ${flags} · ${investigated}`;
+  if (!layers.llm) return `Today: ${flags} · ${cleared} · the rest shown to you`;
+  const saved = savings.savedUsd === undefined ? '' : ` · ~${usd(savings.savedUsd)} saved vs investigating all`;
+  return `Today: ${flags} · ${cleared} · ${investigated}${saved}`;
 };
 
-export const wardenHowItWorks = (triage: WardenTriage): string => {
-  if (triage === 'rules')
-    return 'How it works: a free sweep flags anomalies and shows them to you. No AI runs and nothing is spent.';
-  const guard =
-    triage === 'jev'
-      ? ' Jev only guards: it skips a healthy flag (and blesses it for a while) or sends it on; unsure counts as investigate.'
-      : '';
-  return `How it works: a free sweep flags anomalies.${guard} A read-only investigation decides leave, nudge, resume, stop or needs you. Only that verdict ever acts, and stopping asks you unless you allowed it.`;
+export const wardenHowItWorks = (layers: WardenLayers): string => {
+  if (!layers.jev && !layers.llm)
+    return 'How it works: free rules flag anomalies and show them to you. No AI runs and nothing is spent.';
+  const jev = layers.jev
+    ? ` Jev clears a flag it is sure is healthy; anything else ${layers.llm ? 'goes on' : 'is shown to you'}.`
+    : '';
+  const llm = layers.llm
+    ? ' A read-only investigation decides leave, nudge, resume, stop or needs you. Only that verdict ever acts, and stopping asks you unless you allowed it.'
+    : ' No investigation runs.';
+  return `How it works: free rules flag anomalies.${jev}${llm}`;
 };
 
 // ── Who needs you ───────────────────────────────────────────────────────────────────────────────
@@ -259,6 +262,8 @@ export interface WardenRow {
   readonly at?: string;
   /** Offer "Investigate": an unjudged flag. */
   readonly investigate?: boolean;
+  /** Offer "Leave it longer": the ferret has a flag, or one was cleared. */
+  readonly leave?: boolean;
   /** Offer "Report": a finished investigation's evidence. */
   readonly reportPath?: string;
   readonly verdict?: WardenVerdictKind;
@@ -305,6 +310,7 @@ export const needsYouRows = (view: WardenAttentionView): readonly WardenRow[] =>
       ]),
       at: first.waitingSince,
       ...(group.some(canInvestigate) ? { investigate: true } : {}),
+      ...(group.some(item => item.source === 'warden-anomaly') ? { leave: true } : {}),
       ...optional('reportPath', judged?.reportPath),
     };
   });
@@ -333,23 +339,45 @@ const latestBless = (status: WardenStatusView, sessionId: string): WardenAction 
 
 const clearedChip = (status: WardenStatusView, sessionId: string): WardenChip => {
   const bless = latestBless(status, sessionId);
+  if (bless?.by === 'owner') return chip('left alone by you', 'accent');
   return chip(
     bless?.by === 'jev' && bless.confidence !== undefined ? `cleared · Jev ${percent(bless.confidence)}` : 'cleared',
     'ok',
   );
 };
 
+/** `45 min`, `2 h`, `1 h 20 min`. */
+export const durationLabel = (ms: number): string => {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+};
+
+/**
+ * How much longer a cleared ferret is left alone, as a chip — `quiet 45 min`, `quiet until it changes` —
+ * with the run of clears that made it long: `×3` is the third clear in a row.
+ */
+export const cooldownChip = (blessing: WardenBlessingView, now: number): WardenChip => {
+  if (blessing.untilChange === true) return chip('quiet until it changes', 'ok');
+  const left = durationLabel(Date.parse(blessing.expiresAt) - now);
+  return chip(blessing.streak === undefined ? `quiet ${left}` : `quiet ${left} · ×${blessing.streak + 1}`, 'ok');
+};
+
 /**
  * The Watching rows: current flags nobody needs the owner for yet, flags being judged right now, and
- * sessions a blessing has cleared. A session already in Needs you is never repeated here.
+ * sessions a blessing has cleared — each with how long it stays quiet. A session already in Needs you
+ * is never repeated here. A flagged or cleared ferret offers "Leave it longer".
  */
 export const watchingRows = (
   status: WardenStatusView,
   attention: WardenAttentionView | undefined,
   exclude: ReadonlySet<string>,
+  now: number,
 ): readonly WardenRow[] => {
   const rows = new Map<string, WardenRow>();
-  const blessed = new Set(status.blessings.map(blessing => blessing.sessionId));
+  const blessings = new Map(status.blessings.map(blessing => [blessing.sessionId, blessing]));
   const grouped = new Map<string, WardenAnomaly[]>();
   for (const anomaly of status.anomalies)
     if (!exclude.has(anomaly.sessionId))
@@ -357,6 +385,7 @@ export const watchingRows = (
   for (const [sessionId, group] of grouped) {
     const [first] = group as [WardenAnomaly, ...WardenAnomaly[]];
     const running = investigationFor(status, sessionId);
+    const blessing = blessings.get(sessionId);
     rows.set(sessionId, {
       key: `watch:${sessionId}`,
       sessionId,
@@ -366,9 +395,11 @@ export const watchingRows = (
       chips: dedupeChips([
         ...group.map(anomaly => ANOMALY_CHIPS[anomaly.kind]),
         running === undefined ? undefined : investigationStateChip(status, running),
-        blessed.has(sessionId) ? clearedChip(status, sessionId) : undefined,
+        blessing === undefined ? undefined : clearedChip(status, sessionId),
+        blessing === undefined ? undefined : cooldownChip(blessing, now),
       ]),
       ...optional('at', first.since),
+      leave: true,
     });
   }
   for (const item of attention?.items ?? []) {
@@ -393,8 +424,13 @@ export const watchingRows = (
       key: `watch:${blessing.sessionId}`,
       sessionId: blessing.sessionId,
       reason: bless?.detail ?? 'Judged healthy, so these flags are not raised again for a while.',
-      chips: dedupeChips([...blessing.kinds.map(kind => ANOMALY_CHIPS[kind]), clearedChip(status, blessing.sessionId)]),
+      chips: dedupeChips([
+        ...blessing.kinds.map(kind => ANOMALY_CHIPS[kind]),
+        clearedChip(status, blessing.sessionId),
+        cooldownChip(blessing, now),
+      ]),
       ...optional('at', bless?.at),
+      leave: true,
     });
   }
   return [...rows.values()];

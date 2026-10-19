@@ -165,23 +165,40 @@ describe('wardenNeedsYouCount', () => {
 });
 
 describe('wardenTriageLabel', () => {
-  it('should name the triage in effect, a cap fallback, or Off', () => {
+  const on = { configured: true, active: true, reason: 'configured' } as const;
+  const off = { configured: false, active: false, reason: 'configured' } as const;
+
+  it('should name the layers in effect, any the owner switched on that a cap stopped, or Off', () => {
     // Arrange
-    const jev = wardenStatus({ config: wardenConfig({ triage: 'jev' }) });
+    const both = wardenStatus({ config: wardenConfig({ layers: { jev: true, llm: true } }) });
     const capped = wardenStatus({
-      triage: { configured: 'jev', effective: 'rules', reason: 'jev_cap' },
+      triage: { jev: { configured: true, active: false, reason: 'jev_cap' }, llm: on },
     });
     const investigationCapped = wardenStatus({
-      triage: { configured: 'llm', effective: 'rules', reason: 'investigation_cap' },
+      triage: { jev: on, llm: { configured: true, active: false, reason: 'investigation_cap' } },
     });
-    const off = wardenStatus({ config: wardenConfig({ enabled: false }) });
-    const disabled = wardenStatus({ triage: { configured: 'rules', effective: 'rules', reason: 'disabled' } });
+    const rules = wardenStatus();
+    const off_ = wardenStatus({ config: wardenConfig({ enabled: false }) });
+    const disabled = wardenStatus({
+      triage: {
+        jev: { configured: true, active: false, reason: 'disabled' },
+        llm: { configured: true, active: false, reason: 'disabled' },
+      },
+    });
 
     // Act
-    const labels = [jev, capped, investigationCapped, off, disabled].map(wardenTriageLabel);
+    const labels = [both, capped, investigationCapped, rules, off_, disabled].map(wardenTriageLabel);
 
     // Assert
-    expect(labels).toEqual(['Jev guard', 'Rules only (cap hit)', 'Rules only (cap hit)', 'Off', 'Off']);
+    expect(labels).toEqual([
+      'Rules + Jev + LLM',
+      'Rules + LLM (Jev cap hit)',
+      'Rules + Jev (LLM cap hit)',
+      'Rules only',
+      'Off',
+      'Off',
+    ]);
+    expect(wardenTriageLabel(wardenStatus({ triage: { jev: off, llm: on } }))).toBe('Rules + LLM');
   });
 });
 
@@ -215,10 +232,16 @@ describe('the investigation login', () => {
     expect(wardenLoginProblem(lost, [{ agent: 'legacy-wrapper' }])).toBe("Unknown login 'legacy-wrapper'");
   });
 
-  it('should label a rules fallback for want of a login', () => {
+  it('should label investigations off for want of a login', () => {
+    // Arrange
+    const status = wardenStatus({
+      triage: {
+        jev: { configured: false, active: false, reason: 'configured' },
+        llm: { configured: true, active: false, reason: 'no_login' },
+      },
+    });
+
     // Act / Assert
-    expect(
-      wardenTriageLabel(wardenStatus({ triage: { configured: 'llm', effective: 'rules', reason: 'no_login' } })),
-    ).toBe('Rules only (no login)');
+    expect(wardenTriageLabel(status)).toBe('Rules only (no login)');
   });
 });

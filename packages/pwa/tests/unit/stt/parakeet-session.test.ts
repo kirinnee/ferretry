@@ -7,6 +7,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { AudioCapturePort, AudioRecording } from '../../../src/lib/stt/audio-capture.ts';
 import { BrowserRecognitionError } from '../../../src/lib/stt/browser-recognition.ts';
+import type { CaptureMonitor } from '../../../src/lib/stt/level-monitor.ts';
 import type { NearLiveState, TimedTranscript } from '../../../src/lib/stt/near-live.ts';
 import { ParakeetEngineError } from '../../../src/lib/stt/parakeet-engine.ts';
 import {
@@ -51,6 +52,7 @@ const settle = <T>(promise: Promise<T>): { value?: T; error?: unknown; done: boo
 const ENOUGH = 4_000;
 
 class FakeRecording implements AudioRecording {
+  monitor: CaptureMonitor | null = null;
   stops = 0;
   cancels = 0;
   samples: Float32Array = new Float32Array(ENOUGH);
@@ -90,6 +92,7 @@ interface World {
     transcribeTimed: (samples: Float32Array, signal?: AbortSignal) => Promise<TimedTranscript>;
   };
   readonly live: NearLiveState[];
+  readonly monitors: (CaptureMonitor | null)[];
   preloadThrows: boolean;
 }
 
@@ -101,6 +104,7 @@ const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): W
   const transcribed: World['transcribed'] = [];
   const timers: World['timers'] = [];
   const live: NearLiveState[] = [];
+  const monitors: (CaptureMonitor | null)[] = [];
   let preloads = 0;
   let unwatched = 0;
   let hidden: () => void = () => undefined;
@@ -155,10 +159,12 @@ const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): W
     onAbort: () => events.push('abort'),
     onLimit: () => events.push('limit'),
     onLive: state => live.push(state),
+    onMonitor: monitor => monitors.push(monitor),
   });
   return Object.assign(w, {
     session,
     live,
+    monitors,
     recording,
     open,
     events,
@@ -460,6 +466,53 @@ describe('ParakeetRecognitionSession', () => {
     gate.resolve('x');
     await tick();
     should(outcome.value).equal('x');
+  });
+});
+
+describe('ParakeetRecognitionSession — the input meter', () => {
+  const monitor: CaptureMonitor = { createAnalyser: () => null };
+
+  it('hands over the open recording’s own level tap, once the microphone is open', async () => {
+    const w = world();
+    w.recording.monitor = monitor;
+    w.session.start();
+    should(w.monitors).eql([]);
+    w.open.resolve(w.recording);
+    await tick();
+    should(w.monitors).eql([monitor]);
+  });
+
+  it('offers a null tap when the page has no Web Audio, and the take carries on', async () => {
+    const w = await recordingWorld();
+    should(w.monitors).eql([null]);
+    should(await w.session.finish()).equal('hello world');
+  });
+
+  it('withdraws the tap the moment Stop is pressed', async () => {
+    const w = world();
+    w.recording.monitor = monitor;
+    w.session.start();
+    w.open.resolve(w.recording);
+    await tick();
+    const finishing = w.session.finish();
+    should(w.monitors).eql([monitor, null]);
+    await finishing;
+  });
+
+  it('withdraws the tap on cancel, and when the microphone is refused', async () => {
+    const cancelled = world();
+    cancelled.recording.monitor = monitor;
+    cancelled.session.start();
+    cancelled.open.resolve(cancelled.recording);
+    await tick();
+    cancelled.session.cancel();
+    should(cancelled.monitors).eql([monitor, null]);
+
+    const refused = world();
+    refused.session.start();
+    refused.open.reject({ name: 'NotAllowedError' });
+    await tick();
+    should(refused.monitors).eql([null]);
   });
 });
 
