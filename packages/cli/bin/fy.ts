@@ -1,13 +1,7 @@
 #!/usr/bin/env bun
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import {
-  HYPERMEDIA_ENV,
-  HYPERMEDIA_INSTRUCTION,
-  LESSONS_INSTRUCTION,
-  PASSIVE_LEARNING_ENV,
-  setUpFerretrySkill,
-} from '@ferretry/fleet';
+import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import { type AnalyticsResponse, CONFIG_DIRECTORY_NAME, type IFyApiClient, type SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -119,7 +113,7 @@ import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerLessonCommands } from '../src/lib/lesson/commands';
 import { LessonController } from '../src/lib/lesson/controller';
-import { McpServer, mcpInitializeInstructions, registerMcpCommands } from '../src/lib/mcp';
+import { McpServer, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
@@ -776,14 +770,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new McpServer(toolsClient, {
           name: PRODUCT_NAME,
           version: assertSemver(pkg.version),
-          // PASSIVE LEARNING (FY_LEARNING_PASSIVE=1) and HYPERMEDIA (FY_HYPERMEDIA=1) are per-ferret switches;
-          // the env reads stay here, in the composition root, and only the chosen texts cross into the
-          // pure joining function.
-          instructions: mcpInitializeInstructions({
-            skill: setUpFerretrySkill(BINARY_NAME),
-            ...(world.environment[PASSIVE_LEARNING_ENV] === '1' ? { lessons: LESSONS_INSTRUCTION(BINARY_NAME) } : {}),
-            ...(world.environment[HYPERMEDIA_ENV] === '1' ? { hypermedia: HYPERMEDIA_INSTRUCTION } : {}),
-          }),
+          // One line only. Every behavioural instruction — the tools, the settings rules, and each ferret's own
+          // hypermedia, Pack mode and lessons sections — is in the appended system prompt the runtime wrapper
+          // composes (fleet's fixed-layer.ts), which a harness weighs above a server's instructions.
+          instructions: TOOLS_SERVER_INSTRUCTIONS,
         }),
         Bun.stdin.stream(),
         line => {

@@ -216,22 +216,25 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
   'FY_URL',
   'FY_SESSION_ID',
   'FY_SESSION_BOARD_CAPABILITY',
-  'FY_LEARNING_PASSIVE',
-  'FY_HYPERMEDIA',
 ];
 
 /**
- * PASSIVE LEARNING — a fixed-layer entry that differs per FERRET rather than per runtime (as {@link HYPERMEDIA_ENV} does).
+ * THE PER-FERRET SECTIONS of the appended system prompt: passive learning ({@link PASSIVE_LEARNING_ENV}),
+ * hypermedia ({@link HYPERMEDIA_ENV}) and Pack mode ({@link PACK_ENV}).
  *
- * A runtime's wrapper is materialised once and serves every ferret launched on it, so the teaching
- * cannot be a launch argument: it would be on for all of them or none. It rides the tools server the
- * fixed layer already puts in every agent runtime instead. The daemon sets {@link PASSIVE_LEARNING_ENV}
- * to `1` in the environment of a ferret that is instructed to learn, and `fy mcp serve` adds
- * {@link LESSONS_INSTRUCTION} to its MCP `initialize` instructions iff it is set (Codex is handed the
- * variable through {@link FERRETRY_MCP_ENV_VARS}; Claude hands a stdio server its whole environment).
+ * A runtime's wrapper is materialised once and serves every ferret launched on it, so a section cannot
+ * be a static launch argument: it would be on for all of them or none. The daemon writes each switch
+ * into a ferret's launch environment as `1` or `0`, and the wrapper composes the ONE
+ * `--append-system-prompt` (Claude) or `developer_instructions` (Codex) value at exec time — the
+ * owner's own instruction, then {@link AGENT_INSTRUCTION}, then each section that is `1`, in
+ * {@link FERRET_SECTIONS} order (`../wrappers.ts`). A restart or resume runs the same wrapper with the
+ * same stored environment, so it keeps them.
  *
- * That is ALL the switch does: whether this ferret is told to file lessons. A running ferret switched
- * on or off is told so with a queued, non-interrupting message, because its environment is fixed.
+ * They are system instructions rather than the tools server's MCP `initialize` text because a
+ * harness weighs the system prompt far above a server's instructions, which an agent can ignore.
+ *
+ * Passive learning: whether this ferret is told to file lessons. A running ferret switched on or off
+ * is told so with a queued, non-interrupting message, because its environment is fixed.
  */
 export const PASSIVE_LEARNING_ENV = 'FY_LEARNING_PASSIVE';
 
@@ -240,11 +243,9 @@ export const LESSONS_INSTRUCTION = (fy: string): string =>
   `Lessons: when the owner corrects you, or you learn a durable fact about how they want work done, file it as one short imperative rule with \`${fy} lesson suggest "<rule>" --scope global|repo\` (or the lessons_suggest tool). Use --scope repo for a fact about this project and --scope global for one every ferret should follow. File each lesson once; the owner reviews every lesson before it reaches an instruction file.`;
 
 /**
- * HYPERMEDIA — the second per-FERRET fixed-layer entry, carried exactly like passive learning and for
- * the same reason: one runtime wrapper serves many ferrets, so a launch argument would be on for all of
- * them or none. The daemon sets {@link HYPERMEDIA_ENV} to `1` (or `0`) in a ferret's launch environment
- * and `fy mcp serve` adds {@link HYPERMEDIA_INSTRUCTION} to its MCP `initialize` instructions iff it is
- * `1`. A ferret switched while running learns it at its next launch; nothing is sent to it.
+ * HYPERMEDIA — a per-FERRET section of the appended system prompt, carried exactly like passive learning
+ * (see {@link PASSIVE_LEARNING_ENV}). A ferret switched while running learns it at its next launch;
+ * nothing is sent to it.
  *
  * The markup it teaches is the `fy-render` fence (docs/fy-render.md), and docs/hypermedia.md is the
  * contract that quotes this text verbatim.
@@ -268,6 +269,32 @@ export const HYPERMEDIA_INSTRUCTION = [
   '```',
   'The reader taps Render to show it. Chat only: never write fy-render into files, docs, commits or PR text.',
 ].join('\n');
+
+/**
+ * PACK MODE — a per-FERRET section of the appended system prompt (docs/pack-mode.md): this ferret may
+ * delegate to sub-ferrets and choose the model each runs on. The daemon writes {@link PACK_ENV} `0` for
+ * a ferret at the deepest level a sub-ferret may start from, so it is never told about a door it cannot
+ * open. docs/pack-mode.md quotes this text verbatim.
+ */
+export const PACK_ENV = 'FY_PACK';
+
+/** The Pack mode teaching. Short on purpose — it is in every prompt. */
+export const PACK_INSTRUCTION = (fy: string): string =>
+  [
+    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself.`,
+    `1. \`${fy} recommend "<part>"\` lists the models usable now, best first, with the command to start each.`,
+    `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). The brief is all it knows: say what to do, where, and what to report.`,
+    `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
+    `4. \`${fy} wait <id>\` blocks until it finishes and prints its result. Check it, then combine the results yourself.`,
+    `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
+  ].join('\n');
+
+/** The per-ferret sections, in the order the wrapper appends them, each with the variable that turns it on. */
+export const FERRET_SECTIONS = (fy: string): readonly { readonly env: string; readonly text: string }[] => [
+  { env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION },
+  { env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
+  { env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
+];
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
@@ -322,9 +349,36 @@ const entry = (
 const AUTO_MODE_REFUSAL =
   "Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won't launch this agent runtime. Update Claude Code, or switch this machine's Agent permissions to Skip all permission checks.";
 
+/**
+ * Changing Ferretry's own settings — the short form of the "Set up Ferretry" skill. The whole skill is
+ * one command away (`fy config guide`), so it is not in every prompt; these are the rules an agent must
+ * not learn too late.
+ */
+export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
+  `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (\`${fy} secret set NAME\`, then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
+
+/**
+ * Everything every agent runtime is told, as ONE appended system prompt section: the tools, then the
+ * settings rules. A ferret's own sections follow it (`FERRET_SECTIONS`), added by its wrapper.
+ */
+export const AGENT_INSTRUCTION = (fy: string): string =>
+  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
+
+/**
+ * What the tools server says when an agent connects (MCP `initialize` instructions): one line. Every
+ * behavioural instruction is in the appended system prompt instead, which a harness weighs far above
+ * a server's instructions.
+ */
+export const TOOLS_SERVER_INSTRUCTIONS =
+  "Ferretry's tools: terminals, browser pages, configuration and lessons. How to use them is in your system prompt.";
+
+/** The binary's name, as an instruction names it: the last segment of the command a wrapper runs. */
+export const binaryName = (fyCommand: string): string => fyCommand.split('/').pop() || fyCommand;
+
 /** The fixed layer for an agent runtime of `input.harness`, or the reason it cannot launch (O4). */
 export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
   const { agentPermissions, cwd, fyCommand } = input;
+  const instruction = AGENT_INSTRUCTION(binaryName(fyCommand));
   if (input.harness === 'claude') {
     if (agentPermissions === 'auto' && !input.acceptsAutoPermissionMode) {
       return { ok: false, refusal: { kind: 'claude-auto-mode-unsupported', message: AUTO_MODE_REFUSAL } };
@@ -342,7 +396,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
       entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
       entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
-      entry('instructions', 'launch', ['--append-system-prompt'], AGENT_TOOLS_INSTRUCTION),
+      entry('instructions', 'launch', ['--append-system-prompt'], instruction),
     ];
     return {
       ok: true,
@@ -357,7 +411,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           mode,
           CLAUDE_NO_QUESTIONS_FLAG,
           `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
-          `--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}`,
+          `--append-system-prompt=${instruction}`,
         ],
         // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one
         // is what keeps the auto-default dialog away (see the header).
@@ -386,7 +440,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
         entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
         ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
         entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
-        entry('instructions', 'settings', ['developer_instructions'], AGENT_TOOLS_INSTRUCTION),
+        entry('instructions', 'settings', ['developer_instructions'], instruction),
       ],
       args: [
         '-c',
@@ -405,7 +459,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
         '-c',
         `mcp_servers.${FERRETRY_MCP_SERVER}.env_vars=${tomlArray(FERRETRY_MCP_ENV_VARS)}`,
         '-c',
-        `developer_instructions=${tomlString(AGENT_TOOLS_INSTRUCTION)}`,
+        `developer_instructions=${tomlString(instruction)}`,
       ],
     },
   };

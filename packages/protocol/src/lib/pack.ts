@@ -21,9 +21,6 @@ import { HarnessSchema, InteractionModeSchema, SessionViewSchema } from './sessi
 
 const NonEmpty = z.string().min(1);
 
-/** The environment variable carrying one ferret's Pack switch into its launch (`1` on, `0` off). */
-export const PACK_ENV = 'FY_PACK';
-
 // ── pack.yaml ────────────────────────────────────────────────────────────────────────────────────
 
 /** Who picks the model a sub-ferret runs on: the asking ferret, or Jev ranking the guide's candidates. */

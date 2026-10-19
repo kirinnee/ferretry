@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
@@ -15,9 +16,12 @@ import {
   type FixedLayer,
   type FixedLayerInput,
   fixedLayerFor,
+  FERRET_SECTIONS,
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
+  PACK_ENV,
+  PACK_INSTRUCTION,
   PASSIVE_LEARNING_ENV,
   tomlString,
 } from '../../src/lib/account/fixed-layer.ts';
@@ -27,10 +31,12 @@ import type { HarnessKind } from '../../src/lib/manifest.ts';
 
 const CWD = '/home/me/work.repo';
 const FY = '/opt/fy/bin/fy';
+/** What every agent runtime is told, for the binary {@link FY} names. */
+const INSTRUCTION = AGENT_INSTRUCTION('fy');
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
   `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
-  `--append-system-prompt=${AGENT_TOOLS_INSTRUCTION}`,
+  `--append-system-prompt=${INSTRUCTION}`,
 ];
 /** Every one-shot dialog a Claude agent's `.claude.json` records as seen, as locked entries. */
 const CLAUDE_SEEN_ENTRIES = Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) => ({
@@ -52,9 +58,9 @@ const CODEX_TOOL_ARGS = [
   '-c',
   'mcp_servers.ferretry.args=["mcp","serve"]',
   '-c',
-  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY","FY_LEARNING_PASSIVE","FY_HYPERMEDIA"]',
+  'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_BOARD_CAPABILITY"]',
   '-c',
-  `developer_instructions="${AGENT_TOOLS_INSTRUCTION}"`,
+  `developer_instructions=${tomlString(INSTRUCTION)}`,
 ];
 
 const layerOf = (input: FixedLayerInput): FixedLayer => {
@@ -159,7 +165,7 @@ describe('fixedLayerFor — Claude', () => {
             target: 'launch',
             path: ['--append-system-prompt'],
             key: '--append-system-prompt',
-            value: AGENT_TOOLS_INSTRUCTION,
+            value: INSTRUCTION,
           },
         ],
         args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion', ...CLAUDE_TOOL_ARGS],
@@ -253,7 +259,7 @@ describe('fixedLayerFor — Codex', () => {
         true,
       ]),
       ['settings', 'mcp_servers.ferretry', codexToolsServer(FY)],
-      ['settings', 'developer_instructions', AGENT_TOOLS_INSTRUCTION],
+      ['settings', 'developer_instructions', INSTRUCTION],
     ]);
   });
 
@@ -480,13 +486,13 @@ describe('the Ferretry tools in the fixed layer', () => {
     // Assert — the person's own MCP servers and instruction both stay; theirs first, then Ferretry's.
     should(one.args).containEql('--mcp-config=extra.json');
     should(one.args.filter(arg => arg.startsWith('--append-system-prompt'))).deepEqual([
-      `--append-system-prompt=be terse\n\n${AGENT_TOOLS_INSTRUCTION}`,
+      `--append-system-prompt=be terse\n\n${INSTRUCTION}`,
     ]);
     should(one.args).not.containEql('be terse');
     should(one.overridden).deepEqual([]);
-    should(two.args).containEql(`--append-system-prompt=always test\n\n${AGENT_TOOLS_INSTRUCTION}`);
+    should(two.args).containEql(`--append-system-prompt=always test\n\n${INSTRUCTION}`);
     should(one.fixed.entries.find(entry => entry.purpose === 'instructions')?.value).equal(
-      `be terse\n\n${AGENT_TOOLS_INSTRUCTION}`,
+      `be terse\n\n${INSTRUCTION}`,
     );
   });
 
@@ -521,7 +527,7 @@ describe('the Ferretry tools in the fixed layer', () => {
 
     // Assert
     should(settings.settings).containDeep({
-      developer_instructions: `prefer bun\n\n${AGENT_TOOLS_INSTRUCTION}`,
+      developer_instructions: `prefer bun\n\n${INSTRUCTION}`,
       mcp_servers: { ferretry: codexToolsServer(FY), github: { command: 'gh' } },
     });
     should(settings.overridden.map(entry => (entry.kind === 'setting' ? entry.key : ''))).deepEqual([
@@ -529,7 +535,7 @@ describe('the Ferretry tools in the fixed layer', () => {
     ]);
     should(flags.args).containEql('mcp_servers.github.command="gh"');
     should(flags.args).containEql(
-      `developer_instructions=${tomlString(`be terse\n\nplain\n\ntab\\q\n\n"broken\n\n${AGENT_TOOLS_INSTRUCTION}`)}`,
+      `developer_instructions=${tomlString(`be terse\n\nplain\n\ntab\\q\n\n"broken\n\n${INSTRUCTION}`)}`,
     );
     should(flags.overridden.map(entry => entry.kind === 'flag' && entry.tokens)).deepEqual([
       ['-c', 'mcp_servers.ferretry.command="/evil"'],
@@ -545,7 +551,7 @@ describe('the Ferretry tools in the fixed layer', () => {
 });
 
 describe('passive learning teaching', () => {
-  it('should hand the per-ferret switch to the tools server and teach the suggest command by name', () => {
+  it('should be a per-ferret system prompt section, not a tools-server variable, and teach the suggest command by name', () => {
     // Arrange
     const binary = 'fy';
 
@@ -553,7 +559,8 @@ describe('passive learning teaching', () => {
     const teaching = LESSONS_INSTRUCTION(binary);
 
     // Assert
-    should(FERRETRY_MCP_ENV_VARS).containEql(PASSIVE_LEARNING_ENV);
+    should(FERRETRY_MCP_ENV_VARS).not.containEql(PASSIVE_LEARNING_ENV);
+    should(FERRET_SECTIONS(binary).find(section => section.env === PASSIVE_LEARNING_ENV)?.text).equal(teaching);
     should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
     should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
     should(teaching).containEql('lessons_suggest');
@@ -561,7 +568,7 @@ describe('passive learning teaching', () => {
 });
 
 describe('hypermedia teaching', () => {
-  it('should hand the per-ferret switch to the tools server and teach every form with one fenced example', () => {
+  it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
     const forms = ['mermaid', 'svg', 'html', 'image, video, audio, pdf'];
 
@@ -569,11 +576,34 @@ describe('hypermedia teaching', () => {
     const lines = HYPERMEDIA_INSTRUCTION.split('\n');
 
     // Assert
-    should(FERRETRY_MCP_ENV_VARS).containEql(HYPERMEDIA_ENV);
+    should(FERRETRY_MCP_ENV_VARS).not.containEql(HYPERMEDIA_ENV);
+    should(FERRET_SECTIONS('fy')[0]).deepEqual({ env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION });
     should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
     for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
     should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
     should(HYPERMEDIA_INSTRUCTION).containEql('Do not overdo it');
     should(HYPERMEDIA_INSTRUCTION.length).be.below(1200);
+  });
+});
+
+describe('Pack mode teaching', () => {
+  it('should be the per-ferret section between hypermedia and lessons, naming every step by the binary it is given', () => {
+    // Arrange
+    const binary = 'zz';
+
+    // Act
+    const sections = FERRET_SECTIONS(binary);
+    const teaching = PACK_INSTRUCTION(binary);
+
+    // Assert
+    should(sections.map(section => section.env)).deepEqual([HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV]);
+    should(sections[1]?.text).equal(teaching);
+    should(PACK_ENV).equal('FY_PACK');
+    for (const step of ['`zz recommend "<part>"`', '`zz new --runtime', '`zz new --auto', '`zz wait <id>`', '`zz stop children'])
+      should(teaching).containEql(step);
+    for (const code of ['out_of_quota', 'not_logged_in', 'cli_missing', 'probe_failed', 'limit_reached', 'depth_exceeded'])
+      should(teaching).containEql(code);
+    should(teaching).not.containEql('fy ');
+    should(teaching.length).be.below(1200);
   });
 });

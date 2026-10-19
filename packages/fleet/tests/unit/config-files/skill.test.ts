@@ -78,7 +78,7 @@ describe('setUpFerretrySkill', () => {
   it('should give every file location it names a place Ferretry reads', () => {
     // Arrange
     const actual = setUpFerretrySkill('fy');
-    const named = [...actual.matchAll(/^\| `((?:[a-z]+\/)*[a-z]+\.yaml|[a-z<>/]+\.yaml)` \|/gmu)].map(
+    const named = [...actual.matchAll(/^\| `((?:[a-z]+\/)*[a-z-]+\.yaml|[a-z<>/]+\.yaml)` \|/gmu)].map(
       match => match[1] as string,
     );
 
@@ -89,7 +89,7 @@ describe('setUpFerretrySkill', () => {
     );
 
     // Assert
-    should(named.length).equal(8);
+    should(named.length).equal(10);
     should(unread).deepEqual([]);
   });
 
