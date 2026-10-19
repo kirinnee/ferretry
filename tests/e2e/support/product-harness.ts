@@ -27,6 +27,7 @@ import {
   chromeExecutable,
   closeChromeBounded,
   type HarnessTeardown,
+  isLostBrowser,
   launchChromiumWithRetry,
   resolvePlaywright,
   evidenceScreenshot,
@@ -661,7 +662,12 @@ export async function waitUntil(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await page.evaluate<boolean>(`Boolean(${expression})`).catch(() => false)) return;
+    // A read that failed is "not yet" — unless the browser itself is gone, which no wait outlives.
+    const met = await page.evaluate<boolean>(`Boolean(${expression})`).catch((error: unknown) => {
+      if (isLostBrowser(error)) throw error;
+      return false;
+    });
+    if (met) return;
     await Bun.sleep(150);
   }
   throw new Error(`timed out after ${String(timeoutMs)}ms waiting for ${what} at ${page.url()}`);
