@@ -91,6 +91,10 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 | `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments              |
 | `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets    |
 
+**Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
+changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
+act alone (turning automatic install off never needs one). See [updating.md](updating.md).
+
 **The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
 Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed
 identically: ungoverned from loopback; for a paired device, a browser across the network or a relayed session,

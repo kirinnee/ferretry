@@ -33,6 +33,7 @@
  *   bun harness/screenshot.ts --landing-only # capture the built landing and /get-started/ at both viewports and schemes
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
+ *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
@@ -91,6 +92,8 @@ const PROJECTS_ONLY = process.argv.includes('--projects-only');
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 /** "Pair a phone" from the machine menu: the switcher, the sheet and the minted (fake) QR. */
 const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
+/** Settings › Machine › About: an update available, the mid-turn choice, and a deb's manual steps. */
+const ABOUT_ONLY = process.argv.includes('--about-only');
 
 /**
  * The Projects hub states, each on a page of its own.
@@ -130,6 +133,7 @@ const WALKS_SETTINGS = !(
   PAIRING_FAILURES_ONLY ||
   MCP_SIGN_IN_ONLY ||
   PAIR_FROM_MENU_ONLY ||
+  ABOUT_ONLY ||
   SESSION_LAYOUT_ONLY
 );
 
@@ -155,7 +159,7 @@ const WALKS_SETTINGS = !(
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
  * The rest, seventeen at both viewports plus the open device-capabilities disclosure, the unlock screen and the Files editor's refused save at both: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its ten other panels (Security, the passkey panel, Security log and Files among them), the unreachable daemon's Warden and Carrier, and the
+ * healthy daemon's Warden and its eleven other panels (Security, the passkey panel, Security log, Files and About & updates among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -175,7 +179,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 171;
+const SETTINGS_SIDEWAYS_CHECKS = 173;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -561,6 +565,48 @@ const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void>
   }
 };
 
+/**
+ * SETTINGS › MACHINE › ABOUT, in its three states (`docs/updating.md`): an update available on a
+ * Homebrew install, the mid-turn choice its Update press raises, and the manual steps a deb install
+ * shows instead. The harness daemon answers all three in the page (`?about=manual` picks the deb).
+ *
+ * A narrow mode, so it owes no Settings tally; its own sideways check runs on every frame instead, and
+ * the About panel's geometry in the gated walk is the `about` row of the daemon-panel loop.
+ */
+const captureAbout = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`about ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `about-${name}-${SCHEME}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 about ${name} ${SCHEME} ${viewportName} -> ${target}\n`);
+  };
+  for (const state of ['available', 'manual'] as const) {
+    const url = new URL(server.url);
+    url.searchParams.set('settings-harness', '1');
+    if (state === 'manual') url.searchParams.set('about', 'manual');
+    await page.goto(url.toString());
+    const settings = page.getByLabel('Settings page preview', { exact: true });
+    const navigation = settings.locator(viewportName === 'mobile' ? '[data-settings-home]' : '[data-settings-sidebar]');
+    await navigation.locator('[data-settings-machine="harness-daemon"]').click();
+    const surface = settings.locator('[data-machines-surface="harness-daemon"]');
+    await surface.locator('[data-machine-tab="machine"]').click();
+    const frame = settings.locator('[data-daemon-settings-frame="harness-daemon"]');
+    await frame.locator('[data-daemon-panel="about"]').click();
+    const heading = frame.locator('#about-machine-heading');
+    await heading.waitFor({ state: 'visible' });
+    await heading.scrollIntoViewIfNeeded();
+    await settleTransitions(page);
+    await shot(state);
+    if (state === 'available') {
+      await frame.locator('[data-about-update]').click();
+      const choice = frame.locator('[data-about-mid-turn]');
+      await choice.waitFor({ state: 'visible' });
+      await choice.scrollIntoViewIfNeeded();
+      await shot('mid-turn');
+    }
+  }
+};
 /**
  * "Pair a phone" from the machine menu (`?pair-from-menu`, `harness/pair-from-menu.tsx`): the journey a
  * reader takes, driven rather than posed — open the machine menu, choose "Pair a phone with studio…",
@@ -1940,6 +1986,10 @@ try {
             await capturePairFromMenu(page, viewport.name);
             continue;
           }
+          if (ABOUT_ONLY) {
+            await captureAbout(page, viewport.name);
+            continue;
+          }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
             const taskBoard = page.locator('#harness-task-board');
@@ -2320,10 +2370,10 @@ try {
           const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
           await wardenFrame.locator('[data-daemon-panel]').first().waitFor({ state: 'visible' });
           // The fixture is only evidence about the real frame if it carries the panels the composition
-          // root supplies: the app's twelve less Model pricing, which this fixture has never mounted.
+          // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 11)
-            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 11 it mounts`);
+          if (daemonPanels !== 12)
+            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 12 it mounts`);
           await wardenFrame.scrollIntoViewIfNeeded();
           // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
           await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
@@ -2356,6 +2406,8 @@ try {
             ['Security log', 'security-log', '[data-security-log-panel]'],
             // The configuration files: an invalid file, a held loosening and a login naming its key by reference.
             ['Files', 'files', '[data-config-files-panel]'],
+            // About & updates: the version pair, the install method, the Update button and its changelog.
+            ['About & updates', 'about', '#about-machine-heading'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {

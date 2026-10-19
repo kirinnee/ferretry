@@ -57,7 +57,7 @@ describe('the static /get-started document', () => {
     }
     expect(pageCommands).toContain('xattr -d com.apple.quarantine "$(command -v fy)"');
     expect(page).toContain('v%FY_RELEASE_VERSION%');
-    expect(viteConfig).toContain("html.replaceAll('%FY_RELEASE_VERSION%', releaseVersion)");
+    expect(viteConfig).toContain("html.replaceAll('%FY_RELEASE_VERSION%', appVersion)");
   });
 
   it('shows only commands INSTALLATION.md carries, in a fenced block, exactly as written', () => {

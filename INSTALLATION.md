@@ -94,12 +94,32 @@ Chrome is not installed on this machine: install it with `brew install --cask go
 into the daemon's X display when it has one and runs headless when it does not (a server or an
 SSH-only box), so no display server is required.
 
+## Updating
+
+```bash
+fy daemon update --check   # how this host installed Ferretry, the latest release, what updating takes
+fy daemon update           # update the way it was installed, restart, and roll back if it does not come up
+```
+
+Homebrew and nix profile installs, and standalone binaries, update themselves: `fy daemon update`
+runs `brew upgrade --cask ferretry` or `nix profile upgrade`, restarts the daemon, and checks that the
+new version serves within 30 seconds — rolling back the nix profile or the previous binary when it does
+not. A daemon running from a temporary `nix shell` is offered a switch to a nix profile install, which
+fixes updates for good (`fy daemon update --switch-to-profile`; `fy daemon install` offers the same).
+home-manager, nix-darwin, NixOS and apt/dnf installs are shown the exact steps instead: their version
+is pinned by your own configuration, or needs `sudo`.
+
+`fy daemon status` says how the daemon was installed and when an update is available, and the app
+shows the same under Settings › Machines › About with a one-click Update. The whole design, including
+the standalone signing setup, is [docs/updating.md](docs/updating.md).
+
 ## Which daemon runs
 
 Ferretry runs the `fyd` this host has installed. `fy daemon install`, `start` and `restart` resolve it
 — `FY_DAEMON_BIN` first, then `PATH` — and record that absolute path in the systemd unit or launchd
 agent. Upgrading is your package manager's job; `fy daemon restart` picks the new one up. Rolling back
-is the same operation in reverse: install the version you want and restart.
+is the same operation in reverse: install the version you want and restart. `fy daemon update` does
+both for you where the install method allows it (see [Updating](#updating)).
 
 ```bash
 fy daemon which           # installed and running identities, and whether they agree

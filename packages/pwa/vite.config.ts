@@ -69,14 +69,13 @@ import tailwindConfig from './tailwind.config.ts';
 const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
 
 /**
- * The release the static pages name, read from the repository's `VERSION` at build time.
- *
- * `VERSION` is the one owner of "which release is this" (cli-contracts' `released-version` pins both
- * shipped manifests to it), and Pages builds from `main`, where the release commit has already written
- * it. So `/get-started` shows the release a newcomer will actually install, without a request.
- * `%FY_RELEASE_VERSION%` is replaced in every HTML entry before Vite's own `%ENV%` pass sees it.
+ * THE APP'S OWN RELEASE VERSION, stamped from the repository's `VERSION` — the release semantic-release
+ * last cut, and the number the signed release list carries (`scripts/build-release.ts`). Settings ›
+ * Machine › About shows it beside the machine's, and the "Ferretry updated" line compares it with the
+ * last one this browser saw (`src/lib/app-version.ts`).
+ * The file is part of every checkout, so a build without one fails rather than ships an unknown version.
  */
-const releaseVersion = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim();
+const appVersion = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim();
 
 export default defineConfig({
   plugins: [
@@ -84,11 +83,12 @@ export default defineConfig({
       name: 'fy-release-version',
       transformIndexHtml: {
         order: 'pre',
-        handler: html => html.replaceAll('%FY_RELEASE_VERSION%', releaseVersion),
+        handler: html => html.replaceAll('%FY_RELEASE_VERSION%', appVersion),
       },
     },
   ],
   define: {
+    __FY_APP_VERSION__: JSON.stringify(appVersion),
     __FY_RELAY_DIRECTORY__: JSON.stringify(
       overriddenDirectory === '' ? HOSTED_RELAY_DIRECTORY_ORIGIN : overriddenDirectory,
     ),

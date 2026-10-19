@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
 import type { ConfigChangeFrame } from './config-changes.ts';
+import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
 import type {
@@ -91,6 +92,11 @@ export interface IFyApiClient {
   wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
   cgroupConfig(): Promise<CgroupConfigView>;
   updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView>;
+  /** How this machine's daemon was installed, the latest release, and what updating takes. */
+  daemonUpdate(): Promise<DaemonUpdateView>;
+  /** Start, or schedule for idle, the update to `request.target`; the daemon restarts after answering. */
+  startDaemonUpdate(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView>;
+  updateDaemonUpdateSettings(patch: DaemonUpdateSettingsPatch): Promise<DaemonUpdateView>;
   pwaConfig(): Promise<PwaConfigView>;
   updatePwaConfig(patch: PwaConfigPatch): Promise<PwaConfigView>;
   usage(): Promise<UsageFeedView>;

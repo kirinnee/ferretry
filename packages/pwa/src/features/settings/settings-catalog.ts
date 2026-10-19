@@ -584,6 +584,30 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     href: daemon => `${daemonSettingsPath(daemon)}#speedups`,
     keywords: ['speed-ups', 'speedups', 'jev', 'groq', 'cerebras', 'api key', 'key', 'faster', 'cheaper'],
   },
+  {
+    // The package managers' own names, because "brew" or "nix" is what somebody stuck on an old version types.
+    id: 'about',
+    label: 'Updates',
+    description:
+      'This machine’s version beside the app’s, how it was installed, and updating it — one click where it can update itself, the exact steps where it cannot. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#about`,
+    keywords: [
+      'update',
+      'updates',
+      'upgrade',
+      'version',
+      'about',
+      'release',
+      'changelog',
+      'whats new',
+      'brew',
+      'homebrew',
+      'nix',
+      'apt',
+      'install',
+      'auto-update',
+    ],
+  },
 ] as const;
 
 const SETTINGS_BY_ID = new Map(SETTINGS_DEFINITIONS.map(definition => [definition.id, definition]));
