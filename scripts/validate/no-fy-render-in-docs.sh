@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fails when an `fy-render` fence opener appears anywhere outside the two files that teach the syntax.
+# Fails when an `fy-render` fence opener appears anywhere outside the files that teach the syntax.
 #
 # `fy-render` is a fenced block that renders an illustration in ONE surface: an assistant's own chat
 # message in the transcript (`AssistantProse`). It is inert everywhere else in the app by a
@@ -36,7 +36,7 @@ set -euo pipefail
 #
 # The backtick run is built from a hex-escaped backtick rather than typed literally. That keeps this
 # script's own source free of the exact token it searches for, so it cannot match itself and the
-# allowlist holds exactly the two teaching files with no third mechanical self-exemption. This
+# allowlist holds exactly the teaching files with no third mechanical self-exemption. This
 # mirrors the conflict-markers gate's stance that a teaching document shows a shape exactly rather
 # than one character off — but a validator's job is to FIND the shape, not to teach it, so here it is
 # assembled on purpose.
@@ -44,7 +44,7 @@ set -euo pipefail
 # ## FILE SET
 #
 # `git grep` searches tracked working-tree files — exactly what a commit contains — so a scratch file
-# nobody is committing cannot fail somebody's commit. The two teaching files are exempt by exact path.
+# nobody is committing cannot fail somebody's commit. The teaching files are exempt by exact path.
 #
 # Exit codes follow the repo convention: 0 clean, 1 a violation, 2 a broken gate (a real git-grep
 # error rather than a clean tree).
@@ -57,10 +57,12 @@ bt=$'\x60' # one backtick, via hex escape — see note above
 # under a blockquote or list marker is found), then the token, then only whitespace to end of line.
 opener="(${bt}{3,}|~{3,})fy-render[[:space:]]*\$"
 
-# The only two files that may legitimately contain the opener. Both exist to teach the syntax;
+# The only files that may legitimately contain the opener. Each exists to teach the syntax —
+# docs/hypermedia.md quotes, verbatim, the instruction that teaches it to every ferret;
 # everything else is damage.
 allowed_paths=(
   "docs/fy-render.md"
+  "docs/hypermedia.md"
   ".claude/skills/fy-render-authoring/SKILL.md"
 )
 
@@ -137,4 +139,4 @@ fi
 # NUL records, for the same reason the matcher uses them: a tracked filename may
 # contain a newline, and counting lines would report one such file as two.
 scanned="$(git ls-files -z | tr -cd '\0' | wc -c | tr -d ' ')"
-echo "✅ no fy-render fence openers outside their two teaching files: ${scanned} tracked files searched, opener allowed only in docs/fy-render.md and .claude/skills/fy-render-authoring/SKILL.md"
+echo "✅ no fy-render fence openers outside their teaching files: ${scanned} tracked files searched, opener allowed only in docs/fy-render.md, docs/hypermedia.md and .claude/skills/fy-render-authoring/SKILL.md"

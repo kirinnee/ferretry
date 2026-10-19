@@ -3,6 +3,8 @@ import type { ManagedWorktreeView } from '@ferretry/protocol';
 import {
   effortLabel,
   harnessLabel,
+  hypermediaLabel,
+  hypermediaOn,
   INFO_HINT,
   INFO_TAB_LABEL,
   INFO_TABS,
@@ -208,5 +210,19 @@ describe('learningLabel', () => {
     expect(INFO_HINT.learning).toBe(
       'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
     );
+  });
+});
+
+describe('hypermedia', () => {
+  it('reads a session from before the switch as on, and only an explicit false as off', () => {
+    expect(hypermediaOn(sessionView('legacy'))).toBe(true);
+    expect(hypermediaOn(sessionView('on', { config: { hypermedia: true } }))).toBe(true);
+    expect(hypermediaOn(sessionView('off', { config: { hypermedia: false } }))).toBe(false);
+  });
+
+  it('says what the ferret is told, and that a change waits for its next start', () => {
+    expect(hypermediaLabel(true)).toBe('On · may explain with diagrams and media');
+    expect(hypermediaLabel(false)).toBe('Off · plain text');
+    expect(INFO_HINT.hypermedia).toContain('takes effect when it next starts');
   });
 });

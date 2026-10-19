@@ -53,7 +53,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
-import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { ZodType } from 'zod';
 import {
@@ -293,6 +293,8 @@ import {
   LearningSettingsHarness,
   useHarnessLearningActions,
 } from './learning-hub.tsx';
+import { useHypermediaSessionActions } from '../src/features/hypermedia/hypermedia-session-actions.tsx';
+import type { DaemonFetch } from '../src/lib/runtime-models.ts';
 import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
@@ -7922,6 +7924,24 @@ const WORKSPACE_PAGE_CLIENT: SessionChatClient = WORKSPACE_PICKERS
   ? { ...WORKSPACE_CLIENT, runtime: async () => WORKSPACE_SESSION }
   : WORKSPACE_CLIENT;
 
+/** The SessionConfig fields a wire answer carries that the workspace fixture does not. */
+const HARNESS_WIRE_CONFIG = {
+  incarnation: 'harness-1',
+  runtimeGeneration: 1,
+  boardAccess: 'none',
+  remoteControl: false,
+  harnessFlags: [],
+  turn: 4,
+  intervalSeconds: 30,
+  timeoutSeconds: 0,
+  nudgeAfterSeconds: 0,
+  killAfterSeconds: 0,
+  directSendMaxChars: 0,
+  resumeMenuChoice: 'full',
+  maxSnapshots: 5,
+  retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
+} as const;
+
 function SessionWorkspaceHarness() {
   useAppViewport();
   const layout = useLayoutMode();
@@ -7942,6 +7962,22 @@ function SessionWorkspaceHarness() {
   } as SessionView);
   const [drawer, setDrawer] = useState(window.location.search.includes('drawer'));
   const learningActions = useHarnessLearningActions(daemon, WORKSPACE_FLEET);
+  // The Hypermedia toggle, answered in memory: the switch, and the note saying it waits for the next launch.
+  const hypermediaFetch = useCallback<DaemonFetch>(
+    async (_input, init) => {
+      const enabled = (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled;
+      const view = { ...session, config: { ...session.config, hypermedia: enabled } };
+      setSession(view);
+      return Response.json({
+        // The wire's own fields the workspace fixture leaves out, so the answer parses as a SessionView.
+        view: { ...view, config: { ...HARNESS_WIRE_CONFIG, ...view.config } },
+        restartRequired: true,
+        note: `Hypermedia is ${enabled ? 'on' : 'off'}. This ferret is running, so it takes effect when the ferret restarts.`,
+      });
+    },
+    [session],
+  );
+  const hypermediaActions = useHypermediaSessionActions({ connection: daemon, fetcher: hypermediaFetch });
   const bar = (shape: 'column' | 'rail' | 'drawer') => (
     <SessionsBar
       active={null}
@@ -7966,12 +8002,17 @@ function SessionWorkspaceHarness() {
       className={`kt-shell flex overflow-hidden ${layout === 'drawer' ? 'flex-col' : 'flex-row'}`}
       id="harness-session-workspace-page"
     >
+      {hypermediaActions.host}
       {layout === 'drawer' ? null : bar('column')}
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
           chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_PAGE_CLIENT}
-          actionContributions={[...WORKSPACE_ACTIONS, ...learningActions.contributions]}
+          actionContributions={[
+            ...WORKSPACE_ACTIONS,
+            ...learningActions.contributions,
+            ...hypermediaActions.contributions,
+          ]}
           infoLearning={learningActions.passiveFor(session.config.id)}
           connection={daemon}
           daemonSessions={WORKSPACE_FLEET}

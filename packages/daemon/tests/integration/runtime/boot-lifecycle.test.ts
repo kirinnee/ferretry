@@ -27,6 +27,7 @@ import {
   refusalNotice,
   SendResultSchema,
   SessionConfigSchema,
+  SessionHypermediaPatchResultSchema,
   SessionListSchema,
   SessionStateSchema,
   SessionTranscriptPageSchema,
@@ -50,6 +51,7 @@ import {
   BrowserProfileStore,
   type BunRelayCarrier,
 } from '../../../src/adapters/index.ts';
+import { FileSessionEnvironmentStore } from '../../../src/adapters/session/lifecycle/index.ts';
 import {
   FileSessionTranscriptMessageTokenCodec,
   sessionMessageTokenKeyFile,
@@ -69,7 +71,6 @@ import {
   type ProcessInventoryPort,
   type ProcessObservation,
   parseSessionId,
-  type SessionId,
   RETIRED_ACCOUNT_MODEL_NOTICE,
   RETIRED_FLEET_BLOCK_NOTICE,
   type RelayAdvertisement,
@@ -77,6 +78,7 @@ import {
   type ResumeLauncher,
   SESSION_ID_VARIABLE,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+  type SessionId,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   sessionPaneEnvironment,
@@ -1709,6 +1711,75 @@ describe('daemon boot lifecycle', () => {
       actor: 'admin-cli',
       to: { teammate: 'mary-jane', name: 'Ship The Build' },
     });
+  });
+
+  /**
+   * Hypermedia, through the real composition root: every new ferret starts with it on, and the switch
+   * writes BOTH places it lives — the configuration every surface reads and the launch environment the
+   * pane reads — so the next launch is told what the owner chose (docs/hypermedia.md).
+   *
+   * WHY THIS TIER. The two writes are wired in `bin/fyd.ts`, which is excluded from both coverage
+   * ledgers; the unit suite proves the decision and nothing below this proves the assembled daemon
+   * records it where `fy mcp serve` will read it.
+   */
+  it('should start every ferret with hypermedia on and switch it for the next launch', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-hypermedia');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: new RecordingSessionLauncher(),
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'x-ferretry-client': 'cli',
+      'content-type': 'application/json',
+    };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const switchTo = async (id: string, enabled: boolean): Promise<Response> =>
+      await fetch(`${sessions}/${id}/hypermedia`, { method: 'PATCH', headers, body: JSON.stringify({ enabled }) });
+    const environments = new FileSessionEnvironmentStore(id => join(home, 'state', 'sessions', id));
+
+    // Act
+    const started = SessionViewSchema.parse(
+      await (
+        await fetch(sessions, {
+          method: 'POST',
+          headers: { ...headers, 'x-fy-request-id': 'req-hypermedia-1' },
+          body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'explain it', cwd: home }),
+        })
+      ).json(),
+    );
+    const off = await switchTo(started.config.id, false);
+    const offBody = SessionHypermediaPatchResultSchema.parse(await off.json());
+    const stored = await environments.read(parseSessionId(started.config.id));
+    const absent = await switchTo('ses-absent', true);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(started.config.hypermedia).be.true();
+    should(off.status).equal(200);
+    should(offBody.view.config.hypermedia).be.false();
+    should(offBody.note).startWith('Hypermedia is off');
+    should(stored).have.property('FY_HYPERMEDIA', '0');
+    should(sessionPaneEnvironment(parseSessionId(started.config.id), stored)).have.property('FY_HYPERMEDIA', '0');
+    should(absent.status).equal(404);
   });
 
   /**

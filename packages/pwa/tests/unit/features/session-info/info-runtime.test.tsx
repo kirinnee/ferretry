@@ -173,3 +173,18 @@ describe('InfoRuntime — learning', () => {
     expect(root.querySelector('[data-info-learning]')).toBeNull();
   });
 });
+
+describe('InfoRuntime — hypermedia', () => {
+  it('reads the switch off the session itself, absent as on', async () => {
+    const root = await show();
+    expect(must(root.querySelector('[data-info-row="Hypermedia"]'), 'hypermedia row').textContent).toContain(
+      'On · may explain with diagrams and media',
+    );
+    expect(root.querySelector('[data-info-hypermedia="on"]')).not.toBeNull();
+  });
+
+  it('says plain text when the owner switched it off', async () => {
+    const root = await show({ view: sessionView('session-a', { config: { hypermedia: false } }) });
+    expect(root.querySelector('[data-info-hypermedia="off"]')?.textContent).toBe('Off · plain text');
+  });
+});

@@ -1,7 +1,13 @@
 #!/usr/bin/env bun
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { LESSONS_INSTRUCTION, PASSIVE_LEARNING_ENV, setUpFerretrySkill } from '@ferretry/fleet';
+import {
+  HYPERMEDIA_ENV,
+  HYPERMEDIA_INSTRUCTION,
+  LESSONS_INSTRUCTION,
+  PASSIVE_LEARNING_ENV,
+  setUpFerretrySkill,
+} from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import { type AnalyticsResponse, CONFIG_DIRECTORY_NAME, type IFyApiClient, type SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -770,14 +776,14 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new McpServer(toolsClient, {
           name: PRODUCT_NAME,
           version: assertSemver(pkg.version),
-          // PASSIVE LEARNING: FY_LEARNING_PASSIVE=1 names a ferret instructed to file lessons; the
-          // env read stays here, in the composition root, and only a boolean crosses into the pure
-          // joining function.
-          instructions: mcpInitializeInstructions(
-            setUpFerretrySkill(BINARY_NAME),
-            world.environment[PASSIVE_LEARNING_ENV] === '1',
-            LESSONS_INSTRUCTION(BINARY_NAME),
-          ),
+          // PASSIVE LEARNING (FY_LEARNING_PASSIVE=1) and HYPERMEDIA (FY_HYPERMEDIA=1) are per-ferret switches;
+          // the env reads stay here, in the composition root, and only the chosen texts cross into the
+          // pure joining function.
+          instructions: mcpInitializeInstructions({
+            skill: setUpFerretrySkill(BINARY_NAME),
+            ...(world.environment[PASSIVE_LEARNING_ENV] === '1' ? { lessons: LESSONS_INSTRUCTION(BINARY_NAME) } : {}),
+            ...(world.environment[HYPERMEDIA_ENV] === '1' ? { hypermedia: HYPERMEDIA_INSTRUCTION } : {}),
+          }),
         }),
         Bun.stdin.stream(),
         line => {
