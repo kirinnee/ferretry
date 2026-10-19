@@ -7,7 +7,9 @@
  */
 import {
   builtInPresets,
+  catalogModelValue,
   type HarnessKind,
+  type ModelCatalog,
   type PresetTest,
   type ProviderPreset,
   presetCatalog,
@@ -58,7 +60,18 @@ const HALF_ORDER: readonly HarnessKind[] = ['claude', 'codex'];
  * Each half and whether it is offered: a half is offered when the preset is and the half itself says no
  * reason it cannot be.
  */
-function halvesView(preset: ProviderPreset): NonNullable<FleetProviderPresetView['halves']> {
+/**
+ * The models a half offers, for display: its model catalog's (docs/model-catalog.md), as the values a
+ * CLI is handed, else whatever the preset file itself lists.
+ */
+function halfModels(preset: ProviderPreset, harness: HarnessKind, catalogs: CatalogsById): readonly string[] {
+  const half = preset.catalog === undefined ? undefined : catalogs[preset.catalog]?.[harness];
+  return half === undefined ? (preset.halves[harness]?.models ?? []) : half.models.map(catalogModelValue);
+}
+
+type CatalogsById = Readonly<Record<string, ModelCatalog>>;
+
+function halvesView(preset: ProviderPreset, catalogs: CatalogsById): NonNullable<FleetProviderPresetView['halves']> {
   const usable = presetHarnesses(preset);
   return HALF_ORDER.flatMap(harness => {
     const half = preset.halves[harness];
@@ -70,14 +83,14 @@ function halvesView(preset: ProviderPreset): NonNullable<FleetProviderPresetView
           ? { available: true as const }
           : { available: false as const, reason: half.unavailable ?? (preset.unavailable as string) },
         ...(half.docs === undefined ? {} : { docs: half.docs }),
-        models: [...half.models],
+        models: [...halfModels(preset, harness, catalogs)],
       },
     ];
   });
 }
 
 /** One preset as the wire carries it. */
-export function presetView(preset: ProviderPreset): FleetProviderPresetView {
+export function presetView(preset: ProviderPreset, catalogs: CatalogsById = {}): FleetProviderPresetView {
   return {
     id: preset.id,
     label: preset.label,
@@ -99,13 +112,13 @@ export function presetView(preset: ProviderPreset): FleetProviderPresetView {
     ...(preset.cloudCredential === undefined
       ? {}
       : { cloudCredential: { kinds: [...preset.cloudCredential.kinds], suggested: preset.cloudCredential.suggested } }),
-    models: [...preset.models],
+    models: [...new Set(presetHarnesses(preset).flatMap(harness => halfModels(preset, harness, catalogs)))],
     test: presetTestAct(preset.test),
     quota: { source: preset.quota.source, note: preset.quota.note },
     unverified: [...preset.unverified],
     verified: preset.verified,
     offered: offered(preset),
-    halves: halvesView(preset),
+    halves: halvesView(preset, catalogs),
     ...(isEmptyDetect(preset) ? {} : { detect: { ...preset.detect } }),
   };
 }
@@ -117,6 +130,8 @@ export class ProviderPresetService {
   constructor(
     private readonly machine: MachinePresetSource,
     builtIns: readonly ProviderPreset[] = builtInPresets(),
+    /** The model catalogs in effect, so a preset shows the models its catalog offers. */
+    private readonly catalogs: () => Promise<CatalogsById> = async () => ({}),
   ) {
     this.#builtIns = builtIns;
   }
@@ -127,6 +142,7 @@ export class ProviderPresetService {
   }
 
   async catalog(): Promise<FleetProviderPresetCatalog> {
-    return { presets: (await this.presets()).map(presetView) };
+    const [presets, catalogs] = await Promise.all([this.presets(), this.catalogs()]);
+    return { presets: presets.map(preset => presetView(preset, catalogs)) };
   }
 }

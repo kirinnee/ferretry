@@ -1,0 +1,32 @@
+# Claude on Google Vertex AI (Agent Platform).
+label: Google Vertex AI
+docs: https://code.claude.com/docs/en/google-vertex-ai
+verified: '2026-10-18'
+unverified:
+  - Haiku 5.5 is served in the US and EU multi-regions and global; a single region may not have it.
+customIds: true
+claude:
+  tiers:
+    opus: claude-opus-5-5
+    sonnet: claude-sonnet-5-5
+    haiku: claude-haiku-5-5
+  models:
+    - id: claude-opus-5-5
+      label: Opus 5.5
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
+    - id: claude-sonnet-5-5
+      label: Sonnet 5.5
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+    - id: claude-haiku-5-5
+      label: Haiku 5.5
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium

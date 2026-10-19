@@ -5,23 +5,15 @@ summary: Claude Code through Bedrock Mantle, using an AWS profile from ~/.aws on
 group: cloud
 docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-16'
+catalog: bedrock-mantle
 env:
   CLAUDE_CODE_USE_MANTLE:
     value: '1'
   AWS_REGION:
     value: us-east-1
-  ANTHROPIC_DEFAULT_SONNET_MODEL:
-    value: anthropic.claude-sonnet-5
-    required: false
-  ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: anthropic.claude-haiku-4-5
-    required: false
 cloudCredential:
   kinds: [aws-profile]
   suggested: aws-profile:default
-models:
-  - anthropic.claude-sonnet-5
-  - anthropic.claude-haiku-4-5
 test:
   kind: none
   reason: Mantle needs AWS request signing, which Ferretry does not do. Check the profile with `aws sts get-caller-identity --profile <name>`.

@@ -5,6 +5,7 @@ summary: Claude Code through your Microsoft Foundry resource with its API key. T
 group: cloud
 docs: https://code.claude.com/docs/en/microsoft-foundry
 verified: '2026-10-16'
+catalog: microsoft-foundry
 unverified:
   - Foundry documents no free read, so the Test is one message capped at one token.
 env:
@@ -16,15 +17,14 @@ env:
   ANTHROPIC_FOUNDRY_API_KEY:
     secretName: ANTHROPIC_FOUNDRY_API_KEY
   ANTHROPIC_DEFAULT_OPUS_MODEL:
-    value: claude-opus-4-8
+    value: claude-opus-5-5
     description: your Opus deployment name
   ANTHROPIC_DEFAULT_SONNET_MODEL:
-    value: claude-sonnet-5
+    value: claude-sonnet-5-5
     description: your Sonnet deployment name
   ANTHROPIC_DEFAULT_HAIKU_MODEL:
-    value: claude-haiku-4-5
+    value: claude-haiku-5-5
     description: your Haiku deployment name
-models: [claude-opus-4-8, claude-sonnet-5, claude-haiku-4-5]
 test:
   kind: inference
   url: https://{ANTHROPIC_FOUNDRY_RESOURCE}.services.ai.azure.com/anthropic/v1/messages

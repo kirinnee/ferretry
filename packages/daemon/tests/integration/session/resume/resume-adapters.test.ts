@@ -399,6 +399,39 @@ describe('tmux resume launcher', () => {
     should(launches[1]?.indexOf('-e')).be.below(launches[1]?.indexOf('/opt/fleet/bin/agent') ?? -1);
   });
 
+  it('should relaunch with the argv built at launch rather than the one recorded', async () => {
+    // A revive used to REPLAY the recorded argv, so whatever the daemon learned to put on a launch
+    // since — a Read rule, the model the owner switched to — never reached the replacement process.
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const built: string[] = [];
+    const subject = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent', '--model', 'recorded'],
+        relaunch: async () => {
+          built.push('built');
+          return ['/opt/fleet/bin/agent', '--model', 'current'];
+        },
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+    );
+
+    // Act — only the relaunch builds; reading the pane must not record a launch that never happened.
+    await subject.observe(ID);
+    port.alive = false;
+    await subject.relaunch(ID);
+
+    // Assert
+    should(built).deepEqual(['built']);
+    const launch = port.calls.find(call => call[0] === 'new-session') ?? [];
+    should(launch).containDeep(['current']);
+    should(launch).not.containEql('recorded');
+  });
+
   it('should refuse to relaunch a session whose command is empty', async () => {
     // Arrange
     const subject = new TmuxResumeLauncher(

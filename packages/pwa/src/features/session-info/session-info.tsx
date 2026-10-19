@@ -11,6 +11,7 @@ import type {
   BrowserPageSummary,
   BrowserStatus,
   ManagedWorktreeView,
+  SessionRelaunchSettings,
   SessionView,
   TerminalListView,
   WardenVerdict,
@@ -26,6 +27,7 @@ import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
 import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
 import { InfoOverview } from './info-overview.tsx';
 import { InfoPanel } from './info-panel.tsx';
+import type { InfoRelaunchRead } from './info-relaunch.tsx';
 import { type InfoListRead, InfoRuntime } from './info-runtime.tsx';
 import { InfoSignals, type InfoVerdictsRead } from './info-signals.tsx';
 import { InfoSurfaces } from './info-surfaces.tsx';
@@ -40,6 +42,8 @@ export interface SessionInfoPorts {
   readonly verdicts: ContextLoader<readonly WardenVerdict[]>;
   readonly analytics: ContextLoader<AnalyticsResponse>;
   readonly folder: InfoFolderProps;
+  /** Whether a Restart would relaunch this ferret on different settings. Absent: no Settings row. */
+  readonly relaunch?: ContextLoader<SessionRelaunchSettings>;
 }
 
 export interface SessionInfoProps {
@@ -67,6 +71,8 @@ export interface SessionInfoProps {
   readonly runtimeControls?: ReactNode;
   /** Whether this ferret is instructed to learn (see `InfoRuntimeProps.learning`). Absent: no Learning row. */
   readonly learning?: boolean | null;
+  /** The same Restart as Actions › Restart CLI, offered where the Settings row says it is behind. */
+  readonly onRestart?: () => Promise<void>;
   readonly now?: () => number;
 }
 
@@ -80,6 +86,16 @@ const listRead = <T,>(
 ): InfoListRead =>
   read.kind === 'ready'
     ? { kind: 'ready', items: items(read.value) }
+    : read.kind === 'failed'
+      ? { kind: 'failed', reason: readableReason(read.reason) }
+      : { kind: 'loading' };
+
+/** The loader a host without the read binds, so the hook order never depends on the port. */
+const NO_RELAUNCH: ContextLoader<SessionRelaunchSettings> = async () => ({ current: true, reasons: [] });
+
+const relaunchRead = (read: ReturnType<typeof useContextRead<SessionRelaunchSettings>>['load']): InfoRelaunchRead =>
+  read.kind === 'ready'
+    ? { kind: 'ready', settings: read.value }
     : read.kind === 'failed'
       ? { kind: 'failed', reason: readableReason(read.reason) }
       : { kind: 'loading' };
@@ -106,6 +122,7 @@ export function SessionInfo({
   onOpenAnalytics,
   runtimeControls,
   learning,
+  onRestart,
   now = Date.now,
 }: SessionInfoProps) {
   const { tab } = placement;
@@ -115,6 +132,7 @@ export function SessionInfo({
   const mcp = useContextRead(ports.folder.loadMcp, tab === 'runtime');
   const docs = useContextRead(ports.folder.loadDocs, tab === 'runtime');
   const skills = useContextRead(ports.folder.loadSkills, tab === 'runtime');
+  const relaunch = useContextRead(ports.relaunch ?? NO_RELAUNCH, tab === 'runtime' && ports.relaunch !== undefined);
   const signals = useContextSignals(ports.folder.signals);
 
   const verdictsRead: InfoVerdictsRead =
@@ -168,6 +186,15 @@ export function SessionInfo({
             view={view}
             {...(runtimeControls === undefined ? {} : { controls: runtimeControls })}
             {...(learning === undefined ? {} : { learning })}
+            {...(ports.relaunch === undefined ? {} : { relaunch: relaunchRead(relaunch.load) })}
+            {...(onRestart === undefined
+              ? {}
+              : {
+                  onRestart: async () => {
+                    await onRestart();
+                    relaunch.reload();
+                  },
+                })}
           />
         ),
         usage: () => (

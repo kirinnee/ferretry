@@ -54,6 +54,28 @@ describe('runtime model catalog parsing', () => {
     });
   });
 
+  it("should keep a choice's catalog tier and context window, and the login's catalog", () => {
+    // Arrange
+    const raw = {
+      harness: 'claude',
+      source: 'wrapper-inventory',
+      catalog: { id: 'zai', label: 'GLM / Z.ai', customIds: true },
+      choices: [
+        { value: 'glm-5.3', label: 'GLM-5.3', tier: 'best', context: 1_000_000, reasoningEfforts: [] },
+        { value: 'odd', label: 'Odd', tier: 'ultra', context: -1, reasoningEfforts: [] },
+      ],
+    };
+
+    // Act
+    const parsed = parseRuntimeModelCatalog(raw);
+
+    // Assert — an unknown tier or a nonsense window is dropped, never trusted
+    should(parsed.catalog).deepEqual({ id: 'zai', label: 'GLM / Z.ai', customIds: true });
+    should(parsed.choices[0]).match({ tier: 'best', context: 1_000_000 });
+    should(parsed.choices[1]).not.have.properties(['tier', 'context']);
+    should(parseRuntimeModelCatalog({ ...raw, catalog: { id: 'x' } }).catalog).be.undefined();
+  });
+
   it('should reject malformed catalogs, choices, and effort ids', () => {
     should(() => parseRuntimeModelCatalog({ harness: 'other', source: 'codex-app-server', choices: [] })).throw(
       /invalid runtime model catalog/u,

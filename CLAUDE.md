@@ -236,6 +236,10 @@ The **reader-facing security model** — every layer and what it stops, the thre
 machine included), recovery steps and what is not protected — is [docs/security.md](docs/security.md). It
 summarises the contracts above and owns none of them: when one of them moves, correct that page too.
 
+When a setting reaches a running ferret — live, on restart, or only for new ferrets — and how every launch
+argv is built (one builder for start, Restart CLI, migrate and revive; a revive never replays):
+[docs/launch-settings.md](docs/launch-settings.md).
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

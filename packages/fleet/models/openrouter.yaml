@@ -1,0 +1,44 @@
+# OpenRouter: the "latest" aliases it keeps for Anthropic's and OpenAI's models. Any OpenRouter id works too.
+label: OpenRouter
+docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
+verified: '2026-10-18'
+unverified:
+  - OpenRouter's Codex guide names only ~openai/gpt-sol-latest; whether Astra and Luna have ~latest aliases is not documented.
+customIds: true
+claude:
+  tiers:
+    opus: ~anthropic/claude-opus-latest[1m]
+    sonnet: ~anthropic/claude-sonnet-latest[1m]
+    haiku: ~anthropic/claude-haiku-latest
+  models:
+    - id: ~anthropic/claude-opus-latest
+      suffix: '[1m]'
+      label: Claude Opus (latest)
+      tier: best
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+    - id: ~anthropic/claude-sonnet-latest
+      suffix: '[1m]'
+      label: Claude Sonnet (latest)
+      tier: balanced
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: high
+      default: true
+    - id: ~anthropic/claude-haiku-latest
+      label: Claude Haiku (latest)
+      tier: fast
+      context: 1000000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+codex:
+  docs: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
+  models:
+    - id: ~openai/gpt-sol-latest
+      label: GPT Sol (latest)
+      tier: balanced
+      context: 1050000
+      efforts: [low, medium, high, xhigh, max]
+      defaultEffort: medium
+      default: true
