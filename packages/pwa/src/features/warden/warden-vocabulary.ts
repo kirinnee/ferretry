@@ -23,6 +23,7 @@ export const chip = (label: string, tone: WardenChipTone, busy = false): WardenC
 export const ANOMALY_CHIPS: Readonly<Record<WardenAnomalyKind, WardenChip>> = {
   sus_thinking: chip('long think', 'warn'),
   sus_subprocess: chip('long command', 'pend'),
+  agent_frozen: chip('frozen', 'err'),
   unattended_question: chip('question', 'warn'),
   dead_monitor: chip('pane lost', 'err'),
   quota_reset_passed: chip('quota reset', 'pend'),

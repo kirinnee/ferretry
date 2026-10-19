@@ -515,3 +515,85 @@ describe('leaving a ferret alone longer', () => {
     should(subject.spawns).be.empty();
   });
 });
+
+describe('the liveness reflex', () => {
+  const assessment = { verdict: 'nudge' as const, quietSeconds: 330, strongQuietSeconds: 330 };
+
+  it('should nudge a quiet ferret when the owner lets the Warden nudge, and list it', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [session({ id: 's1' })] });
+
+    // Act
+    const actual = await subject.service.reflex([{ sessionId: 's1', kind: 'nudge', assessment }]);
+
+    // Assert
+    should(actual).deepEqual({ frozen: false });
+    should(subject.remedies).match([{ action: 'nudge', sessionId: 's1' }]);
+    should(subject.state().actions?.[0]).match({
+      action: 'nudge',
+      outcome: 'done',
+      by: 'warden',
+      detail: 'Nudged: no output, screen change or subprocess for 5 min.',
+    });
+    should(journalTypes(subject)).containEql('fleet.warden_reflex_nudged');
+  });
+
+  it('should not nudge while the Warden is off or may not nudge alone, nor for nothing', async () => {
+    // Arrange
+    const off = harness({ config: enabled({ enabled: false }), fleet: [session({ id: 's1' })] });
+    const held = harness({
+      config: enabled({ mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false } }),
+      fleet: [session({ id: 's1' })],
+    });
+
+    // Act
+    await off.service.reflex([{ sessionId: 's1', kind: 'nudge', assessment }]);
+    await held.service.reflex([{ sessionId: 's1', kind: 'nudge', assessment }]);
+    const nothing = await held.service.reflex([]);
+
+    // Assert
+    should(off.remedies).deepEqual([]);
+    should(held.remedies).deepEqual([]);
+    should(nothing).deepEqual({ frozen: false });
+  });
+
+  it('should record a nudge that did not take', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [session({ id: 's1' })], remedyFails: 'nudge' });
+
+    // Act
+    await subject.service.reflex([{ sessionId: 's1', kind: 'nudge', assessment }]);
+
+    // Assert
+    should(subject.state().actions?.[0]).match({ outcome: 'failed', detail: 'The nudge did not take: nudge refused.' });
+  });
+
+  it('should only journal a frozen ferret and say so, leaving the flag to the next sweep', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [session({ id: 's1' })] });
+
+    // Act
+    const actual = await subject.service.reflex([
+      { sessionId: 's1', kind: 'frozen', assessment: { ...assessment, verdict: 'frozen' } },
+    ]);
+
+    // Assert
+    should(actual).deepEqual({ frozen: true });
+    should(subject.remedies).deepEqual([]);
+    should(journalTypes(subject)).containEql('fleet.warden_frozen');
+  });
+
+  it('should flag a frozen working ferret for one assigned warden', async () => {
+    // Arrange
+    const frozen = { ...session({ id: 's1' }), frozenAt: at(-1) };
+    const subject = harness({ config: enabled(), fleet: [frozen] });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert
+    should(actual.anomalies).match([{ kind: 'agent_frozen', sessionId: 's1', since: at(-1), assignedWarden: true }]);
+    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
+    should(subject.spawns[0]?.prompt).containEql('recommend RESTART');
+  });
+});

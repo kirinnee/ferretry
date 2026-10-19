@@ -281,6 +281,8 @@ export const WardenAnomalyKindSchema = z.enum([
   'peer_wait_unanswerable',
   'sus_thinking',
   'sus_subprocess',
+  /** The liveness reflex saw no sign of life after a nudge: a restart candidate, never stopped. */
+  'agent_frozen',
   'bootstrap_degraded',
   'provider_unavailable',
   /** Not detected: the owner asked for an investigation of this ferret. */

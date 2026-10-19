@@ -740,6 +740,10 @@ import {
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
+  WardenLivenessMonitor,
+  withLivenessLedger,
+  backgroundTerminalCount,
+  type ProcessInventoryPort,
   WatchedUsageFeed,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
@@ -3044,6 +3048,15 @@ const WARDEN_ESCALATION_ACTOR: AttentionActor = { kind: 'daemon', cause: 'warden
 /** How many transcript lines a Jev snapshot carries. The guard bounds them again; this bounds the read. */
 const WARDEN_TRIAGE_TAIL = 12;
 
+/** How often the liveness monitor looks at every working ferret: kteam's own tick. */
+const WARDEN_LIVENESS_TICK_SECONDS = 30;
+
+/** How many transcript lines the liveness digest covers: enough that a new line always changes it. */
+const WARDEN_LIVENESS_TAIL = 20;
+
+/** A digest of what the liveness monitor looked at: it keeps whether something changed, never the text. */
+const livenessDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+
 /** The collaborators a warden subsystem needs from the rest of the root. */
 interface WardenParts {
   readonly sessions: SessionDirectorySubsystem;
@@ -3086,6 +3099,8 @@ interface WardenParts {
   readonly analytics: Pick<AnalyticsIngestionService, 'read'>;
   /** The live journal append edge, for the events that bring a sweep forward. */
   readonly events: (listener: (event: { readonly type: string; readonly data: unknown }) => void) => () => void;
+  /** The processes under a ferret's pane, on this daemon's own tmux server: the liveness subprocess signal. */
+  readonly processes: ProcessInventoryPort;
 }
 
 /**
@@ -3095,12 +3110,12 @@ interface WardenParts {
  * judges are the sessions the list shows, parsed by the same schemas from the same documents. A
  * private reader would let the warden act on a view nobody else can see.
  *
- * `hasLiveMonitor` IS ALWAYS FALSE, because this daemon runs no per-session monitors, and that is the
- * truth rather than a placeholder. The sweep is told so through `supervisesMonitors` and collapses
- * what would otherwise be one `dead_monitor` anomaly per live session into the single daemon-level
- * fault it is — see `collapseUnsupervisedMonitors`. Reporting the fleet as watched would be the
- * dangerous lie: it would also switch on the sus classifiers, which reason over a liveness ledger
- * nothing here updates.
+ * `hasLiveMonitor` COMES FROM THE LIVENESS MONITOR. It looks at every working ferret each tick — screen,
+ * transcript tail, work counters, pane subprocesses — and a ferret is watched while it has been looked at
+ * recently. Its ledger is laid over the session documents, which is what switches the sus classifiers
+ * on with evidence that moves; a working ferret it cannot look at is a `dead_monitor`, per ferret. The
+ * reflex nudges a quiet ferret only when the owner lets the Warden nudge, and a frozen one becomes a
+ * flag — nothing here stops a ferret.
  *
  * `stopCapability` IS RECORDED AND NOT DELIVERED. The sweep mints an unguessable secret per
  * assignment and the durable state holds it, but this daemon's start declares no field to carry one
@@ -3109,6 +3124,46 @@ interface WardenParts {
  * cannot run.
  */
 function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
+  // The liveness monitor: what the Warden SEES of each working ferret between sweeps. Its ledger is laid
+  // over the session documents the sweep reads, so the sus classifiers reason over real evidence, and a
+  // working ferret it has not been able to look at recently is the `dead_monitor` it claims to be.
+  const liveness = new WardenLivenessMonitor(
+    {
+      targets: async () =>
+        (await parts.sessions.list())
+          .filter(view => view.config.label !== WARDEN_LABEL)
+          .map(view => ({
+            id: view.config.id,
+            status: view.state.status,
+            turn: view.state.turn,
+            mode: view.config.mode,
+            waiting: view.state.waiting !== undefined,
+            nudgeAfterSeconds: view.config.nudgeAfterSeconds,
+            killAfterSeconds: view.config.killAfterSeconds,
+            tmuxSession: sessionTmuxName(parseSessionId(view.config.id), defaultSessionLifecycleSettings),
+          })),
+      // Three looks, each total: what cannot be read this tick is simply not evidence this tick. The screen
+      // and the transcript are the operator reads — already masked by the vault redactor — and only their
+      // digests are kept; the screen itself is read for its work counters and then dropped.
+      sample: async target => {
+        const pane = await parts.reads.snapshot(target.id).catch(() => undefined);
+        const transcript = await parts.reads.logs(target.id, WARDEN_LIVENESS_TAIL).catch(() => undefined);
+        const observed =
+          target.tmuxSession === undefined
+            ? undefined
+            : await parts.processes.collect(target.tmuxSession).catch(() => undefined);
+        const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
+        const background = pane !== undefined && backgroundTerminalCount(pane) > 0;
+        return {
+          ...(pane === undefined ? {} : { pane, paneHash: livenessDigest(pane) }),
+          ...(transcript === undefined ? {} : { transcriptHash: livenessDigest(transcript) }),
+          ...(children === undefined && !background ? {} : { subprocessAlive: children === true || background }),
+        };
+      },
+      nowMs: () => Date.now(),
+    },
+    WARDEN_LIVENESS_TICK_SECONDS,
+  );
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
   const service = new WardenSweepService(
     {
@@ -3186,7 +3241,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       },
       fleet: {
         fleet: async () =>
-          await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view))),
+          await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view, liveness))),
       },
       spawner: {
         spawn: async request => {
@@ -3293,7 +3348,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // The state home, never an agent's workspace: a warden must not be able to be mistaken for
       // work on a repository, and its own prompt forbids touching one.
       wardenCwd: parts.wardenRoot,
-      supervisesMonitors: false,
+      supervisesMonitors: true,
       mayAct: false,
     },
   );
@@ -3369,7 +3424,28 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
           })
           .catch(() => undefined);
       });
+      // The liveness monitor's own tick. One at a time: a slow tick is skipped over, never stacked. What
+      // it finds is acted on inside the sweep chain, and a ferret that froze brings the next sweep forward.
+      liveness.arm();
+      let looking = false;
+      const look = setInterval(() => {
+        if (looking) return;
+        looking = true;
+        void service
+          .currentConfig()
+          .then(async config => await liveness.tick({ nudgeAllowed: config.enabled && config.mayActAlone.nudge }))
+          .then(async events => await loop.exclusive(async () => await service.reflex(events)))
+          .then(result => {
+            if (result.frozen) loop.trigger();
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            looking = false;
+          });
+      }, WARDEN_LIVENESS_TICK_SECONDS * 1000);
       return () => {
+        clearInterval(look);
+        liveness.disarm();
         unsubscribe();
         parts.supervision.armed = false;
         parts.supervision.armedAtMs = undefined;
@@ -3386,7 +3462,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
  * detector's guard is dead and every session whose pane died after its teammate declared the work
  * finished is reported as abandoned wreckage on every sweep.
  */
-async function wardenFleetSession(parts: WardenParts, view: SessionView): Promise<WardenFleetSession> {
+async function wardenFleetSession(
+  parts: WardenParts,
+  view: SessionView,
+  liveness: WardenLivenessMonitor,
+): Promise<WardenFleetSession> {
   const marker = await parts.files.readText(join(view.directory, DONE_MARKER_FILENAME)).catch(() => undefined);
   return {
     config: {
@@ -3418,12 +3498,14 @@ async function wardenFleetSession(parts: WardenParts, view: SessionView): Promis
       ...(view.config.modelHint === undefined ? {} : { modelHint: view.config.modelHint }),
       intervalSeconds: view.config.intervalSeconds,
     },
-    state: view.state,
+    // The session's own documents, with what the liveness monitor saw laid over them.
+    state: withLivenessLedger(view.state, liveness.ledger(view.config.id)),
     directory: view.directory,
     cwd: view.config.cwd,
     turn: view.state.turn,
-    // Always false, and honestly so: no monitor subsystem exists. See `createWardenSubsystem`.
-    hasLiveMonitor: false,
+    // Watched when the liveness monitor has looked at it recently — see `WardenLivenessMonitor.watching`.
+    hasLiveMonitor: liveness.watching(view.config.id),
+    ...(liveness.frozenAt(view.config.id) === undefined ? {} : { frozenAt: liveness.frozenAt(view.config.id) }),
     hasDoneMarker: doneMarkerCertifiesTurn(marker, view.state.turn),
   };
 }
@@ -7733,6 +7815,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
+          processes: new PaneProcessInventory(launchTmuxCommands, new BunProcessProbe(Bun.which('ps') ?? undefined)),
         }),
         sessionReads: operatorReads,
         sessionAttach,
