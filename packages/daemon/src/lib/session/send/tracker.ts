@@ -42,6 +42,8 @@ import {
 /** One read of a session's transcript evidence. `readable: false` means absence cannot be proven. */
 export interface SendEvidenceReading {
   readonly readable: boolean;
+  /** The session has no transcript the daemon can prove is its own, which no amount of waiting fixes. */
+  readonly unbound?: true;
   readonly inputs: readonly ObservedHumanInput[];
 }
 
@@ -205,14 +207,16 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   ): Promise<SendRecord> {
     if (!reading.readable) {
       // A harness parked on a dialog writes no transcript at all, so "unreadable" was true and useless:
-      // the screen says what is wrong, and the person can fix it.
+      // the screen says what is wrong, and the person can fix it. A transcript that was never PROVEN
+      // is said as itself, because its remedy is a restart and a re-send would only add a copy.
       const blocked = await this.ports.terminal.observe(id).catch(() => undefined);
-      return await this.settle(
-        id,
-        record,
-        'unaccounted',
-        blocked?.blockingPrompt === undefined ? 'transcript_unreadable' : 'blocked_by_prompt',
-      );
+      const reason: SendUnaccountedReason =
+        blocked?.blockingPrompt !== undefined
+          ? 'blocked_by_prompt'
+          : reading.unbound === true
+            ? 'transcript_unbound'
+            : 'transcript_unreadable';
+      return await this.settle(id, record, 'unaccounted', reason);
     }
     const target = await this.ports.repository.read(id);
     if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))

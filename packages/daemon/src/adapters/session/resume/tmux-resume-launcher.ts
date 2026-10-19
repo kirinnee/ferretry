@@ -40,6 +40,8 @@ export interface ResumeLaunchSpec {
    * is what every session that binds no secret gets anyway.
    */
   readonly agent?: string;
+  /** The session's mode, which sets the hypermedia default a replacement pane is launched with. */
+  readonly mode?: 'auto' | 'interactive';
 }
 
 /** Rewrites the durable pane identity after a revive replaces the process incarnation. */
@@ -143,7 +145,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
       session: spec.tmuxSession,
       cwd: spec.cwd,
       command: [program, ...arguments_],
-      env: sessionPaneEnvironment(id, launchEnvironment(account, spec.env ?? {})),
+      env: sessionPaneEnvironment(id, launchEnvironment(account, spec.env ?? {}), spec.mode),
     });
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.

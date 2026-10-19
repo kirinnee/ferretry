@@ -28,6 +28,7 @@ import type { ReactNode } from 'react';
 import { HypermediaMark } from '../features/hypermedia/hypermedia-session-actions.tsx';
 import { hypermediaOn } from '../features/session-info/info-model.ts';
 import { displayCallsign } from '../lib/callsign.ts';
+import { harnessWord } from '../lib/harness-dialogs.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
@@ -73,6 +74,8 @@ export interface SessionTopBarProps {
   readonly menu?: ReactNode;
   /** Phone only: opens the sessions drawer. */
   readonly onOpenSessions?: () => void;
+  /** The ferret that started this one, as a link to it. Absent for a ferret a person started. */
+  readonly startedBy?: { readonly name: string; readonly onOpen: () => void };
 }
 
 export function SessionTopBar({
@@ -86,13 +89,20 @@ export function SessionTopBar({
   onToggleInfo,
   menu,
   onOpenSessions,
+  startedBy,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
-  // The harness dialog a needs-input session is parked on: the one thing it is waiting for. A permission
-  // prompt is said as the request itself, which is what the person is being asked to decide.
+  // What a needs-input session is parked on: the one thing it is waiting for. A permission prompt is said
+  // as the request itself and a harness dialog as its own title — what the person is being asked to decide.
   const permission = turn === 'needs-input' ? session.state.permissionRequest : undefined;
-  const approval = permission === undefined ? undefined : `Waiting for approval: ${permissionPhrase(permission)}`;
+  const dialog = turn === 'needs-input' && permission === undefined ? session.state.harnessDialog : undefined;
+  const approval =
+    permission !== undefined
+      ? `Waiting for approval: ${permissionPhrase(permission)}`
+      : dialog === undefined
+        ? undefined
+        : `Waiting on ${harnessWord(dialog.harness)}: ${dialog.title}`;
   const blockedBy = approval ?? (turn === 'needs-input' ? session.state.turnPrompt : undefined);
 
   return (
@@ -112,6 +122,17 @@ export function SessionTopBar({
         <h1 className="fy-session-bar__name">{name}</h1>
         {hypermediaOn(session) ? <HypermediaMark /> : null}
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
+        {startedBy === undefined || compact ? null : (
+          <button
+            className="fy-session-bar__started-by"
+            data-session-started-by=""
+            onClick={startedBy.onOpen}
+            title={`Started by ${startedBy.name}`}
+            type="button"
+          >
+            Started by {startedBy.name}
+          </button>
+        )}
         <span
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}

@@ -1,0 +1,89 @@
+# Messages between ferrets
+
+A ferret messages another by running `fy send <ferret> "…"` (or `fy reply`) in its shell. This page is
+the contract for what each end sees: the words the RECEIVING agent reads, and how both Chats draw the
+message for the owner.
+
+## What the receiving agent reads
+
+The daemon prepends a two-line banner to the message, then a blank line. The agent reads only text, so
+this is the only way it can tell a ferret from its owner:
+
+```text
+[message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]
+No reply needed. To reply: fy send tomi "<reply>"
+
+Hello from home-manager-fd.
+```
+
+The first word is the message's **kind**:
+
+| Kind       | When                                                            | Second line                                                           |
+| ---------- | --------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `message`  | A note; the sender carried on                                   | `No reply needed. To reply: fy send tomi "<reply>"`                   |
+| `question` | The sender ran `send --ask` and is parked until answered        | `tomi is waiting for your answer. Reply with: fy send tomi "<reply>"` |
+| `reply`    | The RECEIVER is parked waiting on this sender — this answers it | `No reply needed. To reply: fy send tomi "<reply>"`                   |
+
+`reply` wins over `question`: an answer that asks something back is still, first, the answer the
+receiver was waiting for.
+
+Rules for the wording:
+
+- **Ferretry's words only**: "ferret" and "the owner" — never another tool's vocabulary.
+- **Short**: it is in every peer message a ferret is ever sent.
+- **One owner for both ends**: the writer and the parser are `packages/protocol/src/lib/agent-messages.ts`.
+  The daemon writes it (`session/send/policy.ts`), the app parses it back out. Reword it there, with
+  its tests, and nowhere else.
+- **Old records stay readable**: the parser also reads the banner earlier daemons wrote
+  (`[peer message from teammate …]`), so a transcript recorded before the rewording still renders the
+  message as coming from the ferret that sent it.
+
+A message too long to type travels as a **turn file**; the banner is at the top of that file, and the
+transcript records only the pointer to it.
+
+## What the owner sees
+
+Structured facts, never the banner:
+
+- **Who sent it** — the banner's name and session id, or for a turn-file message, the send ledger's
+  `from` / `fromName` (`SendRecord`), which is known before the file has been read.
+- **What kind** — the banner's first word.
+- **Where it got to** — the send ledger's `fate`.
+
+### The receiver's Chat
+
+A card on the LEFT, distinct from the owner's right-hand bubbles: the sender's monogram, the sender as a
+`:name` reference ([reference standard](reference-standard.md) — proved by session id, so a link only
+appears when this daemon's fleet holds that ferret), "ferret", the kind ("waiting for a reply",
+"replied"), the body as Markdown, the time and the receipt mark, and a quiet **Open conversation with
+tomi** link. The banner, the session id and the reply command are never shown: they are addressed to the
+agent, not to the person reading.
+
+The agent's own read of the turn file (`Read turn-001.md`, or Codex's `cat`) is hidden — it is the
+delivery's plumbing. A read that FAILED stays.
+
+### The sender's Chat
+
+The tool call that ran `fy send` becomes a **Sent to** card: the recipient as a `:name` reference, the
+message (a quoted argument or the `"$(cat <<'EOF' … EOF)"` heredoc; a `--message-file` or any other
+shell expansion is named, never guessed), and its state:
+
+| State     | Read from                                                                    |
+| --------- | ---------------------------------------------------------------------------- |
+| Sending   | No result yet                                                                |
+| Queued    | Any successful result other than a delivery                                  |
+| Delivered | The CLI said `delivered` (or `revived the session`)                          |
+| Replied   | A later message in this Chat came from the recipient — the proof it was read |
+| Failed    | The call failed; the reason is the CLI's own first line                      |
+
+The raw command stays one tap away under **Show command**. Anything the reader does not recognise as a
+send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/peer-delivery.ts`.
+
+## Declared gaps
+
+- **One machine.** A send is always between two sessions on the same daemon, so no machine is shown.
+- **Live sender state.** The Sent card reads the CLI's answer at send time, then `replied` from the
+  Chat; it does not follow the receiver's ledger afterwards.
+- **The hand-off wire is unchanged.** `GET /v1/sessions/:id/handoffs/:name` still returns the document's
+  text, banner included, because its schema is strict and a new field would break an older app reading
+  a newer daemon; the app lifts the sender off the banner itself.

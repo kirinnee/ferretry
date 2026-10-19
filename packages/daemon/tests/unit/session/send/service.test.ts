@@ -585,6 +585,33 @@ describe('peer messaging', () => {
     should(channel.inbound[0]).match({ from: PEER, fromName: 'loge' });
   });
 
+  it('tells the receiver a message it is parked on is the reply, and anything else what it is', async () => {
+    const reply = parts(target({ waiting: { peer: PEER } }), [pane({ promptReady: true })], { [PEER]: sender });
+    await reply.service.send(request({ senderReference: PEER }));
+    const question = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    await question.service.send(request({ senderReference: PEER, replyExpected: true }));
+    const note = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    await note.service.send(request({ senderReference: PEER }));
+
+    should(reply.ledger.only().message).startWith('[reply from ferret loge (session ');
+    should(question.ledger.only().message).startWith('[question from ferret loge (session ');
+    should(note.ledger.only().message).startWith('[message from ferret loge (session ');
+    should(note.ledger.only().message).endWith('ship it');
+  });
+
+  it('calls a send a plain message when the recipient cannot be read yet, rather than failing it', async () => {
+    const built = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    const read = built.repository.read.bind(built.repository);
+    let first = true;
+    built.repository.read = async () => {
+      if (!first) return await read();
+      first = false;
+      throw new Error('record mid-write');
+    };
+    await built.service.send(request({ senderReference: PEER }));
+    should(built.ledger.only().message).startWith('[message from ferret loge');
+  });
+
   it("ends the recipient's declared wait, because this send IS the reply it was parked on", async () => {
     const { service, peerWaits } = parts(target({ waiting: { peer: PEER } }), [pane({ promptReady: true })], {
       [PEER]: sender,

@@ -84,6 +84,7 @@ import {
   type AccountDocumentReading,
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
+  harnessCommandsOf,
 } from './catalog-service.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 
@@ -695,6 +696,7 @@ export class FleetSetupService {
         bodies: await this.#bodies(model, documents),
         claudeStatusline: catalog.claudeStatusline,
         fyCommand: catalog.fyCommand,
+        harnessCommands: harnessCommandsOf(harness => catalog.locate(harness)),
         ...(catalog.hostCodexHome === undefined ? {} : { hostCodexHome: catalog.hostCodexHome }),
         acceptsAutoPermissionMode: catalog.acceptsAutoPermissionMode,
         ...(await this.#modelCatalogs()),

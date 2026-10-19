@@ -23,7 +23,13 @@
  * PURE AND TOTAL: values in, values out. Nothing here reads a file or a terminal.
  */
 
-import type { PermissionRequest, SessionState, SessionStatus, SessionTurnState } from '@ferretry/protocol';
+import type {
+  HarnessDialog,
+  PermissionRequest,
+  SessionState,
+  SessionStatus,
+  SessionTurnState,
+} from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 
 /** What one live frame of the agent's pane shows. */
@@ -41,6 +47,8 @@ export interface TurnPaneEvidence {
   readonly prompt?: string | undefined;
   /** The tool-permission prompt on screen, read as data — what it asks and the choices it offers. */
   readonly request?: PermissionRequest | undefined;
+  /** The harness's own dialog on screen — hooks to review, an update, a sign-in — read as data. */
+  readonly dialog?: HarnessDialog | undefined;
 }
 
 /** What the transcript's tail says about the current turn. */
@@ -101,6 +109,8 @@ export interface TurnObservation {
   readonly prompt?: string | undefined;
   /** The tool-permission prompt behind a `needs-input`, when that is what it is. */
   readonly request?: PermissionRequest | undefined;
+  /** The harness dialog behind a `needs-input`, read as data, when that is what it is. */
+  readonly dialog?: HarnessDialog | undefined;
 }
 
 /**
@@ -112,6 +122,13 @@ export function observeTurn(evidence: TurnEvidence): TurnObservation | undefined
   if (!TURN_STATUSES.has(state.status)) return undefined;
   if (state.status === 'awaiting_question' || (state.pendingQuestion ?? null) !== null)
     return { state: 'needs-input', confirmed: true };
+  if (pane?.dialog !== undefined)
+    return {
+      state: 'needs-input',
+      confirmed: true,
+      dialog: pane.dialog,
+      ...(pane.prompt === undefined ? {} : { prompt: pane.prompt }),
+    };
   if (pane?.prompt !== undefined) return { state: 'needs-input', confirmed: true, prompt: pane.prompt };
   if (pane?.request !== undefined) return { state: 'needs-input', confirmed: true, request: pane.request };
   if (pane?.permission === true) return { state: 'needs-input', confirmed: true };
@@ -187,4 +204,14 @@ export function settlePermissionRequest(
 ): PermissionRequest | undefined {
   if (next !== 'needs-input') return undefined;
   return observation?.state === 'needs-input' ? observation.request : recorded;
+}
+
+/** The harness dialog to RECORD beside `next`, by the same rule as {@link settlePermissionRequest}. */
+export function settleHarnessDialog(
+  recorded: HarnessDialog | undefined,
+  next: SessionTurnState | undefined,
+  observation: TurnObservation | undefined,
+): HarnessDialog | undefined {
+  if (next !== 'needs-input') return undefined;
+  return observation?.state === 'needs-input' ? observation.dialog : recorded;
 }

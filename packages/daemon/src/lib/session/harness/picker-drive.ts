@@ -109,6 +109,17 @@ function rowNamed(screen: CodexPickerScreen, name: string): CodexPickerRow | und
 }
 
 /**
+ * The row that is this target's model. Codex renders a model under its display name, which for a
+ * catalog's model is not its id ("DeepSeek V4 Pro" for `deepseek-v4-pro`), so the name the account
+ * advertised is tried first and the id second; both are the model's own names, never a guess.
+ */
+function modelRow(screen: CodexPickerScreen, target: CodexPickerTarget): CodexPickerRow | undefined {
+  return (
+    (target.rowName === undefined ? undefined : rowNamed(screen, target.rowName)) ?? rowNamed(screen, target.model)
+  );
+}
+
+/**
  * Why the visible quick picker cannot express this target, if it cannot.
  *
  * Only a target that is a VISIBLE quick row is judged here. A model absent from the quick list is
@@ -122,7 +133,7 @@ function rowNamed(screen: CodexPickerScreen, name: string): CodexPickerRow | und
  * be shown to be the requested effort.
  */
 export function quickPickerRefusal(screen: CodexPickerScreen, target: CodexPickerTarget): string | undefined {
-  if (screen.kind !== 'quick-models' || rowNamed(screen, target.model) === undefined) return undefined;
+  if (screen.kind !== 'quick-models' || modelRow(screen, target) === undefined) return undefined;
   if (target.quickPickerAppliesPreset !== true) return undefined;
   const preset =
     target.quickPickerDefaultEffort === undefined
@@ -177,11 +188,11 @@ export class CodexModelPickerDriver {
   async drive(target: CodexPickerTarget): Promise<void> {
     let screen = await this.preflight(target);
 
-    if (screen.kind === 'quick-models' && rowNamed(screen, target.model) === undefined) {
+    if (screen.kind === 'quick-models' && modelRow(screen, target) === undefined) {
       await this.#choose(screen, ALL_MODELS_ROW, 'the quick model list');
       screen = await this.#await(candidate => candidate.kind === 'all-models', 'the full model list');
     }
-    await this.#choose(screen, target.model, 'the model list');
+    await this.#choose(screen, target.model, 'the model list', modelRow(screen, target));
 
     const levels = `reasoning choices for ${target.model}`;
     let next = await this.#await(
@@ -192,6 +203,8 @@ export class CodexModelPickerDriver {
       levels,
     );
     if (next.kind === 'reasoning') {
+      if (target.effort === undefined)
+        throw new CodexPickerDriveError(`Codex asked for a reasoning level for ${target.model}, which was not named`);
       if (ADVANCED_EFFORTS.includes(target.effort)) {
         await this.#choose(next, MORE_REASONING_ROW, levels);
         next = await this.#await(candidate => candidate.kind === 'advanced-reasoning', 'advanced reasoning choices');
@@ -236,8 +249,12 @@ export class CodexModelPickerDriver {
   }
 
   /** Send the digit for one named row on the CURRENT screen. */
-  async #choose(screen: CodexPickerScreen, name: string, stage: string): Promise<void> {
-    const row = rowNamed(screen, name);
+  async #choose(
+    screen: CodexPickerScreen,
+    name: string,
+    stage: string,
+    row: CodexPickerRow | undefined = rowNamed(screen, name),
+  ): Promise<void> {
     if (row === undefined) throw new CodexPickerDriveError(`Codex picker did not offer ${name} on ${stage}`);
     // Codex's list accepts single-digit shortcuts only. Do not degrade into arrow counting if a
     // catalog grows past nine: failing visibly is safer than selecting the wrong model.

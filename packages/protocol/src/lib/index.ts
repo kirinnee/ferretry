@@ -43,6 +43,7 @@ export * from './relay-session.ts';
 export * from './secrets.ts';
 export * from './service.ts';
 export * from './session.ts';
+export * from './session-dialog.ts';
 export * from './session-filesystem.ts';
 export * from './session-fork.ts';
 export * from './session-live.ts';

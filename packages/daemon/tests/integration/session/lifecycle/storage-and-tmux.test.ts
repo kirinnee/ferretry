@@ -434,7 +434,7 @@ describe('TmuxSessionLifecycleLauncher', () => {
         '-c',
         '/workspace/project',
         '-e',
-        'FY_HYPERMEDIA=1',
+        'FY_HYPERMEDIA=0',
         '-e',
         'FY_SESSION_ID=tmux-session',
         AGENT,
@@ -1302,6 +1302,25 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     should(launch).containDeep(['-e', 'FY_SESSION_ID=plain-session']);
     // Its own id, and the hypermedia default every pane carries (docs/hypermedia.md).
     should(launch?.filter(word => word === '-e')).have.length(2);
+  });
+
+  it('should launch an interactive ferret with hypermedia on and an auto one with it off', async () => {
+    // Arrange
+    const hypermediaOf = async (mode: 'auto' | 'interactive') => {
+      const port = new RecordingTmuxPort();
+      const controller = new TmuxController(port);
+      const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+      await subject.launch(record(`mode-${mode}`, { mode, ...(mode === 'interactive' ? { prompt: undefined } : {}) }));
+      return port.calls.filter(call => call[0] === 'new-session')[0];
+    };
+
+    // Act
+    const interactive = await hypermediaOf('interactive');
+    const auto = await hypermediaOf('auto');
+
+    // Assert
+    should(interactive).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+    should(auto).containDeep(['-e', 'FY_HYPERMEDIA=0']);
   });
 });
 

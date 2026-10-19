@@ -152,6 +152,21 @@ describe('renderRuntimeWrapperScript', () => {
     should(actual.trimEnd().endsWith('exec claude "$@"')).be.true();
   });
 
+  it('should exec the resolved absolute harness path, and the bare name only when none was resolved', () => {
+    // Arrange
+    const subject = account();
+
+    // Act
+    const resolved = render({ ...subject, harnessCommand: '/opt/harnesses/claude' });
+    const underHome = render({ ...subject, harnessCommand: '~/.local/bin/claude' });
+    const unresolved = render({ ...subject, harnessCommand: undefined });
+
+    // Assert
+    should(resolved.trimEnd().endsWith(`exec '/opt/harnesses/claude' "$@"`)).be.true();
+    should(underHome.trimEnd().endsWith(`exec "$HOME/.local/bin/claude" "$@"`)).be.true();
+    should(unresolved.trimEnd().endsWith('exec claude "$@"')).be.true();
+  });
+
   it('should use the codex home variable and binary for a codex account', () => {
     // Arrange
     const subject = account({ kind: 'codex', home: '/state/fleet/homes/loge', flags: ['--full-auto'] });

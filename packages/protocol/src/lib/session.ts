@@ -3,6 +3,7 @@ import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, Posit
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { SessionLiveActivitySchema } from './session-live.ts';
+import { HarnessDialogSchema } from './session-dialog.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
@@ -47,6 +48,11 @@ export const SendUnaccountedReasonSchema = z.enum([
   'composer_discarded',
   /** The transcript could not be read, so absence could not be proven. */
   'transcript_unreadable',
+  /**
+   * The session has no transcript this daemon can prove is its own, so nothing it typed can ever be
+   * confirmed — not a timing problem, and re-sending cannot fix it. Restarting the CLI can.
+   */
+  'transcript_unbound',
   /** The pane could not be read, so absence could not be proven. */
   'pane_unreadable',
   /** A dialog on the agent's screen was waiting for an answer, so the message could not be typed. */
@@ -391,9 +397,9 @@ export const SessionConfigSchema = z.object({
   transcript: TranscriptProvenanceSchema.optional(),
   retry: RetryPolicySchema,
   /**
-   * Whether this ferret is told it may explain with hypermedia (docs/hypermedia.md). ABSENT MEANS ON: a
-   * session started before the switch existed is instructed at its next launch unless the owner turns
-   * it off. Read at launch, so a change takes effect at the next launch.
+   * Whether this ferret is told it may explain with hypermedia (docs/hypermedia.md). ABSENT MEANS THE MODE'S DEFAULT: on
+   * for an interactive ferret, off for an auto one, so a session started before the switch existed follows it
+   * at its next launch unless the owner set it explicitly. Read at launch, so a change takes effect at the next launch.
    */
   hypermedia: z.boolean().optional(),
   /**
@@ -403,6 +409,14 @@ export const SessionConfigSchema = z.object({
   pack: z.boolean().optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
+
+/**
+ * Whether a ferret is told it may use hypermedia, resolved: the recorded switch, else the default for
+ * its mode — ON for an interactive ferret, OFF for every auto one (a worker, a warden, a miner), which
+ * has no reader to look at a picture (docs/hypermedia.md).
+ */
+export const sessionHypermediaEnabled = (config: Pick<SessionConfig, 'mode' | 'hypermedia'>): boolean =>
+  config.hypermedia ?? config.mode === 'interactive';
 
 export const SessionHealthSchema = z.enum([
   'healthy',
@@ -532,6 +546,12 @@ export const SessionStateSchema = z.object({
    * wants to do and the choices its harness offered. Absent for every other turn.
    */
   permissionRequest: PermissionRequestSchema.optional(),
+  /**
+   * The harness's own dialog the agent's pane is parked on while `turnState` is `needs-input` — hooks to
+   * review, an update, a sign-in, an MCP server to approve — with the choices it offers. Absent for every
+   * other turn.
+   */
+  harnessDialog: HarnessDialogSchema.optional(),
   waiting: DeclaredWaitSchema.optional(),
   waitingCreditSeconds: NonNegativeFiniteSchema.optional(),
 });

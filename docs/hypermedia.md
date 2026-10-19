@@ -15,17 +15,14 @@ and the same filesystem proof.
 
 | Fact                    | Where                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------- |
-| A ferret's switch       | `config.hypermedia` on its session document; **absent means on**                              |
+| A ferret's switch       | `config.hypermedia` on its session document; **absent means the mode's default**              |
 | What a launch is handed | `FY_HYPERMEDIA=1` or `0` in the pane environment                                              |
 | Who reads it            | the runtime wrapper, which appends the instruction to the system prompt iff it is `1`         |
 | Changing it             | `PATCH /v1/sessions/:sessionId/hypermedia {enabled}` — `operator`                             |
 | The UI                  | Info › Runtime "Hypermedia" row, Actions › "Hypermedia" toggle, an icon on the session header |
 
-- **On by default for every new ferret**, interactive and agent alike — the start and the adopt of an
-  existing conversation both record `hypermedia: true`.
-- **A ferret that existed before the switch** has no `config.hypermedia` and no stored variable. Both
-  read as on, so it is instructed **at its next launch** (restart, resume or revive) unless the owner
-  turns it off first.
+- **The default follows the mode.** An **interactive** ferret — one a person is talking to — is on by default: the start and the adopt record `hypermedia: true`. A ferret that runs **auto** (a worker, and the background helpers: wardens, learning miners) is **off** by default, because nobody is reading its chat to look at a picture and the instruction is context it pays for every turn. The start of an auto ferret records `hypermedia: false`. Only the owner's explicit switch overrides the default, in either direction, and `sessionHypermediaEnabled` in `packages/protocol` is the one place that resolves it for the daemon and the PWA.
+- **A ferret that existed before the switch** has no `config.hypermedia` and no stored variable, so it reads as its mode's default: an existing interactive ferret is instructed at its next launch (restart, resume or revive) unless the owner turns it off first, and an existing auto ferret is **not** instructed at its next launch unless the owner explicitly turned it on.
 - **A change takes effect at the next launch, and the answer says so.** A running ferret's
   environment and its system prompt were fixed when it started, so the switch never re-instructs a
   running ferret and never sends it a message — unlike passive learning, there is nothing here worth

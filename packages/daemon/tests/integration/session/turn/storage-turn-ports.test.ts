@@ -19,6 +19,7 @@ import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.
 import {
   ClaudeTranscriptParser,
   CodexTranscriptParser,
+  parseHarnessDialog,
   parsePermissionPrompt,
   parseSessionId,
   type SessionId,
@@ -87,6 +88,7 @@ interface Fixture {
   readonly turnState: () => Promise<unknown>;
   readonly turnPrompt: () => Promise<unknown>;
   readonly permissionRequest: () => Promise<unknown>;
+  readonly harnessDialog: () => Promise<unknown>;
   readonly journal: () => Promise<readonly { type: string; data: unknown }[]>;
   readonly events: () => Promise<readonly (string | null)[]>;
   readonly settle: () => Promise<void>;
@@ -165,6 +167,7 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string, width 
     turnState: async () => (await state()).turnState,
     turnPrompt: async () => (await state()).turnPrompt,
     permissionRequest: async () => (await state()).permissionRequest,
+    harnessDialog: async () => (await state()).harnessDialog,
     journal: async () =>
       (await opened.storage.replay(id)).events.map(event => ({ type: event.type, data: event.data })),
     events: async () =>
@@ -190,6 +193,10 @@ async function untilRequest(subject: Fixture, id: string | undefined, budgetMs =
   }
   throw new Error(`permissionRequest never became ${String(id)}`);
 }
+
+/** A real pane captured from a harness, from `tests/fixtures/harness-dialogs`. */
+const dialogPane = async (name: string): Promise<string> =>
+  await readFile(join(import.meta.dir, '../../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
 
 /** Ticks until the record reads `expected` or the budget runs out, and answers how long it took. */
 async function until(subject: Fixture, expected: unknown, budgetMs = 6_000): Promise<number> {
@@ -344,6 +351,56 @@ describe('the turn watcher over real panes and transcripts', () => {
         parsePermissionPrompt(await prompt(second))?.id,
         null,
       ]);
+    }
+  }, 60_000);
+
+  it('a real harness dialog: recorded as data, a cursor move records nothing, cleared once answered', async () => {
+    for (const [harness, first, moved, second] of [
+      ['codex', 'codex-0.156.1-hooks-review', 'codex-0.156.1-hooks-review-moved', 'codex-0.156.1-update'],
+      ['claude', 'claude-2.1.281-mcp-servers', undefined, 'claude-2.1.281-settings-error'],
+    ] as const) {
+      // Arrange — the screens Codex and Claude Code really drew, at the width they were captured at.
+      const subject = await fixture(harness, await dialogPane(first), 120);
+      await subject.settle();
+      const shown = parseHarnessDialog(await dialogPane(first));
+
+      // Act + Assert — on screen: needs input, and the record is the dialog the pane shows.
+      await until(subject, 'needs-input');
+      should(await subject.harnessDialog()).deepEqual(shown);
+      should(await subject.permissionRequest()).be.undefined();
+
+      // Somebody at the terminal moving the cursor is the same dialog: nothing more is recorded.
+      if (moved !== undefined) {
+        await subject.frame(await dialogPane(moved));
+        await subject.settle();
+        await subject.watcher.tick();
+        should((await subject.harnessDialog()) as { id: string }).have.property('id', shown?.id);
+        should((await subject.journal()).filter(event => event.type.startsWith('turn.'))).have.length(1);
+      }
+
+      // The next dialog replaces it beside the same needs-input.
+      await subject.frame(await dialogPane(second));
+      await subject.settle();
+      const next = parseHarnessDialog(await dialogPane(second));
+      const started = Date.now();
+      while (((await subject.harnessDialog()) as { id?: string } | undefined)?.id !== next?.id) {
+        if (Date.now() - started > 6_000) throw new Error('harnessDialog never became the next dialog');
+        await subject.watcher.tick();
+        await Bun.sleep(200);
+      }
+
+      // Answered: the dialog is gone, and so is the record.
+      await subject.frame(harness === 'claude' ? CLAUDE_IDLE : CODEX_IDLE);
+      await subject.settle();
+      await until(subject, 'your-turn');
+      should(await subject.harnessDialog()).be.undefined();
+
+      const journal = (await subject.journal()).filter(event => event.type.startsWith('turn.'));
+      should(journal.map(event => event.type)).deepEqual(['turn.state', 'turn.prompt', 'turn.state']);
+      // The dialog rides the live feed itself, so a page can show it from the event alone.
+      should(
+        journal.map(event => (event.data as { harnessDialog: { id: string } | null }).harnessDialog?.id ?? null),
+      ).deepEqual([shown?.id, next?.id, null]);
     }
   }, 60_000);
 

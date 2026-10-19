@@ -244,3 +244,42 @@ describe('pane readiness under a permission prompt', () => {
     should(promptIsReady(frame, 5, 2)).be.true();
   });
 });
+
+describe('pane readiness under a harness dialog', () => {
+  const FIXTURES = join(import.meta.dir, '../../fixtures/harness-dialogs');
+
+  it('should never call a pane ready while it shows a harness dialog, wherever tmux puts the cursor', () => {
+    // Arrange — Codex’s `› 1. Review hooks` row is shaped like a composer line.
+    for (const name of readdirSync(FIXTURES)) {
+      const frame = readFileSync(join(FIXTURES, name), 'utf8');
+      const rows = frame.split('\n').length;
+
+      // Act
+      const actual = [promptIsReady(frame), promptIsReady(frame, rows - 1, 0), promptIsReady(frame, 0, 0)];
+
+      // Assert
+      should(actual).deepEqual([false, false, false], name);
+    }
+  });
+
+  it('should name the hooks review as not ready, with the cursor on the first row and on another', () => {
+    // Act
+    const actual = ['codex-0.156.1-hooks-review', 'codex-0.156.1-hooks-review-moved', 'codex-0.145.0-hooks-review'].map(
+      name => promptIsReady(readFileSync(join(FIXTURES, `${name}.txt`), 'utf8')),
+    );
+
+    // Assert
+    should(actual).deepEqual([false, false, false]);
+  });
+
+  it('should still call an idle Codex composer ready', () => {
+    // Arrange
+    const frame = ['• Done.', '', '› Ask Codex to do anything', '', '  gpt-5.1-codex · 98% context left'].join('\n');
+
+    // Act
+    const actual = promptIsReady(frame, 2, 2);
+
+    // Assert
+    should(actual).be.true();
+  });
+});

@@ -116,7 +116,7 @@ export function LearningSettingsSurface({ connection, sessions = null, fetcher }
             >
               <span
                 className={cn(
-                  'absolute top-0.5 h-4 w-4 rounded-full bg-surface-1 shadow transition-[left]',
+                  'absolute top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-[left]',
                   on ? 'left-[18px]' : 'left-0.5',
                 )}
               />

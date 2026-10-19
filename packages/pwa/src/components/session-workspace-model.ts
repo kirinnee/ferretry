@@ -2,6 +2,7 @@ import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
 
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
+import { projectDeliveries } from '../lib/peer-delivery.ts';
 import { readUserMessage } from '../lib/user-message.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
 import { fieldHash } from './session-chat-model.ts';
@@ -232,9 +233,14 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
  * remains an explicit integration gap.
  *
  * Text before the first record header is not a record at all; like every other piece of daemon
- * bookkeeping it is left out of the conversation. `now` dates the records' wall clocks.
+ * bookkeeping it is left out of the conversation. `now` dates the records' wall clocks, and `clientName` is
+ * the CLI a ferret runs to message another (`peer-delivery.ts`).
  */
-export const transcriptEntriesFromLog = (text: string, now: number = Date.now()): readonly TranscriptEntry[] => {
+export const transcriptEntriesFromLog = (
+  text: string,
+  now: number = Date.now(),
+  clientName = 'fy',
+): readonly TranscriptEntry[] => {
   if (text.trim() === '') return [];
   const records: LogRecord[] = [];
   let current: { clock?: string; role: LogRecord['role']; kind: string; lines: string[] } | null = null;
@@ -261,7 +267,7 @@ export const transcriptEntriesFromLog = (text: string, now: number = Date.now())
   }
   flush();
 
-  return projectRecords(records, now);
+  return projectDeliveries(projectRecords(records, now), clientName);
 };
 
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {
@@ -287,6 +293,11 @@ export interface SessionWorkspaceRefreshInput {
   readonly onSends?: (sends: readonly SendRecord[]) => void;
   readonly onError: (message: string | null) => void;
   /**
+   * Whether the daemon refused the transcript because it can prove no file is this session's own —
+   * said apart from any other failure, because its remedy is a restart rather than a wait.
+   */
+  readonly onTranscriptUnbound?: (unbound: boolean) => void;
+  /**
    * Failures somebody else already says — a lost carrier, which the connection model reports once and
    * retries on its own. A quiet failure neither sets the message nor clears it, and leaves the last good
    * transcript where it is: the screen goes stale, not blank. Absent means every failure is said here.
@@ -304,6 +315,10 @@ export interface SessionWorkspaceRefreshControl {
 }
 
 const errorMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
+
+/** The daemon's `no_transcript` refusal: no transcript it can prove is this session's own. */
+const isTranscriptUnbound = (reason: unknown): boolean =>
+  typeof reason === 'object' && reason !== null && (reason as { readonly code?: unknown }).code === 'no_transcript';
 
 /**
  * Keeps one daemon/session workspace fresh without a watch loop in React.
@@ -334,6 +349,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
         if (logs.status === 'fulfilled') input.onTranscript(transcriptEntriesFromLog(logs.value));
         else if (quiet(logs.reason)) silenced = true;
         else errors.push(`Transcript: ${errorMessage(logs.reason)}`);
+        if (!silenced) input.onTranscriptUnbound?.(logs.status === 'rejected' && isTranscriptUnbound(logs.reason));
 
         if (session.status === 'fulfilled') {
           if (session.value.config.id === input.sessionId) input.onSession(session.value);

@@ -5,6 +5,7 @@ import {
   listTallies,
   matchesMode,
   needsYou,
+  pendingQuestionPreview,
   sessionsBarDirectory,
   sessionsBarSubline,
   sessionsBarView,
@@ -151,5 +152,36 @@ describe('which sessions the bar lists', () => {
       '/tmp/wt-session-layout',
     );
     expect(sessionsBarDirectory(sessionView('e', { config: { cwd: '/homestead/kirin' } }))).toBe('/homestead/kirin');
+  });
+});
+
+describe('the question a waiting ferret asks', () => {
+  const asking = (questions: readonly string[], status = 'awaiting_question' as const) =>
+    sessionView('q', {
+      state: {
+        status,
+        pendingQuestion: { toolUseId: 'tool-1', questions: questions.map(question => ({ question })) } as never,
+      },
+    });
+
+  test('previews the first question on one line and says how many more follow', () => {
+    expect(pendingQuestionPreview(asking(['Which   branch\nshould I rebase onto?']))).toBe(
+      'Which branch should I rebase onto?',
+    );
+    expect(pendingQuestionPreview(asking(['Ship it?', 'And the docs?', 'And the tests?']))).toBe('Ship it? (+2 more)');
+  });
+
+  test('caps a long question so the row never carries a paragraph', () => {
+    const preview = pendingQuestionPreview(asking(['x'.repeat(400)])) ?? '';
+    expect(preview).toHaveLength(160);
+    expect(preview.endsWith('…')).toBe(true);
+  });
+
+  test('says nothing when nothing is pending, the question is blank, or the ferret is over', () => {
+    expect(pendingQuestionPreview(sessionView('none'))).toBeUndefined();
+    expect(pendingQuestionPreview(sessionView('null', { state: { pendingQuestion: null } }))).toBeUndefined();
+    expect(pendingQuestionPreview(asking(['   ']))).toBeUndefined();
+    expect(pendingQuestionPreview(asking([]))).toBeUndefined();
+    expect(pendingQuestionPreview(asking(['Still there?'], 'stopped' as never))).toBeUndefined();
   });
 });

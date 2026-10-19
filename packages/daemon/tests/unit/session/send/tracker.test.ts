@@ -401,6 +401,21 @@ describe('a send past its deadline', () => {
     should(blind.only.unaccountedReason).equal('transcript_unreadable');
   });
 
+  it('says the transcript was never proven, which a restart fixes and a re-send does not', async () => {
+    // The owner's Codex session: typed into the pane, answered there, and no rollout it could prove.
+    const unbound = new World(record());
+    unbound.reading = { readable: false, unbound: true, inputs: [] };
+    await unbound.checkAt(60_000);
+    // A dialog on screen is still the more useful thing to say.
+    const blocked = new World(record());
+    blocked.reading = { readable: false, unbound: true, inputs: [] };
+    blocked.pane = pane({ promptReady: false, blockingPrompt: 'Trust this folder?' });
+    await blocked.checkAt(60_000);
+
+    should(unbound.only).match({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound', retryable: false });
+    should(blocked.only.unaccountedReason).equal('blocked_by_prompt');
+  });
+
   it('times out a send whose session ended or whose pane is gone, without offering a plain retry', async () => {
     const ended = new World(record());
     ended.target = { id: ID, status: 'stopped', mode: 'auto', turn: 4 };

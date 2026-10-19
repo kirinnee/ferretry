@@ -40,7 +40,7 @@ const ITEM = 'flex w-full min-w-0 flex-col items-center gap-1 py-1 text-center';
 const MARKER = 'flex h-5 w-5 items-center justify-center rounded-full border text-2xs font-semibold';
 
 const MARKER_TONE: Record<OnboardingStepStatus, string> = {
-  completed: 'border-accent bg-accent-bg text-accent',
+  completed: 'border-accent bg-accent-soft text-accent',
   current: 'border-accent bg-accent text-accent-fg',
   upcoming: 'border-dashed border-border text-faint',
 };

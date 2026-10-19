@@ -389,14 +389,14 @@ export function RemoteBrowserPane({
         }
       />
       {page?.pageError !== undefined && (
-        <div role="alert" className="shrink-0 border-b border-err/30 bg-err-soft px-3 py-2 text-meta text-err">
+        <div role="alert" className="shrink-0 border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err">
           {page.pageError}
         </div>
       )}
       {error !== null && (
         <div
           role="alert"
-          className="flex shrink-0 items-center gap-xs border-b border-err/30 bg-err-soft px-3 py-2 text-meta text-err"
+          className="flex shrink-0 items-center gap-xs border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err"
         >
           <span className="min-w-0 flex-1 break-words">{error}</span>
           <button type="button" onClick={clearError} className="min-h-[44px] min-w-[44px] shrink-0 text-muted">

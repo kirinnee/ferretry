@@ -126,8 +126,11 @@ function optionKind(label: string): PermissionOptionKind {
   return /^yes\b/u.test(lower) ? 'allow-always' : 'allow';
 }
 
-/** FNV-1a over the text, twice with different offsets: sixteen hex digits, stable across runs. */
-function digest(text: string): string {
+/**
+ * FNV-1a over the text, twice with different offsets: sixteen hex digits, stable across runs. Also the
+ * id of a harness dialog (`./harness-dialog.ts`).
+ */
+export function promptDigest(text: string): string {
   const half = (offset: number): string => {
     let hash = offset;
     for (let index = 0; index < text.length; index += 1) {
@@ -280,7 +283,7 @@ export function parsePermissionPrompt(pane: string): PermissionRequest | undefin
     options,
   };
   return {
-    id: digest(JSON.stringify(request)),
+    id: promptDigest(JSON.stringify(request)),
     ...request,
     selected: rows.find(row => row.cursor)?.number ?? 1,
   };

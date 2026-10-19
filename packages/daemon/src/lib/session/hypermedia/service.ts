@@ -9,14 +9,14 @@
  *
  * Two facts move together, under the session's own lock in the composition root: `config.hypermedia`
  * on the session document, which every surface reads, and the launch variable, which the pane reads.
- * Absent from both means ON, so a ferret started before the switch existed is instructed at its next
- * launch unless the owner turns it off first.
+ * Absent from both means the mode's default (on for an interactive ferret, off for an auto one), so a
+ * ferret started before the switch existed follows its mode at its next launch unless the owner set it.
  */
 
 /** What the switch needs to know about one ferret. */
 export interface HypermediaFacts {
-  /** The recorded switch; absent on a session started before it existed, which reads as on. */
-  readonly enabled: boolean | undefined;
+  /** The switch as it reads now: the recorded value, else the default for the session's mode. */
+  readonly enabled: boolean;
   /** Whether a process is running, so the change waits for its next launch. */
   readonly running: boolean;
 }
@@ -61,7 +61,7 @@ export class SessionHypermediaService {
     const facts = await this.ports.facts(sessionId);
     if (facts === undefined) throw new SessionHypermediaError('not-found', `no session ${sessionId}`);
     await this.ports.write(sessionId, enabled, this.ports.now());
-    const changed = (facts.enabled ?? true) !== enabled;
+    const changed = facts.enabled !== enabled;
     return {
       restartRequired: changed && facts.running,
       note: hypermediaNote(enabled, changed, facts.running),

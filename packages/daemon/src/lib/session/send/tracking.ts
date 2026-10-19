@@ -166,6 +166,16 @@ export function judgeSends(
  * and leaves the decision with it: resend, choose another route, or give up.
  */
 export function sendFailureNotice(recipient: string, record: SendRecord, clientName: string): string {
+  // Its own sentence, because the generic one is wrong twice over here: the keys DID reach the
+  // recipient's terminal, and "decide whether to send it again" invites the duplicate. What is
+  // missing is the proof, and only a restart of the recipient can supply it.
+  if (record.fate === 'unaccounted' && record.unaccountedReason === 'transcript_unbound')
+    return ferretryNotice(
+      `Your message to ${recipient} (send ${record.sendId}) was typed into ${recipient}’s terminal, but there is ` +
+        `no transcript Ferretry can prove is ${recipient}’s, so whether ${recipient} read it cannot be confirmed. ` +
+        `Do not send it again — it most likely arrived. Ask the owner to restart ${recipient}’s CLI, which gives ` +
+        'it a transcript Ferretry can read.',
+    );
   const why =
     record.fate === 'timed_out'
       ? `it was not delivered (${(record.unaccountedReason ?? 'not_delivered').replaceAll('_', ' ')}) after ${record.attempt ?? 1} attempt(s)`
