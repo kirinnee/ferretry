@@ -1142,8 +1142,8 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
       if (typeof browser !== 'object' || browser === null) return browser;
       const children = [...launchingChildren].filter(child => !childrenBefore.has(child));
       const transport = watchBrowserTransport(children);
-      // A/B EXPERIMENT ONLY: probe disabled
-      void openTransportProbe;
+
+      await openTransportProbe(browser, transport);
       const guarded = guardBrowserTransport(browser, transport);
       browserProcesses.set(browser, children);
       browserProcesses.set(guarded, children);

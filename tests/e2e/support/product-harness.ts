@@ -590,7 +590,28 @@ export async function mintPairingLink(
  * a standalone `paired`, or the embedded frame unmounting as the setup guide moves on.
  */
 export async function confirmPairing(page: ProductPage, url: string): Promise<'paired' | 'unmounted'> {
-  await page.goto(url, { waitUntil: 'load', timeout: 30_000 });
+  await page.goto(url, { waitUntil: 'load', timeout: 30_000 }).catch(async (error: unknown) => {
+    // A/B DIAGNOSTIC ONLY: who answers this port on each loopback address?
+    const target = new URL(url);
+    const probe = async (host: string): Promise<string> => {
+      try {
+        const response = await fetch(`http://${host}:${target.port}${target.pathname}`, {
+          signal: AbortSignal.timeout(5_000),
+        });
+        return `${String(response.status)} ${response.headers.get('content-type') ?? ''} ${(await response.text()).slice(0, 80)}`;
+      } catch (failure) {
+        return `ERR ${String((failure as Error).message).slice(0, 120)}`;
+      }
+    };
+    const owners = Bun.spawnSync(['ss', '-ltnp', `sport = :${target.port}`], { stdout: 'pipe', stderr: 'pipe' });
+    await recordStep({
+      journey: 'harness',
+      step: 'diag:pair-goto-failed',
+      status: 'FLAG',
+      evidence: `goto failed (${String((error as Error).message).split('\n')[0]}); page at ${page.url()}; 127.0.0.1 → ${await probe('127.0.0.1')}; [::1] → ${await probe('[::1]')}; localhost → ${await probe('localhost')}; listeners: ${owners.stdout.toString().replace(/\s+/gu, ' ').slice(0, 600)}`,
+    });
+    throw error;
+  });
   await page.waitForSelector('[data-pairing-stage="confirm"]', { timeout: 20_000 }).catch(async () => {
     const shot = join(EVIDENCE_ROOT, 'pairing-never-confirmed-' + String(Date.now()) + '.png');
     await mkdir(EVIDENCE_ROOT, { recursive: true });
