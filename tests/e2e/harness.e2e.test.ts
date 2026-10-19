@@ -3,8 +3,10 @@ import { access } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { join } from 'node:path';
 import { userInfo } from 'node:os';
+import childProcess from 'node:child_process';
 import should from 'should';
 import { assertNoLiveStatePath, E2eEnvironment, type FakeHarnessScenario, withE2eEnvironment } from './fixture';
+import { closeChromeBounded, launchChromiumWithRetry } from './support/relay-harness';
 
 let subject: E2eEnvironment | undefined;
 
@@ -128,5 +130,67 @@ describe('isolated E2E harness', () => {
 
     // Assert
     should(actual).equal(join(process.cwd(), 'tests', 'e2e', 'future-state'));
+  });
+});
+
+/**
+ * A stand-in for what Playwright's `launch()` hands back: a browser whose calls are never answered,
+ * because the DevTools pipe to the process launched with it no longer carries anything.
+ */
+function silentBrowser(script: string): () => Promise<{ newContext(): Promise<never>; close(): Promise<void> }> {
+  return async () => {
+    // Through the module object, at call time: the stdio guard wraps `spawn` there, as Playwright calls it.
+    childProcess.spawn('bash', ['-c', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+    return {
+      _guid: 'browser@silent',
+      newContext: () => new Promise<never>(() => undefined),
+      close: async () => undefined,
+    };
+  };
+}
+
+describe('a browser whose DevTools pipe goes silent', () => {
+  it('should fail a pending call at once when Chrome reports the pipe broken', async () => {
+    // Arrange
+    const browser = await launchChromiumWithRetry(
+      silentBrowser(
+        'sleep 0.5; echo "[1:2:ERROR:content/browser/devtools/devtools_pipe_handler.cc:274] Could not write into pipe" >&2; sleep 30',
+      ),
+    );
+    const started = Date.now();
+
+    try {
+      // Act
+      const actual = await browser.newContext().then(
+        () => 'answered',
+        (error: Error) => error.message,
+      );
+
+      // Assert
+      should(actual).match(/^browser has disconnected: Chrome pid \d+ reported "Could not write into pipe"/u);
+      should(Date.now() - started).be.below(10_000);
+    } finally {
+      await closeChromeBounded(browser);
+    }
+  });
+
+  it('should fail a pending call at once when Chrome exits on its own', async () => {
+    // Arrange
+    const browser = await launchChromiumWithRetry(silentBrowser('sleep 0.5'));
+    const started = Date.now();
+
+    try {
+      // Act
+      const actual = await browser.newContext().then(
+        () => 'answered',
+        (error: Error) => error.message,
+      );
+
+      // Assert
+      should(actual).match(/^browser has disconnected: Chrome pid \d+ exited on its own \(code=0/u);
+      should(Date.now() - started).be.below(10_000);
+    } finally {
+      await closeChromeBounded(browser);
+    }
   });
 });

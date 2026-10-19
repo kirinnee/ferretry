@@ -1139,12 +1139,12 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
     launching += 1;
     try {
       const browser = await launch();
-      if (typeof browser === 'object' && browser !== null)
-        browserProcesses.set(
-          browser,
-          [...launchingChildren].filter(child => !childrenBefore.has(child)),
-        );
-      return browser;
+      if (typeof browser !== 'object' || browser === null) return browser;
+      const children = [...launchingChildren].filter(child => !childrenBefore.has(child));
+      const guarded = guardBrowserTransport(browser, watchBrowserTransport(children));
+      browserProcesses.set(browser, children);
+      browserProcesses.set(guarded, children);
+      return guarded;
     } catch (error) {
       const text = String((error as Error).message ?? error);
       const pipeBroke = pipeFailures.length > failuresBefore;
@@ -1163,6 +1163,139 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
 }
 
 /**
+ * What Chrome writes to stderr when the DevTools pipe Playwright drives it through has broken.
+ *
+ * Seen on hosted runners, and the cause of both journeys that hung a shard for 10–15 minutes: Bun
+ * stops servicing the extra stdio sockets it wired for Playwright (fds 3 and 4) AFTER the launch
+ * succeeded. Chrome then cannot write a reply (`Could not write into pipe`) or reads EOF and exits 0
+ * (`Connection terminated while reading from pipe`). Playwright is told neither: no `disconnected`
+ * event, no error, and every call without its own timeout — `evaluate`, a CDP `send`, `newPage` —
+ * waits until the test's own timeout ends it. Neither line has ever appeared in a healthy run.
+ */
+const DEVTOOLS_PIPE_LOSS = /Could not write into pipe|Connection terminated while reading from pipe/u;
+
+/**
+ * The ceiling for a browser call that carries no `timeout` of its own.
+ *
+ * Playwright bounds its actions (30 s by default) but not `evaluate`, CDP `send`, `newPage` or
+ * `newContext`; on a healthy page each answers in milliseconds. A call given a timeout gets that
+ * timeout plus {@link CALL_GRACE_MS}, so Playwright's own, better-worded error always arrives first.
+ */
+const CALL_CEILING_MS = 60_000;
+const CALL_GRACE_MS = 30_000;
+
+interface BrowserTransport {
+  /** Rejects, with a `browser has disconnected` error, the moment the transport is known to be gone. */
+  readonly lost: Promise<never>;
+  /** Set by {@link closeChromeBounded}: an exit the harness asked for is not a lost transport. */
+  closing: boolean;
+}
+
+const browserTransports = new WeakMap<object, BrowserTransport>();
+
+/**
+ * Watch one launched browser's processes for the two ways its transport dies silently: Chrome
+ * reporting a broken DevTools pipe, and Chrome exiting while nobody asked it to close.
+ */
+function watchBrowserTransport(children: readonly ChildProcess[]): BrowserTransport {
+  let reject: (error: Error) => void = () => undefined;
+  const lost = new Promise<never>((_resolve, fail) => {
+    reject = fail;
+  });
+  // Nothing may be left unhandled: Bun fails whichever test is running on an unhandled rejection.
+  lost.catch(() => undefined);
+  let reason: string | undefined;
+  const transport: BrowserTransport = { lost, closing: false };
+  const markLost = (why: string): void => {
+    if (reason !== undefined || transport.closing) return;
+    reason = why;
+    browserExits.push(`transport lost ${new Date().toISOString()}: ${why}`);
+    reject(new Error(`browser has disconnected: ${why}`));
+  };
+  for (const child of children) {
+    const exited = (code: number | null, signal: string | null): void =>
+      markLost(`Chrome pid ${String(child.pid)} exited on its own (code=${String(code)}, signal=${String(signal)})`);
+    if (child.exitCode !== null || child.signalCode !== null) exited(child.exitCode, child.signalCode);
+    child.once('exit', exited);
+    child.stderr?.on('data', (chunk: unknown) => {
+      const seen = DEVTOOLS_PIPE_LOSS.exec(String(chunk));
+      if (seen !== null)
+        markLost(
+          `Chrome pid ${String(child.pid)} reported "${seen[0]}" — Bun stopped servicing Playwright's DevTools pipe, so no pending call can be answered`,
+        );
+    });
+  }
+  return transport;
+}
+
+/** The Playwright objects a guarded browser hands out, unwrapped again whenever one goes back in. */
+const guardedTargets = new WeakMap<object, object>();
+
+/** Playwright's own client objects: every one carries the `_guid` of its protocol channel. */
+function isPlaywrightObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null && Object.hasOwn(value, '_guid');
+}
+
+/** The helpers Playwright exposes as properties rather than methods. */
+const GUARDED_PROPERTIES = new Set(['keyboard', 'mouse', 'touchscreen', 'request']);
+
+function callCeiling(args: readonly unknown[]): number {
+  for (const arg of args) {
+    const timeout = (arg as { timeout?: unknown } | null)?.timeout;
+    if (typeof arg === 'object' && typeof timeout === 'number' && timeout > 0) return timeout + CALL_GRACE_MS;
+  }
+  return CALL_CEILING_MS;
+}
+
+/**
+ * Make every call on a browser — and on every context, page, CDP session and input helper it hands
+ * out — settle: with its own answer, with `browser has disconnected: …` the moment the transport is
+ * lost, or with a named timeout when it carried no timeout of its own and never answered.
+ *
+ * The journeys' retry (`product-journeys.e2e.test.ts#withProduct`) already reruns a journey whose
+ * browser vanished; this is what turns a SILENT loss into that error instead of a hang.
+ */
+function guardBrowserTransport<T extends object>(target: T, transport: BrowserTransport): T {
+  browserTransports.set(target, transport);
+  const wrap = (value: unknown): unknown => (isPlaywrightObject(value) ? guard(value) : value);
+  const unwrap = (value: unknown): unknown =>
+    typeof value === 'object' && value !== null ? (guardedTargets.get(value) ?? value) : value;
+  const settle = (name: string, pending: Promise<unknown>, args: readonly unknown[]): Promise<unknown> => {
+    const ceiling = callCeiling(args);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const silent = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${name} did not settle within ${String(ceiling)}ms: the browser stopped answering`)),
+        ceiling,
+      );
+    });
+    return Promise.race([pending.then(wrap), transport.lost, silent]).finally(() => clearTimeout(timer));
+  };
+  const proxies = new WeakMap<object, object>();
+  const guard = (object: object): object => {
+    const known = proxies.get(object);
+    if (known !== undefined) return known;
+    const proxy = new Proxy(object, {
+      get(raw, property) {
+        const value = Reflect.get(raw, property, raw) as unknown;
+        if (typeof value !== 'function')
+          return typeof property === 'string' && GUARDED_PROPERTIES.has(property) ? wrap(value) : value;
+        return (...args: unknown[]): unknown => {
+          const inputs = args.map(unwrap);
+          const result = (value as (...input: unknown[]) => unknown).apply(raw, inputs);
+          if (!(result instanceof Promise)) return wrap(result);
+          return settle(`${raw.constructor.name}.${String(property)}`, result, inputs);
+        };
+      },
+    });
+    proxies.set(object, proxy);
+    guardedTargets.set(proxy, object);
+    browserTransports.set(proxy, transport);
+    return proxy;
+  };
+  return guard(target) as T;
+}
+/**
  * Close one browser, and if Playwright's `close()` never settles, end that browser's own processes.
  *
  * Seen in full-tier runs: `browser.close()` hung, and the teardown behind it never ran. The processes
@@ -1170,6 +1303,8 @@ export async function launchChromiumWithRetry<T>(launch: () => Promise<T>, attem
  * in this journey, a later one or another run on the host, is ever touched.
  */
 export async function closeChromeBounded(browser: { close(): Promise<void> }): Promise<void> {
+  const transport = browserTransports.get(browser);
+  if (transport !== undefined) transport.closing = true;
   const closed = await Promise.race([browser.close().then(() => true), Bun.sleep(8_000).then(() => false)]).catch(
     () => false,
   );
