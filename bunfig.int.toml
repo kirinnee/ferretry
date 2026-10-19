@@ -57,4 +57,8 @@ coveragePathIgnorePatterns = [
   # `scripts/ci/test.sh` refuses the whole tier as "coverage path outside
   # src/adapters" — a failure with no visible connection to the file that caused it.
   "packages/pwa/harness/**",
+  # THE HOSTED APP'S RELEASE KEY, a text file `fyd` compiles in to check the published model catalog
+  # (docs/model-catalog.md). Bun records a text import as a covered "file", so a tier that boots fyd
+  # would otherwise report `packages/pwa/release-signing-key.pub` and fail on a PATH.
+  "packages/pwa/*.pub",
 ]

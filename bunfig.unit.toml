@@ -20,4 +20,6 @@ coveragePathIgnorePatterns = [
   "packages/*/src/adapters/**",
   "packages/*/tests/**",
   "packages/*/*.config.ts",
+  # The hosted app's release key, compiled into fyd as text (bunfig.int.toml says why it is listed).
+  "packages/pwa/*.pub",
 ]
