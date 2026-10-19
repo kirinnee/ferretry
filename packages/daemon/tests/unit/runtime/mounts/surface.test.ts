@@ -522,6 +522,22 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   recommend: recommendSubsystem(),
   sttEnhancement: new FakeSttEnhancer(),
   speedups: new FakeSpeedups(),
+  models: {
+    view: async () => ({ published: { origin: 'https://ferretry.pages.dev', enabled: false }, catalogs: [] }),
+    refresh: async () => ({ outcome: 'disabled' as const }),
+  },
+  daemonUpdate: {
+    view: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    start: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    setAutoInstall: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    arm: () => () => undefined,
+  },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   secrets: secretSubsystem(),
@@ -615,9 +631,12 @@ describe('the mounted daemon surface', () => {
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
+      3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
+      1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       2 + // existing conversations kept as ferrets: the listing and the adoption
+      2 + // the model catalogs: the list and a check for a newer published one (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status.
@@ -768,6 +787,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
+      'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/migrate',
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',
@@ -868,6 +888,13 @@ describe('the mounted daemon surface', () => {
       // Speed-up keys: which are set (by name), and a Test that spends one once. No key on either.
       'GET /v1/speedups',
       'POST /v1/speedups/:provider/test',
+      // The model catalogs: the list and a check for a newer published catalog. Fixed literals, no other user.
+      'GET /v1/models',
+      'POST /v1/models/refresh',
+      // Updating this daemon: the view, starting an update, and the automatic-install setting.
+      'GET /v1/daemon/update',
+      'POST /v1/daemon/update',
+      'PATCH /v1/daemon/update/settings',
       // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',

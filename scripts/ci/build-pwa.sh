@@ -26,6 +26,14 @@ for asset in fy-render-sandbox.html fy-render-mermaid.js fy-render-lottie.js; do
     exit 1
   }
 done
+# The published model catalog (docs/model-catalog.md): every paired daemon follows its model lists
+# from these two files, checked against the signed release list below.
+for asset in catalog/models.json catalog/version.json; do
+  test -s "packages/pwa/dist/${asset}" || {
+    echo "❌ packages/pwa/dist/${asset} is missing or empty; the model catalog was not written" >&2
+    exit 1
+  }
+done
 # The signed-release files (docs/pwa-release-signing.md). The build always writes the UNSIGNED
 # marker; only scripts/ci/sign-pwa-release.sh, holding the key, replaces it.
 for asset in sw.verified.js release-manifest.json release-manifest.sig; do
@@ -41,6 +49,14 @@ present="$(cd packages/pwa/dist && find . -type f ! -name _headers ! -name _redi
   diff <(printf '%s\n' "${listed}") <(printf '%s\n' "${present}") >&2 || true
   exit 1
 }
+# The static pages name the release they were built from (`vite.config.ts` stamps VERSION in). A
+# placeholder that survived the build would show a newcomer `v%FY_RELEASE_VERSION%`.
+for page in index.html get-started/index.html; do
+  if rg -qF '%FY_RELEASE_VERSION%' "packages/pwa/dist/${page}" || ! rg -qF "v$(cat VERSION)" "packages/pwa/dist/${page}"; then
+    echo "❌ packages/pwa/dist/${page} does not name release v$(cat VERSION)" >&2
+    exit 1
+  fi
+done
 cmp packages/pwa/public/_headers packages/pwa/dist/_headers
 cmp packages/pwa/public/_redirects packages/pwa/dist/_redirects
 

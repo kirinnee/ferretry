@@ -605,6 +605,8 @@ export class E2eEnvironment {
       NO_COLOR: '1',
       // Turns on the daemon's launch guard: a session whose harness resolves to a real install fails.
       FERRETRY_TEST: '1',
+      // A compiled daemon asks GitHub for the latest release at boot; a suite never dials out.
+      FY_UPDATE_CHECK: 'off',
     });
     delete env.TMUX;
     delete env.TMUX_PANE;

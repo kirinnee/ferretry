@@ -38,5 +38,7 @@ describe('the daemon runtime environment', () => {
     // Every route imports the one shared source default. A missing directory is now reachable only
     // in a pre-default binary or a test double that explicitly returns NO_RELAY_DIRECTORY.
     should(environment({}).relayDirectoryOrigin()).equal(HOSTED_RELAY_DIRECTORY_ORIGIN);
+    // `off` asks nobody: how every test tier keeps a booted daemon off the network.
+    should(environment({ FY_RELAY_DIRECTORY_ORIGIN: ' off ' }).relayDirectoryOrigin()).be.undefined();
   });
 });

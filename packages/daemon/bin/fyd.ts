@@ -76,6 +76,9 @@ import {
 import { deviceRotateMessage, verifyDeviceProof } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
+// The hosted app's release key, the one its signed release list is checked with — and so the published
+// model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
+import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
 import { BunSqliteAnalyticsStoreFactory, HttpAnalyticsPricingFeed } from '../src/adapters/analytics/index.ts';
 import {
@@ -123,6 +126,7 @@ import {
   BunSecretShell,
   BunSqliteIndexFactory,
   CachedUsageFeed,
+  CliUpdateLauncher,
   ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
@@ -144,9 +148,14 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
+  FileModelCatalogCache,
   FileSpeedupTestLedger,
+  FileUpdateDocuments,
   foreignHistoryRoots,
+  HostedModelCatalog,
+  GitHubLatestRelease,
   HostedRelayDirectory,
+  HostInstallFacts,
   HttpUsageSource,
   hostCgroupFacts,
   JournalGrantAudit,
@@ -287,6 +296,7 @@ import {
   StorageSignalRepository,
 } from '../src/adapters/session/signal/index.ts';
 import { FileLastSnapshotStore } from '../src/adapters/session/snapshot/index.ts';
+import { FileLaunchSettingsDigest } from '../src/adapters/session/launch/index.ts';
 import {
   FileHarnessWrapperSource,
   FileSessionTranscriptMessageTokenCodec,
@@ -405,6 +415,11 @@ import {
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
+  buildLaunchArgv,
+  canServeModel,
+  currentLaunchEffort,
+  currentLaunchModel,
+  SessionLaunchService,
   type BootNoticePort,
   type BootRefusal,
   type BrowserLoginLifecycle,
@@ -444,6 +459,7 @@ import {
   type DaemonConfig,
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
+  DaemonUpdateService,
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
   type DeliveredAttachment,
@@ -488,7 +504,6 @@ import {
   type HarnessPreflight,
   HarnessQuirkService,
   handoffFolders,
-  handoffReadArguments,
   handoffView,
   harnessAbsentWarning,
   harnessDiscoveryPolicy,
@@ -536,8 +551,11 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  HOSTED_APP_ORIGIN,
   ModelCatalogService,
+  modelCatalogsView,
   PinService,
+  PublishedModelCatalogService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   ProvedPaneCapture,
@@ -734,7 +752,6 @@ import {
   LeaseClaimingLaunchWrapper,
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
-import { startupModelArguments } from '../src/lib/session/harness/startup.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
@@ -746,7 +763,7 @@ import {
   TransferPrepareError,
   WorkspaceFacetContributor,
 } from '../src/lib/transfer/index.ts';
-import { daemonVersion } from '../src/lib/version.ts';
+import { daemonVersion, productName } from '../src/lib/version.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -973,7 +990,17 @@ export interface DaemonWorld {
    * and respawning a pane on the host. A test substitutes this and keeps the service, the real
    * documents, the journal and the routes exactly as production builds them.
    */
-  readonly createResumeLauncher: (storage: DaemonStorage) => ResumeLauncher;
+  readonly createResumeLauncher: (
+    storage: DaemonStorage,
+    /**
+     * The argv a revive runs, REBUILT from the session's documents and the fleet as it is now
+     * (`SessionLaunchService.relaunch`). Nothing means the session cannot be rebuilt and its record is
+     * replayed. Passed IN so a test's launcher can record exactly what production would have run.
+     */
+    relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
+  ) => ResumeLauncher;
+  /** Rebuilding a session's launch on current settings, and saying whether its process is stale. */
+  readonly createSessionLaunch: (storage: DaemonStorage) => SessionLaunchService;
   /**
    * Reviving a stopped or dead session with its conversation intact: replace the terminal, hand the
    * agent its next turn, and refuse the revives that would destroy work rather than recover it.
@@ -1732,6 +1759,9 @@ function createSessionControlSubsystem(
   adoptLearning: (id: SessionId) => Promise<void>,
   /** The folders this session's agent is pointed into to read what it was sent (`handoffFolders`). */
   readableHandoffs: (id: SessionId) => readonly string[],
+  /** A digest of the fleet settings a wrapper launches under, recorded so a later read can say the
+   *  running process is on older ones (`FileLaunchSettingsDigest`). */
+  launchSettings: (executable: string, harness: HarnessKind) => Promise<string | undefined>,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -1868,17 +1898,20 @@ function createSessionControlSubsystem(
       // The remote-control arguments are added only when the caller asked for the surface, because
       // they are what makes the harness publish one — adding them anyway would open a control channel
       // for a session whose own document records that it has none.
-      const command = [
+      // THE SAME BUILD a Restart CLI, a migration and a revive run, so the four can never disagree
+      // about what a launch carries. Effort is not on it: a start applies the requested level as a
+      // runtime command before turn one (`startupRuntime` above), and a relaunch passes the level the
+      // session is on by then.
+      const command = buildLaunchArgv({
+        harness: account.kind,
         executable,
-        ...(request.remoteControl === true ? plan.extraArgs : []),
-        ...transcript.launchArguments,
-        // Its own turn documents and attachments, readable without a permission prompt and nothing more.
-        ...handoffReadArguments(account.kind, readableHandoffs(id)),
-        // The catalogue-proved model is the daemon's default. A free-form operator flag is last,
-        // as documented: an explicitly supplied `--model` wins over that default.
-        ...startupModelArguments(plan.model),
-        ...(request.harnessFlags ?? []),
-      ];
+        remoteControl: request.remoteControl === true ? plan.extraArgs : [],
+        transcript: transcript.launchArguments,
+        readableFolders: readableHandoffs(id),
+        model: plan.model,
+        harnessFlags: request.harnessFlags ?? [],
+      });
+      const settingsDigest = await launchSettings(executable, account.kind);
       // The level this launch starts on, so a session that has said nothing yet still shows one. A
       // single local file read: no harness is started and no provider is asked.
       const launchEffort = launchReasoningEffort(
@@ -1901,6 +1934,7 @@ function createSessionControlSubsystem(
         modelHint: request.model ?? account.defaultModel ?? '',
         model: plan.model,
         ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
+        ...(settingsDigest === undefined ? {} : { launchSettings: settingsDigest }),
         remoteControl: request.remoteControl === true,
         harnessFlags: [...(request.harnessFlags ?? [])],
         /**
@@ -2197,12 +2231,15 @@ function createConversationAdopter(
         return { kind: 'refused', code: 'unavailable', reason: planned.reason };
       }
       const plan = planned.plan;
-      const command = [
+      const command = buildLaunchArgv({
+        harness: account.kind,
         executable,
-        ...conversationResumeArguments(harness, conversation.id),
-        ...handoffReadArguments(account.kind, readableHandoffs(id)),
-        ...startupModelArguments(plan.model),
-      ];
+        remoteControl: [],
+        transcript: conversationResumeArguments(harness, conversation.id),
+        readableFolders: readableHandoffs(id),
+        model: plan.model,
+        harnessFlags: [],
+      });
       const envelope: SessionProtocolEnvelope = {
         agent: account.agent,
         harness: account.kind,
@@ -3407,6 +3444,8 @@ interface SessionMigrateParts {
   readonly readableHandoffs: (id: SessionId) => readonly string[];
   /** Serializes whole migrations of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
+  /** The SAME rebuild a revive runs, asked whether it would change anything. */
+  readonly launch: SessionLaunchService;
 }
 
 /** The documents a migration reasons about, parsed by the schemas that govern them. */
@@ -3545,15 +3584,29 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     if (mismatch !== undefined) throw new SessionMigrateError('harness_mismatch', mismatch);
     // The same planner the start uses, so the model a migration records and the window it is measured
     // against come from the one decision rather than two that can disagree.
-    const planned = parts.planner.plan({
+    const shape = {
       id,
       account,
       mode: config.mode,
       ...(config.teammate === undefined ? {} : { teammate: config.teammate }),
       ...(config.name === undefined ? {} : { name: config.name }),
-      ...(request.model === undefined ? {} : { requestedModel: request.model }),
       ...(config.parent === undefined ? {} : { parent: config.parent }),
-    });
+    };
+    // A RESTART KEEPS THE MODEL THE SESSION IS ON. A request that names no model used to plan the
+    // target's default, so Restart CLI — a migration onto the same account — quietly moved a session
+    // the owner had switched to another model back onto the default. The model it is on now is asked
+    // for instead; only when the target cannot serve it does the target's default decide, as before.
+    const current = currentLaunchModel(config, state, model => canServeModel(account, model));
+    const keep =
+      request.model === undefined && current !== undefined
+        ? parts.planner.plan({ ...shape, requestedModel: current })
+        : undefined;
+    const planned =
+      keep?.kind === 'planned'
+        ? keep
+        : parts.planner.plan({ ...shape, ...(request.model === undefined ? {} : { requestedModel: request.model }) });
+    // And the effort it is on, which no request names.
+    const effort = currentLaunchEffort(config, state);
     // A MIGRATION ONTO A MODEL THE TARGET DOES NOT SERVE IS REFUSED, for the same reason the start
     // refuses it and with more at stake: a migration that quietly landed on the account's default
     // would move a live conversation into a different model and a different context window while the
@@ -3585,13 +3638,16 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       try {
         return authorizeSessionCommand(
           executable,
-          [
+          buildLaunchArgv({
+            harness: account.kind,
             executable,
-            ...(config.remoteControl ? plan.extraArgs : []),
-            ...relaunchTranscript.launchArguments,
-            ...handoffReadArguments(account.kind, parts.readableHandoffs(id)),
-            ...config.harnessFlags,
-          ],
+            remoteControl: config.remoteControl ? plan.extraArgs : [],
+            transcript: relaunchTranscript.launchArguments,
+            readableFolders: parts.readableHandoffs(id),
+            model: plan.model,
+            ...(effort === undefined ? {} : { effort }),
+            harnessFlags: config.harnessFlags,
+          }),
           defaultSessionLifecycleSettings,
         );
       } catch (error) {
@@ -3638,8 +3694,9 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     );
     const from = config.agent;
     const generation = config.runtimeGeneration + 1;
-    // The previous account's level described the previous runtime; the target's own settings decide.
-    const launchEffort = await readPersistedReasoningEffort(account.kind, relaunchTranscript.provenance?.home);
+    // The level the session is on carries over; with none known, the target's own settings decide.
+    const launchEffort =
+      effort ?? (await readPersistedReasoningEffort(account.kind, relaunchTranscript.provenance?.home));
     await parts.storage.updateConfig(id, current => {
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
@@ -3725,6 +3782,14 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       // the document that pane's replacement is launched from, and a second migration interleaving
       // between the two would relaunch the first one's target under the second one's account.
       return await parts.serial.run(id, async () => await migrate(id, request));
+    },
+    relaunchSettings: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionMigrateError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if (parts.storage.findSession(id) === undefined)
+        throw new SessionMigrateError('not_found', `no session ${reference}`);
+      return await parts.launch.drift(id);
     },
   };
 }
@@ -5761,7 +5826,57 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       throw new Error(`cannot store a final frame for unusable session id ${JSON.stringify(id)}`);
     return createSessionPaths(paths, parsed).lastSnapshot;
   });
-  const createResumeLauncher = (storage: DaemonStorage): ResumeLauncher => {
+  /** The fleet settings a wrapper launches under, digested; see `FileLaunchSettingsDigest`. */
+  const launchSettings = new FileLaunchSettingsDigest(new FileHarnessWrapperSource(), process.env);
+  /**
+   * Every relaunch of an existing session builds its argv HERE, from its own documents and the fleet as
+   * it is now — the revive, and the stale-settings read that compares against what a revive would run.
+   */
+  const createSessionLaunch = (storage: DaemonStorage): SessionLaunchService =>
+    new SessionLaunchService({
+      subject: async id => {
+        const raw = await storage.readConfig(id);
+        const config = SessionConfigSchema.safeParse(raw);
+        const state = SessionStateSchema.safeParse(await storage.readState(id));
+        const lifecycle = SessionLifecycleConfigSchema.safeParse(lifecycleConfigDocument(raw));
+        if (!config.success || !state.success || !lifecycle.success) return undefined;
+        return { config: config.data, state: state.data, command: lifecycle.data.command };
+      },
+      account: async agent =>
+        await resolveStartAccount(accounts, agent, executables, CLIENT_NAME).catch(() => undefined),
+      planner,
+      // The attachment root is keyed by the pairing identity, which boot opens before anything can
+      // revive a session or read its settings; the start's own resolver is the same expression.
+      readableFolders: id => {
+        if (attachmentDaemonId === undefined) throw new Error('pairing identity was not opened before a relaunch');
+        return handoffFolders(
+          createSessionPaths(paths, id).directory,
+          attachmentDirectory(paths.state, attachmentDaemonId, id),
+        );
+      },
+      settings: async (executable, harness) => await launchSettings.digest(executable, harness),
+      transcriptStarted: async file => await Bun.file(file).exists(),
+      authorize: (executable, argv) => authorizeSessionCommand(executable, argv, defaultSessionLifecycleSettings),
+      record: async (id, launch) => {
+        await storage.updateConfig(id, current => {
+          const { launchSettings: _previous, ...retained } = jsonObject(current) ?? {};
+          return {
+            ...retained,
+            command: [...launch.command],
+            model: launch.model,
+            ...(launch.launchReasoningEffort === undefined
+              ? {}
+              : { launchReasoningEffort: launch.launchReasoningEffort }),
+            ...(launch.launchSettings === undefined ? {} : { launchSettings: launch.launchSettings }),
+            updatedAt: clock.now(),
+          };
+        });
+      },
+    });
+  const createResumeLauncher = (
+    storage: DaemonStorage,
+    relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
+  ): ResumeLauncher => {
     const controller = new TmuxController(
       new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')),
       launchGuard,
@@ -5777,10 +5892,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // record of having created it, so its existence decides between creating and resuming.
         const transcript = storedTranscriptProvenance(raw)?.file;
         const started = transcript !== undefined && (await Bun.file(transcript).exists());
+        const replay = relaunchCommand(config.command, started);
         return {
           tmuxSession: config.tmuxSession,
           cwd: config.cwd,
-          command: relaunchCommand(config.command, started),
+          command: replay,
+          // A revive RUNS on current settings rather than replaying the argv its start recorded.
+          relaunch: async () => (await relaunch(id)) ?? replay,
           // The SAME store the launch path reads, for the same reason it reads it per launch: a
           // replacement pane must carry the session's CURRENT environment. Read here rather than
           // captured at construction, and merged with the derived session id by the launcher.
@@ -6043,6 +6161,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         settings,
       ),
     createResumeLauncher,
+    createSessionLaunch,
     createSessionResume,
     createUsageFeed: async config => {
       // THIS HOST'S OWN CREDENTIALS FIRST: what the account model's usage pass already read, joined to
@@ -6705,6 +6824,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
             async id => await adoptLearning(id),
             id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
+            async (executable, harness) => await launchSettings.digest(executable, harness),
           ),
           attachmentStore,
         ),
@@ -6816,6 +6936,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
         // make every unrelated document write in the process wait behind it.
         serial: new KeyedSerialExecutor(),
+        launch: createSessionLaunch(storage),
       });
       // The SAME durable registration ledger the reap sweep reads, over the storage this boot
       // opened. Resource limits and the reap both need "which panes does this daemon own, and which
@@ -6922,10 +7043,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         async () => await modelCatalogService.catalogs(),
       );
-      // Model catalogs (docs/model-catalog.md): this build's, then this machine's own
-      // config/models/<id>.yaml over them. What every runtime on a login offers and pins.
+      // The model catalog Ferretry publishes with the hosted app (docs/model-catalog.md § Live updates):
+      // a one-file version check, at most every six hours when something reads the catalogs, and the
+      // full catalog only when the version differs — checked against the hosted app's signed release
+      // list with the key compiled into this build. `FY_MODEL_CATALOG=off` follows none; the origin can
+      // be pointed elsewhere with `FY_MODEL_CATALOG_ORIGIN`.
+      const modelCatalogOrigin = process.env.FY_MODEL_CATALOG_ORIGIN?.trim() || HOSTED_APP_ORIGIN;
+      const publishedModelCatalog = new PublishedModelCatalogService({
+        ...(process.env.FY_MODEL_CATALOG === 'off' ? {} : { fetch: new HostedModelCatalog(modelCatalogOrigin) }),
+        cache: new FileModelCatalogCache(stateFiles, join(paths.state, 'model-catalog.json')),
+        publicKeyPem: HOSTED_APP_RELEASE_KEY,
+        nowMs: () => millisecondClock.now(),
+        // A newer catalog moves what every runtime offers now, not at the next change somebody makes.
+        onUpdated: async () => {
+          await fleetCatalog.republish().catch(() => undefined);
+        },
+      });
+      // Model catalogs (docs/model-catalog.md): this build's, the published one over them, then this
+      // machine's own config/models/<id>.yaml over both. What every runtime on a login offers and pins.
       const modelCatalogService = new ModelCatalogService({
         files: async () => (await configFiles.load()).evaluation.effective.modelCatalogs,
+        published: async () => {
+          publishedModelCatalog.refreshIfDue();
+          return await publishedModelCatalog.catalogs();
+        },
         presets: async () => await providerPresets.presets(),
       });
       const providerProbe = new ProviderProbeService({
@@ -7477,6 +7618,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sttEnhancement,
         // Names-only status over the store's listing, and a Test that spends a key once through the
         // outbound holder above. Jev's Test goes through the same guard the Warden will use.
+        // The model catalogs in effect, and the published one this machine follows (docs/model-catalog.md).
+        models: {
+          view: async () =>
+            modelCatalogsView(await modelCatalogService.catalogs(), {
+              origin: modelCatalogOrigin,
+              enabled: publishedModelCatalog.enabled,
+              ...(await publishedModelCatalog.status()),
+            }),
+          refresh: async () => await publishedModelCatalog.refresh(true),
+        },
         speedups: new SpeedupsService({
           authorizer: outboundAuthorizer,
           secrets: secrets.directory,
@@ -7484,6 +7635,51 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock: { monotonicMs: () => speedupStopwatch.monotonicMs(), now: () => clock.now() },
           guard: new JevTriageGuard(outboundAuthorizer, speedupStopwatch),
         }),
+        // Updating this daemon (docs/updating.md): its install facts, the latest release from GitHub at
+        // boot and at most every six hours, and `fy daemon update` started detached beside this daemon.
+        daemonUpdate: (() => {
+          const directory = join(paths.state, 'update');
+          const launched = isAbsolute(process.argv0) ? process.argv0 : process.execPath;
+          return new DaemonUpdateService(
+            {
+              current: daemonVersion,
+              product: productName,
+              clientName: CLIENT_NAME,
+              install: new HostInstallFacts({
+                product: productName,
+                argv0: process.argv0,
+                execPath: process.execPath,
+                main: Bun.main,
+                homeDirectory: userHome,
+                platform: process.platform,
+                workingDirectory: process.cwd(),
+                which: name => Bun.which(name) ?? undefined,
+              }),
+              releases: new GitHubLatestRelease(productName, { userAgent: `${DAEMON_NAME}/${daemonVersion}` }),
+              documents: new FileUpdateDocuments(stateFiles, directory),
+              launcher: new CliUpdateLauncher({
+                client: join(dirname(launched), CLIENT_NAME),
+                stateHome: paths.home,
+                files: stateFiles,
+                directory,
+                environment: process.env,
+              }),
+              activity: {
+                midTurn: async () =>
+                  (await turnPorts.sessions()).filter(session => session.state.turnState === 'working').length,
+              },
+              clock: millisecondClock,
+              // A source run has no release to compare with, and an operator or a suite can switch it off.
+              checks: Bun.main.startsWith('/$bunfs/') && process.env.FY_UPDATE_CHECK !== 'off',
+            },
+            {
+              every: (intervalMs, tick) => {
+                const handle = setInterval(tick, intervalMs);
+                return () => clearInterval(handle);
+              },
+            },
+          );
+        })(),
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
@@ -7814,7 +8010,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
     // and threading it through the same seam as the other host adapters is what lets a test replace
     // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane.
-    world.createResumeLauncher(opened.storage),
+    world.createResumeLauncher(
+      opened.storage,
+      async id => await world.createSessionLaunch(opened.storage).relaunch(id),
+    ),
     world.migratePreflight,
     world.browserLogin.window,
     world.sttEnhancement,
@@ -8178,6 +8377,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  /**
+   * The update check, armed after the bind: it asks GitHub once now and then at most every six hours,
+   * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails
+   * a boot — it is reported on the update view instead.
+   */
+  cleanups.push(subsystems.daemonUpdate.arm());
   /**
    * The send tracker, armed after the bind like every loop that can type into a pane: a send proven
    * absent is re-attempted. Arming re-derives every in-flight send from its transcript — a restart

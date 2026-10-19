@@ -69,6 +69,7 @@ import {
   type ProcessInventoryPort,
   type ProcessObservation,
   parseSessionId,
+  type SessionId,
   RETIRED_ACCOUNT_MODEL_NOTICE,
   RETIRED_FLEET_BLOCK_NOTICE,
   type RelayAdvertisement,
@@ -465,6 +466,13 @@ class RecordingResumeLauncher implements ResumeLauncher {
   readonly delivered: string[] = [];
   readonly killed: string[] = [];
   readonly snapshots: string[] = [];
+  /**
+   * The production argv builder a revive runs, when a case hands it over: the replacement pane is the
+   * one thing faked here, never what it would have been launched with.
+   */
+  argvFor: ((id: SessionId) => Promise<readonly string[] | undefined>) | undefined;
+  /** What each relaunch would have run, when a case asked for it. */
+  readonly argv: Array<readonly string[] | undefined> = [];
 
   async observe(): Promise<PaneObservation> {
     return this.pane;
@@ -480,6 +488,7 @@ class RecordingResumeLauncher implements ResumeLauncher {
 
   async relaunch(id: string): Promise<void> {
     this.relaunched.push(id);
+    if (this.argvFor !== undefined) this.argv.push(await this.argvFor(parseSessionId(id)));
   }
 
   async deliver(_id: string, instruction: string): Promise<void> {
@@ -2925,6 +2934,175 @@ describe('daemon boot lifecycle', () => {
     should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');
     should(absent.status).equal(404);
     should((await absent.json()) as { code: string }).have.property('code', 'not-found');
+  });
+
+  /**
+   * A RELAUNCH RUNS ON CURRENT SETTINGS, whichever way it happens.
+   *
+   * The defect: a revive replayed the argv its start recorded, and a Restart CLI (a migration onto the
+   * same account) planned the account's default model. So a session switched to another model came
+   * back on the default, and a session started before the hand-off `Read(...)` rules existed never
+   * got them however often it was revived. Both now build the argv the way a start does, from the
+   * session's documents and the fleet as it is NOW, and Info › Runtime can ask whether the running
+   * process is behind that.
+   *
+   * The session is made OLD by hand — its recorded argv has no rules, as a pre-#554 start's did — and
+   * the owner's `/model` switch is seeded as the harness's own report, which is how the daemon learns
+   * of one. The permission mode then changes by regenerating the wrapper, as `fy fleet apply` does.
+   */
+  it('should revive and restart a session on current settings, keeping the model it is on', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-relaunch-settings');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: (
+        _storage: unknown,
+        relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
+      ) => {
+        reviver.argvFor = relaunch;
+        return reviver;
+      },
+    };
+    const wrapper = await seedFleet(home);
+    const harness = join(home, 'harness');
+    const permissionMode = async (mode: string): Promise<void> =>
+      await writeFile(
+        wrapper,
+        `#!/bin/sh\nexport CLAUDE_CONFIG_DIR="${harness}"\nexec claude --permission-mode ${mode} "$@"\n`,
+        { mode: 0o755 },
+      );
+    await permissionMode('auto');
+    // Two models, so keeping the one the session is on is distinguishable from planning the default.
+    await publishManifest(home, [
+      {
+        id: BOOT_ACCOUNT,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper,
+        home: harness,
+        displayName: 'Boot',
+        defaultModel: 'claude-opus-5',
+        models: [
+          { id: 'claude-opus-5', available: true },
+          { id: 'claude-sonnet-5', available: true },
+        ],
+        available: true,
+        unavailableReason: null,
+      },
+    ]);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startResponse = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-relaunch-start' },
+      body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'keep the settings current', cwd: home }),
+    });
+    const startedRaw: unknown = await startResponse.json();
+    if (startResponse.status !== 201) throw new Error(`the fixture start failed: ${JSON.stringify(startedRaw)}`);
+    const id = SessionViewSchema.parse(startedRaw).config.id;
+    const configFile = join(home, 'state', 'sessions', id, 'config.json');
+    const stateFile = join(home, 'state', 'sessions', id, 'state.json');
+    const document = async (file: string): Promise<Record<string, unknown>> =>
+      JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>;
+    const patch = async (file: string, fields: Record<string, unknown>): Promise<void> =>
+      await writeFile(file, JSON.stringify({ ...(await document(file)), ...fields }), { mode: 0o600 });
+    const settings = async (): Promise<unknown> =>
+      await (await fetch(`${sessions}/${id}/relaunch-settings`, { headers: cli })).json();
+    const startArgv = launcher.launched[0]?.command ?? [];
+    const readRules = startArgv.filter(token => token.startsWith('--allowedTools=Read('));
+
+    // Act
+    const fresh = await settings();
+    // Made OLD: the argv a start recorded before the Read rules existed.
+    const harnessSession = startArgv[startArgv.indexOf('--session-id') + 1] ?? '';
+    await patch(configFile, { command: [wrapper, '--session-id', harnessSession, '--model', 'claude-opus-5'] });
+    // The owner typed `/model` in the pane; the harness reported it after the start decided.
+    await patch(stateFile, {
+      observedModel: 'claude-sonnet-5',
+      observedModelAt: '2099-01-01T00:00:00.000Z',
+      observedReasoningEffort: 'high',
+    });
+    // The machine's agent permissions changed: the fleet regenerated the wrapper.
+    await permissionMode('default');
+    const stale = await settings();
+    // The pane died (as after `fy daemon restart`); the session is revived.
+    await fetch(`${sessions}/${id}/stop`, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ reason: 'pane died' }),
+    });
+    reviver.pane = { alive: false, dead: false, promptReady: false };
+    const revived = await fetch(`${sessions}/${id}/resume`, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ message: 'pick it back up' }),
+    });
+    const afterRevive = await settings();
+    const revivedConfig = await document(configFile);
+    // The profile changes too, and the owner presses Restart CLI: a migration onto the same account
+    // that names no model. A session answering at its prompt is one the gate lets through.
+    await permissionMode('acceptEdits');
+    const beforeRestart = await settings();
+    await patch(stateFile, { status: 'rate_limited' });
+    reviver.pane = { alive: true, dead: false, promptReady: true };
+    const restarted = await fetch(`${sessions}/${id}/migrate`, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-relaunch-restart' },
+      body: JSON.stringify({ agent: WRAPPER }),
+    });
+    const restartedRaw: unknown = await restarted.json();
+    const afterRestart = await settings();
+    const absent = await fetch(`${sessions}/no-such-session/relaunch-settings`, { headers: cli });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // The start carried the rules and recorded what it launched under, so it is current.
+    should(readRules.length).be.above(0);
+    should(fresh).deepEqual({ current: true, reasons: [] });
+    // Behind on both counts: rules it predates, and a permission mode changed under it.
+    should(stale).deepEqual({ current: false, reasons: ['arguments', 'settings'] });
+    // THE REVIVE: rebuilt, not replayed — the rules are back, on the model and effort it is ON, with
+    // the same conversation (the transcript was never written here, so it is created, not resumed).
+    should(revived.status).equal(200);
+    const revivedArgv = reviver.argv[0] ?? [];
+    should(revivedArgv).containDeep(readRules);
+    should(revivedArgv.slice(revivedArgv.indexOf('--model'), revivedArgv.indexOf('--model') + 2)).deepEqual([
+      '--model',
+      'claude-sonnet-5',
+    ]);
+    should(revivedArgv).containDeep(['--effort', 'high']);
+    should(revivedArgv).containDeep(['--session-id', harnessSession]);
+    should(revivedConfig.model).equal('claude-sonnet-5');
+    should(afterRevive).deepEqual({ current: true, reasons: [] });
+    // THE RESTART: the profile change is seen, and the restart keeps Sonnet rather than the default.
+    should(beforeRestart).deepEqual({ current: false, reasons: ['settings'] });
+    if (restarted.status !== 200) throw new Error(`the restart was refused: ${JSON.stringify(restartedRaw)}`);
+    should(SessionViewSchema.parse(restartedRaw).config.model).equal('claude-sonnet-5');
+    const restartArgv = reviver.argv[1] ?? [];
+    should(restartArgv).containDeep(readRules);
+    should(restartArgv).containDeep(['--model', 'claude-sonnet-5']);
+    should(restartArgv).not.containEql('claude-opus-5');
+    should(afterRestart).deepEqual({ current: true, reasons: [] });
+    should(absent.status).equal(404);
   });
 
   /**

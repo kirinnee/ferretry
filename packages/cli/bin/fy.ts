@@ -51,6 +51,11 @@ import { environmentBoardCredentials, environmentSessionId } from '../src/adapte
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
 import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
+import { HostInstallFacts } from '../src/adapters/update/install-facts';
+import { GitHubLatestRelease } from '../src/adapters/update/latest-release';
+import { CommandPackageManagers } from '../src/adapters/update/package-managers';
+import { StandaloneRelease } from '../src/adapters/update/standalone-release';
+import { ProtocolDaemonUpdateView } from '../src/adapters/update/update-view';
 import {
   AgentToolsClient,
   AgentToolsController,
@@ -124,6 +129,8 @@ import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
+import { registerModelsCommands } from '../src/lib/models/commands';
+import { ModelsController } from '../src/lib/models/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
@@ -154,6 +161,10 @@ import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
+import { NixProfileSwitch } from '../src/lib/update/profile-switch';
+import { DAEMON_RELEASE_KEYS } from '../src/lib/update/release-keys';
+import { DaemonUpdateStatusReader } from '../src/lib/update/status';
+import { DaemonUpdater } from '../src/lib/update/updater';
 import { assertSemver } from '../src/lib/version';
 import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
 import { WorktreeController } from '../src/lib/worktrees/controller';
@@ -459,22 +470,108 @@ function daemonBinaryVersion(path: string): string | undefined {
  * print `--help`. The daemon executable is resolved later still, when a verb actually needs to record
  * or launch one — `fy daemon status` and `fy daemon logs` work on a host that has no daemon at all.
  */
-function buildDaemonController(world: CliWorld, client: SharedDaemonClient): DaemonController {
+function resolveWorldDaemonLayout(world: CliWorld): DaemonLayout {
   const environment = world.environment;
-  const out = world.io;
-  const daemonName = DAEMON_NAME;
-  const layout: DaemonLayout = resolveDaemonLayout({
+  return resolveDaemonLayout({
     platform: process.platform,
     homeDirectory: resolveUserHome(environment),
     stateHome: environment.FY_HOME,
     configHome: environment.XDG_CONFIG_HOME,
     stateDirectory: environment.XDG_STATE_HOME,
     userId: typeof process.getuid === 'function' ? process.getuid() : 0,
-    daemonName,
+    daemonName: DAEMON_NAME,
     product: PRODUCT_NAME,
     searchPath: environment.PATH ?? '',
     locale: { LC_ALL: environment.LC_ALL, LC_CTYPE: environment.LC_CTYPE, LANG: environment.LANG },
   });
+}
+
+/** The local daemon's health probe: THIS state home's own address, never `FY_URL` (see below). */
+function localDaemonHealth(world: CliWorld, stateHome: string): ProtocolDaemonHealth {
+  return new ProtocolDaemonHealth(lazyHealthClient({ ...world.environment, FY_URL: undefined }, stateHome));
+}
+
+/** How the installed daemon got onto this host, read from the host itself. */
+function hostInstallFacts(world: CliWorld): HostInstallFacts {
+  return new HostInstallFacts({
+    product: PRODUCT_NAME,
+    homeDirectory: resolveUserHome(world.environment),
+    platform: process.platform,
+  });
+}
+
+/** The nix shell → nix profile switch, shared by `daemon install`'s offer and `daemon update`. */
+function buildProfileSwitch(world: CliWorld, processes: BunDaemonProcess): NixProfileSwitch {
+  return new NixProfileSwitch({
+    facts: hostInstallFacts(world),
+    packages: new CommandPackageManagers(argv => processes.run(argv)),
+    lifecycle: { executable: isExecutableFile, versionOf: daemonBinaryVersion },
+    out: world.io,
+    prompt: world.prompt,
+    interactive: () => world.io.interactive(),
+    product: PRODUCT_NAME,
+    clientName: BINARY_NAME,
+    daemonName: DAEMON_NAME,
+    homeDirectory: resolveUserHome(world.environment),
+  });
+}
+
+/**
+ * Builds `fy daemon update`.
+ *
+ * Its lifecycle builds A NEW CONTROLLER FOR EVERY CALL, and that is the point: a controller resolves
+ * the installed daemon once and remembers it, and an update changes the installed daemon — in place,
+ * or (switching to a nix profile) at a new path, which is handed over as `FY_DAEMON_BIN`.
+ */
+function buildDaemonUpdater(world: CliWorld, client: SharedDaemonClient): DaemonUpdater {
+  const environment = world.environment;
+  const processes = new BunDaemonProcess();
+  const layout = resolveWorldDaemonLayout(world);
+  const health = localDaemonHealth(world, layout.stateHome);
+  const controllerFor = (daemonPath?: string): DaemonController =>
+    buildDaemonController(
+      daemonPath === undefined ? world : { ...world, environment: { ...environment, FY_DAEMON_BIN: daemonPath } },
+      client,
+    );
+  return new DaemonUpdater({
+    facts: hostInstallFacts(world),
+    latest: new GitHubLatestRelease(PRODUCT_NAME),
+    packages: new CommandPackageManagers(argv => processes.run(argv)),
+    standalone: new StandaloneRelease({
+      product: PRODUCT_NAME,
+      clientName: BINARY_NAME,
+      platform: process.platform,
+      arch: process.arch,
+      binaries: [BINARY_NAME, ...Object.keys(daemonPkg.bin)],
+      keys: DAEMON_RELEASE_KEYS,
+      run: argv => processes.run(argv),
+    }),
+    lifecycle: {
+      installed: () => resolveDaemonBinary(environment, DAEMON_NAME),
+      versionOf: daemonBinaryVersion,
+      executable: isExecutableFile,
+      restart: () => controllerFor().restart(),
+      installAt: path => controllerFor(path).install(),
+      probe: () => health.probe(),
+    },
+    updateView: new ProtocolDaemonUpdateView(client),
+    switcher: buildProfileSwitch(world, processes),
+    reports: new FileServiceStore(),
+    out: world.io,
+    prompt: world.prompt,
+    interactive: () => world.io.interactive(),
+    clock: new SystemMillisecondClock(),
+    product: PRODUCT_NAME,
+    clientName: BINARY_NAME,
+    daemonName: DAEMON_NAME,
+  });
+}
+
+function buildDaemonController(world: CliWorld, client: SharedDaemonClient): DaemonController {
+  const environment = world.environment;
+  const out = world.io;
+  const daemonName = DAEMON_NAME;
+  const layout = resolveWorldDaemonLayout(world);
   const processes = new BunDaemonProcess();
   const clock = new SystemMillisecondClock();
   const files = new FileServiceStore();
@@ -498,7 +595,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
      * this host, and stop, restart and reset act on whatever answered: honouring a remote or forwarded
      * `FY_URL` reported a stranger's counts and handed its pid to a local SIGTERM.
      */
-    health: new ProtocolDaemonHealth(lazyHealthClient({ ...environment, FY_URL: undefined }, layout.stateHome)),
+    health: localDaemonHealth(world, layout.stateHome),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
     // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
@@ -538,6 +635,8 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
       interactive: () => world.io.interactive(),
       clientName: BINARY_NAME,
     }),
+    updateStatus: new DaemonUpdateStatusReader(hostInstallFacts(world), new ProtocolDaemonUpdateView(client)),
+    nixShellOffer: buildProfileSwitch(world, processes),
   });
 }
 
@@ -787,6 +886,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       program,
       () => buildDaemonController(world, client),
       () => buildStateHomeController(world),
+      () => buildDaemonUpdater(world, client),
     ),
   // The grant verbs mount onto the group above and DO take the shared client, because unlike every
   // other daemon verb they change what the daemon serves rather than whether it is running. They are
@@ -873,6 +973,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new ContinueSessionController(gateway, world.io, world.prompt, { ...context, interactive: world.interactive }),
     );
   },
+  // `fy models list` and `fy models refresh` (docs/model-catalog.md): the catalogs the daemon reads.
+  ({ program, world, client }) => registerModelsCommands(program, new ModelsController(client, world.io)),
 ];
 
 /**

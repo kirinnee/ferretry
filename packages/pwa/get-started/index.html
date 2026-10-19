@@ -1,0 +1,806 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Get started — Ferretry</title>
+    <meta
+      name="description"
+      content="Install Ferretry on your computer, start the daemon, and pair your phone in four steps."
+    />
+    <!-- A static page like the landing: no PWA bundle, no manifest. Every command
+         below must also appear in INSTALLATION.md, which owns them — the
+         `installation-parity` contract and tests/unit/get-started-document.test.ts
+         both refuse a command the doc does not carry. -->
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --paper: #f2f0e8;
+        --paper-shade: #e4e0d2;
+        --panel: #fbfaf5;
+        --ink: #20251e;
+        --muted: #62685d;
+        --line: #b5baac;
+        --lime: #b8f154;
+        --lime-deep: #426c0a;
+        --night: #202a1b;
+        --night-muted: #c9d0c0;
+        --code-ink: #f4f3ea;
+        --display: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+        --sans: 'Avenir Next', Avenir, 'Segoe UI', Helvetica, sans-serif;
+        --mono: ui-monospace, 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', Menlo, Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        min-width: 320px;
+        margin: 0;
+        overflow-x: hidden;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: var(--sans);
+      }
+      a {
+        color: inherit;
+      }
+      img {
+        display: block;
+      }
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+      .skip-link {
+        position: fixed;
+        z-index: 20;
+        top: 12px;
+        left: 12px;
+        padding: 10px 13px;
+        background: var(--lime);
+        color: var(--ink);
+        font: 800 12px/1 var(--mono);
+        transform: translateY(-180%);
+      }
+      .skip-link:focus {
+        transform: translateY(0);
+      }
+      .frame {
+        width: min(1080px, calc(100% - 48px));
+        margin: auto;
+      }
+      .topbar {
+        border-bottom: 1px solid var(--line);
+      }
+      .topbar .frame {
+        display: flex;
+        min-height: 70px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font: 800 18px/1 var(--mono);
+        letter-spacing: -0.07em;
+        text-decoration: none;
+      }
+      .brand img {
+        width: 29px;
+        height: 29px;
+      }
+      .nav-link {
+        font: 800 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .hero {
+        border-bottom: 1px solid var(--line);
+      }
+      .hero .frame {
+        padding: clamp(56px, 8vw, 104px) 0 clamp(44px, 6vw, 72px);
+      }
+      .eyebrow,
+      .step-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 22px;
+        color: var(--lime-deep);
+        font: 800 11px/1.2 var(--mono);
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+      .eyebrow::before {
+        width: 35px;
+        height: 9px;
+        background: var(--lime);
+        content: '';
+      }
+      h1 {
+        margin-bottom: 24px;
+        font-family: var(--display);
+        font-size: clamp(3.6rem, 8vw, 7.4rem);
+        font-weight: 500;
+        letter-spacing: -0.09em;
+        line-height: 0.8;
+      }
+      h1 span {
+        color: var(--lime-deep);
+        font-style: italic;
+      }
+      .intro {
+        max-width: 640px;
+        margin-bottom: 0;
+        color: var(--muted);
+        font-family: var(--display);
+        font-size: clamp(1.15rem, 2vw, 1.5rem);
+        line-height: 1.32;
+      }
+      .facts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 28px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .facts li {
+        padding: 8px 11px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        font: 700 11px/1.3 var(--mono);
+      }
+      .facts strong {
+        color: var(--lime-deep);
+      }
+      .steps {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .step {
+        border-bottom: 1px solid var(--line);
+      }
+      .step:nth-child(even) {
+        background: var(--panel);
+      }
+      .step .frame {
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+        gap: clamp(28px, 6vw, 80px);
+        padding: clamp(48px, 7vw, 88px) 0;
+      }
+      h2 {
+        margin-bottom: 18px;
+        font-family: var(--display);
+        font-size: clamp(2.5rem, 4.6vw, 4.2rem);
+        font-weight: 500;
+        letter-spacing: -0.07em;
+        line-height: 0.88;
+      }
+      .step-copy p {
+        max-width: 470px;
+        margin-bottom: 14px;
+        color: var(--muted);
+        font-family: var(--display);
+        font-size: 1.18rem;
+        line-height: 1.36;
+      }
+      .step-copy p:last-child {
+        margin-bottom: 0;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+      }
+      .step-copy code {
+        padding: 1px 4px;
+        background: var(--paper-shade);
+        color: var(--ink);
+      }
+      .work {
+        min-width: 0;
+      }
+      .tablist {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0;
+        border: 1px solid var(--ink);
+        border-bottom: 0;
+        width: fit-content;
+      }
+      .tablist[hidden] {
+        display: none;
+      }
+      .tab {
+        min-height: 44px;
+        padding: 0 18px;
+        border: 0;
+        border-right: 1px solid var(--ink);
+        background: var(--panel);
+        color: var(--ink);
+        cursor: pointer;
+        font: 800 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .tab:last-child {
+        border-right: 0;
+      }
+      .tab[aria-selected='true'] {
+        background: var(--ink);
+        color: var(--paper);
+      }
+      .tab:focus-visible,
+      .copy:focus-visible,
+      .button:focus-visible,
+      .brand:focus-visible,
+      .nav-link:focus-visible {
+        outline: 3px solid var(--lime-deep);
+        outline-offset: 3px;
+      }
+      .panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+      }
+      .panel[hidden] {
+        display: none;
+      }
+      .panel + .panel {
+        margin-top: 26px;
+      }
+      .js .panel + .panel {
+        margin-top: 0;
+      }
+      .panel-title {
+        margin: 0;
+        font: 800 11px/1.2 var(--mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .js .panel-title {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      .note {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+      .note.after {
+        margin-top: 18px;
+      }
+      .command.any {
+        margin-top: 30px;
+      }
+      .facts.flush {
+        margin-top: 0;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      .note code {
+        padding: 1px 4px;
+        background: var(--paper-shade);
+        color: var(--ink);
+      }
+      .command {
+        position: relative;
+        border: 1px solid var(--ink);
+        background: var(--night);
+        box-shadow: 6px 6px 0 var(--lime-deep);
+        color: var(--code-ink);
+      }
+      .command header {
+        display: flex;
+        min-height: 40px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 0 0 14px;
+        border-bottom: 1px solid #c9d0c03d;
+        color: var(--lime);
+        font: 800 10px/1.2 var(--mono);
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+      .copy {
+        min-width: 76px;
+        min-height: 40px;
+        padding: 0 14px;
+        border: 0;
+        border-left: 1px solid #c9d0c03d;
+        background: transparent;
+        color: var(--lime);
+        cursor: pointer;
+        font: 800 10px/1 var(--mono);
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+      .copy:hover {
+        background: #b8f1541f;
+      }
+      .copy[hidden] {
+        display: none;
+      }
+      .command pre {
+        margin: 0;
+        padding: 16px 14px;
+        overflow-x: auto;
+        font: 600 13px/1.6 var(--mono);
+      }
+      .command pre code {
+        display: block;
+        font-size: inherit;
+        white-space: pre;
+      }
+      .command pre code::before {
+        color: #c9d0c08a;
+        content: '$ ';
+      }
+      .command pre code.continued::before {
+        content: '  ';
+      }
+      .troubleshooting {
+        border-bottom: 1px solid var(--line);
+        background: var(--paper-shade);
+      }
+      .troubleshooting .frame {
+        padding: clamp(52px, 7vw, 92px) 0;
+      }
+      .trouble-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+        margin: 28px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+      .trouble-list li {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-content: start;
+        gap: 12px;
+      }
+      .trouble-list h3 {
+        margin: 0;
+        font-family: var(--display);
+        font-size: 1.45rem;
+        font-weight: 500;
+        letter-spacing: -0.03em;
+      }
+      .trouble-list p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+      .trouble-list .danger h3 {
+        color: #9b2c1f;
+      }
+      .finish .frame {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 22px;
+        padding: clamp(48px, 7vw, 84px) 0;
+      }
+      .finish p {
+        max-width: 540px;
+        margin: 0;
+        color: var(--muted);
+        font-family: var(--display);
+        font-size: 1.3rem;
+        line-height: 1.3;
+      }
+      .button {
+        display: inline-flex;
+        min-height: 54px;
+        align-items: center;
+        justify-content: center;
+        gap: 19px;
+        padding: 0 23px;
+        border: 1px solid var(--ink);
+        background: var(--ink);
+        box-shadow: 5px 5px 0 var(--lime-deep);
+        color: #fffef8;
+        font: 800 12px/1 var(--mono);
+        letter-spacing: 0.06em;
+        text-decoration: none;
+        text-transform: uppercase;
+      }
+      .button::after {
+        content: '↗';
+        font-size: 19px;
+        line-height: 1;
+      }
+      .footer {
+        background: var(--night);
+        color: #f7f6ef;
+      }
+      .footer .frame {
+        display: flex;
+        flex-wrap: wrap;
+        min-height: 84px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px 20px;
+        padding: 18px 0;
+        font: 700 10px/1.3 var(--mono);
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+      .footer a {
+        color: var(--lime);
+      }
+      @media (max-width: 760px) {
+        .frame {
+          width: min(100% - 32px, 1080px);
+        }
+        .topbar .frame {
+          min-height: 63px;
+        }
+        .step .frame,
+        .trouble-list {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .tablist {
+          width: 100%;
+        }
+        .tab {
+          flex: 1 1 0;
+          padding: 0 8px;
+        }
+        .command {
+          box-shadow: 4px 4px 0 var(--lime-deep);
+        }
+        .button {
+          width: calc(100% - 5px);
+        }
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #141812;
+          --paper-shade: #20291b;
+          --panel: #1b2218;
+          --ink: #f2f2e9;
+          --muted: #bec4b6;
+          --line: #596254;
+          --lime: #caf76f;
+          --lime-deep: #caf76f;
+          --night: #090c08;
+          --night-muted: #c9d0c0;
+        }
+        .command {
+          border-color: #596254;
+        }
+        .tab[aria-selected='true'] {
+          background: var(--lime);
+          color: #17200f;
+        }
+        .button {
+          border-color: var(--lime);
+          background: var(--lime);
+          color: #17200f;
+        }
+        .trouble-list .danger h3 {
+          color: #f0a596;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="topbar">
+      <div class="frame">
+        <a class="brand" href="/?stay" aria-label="Ferretry home"><img src="/fleet-grid.svg" alt="" />Ferretry</a>
+        <a class="nav-link" href="/app">Open the app ↗</a>
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero" aria-labelledby="title">
+        <div class="frame">
+          <p class="eyebrow">Get started</p>
+          <h1 id="title">Four steps to <span>your fleet</span></h1>
+          <p class="intro">
+            Install Ferretry on the computer where Claude Code or Codex runs, start its daemon, and pair your phone.
+            About five minutes.
+          </p>
+          <ul class="facts" aria-label="Before you start">
+            <li>Latest release <strong>v%FY_RELEASE_VERSION%</strong></li>
+            <li>macOS on Apple silicon · Linux amd64 / arm64</li>
+            <li>Needs Claude Code or Codex, and tmux</li>
+          </ul>
+        </div>
+      </section>
+
+      <ol class="steps">
+        <li class="step">
+          <div class="frame">
+            <div class="step-copy">
+              <p class="step-label">Step 01</p>
+              <h2 id="step-1-title">Install it on your computer.</h2>
+              <p>
+                This installs the <code>fy</code> command and the <code>fyd</code> daemon. Pick your system — the tab
+                for this device is chosen for you.
+              </p>
+            </div>
+            <div class="work" data-os-tabs>
+              <div class="tablist" role="tablist" aria-label="Your operating system" hidden>
+                <button class="tab" type="button" role="tab" id="tab-macos" aria-controls="panel-macos" data-os="macos">
+                  macOS
+                </button>
+                <button class="tab" type="button" role="tab" id="tab-linux" aria-controls="panel-linux" data-os="linux">
+                  Linux
+                </button>
+                <button class="tab" type="button" role="tab" id="tab-nix" aria-controls="panel-nix" data-os="nix">
+                  Nix
+                </button>
+              </div>
+              <div class="panel" id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" data-os="macos">
+                <h3 class="panel-title">macOS</h3>
+                <div class="command">
+                  <header><span>Homebrew</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry</code><code data-command>brew install --cask ferretry</code></pre>
+                </div>
+                <p class="note">The cask clears macOS's quarantine flag for you, so the first run just works.</p>
+              </div>
+              <div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" data-os="linux">
+                <h3 class="panel-title">Linux</h3>
+                <div class="command">
+                  <header><span>Debian / Ubuntu</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>echo &quot;deb [trusted=yes] https://apt.fury.io/kirinnee97/ /&quot; | sudo tee /etc/apt/sources.list.d/fury.list</code><code data-command>sudo apt update</code><code data-command>sudo apt install fy</code></pre>
+                </div>
+                <div class="command">
+                  <header><span>Fedora / RHEL</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>sudo tee /etc/yum.repos.d/fury.repo &lt;&lt;&#39;EOF&#39;</code><code class="continued" data-command>[fury]</code><code class="continued" data-command>name=Gemfury kirinnee97</code><code class="continued" data-command>baseurl=https://yum.fury.io/kirinnee97/</code><code class="continued" data-command>enabled=1</code><code class="continued" data-command>gpgcheck=0</code><code class="continued" data-command>EOF</code><code data-command>sudo dnf install fy</code></pre>
+                </div>
+              </div>
+              <div class="panel" id="panel-nix" role="tabpanel" aria-labelledby="tab-nix" data-os="nix">
+                <h3 class="panel-title">Nix</h3>
+                <div class="command">
+                  <header><span>Install</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>nix profile install github:kirinnee/ferretry</code></pre>
+                </div>
+                <div class="command">
+                  <header>
+                    <span>Or try it without installing</span><button class="copy" type="button" hidden>Copy</button>
+                  </header>
+                  <pre><code data-command>nix shell github:kirinnee/ferretry</code></pre>
+                </div>
+                <p class="note">
+                  Works on macOS and Linux. The daemon pins its own Nix store path, so garbage collection cannot remove
+                  it.
+                </p>
+              </div>
+              <div class="command any">
+                <header>
+                  <span>Any Mac or Linux: one-line installer</span
+                  ><button class="copy" type="button" hidden>Copy</button>
+                </header>
+                <pre><code data-command>curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash</code></pre>
+              </div>
+              <p class="note after">
+                It checks the download and puts both programs in <code>~/.local/bin</code>. Every option is in
+                <a href="https://github.com/kirinnee/ferretry/blob/main/INSTALLATION.md">INSTALLATION.md</a>.
+              </p>
+            </div>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="frame">
+            <div class="step-copy">
+              <p class="step-label">Step 02</p>
+              <h2 id="step-2-title">Start the daemon.</h2>
+              <p>
+                The daemon is the part that runs your sessions. This installs it as a user service (launchd on macOS,
+                systemd on Linux), starts it, and brings it back after a restart.
+              </p>
+            </div>
+            <div class="work">
+              <div class="command">
+                <header><span>On your computer</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy daemon install</code></pre>
+              </div>
+            </div>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="frame">
+            <div class="step-copy">
+              <p class="step-label">Step 03</p>
+              <h2 id="step-3-title">Pair your phone.</h2>
+              <p>
+                Run this, then scan the QR code with your phone's camera. The code lasts two minutes and works once.
+              </p>
+              <p>
+                Your phone does not need to be on the same network. When it cannot reach the computer directly, it
+                connects through Ferretry's end-to-end encrypted relay, which never sees the code or anything you send.
+              </p>
+            </div>
+            <div class="work">
+              <div class="command">
+                <header><span>On your computer</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy pair</code></pre>
+              </div>
+              <p class="note after">
+                No password to set: your phone registers a passkey, and risky actions ask for it later.
+              </p>
+            </div>
+          </div>
+        </li>
+
+        <li class="step">
+          <div class="frame">
+            <div class="step-copy">
+              <p class="step-label">Step 04</p>
+              <h2 id="step-4-title">Finish setup in the app.</h2>
+              <p>
+                Once your phone is paired, the app opens setup by itself. Every step can be skipped and changed later in
+                Settings.
+              </p>
+            </div>
+            <div class="work">
+              <ul class="facts flush" aria-label="What setup covers">
+                <li><strong>Claude Code</strong> and <strong>Codex</strong> — use your existing login and setup</li>
+                <li><strong>Keys</strong> — add logins and providers; keys go in the secret store</li>
+                <li><strong>Voice</strong> — on-device dictation, with optional clean-up</li>
+                <li><strong>Warden</strong> — what watches your sessions, and how much it may spend</li>
+              </ul>
+            </div>
+          </div>
+        </li>
+      </ol>
+
+      <section class="troubleshooting" aria-labelledby="trouble-title">
+        <div class="frame">
+          <p class="step-label">Troubleshooting</p>
+          <h2 id="trouble-title">If something is off.</h2>
+          <ul class="trouble-list">
+            <li>
+              <h3>Is the daemon running?</h3>
+              <p>Says whether it is serving, and what started it.</p>
+              <div class="command">
+                <header><span>Status</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy daemon status</code></pre>
+              </div>
+            </li>
+            <li>
+              <h3>What went wrong?</h3>
+              <p>Prints the daemon's log.</p>
+              <div class="command">
+                <header><span>Logs</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy daemon logs</code></pre>
+              </div>
+            </li>
+            <li>
+              <h3>macOS says it can't open <code>fy</code>.</h3>
+              <p>
+                The programs are not code-signed. Homebrew handles this; after any other install, clear the quarantine
+                flag once.
+              </p>
+              <div class="command">
+                <header><span>macOS</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>xattr -d com.apple.quarantine &quot;$(command -v fy)&quot;</code></pre>
+              </div>
+            </li>
+            <li class="danger">
+              <h3>Start over completely.</h3>
+              <p>
+                Removes ALL Ferretry data on this computer: settings, sessions, stored secrets and paired devices. It
+                lists what will go and asks before it deletes anything.
+              </p>
+              <div class="command">
+                <header><span>Reset</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy daemon reset</code></pre>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="finish" aria-labelledby="finish-title">
+        <div class="frame">
+          <div>
+            <h2 id="finish-title">Already paired?</h2>
+            <p>Open the app on this device. To add another computer, run steps 1 to 3 on it.</p>
+          </div>
+          <a class="button" href="/app">Open the app</a>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="frame">
+        <span>Ferretry v%FY_RELEASE_VERSION%</span>
+        <a href="https://github.com/kirinnee/ferretry">Source on GitHub</a>
+      </div>
+    </footer>
+    <p class="sr-only" aria-live="polite" data-copy-status></p>
+    <script>
+      !(function () {
+        var root = document.documentElement;
+        root.className = 'js';
+        var group = document.querySelector('[data-os-tabs]');
+        var tabs = Array.prototype.slice.call(group.querySelectorAll('[role="tab"]'));
+        var panels = Array.prototype.slice.call(group.querySelectorAll('[role="tabpanel"]'));
+        var ua = (navigator.userAgent || '') + ' ' + (navigator.platform || '');
+        var guess = /Linux|X11|CrOS|Android/.test(ua) && !/Mac/.test(ua) ? 'linux' : 'macos';
+        function select(os, focus) {
+          tabs.forEach(function (tab) {
+            var on = tab.getAttribute('data-os') === os;
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+            tab.tabIndex = on ? 0 : -1;
+            if (on && focus) tab.focus();
+          });
+          panels.forEach(function (panel) {
+            panel.hidden = panel.getAttribute('data-os') !== os;
+          });
+        }
+        tabs.forEach(function (tab, index) {
+          tab.addEventListener('click', function () {
+            select(tab.getAttribute('data-os'), false);
+          });
+          tab.addEventListener('keydown', function (event) {
+            var next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }[event.key];
+            if (next === undefined) return;
+            event.preventDefault();
+            select(tabs[(next + tabs.length) % tabs.length].getAttribute('data-os'), true);
+          });
+        });
+        group.querySelector('[role="tablist"]').hidden = false;
+        select(guess, false);
+
+        var status = document.querySelector('[data-copy-status]');
+        Array.prototype.slice.call(document.querySelectorAll('.command')).forEach(function (block) {
+          var button = block.querySelector('.copy');
+          var text = Array.prototype.slice
+            .call(block.querySelectorAll('[data-command]'))
+            .map(function (line) {
+              return line.textContent;
+            })
+            .join('\n');
+          if (!navigator.clipboard) return;
+          button.hidden = false;
+          button.setAttribute('aria-label', 'Copy: ' + text);
+          button.addEventListener('click', function () {
+            navigator.clipboard.writeText(text).then(
+              function () {
+                button.textContent = 'Copied';
+                status.textContent = 'Copied to the clipboard.';
+                setTimeout(function () {
+                  button.textContent = 'Copy';
+                }, 2000);
+              },
+              function () {
+                button.textContent = 'Select it';
+                status.textContent = 'Could not copy. Select the command and copy it yourself.';
+              },
+            );
+          });
+        });
+      })();
+    </script>
+  </body>
+</html>

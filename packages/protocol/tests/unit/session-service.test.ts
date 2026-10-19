@@ -174,6 +174,17 @@ const sessionCases: SchemaCase[] = [
   { name: 'session state', schema: session.SessionStateSchema, value: sessionView.state },
   { name: 'session view', schema: session.SessionViewSchema, value: sessionView },
   { name: 'session list', schema: session.SessionListSchema, value: [sessionView] },
+  {
+    name: 'session config with launch settings',
+    schema: session.SessionConfigSchema,
+    value: { ...sessionView.config, launchSettings: 'a1b2c3' },
+  },
+  { name: 'relaunch drift', schema: session.SessionRelaunchDriftSchema, value: 'settings' },
+  {
+    name: 'relaunch settings',
+    schema: session.SessionRelaunchSettingsSchema,
+    value: { current: false, reasons: ['arguments', 'settings'] },
+  },
   { name: 'attach target', schema: session.SessionAttachTargetSchema, value: sessionAttachTarget },
   { name: 'console input', schema: session.SessionConsoleInputRequestSchema, value: { data: 'ls\r' } },
   { name: 'console input result', schema: session.SessionConsoleInputResultSchema, value: { written: 3 } },

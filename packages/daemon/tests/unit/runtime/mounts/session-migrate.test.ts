@@ -1,6 +1,12 @@
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { FY_REQUEST_ID_HEADER, type SessionView, SessionViewSchema } from '@ferretry/protocol';
+import {
+  FY_REQUEST_ID_HEADER,
+  type SessionRelaunchSettings,
+  SessionRelaunchSettingsSchema,
+  type SessionView,
+  SessionViewSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -239,6 +245,63 @@ describe('the session migrate mount', () => {
 });
 
 /**
+ * The stale-settings read: whether a Restart would relaunch this session on different settings.
+ *
+ * It lives on the migration's mount because a Restart IS a migration onto the same account, so it is
+ * served under the same credential floor and answers the same refusals for an id it cannot use.
+ */
+describe('the session relaunch-settings read', () => {
+  const read = (sessionId: string, headers: Readonly<Record<string, string>> = human) =>
+    request({ method: 'GET', path: `/v1/sessions/${sessionId}/relaunch-settings`, headers });
+
+  it('should answer what the subsystem says, in the protocol shape', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const response = await subject.dispatch(read('s1'));
+
+    // Assert
+    should(response.status).equal(200);
+    should(SessionRelaunchSettingsSchema.parse(JSON.parse(response.body))).deepEqual({
+      current: false,
+      reasons: ['settings'],
+    });
+    should(migrator.relaunchReads).deepEqual(['s1']);
+    // A read moves nothing.
+    should(migrator.migrations).be.empty();
+  });
+
+  it('should answer an unknown session as not found, and refuse anonymously', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const absent = await subject.dispatch(read('s404'));
+    const anonymous = await subject.dispatch(read('s1', {}));
+
+    // Assert
+    should(absent.status).equal(404);
+    should(anonymous.status).equal(401);
+  });
+
+  it('should refuse a path parameter that would regain a separator', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const traversal = await subject.dispatch(read('%2e%2e%2fetc'));
+
+    // Assert
+    should(traversal.status).equal(400);
+    should(migrator.relaunchReads).be.empty();
+  });
+});
+
+/**
  * The route's replay contract.
  *
  * The protocol client retries this POST up to three times on transport failure and a migration kills
@@ -262,6 +325,9 @@ describe('the session migrate mount, replayed', () => {
       this.calls += 1;
       if (outcome !== 'ok') throw outcome;
       return await this.#views.migrate(sessionId, request);
+    }
+    async relaunchSettings(sessionId: string): Promise<SessionRelaunchSettings> {
+      return await this.#views.relaunchSettings(sessionId);
     }
   }
 

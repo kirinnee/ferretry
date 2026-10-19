@@ -46,6 +46,7 @@ import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } f
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
+import { useMachineUpdates } from './machine-updates.ts';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import { MessageMarksLegend } from './message-marks-legend.tsx';
 import type { PasskeyClientFactory } from './security-settings.tsx';
@@ -91,6 +92,8 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'learning',
   'clone',
   'export',
+  // Settings › Machine › About, named by the palette's Updates link.
+  'about',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));
@@ -260,6 +263,11 @@ export interface SettingsPageProps {
    * Without one the section says it cannot read a machine rather than dialling an address itself.
    */
   readonly createMachineClient?: FleetClientFactory;
+  /**
+   * Reads each machine's update view for the dot beside it in the machine list (`machine-updates.ts`).
+   * Separate from {@link createMachineClient} so a page given none simply shows no dot.
+   */
+  readonly createUpdateClient?: FleetClientFactory;
   /** Machines whose background reads are waiting on an unlock, which the Machines list shows as locked. */
   readonly lockedMachines?: readonly DaemonId[];
   /** The Machines tabs' surfaces; a tab nobody supplies is the shell's honest empty frame. */
@@ -306,6 +314,7 @@ export function SettingsPage({
   createSecretClient,
   daemonSettingsTabs,
   createMachineClient,
+  createUpdateClient,
   machineTabs,
   lockedMachines,
   onRenameDaemon,
@@ -520,10 +529,17 @@ export function SettingsPage({
     ...(lockedMachines === undefined ? {} : { locked: lockedMachines }),
     ...(onMachineNamed === undefined ? {} : { onNamed: onMachineNamed }),
   });
+  // The dot beside a machine with an update: one read per machine per Settings visit, like its reach.
+  const updates = useMachineUpdates({
+    connections,
+    createClient: createUpdateClient,
+    ...(lockedMachines === undefined ? {} : { locked: lockedMachines }),
+  });
   const machines: readonly SettingsMachineEntry[] = connections.map(connection => ({
     daemonId: connection.daemonId,
     name: distinctDaemonName(connection, connections),
     reach: reach.reachOf(connection.daemonId),
+    updateAvailable: updates.has(connection.daemonId),
   }));
 
   const daemonPanels = useMemo<DaemonPanelsRenderer | undefined>(

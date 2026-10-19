@@ -54,6 +54,13 @@ and what to do when something goes wrong.
   list, and warns the reader if it is not the signed worker. This only **sometimes** works. See
   [what this does not protect](#what-this-does-and-does-not-protect-against).
 
+## The model catalog rides on it
+
+The hosted app also serves `catalog/models.json` and `catalog/version.json` (docs/model-catalog.md §
+Live updates). They are ordinary listed files, so the same signature covers them, and a daemon checks
+that signature itself — with the release key compiled into it — before it takes a newer model catalog.
+No second key exists for it.
+
 ## The pieces
 
 | piece                                             | role                                                                  |
