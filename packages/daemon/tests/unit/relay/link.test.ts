@@ -72,13 +72,13 @@ import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { ApiSocketDispatcher, type SocketRoute } from '../../../src/lib/api/socket.ts';
 import type {
   SocketDownstream,
   SocketFrame,
   SocketHandler,
   SocketUpgradeDecision,
 } from '../../../src/lib/api/socket.ts';
+import { ApiSocketDispatcher, type SocketRoute } from '../../../src/lib/api/socket.ts';
 import {
   LiveDeviceConnections,
   type PairingRedemption,
@@ -461,6 +461,34 @@ const controlOf = (frame: RelayFrame | undefined): ControlMessage | null =>
   frame === undefined ? null : decodeControlMessage(frame.payload);
 
 describe('claiming a rendezvous', () => {
+  it('should probe the claim only on a rendezvous that offered it, and count each held', async () => {
+    // Arrange — a plain `claimed`: a rendezvous that does not speak `claim-probe`.
+    const plain = harness();
+    await plain.link.receiveBinary(claimed());
+    plain.link.probeClaim();
+    should(plain.wire.frames).be.empty();
+    should(plain.link.report()).containDeep({ claimProbe: false, held: 0 });
+
+    // Act — a rendezvous that echoed the feature.
+    const { link, wire: sent } = harness();
+    await link.receiveBinary(
+      control({
+        t: 'claimed',
+        protocol: RELAY_PROTOCOL_ID,
+        limits: { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 },
+        features: ['claim-probe'],
+      }),
+    );
+    link.probeClaim();
+    await link.receiveBinary(control({ t: 'held' }));
+    await link.receiveBinary(control({ t: 'held' }));
+
+    // Assert — one probe on the rendezvous session, two answers counted.
+    should(sent.frames.map(controlOf)).deepEqual([{ t: 'probe' }]);
+    should(sent.frames[0]?.sessionId.text).equal(RENDEZVOUS_SESSION_ID.text);
+    should(link.report()).containDeep({ claimed: true, claimProbe: true, held: 2 });
+  });
+
   it('should sign the challenge for the host it dialled, and say what it claimed', async () => {
     // Arrange
     const { link, wire: sent } = harness();

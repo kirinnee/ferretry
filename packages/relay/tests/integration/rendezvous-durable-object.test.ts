@@ -23,6 +23,7 @@ import {
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
   type RelayFrame,
+  type RendezvousState,
   type SessionId,
   sessionIdFromBytes,
   signRendezvousClaim,
@@ -46,8 +47,8 @@ function makeObject(overrides: Partial<RelayRuntime> = {}, relayEnvironment: Rel
   };
 }
 
-function socketRequest(daemonId: string, role: 'daemon' | 'client', reservationId?: string): Request {
-  return new Request(`https://${host}/v1/rendezvous/${daemonId}/${role}`, {
+function socketRequest(daemonId: string, role: 'daemon' | 'client', reservationId?: string, query = ''): Request {
+  return new Request(`https://${host}/v1/rendezvous/${daemonId}/${role}${query}`, {
     headers: {
       Upgrade: 'websocket',
       ...(reservationId === undefined ? {} : { 'x-ferretry-relay-reservation': reservationId }),
@@ -65,10 +66,11 @@ function bytesOf(frame: RelayFrame): ArrayBuffer {
 }
 
 /** Bring a real daemon all the way through the claim, exactly as a daemon would. */
-async function claimRendezvous(harness: ReturnType<typeof makeObject>, reservationId?: string) {
+async function claimRendezvous(harness: ReturnType<typeof makeObject>, reservationId?: string, query = '') {
   const identity = await newDaemonIdentity();
-  await harness.object.fetch(socketRequest(identity.daemonId, 'daemon', reservationId));
-  const daemonSocket = harness.objectState.sockets[0];
+  const before = harness.objectState.sockets.length;
+  await harness.object.fetch(socketRequest(identity.daemonId, 'daemon', reservationId, query));
+  const daemonSocket = harness.objectState.sockets[before];
   if (daemonSocket === undefined) throw new Error('the daemon socket was never accepted');
 
   const challengeMessage = controlOf(daemonSocket.drain()[0]);
@@ -289,9 +291,18 @@ describe('hosted rendezvous enforcement', () => {
   }
 
   /** Stand up a rendezvous holding one live session for `socketId`, and return a frame it may send. */
+  /** The daemon a hand-written state names has to be a socket the runtime holds, or it is not there. */
+  function attachDaemon(harness: ReturnType<typeof makeObject>): FakeSocket {
+    const daemon = new FakeSocket();
+    daemon.serializeAttachment({ socketId: 'daemon' });
+    harness.objectState.sockets.push(daemon);
+    return daemon;
+  }
+
   function liveSessionFrame(harness: ReturnType<typeof makeObject>, socketId: string): ArrayBuffer {
     const sessionId = sessionIdFromBytes(new Uint8Array(16).fill(1));
     if (sessionId === null) throw new Error('session fixture is invalid');
+    attachDaemon(harness);
     harness.objectState.storage.values.set('rendezvous', {
       ...initialRendezvousState(`fy_daemon_${'a'.repeat(43)}`),
       daemon: { socketId: 'daemon', since: 1 },
@@ -436,12 +447,36 @@ describe('hosted rendezvous enforcement', () => {
     should(releasedBy(hosted.calls)).containEql('client_reservation');
   });
 
+  it('should answer a claim probe without reporting it to the hosted meter', async () => {
+    const hosted = hostedEnvironment();
+    const harness = makeObject({}, hosted.environment);
+    const { daemonSocket } = await claimRendezvous(harness, 'daemon_reservation', '?features=claim-probe');
+    await harness.object.metered();
+    daemonSocket.drain();
+    hosted.calls.length = 0;
+
+    await harness.object.webSocketMessage(
+      daemonSocket,
+      bytesOf({
+        kind: FRAME_KINDS.control,
+        sessionId: RENDEZVOUS_SESSION_ID,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'probe' }),
+      }),
+    );
+    await harness.object.metered();
+
+    should(daemonSocket.drain().map(controlOf)).deepEqual([{ t: 'held' }]);
+    should(hosted.calls.filter(call => call.path === '/internal/meter')).be.empty();
+  });
+
   it('should carry live sessions through a meter outage, re-report the bytes, and fail closed only past the grace', async () => {
     // An unreachable control object is not a refusal: one blip used to close every socket on the
     // rendezvous — the daemon's and every phone's — with no deploy and no ceiling anywhere.
     let reachable = false;
     const hosted = hostedEnvironment(() => (reachable ? { ok: true } : { invalid: true }));
     const harness = makeObject({}, hosted.environment);
+    attachDaemon(harness);
     const client = new FakeSocket();
     client.serializeAttachment({ socketId: 'client', reservationId: 'client_reservation' });
     harness.objectState.sockets.push(client);
@@ -807,5 +842,148 @@ describe('session identifiers', () => {
   it('should reject a width the frame header cannot carry', () => {
     const built: SessionId | null = sessionIdFromBytes(new Uint8Array(16));
     should(built).not.be.null();
+  });
+});
+
+describe('rendezvous durable object: a claim the stored state lost', () => {
+  const probing = '?features=claim-probe';
+  const probe = bytesOf({
+    kind: FRAME_KINDS.control,
+    sessionId: RENDEZVOUS_SESSION_ID,
+    sequence: 0,
+    payload: encodeControlMessage({ t: 'probe' }),
+  });
+
+  /** What eviction leaves behind: the same storage and the same hibernated sockets, under fresh code. */
+  function evict(harness: ReturnType<typeof makeObject>): ReturnType<typeof makeObject> {
+    return { ...harness, object: new RendezvousDurableObject(harness.objectState, environment, harness.runtime) };
+  }
+
+  /** The divergence the owner hit: the document says nobody holds the slot; the runtime still holds the daemon. */
+  function forgetTheClaim(harness: ReturnType<typeof makeObject>): void {
+    const stored = harness.objectState.storage.values.get('rendezvous') as RendezvousState;
+    harness.objectState.storage.values.set('rendezvous', { ...stored, daemon: null });
+  }
+
+  it('should mark the socket that holds the claim, with the features it asked for', async () => {
+    const harness = makeObject();
+    const { daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    should(controlOf(daemonSocket.drain()[0])).match({ t: 'claimed', features: ['claim-probe'] });
+    should(daemonSocket.deserializeAttachment()).match({ claim: { features: ['claim-probe'] } });
+
+    const plain = makeObject();
+    const { daemonSocket: older } = await claimRendezvous(plain);
+    should(controlOf(older.drain()[0])).not.have.property('features');
+    should(older.deserializeAttachment()).match({ claim: {} });
+  });
+
+  it('should keep serving across an eviction, because the claim is stored rather than remembered', async () => {
+    const harness = makeObject();
+    const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    daemonSocket.drain();
+
+    const woken = evict(harness);
+    const { ready } = await joinClient(woken, identity.daemonId);
+    should(ready).match({ t: 'ready' });
+    should(controlOf(daemonSocket.drain()[0])).match({ t: 'open' });
+  });
+
+  it('should serve the phone without a daemon restart when the claim is lost but the socket is not', async () => {
+    // 2026-10-19: daemon connected at 02:30:38, fy-pong kept arriving, and every phone from 02:38 to the
+    // restart at 02:46 was told 4404 — the stored state had stopped naming a socket the runtime still held.
+    const harness = makeObject();
+    const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    daemonSocket.drain();
+    forgetTheClaim(harness);
+    const warned: unknown[] = [];
+    const warn = console.warn;
+    console.warn = (...line: unknown[]) => warned.push(line);
+    let joined: Awaited<ReturnType<typeof joinClient>>;
+    try {
+      joined = await joinClient(evict(harness), identity.daemonId);
+    } finally {
+      console.warn = warn;
+    }
+
+    should(joined.ready).match({ t: 'ready' });
+    should(joined.clientSocket.closed).be.null();
+    should(controlOf(daemonSocket.drain()[0])).match({ t: 'open' });
+    should(daemonSocket.closed).be.null();
+    should(harness.objectState.storage.values.get('rendezvous')).match({
+      daemon: { socketId: (daemonSocket.deserializeAttachment() as { socketId: string }).socketId, restored: true },
+    });
+    should(warned).have.length(1);
+  });
+
+  it('should answer the holder probe from its own state, after an eviction too', async () => {
+    const harness = makeObject();
+    const { daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    daemonSocket.drain();
+
+    await evict(harness).object.webSocketMessage(daemonSocket, probe);
+    should(daemonSocket.drain().map(controlOf)).deepEqual([{ t: 'held' }]);
+    should(daemonSocket.closed).be.null();
+  });
+
+  it('should close a probing socket with 4410 when nothing it holds can restore the claim', async () => {
+    // A socket that never carried a claim marker: the probe is the only thing that can find it out.
+    const harness = makeObject();
+    const { daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    daemonSocket.drain();
+    forgetTheClaim(harness);
+    const { claim: _claim, ...unmarked } = daemonSocket.deserializeAttachment() as Record<string, unknown>;
+    daemonSocket.serializeAttachment(unmarked);
+
+    await harness.object.webSocketMessage(daemonSocket, probe);
+    should(controlOf(daemonSocket.frames().at(-1))).match({ t: 'error', code: RELAY_CLOSE_CODES.claimLost });
+    should(daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.claimLost);
+  });
+
+  it('should refuse a claimed socket the slot does not name with 4410, and never restore it after', async () => {
+    const harness = makeObject();
+    const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    daemonSocket.drain();
+    const other = new FakeSocket();
+    other.serializeAttachment({ socketId: 'other', claim: {} });
+    harness.objectState.sockets.push(other);
+    const stored = harness.objectState.storage.values.get('rendezvous') as RendezvousState;
+    harness.objectState.storage.values.set('rendezvous', { ...stored, daemon: { socketId: 'other', since: 1 } });
+
+    await harness.object.alarm();
+    should(daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.claimLost);
+    should(daemonSocket.deserializeAttachment()).not.have.property('claim');
+
+    // The slot's holder goes too. The refused socket is still listed, but it carries no claim any more.
+    harness.objectState.sockets.splice(harness.objectState.sockets.indexOf(other), 1);
+    await harness.object.fetch(socketRequest(identity.daemonId, 'client'));
+    should(harness.objectState.sockets.at(-1)?.closed?.code).equal(RELAY_CLOSE_CODES.daemonAbsent);
+  });
+
+  it('should not restore a daemon whose socket reported an error or that the sweep evicted', async () => {
+    const errored = makeObject();
+    const first = await claimRendezvous(errored, undefined, probing);
+    await errored.object.webSocketError(first.daemonSocket);
+    should(first.daemonSocket.deserializeAttachment()).not.have.property('claim');
+    await errored.object.fetch(socketRequest(first.identity.daemonId, 'client'));
+    should(errored.objectState.sockets.at(-1)?.closed?.code).equal(RELAY_CLOSE_CODES.daemonAbsent);
+
+    const swept = makeObject();
+    const second = await claimRendezvous(swept, undefined, probing);
+    swept.runtime.clock += HEARTBEAT_GRACE_SECONDS * 1_000 + 1;
+    await swept.object.alarm();
+    should(second.daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.heartbeatTimeout);
+    should(second.daemonSocket.deserializeAttachment()).not.have.property('claim');
+    await swept.object.fetch(socketRequest(second.identity.daemonId, 'client'));
+    should(swept.objectState.sockets.at(-1)?.closed?.code).equal(RELAY_CLOSE_CODES.daemonAbsent);
+  });
+
+  it('should free a slot whose socket the runtime no longer holds, instead of refusing the redial 4409', async () => {
+    // A reset drops every socket without delivering their closes; the stored slot still named the old one.
+    const harness = makeObject();
+    const { identity, daemonSocket } = await claimRendezvous(harness, undefined, probing);
+    harness.objectState.sockets.splice(harness.objectState.sockets.indexOf(daemonSocket), 1);
+
+    await evict(harness).object.fetch(socketRequest(identity.daemonId, 'daemon', undefined, probing));
+    should(controlOf(harness.objectState.sockets.at(-1)?.drain()[0])).match({ t: 'challenge' });
   });
 });

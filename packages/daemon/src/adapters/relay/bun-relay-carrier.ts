@@ -54,6 +54,7 @@ import {
   type RelayCarrierDecision,
   RelayLink,
   type RelayLinkTimer,
+  relayDialUrl,
   relayRedialDelayMs,
   relaySocketIsStale,
 } from '../../lib/relay/index.ts';
@@ -215,7 +216,7 @@ export class BunRelayCarrier {
   #dial(): void {
     if (this.#decision.kind !== 'dial' || this.#stopped) return;
     this.#phase = 'dialling';
-    const socket = this.#socketFactory(this.#decision.socketUrl);
+    const socket = this.#socketFactory(relayDialUrl(this.#decision.socketUrl));
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
     this.#lastSeen = this.#now();
@@ -325,16 +326,34 @@ export class BunRelayCarrier {
       return;
     }
     link.heartbeat();
+    // `fy-pong` proves the edge still holds the socket and nothing more: the auto-responder answers it
+    // without consulting the rendezvous. So where the rendezvous speaks it, the same tick also asks the
+    // rendezvous ITSELF whether this socket still holds the claim, and only `held` answers that.
+    const probing = link.report().claimProbe;
+    if (probing) link.probeClaim();
     const heard = this.#received;
+    const held = link.report().held;
     this.#pongDeadline = this.#scheduler.after(RELAY_PONG_DEADLINE_MS, () => {
-      if (!this.#live(socket, link) || this.#received !== heard) return;
-      this.#abandon(
-        socket,
-        link,
-        'the rendezvous stopped answering, so the daemon dropped the socket',
-        'no answer within the heartbeat deadline',
-        `no reply within ${formatSeconds(RELAY_PONG_DEADLINE_MS)} of the ping — dropping the socket`,
-      );
+      if (!this.#live(socket, link)) return;
+      if (this.#received === heard) {
+        this.#abandon(
+          socket,
+          link,
+          'the rendezvous stopped answering, so the daemon dropped the socket',
+          'no answer within the heartbeat deadline',
+          `no reply within ${formatSeconds(RELAY_PONG_DEADLINE_MS)} of the ping — dropping the socket`,
+        );
+        return;
+      }
+      if (probing && link.report().held === held) {
+        this.#abandon(
+          socket,
+          link,
+          'the rendezvous stopped confirming the claim, so the daemon dropped the socket to claim again',
+          'the rendezvous did not confirm the claim',
+          `the edge answered but the rendezvous did not confirm the claim within ${formatSeconds(RELAY_PONG_DEADLINE_MS)} — dropping the socket to claim again`,
+        );
+      }
     });
     this.#armKeepalive(socket, link);
   }
@@ -392,6 +411,11 @@ export class BunRelayCarrier {
     if (said !== undefined) how = `${how}; the relay said: ${said}`;
     this.#detail ??= `the rendezvous connection ended (${how})`;
     this.#offlineSince ??= this.#now();
+    if (closed.startsWith(`${RELAY_CLOSE_CODES.claimLost} `)) {
+      // The socket was fine; the rendezvous had stopped naming it. Said on its own line because it is
+      // the one disconnect that means "phones were being told this machine is gone".
+      this.#say('liveness: the rendezvous no longer held this daemon’s claim — claiming again');
+    }
     const delay = relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);
     this.#attempts += 1;
     this.#say(`disconnected (${how}) — redial attempt ${this.#attempts} in ${formatDelay(delay)}`);

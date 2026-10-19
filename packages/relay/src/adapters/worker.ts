@@ -23,28 +23,34 @@
  */
 
 import {
+  type AttachedSocket,
   bytesEqual,
   decodeClaim,
   decodeFrame,
   encodeControlMessage,
   encodeFrame,
   FRAME_KINDS,
-  HEARTBEAT_SECONDS,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
+  HEARTBEAT_SECONDS,
   type HostedRelayDecision,
   initialRendezvousState,
+  isClaimProbe,
   NONCE_BYTES,
   parseRelayTenancy,
   parseRendezvousPath,
   RELAY_CLOSE_CODES,
+  RELAY_FEATURES,
   RELAY_PROTOCOL_ID,
   RENDEZVOUS_SESSION_ID,
   type RelayCrypto,
+  type RelayFeature,
   type RendezvousEvent,
   type RendezvousState,
   type RendezvousStep,
+  reconcileRendezvous,
   reduceRendezvous,
+  requestedRelayFeatures,
   SESSION_ID_BYTES,
   servesDaemon,
   sessionIdFromBytes,
@@ -368,6 +374,15 @@ function jsonError(error: string, status: number, publicResponse = false): Respo
 interface SocketAttachment {
   readonly socketId: string;
   readonly reservationId?: string;
+  /**
+   * THE CLAIM, WRITTEN ON THE SOCKET THAT HOLDS IT.
+   *
+   * Present exactly while this socket is the proved daemon: set when the slot is handed to it and
+   * erased before this side closes it or hears it has gone. An attachment lives with the socket through
+   * hibernation and eviction, so it is the evidence {@link reconcileRendezvous} restores a claim from
+   * when the stored state no longer names one.
+   */
+  readonly claim?: { readonly features?: readonly RelayFeature[] };
 }
 
 /** Frames this rendezvous forwarded that the hosted meter has not been told about yet. */
@@ -410,7 +425,8 @@ export class RendezvousDurableObject {
   }
 
   async fetch(request: Request): Promise<Response> {
-    const route = parseRendezvousPath(new URL(request.url).pathname);
+    const url = new URL(request.url);
+    const route = parseRendezvousPath(url.pathname);
     if (route === null) return new Response(NOT_FOUND, { status: 404 });
     const reservationId = request.headers.get(RESERVATION_HEADER) ?? undefined;
     if (this.isHosted() && reservationId === undefined) {
@@ -433,7 +449,8 @@ export class RendezvousDurableObject {
             kind: 'daemon-arrived',
             socketId,
             challenge: this.runtime.crypto.randomBytes(NONCE_BYTES),
-            host: new URL(request.url).host,
+            host: url.host,
+            features: requestedRelayFeatures(url.searchParams),
             at,
           }
         : { kind: 'client-arrived', socketId, sessionId: this.newSessionId(), at };
@@ -444,11 +461,14 @@ export class RendezvousDurableObject {
         await this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
         return;
       }
-      const state = loaded ?? initialRendezvousState(route.daemonId);
-      if (state.daemonId !== route.daemonId) {
+      const stored = loaded ?? initialRendezvousState(route.daemonId);
+      if (stored.daemonId !== route.daemonId) {
         await this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous belongs to another daemon');
         return;
       }
+      // Before the arrival is judged: a phone must never be told `4404` by a document that forgot a
+      // daemon whose socket is right here.
+      const state = await this.reconciled(stored);
       await this.applyStep(reduceRendezvous(state, event));
     });
     await this.queue;
@@ -466,8 +486,9 @@ export class RendezvousDurableObject {
     const decoded = decodeFrame(new Uint8Array(message));
     if (!decoded.ok) return this.closeSocket(socket, decoded.code, decoded.reason);
     this.enqueue(async () => {
-      const state = await this.load();
-      if (state === null) return this.closeSocket(socket, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
+      const stored = await this.load();
+      if (stored === null) return this.closeSocket(socket, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
+      const state = await this.reconciled(stored);
       const step = reduceRendezvous(state, {
         kind: 'frame',
         socketId: attachment.socketId,
@@ -478,7 +499,8 @@ export class RendezvousDurableObject {
         ? message.byteLength
         : 0;
       await this.applyStep(step);
-      this.meter(state.daemonId, relayedBytes);
+      // A probe is the rendezvous talking to itself about the slot; it carries nobody's traffic.
+      if (!isClaimProbe(decoded.frame)) this.meter(state.daemonId, relayedBytes);
     });
     await this.queue;
   }
@@ -562,8 +584,9 @@ export class RendezvousDurableObject {
 
   async alarm(): Promise<void> {
     this.enqueue(async () => {
-      const state = await this.load();
-      if (state === null) return;
+      const stored = await this.load();
+      if (stored === null) return;
+      const state = await this.reconciled(stored);
       // A batch the meter could not take is offered again on every sweep, so an idle rendezvous that
       // stopped forwarding still settles its count — or reaches the outage bound — on schedule.
       this.startMeterReport();
@@ -620,6 +643,9 @@ export class RendezvousDurableObject {
   private async departed(socket: RelaySocket): Promise<void> {
     const attachment = attachmentOf(socket);
     if (attachment === null) return;
+    // The runtime may still list a socket whose close or error it is reporting, and a claim left on it
+    // would be restored by the next reconciliation: a departed daemon reinstated as a ghost.
+    markClaim(socket, attachment, undefined);
     this.enqueue(async () => {
       const state = await this.load();
       if (state === null) return;
@@ -655,7 +681,10 @@ export class RendezvousDurableObject {
    * close, and a slot that leaks because the socket was *extra* dead is the same permanent leak.
    */
   private async closeSocket(socket: RelaySocket, code: number, reason: string): Promise<void> {
-    const reservationId = attachmentOf(socket)?.reservationId;
+    const attachment = attachmentOf(socket);
+    const reservationId = attachment?.reservationId;
+    // A socket this side is closing holds nothing from now on, whatever the close handshake still owes.
+    if (attachment?.claim !== undefined) markClaim(socket, attachment, undefined);
     try {
       socket.close(code, reason);
     } finally {
@@ -722,6 +751,38 @@ export class RendezvousDurableObject {
     if (control !== undefined) await releaseHostedRelayReservation(control, reservationId);
   }
 
+  /** Write the claim onto the socket the stored state names as holder, once, as soon as it is named. */
+  private markHolder(state: RendezvousState, sockets: Map<string, RelaySocket>): void {
+    if (state.daemon === null) return;
+    const holder = sockets.get(state.daemon.socketId);
+    const attachment = holder === undefined ? null : attachmentOf(holder);
+    if (holder === undefined || attachment === null || attachment.claim !== undefined) return;
+    markClaim(holder, attachment, state.daemon.features === undefined ? {} : { features: state.daemon.features });
+  }
+
+  /**
+   * The stored state, corrected against the sockets the runtime actually holds — and stored again, with
+   * its effects carried out, whenever the two disagreed. See {@link reconcileRendezvous}.
+   */
+  private async reconciled(state: RendezvousState): Promise<RendezvousState> {
+    const attached: AttachedSocket[] = [];
+    for (const socket of this.objectState.getWebSockets()) {
+      const attachment = attachmentOf(socket);
+      if (attachment === null) continue;
+      attached.push({
+        socketId: attachment.socketId,
+        ...(attachment.claim === undefined ? {} : { claim: attachment.claim }),
+      });
+    }
+    const step = reconcileRendezvous(state, attached, this.runtime.now());
+    if (step === null) return state;
+    if (step.state.daemon?.restored === true && state.daemon?.socketId !== step.state.daemon.socketId) {
+      console.warn('relay rendezvous restored a daemon claim its stored state had lost');
+    }
+    await this.applyStep(step);
+    return step.state;
+  }
+
   private socketsById(): Map<string, RelaySocket> {
     const sockets = new Map<string, RelaySocket>();
     for (const socket of this.objectState.getWebSockets()) {
@@ -744,6 +805,7 @@ export class RendezvousDurableObject {
   private async applyStep(step: RendezvousStep): Promise<void> {
     await this.objectState.storage.put(STATE_KEY, step.state);
     const sockets = this.socketsById();
+    this.markHolder(step.state, sockets);
     const failures: unknown[] = [];
     for (const effect of step.effects) {
       try {
@@ -801,7 +863,25 @@ function attachmentOf(socket: RelaySocket): SocketAttachment | null {
   return {
     socketId: attachment.socketId,
     ...(attachment.reservationId === undefined ? {} : { reservationId: attachment.reservationId }),
+    ...(attachment.claim === undefined ? {} : { claim: claimOf(attachment.claim) }),
   };
+}
+
+/** A claim marker read back from storage the runtime owns: only features this version speaks survive. */
+function claimOf(value: unknown): NonNullable<SocketAttachment['claim']> {
+  const features = (value as { features?: unknown } | null)?.features;
+  const known = Array.isArray(features) ? RELAY_FEATURES.filter(feature => features.includes(feature)) : [];
+  return known.length === 0 ? {} : { features: known };
+}
+
+/** Rewrite one socket's claim marker. A socket the runtime already tore down may refuse; it holds nothing. */
+function markClaim(socket: RelaySocket, attachment: SocketAttachment, claim: SocketAttachment['claim']): void {
+  const { claim: _previous, ...rest } = attachment;
+  try {
+    socket.serializeAttachment(claim === undefined ? rest : { ...rest, claim });
+  } catch {
+    // Nothing to mark on a socket that is gone, and reconciliation only reads sockets that are not.
+  }
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

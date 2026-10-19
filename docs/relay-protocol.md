@@ -249,6 +249,37 @@ worth stopping.
 
 A daemon socket that has not claimed within `deadlineSeconds` is closed (`4402`).
 
+### Features, and the claim probe
+
+Every control message is a strict shape (an unknown `t` or key is refused, and the socket closes), so
+nothing beyond the messages above is ever **assumed** of a peer. A feature is asked for and echoed:
+
+1. The daemon names the features it speaks in its route's query string:
+   `…/v1/rendezvous/<daemonId>/daemon?features=claim-probe`. A rendezvous that does not know the
+   parameter ignores it — the route is the path, and only the path.
+2. A rendezvous that speaks one echoes it in `claimed`, and adds the key **only** for a daemon that asked:
+   `{ "t":"claimed", "protocol":"ferretry-relay/1", "limits":{ … }, "features":["claim-probe"] }`.
+   `features` is never empty and never names a feature the daemon did not ask for, so an older daemon's
+   strict parse never meets it. Unknown names in the query are ignored, not refused.
+3. Neither side uses a feature the other did not name. An old daemon on a new rendezvous, and a new
+   daemon on an old one, both stay on exactly the messages above.
+
+None of this changes `ferretry-relay/1`: an endpoint that never asks sees byte-for-byte the protocol it
+always saw, which is why it is a feature and not a version.
+
+**`claim-probe`** is the only feature so far:
+
+```
+daemon → relay    { "t":"probe" }     sessionId = all zero
+relay  → daemon   { "t":"held" }      sessionId = all zero — this socket still holds the claim
+```
+
+The rendezvous answers from its own state, never from the edge, so `held` proves what `fy-pong` (§8)
+cannot: that the rendezvous still names this socket as the daemon. There is no "not held" message. A
+probe from a socket the rendezvous does not name is refused `4410` — the socket is plainly alive, it
+just spoke, so the slot is what was lost — and the daemon claims again on a new socket at once. A probe
+is hop-by-hop: it is never forwarded and never metered (§13).
+
 ### Sessions
 
 ```
@@ -431,6 +462,19 @@ network type changes, so a phone that wakes with a dead socket learns so in seco
 changes the wire: a peer that pings only every thirty seconds is still conforming, and the
 rendezvous's eviction rule is unchanged.
 
+#### What `fy-pong` cannot prove
+
+`fy-pong` is answered by the runtime holding the socket, not by the rendezvous: the auto-responder
+consults neither the stored state nor the object's code. So it proves the **socket** is alive and
+nothing about the **claim**. On 2026-10-19 the hosted rendezvous stopped naming a daemon's socket as
+the holder while the runtime kept that socket open; the daemon's pings kept passing for sixteen
+minutes, and every phone was told `4404` until the daemon was restarted. A daemon whose rendezvous
+offered `claim-probe` (§5) therefore sends one `probe` with each keepalive ping and expects `held`
+within the same 10-second deadline. A socket that answers `fy-pong` but not `probe` is dropped with
+`4408` and the daemon claims again; a `4410` is the rendezvous saying the same thing first. The probe
+does wake the Durable Object, which the rendezvous's own 30-second sweep (§9) already does while a
+daemon holds the slot, so the marginal cost is small.
+
 ### Credit
 
 A rendezvous **never queues**. It forwards a frame the instant it arrives or it ends the session, so
@@ -466,6 +510,22 @@ another's session.
 
 **No daemon, no session.** A client arriving at a rendezvous no daemon holds is closed with `4404`
 rather than parked. There is nothing to wait for that the client cannot retry.
+
+**The sockets are the truth; the stored state is corrected against them.** A rendezvous keeps its
+state in storage and its sockets in the runtime, and a reset, a lost close event or a defect can make
+the two disagree. Before every arrival, frame and sweep the reference rendezvous reconciles them:
+
+- a slot, unproved socket or session whose socket the runtime no longer holds is gone, exactly as if
+  its close had arrived — so a reset that swallowed the closes cannot leave the slot "held" and turn
+  every redial into `4409`;
+- each proved claim is also written **on the socket that holds it** (a WebSocket attachment, which
+  survives hibernation with the socket), and erased before the rendezvous closes that socket or hears
+  it has gone. If the state names no daemon but a socket still carries a claim, the claim is restored
+  to it — a phone is never told `4404` while the daemon's claimed socket is attached. What the daemon
+  was carrying is not restored: a frame it sends for a session from before is answered with that
+  session's `closed` (`4500`, "the rendezvous lost this session") instead of ending its socket;
+- any other socket carrying a claim is refused `4410`, so its daemon claims again rather than waiting
+  on a socket nobody can reach it through.
 
 **Reconnection is normal, and it is not resumption.** A session is bound to its sockets. When either
 socket drops, the session ends and both sides are told. Frames in flight are lost — and _known_ to be
@@ -506,6 +566,7 @@ shared one, and the daemon was refused `4429` for as long as the clients kept tr
 | `4404` | no daemon holds this rendezvous                                                                |
 | `4408` | heartbeat timeout                                                                              |
 | `4409` | a daemon already holds this rendezvous                                                         |
+| `4410` | this daemon socket is live but the rendezvous no longer holds its claim: claim again at once   |
 | `4413` | frame too large                                                                                |
 | `4420` | sequence broken: a frame was dropped, duplicated or reordered                                  |
 | `4421` | a record failed authentication                                                                 |
@@ -643,6 +704,12 @@ the answers. It does **not** prove that Cloudflare behaves as those fakes do. In
   fields that could not survive an eviction. Whether an idle rendezvous actually bills nothing is a
   claim only a real deployment can settle. Check your account's metrics after a day of idling — that
   is the honest verification, and it has not been performed here.
+- **Eviction is simulated, not run.** The suite evicts a rendezvous by building a fresh object over
+  the same storage and the same attached sockets — what Cloudflare documents an eviction to leave — and
+  proves a phone is served afterwards, including when the stored state had lost the claim. It cannot
+  prove which Cloudflare event made a real deployment's state and sockets disagree on 2026-10-19; that
+  is why §9 reconciles them on every handler and §5's probe makes the daemon find out, rather than
+  either relying on one cause having been fixed.
 - Close-code delivery, socket buffering behaviour and alarm timing are Cloudflare's, not ours.
 
 ---

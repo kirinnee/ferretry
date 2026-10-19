@@ -247,4 +247,14 @@ fi
 [[ "$(jq -c '.global.bytesRelayed' <<<"${metrics_summary}")" == '123' ]] ||
   fail "the metrics projection must still report the account-wide meter"
 
+# ─── what a protocol merge can do to the hosted Worker ────────────────────────────────────────
+
+# A DEPLOY DROPS EVERY LIVE SESSION, and the fingerprint skip only helps if unrelated code stays out
+# of the bundle. The relay imports three names from `@ferretry/protocol`'s barrel; without this flag
+# the bundler kept every protocol module, so on 2026-10-19 five protocol-only merges (session,
+# fleet-catalog, daemon-update, models…) changed the fingerprint and redeployed the relay five times
+# in an hour. With it, only the modules those names reach are bundled.
+jq -e '.sideEffects == false' packages/protocol/package.json >/dev/null 2>&1 ||
+  fail 'packages/protocol/package.json must declare "sideEffects": false, or every protocol change redeploys the hosted relay'
+
 echo "✅ Hosted relay configuration, deploy workflow and control-plane projections agree"

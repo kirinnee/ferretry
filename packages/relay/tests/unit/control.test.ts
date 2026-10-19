@@ -4,8 +4,9 @@ import {
   decodeControlMessage,
   encodeControlMessage,
   RELAY_LIMITS,
-  RelayLimitsSchema,
   RELAY_PROTOCOL_ID,
+  RelayLimitsSchema,
+  requestedRelayFeatures,
   toBase64Url,
   utf8Bytes,
 } from '@ferretry/relay';
@@ -22,6 +23,9 @@ describe('rendezvous control messages', () => {
       { t: 'claim', protocol: RELAY_PROTOCOL_ID, publicKey, signature },
       { t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS },
       { t: 'ready', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS },
+      { t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS, features: ['claim-probe'] },
+      { t: 'probe' },
+      { t: 'held' },
       { t: 'open' },
       { t: 'closed', code: 4404, reason: 'gone' },
       { t: 'error', code: 4400, reason: 'bad' },
@@ -60,5 +64,21 @@ describe('rendezvous control messages', () => {
     should(decodeControlMessage(new Uint8Array([0xff, 0xfe]))).be.null();
     should(decodeControlMessage(utf8Bytes('{'))).be.null();
     should(decodeControlMessage(utf8Bytes('{"t":"unheard-of"}'))).be.null();
+  });
+});
+
+describe('relay features', () => {
+  it('should never let claimed carry an empty or unknown feature list an older daemon might meet', () => {
+    const claimed = { t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS };
+    should(ControlMessageSchema.safeParse({ ...claimed, features: [] }).success).be.false();
+    should(ControlMessageSchema.safeParse({ ...claimed, features: ['time-travel'] }).success).be.false();
+    should(ControlMessageSchema.safeParse({ t: 'held', extra: true }).success).be.false();
+  });
+
+  it('should read only the features this version speaks from a daemon route query', () => {
+    should(requestedRelayFeatures(new URLSearchParams('features=claim-probe'))).deepEqual(['claim-probe']);
+    should(requestedRelayFeatures(new URLSearchParams('features=time-travel,claim-probe'))).deepEqual(['claim-probe']);
+    should(requestedRelayFeatures(new URLSearchParams('features=time-travel'))).deepEqual([]);
+    should(requestedRelayFeatures(new URLSearchParams(''))).deepEqual([]);
   });
 });
