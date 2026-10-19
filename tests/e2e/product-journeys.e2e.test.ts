@@ -849,8 +849,11 @@ async function pairAgain(journey: string, stepName: string, page: ProductPage, u
     STALE_DONE_BUG,
   );
   if (first) return 'direct';
-  // The failed attempt can leave the app mid-navigation, and an evaluate that lands then dies with
-  // "Execution context was destroyed": that is the page moving, not an answer, so read it again.
+  // The failed attempt can leave the page anywhere: on another origin, where localStorage is refused
+  // ("Access is denied for this document"), or mid-navigation, where the evaluate dies with "Execution
+  // context was destroyed". So clear the key from a document of the app's own origin, and read again
+  // while that document is still settling.
+  await page.goto(`${new URL(url).origin}/`, { waitUntil: 'load', timeout: 30_000 });
   for (let attempt = 1; ; attempt += 1) {
     const cleared = await page.evaluate(`localStorage.removeItem('fy-onboarding-v4')`).then(
       () => true,
