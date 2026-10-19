@@ -1022,9 +1022,10 @@ describe('materialiseFleet', () => {
         const catalog = JSON.parse((file as { content: string }).content) as {
           models: { slug: string; display_name: string; priority: number }[];
         };
+        // the model the runtime launches with comes first: Codex calls its first model the default
         should(catalog.models.map(model => [model.slug, model.display_name, model.priority])).eql([
-          ['deepseek-v4-pro', 'DeepSeek V4 Pro', 1],
-          ['deepseek-flash', 'DeepSeek Flash', 2],
+          ['deepseek-flash', 'DeepSeek Flash', 1],
+          ['deepseek-v4-pro', 'DeepSeek V4 Pro', 2],
         ]);
         should(wrapperOf(result, 'codex-default')).containEql(`'-c' 'model_catalog_json="${CATALOG_FILE}"'`);
         // The manifest says the runtime has one, so a machine that has none republishes.
