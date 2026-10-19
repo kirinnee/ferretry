@@ -1782,7 +1782,7 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   }
 }
 
-/* A MESSAGE FROM ANOTHER AGENT. It arrives on the user channel but is not the person, so it sits on
+/* A MESSAGE FROM ANOTHER FERRET. It arrives on the user channel but is not the person, so it sits on
    the left like the assistant's side of the conversation, in a card of its own with the sender's
    monogram and name, never as a right-hand "You" bubble. Every colour is a theme token. */
 .fy-message-peer {
@@ -1794,18 +1794,16 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   max-width: min(85%, 640px);
   padding: 8px 12px 10px;
 }
-.fy-message-peer header {
+.fy-message-peer header,
+.fy-message-sent header {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px 8px;
   justify-content: flex-start;
 }
-.fy-peer-chip {
-  align-items: center;
+.fy-peer-name {
   color: var(--fy-fg);
-  display: inline-flex;
   font-weight: 600;
-  gap: 6px;
 }
 .fy-peer-avatar {
   align-items: center;
@@ -1823,13 +1821,19 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 }
 .fy-peer-reference {
   display: inline-block;
+  font-weight: 600;
   width: auto;
 }
 .fy-peer-reference p {
   display: inline;
   margin: 0;
 }
-.fy-peer-awaiting {
+/* "ferret": the one word that says this is not the owner, in the chrome tier. */
+.fy-peer-role {
+  color: var(--fy-muted);
+  font-size: 11px;
+}
+.fy-peer-kind {
   background: var(--warn-bg, var(--fy-surface-2));
   border: 1px solid var(--warn-border, var(--fy-border));
   border-radius: 999px;
@@ -1837,20 +1841,93 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   font-size: 11px;
   padding: 0 8px;
 }
-.fy-peer-body {
-  margin-top: 6px;
-}
-.fy-peer-note {
+.fy-peer-kind[data-peer-kind='reply'] {
+  background: var(--fy-surface-2);
+  border-color: var(--fy-border);
   color: var(--fy-muted);
-  font-size: 11.5px;
+}
+.fy-peer-body,
+.fy-message-peer .fy-handoff {
   margin-top: 6px;
 }
-.fy-peer-note summary {
-  cursor: pointer;
-  width: fit-content;
+/* Quiet on purpose: a way to the sender's own conversation, not a call to action. */
+.fy-peer-open {
+  color: var(--fy-muted);
+  display: inline-block;
+  font-size: 11.5px;
+  margin-top: 4px;
+  text-decoration: underline;
+  text-decoration-color: var(--fy-border);
+  text-underline-offset: 2px;
 }
-.fy-peer-note p {
-  margin: 4px 0 0;
+.fy-peer-open:hover,
+.fy-peer-open:focus-visible {
+  color: var(--fy-accent);
+}
+/* A MESSAGE THIS FERRET SENT: the assistant's side, in a card of its own, so a send reads as a message
+   leaving and not as one more shell command. The outline is dashed because it is outgoing. */
+.fy-message-sent {
+  background: var(--fy-surface);
+  border: 1px dashed var(--fy-border);
+  border-radius: 12px 12px 12px 3px;
+  margin-right: auto;
+  max-width: min(85%, 640px);
+  padding: 8px 12px 8px;
+}
+.fy-sent-label {
+  color: var(--fy-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.fy-sent-body {
+  margin-top: 6px;
+}
+.fy-sent-unseen {
+  color: var(--fy-muted);
+  font-style: italic;
+  margin: 6px 0 0;
+}
+.fy-sent-state {
+  align-items: flex-start;
+  color: var(--fy-muted);
+  display: flex;
+  font-size: 11.5px;
+  gap: 6px;
+  margin: 6px 0 0;
+}
+.fy-sent-state[data-sent-state='replied'] {
+  color: var(--fy-accent);
+}
+.fy-sent-state[data-sent-state='failed'] {
+  color: var(--err, #b42318);
+  font-weight: 600;
+}
+.fy-sent-reason {
+  font-weight: 400;
+}
+.fy-sent-mark {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+.fy-sent-foot {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+.fy-sent-command-toggle {
+  background: none;
+  border: 0;
+  color: var(--fy-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 0;
+}
+.fy-sent-command-toggle:hover,
+.fy-sent-command-toggle:focus-visible {
+  color: var(--fy-fg);
 }
 /* A NOTICE FROM FERRETRY ITSELF: the chrome tier, one compact line with its source named. */
 .fy-message-system {
@@ -1872,15 +1949,17 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   display: inline;
   margin: 0;
 }
-/* The folded delivery note keeps the transcript's density on a touch screen: the summary stays its own
-   size and gets the same invisible, centred 44px hit area the transcript's other disclosures get. */
+/* The quiet links keep the transcript's density on a touch screen: each stays its own size and gets the
+   same invisible, centred 44px hit area the transcript's other disclosures get. */
 @media (pointer: coarse) {
-  .fy-message-peer .fy-peer-note summary {
+  :root a.fy-peer-open[href],
+  :root button.fy-sent-command-toggle {
     min-height: 0;
     min-width: 0;
     position: relative;
   }
-  .fy-message-peer .fy-peer-note summary::after {
+  :root a.fy-peer-open[href]::after,
+  :root button.fy-sent-command-toggle::after {
     content: '';
     height: var(--target-floor);
     left: 50%;

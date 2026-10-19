@@ -618,3 +618,67 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
     expect(entry).not.toHaveProperty('peer');
   });
 });
+
+describe('transcriptEntriesFromLog · messages between ferrets', () => {
+  const turn = '/home/kirin/.ferretry/state/sessions/tanna/turns/turn-001.md';
+  const pointer = turnFileInstruction(turn);
+
+  test('a Claude receiver: the hand-off row stays and its own Read of the turn file is gone', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        `[10:00:00] user/message: ${pointer}`,
+        `[10:00:01] assistant/tool-call: Read(${JSON.stringify({ file_path: turn })})`,
+        '[10:00:01] tool/tool-result: [message from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]',
+        '[10:00:05] assistant/message: Hi tomi!',
+      ].join('\n'),
+      NOW,
+    );
+    expect(entries.map(entry => entry.kind)).toEqual(['user', 'assistant']);
+    expect(entries[0]?.handoff?.name).toBe('turn-001');
+  });
+
+  test('a Codex receiver: its cat of the turn file is gone, and a FAILED read stays', () => {
+    const read = `[10:00:01] assistant/tool-call: exec_command(${JSON.stringify({ cmd: `cat ${turn}` })})`;
+    const ok = transcriptEntriesFromLog(
+      [`[10:00:00] user/message: ${pointer}`, read, '[10:00:01] tool/tool-result: Process exited with code 0'].join(
+        '\n',
+      ),
+      NOW,
+    );
+    expect(ok.map(entry => entry.kind)).toEqual(['user']);
+    const failed = transcriptEntriesFromLog(
+      [`[10:00:00] user/message: ${pointer}`, read, '[10:00:01] tool/tool-result: error No such file'].join('\n'),
+      NOW,
+    );
+    expect(failed.map(entry => entry.kind)).toEqual(['user', 'tool']);
+  });
+
+  test('a Claude sender: its fy send is a "sent" row, not a tool group', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        `[10:00:00] assistant/tool-call: Bash(${JSON.stringify({ command: 'fy send tanna "Hello from home-manager-fd"' })})`,
+        '[10:00:01] tool/tool-result: delivered',
+      ].join('\n'),
+      NOW,
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.sent).toEqual({
+      to: 'tanna',
+      body: 'Hello from home-manager-fd',
+      ask: false,
+      state: 'delivered',
+    });
+  });
+
+  test('a Codex sender, under a renamed binary', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        `[10:00:00] assistant/tool-call: exec_command(${JSON.stringify({ cmd: "ferret send tanna 'are you free?' --ask" })})`,
+        '[10:00:01] tool/tool-result: Process exited with code 0\nOutput:\nqueued in the agent’s own queue',
+      ].join('\n'),
+      NOW,
+      'ferret',
+    );
+    expect(entries[0]?.sent).toMatchObject({ to: 'tanna', body: 'are you free?', ask: true, state: 'queued' });
+  });
+});

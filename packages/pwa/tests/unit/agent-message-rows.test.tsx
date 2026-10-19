@@ -28,8 +28,9 @@ const PEER: TranscriptEntry = {
   peer: {
     name: 'torrey',
     sessionId: 'mvb0sw7d-27f71326',
+    kind: 'message',
     replyExpected: false,
-    note: 'No reply is required; torrey has carried on.',
+    note: 'No reply needed. To reply: fy send torrey "<reply>"',
   },
 };
 
@@ -37,39 +38,88 @@ const fleet = [
   { config: { id: 'mvb0sw7d-27f71326', teammate: 'torrey' }, state: { status: 'running' } },
 ] as unknown as SessionView[];
 
-describe('a message from another agent', () => {
-  test('reads as FROM that agent, with its name chip, a proved :reference and a Markdown body', () => {
+const proved = (navigated: string[]) => ({
+  agentReferenceResolver: createAgentReferenceResolver('d1' as DaemonId, fleet),
+  onNavigate: (to: string) => void navigated.push(to),
+});
+
+describe('a message from another ferret', () => {
+  test('reads as FROM that ferret: a proved :reference, a Markdown body, and no delivery boilerplate', () => {
     const navigated: string[] = [];
     const view = render(
-      <ReferenceSurfaceProvider
-        surface={{
-          agentReferenceResolver: createAgentReferenceResolver('d1' as DaemonId, fleet),
-          onNavigate: to => void navigated.push(to),
-        }}
-      >
+      <ReferenceSurfaceProvider surface={proved(navigated)}>
         <TranscriptRow entry={PEER} />
       </ReferenceSurfaceProvider>,
     );
     const text = textOf(view);
     expect(text).not.toContain('You');
-    expect(text).toContain('Torrey → sent this');
+    expect(text).toContain('Message from ferret');
     expect(view.root.findByProps({ className: 'fy-peer-avatar' }).children).toEqual(['T']);
-    // The sender is a real reference, through the one renderer, so it opens that agent's session.
+    // The sender is a real reference, through the one renderer, so it opens that ferret's session.
     const [link] = view.root.findAllByType('a');
     expect(link?.props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
     run(() => link?.props.onClick({ preventDefault: () => undefined, button: 0 }));
     expect(navigated).toEqual(['/d/d1/session/mvb0sw7d-27f71326']);
     expect(view.root.findAllByType('strong').map(node => node.children)).toEqual([['day']]);
-    // The boilerplate addressed to the agent is folded, not shown inline.
-    expect(view.root.findByType('details').findByType('summary').children).toEqual(['Delivery note for the agent']);
+    // Nothing addressed to the receiving agent reaches the reader.
+    expect(text).not.toContain('fy send');
+    expect(text).not.toContain('mvb0sw7d');
+    expect(view.root.findAllByType('details')).toHaveLength(0);
     expect(view.root.findByProps({ 'data-transcript-kind': 'user' }).props['data-peer']).toBe('torrey');
   });
 
-  test('says when the sender is parked on a reply, and omits an empty note', () => {
-    const view = render(<TranscriptRow entry={{ ...PEER, peer: { name: 'kamila', replyExpected: true, note: '' } }} />);
-    expect(textOf(view)).toContain('waiting for a reply');
-    expect(view.root.findAllByType('details')).toHaveLength(0);
-    expect(view.root.findAllByProps({ className: 'fy-peer-clock' })).toHaveLength(0);
+  test('offers a quiet link to the sender’s own conversation, which a modifier-click leaves to the browser', () => {
+    const navigated: string[] = [];
+    const view = render(
+      <ReferenceSurfaceProvider surface={proved(navigated)}>
+        <TranscriptRow entry={PEER} />
+      </ReferenceSurfaceProvider>,
+    );
+    const open = view.root.findByProps({ className: 'fy-peer-open' });
+    expect(open.children.join('')).toBe('Open conversation with Torrey');
+    expect(open.props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
+    let prevented = 0;
+    run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 0, metaKey: true }));
+    run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 1 }));
+    expect(prevented).toBe(0);
+    run(() => open.props.onClick({ preventDefault: () => (prevented += 1), button: 0 }));
+    expect(prevented).toBe(1);
+    expect(navigated).toEqual(['/d/d1/session/mvb0sw7d-27f71326']);
+  });
+
+  test('proves a sender with no session id by its name, and offers nothing to click without a destination', () => {
+    const { sessionId: _id, ...unnamed } = PEER.peer as NonNullable<TranscriptEntry['peer']>;
+    const byName = render(
+      <ReferenceSurfaceProvider surface={proved([])}>
+        <TranscriptRow entry={{ ...PEER, peer: unnamed }} />
+      </ReferenceSurfaceProvider>,
+    );
+    expect(byName.root.findByProps({ className: 'fy-peer-open' }).props.href).toBe('/d/d1/session/mvb0sw7d-27f71326');
+    const { onNavigate: _nav, ...nowhere } = proved([]);
+    const inert = render(
+      <ReferenceSurfaceProvider surface={nowhere}>
+        <TranscriptRow entry={PEER} />
+      </ReferenceSurfaceProvider>,
+    );
+    expect(inert.root.findAllByProps({ className: 'fy-peer-open' })).toHaveLength(0);
+  });
+
+  test('shows an unproved sender as a plain name with nothing to click', () => {
+    const view = render(<TranscriptRow entry={PEER} />);
+    expect(view.root.findByProps({ className: 'fy-peer-name' }).children).toEqual(['Torrey']);
+    expect(view.root.findAllByType('a')).toHaveLength(0);
+  });
+
+  test('says what kind of message it is: a question is waiting, a reply replied, a note says nothing', () => {
+    const question = render(
+      <TranscriptRow entry={{ ...PEER, peer: { name: 'kamila', kind: 'question', replyExpected: true, note: '' } }} />,
+    );
+    expect(textOf(question)).toContain('waiting for a reply');
+    const reply = render(
+      <TranscriptRow entry={{ ...PEER, peer: { name: 'kamila', kind: 'reply', replyExpected: false, note: '' } }} />,
+    );
+    expect(reply.root.findByProps({ className: 'fy-peer-kind' }).children).toEqual(['replied']);
+    expect(render(<TranscriptRow entry={PEER} />).root.findAllByProps({ className: 'fy-peer-kind' })).toHaveLength(0);
   });
 
   test('carries its time at the foot, on the reader’s clock, never in the header', () => {

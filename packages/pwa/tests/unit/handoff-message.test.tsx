@@ -201,3 +201,85 @@ describe('a message handed to the agent through a file', () => {
     await view.unmount();
   });
 });
+
+describe('a ferret’s message handed over through a file', () => {
+  /** The owner's report: Tanna's turn file, as the older daemon wrote it. */
+  const TANNA_TURN = [
+    '[peer message from teammate tomi (session mveq0r0r-ddd75d7b) — not from the human lead]',
+    'No reply is required; tomi has carried on. Reply with `fy send tomi "…"` if useful.',
+    '',
+    'Hello from home-manager-fd (the user asked me to say hi).',
+  ].join('\n');
+  const fromTomi: SessionHandoff = { name: 'turn-008', message: TANNA_TURN, attachments: [] };
+
+  it('renders as a message FROM that ferret, body only, never as the reader’s own bubble', async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() => handoffs.pending[0]?.resolve(fromTomi));
+
+    const row = must(view.container.querySelector<HTMLElement>('.fy-message-peer'), 'the peer row');
+    expect(row.dataset['peer']).toBe('tomi');
+    expect(view.container.querySelector('.fy-message-user')).toBeNull();
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('Hello from home-manager-fd (the user asked me to say hi).');
+    for (const boilerplate of ['peer message', 'human lead', 'mveq0r0r', 'fy send', 'via turn file'])
+      expect(text).not.toContain(boilerplate);
+    await view.unmount();
+  });
+
+  it('reads the current banner, its kind and the files under it', async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() =>
+      handoffs.pending[0]?.resolve({
+        name: 'turn-008',
+        message:
+          '[question from ferret tomi (session mveq0r0r-ddd75d7b) — not from the owner]\n' +
+          'tomi is waiting for your answer. Reply with: fy send tomi "<reply>"\n\nIs CI green?',
+        attachments: [{ filename: 'log.txt', mime: 'text/plain' }],
+      }),
+    );
+    const row = must(view.container.querySelector<HTMLElement>('.fy-message-peer'), 'the peer row');
+    expect(row.dataset['peerKind']).toBe('question');
+    expect(row.textContent).toContain('Is CI green?');
+    expect(row.textContent).toContain('log.txt');
+    expect(row.textContent).not.toContain('Reply with');
+    await view.unmount();
+  });
+
+  it('is a ferret’s message from the first frame when its delivered send names the sender', async () => {
+    const handoffs = source();
+    const send = {
+      sendId: 'send-8',
+      acceptedAt: '2026-10-18T02:45:00.000Z',
+      message: 'x',
+      attachmentIds: [],
+      fate: 'delivered' as const,
+      turn: 8,
+      from: 'mveq0r0r-ddd75d7b',
+      fromName: 'tomi',
+      replyExpected: true as const,
+    };
+    const view = await mount(inSession(handoffs.value, entry({ send })));
+    const pending = must(view.container.querySelector<HTMLElement>('.fy-message-peer'), 'the pending peer row');
+    expect(pending.dataset['peerKind']).toBe('question');
+    expect(pending.textContent).toContain('Opening the message…');
+    expect(pending.textContent).not.toContain('via turn file');
+
+    // A document that cannot be read still says whose message it was.
+    await interact(() => handoffs.pending[0]?.reject(new Error('gone')));
+    expect(
+      must(view.container.querySelector<HTMLElement>('.fy-message-peer'), 'the gone peer row').dataset['peer'],
+    ).toBe('tomi');
+    expect(view.container.querySelector('[data-handoff-note="gone"]')).not.toBeNull();
+
+    // A send with no name and no question still names its session.
+    const { fromName: _name, replyExpected: _ask, ...bare } = send;
+    const later = source();
+    await view.render(inSession(later.value, entry({ id: 'u3', send: bare })));
+    const plain = must(view.container.querySelector<HTMLElement>('.fy-message-peer'), 'the unnamed peer row');
+    expect(plain.dataset['peer']).toBe('mveq0r0r-ddd75d7b');
+    expect(plain.dataset['peerKind']).toBe('message');
+    await view.unmount();
+  });
+});

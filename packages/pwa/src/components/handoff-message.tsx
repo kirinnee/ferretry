@@ -79,13 +79,13 @@ export function HandoffSourceProvider({
   return <HandoffContext.Provider value={reader}>{children}</HandoffContext.Provider>;
 }
 
-type Reading =
+export type HandoffReading =
   | { readonly state: 'reading' }
   | { readonly state: 'read'; readonly handoff: SessionHandoff }
   | { readonly state: 'gone' };
 
-function useHandoff(reader: HandoffReader | null, name: string): Reading {
-  const [reading, setReading] = useState<Reading>(reader === null ? { state: 'gone' } : { state: 'reading' });
+function useHandoff(reader: HandoffReader | null, name: string): HandoffReading {
+  const [reading, setReading] = useState<HandoffReading>(reader === null ? { state: 'gone' } : { state: 'reading' });
   useEffect(() => {
     if (reader === null) return;
     let live = true;
@@ -101,20 +101,40 @@ function useHandoff(reader: HandoffReader | null, name: string): Reading {
   return reading;
 }
 
-export function HandoffMessage({
+/**
+ * One hand-off document, read once for the row that shows it. The row decides whose message it is from
+ * what the document holds — a ferret's message carries its banner — so the read is lifted out of the
+ * renderer and handed to whichever row that turns out to be.
+ */
+export function useHandoffReading(name: string): {
+  readonly reading: HandoffReading;
+  readonly source: HandoffSource | null;
+} {
+  const reader = useContext(HandoffContext);
+  const reading = useHandoff(reader, name);
+  return { reading, source: reader === null ? null : reader.source };
+}
+
+/** A hand-off as its reading stands: the message, an "Opening…" line, or the faded pointer. */
+export function HandoffView({
   pointer,
   pointerText,
+  reading,
+  source,
+  explain = true,
 }: {
   readonly pointer: HandoffPointer;
   /** The line the agent was typed, shown faded only when the document cannot be read. */
   readonly pointerText: string;
+  readonly reading: HandoffReading;
+  readonly source: HandoffSource | null;
+  /** Say why it travelled as a file. A ferret's message does not: the reader did not send it. */
+  readonly explain?: boolean;
 }) {
-  const reader = useContext(HandoffContext);
-  const reading = useHandoff(reader, pointer.name);
   return (
     <div className="fy-handoff" data-handoff={pointer.name} data-handoff-state={reading.state}>
-      {reading.state === 'read' ? (
-        <HandoffBody handoff={reading.handoff} source={(reader as HandoffReader).source} />
+      {reading.state === 'read' && source !== null ? (
+        <HandoffBody handoff={reading.handoff} source={source} />
       ) : reading.state === 'reading' ? (
         <p aria-busy="true" className="fy-handoff-pending">
           Opening the message…
@@ -122,12 +142,12 @@ export function HandoffMessage({
       ) : (
         <p className="fy-handoff-pointer">{pointerText}</p>
       )}
-      <HandoffNote gone={reading.state === 'gone'} />
+      {explain || reading.state === 'gone' ? <HandoffNote gone={reading.state === 'gone'} /> : null}
     </div>
   );
 }
 
-function HandoffBody({ handoff, source }: { readonly handoff: SessionHandoff; readonly source: HandoffSource }) {
+export function HandoffBody({ handoff, source }: { readonly handoff: SessionHandoff; readonly source: HandoffSource }) {
   const stored = handoff.attachments.flatMap((attachment): StoredTranscriptAttachment[] =>
     attachment.attachmentId === undefined
       ? []
