@@ -55,7 +55,7 @@ in every turn's context, so it is kept short; change it there and here together.
 Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).
 - svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.
-- html: one self-contained interactive page with inline CSS and JS; it runs sandboxed, with no network.
+- html: one self-contained interactive page with inline CSS and JS; it runs sandboxed, so load nothing from the network.
 - image, video, audio, pdf: put `src: @path/in/your/workspace` or `src: https://…` before `---`, and no payload.
 Example:
 ```fy-render
@@ -80,10 +80,10 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
 | `mermaid` | Mermaid source                      | a diagram, compiled in the sandbox frame, theme following light/dark      |
 | `svg`     | one `<svg>` document                | a picture through the measured `<img>` sink — never inline SVG            |
 | `html`    | one self-contained page             | an interactive page in an opaque-origin sandbox frame with its own policy |
-| `image`   | `src:` — or `mime:` + base64 inline | a picture                                                                 |
-| `video`   | `src:`                              | the browser's native player                                               |
-| `audio`   | `src:`                              | the browser's native player                                               |
-| `pdf`     | `src:`                              | the in-app PDF viewer                                                     |
+| `image`   | `src:` — or `mime:` + base64 inline | a picture; an https image needs CORS from its host, else a link card      |
+| `video`   | `src:`                              | the browser's native player (https plays directly)                        |
+| `audio`   | `src:`                              | the browser's native player (https plays directly)                        |
+| `pdf`     | `src:`                              | an Open / Download card; an https PDF is a link (no in-frame viewer)      |
 
 `src:` is one of two things, and nothing else:
 
@@ -92,6 +92,8 @@ breaks the transcript. Nothing decodes, downloads or runs until the reader press
   through the session filesystem route **as the reader**, so the reader's own grants decide it
   ([grants.md](grants.md) — `filesystem` _use_), the same as opening the file in the workspace. The
   bytes become a short-lived object URL; no daemon URL or credential ever reaches a media element.
+  A workspace file is capped at 1 MiB, the daemon's per-file view limit; a larger one shows a
+  "too large" card.
 - **`https://…`** — a link the reader's browser fetches only after they press Render.
 
 A file that is missing, unreadable, over its cap or denied to this reader renders a fallback card that
