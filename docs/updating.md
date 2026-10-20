@@ -215,3 +215,114 @@ around either. The agent hands the person the command instead:
 - Homebrew updates cannot be rolled back automatically (Homebrew keeps no previous cask).
 - The standalone path refuses until the owner sets up the release key above.
 - `apt`/`dnf` and module installs show steps; they never self-update.
+
+## Updating Claude Code and Codex
+
+How a machine shows, and updates, the `claude` and `codex` its ferrets run. Read this before changing
+`GET`/`POST /v1/harnesses/update`, `fy harness`, or Settings › Machines › _machine_ › Machine ›
+**Agent CLIs**.
+
+### The one-sentence version
+
+**The daemon finds the exact file a runtime launches for each harness, works out how that file was
+installed with the daemon's own rules, asks npm for the newest version only when somebody looks, and
+updates it with that install method's own tool — never past the version Ferretry verified without an
+explicit yes, and never on a timer.**
+
+### Which file, and how it was installed
+
+- **Which file** is the ONE harness resolution rule ([harness-paths.md](harness-paths.md)):
+  `FY_CLAUDE_BIN` / `FY_CODEX_BIN`, `harness.paths`, the declared search paths, then `PATH`. It is the
+  file the wrapper `exec`s, so it is the one a new ferret runs; the panel names the rule that chose it.
+- **How it was installed** reuses the daemon's own detection, not a copy of it: the same link-chain
+  walk (`executableNixFacts` in `packages/daemon/src/adapters/update/install-facts.ts`), the same
+  `nix profile list --json` reading, the same store-path rule (`classifyNixStorePath`) and the same
+  module steps (`nixModuleUpdate`) in `packages/protocol/src/lib/daemon-update.ts`.
+  `classifyHarnessInstall` (`packages/protocol/src/lib/harness-update.ts`) adds only what a harness has
+  and the daemon does not.
+
+| method             | recognised by (on the resolved path unless said)                                      | update                                                              | rollback                         |
+| ------------------ | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------- |
+| Homebrew cask      | `…/Caskroom/<cask>/`                                                                  | **self**: `brew update`, `brew upgrade --cask <cask>`               | none (declared GAP)              |
+| nix profile        | a store path reached through the user's profile, held by a profile element            | **self**: `nix profile upgrade --refresh <element>`                 | `nix profile rollback`           |
+| nix shell          | the launched path is itself a store path                                              | **manual**: `nix profile install nixpkgs#<attr>`                    | —                                |
+| Nix module         | home-manager / nix-darwin / NixOS, told apart exactly as for the daemon               | **manual**: `nix flake update nixpkgs`, then the ONE switch command | —                                |
+| npm global         | `…/lib/node_modules/<package>/` — the prefix is reported, and nvm/fnm/asdf/mise named | **self**: `<prefix>/bin/npm install -g --prefix <prefix> <pkg>@<v>` | the same install of the previous |
+| pnpm / Bun / Volta | `pnpm/global`, `.bun/install/global`, or a launched path under `.volta`               | **self**: `pnpm add -g`, `bun add -g`, `volta install` `<pkg>@<v>`  | the same install of the previous |
+| Homebrew formula   | `…/Cellar/<formula>/`                                                                 | **self**: `brew update`, `brew upgrade <formula>`                   | none                             |
+| Claude installer   | `~/.local/share/claude/…` (Claude Code only)                                          | **self**: `claude update`, or `claude install <v>` for a chosen one | `claude install <previous>`      |
+| standalone         | anything else                                                                         | **manual**: Claude's `install.sh`, or Codex's release / npm         | —                                |
+
+**A store path is asked before the npm layout**, because nixpkgs' `claude-code` is itself a
+`lib/node_modules/@anthropic-ai/claude-code` inside the store. A module install reports the flake
+steps and never runs them: the pin is in somebody's own configuration. The package names are spelled
+once, in `HARNESS_PACKAGES`, which the tool install (`fleet/tool-install.ts`) reads too.
+
+### Verified versions
+
+**Verified** means the harness contract guard (`packages/fleet/tests/contract`) measures that exact
+version in every build — the `claude-code` and `codex` of the flake's locked nixpkgs.
+`VERIFIED_HARNESS_VERSIONS` in `packages/protocol/src/lib/harness-update.ts` is the owner, and
+`run.sh pinned` fails when what it measured is not that constant, so a `flake.lock` bump that moves the
+pin moves the constant in the same change. Codex 0.163, for example, is newer than the 0.145.0 pin and
+changed the trust screens (#621): it reads **Not yet verified by Ferretry**, with a link to the guard's
+README.
+
+- An update **past** the verified version needs an explicit yes: a second question in the app
+  ("Update anyway"), `--allow-unverified` for `fy harness update` (**`--yes` never implies it**), and
+  `confirmUnverified: true` on the route, which otherwise answers `409 harness_update_unverified` with
+  both versions.
+- A method that installs a chosen version (npm, pnpm, Bun, Volta, Claude's installer) is offered the
+  verified version as the primary button, beside the newest. Homebrew and nix install what they have,
+  so they get one Update — and when Ferretry cannot know what that will be, it asks the same question.
+
+### Knowing the newest version
+
+- **Source**: npm's `latest` dist-tag for `@anthropic-ai/claude-code` / `@openai/codex`, where both
+  publish first. Homebrew and nixpkgs follow it, sometimes days later, which a result says
+  ("This install method does not have 0.163.0 yet").
+- **When**: only when somebody looks — `GET /v1/harnesses/update` (the panel opening, the Machines
+  list's update dot on a Settings visit, `fy harness status`). An answer is reused for five minutes.
+  **There is no timer and no boot check**, and `FY_UPDATE_CHECK=off` switches the ask off.
+- **The installed version** comes from running the located file's `--version` with a throwaway `HOME`
+  and every proxy pointed at a port nothing listens on, so it can read no login and reach no network.
+  This is the one place the daemon runs a harness outside a session, and only on a look.
+
+### Applying an update
+
+The daemon runs it **in-process**: replacing a harness restarts nothing, so there is no restart to
+outlive. One update per harness at a time (`409 harness_update_in_progress`).
+
+1. **Check** the method can update itself, the target is newer, and — past the verified version — the
+   yes was given.
+2. **Run** the method's commands with the package manager this daemon can find (an npm prefix's own
+   `npm` first), no stdin and no `sudo`; a manager that needs admin rights is handed back with its
+   command.
+3. **Verify**: the located file's `--version` must read, and `--help` must exit 0 offline. A pinned
+   method must have installed at least the version asked for; a newer one is accepted and said.
+4. **Roll back** where the method allows: the previous version through the same tool, or
+   `nix profile rollback`, then verify again.
+5. **Report** honestly: `succeeded`, `unchanged` (the method had nothing newer), `rolled-back` or
+   `failed`, in one sentence that always says **running ferrets keep the version they started with
+   until they are restarted**.
+
+### Surface
+
+| surface                                                                               | what                                                           |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `fy harness status [--json]`                                                          | each harness: path and rule, method, version, verified, newest |
+| `fy harness update [claude\|codex] [--to <v>\|verified] [--yes] [--allow-unverified]` | update one or both, waiting for the outcome                    |
+| `GET /v1/harnesses/update`                                                            | the `HarnessUpdateView`; asks npm when the last answer is old  |
+| `POST /v1/harnesses/update`                                                           | start one harness's update                                     |
+| Settings › Machine › **Agent CLIs**                                                   | the same, with the update dot on the machine list              |
+
+Governance is the daemon update's own (`ownerOnly`): `fleet` `use` to read, `configure` plus a passkey
+step-up from a remote device to start, and never a ferret. The start is audited as `security.changed`
+(`harness-update`).
+
+### Declared GAPs
+
+- Homebrew keeps no previous version, so a broken Homebrew harness update cannot be rolled back.
+- The last outcome lives in memory: a daemon restart forgets it (the update itself is unaffected).
+- A Homebrew or nix update cannot be pinned to the verified version; it installs what that source has.
+- Codex standalone binaries are shown steps, not updated: Ferretry does not download harness binaries.

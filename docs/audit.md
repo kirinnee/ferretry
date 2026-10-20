@@ -107,8 +107,8 @@ actor phrases (`this computer`, `a supervising agent`, …).
 
 Starting a daemon update (`POST /v1/daemon/update`, subject `daemon-update`) and changing the
 automatic-install setting (`PATCH /v1/daemon/update/settings`, subject `daemon-update-settings`, with
-`autoInstall` in `detail`) are also `security.changed`: each lets new code run on the machine
-([updating.md](updating.md)).
+`autoInstall` in `detail`), and updating an agent CLI (`POST /v1/harnesses/update`, subject `harness-update`),
+are also `security.changed`: each lets new code run on the machine ([updating.md](updating.md)).
 
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and
 `auditedSocketRoutes` in `packages/daemon/src/lib/audit/routes.ts`), so a relayed request is recorded
