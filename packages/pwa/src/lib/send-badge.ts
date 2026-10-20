@@ -1,4 +1,4 @@
-import type { SendUnaccountedReason } from '@ferretry/protocol';
+import type { SendCancelEffect, SendUnaccountedReason } from '@ferretry/protocol';
 import type { LedgerSendRecord } from './send-ledger.ts';
 
 export interface SendBadge {
@@ -28,6 +28,14 @@ const REASONS: Readonly<Record<SendUnaccountedReason, string>> = {
   not_delivered: 'it never reached the agent',
 };
 
+/** What cancelling did on the agent’s screen — only some of it can be undone there, so each says which. */
+const CANCEL_EFFECTS: Readonly<Record<SendCancelEffect, string>> = {
+  cleared: 'removed, and erased from the agent’s composer',
+  not_in_pane: 'removed; it never reached the agent',
+  left_in_queue: 'removed here, but the agent was already holding it in its own queue and may still read it',
+  left_in_composer: 'removed here; the agent’s composer held other text too, so it was left as it was',
+};
+
 const reasonOf = (record: LedgerSendRecord): string =>
   record.unaccountedReason === undefined ? 'arrival could not be checked' : REASONS[record.unaccountedReason];
 
@@ -52,7 +60,19 @@ export const sendBadge = (record: LedgerSendRecord): SendBadge => {
     return {
       label: 'delivered',
       tone: 'border-ok-border bg-ok-bg text-ok',
-      detail: 'the agent’s transcript shows this message',
+      detail:
+        record.evidence?.tier === 'merged-text'
+          ? 'the agent’s transcript shows this message, delivered joined with the message next to it'
+          : 'the agent’s transcript shows this message',
+    };
+  if (record.fate === 'cancelled')
+    return {
+      label: 'cancelled',
+      tone: QUIET_TONE,
+      detail:
+        record.cancelEffect === undefined
+          ? 'taken back; what that did on the agent’s screen is not known'
+          : CANCEL_EFFECTS[record.cancelEffect],
     };
   if (record.fate === 'timed_out')
     return {
@@ -65,6 +85,12 @@ export const sendBadge = (record: LedgerSendRecord): SendBadge => {
       label: 'unconfirmed',
       tone: QUIET_TONE,
       detail: `unconfirmed — ${reasonOf(record)}; it may still have landed`,
+    };
+  if (record.typedNotSent === true)
+    return {
+      label: 'typed, not sent',
+      tone: WAITING_TONE,
+      detail: 'it is sitting in the agent’s composer; press Enter to send it or cancel it',
     };
   if (record.held === true)
     return {

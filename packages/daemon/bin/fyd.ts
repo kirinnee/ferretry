@@ -2683,6 +2683,16 @@ function createSessionSendSubsystem(
         .catch((error: unknown) => sendRefusal(error));
       return sendRecordView(record);
     },
+    cancel: async (reference, sendId) => {
+      const id = require(reference);
+      const record = await service.cancel(id, sendId).catch((error: unknown) => sendRefusal(error));
+      return sendRecordView(record);
+    },
+    submit: async (reference, sendId) => {
+      const id = require(reference);
+      const record = await service.submit(id, sendId).catch((error: unknown) => sendRefusal(error));
+      return sendRecordView(record);
+    },
     handoff: async (reference, name) => {
       const id = require(reference);
       const handoff = await readHandoff(id, name);
@@ -6961,6 +6971,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
         new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
         new TmuxPaneQueue(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+        milliseconds => Bun.sleep(milliseconds),
       );
       const sendTranscripts = createTranscriptReader(storage);
       /**

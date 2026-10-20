@@ -14,7 +14,7 @@ import {
 } from 'react';
 import { composerSuggestionSwitches } from './components/composer-autocomplete.ts';
 import { ImportedHistoryPage } from './components/imported-history-page.tsx';
-import type { SendRetry } from './components/ledger-message.tsx';
+import type { SendCancel, SendRetry, SendSubmit } from './components/ledger-message.tsx';
 import { liveStreamState } from './components/live-stream-indicator.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
 import {
@@ -27,7 +27,9 @@ import { browserTerminalDeckDependencies } from './components/session-terminal-d
 import {
   type SessionWorkspaceRefreshControl,
   type SessionWorkspaceRefreshEnvironment,
+  sendCanceller,
   sendRetrier,
+  sendSubmitter,
   startSessionWorkspaceRefresh,
   type transcriptEntriesFromLog,
 } from './components/session-workspace-model.ts';
@@ -96,6 +98,7 @@ import { settingsPaletteEntries } from './features/settings/settings-catalog.ts'
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
+import { useStuckMessageActions } from './features/stuck-messages/use-stuck-message-actions.tsx';
 import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
@@ -928,16 +931,6 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const hypermediaActions = useHypermediaSessionActions({ connection, fetcher: useDaemonFetch() });
   // Pack mode's Actions-menu toggle, and its status line: also read at the next launch.
   const packActions = usePackSessionActions({ connection, fetcher: useDaemonFetch() });
-  // Every feature's Actions-menu entries for this ferret: Warden, Learning, Hypermedia, then Pack mode.
-  const sessionActions = useMemo(
-    () => [
-      ...wardenActions,
-      ...learningActions.contributions,
-      ...hypermediaActions.contributions,
-      ...packActions.contributions,
-    ],
-    [wardenActions, learningActions.contributions, hypermediaActions.contributions, packActions.contributions],
-  );
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
@@ -1166,6 +1159,37 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     () => sendRetrier(client, sessionId, () => void refreshControl.current?.refresh(true)),
     [client, sessionId],
   );
+  /** Asks for fresh evidence at once. Stable, so the menu entry built over it is not rebuilt for nothing. */
+  const refreshSends = useCallback(() => void refreshControl.current?.refresh(true), []);
+  /** A row's Cancel — takes the send back; the daemon says what that did on the agent's screen. */
+  const cancelSend = useMemo<SendCancel>(
+    () => sendCanceller(client, sessionId, refreshSends),
+    [client, sessionId, refreshSends],
+  );
+  /** A row's Press Enter — for a message typed into the agent's composer and never submitted. */
+  const submitSend = useMemo<SendSubmit>(
+    () => sendSubmitter(client, sessionId, refreshSends),
+    [client, sessionId, refreshSends],
+  );
+  // "Clear stuck messages" — Actions-menu entry that takes back every message nothing proved arrived.
+  const stuckActions = useStuckMessageActions({ client, sessionId, sends, refresh: refreshSends });
+  // Every feature's Actions-menu entries for this ferret: Warden, Learning, Hypermedia, Pack mode, then stuck messages.
+  const sessionActions = useMemo(
+    () => [
+      ...wardenActions,
+      ...learningActions.contributions,
+      ...hypermediaActions.contributions,
+      ...packActions.contributions,
+      ...stuckActions.contributions,
+    ],
+    [
+      wardenActions,
+      learningActions.contributions,
+      hypermediaActions.contributions,
+      packActions.contributions,
+      stuckActions.contributions,
+    ],
+  );
   /**
    * The reader's way back, and it is a REF rather than the control itself on purpose: a callback
    * that depended on the live stream object would change identity on every resubscription and
@@ -1280,6 +1304,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
             : { daemonSessions: fleetSlice.sessions })}
           entries={placedEntries}
           onRetry={retrySend}
+          onCancel={cancelSend}
+          onSubmit={submitSend}
           onNavigate={navigate}
           {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
           project={projectKeyFor(session.config.cwd, projects).name}

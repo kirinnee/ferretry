@@ -8,6 +8,7 @@ import {
 } from '../../src/components/ledger-message.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import {
+  isStuckSend,
   type LedgerBlockPlacement,
   ledgerPlacementCopy,
   placeLedgerRows,
@@ -83,6 +84,70 @@ describe('sendBadge', () => {
     const blocked = sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt' })).detail;
     expect(blocked).toContain('a prompt on the agent’s screen is waiting for an answer');
     expect(blocked).not.toContain('transcript');
+  });
+});
+
+describe('sendBadge · typed, cancelled and merged', () => {
+  test('says a message sitting in the composer is typed, not sent, and what the reader can do about it', () => {
+    const badge = sendBadge(record({ typedNotSent: true }));
+    expect(badge.label).toBe('typed, not sent');
+    expect(badge.tone).toContain('warn');
+    expect(badge.detail).toContain('sitting in the agent’s composer');
+    expect(badge.detail).toContain('press Enter to send it or cancel it');
+    expect(sendBadge(record({ fate: 'queued', typedNotSent: true })).label).toBe('typed, not sent');
+    // A settled fate outranks it: a timed-out message is no longer waiting in a composer.
+    expect(sendBadge(record({ fate: 'timed_out', typedNotSent: true })).label).toBe('not delivered');
+  });
+
+  test('says what a cancel did on the agent’s screen, in four plain sentences and one fallback', () => {
+    const detail = (cancelEffect?: LedgerSendRecord['cancelEffect']) =>
+      sendBadge(record({ fate: 'cancelled', ...(cancelEffect === undefined ? {} : { cancelEffect }) })).detail;
+    expect(sendBadge(record({ fate: 'cancelled' })).label).toBe('cancelled');
+    expect(sendBadge(record({ fate: 'cancelled' })).tone).not.toContain('err');
+    expect(detail('cleared')).toBe('removed, and erased from the agent’s composer');
+    expect(detail('not_in_pane')).toBe('removed; it never reached the agent');
+    expect(detail('left_in_queue')).toContain('may still read it');
+    expect(detail('left_in_composer')).toContain('the agent’s composer held other text too');
+    expect(detail()).toBe('taken back; what that did on the agent’s screen is not known');
+  });
+
+  test('delivered joined with its neighbours says so, and an ordinary delivery does not', () => {
+    const evidence = (tier: 'exact-text' | 'merged-text') => ({
+      key: 'k',
+      tier,
+    });
+    expect(sendBadge(record({ fate: 'delivered', evidence: evidence('merged-text') })).detail).toContain(
+      'delivered joined with the message next to it',
+    );
+    expect(sendBadge(record({ fate: 'delivered', evidence: evidence('exact-text') })).detail).not.toContain('joined');
+    expect(sendBadge(record({ fate: 'delivered' })).label).toBe('delivered');
+  });
+});
+
+describe('isStuckSend', () => {
+  const now = Date.parse('2026-07-31T10:05:00.000Z');
+
+  test('counts what the reader can see waiting, and nothing proven, cancelled, held or retired', () => {
+    const stuck = (overrides: Partial<LedgerSendRecord>) => isStuckSend(record(overrides), now);
+    expect(stuck({})).toBe(true);
+    expect(stuck({ fate: 'queued' })).toBe(true);
+    expect(stuck({ typedNotSent: true })).toBe(true);
+    expect(stuck({ fate: 'timed_out' })).toBe(true);
+    expect(stuck({ fate: 'unaccounted' })).toBe(true);
+    expect(stuck({ fate: 'delivered' })).toBe(false);
+    expect(stuck({ fate: 'cancelled' })).toBe(false);
+    expect(stuck({ held: true })).toBe(false);
+    expect(stuck({ withdrawn: true })).toBe(false);
+    // A settled row retires from view after a day, and so stops counting as something to clear.
+    expect(stuck({ fate: 'timed_out', acceptedAt: new Date(now - SETTLED_ROW_LIFETIME_MS).toISOString() })).toBe(false);
+    // An in-flight one never retires.
+    expect(stuck({ acceptedAt: new Date(now - 3 * SETTLED_ROW_LIFETIME_MS).toISOString() })).toBe(true);
+    expect(isStuckSend(record({ fate: 'timed_out' }))).toBe(false);
+  });
+
+  test('keeps a cancelled row in the conversation for a day so it can say what the cancel did', () => {
+    const placed = placeLedgerRows([], [record({ sendId: 'c', fate: 'cancelled', cancelEffect: 'cleared' })], now);
+    expect(placed.map(entry => entry.id)).toEqual(['ledger:c']);
   });
 });
 
@@ -313,18 +378,21 @@ describe('LedgerMessage', () => {
     expect(bodyless.root.findAllByProps({ className: expect.stringContaining('kt-user-copy') })).toHaveLength(0);
   });
 
-  test('offers no retry while a send is still in flight, or once it was delivered', () => {
-    for (const fate of ['accepted', 'queued', 'delivered'] as const) {
+  test('offers no one-tap retry while a send is in flight, and no action at all once it was delivered', () => {
+    for (const fate of ['accepted', 'queued'] as const) {
       const row = render(<LedgerMessage onRetry={async () => true} record={record({ fate })} />);
-      expect(row.root.findAllByType('button')).toHaveLength(1);
+      // The receipt, the guarded "Retry…" and Copy text — never a bare Retry that could send it twice.
+      expect(row.root.findAllByType('button').map(textOfNode).slice(1)).toEqual(['Retry…', 'Copy text']);
     }
+    const settled = render(<LedgerMessage onRetry={async () => true} record={record({ fate: 'delivered' })} />);
+    expect(settled.root.findAllByType('button')).toHaveLength(1);
     const unprovable = render(
       <LedgerMessage
         onRetry={async () => true}
         record={record({ fate: 'timed_out', unaccountedReason: 'session_ended' })}
       />,
     );
-    expect(unprovable.root.findAllByType('button')).toHaveLength(1);
+    expect(unprovable.root.findAllByType('button').map(textOfNode).slice(1)).toEqual(['Copy text']);
   });
 
   test('retries a proven-absent send in one tap, under its own id, and says it is sending again', async () => {
@@ -375,7 +443,12 @@ describe('LedgerMessage', () => {
 
     expect(textOf(row)).toContain(UNBOUND_SEND_COPY);
     expect(textOf(row)).not.toContain(RESEND_RISK_COPY);
-    expect(row.root.findAll(node => node.type === 'button')).toHaveLength(1);
+    expect(
+      row.root
+        .findAll(node => node.type === 'button')
+        .map(textOfNode)
+        .slice(1),
+    ).toEqual(['Copy text']);
     expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' })).detail).toContain(
       'can’t find a transcript it can prove is this session’s',
     );

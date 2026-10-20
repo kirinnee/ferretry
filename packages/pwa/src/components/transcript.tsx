@@ -4,6 +4,7 @@ import { useInputModality } from '../hooks/use-input-modality.ts';
 import { useTranscriptHold } from '../hooks/use-live-clock.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
+import { compactionStripIndex } from '../lib/compaction-readout.ts';
 import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
@@ -11,10 +12,9 @@ import { quoteSelectionIntoComposer } from '../lib/quote.ts';
 import { type TranscriptEntry, transcriptItems } from '../lib/session-screens.ts';
 import { newTailRows, prependedAbove, prependRestoreTarget } from '../lib/transcript-follow.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
-import { JumpToLatest } from './jump-to-latest.tsx';
-import type { SendRetry } from './ledger-message.tsx';
-import { compactionStripIndex } from '../lib/compaction-readout.ts';
 import { CompactionCard, CompactionStrip } from './compaction-card.tsx';
+import { JumpToLatest } from './jump-to-latest.tsx';
+import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
@@ -26,6 +26,10 @@ export interface TranscriptProps {
   readonly label?: string;
   /** Offered on ledger rows. Absent means retry is not available here. */
   readonly onRetry?: SendRetry;
+  /** Offered on ledger rows. Absent means a message cannot be cancelled from here. */
+  readonly onCancel?: SendCancel;
+  /** Offered on ledger rows. Absent means Enter cannot be pressed for a typed message from here. */
+  readonly onSubmit?: SendSubmit;
   /** The harness's own live status line while `busy`, when its pane could be read. */
   readonly activity?: PaneActivity | null;
   /** The daemon's activity sentence, shown when the pane said nothing readable. */
@@ -106,6 +110,8 @@ export function Transcript({
   busy = false,
   label = 'Transcript',
   onRetry,
+  onCancel,
+  onSubmit,
   activity = null,
   activityFallback = null,
   turnStartedAt = null,
@@ -234,7 +240,9 @@ export function Transcript({
                 entry={agentName === undefined ? item.entry : withAgentName(item.entry, agentName)}
                 isLast={index === items.length - 1}
                 live={shown.busy}
+                onCancel={onCancel}
                 onRetry={onRetry}
+                onSubmit={onSubmit}
                 previous={item.previous}
               />
             </Fragment>

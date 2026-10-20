@@ -2,7 +2,12 @@ import { describe, it } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
-import { PaneDeliveryError, TmuxPaneDelivery } from '../../../src/adapters/index.ts';
+import {
+  ComposerOccupiedError,
+  PaneDeliveryError,
+  PaneStrandedError,
+  TmuxPaneDelivery,
+} from '../../../src/adapters/index.ts';
 import { TmuxController } from '../../../src/lib/index.ts';
 import { FakeTmuxServer } from '../support/fake-tmux-server.ts';
 
@@ -321,5 +326,73 @@ describe('tmux paste buffers', () => {
     // Act / Assert
     await should(new TmuxController(server).paste(SESSION, 'a\nb')).be.rejectedWith('buffer too large');
     should(server.commands()).not.containEql('paste-buffer');
+  });
+});
+
+describe('tmux pane delivery — the Codex composer', () => {
+  it('should land `hi` first time over a placeholder that contains it, and submit it', async () => {
+    // Arrange — the bug: `Ask Codex to do anything` holds a `hi`, so typing `hi` left a whole-frame
+    // count unchanged and the daemon cleared and retyped until it gave up with `hi` stranded.
+    const server = new FakeTmuxServer();
+    server.placeholder = 'Ask Codex to do anything';
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'hi');
+
+    // Assert
+    should(server.submitted).deepEqual(['hi']);
+    should(server.calls.filter(call => call[0] === 'send-keys' && call.includes('-l'))).have.length(1);
+    should(server.calls.some(call => call.at(-1) === 'C-u')).be.false();
+  });
+
+  it('should press Enter again when the first one only opened a new line, and submit once', async () => {
+    // Arrange — Codex 0.156.1 turns an Enter inside its paste-burst window into a newline.
+    const server = new FakeTmuxServer();
+    server.placeholder = 'Ask Codex to do anything';
+    server.swallowEnters = 1;
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'hello');
+
+    // Assert
+    should(server.submitted).deepEqual(['hello']);
+    should(server.calls.filter(call => call.at(-1) === 'Enter')).have.length(2);
+  });
+
+  it('should say a payload that every Enter left in the composer is typed and not sent', async () => {
+    const server = new FakeTmuxServer();
+    server.swallowEnters = Number.MAX_SAFE_INTEGER;
+    const { subject } = delivery(server, { submitPolls: 1 });
+
+    await should(subject.deliver(SESSION, 'hi')).be.rejectedWith(PaneStrandedError);
+    should(server.submitted).be.empty();
+  });
+
+  it('should type nothing into a composer that already holds a draft, and say so without the long wait', async () => {
+    // Arrange — `hi` sits there unsent; typing `hello` onto it is what reached Codex as `hihello`.
+    const server = new FakeTmuxServer();
+    server.composer = 'hi';
+    const { subject, slept } = delivery(server);
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'hello').catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceof(ComposerOccupiedError);
+    should((refused as ComposerOccupiedError).draft).equal('hi');
+    should(server.calls.some(call => call[0] === 'send-keys')).be.false();
+    should(slept.length).be.below(3);
+  });
+
+  it('should refuse at the fill too, when the draft appeared after the pane read ready', async () => {
+    const server = new FakeTmuxServer();
+    const { subject } = delivery(server);
+    await subject.waitReady(SESSION);
+    server.composer = 'my own words';
+
+    await should(subject.deliver(SESSION, 'hello')).be.rejectedWith(ComposerOccupiedError);
+    should(server.submitted).be.empty();
   });
 });

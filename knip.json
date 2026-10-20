@@ -44,6 +44,7 @@
         "harness/receipts-screenshot.tsx",
         "harness/harness-events-screenshot.tsx",
         "harness/transcript-unbound-screenshot.tsx",
+        "harness/stuck-messages-screenshot.tsx",
         "harness/live-activity-screenshot.tsx",
         "harness/compaction-screenshot.tsx",
         "harness/handoff-screenshot.tsx",

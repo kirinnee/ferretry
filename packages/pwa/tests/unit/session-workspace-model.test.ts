@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { turnFileInstruction } from '@ferretry/protocol';
 import {
   type SessionWorkspaceRefreshEnvironment,
+  sendCanceller,
   sendRetrier,
+  sendSubmitter,
   startSessionWorkspaceRefresh,
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
@@ -752,5 +754,40 @@ describe('transcriptEntriesFromLog · messages between ferrets', () => {
       'ferret',
     );
     expect(entries[0]?.sent).toMatchObject({ to: 'tanna', body: 'are you free?', ask: true, state: 'queued' });
+  });
+});
+
+describe('sendCanceller and sendSubmitter', () => {
+  test('cancel the send, or press Enter for it, by its id and refresh; nothing happens without a client', async () => {
+    const calls: unknown[] = [];
+    let refreshed = 0;
+    const client = {
+      cancelSend: async (...args: unknown[]) => void calls.push(['cancel', ...args]) as never,
+      submitSend: async (...args: unknown[]) => void calls.push(['enter', ...args]) as never,
+    };
+
+    expect(await sendCanceller(client, 's-1', () => (refreshed += 1))({ sendId: 'send-1' })).toBe(true);
+    expect(await sendSubmitter(client, 's-1', () => (refreshed += 1))({ sendId: 'send-2' })).toBe(true);
+    expect(await sendCanceller(null, 's-1', () => (refreshed += 1))({ sendId: 'send-1' })).toBe(false);
+    expect(await sendSubmitter(null, 's-1', () => (refreshed += 1))({ sendId: 'send-1' })).toBe(false);
+    expect(calls).toEqual([
+      ['cancel', 's-1', 'send-1'],
+      ['enter', 's-1', 'send-2'],
+    ]);
+    expect(refreshed).toBe(2);
+  });
+
+  test("lets the daemon's refusal through and does not refresh on it", async () => {
+    let refreshed = 0;
+    const refuse = async (): Promise<never> => {
+      throw new Error('it is still typed in the composer');
+    };
+    await expect(
+      sendCanceller({ cancelSend: refuse }, 's-1', () => (refreshed += 1))({ sendId: 'send-1' }),
+    ).rejects.toThrow('still typed');
+    await expect(
+      sendSubmitter({ submitSend: refuse }, 's-1', () => (refreshed += 1))({ sendId: 'send-1' }),
+    ).rejects.toThrow('still typed');
+    expect(refreshed).toBe(0);
   });
 });

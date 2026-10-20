@@ -131,6 +131,13 @@ export interface IFyApiClient {
    * re-sends an unconfirmed one, whose original may still have landed.
    */
   retrySend(id: string, sendId: string, force?: boolean): Promise<SendRecord>;
+  /**
+   * Takes back one send that was not proven delivered, erasing it from the agent's composer when it
+   * is sitting typed there. The record's `cancelEffect` says what happened on the agent's screen.
+   */
+  cancelSend(id: string, sendId: string): Promise<SendRecord>;
+  /** Presses Enter once for a send that is sitting typed, and not sent, in the agent's composer. */
+  submitSend(id: string, sendId: string): Promise<SendRecord>;
   answer(
     id: string,
     toolUseId: string,

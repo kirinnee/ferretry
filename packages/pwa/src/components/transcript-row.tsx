@@ -6,7 +6,7 @@ import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
 import { HandoffBody, HandoffView, useHandoffReading } from './handoff-message.tsx';
 import { HarnessEventRow } from './harness-event-row.tsx';
-import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
+import { LedgerMessage, type SendCancel, type SendRetry, type SendSubmit } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { PackCallRow } from './pack-call.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
@@ -25,6 +25,10 @@ export interface TranscriptRowProps {
   readonly isLast?: boolean;
   /** Offered on a ledger row, and only when a retry is possible at all. */
   readonly onRetry?: SendRetry;
+  /** Offered on a ledger row for a message that was not proven delivered. */
+  readonly onCancel?: SendCancel;
+  /** Offered on a ledger row, and only a message typed in the composer uses it. */
+  readonly onSubmit?: SendSubmit;
   /** An assistant row follows this one, so a delivered send on it reads as `read`. */
   readonly answered?: boolean;
 }
@@ -42,6 +46,8 @@ export function TranscriptRow({
   live = false,
   isLast = false,
   onRetry,
+  onCancel,
+  onSubmit,
   answered = false,
 }: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
@@ -52,7 +58,13 @@ export function TranscriptRow({
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
-        <LedgerMessage onRetry={onRetry} placement={entry.placement} record={entry.ledger} />
+        <LedgerMessage
+          onCancel={onCancel}
+          onRetry={onRetry}
+          onSubmit={onSubmit}
+          placement={entry.placement}
+          record={entry.ledger}
+        />
       </div>
     );
   }

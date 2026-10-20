@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { PaneQueueError, TmuxPaneQueue } from '../../../src/adapters/index.ts';
+import { ComposerOccupiedError, TmuxPaneQueue } from '../../../src/adapters/index.ts';
 import { type TmuxCommandPort, type TmuxCommandResult, TmuxController } from '../../../src/lib/index.ts';
 
 const SESSION = 'fy-session-1';
@@ -18,6 +18,8 @@ class BusyPane implements TmuxCommandPort {
   composer = '';
   /** True once the message is in the queue and no longer needs a key. */
   queued = false;
+  /** What the harness is holding in its own queue, drawn as a pending block above the composer. */
+  pending = '';
   /** Whether the composer ever accepts the text at all. */
   accepts = true;
 
@@ -31,7 +33,8 @@ class BusyPane implements TmuxCommandPort {
     this.calls.push(argv);
     const command = argv[0];
     if (command === 'has-session') return ok('');
-    if (command === 'display-message') return ok(`0||${2 + this.composer.length}|1|24|80\n`);
+    if (command === 'display-message')
+      return ok(`0||${2 + this.composer.length}|${this.lines().findIndex(line => /^[>❯] /u.test(line))}|24|80\n`);
     if (command === 'capture-pane') return ok(this.frame());
     if (command === 'send-keys') return this.keys(argv);
     return ok('');
@@ -49,23 +52,31 @@ class BusyPane implements TmuxCommandPort {
     }
     const key = String(argv.at(-1));
     if (key === 'C-u') this.composer = '';
-    // The Claude shape: Enter hands the text to the harness, which echoes it as a queued line.
-    if (key === 'Enter' && this.enterSubmits) this.queued = true;
-    // The Codex shape: Tab is what moves a held composer into the explicit queue.
-    if (key === 'Tab') this.queued = true;
+    // Enter mid-turn hands the text to the harness's own queue; on the Tab shape only Tab does.
+    if ((key === 'Enter' && this.enterSubmits) || key === 'Tab') this.hold();
     return ok('');
   }
 
-  private frame(): string {
+  /** The text leaves the composer for the pending block, as Codex 0.145–0.163 were measured to draw it. */
+  private hold(): void {
+    if (this.composer === '') return;
+    this.queued = true;
+    this.pending = this.composer;
+    this.composer = '';
+  }
+
+  lines(): readonly string[] {
     const lines = [this.working ? '✻ Lollygagging… (34s · ⚒ 2.1k tokens)' : 'idle'];
-    // Once queued, the harness shows the message as a pending line rather than as composer text.
-    if (this.queued) lines.push(`❯ ${this.composer} (queued)`);
-    else {
-      lines.push(`> ${this.composer}`);
-      // The hint only appears while the composer is genuinely holding something.
-      if (this.composer !== '' && !this.enterSubmits) lines.push('  tab to queue message');
-    }
-    return `${lines.join('\n')}\n`;
+    if (this.pending !== '') lines.push('', '• Queued follow-up inputs', `  ↳ ${this.pending}`, '');
+    lines.push(`> ${this.composer}`);
+    // The hint only appears while the composer is genuinely holding something.
+    // Codex draws it one blank row below the composer, as every measured version does.
+    if (this.composer !== '' && !this.enterSubmits) lines.push('', '  tab to queue message');
+    return lines;
+  }
+
+  private frame(): string {
+    return `${this.lines().join('\n')}\n`;
   }
 }
 
@@ -102,9 +113,10 @@ describe('tmux pane queue', () => {
     should(pane.queued).be.true();
   });
 
-  it('should report a pane that is only working as working, never as holding the message', async () => {
-    // Enter took the text and the composer is empty, but the agent is visibly busy. That is a pane
-    // about to consume or queue it — not proof the harness is holding it — so nothing calls it queued.
+  it('should report a message that left the composer of a working pane as left, never as held', async () => {
+    // Enter took the text and the composer is empty, but no queue shows it: Codex 0.163 steers a
+    // mid-turn Enter straight into the running turn. That proves the keys were taken, not that the
+    // harness is holding it, so nothing calls it queued.
     // Arrange
     const pane = new (class extends BusyPane {
       override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
@@ -116,7 +128,7 @@ describe('tmux pane queue', () => {
     const { subject } = queue(pane);
 
     // Act / Assert
-    should(await subject.queue(SESSION, 'read the queued brief')).equal('working');
+    should(await subject.queue(SESSION, 'read the queued brief')).equal('left');
   });
 
   it('should press the queue key only when the pane asks for it', async () => {
@@ -134,10 +146,10 @@ describe('tmux pane queue', () => {
     should(pane.queued).be.true();
   });
 
-  it('should refuse when nothing proves the message is being held', async () => {
-    // The pane went idle between the fill and the submit, so Enter consumed the text at a prompt and
-    // nothing is holding it and nothing is working. Reporting `queued` here is how a message is lost
-    // silently: the caller waits at a turn boundary the harness passed seconds earlier.
+  it('should never call a message queued when the pane went idle and Enter simply submitted it', async () => {
+    // The pane went idle between the fill and the submit, so Enter submitted the text at a prompt.
+    // Reporting `queued` would have the caller wait at a turn boundary the harness already passed, and
+    // failing the send would report a submitted message as lost — the transcript decides instead.
     // Arrange
     const pane = new (class extends BusyPane {
       override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
@@ -149,8 +161,35 @@ describe('tmux pane queue', () => {
     const { subject } = queue(pane);
 
     // Act / Assert
-    await should(subject.queue(SESSION, 'read the queued brief')).be.rejectedWith(PaneQueueError);
-    await should(subject.queue(SESSION, 'read the queued brief')).be.rejectedWith(/without queue evidence/u);
+    should(await subject.queue(SESSION, 'read the queued brief')).equal('left');
+  });
+
+  it('should report a message the queue key could not move as typed, which no turn end will send', async () => {
+    // Arrange — the Tab shape, with a Tab that does not take (measured on 0.156.1 when it arrives
+    // inside the paste-burst window): the text is still in the composer after both keys.
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        if (argv[0] !== 'send-keys' || argv.at(-1) !== 'Tab') return await super.execute(argv);
+        this.calls.push(argv);
+        return ok('');
+      }
+    })(false);
+    const { subject } = queue(pane);
+
+    // Act / Assert
+    should(await subject.queue(SESSION, 'read the queued brief')).equal('typed');
+    should(pane.keysSent()).deepEqual(['Enter', 'Tab']);
+  });
+
+  it('should type nothing into a composer that already holds a draft', async () => {
+    // Arrange — the shape that reached Codex as `hihello`: a draft nobody submitted.
+    const pane = new BusyPane(true);
+    pane.composer = 'hi';
+    const { subject } = queue(pane);
+
+    // Act / Assert
+    await should(subject.queue(SESSION, 'hello')).be.rejectedWith(ComposerOccupiedError);
+    should(pane.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
   it('should give up rather than keep typing into a composer that takes nothing', async () => {

@@ -76,7 +76,9 @@ export class SendMessageController {
     for (;;) {
       const record = await this.api.sendStatus(result.config.id, sendId);
       if (SETTLED_SEND_FATES.has(record.fate)) {
-        if (record.fate === 'timed_out') throw new SessionCommandError(describeFate(record));
+        // A cancelled message was not delivered either; it fails the wait as a proven absence does.
+        if (record.fate === 'timed_out' || record.fate === 'cancelled')
+          throw new SessionCommandError(describeFate(record));
         this.presenter.note(describeFate(record));
         return;
       }

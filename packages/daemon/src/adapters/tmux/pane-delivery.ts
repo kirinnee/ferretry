@@ -15,13 +15,10 @@
 
 import {
   classifySubmit,
-  composerEvidence,
-  composerTransport,
-  type DeliveryFrame,
   type InjectionOutcome,
   type LandingEvidence,
-  landingEvidence,
   nextReadinessStep,
+  occupiedComposer,
   paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
@@ -30,9 +27,7 @@ import {
   type StartupDialogOptions,
   type TmuxController,
 } from '../../lib/tmux/index.ts';
-
-/** Waiting is a capability, not a decision: the composition root owns how this process sleeps. */
-export type DeliverySleep = (milliseconds: number) => Promise<void>;
+import { ComposerOccupiedError, captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
 
 export interface PaneDeliveryOptions {
   /** Frames to look at while waiting for a prompt before giving up. */
@@ -69,6 +64,20 @@ export class PaneDeliveryError extends Error {
   }
 }
 
+/**
+ * The payload is in the composer and every bounded Enter left it there: typed, and not sent.
+ *
+ * Its own type because the remedy is different from every other failure: nothing needs retyping, and
+ * retyping would put a second copy beside the first. The text is still on the agent's screen, where a
+ * single Enter — or a cancel that clears it — finishes the job.
+ */
+export class PaneStrandedError extends PaneDeliveryError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PaneStrandedError';
+  }
+}
+
 export class TmuxPaneDelivery {
   private readonly settings: Required<PaneDeliveryOptions>;
 
@@ -94,14 +103,24 @@ export class TmuxPaneDelivery {
     // the box is loaded, and polling it hardest exactly then is the wrong shape.
     const delays = retryDelays(this.settings.readinessAttempts);
     let blocked: string | undefined;
+    let occupied = 0;
     for (let attempt = 0; attempt < delays.length; ) {
-      const frame = await this.frame(session);
+      const frame = await captureFrame(this.tmux, session);
       blocked =
         paneBlockingPrompt(frame.visible) ?? paneBlockingPermission(frame.visible) ?? paneBlockingDialog(frame.visible);
       const step = nextReadinessStep(frame, attemptsByKind, options);
       if (step.kind === 'ready') return;
       if (step.kind === 'exited' || step.kind === 'stuck')
         throw new PaneDeliveryError(`${step.reason}; tmux session ${session}`);
+      // A composer holding typed input will never become ready by waiting, and the wait is long. Two
+      // frames in a row, so a repaint caught halfway through clearing a submit is not mistaken for one.
+      const draft = step.kind === 'wait' ? occupiedComposer(frame) : undefined;
+      occupied = draft === undefined ? 0 : occupied + 1;
+      if (draft !== undefined && occupied >= 2)
+        throw new ComposerOccupiedError(
+          `the composer of tmux session ${session} already holds unsent text; nothing was typed`,
+          draft,
+        );
       if (step.kind === 'answer_dialog') {
         attemptsByKind.set(step.action.kind, step.attempt);
         for (const key of step.action.keys) await this.tmux.sendKey(session, key);
@@ -137,45 +156,15 @@ export class TmuxPaneDelivery {
     return await this.submit(session, text, evidence);
   }
 
-  /** One capture, shaped the way the decision layer reads a pane. */
-  private async frame(session: string): Promise<DeliveryFrame> {
-    const state = await this.tmux.state(session);
-    return {
-      alive: state.alive,
-      dead: state.dead,
-      promptReady: state.promptReady,
-      visible: state.visible,
-      ...(state.exitCode === undefined ? {} : { exitCode: state.exitCode }),
-    };
-  }
-
-  /**
-   * Fill the composer and return the evidence that proved it.
-   *
-   * The composer is cleared before a RETRY only, and only on the path where nothing landed — the
-   * placeholder guard below returns first otherwise, so clearing can never destroy a paste the
-   * harness already took.
-   */
   private async fill(session: string, text: string): Promise<LandingEvidence> {
-    for (let attempt = 0; attempt < this.settings.composerAttempts; attempt++) {
-      if (attempt > 0) {
-        await this.tmux.sendKey(session, 'C-u');
-        await this.sleep(this.settings.pollMs);
-      }
-      const before = composerEvidence(await this.tmux.capture(session, false), text);
-      if (composerTransport(text) === 'paste') await this.tmux.paste(session, text);
-      else await this.tmux.sendLiteral(session, text);
-      for (let poll = 0; poll < this.settings.composerPolls; poll++) {
-        await this.sleep(this.settings.pollMs);
-        const proved = landingEvidence(before, composerEvidence(await this.tmux.capture(session, false), text));
-        if (proved !== undefined) return proved;
-      }
-      // No NEW evidence, but a placeholder is nonetheless sitting in the composer: a paste of ours is
-      // in there (a repaint can hide the counter bump, and re-pasting identical text may not move it).
-      // Submitting that is correct; retyping would duplicate or destroy it.
-      if (composerEvidence(await this.tmux.capture(session, false), text).placeholders > 0) return 'placeholder';
-    }
-    throw new PaneDeliveryError(`the turn did not land in the composer of tmux session ${session}`);
+    return await fillComposer(
+      this.tmux,
+      this.sleep,
+      this.settings,
+      session,
+      text,
+      message => new PaneDeliveryError(message),
+    );
   }
 
   /**
@@ -189,10 +178,10 @@ export class TmuxPaneDelivery {
       await this.tmux.sendKey(session, 'Enter');
       for (let poll = 0; poll < this.settings.submitPolls; poll++) {
         await this.sleep(this.settings.pollMs);
-        const step = classifySubmit(await this.frame(session), text, evidence);
+        const step = classifySubmit(await captureFrame(this.tmux, session), text, evidence);
         if (step.kind === 'delivered') return step.outcome;
       }
     }
-    throw new PaneDeliveryError(`the turn landed but stayed in the composer of tmux session ${session}`);
+    throw new PaneStrandedError(`the turn landed but stayed in the composer of tmux session ${session}`);
   }
 }

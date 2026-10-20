@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { MessageFooter } from '../../src/components/send-receipt.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
-import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
 import { clockOfInstant } from '../../src/lib/message-clock.ts';
+import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
 import { RECEIPT_LEGEND, type SendReceiptKind, sendReceipt } from '../../src/lib/send-receipt.ts';
 import { type TranscriptEntry, transcriptItems } from '../../src/lib/session-screens.ts';
 import { render, runAsync } from '../support/react.ts';
@@ -39,6 +39,41 @@ describe('sendReceipt', () => {
       ['held', record({ held: true }), false, 'held', 'Held for revive', undefined],
       ['held while queued', record({ fate: 'queued', held: true }), false, 'held', 'Held for revive', undefined],
       ['queued', record({ fate: 'queued' }), false, 'queued', 'Queued', undefined],
+      ['typed in the composer', record({ typedNotSent: true }), false, 'typed', 'Typed, not sent', 'typed, not sent'],
+      [
+        'typed and queued',
+        record({ fate: 'queued', typedNotSent: true }),
+        false,
+        'typed',
+        'Typed, not sent',
+        'typed, not sent',
+      ],
+      // A settled fate outranks the typed flag, and the typed flag outranks held.
+      [
+        'typed but timed out',
+        record({ fate: 'timed_out', typedNotSent: true }),
+        false,
+        'failed',
+        'Not delivered',
+        'not delivered',
+      ],
+      [
+        'typed but held',
+        record({ held: true, typedNotSent: true }),
+        false,
+        'typed',
+        'Typed, not sent',
+        'typed, not sent',
+      ],
+      [
+        'cancelled',
+        record({ fate: 'cancelled', cancelEffect: 'cleared' }),
+        false,
+        'cancelled',
+        'Cancelled',
+        'cancelled',
+      ],
+      ['cancelled and held', record({ fate: 'cancelled', held: true }), false, 'cancelled', 'Cancelled', 'cancelled'],
       ['delivered', record({ fate: 'delivered' }), false, 'delivered', 'Delivered', undefined],
       ['delivered, then answered', record({ fate: 'delivered' }), true, 'answered', 'Answered', undefined],
       ['unaccounted', record({ fate: 'unaccounted' }), false, 'unconfirmed', 'Unconfirmed', 'unconfirmed'],
@@ -74,18 +109,22 @@ describe('the legend', () => {
     expect(RECEIPT_LEGEND.map(row => row.kind)).toEqual([
       'sending',
       'queued',
+      'typed',
       'delivered',
       'answered',
       'unconfirmed',
       'failed',
+      'cancelled',
     ]);
     const records: readonly [LedgerSendRecord, boolean][] = [
       [record(), false],
       [record({ fate: 'queued' }), false],
+      [record({ typedNotSent: true }), false],
       [record({ fate: 'delivered' }), false],
       [record({ fate: 'delivered' }), true],
       [record({ fate: 'unaccounted' }), false],
       [record({ fate: 'timed_out' }), false],
+      [record({ fate: 'cancelled' }), false],
     ];
     RECEIPT_LEGEND.forEach((row, index) => {
       const [sent, answered] = records[index] as [LedgerSendRecord, boolean];
