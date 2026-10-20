@@ -24,7 +24,7 @@ export interface ImportSearchQuery {
   /** Only Ferretry's own history, or only the computer's CLI homes; absent reads both. */
   readonly source?: ConversationSource;
   readonly harness?: Harness;
-  /** Case-insensitive words; each must appear in the preview, the latest message or the project folder. */
+  /** Case-insensitive words; each must appear in the name, the first or latest message or the project folder. */
   readonly q?: string;
   /** An ISO instant: only conversations active at or after it. */
   readonly since?: string;

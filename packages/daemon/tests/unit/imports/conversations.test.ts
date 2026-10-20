@@ -6,6 +6,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { transcriptName } from '../../../src/lib/imports/conversation-name.ts';
 import {
   adoptedConversationFile,
   adoptedTranscriptProvenance,
@@ -109,7 +110,14 @@ class FakeFiles implements ConversationFiles {
     const node = this.node(file);
     return typeof node === 'string' ? node.slice(0, maxBytes) : undefined;
   }
+
+  async tail(file: string, maxBytes: number): Promise<string | undefined> {
+    const node = this.node(file);
+    return typeof node === 'string' ? node.slice(Math.max(0, node.length - maxBytes)) : undefined;
+  }
 }
+
+const CODEX_NAMED = '44444444-4444-4444-8444-444444444444';
 
 const parsers = { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() };
 
@@ -582,5 +590,132 @@ describe('where a listing reads and what its rows say', () => {
     // Act & Assert
     should(await subjectService.preview('claude', 'missing')).be.undefined();
     should(await subjectService.preview('claude', POINTED)).be.undefined();
+  });
+});
+
+describe('conversation names', () => {
+  const claudeNamed = [
+    claude('Fix the cart total', '2026-10-17T08:01:00.000Z'),
+    JSON.stringify({ type: 'summary', summary: 'Cart total fix', leafUuid: 'u-1' }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'Repair cart  maths', sessionId: CLAUDE_ID }),
+    JSON.stringify({ type: 'custom-title', customTitle: 'Shop: cart bug', sessionId: CLAUDE_ID }),
+    JSON.stringify({ type: 'ai-title', aiTitle: 'A later generated title', sessionId: CLAUDE_ID }),
+  ].join('\n');
+  const namedTree: Tree = {
+    host: {
+      claude: { projects: { '-work-shop': { [`${CLAUDE_ID}.jsonl`]: claudeNamed } } },
+      codex: {
+        'session_index.jsonl': [
+          JSON.stringify({ id: CODEX_ID, thread_name: 'Old release notes', updated_at: '2026-10-10T09:02:00Z' }),
+          JSON.stringify({ id: CODEX_ID, thread_name: 'Release notes', updated_at: '2026-10-10T09:03:00Z' }),
+          JSON.stringify({ id: CODEX_ID, thread_name: '   ' }),
+          'not json',
+        ].join('\n'),
+        sessions: {
+          '2026': {
+            '10': {
+              '10': {
+                [`rollout-2026-10-10T09-00-00-${CODEX_ID}.jsonl`]: [
+                  codexMeta,
+                  codexUser('Draft the release notes', '2026-10-10T09:01:00.000Z'),
+                ].join('\n'),
+                [`rollout-2026-10-11T09-00-00-${CODEX_NAMED}.jsonl`]: [
+                  JSON.stringify({
+                    type: 'session_meta',
+                    timestamp: '2026-10-11T09:00:00.000Z',
+                    payload: { id: CODEX_NAMED, cwd: '/work/notes' },
+                  }),
+                  codexUser('Plan the offsite', '2026-10-11T09:01:00.000Z'),
+                  JSON.stringify({
+                    type: 'event_msg',
+                    payload: { type: 'thread_name_updated', thread_id: CODEX_NAMED, thread_name: 'Offsite plan' },
+                  }),
+                  JSON.stringify({ type: 'event_msg', payload: { type: 'thread_name_updated', thread_name: 7 } }),
+                  JSON.stringify({ type: 'event_msg', payload: { type: 'token_count' } }),
+                  JSON.stringify({ type: 'event_msg', payload: 'text' }),
+                ].join('\n'),
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  const codexSessions = (namedTree.host as { codex: { sessions: Tree } }).codex.sessions;
+  const named = () =>
+    new ConversationImportService(
+      new FakeFiles(namedTree),
+      [
+        { harness: 'claude', home: '/host/claude', source: 'computer' },
+        { harness: 'codex', home: '/host/codex', source: 'computer' },
+      ],
+      parsers,
+      { owners: async () => new Map() },
+      new RecordingAdopter(),
+    );
+
+  it('should name a Claude conversation by its /rename title over any generated one, the latest winning', async () => {
+    // Act
+    const listing = await named().list({ harness: 'claude' });
+
+    // Assert
+    should(listing.conversations[0]).containDeep({
+      id: CLAUDE_ID,
+      name: 'Shop: cart bug',
+      preview: 'Fix the cart total',
+    });
+  });
+
+  it('should fall back to the latest generated Claude title, a summary included', async () => {
+    // Arrange
+    const text = [
+      claude('Hello', '2026-10-17T08:01:00.000Z'),
+      JSON.stringify({ type: 'agent-name', agentName: '  ' }),
+      JSON.stringify({ type: 'summary', summary: 'First summary' }),
+      JSON.stringify({ type: 'summary', summary: 7 }),
+    ].join('\n');
+
+    // Act & Assert
+    should(transcriptName('claude', text)).equal('First summary');
+    should(
+      transcriptName('claude', `${text}\n${JSON.stringify({ type: 'agent-name', agentName: 'Named by agent' })}`),
+    ).equal('Named by agent');
+    should(transcriptName('claude', claude('Hello', '2026-10-17T08:01:00.000Z'))).be.undefined();
+    should(
+      transcriptName('claude', JSON.stringify({ type: 'custom-title', customTitle: 'y'.repeat(200) })),
+    ).have.length(120);
+  });
+
+  it('should name a Codex thread by the index first, then by the rename its rollout recorded', async () => {
+    // Act
+    const listing = await named().list({ harness: 'codex' });
+
+    // Assert
+    should(listing.conversations.map(row => [row.id, row.name])).deepEqual([
+      [CODEX_NAMED, 'Offsite plan'],
+      [CODEX_ID, 'Release notes'],
+    ]);
+  });
+
+  it('should search the name, and treat a missing or unreadable Codex index as no names', async () => {
+    // Arrange
+    const service = named();
+    const bare = new ConversationImportService(
+      new FakeFiles({ host: { codex: { sessions: codexSessions } } }),
+      [{ harness: 'codex', home: '/host/codex', source: 'computer' }],
+      parsers,
+      { owners: async () => new Map() },
+      new RecordingAdopter(),
+    );
+
+    // Act
+    const byName = await service.list({ q: 'offsite' });
+    const byIndexName = await service.list({ q: 'RELEASE' });
+    const unnamed = await bare.list();
+
+    // Assert
+    should(byName.conversations.map(row => row.id)).deepEqual([CODEX_NAMED]);
+    should(byIndexName.conversations.map(row => row.id)).deepEqual([CODEX_ID]);
+    should(unnamed.conversations.map(row => row.name)).deepEqual(['Offsite plan', undefined]);
   });
 });

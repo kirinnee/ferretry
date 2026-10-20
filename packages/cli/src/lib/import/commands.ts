@@ -1,7 +1,7 @@
 import { type Command, InvalidArgumentError, Option } from 'commander';
+import type { PackNewOptions } from '../pack/controller.ts';
 import type { ContinueSessionController, ImportController } from './controller.ts';
 import { parseSinceDuration } from './controller.ts';
-import type { PackNewOptions } from '../pack/controller.ts';
 
 /** Both commands share one `--since` grammar: validated here, converted to an instant in the controller. */
 function sinceArgument(value: string): string {
@@ -34,7 +34,7 @@ export function registerImportCommands(
     .description(
       'list conversations on this machine, adopt chosen ones, or import a window with --all or --since <1d|3d|7d|14d|30d> --runtime <name>',
     )
-    .argument('[query...]', 'search words; each must appear in the preview, latest message or project folder')
+    .argument('[query...]', 'search words; each must appear in the name, first or latest message or project folder')
     .addOption(harnessOption('only this harness'))
     .option('--since <duration>', SINCE_HELP, sinceArgument)
     .option('--select <id...>', 'adopt these conversation ids instead of listing')

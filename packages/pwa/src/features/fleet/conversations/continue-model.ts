@@ -84,7 +84,7 @@ export const stoppedSessionRows = (
       if (search.harness !== 'all' && row.view.config.harness !== search.harness) return false;
       if (since !== undefined && Date.parse(row.lastActivityAt) < Date.parse(since)) return false;
       const haystack =
-        `${row.name}\n${row.conversation?.preview ?? ''}\n${row.conversation?.latest ?? ''}\n${row.view.config.cwd}`.toLowerCase();
+        `${row.name}\n${row.conversation?.name ?? ''}\n${row.conversation?.preview ?? ''}\n${row.conversation?.latest ?? ''}\n${row.view.config.cwd}`.toLowerCase();
       return wanted.every(word => haystack.includes(word));
     })
     .sort((left, right) => Date.parse(right.lastActivityAt) - Date.parse(left.lastActivityAt));

@@ -11,7 +11,6 @@ import type { z } from 'zod';
 import {
   ConversationPicker,
   ImportConversations,
-  previewText,
 } from '../../../../../src/features/fleet/conversations/conversation-picker.tsx';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
@@ -199,8 +198,22 @@ describe('ConversationPicker rows', () => {
     expect(all('[data-conversation-row]')).toHaveLength(20);
   });
 
-  it('reads an empty preview as such', () => {
-    expect(previewText(conversation('x', { preview: '  ' }))).toBe('No message preview');
+  it('heads a named conversation by its name, with the first message under it and no latest line', async () => {
+    await open({
+      routes: {
+        [CLAUDE_LIST]: () =>
+          listing([
+            conversation('named', { name: 'Cart total bugfix', latest: 'ship it' }),
+            conversation('plain', { latest: 'and the tests' }),
+          ]),
+      },
+    });
+    expect(text('[data-conversation-row="named"] [data-conversation-name]')).toBe('Cart total bugfix');
+    expect(text('[data-conversation-row="named"] [data-conversation-first]')).toBe('Fix the named page');
+    expect(all('[data-conversation-row="named"] [data-conversation-latest]')).toHaveLength(0);
+    expect(all('[data-conversation-row="plain"] [data-conversation-name]')).toHaveLength(0);
+    expect(all('[data-conversation-row="plain"] [data-conversation-first]')).toHaveLength(0);
+    expect(text('[data-conversation-row="plain"] [data-conversation-latest]')).toContain('and the tests');
   });
 });
 

@@ -22,6 +22,7 @@ import { SetupNote } from '../setup/setup-ui.tsx';
 import { SETUP_HARNESS_NAMES } from '../setup/setup-words.ts';
 import {
   adoptRequest,
+  conversationHeadline,
   DATE_FILTERS,
   type DateFilter,
   EMPTY_FILTER,
@@ -90,40 +91,51 @@ export function Segmented<T extends string>({
 }
 
 /**
- * A conversation in at most three short lines, shared by the picker and Continue. First: what it began
- * with (one line, ellipsised) and how long ago it last moved. Second, when it moved on since: the latest
- * thing the owner said, so two rows that began alike still read apart. Third, faint: its folder (the
- * last two segments, which give way first), the CLI, the turns and the model, after `lead` when given.
+ * A conversation in at most three short lines, shared by the picker and Continue. First: its NAME (the
+ * CLI's title, or the ferret's own when `title` is given) and how long ago it last moved. Second: the
+ * first thing the owner said, or the conversation's name under a ferret's. A conversation that was never
+ * named is headed by its first message instead and, when it moved on since, shows the latest thing the
+ * owner said so two rows that began alike still read apart. Third, faint: its folder (the last two
+ * segments, which give way first), the CLI, the turns and the model.
  */
 export function ConversationLines({
   row,
   now,
-  lead,
+  title,
 }: {
   readonly row: ImportableConversation;
   readonly now: number;
-  /** Leads the third line: the ferret's name, on a row that is a ferret. */
-  readonly lead?: string;
+  /** Heads the row in place of the conversation's name: the ferret's name, on a row that is a ferret. */
+  readonly title?: string;
 }) {
   const turns = `${row.turns} ${row.turns === 1 ? 'turn' : 'turns'}`;
+  const { headline, secondary, named } = conversationHeadline(row, title);
   return (
     <>
       <span className="flex min-w-0 items-baseline gap-sm">
-        <span className="min-w-0 flex-1 truncate text-row text-fg" title={row.preview}>
-          {previewText(row)}
+        <span
+          className={cn('min-w-0 flex-1 truncate text-row', named ? 'font-medium text-fg' : 'text-fg')}
+          title={headline}
+          data-conversation-name={named ? '' : undefined}
+        >
+          {headline}
         </span>
         <span className="mono shrink-0 text-meta text-faint" data-conversation-age="">
           {relativeTime(row.lastActivityAt, now)}
         </span>
       </span>
-      {row.latest === undefined ? null : (
+      {secondary === undefined ? null : (
+        <span className="min-w-0 truncate text-meta text-muted" title={secondary} data-conversation-first="">
+          {secondary}
+        </span>
+      )}
+      {named || row.latest === undefined ? null : (
         <span className="min-w-0 truncate text-meta text-muted" title={row.latest} data-conversation-latest="">
           <span className="sr-only">Latest: </span>
           {row.latest}
         </span>
       )}
       <span className="flex min-w-0 items-baseline gap-1 overflow-hidden text-meta text-faint">
-        {lead === undefined ? null : <span className="shrink-0 font-medium text-muted">{lead} ·</span>}
         <span className="max-w-[45%] shrink-0 truncate font-mono" title={row.project}>
           {folderLabel(row.project)}
         </span>
@@ -135,10 +147,6 @@ export function ConversationLines({
     </>
   );
 }
-
-/** The first thing the owner typed, or a placeholder for a conversation that never said anything readable. */
-export const previewText = (row: ImportableConversation): string =>
-  row.preview.trim() === '' ? 'No message preview' : row.preview;
 
 export interface ConversationPickerProps {
   readonly connection: DaemonConnection;
@@ -259,7 +267,7 @@ export function ConversationPicker({
           id={searchId}
           type="search"
           className="kt-input w-full"
-          placeholder="Search messages and folders"
+          placeholder="Search names, messages and folders"
           autoComplete="off"
           data-conversations-search=""
           value={filter.text}

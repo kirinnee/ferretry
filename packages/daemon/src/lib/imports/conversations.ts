@@ -15,6 +15,7 @@ import {
   type SessionStatus,
 } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptParser } from '../transcript/index.ts';
+import { codexIndexNames, transcriptName } from './conversation-name.ts';
 import {
   HANDOFF_READ_MAX_BYTES,
   type HandoffDocuments,
@@ -54,6 +55,8 @@ export interface ConversationFileInfo {
 export interface ConversationFiles {
   entries(directory: string): Promise<readonly ConversationFileEntry[]>;
   info(file: string): Promise<ConversationFileInfo | undefined>;
+  /** At most the last `maxBytes` of a file: where an append-only index keeps its newest lines. */
+  tail(file: string, maxBytes: number): Promise<string | undefined>;
   text(file: string): Promise<string | undefined>;
   /** At most the first `maxBytes` of a file, for documents that are not trusted to be small. */
   head(file: string, maxBytes: number): Promise<string | undefined>;
@@ -102,6 +105,10 @@ export const conversationKey = (harness: Harness, id: string): string => `${harn
 export function conversationResumeArguments(harness: Harness, id: string): readonly string[] {
   return harness === 'claude' ? ['--resume', id] : ['resume', id];
 }
+
+/** Codex's thread-name index, in its home. Only its newest lines are read: it is append-only. */
+const CODEX_INDEX = 'session_index.jsonl';
+const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** How deep Codex nests rollouts (`sessions/YYYY/MM/DD/`), plus one level of slack. */
@@ -165,6 +172,7 @@ export function describeConversation(
   const spoken = spokenMessages(events, documents);
   const first = spoken[0];
   if (first === undefined) return undefined;
+  const name = transcriptName(candidate.harness, text);
   const latest = spoken.at(-1);
   let model: string | undefined;
   let last: string | undefined;
@@ -179,6 +187,7 @@ export function describeConversation(
     id,
     harness: candidate.harness,
     project,
+    ...(name === undefined ? {} : { name }),
     preview: first.slice(0, CONVERSATION_PREVIEW_MAX),
     ...(latest === undefined || latest === first ? {} : { latest: latest.slice(0, CONVERSATION_PREVIEW_MAX) }),
     lastActivityAt: new Date(Number.isNaN(parsedLast) ? modifiedAtMs : parsedLast).toISOString(),
@@ -196,7 +205,7 @@ export function conversationMatcher(query: ConversationImportQuery): (row: Disco
   const since = query.since === undefined ? undefined : Date.parse(query.since);
   return row => {
     if (since !== undefined && Date.parse(row.lastActivityAt) < since) return false;
-    const haystack = `${row.preview}\n${row.latest ?? ''}\n${row.project}`.toLowerCase();
+    const haystack = `${row.name ?? ''}\n${row.preview}\n${row.latest ?? ''}\n${row.project}`.toLowerCase();
     return words.every(word => haystack.includes(word));
   };
 }
@@ -319,6 +328,7 @@ export class ConversationImportService {
     for (const root of this.roots) {
       if (harness !== undefined && root.harness !== harness) continue;
       if (source !== undefined && root.source !== source) continue;
+      const index = await this.indexNames(root);
       for (const candidate of await this.candidates(root)) {
         const described = await this.describe(candidate);
         if (described === undefined) {
@@ -326,14 +336,27 @@ export class ConversationImportService {
           continue;
         }
         const key = conversationKey(described.harness, described.id);
+        const indexed = index.get(described.id);
         if (!seen.has(key))
-          seen.set(key, { ...described, source: candidate.source, relativePath: candidate.relativePath });
+          seen.set(key, {
+            ...described,
+            ...(indexed === undefined ? {} : { name: indexed }),
+            source: candidate.source,
+            relativePath: candidate.relativePath,
+          });
       }
     }
     const conversations = [...seen.values()].sort(
       (left, right) => Date.parse(right.lastActivityAt) - Date.parse(left.lastActivityAt),
     );
     return { conversations, skipped };
+  }
+
+  /** Codex's own name for each thread, which wins over the one a rollout recorded: it is what `resume` reads. */
+  private async indexNames(root: ConversationRoot): Promise<ReadonlyMap<string, string>> {
+    if (root.harness !== 'codex') return new Map();
+    const text = await this.files.tail(join(root.home, CODEX_INDEX), CODEX_INDEX_READ_MAX_BYTES);
+    return text === undefined ? new Map() : codexIndexNames(text);
   }
 
   private async describe(
