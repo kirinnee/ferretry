@@ -217,10 +217,11 @@ describe.skipIf(!contract.enabled)('codex contract: launching an agent runtime',
     'lets a Seatbelt-sandboxed command create a missing writable root, but not one whose parent is missing too',
     async () => {
       const r = await runtime({ projectless: true });
-      const session = path.join(r.root, 'state', 'sessions', 's1');
-      await mkdir(session, { recursive: true });
+      await mkdir(path.join(r.root, 'state', 'sessions', 's1'), { recursive: true });
+      const session = await realpath(path.join(r.root, 'state', 'sessions', 's1'));
       const bare = path.join(session, 'codex-correlation');
       const nested = path.join(session, 'nested', 'unreachable');
+      const stray = path.join(session, 'stray');
       const roots = `sandbox_workspace_write.writable_roots=${JSON.stringify([bare, nested])}`;
       const ran = await run(
         [
@@ -230,16 +231,26 @@ describe.skipIf(!contract.enabled)('codex contract: launching an agent runtime',
           'sandbox_mode="workspace-write"',
           '-c',
           roots,
+          // The sandbox lives under $TMPDIR, which workspace-write makes writable by default; a
+          // Ferretry session directory is under neither it nor /tmp.
+          '-c',
+          'sandbox_workspace_write.exclude_tmpdir_env_var=true',
+          '-c',
+          'sandbox_workspace_write.exclude_slash_tmp=true',
           '--',
           '/bin/sh',
           '-c',
-          'mkdir "$1"; echo "bare=$?"; mkdir -p "$2"; echo "nested=$?"',
+          'mkdir "$1"; echo "stray=$?"; mkdir "$2"; echo "bare=$?"; mkdir -p "$3"; echo "nested=$?"',
           'sh',
+          stray,
           bare,
           nested,
         ],
         { env: r.env, cwd: r.cwd },
       );
+      // That the measurement is isolated: a folder beside them that is no root cannot be made.
+      should(ran.stdout).match(/stray=[1-9]/u, `${ran.stdout}\n${ran.stderr}`);
+      should(existsSync(stray)).be.false();
       // The control: a missing root whose parent exists becomes writable, which is why Ferretry's
       // correlation root sits one level further down.
       should(ran.stdout).match(/bare=0/u, `${ran.stdout}\n${ran.stderr}`);
