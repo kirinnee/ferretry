@@ -68,6 +68,19 @@ claude_version="$(version_of "${FY_CONTRACT_CLAUDE_BIN}")"
 codex_version="$(version_of "${FY_CONTRACT_CODEX_BIN}")"
 echo "🔎 harness contract (${mode}, $(uname -s)): claude ${claude_version} · codex ${codex_version}"
 
+# The pinned versions ARE what Ferretry calls "verified" (VERIFIED_HARNESS_VERSIONS, docs/updating.md):
+# the app warns before an update goes past them. A flake.lock bump that moves the pin must move that
+# constant in the same change, so a mismatch fails here rather than mislabelling every machine.
+if [[ ${mode} == "pinned" ]]; then
+  semver_of() { grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<<"$1" | head -n 1; }
+  verified="$(bun -e "import { VERIFIED_HARNESS_VERSIONS as v } from './packages/protocol/src/lib/harness-update.ts'; console.log(v.claude + ' ' + v.codex);")"
+  read -r verified_claude verified_codex <<<"${verified}"
+  if [[ "$(semver_of "${claude_version}")" != "${verified_claude}" || "$(semver_of "${codex_version}")" != "${verified_codex}" ]]; then
+    echo "❌ the pin measures claude $(semver_of "${claude_version}") · codex $(semver_of "${codex_version}"), but VERIFIED_HARNESS_VERSIONS says claude ${verified_claude} · codex ${verified_codex}; update packages/protocol/src/lib/harness-update.ts with the pin" >&2
+    exit 1
+  fi
+fi
+
 export FY_HARNESS_CONTRACT=1
 set +e
 bun test --timeout 180000 ./packages/fleet/tests/contract/ 2>&1 | tee "${artifacts}/bun-test.log"

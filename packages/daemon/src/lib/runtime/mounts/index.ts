@@ -16,6 +16,7 @@ import { type ConfigChangeSink, configAnnouncedRoutes } from '../../config-files
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
+import type { HarnessUpdateSubsystem } from '../../harness-update/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
@@ -52,10 +53,13 @@ import { type HarnessLoginSubsystem, harnessLoginRoutes } from './fleet-login.ts
 import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
+import { harnessUpdateRoutes } from './harness-update.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
+import { type ModelsSubsystem, modelRoutes } from './models.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
+import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
@@ -69,14 +73,13 @@ import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-atta
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
+import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dialog.ts';
 import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
 import { type SessionHandoverSubsystem, sessionHandoverRoutes } from './session-handover.ts';
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
-import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
-import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dialog.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
@@ -85,7 +88,6 @@ import { sessionRuntimeRoutes } from './session-runtime.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
-import { type ModelsSubsystem, modelRoutes } from './models.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
@@ -331,6 +333,9 @@ export interface MountedSubsystems {
   /** How this machine's daemon was installed, the latest release, and starting an update. The
    *  subsystem owns its check loop as well as its routes — see `mounts/daemon-update.ts`. */
   readonly daemonUpdate: DaemonUpdateSubsystem;
+  /** How this machine's `claude` and `codex` were installed, whether Ferretry verified their versions, and
+   *  updating them on request. No loop: npm is asked only when somebody reads — see `mounts/harness-update.ts`. */
+  readonly harnessUpdate: HarnessUpdateSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -567,6 +572,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...modelRoutes(subsystems.models),
         // Fixed literals under `/v1/daemon`, which no other subsystem uses: none can shadow or be shadowed.
         ...daemonUpdateRoutes(subsystems.daemonUpdate),
+        // Fixed literals under `/v1/harnesses`, which no other subsystem uses: none can shadow or be shadowed.
+        ...harnessUpdateRoutes(subsystems.harnessUpdate),
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.
