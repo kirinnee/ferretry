@@ -12,12 +12,14 @@ export {
   type HostedRelayControlStorageTransaction,
   hostedRelayControlRuntime,
   hostedRelayControlStub,
+  reconcileHostedRelayReservations,
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from './hosted-control.ts';
 export { RelayKeyHandleError, WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
 export {
   HOSTED_CONTROL_OUTAGE_GRACE_MS,
+  HOSTED_RESERVATION_RENEW_MS,
   type RelayEnvironment,
   type RelayObjectState,
   type RelayRuntime,

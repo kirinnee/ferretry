@@ -10,6 +10,9 @@ import should from 'should';
 import type { FileInformation, FileSystemPort } from '../../../src/lib/ports.ts';
 import {
   decideRelayCarrier,
+  RELAY_CAPACITY_REDIAL_BASE_MS,
+  RELAY_CAPACITY_REDIAL_CEILING_MS,
+  relayCapacityRedialDelayMs,
   relayDialUrl,
   relayRedialDelayMs,
   relaySocketIsStale,
@@ -203,3 +206,25 @@ describe("reading the daemon's own identity", () => {
 async function notCalled(): Promise<never> {
   throw new Error('the identity key must not be read for a document that failed to parse');
 }
+
+describe('the redial schedule after a hosted connection ceiling', () => {
+  it('should wait minutes, doubling to a ten-minute window, with equal jitter', () => {
+    should([1, 2, 3, 4, 9].map(refusals => relayCapacityRedialDelayMs(refusals, 1))).deepEqual([
+      RELAY_CAPACITY_REDIAL_BASE_MS,
+      240_000,
+      480_000,
+      RELAY_CAPACITY_REDIAL_CEILING_MS,
+      RELAY_CAPACITY_REDIAL_CEILING_MS,
+    ]);
+    should(relayCapacityRedialDelayMs(1, 0)).equal(RELAY_CAPACITY_REDIAL_BASE_MS / 2);
+    should(relayCapacityRedialDelayMs(1, 0.5)).equal(90_000);
+  });
+
+  it('should be total: an unusable count is the first refusal, an unusable random the bottom of the range', () => {
+    should(relayCapacityRedialDelayMs(Number.NaN, 1)).equal(RELAY_CAPACITY_REDIAL_BASE_MS);
+    should(relayCapacityRedialDelayMs(-3, 1)).equal(RELAY_CAPACITY_REDIAL_BASE_MS);
+    should(relayCapacityRedialDelayMs(Number.POSITIVE_INFINITY, 1)).equal(RELAY_CAPACITY_REDIAL_CEILING_MS);
+    should(relayCapacityRedialDelayMs(1, Number.NaN)).equal(RELAY_CAPACITY_REDIAL_BASE_MS / 2);
+    should(relayCapacityRedialDelayMs(1, 7)).equal(RELAY_CAPACITY_REDIAL_BASE_MS);
+  });
+});

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   type HostedRelayControlNamespace,
+  reconcileHostedRelayReservations,
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from '../../src/adapters/index.ts';
@@ -9,6 +10,8 @@ import { HostedRelayControlDurableObject } from '../../src/adapters/worker.ts';
 import {
   DEFAULT_HOSTED_RELAY_LIMITS,
   HOSTED_RELAY_DAY_MILLISECONDS,
+  HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS,
+  HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS,
   type HostedRelayConfigurationInput,
   type HostedRelayDaemonMetrics,
   initialHostedRelayDaemonMetrics,
@@ -829,5 +832,167 @@ describe('hosted relay control clients', () => {
         'valid_id_0000001',
       ),
     ).be.false();
+  });
+});
+
+describe('hosted relay reservations heal themselves', () => {
+  const reserve = async (harness: ReturnType<typeof makeObject>, reservationId: string, owner = daemonId) =>
+    (await harness.object.fetch(request('/internal/reserve', 'POST', { daemonId: owner, reservationId }))).json();
+  const reconcile = async (harness: ReturnType<typeof makeObject>, live: readonly string[], owner = daemonId) =>
+    harness.object.fetch(request('/internal/reconcile', 'POST', { daemonId: owner, live }));
+  const snapshot = async (harness: ReturnType<typeof makeObject>) => {
+    const response = await harness.object.fetch(request('/operator/metrics'));
+    should(response.status).equal(200);
+    return (await response.json()) as {
+      global: { concurrentConnections: number };
+      daemons: { daemonId: string; concurrentConnections: number }[];
+    };
+  };
+  const reservations = (harness: ReturnType<typeof makeObject>) =>
+    [...harness.storage.values.keys()].filter(key => key.startsWith('reservation:')).sort();
+  const reservationId = (index: number) => `leaked_reservation_${String(index).padStart(2, '0')}`;
+
+  /**
+   * THE INCIDENT, AS IT WAS STORED. Sixteen reservations a rendezvous lost without a close callback,
+   * counters that agree with them, and not one socket anywhere holding any of it. Every dial for
+   * fourteen thousand attempts was `4432`.
+   */
+  async function lockedOut(rows = 16) {
+    const harness = makeObject();
+    await configure(harness);
+    for (let index = 0; index < 16; index += 1) {
+      harness.runtime.clock += 1;
+      should(await reserve(harness, reservationId(index))).deepEqual({ ok: true });
+    }
+    for (let index = rows; index < 16; index += 1) harness.storage.values.delete(`reservation:${reservationId(index)}`);
+    if (rows === 0) return harness;
+    harness.runtime.clock += 1;
+    should(await reserve(harness, 'refused_reservation1')).match({
+      ok: false,
+      code: RELAY_CLOSE_CODES.hostedCapacity,
+      reason: 'hosted relay per-daemon connection ceiling is reached',
+    });
+    return harness;
+  }
+
+  it('should admit the next dial once the stuck reservations outlive their lease, with no operator', async () => {
+    const harness = await lockedOut();
+    harness.runtime.clock += HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
+    should(await reserve(harness, 'recovered_reservation')).deepEqual({ ok: true });
+    should(reservations(harness)).deepEqual(['reservation:recovered_reservation']);
+    const metrics = await snapshot(harness);
+    should(metrics.global.concurrentConnections).equal(1);
+    should(metrics.daemons[0]?.concurrentConnections).equal(1);
+  });
+
+  it('should admit at once when the counters say full but no reservation backs them', async () => {
+    // Counters that drifted on their own: no row to reclaim, only a cache to correct.
+    const harness = await lockedOut(0);
+    should(await reserve(harness, 'recovered_reservation')).deepEqual({ ok: true });
+    should((await snapshot(harness)).global.concurrentConnections).equal(1);
+  });
+
+  it('should keep refusing a ceiling that live, leased reservations really fill', async () => {
+    const harness = await lockedOut();
+    harness.runtime.clock += HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS - 100;
+    should(await reserve(harness, 'still_refused_reserv')).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    should(reservations(harness)).have.length(16);
+    should((await snapshot(harness)).global.concurrentConnections).equal(16);
+  });
+
+  it('should reclaim at once what the rendezvous says no socket holds, renew what it does, and spare a handoff', async () => {
+    const harness = await lockedOut();
+    harness.runtime.clock += HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS;
+    should(await reserve(harness, 'other_daemon_reserv1', otherDaemonId)).deepEqual({ ok: true });
+    const response = await reconcile(harness, [reservationId(0)]);
+    should(response.status).equal(200);
+    should(await response.json()).deepEqual({ reclaimed: 15, corrected: 2 });
+    should(reservations(harness)).deepEqual([`reservation:${reservationId(0)}`, 'reservation:other_daemon_reserv1']);
+    should(harness.storage.values.get(`reservation:${reservationId(0)}`)).match({ confirmedAt: harness.runtime.clock });
+    const metrics = await snapshot(harness);
+    should(metrics.global.concurrentConnections).equal(2);
+    should(metrics.daemons.map(daemon => daemon.concurrentConnections)).deepEqual([1, 1]);
+
+    // A reservation the Worker just took is not in the rendezvous's report yet, and must survive it.
+    harness.runtime.clock += 1;
+    should(await reserve(harness, 'in_flight_reservation')).deepEqual({ ok: true });
+    should(await (await reconcile(harness, [reservationId(0)])).json()).deepEqual({ reclaimed: 0, corrected: 0 });
+    should(reservations(harness)).containEql('reservation:in_flight_reservation');
+
+    // A renewed reservation outlives the lease it would otherwise have run out of.
+    harness.runtime.clock += HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS - 1;
+    should(await reserve(harness, 'unaffected_reservation', otherDaemonId)).deepEqual({ ok: true });
+    should(reservations(harness)).containEql(`reservation:${reservationId(0)}`);
+  });
+
+  it('should release a reservation whose counters disagree instead of keeping it for ever', async () => {
+    const harness = makeObject();
+    await configure(harness);
+    harness.runtime.clock += 1;
+    should(await reserve(harness, 'drifted_reservation1')).deepEqual({ ok: true });
+    const key = `metrics:daemon:${daemonId}`;
+    harness.storage.values.set(key, { ...(harness.storage.values.get(key) as object), concurrentConnections: 0 });
+    harness.runtime.clock += 1;
+    const released = await harness.object.fetch(
+      request('/internal/release', 'POST', { reservationId: 'drifted_reservation1' }),
+    );
+    should(released.status).equal(200);
+    should(reservations(harness)).deepEqual([]);
+    should((await snapshot(harness)).global.concurrentConnections).equal(0);
+
+    // A reservation whose daemon row vanished is the same: the row goes, and the global count with it.
+    should(await reserve(harness, 'orphaned_reservation')).deepEqual({ ok: true });
+    harness.storage.values.delete(key);
+    harness.storage.values.set('metrics:global', {
+      ...(harness.storage.values.get('metrics:global') as object),
+      trackedDaemons: 0,
+    });
+    should(
+      (await harness.object.fetch(request('/internal/release', 'POST', { reservationId: 'orphaned_reservation' })))
+        .status,
+    ).equal(200);
+    should(reservations(harness)).deepEqual([]);
+    should(
+      (harness.storage.values.get('metrics:global') as { concurrentConnections: number }).concurrentConnections,
+    ).equal(0);
+  });
+
+  it('should fail an audit closed on a reservation it cannot read, and leave the refusal standing', async () => {
+    const harness = await lockedOut();
+    harness.storage.values.set('reservation:unreadable_reservation', { reservationId: 'nope' });
+    harness.runtime.clock += HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
+    should(await reserve(harness, 'still_refused_reserv')).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    should((await reconcile(harness, [])).status).equal(503);
+    should(reservations(harness)).have.length(17);
+  });
+
+  it('should reject a malformed report, and answer an unconfigured relay without touching anything', async () => {
+    const harness = makeObject();
+    should((await harness.object.fetch(request('/internal/reconcile', 'POST', { daemonId }))).status).equal(400);
+    should(await (await reconcile(harness, [])).json()).deepEqual({ reclaimed: 0, corrected: 0 });
+    should(harness.storage.values.size).equal(0);
+  });
+
+  it('should carry a report through the named singleton and say when it could not', async () => {
+    const harness = await lockedOut();
+    harness.runtime.clock += HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS;
+    const namespace: HostedRelayControlNamespace = {
+      idFromName: name => name,
+      get: () => ({ fetch: request => harness.object.fetch(request) }),
+    };
+    should(await reconcileHostedRelayReservations(namespace, daemonId, [])).deepEqual({ reclaimed: 16, corrected: 2 });
+    for (const failing of [
+      async () => new Response(null, { status: 503 }),
+      async () => Response.json({ reclaimed: -1 }),
+      async () => Promise.reject(new Error('down')),
+    ]) {
+      should(
+        await reconcileHostedRelayReservations(
+          { idFromName: name => name, get: () => ({ fetch: failing }) },
+          daemonId,
+          [],
+        ),
+      ).be.null();
+    }
   });
 });

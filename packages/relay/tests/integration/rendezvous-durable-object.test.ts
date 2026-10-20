@@ -2,14 +2,18 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   HOSTED_CONTROL_OUTAGE_GRACE_MS,
+  HOSTED_RESERVATION_RENEW_MS,
+  HostedRelayControlDurableObject,
   type RelayEnvironment,
   type RelayRuntime,
   RendezvousDurableObject,
+  relayFetch,
   workersRuntime,
 } from '../../src/adapters/index.ts';
 import {
   type ControlMessage,
   claimContextForChallenge,
+  DEFAULT_HOSTED_RELAY_LIMITS,
   decodeControlMessage,
   encodeClaim,
   encodeControlMessage,
@@ -17,6 +21,7 @@ import {
   FRAME_KINDS,
   fromBase64UrlFixed,
   HEARTBEAT_GRACE_SECONDS,
+  HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS,
   initialRendezvousState,
   NONCE_BYTES,
   RELAY_CLOSE_CODES,
@@ -28,6 +33,7 @@ import {
   sessionIdFromBytes,
   signRendezvousClaim,
 } from '../../src/lib/index.ts';
+import { FakeHostedRelayControlStorage } from '../support/hosted-control-fakes.ts';
 import { newDaemonIdentity, relayCrypto, stubbedCrypto } from '../support/identities.ts';
 import { FakeObjectState, FakeSocket, testRuntime } from '../support/workers-fakes.ts';
 
@@ -985,5 +991,217 @@ describe('rendezvous durable object: a claim the stored state lost', () => {
 
     await evict(harness).object.fetch(socketRequest(identity.daemonId, 'daemon', undefined, probing));
     should(controlOf(harness.objectState.sockets.at(-1)?.drain()[0])).match({ t: 'challenge' });
+  });
+});
+
+describe('hosted reservations a rendezvous lost without a close', () => {
+  /** A rendezvous, a real control object and the real Worker in front of both, on one clock. */
+  async function hostedRelay() {
+    const storage = new FakeHostedRelayControlStorage();
+    let clock = 1_000;
+    const control = new HostedRelayControlDurableObject({ storage }, {}, { now: () => clock });
+    const configured = await control.fetch(
+      new Request('https://relay-control.invalid/operator/configuration', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: 1, relayUrl: `wss://${host}`, limits: DEFAULT_HOSTED_RELAY_LIMITS }),
+      }),
+    );
+    should(configured.status).equal(200);
+    const reconciles: unknown[] = [];
+    const objectState = new FakeObjectState();
+    const runtime = testRuntime({ upgradeResponse: () => new Response(null, { status: 101 }) });
+    Object.defineProperty(runtime, 'clock', { get: () => clock, set: value => (clock = value) });
+    const relay: { object: RendezvousDurableObject } = { object: undefined as unknown as RendezvousDurableObject };
+    const value: RelayEnvironment = {
+      RELAY_MODE: 'hosted',
+      RELAY_CONTROL: {
+        idFromName: name => name,
+        get: () => ({
+          fetch: async request => {
+            if (new URL(request.url).pathname === '/internal/reconcile') reconciles.push(await request.clone().json());
+            return control.fetch(request);
+          },
+        }),
+      },
+      RENDEZVOUS: { idFromName: name => name, get: () => ({ fetch: request => relay.object.fetch(request) }) },
+    };
+    relay.object = new RendezvousDurableObject(objectState, value, runtime);
+    const counts = () => {
+      const global = storage.values.get('metrics:global') as { concurrentConnections: number };
+      return {
+        global: global.concurrentConnections,
+        reservations: [...storage.values.keys()].filter(key => key.startsWith('reservation:')).length,
+      };
+    };
+    /** Dial through the Worker, as a phone or the daemon would. The newest socket is the one it got. */
+    const dial = async (daemonId: string, role: 'daemon' | 'client') => {
+      const before = objectState.sockets.length;
+      should((await relayFetch(socketRequest(daemonId, role), value, runtime)).status).equal(101);
+      const refusal = runtime.pairs.at(-1)?.server;
+      // A refusal is upgraded too, so it can be explained; admission is the rendezvous accepting a socket.
+      return objectState.sockets.length > before
+        ? { admitted: true as const, socket: objectState.sockets[before] }
+        : { admitted: false as const, code: refusal?.closed?.code, reason: refusal?.closed?.reason };
+    };
+    return {
+      storage,
+      objectState,
+      runtime,
+      relay,
+      value,
+      reconciles,
+      counts,
+      dial,
+      advance: (milliseconds: number) => {
+        clock += milliseconds;
+      },
+    };
+  }
+
+  /** Claim the rendezvous through the Worker with a real daemon key. */
+  async function claimThroughWorker(
+    hosted: Awaited<ReturnType<typeof hostedRelay>>,
+    known?: Awaited<ReturnType<typeof newDaemonIdentity>>,
+  ) {
+    const identity = known ?? (await newDaemonIdentity());
+    const dialled = await hosted.dial(identity.daemonId, 'daemon');
+    if (!dialled.admitted || dialled.socket === undefined) throw new Error('the daemon was not admitted');
+    const challengeMessage = controlOf(dialled.socket.drain()[0]);
+    if (challengeMessage?.t !== 'challenge') throw new Error('expected a challenge');
+    const challenge = fromBase64UrlFixed(challengeMessage.nonce, NONCE_BYTES);
+    if (challenge === null) throw new Error('challenge nonce is malformed');
+    const context = claimContextForChallenge(identity.daemonId, host, challengeMessage.host, challenge);
+    if (context === null) throw new Error('the daemon refused the host it was challenged for');
+    const claim = encodeClaim(await signRendezvousClaim(relayCrypto, identity, context));
+    await hosted.relay.object.webSocketMessage(
+      dialled.socket,
+      bytesOf({
+        kind: FRAME_KINDS.control,
+        sessionId: RENDEZVOUS_SESSION_ID,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'claim', protocol: RELAY_PROTOCOL_ID, ...claim }),
+      }),
+    );
+    should(controlOf(dialled.socket.drain()[0])).match({ t: 'claimed' });
+    return { identity, socket: dialled.socket };
+  }
+
+  it('should replay the 2026-10-19 lockout and let the daemon back in on the next sweep', async () => {
+    const hosted = await hostedRelay();
+    const identity = await newDaemonIdentity();
+    // Four times over: the daemon holds the slot with three phones on it, then Cloudflare resets the
+    // object — every socket gone, and not one `webSocketClose` delivered. Each reset strands four.
+    for (let reset = 0; reset < 4; reset += 1) {
+      await claimThroughWorker(hosted, identity);
+      for (let phone = 0; phone < 3; phone += 1)
+        should((await hosted.dial(identity.daemonId, 'client')).admitted).be.true();
+      hosted.objectState.sockets.length = 0;
+      hosted.relay.object = new RendezvousDurableObject(hosted.objectState, hosted.value, hosted.runtime);
+      hosted.advance(4_000);
+    }
+    should(hosted.counts()).deepEqual({ global: 16, reservations: 16 });
+
+    hosted.advance(4_000);
+    should(await hosted.dial(identity.daemonId, 'daemon')).match({
+      admitted: false,
+      code: RELAY_CLOSE_CODES.hostedCapacity,
+      reason: 'hosted relay per-daemon connection ceiling is reached',
+    });
+
+    // The alarm the dead sockets left behind still fires. The rendezvous reports what it holds — nothing —
+    // and the control object takes back every reservation past the handoff grace.
+    hosted.advance(HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS);
+    await hosted.relay.object.alarm();
+    should(hosted.reconciles.at(-1)).deepEqual({ daemonId: identity.daemonId, live: [] });
+    should(hosted.counts()).deepEqual({ global: 0, reservations: 0 });
+
+    const back = await claimThroughWorker(hosted, identity);
+    should(hosted.counts()).deepEqual({ global: 1, reservations: 1 });
+    // And the ordinary close still gives that one back, so the count returns to zero.
+    await hosted.relay.object.webSocketClose(back.socket);
+    should(hosted.counts()).deepEqual({ global: 0, reservations: 0 });
+  });
+
+  it('should bring the count back to zero after every refused or departed arrival', async () => {
+    const hosted = await hostedRelay();
+    const identity = await newDaemonIdentity();
+    // No daemon yet: the phone is admitted by the Worker, refused 4404 by the rendezvous, and released.
+    await hosted.dial(identity.daemonId, 'client');
+    should(hosted.counts()).deepEqual({ global: 0, reservations: 0 });
+    const { socket } = await claimThroughWorker(hosted, identity);
+    // A second daemon socket while the first is live and answering is refused, and gives its slot back.
+    hosted.objectState.lastSeen.set(socket, new Date(hosted.runtime.clock));
+    const second = await hosted.dial(identity.daemonId, 'daemon');
+    if (second.admitted && second.socket !== undefined) await hosted.relay.object.webSocketClose(second.socket);
+    should(hosted.counts()).deepEqual({ global: 1, reservations: 1 });
+    await hosted.relay.object.webSocketError(socket);
+    should(hosted.counts()).deepEqual({ global: 0, reservations: 0 });
+  });
+
+  it('should renew the reservations its live sockets carry, and only reclaim the ones they do not', async () => {
+    const hosted = await hostedRelay();
+    const { identity, socket } = await claimThroughWorker(hosted);
+    const phone = await hosted.dial(identity.daemonId, 'client');
+    if (!phone.admitted || phone.socket === undefined) throw new Error('the phone was not admitted');
+    // The phone's socket is lost on its own; the daemon's is still held.
+    hosted.objectState.sockets.splice(hosted.objectState.sockets.indexOf(phone.socket), 1);
+    hosted.advance(HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS);
+    hosted.objectState.lastSeen.set(socket, new Date(hosted.runtime.clock));
+    await hosted.relay.object.alarm();
+    should(hosted.counts()).deepEqual({ global: 1, reservations: 1 });
+    const reservationId = (socket.deserializeAttachment() as { reservationId: string }).reservationId;
+    should(hosted.reconciles).deepEqual([{ daemonId: identity.daemonId, live: [reservationId] }]);
+    should(hosted.storage.values.get(`reservation:${reservationId}`)).match({ confirmedAt: hosted.runtime.clock });
+    should(socket.closed).be.null();
+  });
+
+  it('should renew at most once a minute and try again on the next sweep when the control object is down', async () => {
+    const hosted = await hostedRelay();
+    const { socket } = await claimThroughWorker(hosted);
+    const sweep = async () => {
+      hosted.objectState.lastSeen.set(socket, new Date(hosted.runtime.clock));
+      await hosted.relay.object.alarm();
+    };
+    await sweep();
+    hosted.advance(HOSTED_RESERVATION_RENEW_MS - 1);
+    await sweep();
+    should(hosted.reconciles).have.length(1);
+    hosted.advance(1);
+    await sweep();
+    should(hosted.reconciles).have.length(2);
+
+    // A renewal the control object did not take is not remembered as done, so the next sweep asks again.
+    const control = hosted.value.RELAY_CONTROL;
+    if (control === undefined) throw new Error('hosted relay has no control binding');
+    const failing = new RendezvousDurableObject(
+      hosted.objectState,
+      {
+        ...hosted.value,
+        RELAY_CONTROL: {
+          idFromName: name => name,
+          get: id => ({
+            fetch: async request =>
+              new URL(request.url).pathname === '/internal/reconcile'
+                ? new Response(null, { status: 503 })
+                : control.get(id).fetch(request),
+          }),
+        },
+      },
+      hosted.runtime,
+    );
+    hosted.relay.object = failing;
+    await sweep();
+    hosted.relay.object = new RendezvousDurableObject(hosted.objectState, hosted.value, hosted.runtime);
+    await sweep();
+    should(hosted.reconciles).have.length(3);
+  });
+
+  it('should never report reservations from a self-hosted rendezvous', async () => {
+    const harness = makeObject();
+    const { daemonSocket } = await claimRendezvous(harness);
+    harness.objectState.lastSeen.set(daemonSocket, new Date(harness.runtime.clock));
+    await harness.object.alarm();
+    should(daemonSocket.closed).be.null();
   });
 });

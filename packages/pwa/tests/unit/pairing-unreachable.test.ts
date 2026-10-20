@@ -24,13 +24,15 @@ describe('describePairingUnreachable', () => {
       describePairingUnreachable([{ kind: 'relay', address: RELAY, ...(code === undefined ? {} : { code }) }]);
     expect(relay(RELAY_CLOSE_CODES.daemonAbsent)).toContain('the machine is not connected to it right now');
     expect(relay(RELAY_CLOSE_CODES.hostedDisabled)).toContain('is switched off right now');
-    for (const busy of [
-      RELAY_CLOSE_CODES.rendezvousBusy,
-      RELAY_CLOSE_CODES.hostedCapacity,
-      RELAY_CLOSE_CODES.hostedBandwidth,
-    ]) {
+    for (const busy of [RELAY_CLOSE_CODES.rendezvousBusy, RELAY_CLOSE_CODES.hostedBandwidth]) {
       expect(relay(busy)).toContain('is busy right now');
     }
+    // A full connection count is said as what it is, never as a busy relay to wait a minute for.
+    expect(relay(RELAY_CLOSE_CODES.hostedCapacity)).toContain(
+      'connection limit for this machine, or for the relay as a whole, is full',
+    );
+    expect(relay(RELAY_CLOSE_CODES.hostedCapacity)).toContain('repairs that by itself within about ten minutes');
+    expect(relay(RELAY_CLOSE_CODES.hostedCapacity)).not.toContain('busy right now');
     expect(relay(RELAY_CLOSE_CODES.heartbeatTimeout)).toContain('did not answer in time');
     expect(relay(1006)).toContain('could not be reached, or it failed on its side');
     expect(relay()).toContain('could not be reached, or it failed on its side');
