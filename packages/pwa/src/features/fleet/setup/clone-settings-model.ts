@@ -15,11 +15,14 @@
  *   reviewed `machine.settings` change. `machine.yaml` is NOT copied whole: its advanced block names
  *   this machine's own paths and tools.
  *
- * SECRETS AND LOGIN TOKENS NEVER TRAVEL WITH THE SETTINGS — no route returns a value, and a secret is copied
- * only by name, on its own (docs/secrets.md). What travels can still NEED one,
- * so the preview lists every secret and sign-in the copied settings need ("needs: JEV_API_KEY,
- * GROQ_API_KEY, Claude Code login…"), each marked when this machine already holds it, with a field to
- * add it now.
+ * OWNER DECISION 2026-10-20: "don't copy sign-in, copy env var credentials only" (docs/secrets.md).
+ * An API-key login (an environment login: GLM, DeepSeek, OpenRouter, Bedrock keys…) travels as plain
+ * variables and secret NAMES, and the keys it names follow in ONE sealed copy the source confirms with a
+ * passkey, so the cloned runtime works on arrival. A Claude Code or Codex SIGN-IN never travels: it
+ * arrives as an empty slot the person signs in to on this machine, because a refresh token living on two
+ * machines would sign one of them out. The settings files carry no secret value either way; what they
+ * NEED is listed ("needs: JEV_API_KEY, GROQ_API_KEY, Claude Code login…"), each marked when this machine
+ * already holds it, with a field to add it now.
  *
  * Pure: the source's files, bundle and machine view in; the items, the needs and the change out.
  */
@@ -28,6 +31,7 @@ import {
   type FleetAccountChange,
   type FleetCloneBundle,
   type FleetMachineView,
+  isSignInSecretName,
   type SpeedupProvider,
   type SpeedupsView,
   secretReferencesIn,
@@ -36,6 +40,18 @@ import { countWords, SETUP_HARNESS_NAMES } from './setup-words.ts';
 
 /** One thing Clone can copy, with the id the checkbox and the result use. */
 export type CloneItemId = 'fleet' | 'warden' | 'learning' | 'voice' | 'controls';
+
+/** What a Done line is about: an item the person ticked, or the sealed copy of the keys that came with it. */
+export type CloneOutcomeId = CloneItemId | 'keys';
+
+/** The part of an item an outcome sentence needs. */
+export interface CloneOutcomeItem {
+  readonly id: CloneOutcomeId;
+  readonly label: string;
+}
+
+/** The keys that travel with the logins, as a result line (it is not a checkbox: the logins bring it). */
+export const CLONE_KEYS_ITEM: CloneOutcomeItem = { id: 'keys', label: 'API keys' };
 
 export interface CloneItem {
   readonly id: CloneItemId;
@@ -72,7 +88,8 @@ export const CLONE_ITEMS: readonly CloneItem[] = [
   {
     id: 'fleet',
     label: 'Profiles, components, runtimes and logins',
-    detail: 'Logins travel as plain variables and secret NAMES only; a signed-in login arrives empty.',
+    detail:
+      'An API-key login travels with its key, sealed, for one passkey. A Claude Code or Codex sign-in does not: you sign in on the new machine.',
   },
   ...CLONE_SETTINGS_FILES,
   {
@@ -229,8 +246,7 @@ export const cloneNeeds = (
       for (const name of secretReferencesIn(file.content)) addSecret(name, file.path, name);
     for (const credential of bundle.credentials) {
       if (credential.store === 'environment') {
-        for (const value of Object.values(credential.env ?? {}))
-          for (const name of secretReferencesIn(value)) addSecret(name, `login ${credential.id}`, name);
+        for (const name of loginSecretNames(credential)) addSecret(name, `login ${credential.id}`, name);
         continue;
       }
       signIns.push({
@@ -245,6 +261,69 @@ export const cloneNeeds = (
   }
   return [...secrets.values(), ...signIns];
 };
+
+/** The secret names an environment login names anywhere: its variables and, for a two-CLI login, either half. */
+const loginSecretNames = (credential: FleetCloneBundle['credentials'][number]): readonly string[] =>
+  secretReferencesIn(JSON.stringify([credential.env ?? {}, credential.claude ?? {}, credential.codex ?? {}]));
+
+/** One login the copy brings, by what it needs to work on this machine. */
+export type CloneLogin =
+  | {
+      /** An environment login: its variables copy, and its keys follow sealed. */
+      readonly kind: 'api-key';
+      readonly id: string;
+      readonly harness: FleetCloneBundle['credentials'][number]['harness'];
+      /** "glm-env", or the login's own label. */
+      readonly name: string;
+      /** The keys it names, each marked when this machine already holds it. */
+      readonly keys: readonly { readonly name: string; readonly held: boolean }[];
+    }
+  | {
+      /** A Claude Code or Codex sign-in: it arrives as an empty slot, and the person signs in here. */
+      readonly kind: 'sign-in';
+      readonly id: string;
+      readonly harness: FleetCloneBundle['credentials'][number]['harness'];
+      readonly name: string;
+    };
+
+/** Every login in the bundle, API-key logins first, each once. */
+export const cloneLogins = (bundle: FleetCloneBundle | null, held: readonly string[]): readonly CloneLogin[] => {
+  if (bundle === null) return [];
+  const apiKeys: CloneLogin[] = [];
+  const signIns: CloneLogin[] = [];
+  for (const credential of bundle.credentials) {
+    const name = credential.label ?? credential.email ?? credential.id;
+    if (credential.store === 'environment')
+      apiKeys.push({
+        kind: 'api-key',
+        id: credential.id,
+        harness: credential.harness,
+        name,
+        keys: loginSecretNames(credential).map(key => ({ name: key, held: held.includes(key) })),
+      });
+    else signIns.push({ kind: 'sign-in', id: credential.id, harness: credential.harness, name });
+  }
+  return [...apiKeys, ...signIns];
+};
+
+/**
+ * The keys to seal and send with this copy: each secret the copied settings need that this machine does
+ * not hold and the SOURCE does, never a sign-in token. `source` is the source's list of names, or `null`
+ * when it could not be read — then nothing is guessed and no key is sent.
+ */
+export const keysToCopy = (needs: readonly CloneNeed[], source: readonly string[] | null): readonly string[] =>
+  source === null
+    ? []
+    : needs
+        .filter(
+          (need): need is CloneNeed & { readonly secretName: string } =>
+            need.kind === 'secret' &&
+            !need.held &&
+            need.secretName !== undefined &&
+            source.includes(need.secretName) &&
+            !isSignInSecretName(need.secretName),
+        )
+        .map(need => need.secretName);
 
 /** "JEV_API_KEY, GROQ_API_KEY, Claude Code login (claude-work)" — what is not held yet, or `null`. */
 export const needsSentence = (needs: readonly CloneNeed[]): string | null => {
@@ -270,7 +349,7 @@ export type CloneItemOutcome =
   | { readonly kind: 'refused'; readonly reason: string };
 
 /** The Done line for one item's outcome. */
-export const outcomeSentence = (item: CloneItem, outcome: CloneItemOutcome): string => {
+export const outcomeSentence = (item: CloneOutcomeItem, outcome: CloneItemOutcome): string => {
   switch (outcome.kind) {
     case 'copied':
       return `${item.label}: copied, in effect now.`;

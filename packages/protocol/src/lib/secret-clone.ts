@@ -21,6 +21,7 @@
 
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
+import { isSignInSecretName } from './mcp-oauth.ts';
 import { DaemonIdSchema } from './pairing.ts';
 import { MAX_SECRETS_PER_DAEMON, SecretNameSchema } from './secrets.ts';
 
@@ -47,9 +48,25 @@ export const SecretImportIdSchema = z
   .regex(/^fy_secret_import_[A-Za-z0-9_-]{22}$/u, 'invalid secret import id');
 export type SecretImportId = z.infer<typeof SecretImportIdSchema>;
 
+/**
+ * The name of a secret a copy MAY carry: a key a person stored, never a sign-in (docs/secrets.md,
+ * "Copying secrets to another machine"). Owner decision 2026-10-20: "don't copy sign-in, copy env var
+ * credentials only". A sign-in token is half of a login whose refresh half cannot travel, and a refresh
+ * token that lived on two machines would sign one of them out the first time the other refreshed.
+ *
+ * It is a BRAND, so everything downstream of a copy — the request, the bundle's plaintext, the names
+ * the target files — is typed to hold only these, and a sign-in's name cannot reach a bundle by
+ * forgetting a check: there is no other way to make one than to parse through here.
+ */
+export const CloneableSecretNameSchema = SecretNameSchema.refine(
+  name => !isSignInSecretName(name),
+  'a sign-in is not copied: sign in on the other machine instead',
+).brand<'CloneableSecretName'>();
+export type CloneableSecretName = z.infer<typeof CloneableSecretNameSchema>;
+
 /** Which secrets to copy: names only, each once, at least one. */
 export const SecretCloneNamesSchema = z
-  .array(SecretNameSchema)
+  .array(CloneableSecretNameSchema)
   .min(1)
   .max(MAX_SECRETS_PER_DAEMON)
   .refine(names => new Set(names).size === names.length, 'each secret is named once')
@@ -119,7 +136,7 @@ export const SecretImportResultSchema = z.strictObject({
   importId: SecretImportIdSchema,
   sourceDaemonId: DaemonIdSchema,
   imported: SecretCloneNamesSchema,
-  replaced: z.array(SecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
+  replaced: z.array(CloneableSecretNameSchema).max(MAX_SECRETS_PER_DAEMON).readonly(),
 });
 export type SecretImportResult = z.infer<typeof SecretImportResultSchema>;
 

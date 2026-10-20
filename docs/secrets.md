@@ -137,10 +137,6 @@ still there.
 
 ## What is not built yet
 
-- **Copying a sign-in (Claude / Codex login tokens) — GAP, undecided.** A copied refresh token would live
-  on two machines, and a provider that rotates refresh tokens signs one of them out when the other
-  refreshes. A secret copy carries stored secrets only; the extension point is marked on the bundle's
-  plaintext schema in `packages/daemon/src/lib/secrets/clone.ts`.
 - **`fy secret clone --from <machine>` — GAP.** Copying is browser-only for now. The command line
   holds one credential, this host's admin token, and has no way to reach a second daemon; giving it one
   is a design of its own (it would need to be paired, like a browser). Copy from the PWA.
@@ -156,7 +152,46 @@ from another machine** offers **Copy secrets from <machine>…**; on any machine
 Copy to another machine…** does the same from the other end. Either way a person picks the secrets by
 name — each row says where that machine's configuration uses it, and whether the receiving machine
 already holds one (it is replaced) — and the sending machine asks for a **passkey for that copy**.
-Secrets still never travel as a side effect of copying configuration: only the names a person ticked.
+Secrets never travel as a side effect of copying configuration. The one exception is the keys of the **API-key
+logins** being cloned, which are named in the preview and follow in the same sealed copy — see
+[Sign-ins are not copied; API keys are](#sign-ins-are-not-copied-api-keys-are).
+
+### Sign-ins are not copied; API keys are
+
+**Owner decision, 2026-10-20: "don't copy sign-in, copy env var credentials only".** Cloning a machine
+brings across everything that makes a runtime work by key, and nothing that makes it work by a signed-in
+account.
+
+| What                                                                                                  | Clone does                                                                                                         |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| An **API-key (environment) login** — GLM, DeepSeek, MiniMax, OpenRouter, a Bedrock key, a LiteLLM key | The login copies as its file (plain variables, `${secret:NAME}` names) and its **keys follow, sealed**, below.     |
+| A key a copied setting spends — the Warden's Jev key, the Groq or Cerebras clean-up key               | The same sealed copy: the preview lists it under the keys that travel.                                             |
+| A **sign-in** — Claude Code's login, Codex's ChatGPT login, a keychain item, `auth.json`              | **Never.** It arrives as an empty slot marked **Sign in on _machine_**, with a Sign in button for each login.      |
+| An MCP server's OAuth access token (`MCP_…_ACCESS`), the one sign-in the vault itself holds           | **Never.** The copy panel lists it and does not let it be ticked; sign in to that server again on the new machine. |
+
+**Why a sign-in is excluded.** A sign-in is a refresh token, and a provider that rotates refresh tokens
+(Anthropic and OpenAI both do) invalidates the old one the first time the new one is used. A login copied to
+a second machine would therefore sign the _first_ machine out the next time either one refreshed — a copy that
+looks like it worked and breaks the original. An API key has no such state: the same key is valid on both
+machines, which is also why a key being on two machines is an ordinary thing to do and is the owner's call.
+
+**It is a type, not a check.** A secret copy is built from `CloneableSecretName`
+(`packages/protocol/src/lib/secret-clone.ts`), a branded name that cannot be made from an MCP sign-in token's
+name. The export request, the bundle's authenticated names, its sealed plaintext and the target's filing are
+all typed to it, so no code path can put a sign-in in a bundle by forgetting a check. Claude Code and Codex
+logins are files in a credential store, not vault entries, so there is no name to put in a bundle at all.
+A bundle that arrives carrying a sign-in token's name anyway — from a daemon that was modified — is refused
+whole by the receiving machine (`bundle_invalid`), and nothing is filed.
+
+**What the person sees.** The Clone preview (Settings › a machine › Setup, and New machine setup's _Start
+from_ step) has a **Logins and keys** section: each API-key login reads _Copies with its key_; each sign-in
+reads _Sign in on *machine*_ with the reason; one box, ticked, reads _Copy *n* API keys with the logins_. Pressing
+Copy applies the clone and then runs ONE sealed copy for those keys — **one passkey on the sending machine for
+all of them** — so the cloned runtime works on arrival. Unticking the box copies the login without its key; the
+preview's needs list still offers a field for each. If the passkey is declined the clone is kept, the Done page
+says the keys were not copied, and the _Copy secrets from…_ list offers them again. Only keys the sending machine
+actually holds and the receiving one does not are asked for; a key already on the receiving machine is never
+replaced by Clone.
 
 ### How it works
 

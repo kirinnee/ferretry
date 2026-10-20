@@ -1,6 +1,8 @@
 import { beforeAll, describe, it } from 'bun:test';
 import {
+  CloneableSecretNameSchema,
   MAX_SECRETS_PER_DAEMON,
+  mcpOAuthSecretNames,
   type SealedSecretBundle,
   type SecretCloneRefusal,
   type SecretImportOffer,
@@ -23,6 +25,9 @@ import { FakeSecretCipher, MemorySecretDocuments } from '../runtime/mounts/suppo
 const crypto_ = new WebCryptoRelayCrypto();
 const START = Date.parse('2026-10-20T10:00:00.000Z');
 const VALUE = 'sk-live-0123456789';
+
+/** Names as a copy takes them: parsed, so a sign-in's cannot be written here by accident. */
+const named = (...names: string[]) => names.map(name => CloneableSecretNameSchema.parse(name));
 
 /** A clock a test moves by hand. */
 class Clock {
@@ -135,7 +140,7 @@ describe('copying secrets between machines', () => {
     const offer = await target.imports.open();
 
     // Act
-    const exported = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const exported = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
     const result = await target.imports.complete(offer.importId, exported.bundle);
 
     // Assert — the bundle names its contents and carries no value in clear.
@@ -158,7 +163,7 @@ describe('copying secrets between machines', () => {
     const { source, target } = await pair();
     await target.directory.put('API_KEY', 'old-value-here');
     const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY', 'DB_PASSWORD'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'DB_PASSWORD') });
 
     // Act
     const result = await target.imports.complete(offer.importId, bundle);
@@ -172,7 +177,7 @@ describe('copying secrets between machines', () => {
     // Arrange
     const { source, target } = await pair();
     const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
     await target.imports.complete(offer.importId, bundle);
 
     // Act
@@ -186,7 +191,7 @@ describe('copying secrets between machines', () => {
     // Arrange
     const { source, target } = await pair();
     const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
 
     // Act
     const tampered = await refusal(
@@ -202,7 +207,7 @@ describe('copying secrets between machines', () => {
 
   it('should refuse a bundle whose authenticated header was edited', async () => {
     for (const edit of [
-      (bundle: SealedSecretBundle) => ({ ...bundle, names: ['DB_PASSWORD'] }),
+      (bundle: SealedSecretBundle) => ({ ...bundle, names: named('DB_PASSWORD') }),
       (bundle: SealedSecretBundle) => ({ ...bundle, sourceDaemonId: strangerIdentity.daemonId }),
       (bundle: SealedSecretBundle) => ({ ...bundle, nonce: flipped(bundle.nonce) }),
       (bundle: SealedSecretBundle) => ({ ...bundle, ephemeralKey: 'short' }),
@@ -211,7 +216,7 @@ describe('copying secrets between machines', () => {
       // Arrange
       const { source, target } = await pair();
       const offer = await target.imports.open();
-      const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+      const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
 
       // Act
       const answer = await refusal(target.imports.complete(offer.importId, edit(bundle) as SealedSecretBundle));
@@ -226,7 +231,7 @@ describe('copying secrets between machines', () => {
     const { source, target } = await pair();
     const first = await target.imports.open();
     const second = await target.imports.open();
-    const { bundle } = await source.exports.seal(first.importId, { offer: first, names: ['API_KEY'] });
+    const { bundle } = await source.exports.seal(first.importId, { offer: first, names: named('API_KEY') });
 
     // Act — presented for the second import, whose key never sealed it.
     const answer = await refusal(target.imports.complete(second.importId, { ...bundle, importId: second.importId }));
@@ -242,7 +247,7 @@ describe('copying secrets between machines', () => {
     const { source, target, clock } = await pair();
     const elsewhere = machine(strangerIdentity, clock);
     const offer = await elsewhere.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
     const mine = await target.imports.open();
 
     // Act
@@ -256,7 +261,7 @@ describe('copying secrets between machines', () => {
     // Arrange
     const { source, target, clock } = await pair();
     const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
     clock.ms += 5 * 60_000;
 
     // Act
@@ -271,7 +276,7 @@ describe('copying secrets between machines', () => {
     // Arrange
     const { source, target, clock } = await pair();
     const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
     clock.ms += 6 * 60_000;
     await target.imports.open();
 
@@ -303,10 +308,10 @@ describe('copying secrets between machines', () => {
     const offer = await source.imports.open();
     const other = machine(strangerIdentity, clock);
     await other.directory.put('API_KEY', VALUE);
-    const { bundle } = await other.exports.seal(offer.importId, { offer, names: ['API_KEY'] });
+    const { bundle } = await other.exports.seal(offer.importId, { offer, names: named('API_KEY') });
 
     // Act
-    const atSource = await refusal(source.exports.seal(offer.importId, { offer, names: ['API_KEY'] }));
+    const atSource = await refusal(source.exports.seal(offer.importId, { offer, names: named('API_KEY') }));
     const atTarget = await refusal(
       source.imports.complete(offer.importId, { ...bundle, sourceDaemonId: sourceIdentity.daemonId }),
     );
@@ -331,7 +336,7 @@ describe('copying secrets between machines', () => {
 
     // Act
     const answers = await Promise.all(
-      edits.map(edit => refusal(source.exports.seal(offer.importId, { offer: edit(offer), names: ['API_KEY'] }))),
+      edits.map(edit => refusal(source.exports.seal(offer.importId, { offer: edit(offer), names: named('API_KEY') }))),
     );
 
     // Assert
@@ -345,7 +350,7 @@ describe('copying secrets between machines', () => {
 
     // Act
     const answer = await refusal(
-      source.exports.seal(`fy_secret_import_${'z'.repeat(22)}`, { offer, names: ['API_KEY'] }),
+      source.exports.seal(`fy_secret_import_${'z'.repeat(22)}`, { offer, names: named('API_KEY') }),
     );
 
     // Assert
@@ -359,9 +364,9 @@ describe('copying secrets between machines', () => {
 
     // Act
     clock.ms -= 2 * 60_000;
-    const overlong = await refusal(source.exports.seal(offer.importId, { offer, names: ['API_KEY'] }));
+    const overlong = await refusal(source.exports.seal(offer.importId, { offer, names: named('API_KEY') }));
     clock.ms += 2 * 60_000 + 6 * 60_000;
-    const expired = await refusal(source.exports.seal(offer.importId, { offer, names: ['API_KEY'] }));
+    const expired = await refusal(source.exports.seal(offer.importId, { offer, names: named('API_KEY') }));
 
     // Assert
     should(overlong).equal('offer_invalid');
@@ -374,7 +379,7 @@ describe('copying secrets between machines', () => {
     const offer = await target.imports.open();
 
     // Act
-    const sealing = source.exports.seal(offer.importId, { offer, names: ['API_KEY', 'MISSING'] });
+    const sealing = source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'MISSING') });
 
     // Assert
     const error = await sealing.then(
@@ -394,10 +399,26 @@ describe('copying secrets between machines', () => {
     const offer = await resign(unsigned);
 
     // Act
-    const answer = await refusal(source.exports.seal(offer.importId, { offer, names: ['API_KEY'] }));
+    const answer = await refusal(source.exports.seal(offer.importId, { offer, names: named('API_KEY') }));
 
     // Assert
     should(answer).equal('offer_invalid');
+  });
+
+  it('should refuse a bundle that carries a sign-in token, even one a careless source sealed', async () => {
+    // Arrange — the source is forced past the type that keeps a sign-in out of a bundle.
+    const { source, target } = await pair();
+    const token = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    await source.directory.put(token, VALUE);
+    const offer = await target.imports.open();
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: [token] as never });
+
+    // Act
+    const answer = await refusal(target.imports.complete(offer.importId, bundle));
+
+    // Assert
+    should(answer).equal('bundle_invalid');
+    should(await target.directory.list()).deepEqual([]);
   });
 
   it('should copy nothing when the target would be past its limit', async () => {
@@ -406,7 +427,7 @@ describe('copying secrets between machines', () => {
     for (let index = 0; index < MAX_SECRETS_PER_DAEMON; index += 1) await target.directory.put(`HELD_${index}`, VALUE);
     await target.directory.remove('HELD_0');
     const offer = await target.imports.open();
-    const { bundle } = await source.exports.seal(offer.importId, { offer, names: ['API_KEY', 'DB_PASSWORD'] });
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY', 'DB_PASSWORD') });
 
     // Act
     const filing = target.imports.complete(offer.importId, bundle);
@@ -429,7 +450,7 @@ describe('copying secrets between machines', () => {
 
     // Act
     const opening = await refusal(blind.imports.open());
-    const sealing = await refusal(blind.exports.seal(offer.importId, { offer, names: ['API_KEY'] }));
+    const sealing = await refusal(blind.exports.seal(offer.importId, { offer, names: named('API_KEY') }));
 
     // Assert
     should(opening).equal('identity_unavailable');
