@@ -1,4 +1,4 @@
-import { watch as watchFileSystem, type FSWatcher } from 'node:fs';
+import { type FSWatcher, watch as watchFileSystem } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type {

@@ -21,8 +21,17 @@ export interface ForeignHistoryEntry {
  */
 export interface ForeignHistoryFiles {
   entries(directory: string): Promise<readonly ForeignHistoryEntry[]>;
+  /** A regular file's size in bytes, or `undefined` when it is not one. */
+  size(file: string): Promise<number | undefined>;
   text(file: string): Promise<string | undefined>;
 }
+
+/**
+ * The largest transcript this index reads. Every listing reads every file whole — it reports how many
+ * events each holds and refuses a damaged one — so a file past this is skipped, and says so, rather
+ * than held in memory whole: transcripts grow without limit, and one adopted conversation was 200 MB.
+ */
+export const FOREIGN_HISTORY_READ_MAX_BYTES = 32 * 1024 * 1024;
 
 export interface ForeignHistoryRoots {
   readonly claudeProjects: string;
@@ -155,7 +164,12 @@ export class ForeignHistoryImporter {
     | { readonly conversation: ImportedConversation; readonly events: readonly TranscriptEvent[] }
     | { readonly reason: string }
   > {
-    const text = await this.files.text(candidate.source);
+    const size = await this.files.size(candidate.source);
+    if (size !== undefined && size > FOREIGN_HISTORY_READ_MAX_BYTES)
+      return {
+        reason: `the transcript is ${String(Math.ceil(size / (1024 * 1024)))} MB, more than the ${String(FOREIGN_HISTORY_READ_MAX_BYTES / (1024 * 1024))} MB a history listing reads`,
+      };
+    const text = size === undefined ? undefined : await this.files.text(candidate.source);
     if (text === undefined) return { reason: 'the transcript could not be read' };
     const parsed = this.parsers[candidate.harness].parse({ text, source: candidate.source, endOfInput: true });
     // An invalid/partial transcript is lost history, never a shorter conversation. The list reports

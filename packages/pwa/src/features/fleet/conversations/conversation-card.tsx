@@ -150,7 +150,7 @@ export function ConversationLines({
   readonly ferret?: FerretMark;
 }) {
   const { headline, secondary, named } = conversationHeadline(row);
-  const turns = `${row.turns} ${row.turns === 1 ? 'turn' : 'turns'}`;
+  const turns = `${row.turns}${row.turnsAtLeast === true ? '+' : ''} ${row.turns === 1 ? 'turn' : 'turns'}`;
   return (
     <Card
       harness={row.harness}

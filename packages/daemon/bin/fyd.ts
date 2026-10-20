@@ -23,6 +23,7 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  type ModelCatalog,
   manifestRuntimes,
   PACK_ENV,
   PASSIVE_LEARNING_ENV,
@@ -30,7 +31,6 @@ import {
   runtimeIdsPath,
   sanitizeHarnessEnv,
   sharedHistoryPoolDirectory,
-  type ModelCatalog,
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
@@ -515,6 +515,7 @@ import {
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
   type ExecutableResolverPort,
+  effectiveAnalyticsPricing,
   exactWorkerAssignee,
   FixedSettingsUnreadableError,
   FleetEventStreamService,
@@ -538,8 +539,8 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
-  type HarnessVersionPort,
   HarnessUpdateService,
+  type HarnessVersionPort,
   HOSTED_APP_ORIGIN,
   handoffFolders,
   handoffPointerPaths,
@@ -570,15 +571,14 @@ import {
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
   McpOAuthService,
-  effectiveAnalyticsPricing,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
   ModelCatalogService,
-  modelCatalogPricingRates,
   type MountedSubsystems,
   mayTrustDirectLoopback,
   messageWithAttachments,
+  modelCatalogPricingRates,
   modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
@@ -730,7 +730,6 @@ import {
   type SessionSignalSubsystem,
   type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
-  tailTranscriptEvents,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
   SessionTurnWatcher,
@@ -781,6 +780,7 @@ import {
   TranscriptSendEvidence,
   type TranscriptSource,
   type TriageGuardPort,
+  tailTranscriptEvents,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
@@ -825,8 +825,8 @@ import {
   LeaseClaimingLaunchWrapper,
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
-import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
+import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {

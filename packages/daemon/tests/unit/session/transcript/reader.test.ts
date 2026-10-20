@@ -4,9 +4,9 @@ import {
   DEFAULT_TRANSCRIPT_TAIL_BYTES,
   drainTranscriptWindow,
   SessionTranscriptReader,
-  tailTranscriptEvents,
   type TranscriptDigestJournal,
   type TranscriptFileResolver,
+  tailTranscriptEvents,
 } from '../../../../src/lib/session/transcript/index.ts';
 import type {
   TranscriptBatch,

@@ -59,7 +59,6 @@ export interface ConversationFiles {
   info(file: string): Promise<ConversationFileInfo | undefined>;
   /** At most the last `maxBytes` of a file: where an append-only index keeps its newest lines. */
   tail(file: string, maxBytes: number): Promise<string | undefined>;
-  text(file: string): Promise<string | undefined>;
   /** At most the first `maxBytes` of a file, for documents that are not trusted to be small. */
   head(file: string, maxBytes: number): Promise<string | undefined>;
 }
@@ -111,6 +110,48 @@ export function conversationResumeArguments(harness: Harness, id: string): reado
 /** Codex's thread-name index, in its home. Only its newest lines are read: it is append-only. */
 const CODEX_INDEX = 'session_index.jsonl';
 const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
+
+/**
+ * How much of a transcript a listing reads from each END.
+ *
+ * Everything a row says is at one end or the other — the folder and the first message at the start,
+ * the latest message, the model and the last activity at the end — and a transcript grows without
+ * limit: an adopted conversation reached 200 MB, and reading it whole for every listing held all of
+ * it in memory, twice, because the same file is listed from two homes. A file larger than both ends
+ * together is described from them alone, and says its turn count is only a floor.
+ */
+export const CONVERSATION_HEAD_READ_MAX_BYTES = 4 * 1024 * 1024;
+export const CONVERSATION_TAIL_READ_MAX_BYTES = 4 * 1024 * 1024;
+
+/** A transcript as a listing may read it: whole when small, else its first and last complete records. */
+interface BoundedTranscript {
+  readonly text: string;
+  /** The middle was not read. */
+  readonly partial: boolean;
+}
+
+async function boundedTranscript(
+  files: ConversationFiles,
+  file: string,
+  size: number,
+): Promise<BoundedTranscript | undefined> {
+  if (size <= CONVERSATION_HEAD_READ_MAX_BYTES + CONVERSATION_TAIL_READ_MAX_BYTES) {
+    const text = await files.head(file, size);
+    return text === undefined ? undefined : { text, partial: false };
+  }
+  const [head, tail] = await Promise.all([
+    files.head(file, CONVERSATION_HEAD_READ_MAX_BYTES),
+    files.tail(file, CONVERSATION_TAIL_READ_MAX_BYTES),
+  ]);
+  if (head === undefined || tail === undefined) return undefined;
+  // Each end is cut to whole records: the head's last line and the tail's first are pieces of ones
+  // the read cut through, and a piece parsed as a record is a record nobody wrote.
+  const start = tail.indexOf('\n');
+  return {
+    text: `${head.slice(0, head.lastIndexOf('\n') + 1)}${start < 0 ? '' : tail.slice(start + 1)}`,
+    partial: true,
+  };
+}
 
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** How deep Codex nests rollouts (`sessions/YYYY/MM/DD/`), plus one level of slack. */
@@ -167,6 +208,8 @@ export function describeConversation(
   events: readonly TranscriptEvent[],
   modifiedAtMs: number,
   documents?: HandoffDocuments,
+  /** The transcript's middle was not read, so the spoken messages counted are only some of them. */
+  partial = false,
 ): Omit<DiscoveredConversation, 'source' | 'relativePath'> | undefined {
   const head = conversationHead(candidate.harness, text);
   if (head === undefined) return undefined;
@@ -201,6 +244,7 @@ export function describeConversation(
     ...(latest === undefined || latest === first ? {} : { latest: latest.slice(0, CONVERSATION_PREVIEW_MAX) }),
     lastActivityAt: new Date(Number.isNaN(parsedLast) ? modifiedAtMs : parsedLast).toISOString(),
     turns: spoken.length,
+    ...(partial ? { turnsAtLeast: true as const } : {}),
     ...(model === undefined ? {} : { model }),
   };
 }
@@ -270,9 +314,10 @@ export class ConversationImportService {
     const { conversations } = await this.discover(harness);
     const conversation = conversations.find(row => row.id === id);
     if (conversation === undefined) return undefined;
-    const text = await this.files.text(conversation.source);
-    if (text === undefined) return undefined;
-    const { events } = this.parsers[harness].parse({ text, source: conversation.source, endOfInput: true });
+    const info = await this.files.info(conversation.source);
+    const read = info === undefined ? undefined : await boundedTranscript(this.files, conversation.source, info.size);
+    if (read === undefined) return undefined;
+    const { events } = this.parsers[harness].parse({ text: read.text, source: conversation.source, endOfInput: true });
     return { id, harness, messages: [...recentExchanges(events, await this.handoffDocuments(events))] };
   }
 
@@ -376,16 +421,23 @@ export class ConversationImportService {
     const cached = this.cache.get(candidate.source);
     if (cached !== undefined && cached.modifiedAtMs === info.modifiedAtMs && cached.size === info.size)
       return cached.described;
-    const text = await this.files.text(candidate.source);
+    const read = await boundedTranscript(this.files, candidate.source, info.size);
     // A live conversation may end mid-record; the complete records before it still describe it.
     const events =
-      text === undefined
+      read === undefined
         ? undefined
-        : this.parsers[candidate.harness].parse({ text, source: candidate.source, endOfInput: true }).events;
+        : this.parsers[candidate.harness].parse({ text: read.text, source: candidate.source, endOfInput: true }).events;
     const described =
-      text === undefined || events === undefined
+      read === undefined || events === undefined
         ? undefined
-        : describeConversation(candidate, text, events, info.modifiedAtMs, await this.handoffDocuments(events));
+        : describeConversation(
+            candidate,
+            read.text,
+            events,
+            info.modifiedAtMs,
+            await this.handoffDocuments(events),
+            read.partial,
+          );
     this.cache.set(candidate.source, { modifiedAtMs: info.modifiedAtMs, size: info.size, described });
     return described;
   }

@@ -44,6 +44,13 @@ The wire contract is `packages/protocol/src/lib/conversation-import.ts`; the dae
   delivered-files list, interruption markers and text the CLI injected (anything opening with a tag) are
   dropped the same way (`lib/imports/conversation-text.ts`). Search (`q`, `harness`, `since`, `limit`) runs on the daemon over that index, which is
   re-parsed only when a file's size or time changes.
+- **How much:** never a whole large file. A transcript of up to 8 MiB is read whole; a larger one only
+  its first and last 4 MiB, cut to whole records (`CONVERSATION_HEAD_READ_MAX_BYTES` /
+  `CONVERSATION_TAIL_READ_MAX_BYTES`). Everything a row says lives at one end — the folder and first
+  message at the start, the latest message, model and last activity at the end — except the turn
+  count, which then counts only the messages read and is marked `turnsAtLeast` (shown as "N+ turns").
+  The preview reads the same way. An adopted conversation is one file with two names, listed from both
+  homes, so this bound is what keeps a 200 MB one from being held in memory twice per listing.
 - **Who may:** every route is `fleet.configure`. A caller off the host needs the passkey step-up. The
   answers carry no whole transcript and no file path, only to the owner's own devices.
 

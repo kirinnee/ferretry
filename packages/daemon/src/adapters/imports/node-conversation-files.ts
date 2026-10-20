@@ -38,12 +38,6 @@ export class NodeConversationFiles implements ConversationFiles {
       .catch(() => undefined);
   }
 
-  async text(file: string): Promise<string | undefined> {
-    return await Bun.file(file)
-      .text()
-      .catch(() => undefined);
-  }
-
   async head(file: string, maxBytes: number): Promise<string | undefined> {
     if ((await this.info(file)) === undefined) return undefined;
     return await Bun.file(file)
