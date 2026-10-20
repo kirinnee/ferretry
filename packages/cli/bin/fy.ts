@@ -93,7 +93,7 @@ import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
 import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
 import type { AccountCommandDeps } from '../src/lib/fleet/account-ports';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
-import { PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
+import { ambientSession, PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { resolveFleetLayout } from '../src/lib/fleet/layout';
 import { RecommendController } from '../src/lib/fleet/recommend';
@@ -978,8 +978,14 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     const pack = new PackController({
       gateway: new ProtocolPackGateway(client),
       out: world.io,
-      parent: world.environment.FY_SESSION_ID?.trim() || undefined,
+      parent: async () =>
+        await ambientSession(world.environment, async argv => {
+          const child = Bun.spawn({ cmd: [...argv], stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
+          const [text, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+          return code === 0 ? text : undefined;
+        }).catch(() => undefined),
       cwd: world.cwd,
+      absolute: path => (isAbsolute(path) ? path : join(world.cwd, path)),
       readFile: async path => await Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
       binaryName: BINARY_NAME,
     });

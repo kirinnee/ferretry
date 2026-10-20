@@ -10,6 +10,7 @@ import type {
 import should from 'should';
 import type { PackProbeOutcome, PackProbeRequest } from '../../../src/lib/pack/probe.ts';
 import type { JevRanking, RankableCandidate } from '../../../src/lib/pack/jev.ts';
+import { SCRATCH_REMEDY, scratchMessage } from '../../../src/lib/pack/scratch.ts';
 import {
   type PackParent,
   type PackPorts,
@@ -61,6 +62,8 @@ interface Options {
   startError?: unknown;
   ranking?: JevRanking;
   spent?: number;
+  /** The folders the scratch check calls temporary. */
+  scratch?: readonly string[];
 }
 
 function build(options: Options = {}) {
@@ -78,6 +81,7 @@ function build(options: Options = {}) {
     catalogs: async () => CATALOGS,
     facts: async () => facts({ runtimes: options.runtimes ?? [CLAUDE_MAIN, CLAUDE_FAST] }),
     parent: async id => options.parents?.[id],
+    scratch: async cwd => options.scratch?.includes(cwd) === true,
     probe: async (request, ttlMs) => {
       probes.push([request, ttlMs]);
       return {
@@ -356,6 +360,46 @@ describe('PackService.newChild with a named runtime', () => {
     should(outcome.outcome).equal('started');
     should(starts[0]?.cwd).equal('/elsewhere');
     should(starts[0]?.mode).equal('auto');
+  });
+
+  it("should run a sub-ferret in its parent's folder even when that folder is temporary", async () => {
+    // Arrange
+    const { subject, starts } = build({ parents: { p1: { ...PARENT, cwd: '/tmp/work' } }, scratch: ['/tmp/work'] });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main-wrapper', model: 'opus' }));
+
+    // Assert
+    should(outcome.outcome).equal('started');
+    should(starts[0]?.cwd).equal('/tmp/work');
+  });
+
+  it('should refuse a NAMED temporary folder, unless the caller allows it, before probing anything', async () => {
+    // Arrange
+    const refusing = build({ parents: { p1: PARENT }, scratch: ['/tmp/claude-1/scratchpad'] });
+    const allowing = build({ parents: { p1: PARENT }, scratch: ['/tmp/claude-1/scratchpad'] });
+
+    // Act
+    const refused = await refusing.subject.newChild(
+      request({ runtime: 'claude-main-wrapper', cwd: '/tmp/claude-1/scratchpad' }),
+    );
+    const allowed = await allowing.subject.newChild(
+      request({ runtime: 'claude-main-wrapper', cwd: '/tmp/claude-1/scratchpad', allowScratch: true }),
+    );
+
+    // Assert
+    should(refused).deepEqual({
+      outcome: 'refused',
+      refusal: {
+        code: 'scratch_cwd',
+        message: scratchMessage('/tmp/claude-1/scratchpad'),
+        remedy: SCRATCH_REMEDY,
+      },
+      attempts: [],
+    });
+    should(refusing.probes).deepEqual([]);
+    should(allowed.outcome).equal('started');
+    should(allowing.starts[0]?.cwd).equal('/tmp/claude-1/scratchpad');
   });
 
   it('should start a top-level sub-ferret with no parent, on the runtime’s own default model', async () => {
