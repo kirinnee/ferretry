@@ -19,7 +19,7 @@
  * rows underneath it. "Show stopped (3)" is likewise the stopped sessions that tick would add under the
  * mode chosen.
  *
- * WHAT A ROW SAYS: the status mark, the agent's name, its task, and its project DIRECTORY — the folder
+ * WHAT A ROW SAYS: the status mark, its task as the title with the ferret's name beneath, and its project DIRECTORY — the folder
  * it runs in, which tells two agents on one project apart (a worktree each).
  *
  * NEEDS YOU is the session's own say-so: it is parked on a person (`awaiting_user`,
@@ -29,6 +29,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import { displayCallsign } from '../lib/callsign.ts';
 import type { ModeFilter } from '../lib/controls.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
 import { TERMINAL_STATUSES } from './status-mark.tsx';
@@ -138,6 +139,20 @@ export const sessionsBarView = (
   ),
   ...listTallies(sessions, filter, keep),
 });
+
+/**
+ * A row's two names. The TITLE is the task — what the session is for ("Home Manager", "Diene Work") — because
+ * that is what a person scans a list by; the ferret that is doing it is the secondary line. With no task the
+ * ferret's name is the title and there is no second name to show. A task that only repeats the ferret's name
+ * is no task.
+ */
+export const sessionsBarNames = (view: SessionView): { readonly title: string; readonly ferret: string | null } => {
+  const callsign = displayCallsign(view.config.teammate);
+  const task = (view.config.label ?? view.config.name ?? '').trim();
+  const ferret = callsign || view.config.id;
+  if (task === '' || task === callsign) return { title: ferret, ferret: null };
+  return { title: task, ferret: callsign === '' ? null : callsign };
+};
 
 /** The second line under a session's name: what it is working on, else where. */
 export const sessionsBarSubline = (view: SessionView): string =>

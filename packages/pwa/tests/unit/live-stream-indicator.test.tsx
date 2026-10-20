@@ -182,6 +182,43 @@ describe('LiveStreamIndicator', () => {
   });
 });
 
+describe('LiveStreamIndicator, quiet and compact (a phone’s session bar)', () => {
+  test('says nothing in words: a healthy feed is empty, a failing one is an icon, Reconnect is an icon button', async () => {
+    let reconnects = 0;
+    const view = await mount(<LiveStreamIndicator compact quiet status="live" onReconnect={() => (reconnects += 1)} />);
+    try {
+      for (const status of ALL) {
+        await view.render(<LiveStreamIndicator compact quiet status={status} onReconnect={() => (reconnects += 1)} />);
+        const region = must(view.container.querySelector('[data-live-stream]'), 'the live-stream region');
+        expect(region.getAttribute('role')).toBe('status');
+        expect(region.classList.contains('fy-live-quiet--compact')).toBe(true);
+        // The sentence is for a screen reader; no visible word can run into the ferret's name.
+        expect(region.querySelector('.sr-only')?.textContent?.length).toBeGreaterThan(0);
+        expect(region.querySelector('[aria-hidden="true"]:not(svg)')).toBeNull();
+        // ONE control: the glyph lives inside the Reconnect button, so a failing feed costs one icon of room.
+        expect(region.querySelectorAll('svg').length).toBe(
+          status === 'reconnecting' || status === 'disconnected' ? 1 : 0,
+        );
+        expect(region.querySelector('[data-spinner]') !== null).toBe(status === 'reconnecting');
+        const button = reconnectButton(view.container);
+        expect(button !== null).toBe(status === 'reconnecting' || status === 'disconnected');
+        if (button !== null) {
+          expect(button.getAttribute('aria-label')).toBe('Reconnect');
+          expect(button.textContent).toBe('');
+          expect(button.querySelector('svg')).not.toBeNull();
+        }
+      }
+      await view.render(
+        <LiveStreamIndicator compact quiet status="disconnected" onReconnect={() => (reconnects += 1)} />,
+      );
+      await interact(() => must(reconnectButton(view.container), 'the button').click());
+      expect(reconnects).toBe(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+});
+
 describe('LiveStreamIndicator, quiet (the session bar’s form)', () => {
   test('draws nothing while the feed is healthy, a word and Reconnect once it is not, and always announces', async () => {
     let reconnects = 0;

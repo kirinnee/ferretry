@@ -20,7 +20,7 @@ describe('the bottom safe-area inset has one owner', () => {
   it('is read from the platform in exactly one place, the --safe-bottom definition', () => {
     const readers = files.filter(file => file.text.includes('safe-area-inset-bottom'));
     expect(readers.map(file => file.path)).toEqual([STYLES]);
-    expect(readers[0]?.text).toContain('--safe-bottom: env(safe-area-inset-bottom, 0px);');
+    expect(readers[0]?.text).toContain('--safe-bottom: calc(env(safe-area-inset-bottom, 0px) / 2);');
   });
 
   it('is zero while a software keyboard is up, because the home indicator is hidden', () => {
