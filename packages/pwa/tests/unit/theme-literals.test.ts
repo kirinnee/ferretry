@@ -51,7 +51,7 @@ const blankComments = (source: string, kind: 'css' | 'ts'): string => {
 const lineOf = (text: string, index: number): number => text.slice(0, index).split('\n').length;
 
 /** A non-zero length written as a number: `1px`, `.5rem`, `12px`. `0px` and `0` are not a look. */
-const LENGTH = /(?<![\w.-])(?:\d*\.\d+|\d+)(?:px|rem|em)\b/g;
+const LENGTH = /(?<![\w.])(?:\d*\.\d+|\d+)(?:px|rem|em)\b/g;
 const nonZeroLengths = (value: string): string[] =>
   [...value.replace(/var\([^()]*(?:\([^()]*\)[^()]*)*\)/g, ' ').matchAll(LENGTH)]
     .map(match => match[0])
@@ -144,6 +144,7 @@ describe('the scanner itself', () => {
   font-family: system-ui, sans-serif;
   font: 14px/1.45 system-ui, sans-serif;
   border-top-width: 2px;
+  box-shadow: inset 0 -2px 0 var(--accent);
 }`).map(finding => finding.rule);
     expect(rules).toEqual([
       'border',
@@ -156,6 +157,7 @@ describe('the scanner itself', () => {
       'font',
       'font',
       'border',
+      'shadow',
     ]);
   });
 
