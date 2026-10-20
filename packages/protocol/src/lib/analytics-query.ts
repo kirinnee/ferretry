@@ -328,7 +328,13 @@ export function scopeAnalyticsQuery(input: string | undefined, sessionId: string
 class Cursor {
   public index = 0;
 
-  public constructor(public readonly source: string) {}
+  public readonly source: string;
+
+  // A plain field, not a parameter property: vite.config.ts loads protocol through Node's strip-only
+  // TypeScript, which refuses parameter properties.
+  public constructor(source: string) {
+    this.source = source;
+  }
 
   public skipSpace(): void {
     while (this.index < this.source.length && /\s/.test(this.source[this.index]!)) this.index += 1;
