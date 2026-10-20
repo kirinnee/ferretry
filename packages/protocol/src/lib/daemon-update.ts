@@ -47,6 +47,10 @@ export const releaseTapUrl = (product: string): string => `https://github.com/${
 export const latestReleaseApiUrl = (product: string): string =>
   `https://api.github.com/repos/${RELEASE_OWNER}/${product}/releases/latest`;
 
+/** The GitHub API address of a product's most recent tags — newer than the latest release while one is publishing. */
+export const releaseTagsApiUrl = (product: string): string =>
+  `https://api.github.com/repos/${RELEASE_OWNER}/${product}/tags?per_page=30`;
+
 /** The download base of one tagged release's assets. */
 export const releaseDownloadBase = (product: string, version: string): string =>
   `https://github.com/${RELEASE_OWNER}/${product}/releases/download/v${version}`;
@@ -367,6 +371,28 @@ export function parseGitHubLatestRelease(value: unknown): LatestRelease | undefi
     url: parsed.data.html_url,
     ...(published.success ? { publishedAt: published.data } : {}),
   };
+}
+
+const GitHubTagsSchema = z.array(z.looseObject({ name: z.string() }));
+
+/**
+ * The highest stable `v<semver>` tag in a GitHub `tags` answer — or `undefined` when there is none.
+ *
+ * Tags are cut before the GitHub release, the cask and the archives catch up, so this is what a
+ * source-built install (nix) will actually get; it is never the target of an install that downloads
+ * release assets.
+ */
+export function parseGitHubNewestTag(product: string, value: unknown): LatestRelease | undefined {
+  const parsed = GitHubTagsSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  let newest: string | undefined;
+  for (const { name } of parsed.data) {
+    const version = name.replace(/^v/u, '');
+    if (name === version || !ProtocolVersionSchema.safeParse(version).success || version.includes('-')) continue;
+    if (newest === undefined || compareProtocolVersions(version, newest) === 1) newest = version;
+  }
+  if (newest === undefined) return undefined;
+  return { version: newest, url: `https://github.com/${RELEASE_OWNER}/${product}/releases/tag/v${newest}` };
 }
 
 /** Whether `latest` is newer than `current`. Versions that do not parse are never "newer". */

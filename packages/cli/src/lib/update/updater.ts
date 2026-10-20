@@ -132,7 +132,7 @@ export class DaemonUpdater {
         throw new DaemonUpdateRefusedError(`cannot tell which version ${daemon.path} is; it did not answer --version`);
       }
       from = current;
-      const latest = await this.#latest(options.to);
+      const latest = await this.#latest(options.to, method);
       if (options.check === true) {
         this.#reportCheck(daemon, method, plan, current, latest, options.json === true);
         return;
@@ -148,7 +148,10 @@ export class DaemonUpdater {
     }
   }
 
-  async #latest(to: string | undefined): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
+  async #latest(
+    to: string | undefined,
+    method: InstallMethod,
+  ): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
     if (to !== undefined) {
       if (!ProtocolVersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
       return {
@@ -156,6 +159,15 @@ export class DaemonUpdater {
       };
     }
     const answer = await this.deps.latest.latest();
+    // A source-built install gets whatever the flake's main is, which is the newest tag, not the newest release.
+    const tag =
+      method.kind === 'nix-profile' || method.kind === 'nix-shell' ? await this.deps.latest.newestTag() : undefined;
+    if (
+      tag?.kind === 'found' &&
+      (answer.kind === 'failed' || compareProtocolVersions(tag.release.version, answer.release.version) === 1)
+    ) {
+      return { release: tag.release };
+    }
     if (answer.kind === 'failed') return { failure: `could not learn the latest release: ${answer.reason}` };
     return { release: answer.release };
   }
@@ -345,43 +357,46 @@ export class DaemonUpdater {
     }
   }
 
-  /** Prove the target version is installed and, when a daemon was running, that it serves. */
+  /** Prove the target version (or a newer one) is installed and, when a daemon was running, that it serves. */
   async #prove(
     intent: UpdateIntent,
     applied: Extract<Applied, { kind: 'applied' }>,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
     const name = this.deps.daemonName;
     const installed = this.deps.lifecycle.versionOf(applied.daemonPath);
-    if (installed !== intent.target) {
+    // The package manager may build something newer than the release that was offered; that is still an update.
+    const order = installed === undefined ? undefined : compareProtocolVersions(installed, intent.target);
+    if (installed === undefined || order === undefined || order < 0) {
       return await this.#rollBack(
         intent,
         applied,
         `the upgrade left ${name} at ${installed ?? 'an unknown version'}, not ${intent.target}`,
       );
     }
+    const newer = installed === intent.target ? '' : ` (newer than the ${intent.target} release you were offered)`;
     if (!intent.running) {
       const next =
         applied.daemonPath === intent.daemon.path
           ? `start it with ${this.deps.clientName} daemon start`
           : `run ${this.deps.clientName} daemon install from a new shell to point the service at ${applied.daemonPath}`;
-      return { outcome: 'succeeded', message: `${name} updated to ${intent.target}; it was not running — ${next}` };
+      return { outcome: 'succeeded', message: `${name} updated to ${installed}${newer}; it was not running — ${next}` };
     }
-    const failure = await this.#restartInto(intent, applied.daemonPath);
+    const failure = await this.#restartInto(intent, applied.daemonPath, installed);
     if (failure !== undefined) return await this.#rollBack(intent, applied, failure);
-    return { outcome: 'succeeded', message: `${name} updated ${intent.current} → ${intent.target} and serving` };
+    return { outcome: 'succeeded', message: `${name} updated ${intent.current} → ${installed}${newer} and serving` };
   }
 
   /** Restart onto the new executable and wait for it to report the target; answers why not. */
-  async #restartInto(intent: UpdateIntent, daemonPath: string): Promise<string | undefined> {
+  async #restartInto(intent: UpdateIntent, daemonPath: string, installed: string): Promise<string | undefined> {
     try {
       if (daemonPath === intent.daemon.path) await this.deps.lifecycle.restart();
       else await this.deps.lifecycle.installAt(daemonPath);
     } catch (error: unknown) {
       return `the new ${this.deps.daemonName} did not start: ${errorText(error)}`;
     }
-    return (await this.#serves(intent.target))
+    return (await this.#serves(installed))
       ? undefined
-      : `the new ${this.deps.daemonName} did not report ${intent.target} within ${String(Math.round(this.healthTimeoutMs / 1_000))}s`;
+      : `the new ${this.deps.daemonName} did not report ${installed} within ${String(Math.round(this.healthTimeoutMs / 1_000))}s`;
   }
 
   /** Poll `/healthz` until it reports `version`, or the health deadline passes. */

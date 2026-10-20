@@ -11,9 +11,11 @@ import {
   knownLatestRelease,
   latestReleaseApiUrl,
   parseGitHubLatestRelease,
+  parseGitHubNewestTag,
   planUpdate,
   releaseDownloadBase,
   releaseFlakeReference,
+  releaseTagsApiUrl,
   releaseTapName,
   releaseTapUrl,
 } from '../../src/lib/daemon-update.ts';
@@ -341,6 +343,19 @@ describe('latest release', () => {
     should(parseGitHubLatestRelease({ ...answer, prerelease: true })).be.undefined();
     should(parseGitHubLatestRelease({ ...answer, tag_name: 'nightly' })).be.undefined();
     should(parseGitHubLatestRelease({ ...answer, html_url: 'http://example.com/x' })).be.undefined();
+  });
+
+  it('reads the highest stable tag, ignoring pre-releases and names that are not versions', () => {
+    should(releaseTagsApiUrl('ferretry')).equal('https://api.github.com/repos/kirinnee/ferretry/tags?per_page=30');
+    const names = (...list: string[]) => list.map(name => ({ name }));
+    should(
+      parseGitHubNewestTag('ferretry', names('v4.29.0', 'v4.30.1', 'v4.30.0', 'v5.0.0-rc.1', 'nightly', '4.31.0')),
+    ).deepEqual({
+      version: '4.30.1',
+      url: 'https://github.com/kirinnee/ferretry/releases/tag/v4.30.1',
+    });
+    should(parseGitHubNewestTag('ferretry', names('nightly', 'v5.0.0-rc.1'))).be.undefined();
+    should(parseGitHubNewestTag('ferretry', 'nope')).be.undefined();
   });
 
   it('compares versions, and never calls an unparseable one newer', () => {

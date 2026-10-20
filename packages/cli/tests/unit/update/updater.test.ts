@@ -277,6 +277,124 @@ describe('DaemonUpdater — standalone', () => {
   });
 });
 
+describe('DaemonUpdater — an install newer than the release offered', () => {
+  const OFFERED = '(newer than the 1.3.0 release you were offered)';
+
+  it('accepts a newer nix profile build, serves it, and says so', async () => {
+    const h = harness('nix-profile');
+    h.packages.upgradeTo = '1.3.1';
+    await h.run();
+    should(h.host.trail).deepEqual(['nix-upgrade:ferretry', 'restart']);
+    should(h.report()).match({
+      from: '1.2.3',
+      target: '1.3.0',
+      outcome: 'succeeded',
+      message: `fyd updated 1.2.3 → 1.3.1 ${OFFERED} and serving`,
+    });
+    should(h.host.running).equal('1.3.1');
+    should(h.out.exitCode).be.undefined();
+  });
+
+  it('accepts a newer Homebrew cask and a newer standalone release', async () => {
+    const brew = harness('homebrew');
+    brew.packages.upgradeTo = '1.4.0';
+    await brew.run();
+    should(brew.report().message).equal(`fyd updated 1.2.3 → 1.4.0 ${OFFERED} and serving`);
+    const standalone = harness('standalone');
+    standalone.standalone.delivers = '1.3.1';
+    await standalone.run();
+    should(standalone.host.trail).deepEqual(['stage:1.3.0:/opt/fy', 'swap:fy,fyd', 'restart']);
+    should(standalone.report().message).equal(`fyd updated 1.2.3 → 1.3.1 ${OFFERED} and serving`);
+  });
+
+  it('accepts a newer build when the daemon was not running', async () => {
+    const h = harness('nix-profile', { running: false });
+    h.packages.upgradeTo = '1.3.1';
+    await h.run();
+    should(h.report().message).equal(
+      `fyd updated to 1.3.1 ${OFFERED}; it was not running — start it with fy daemon start`,
+    );
+  });
+
+  it('rolls back a newer build that does not serve the version it installed', async () => {
+    const h = harness('nix-profile');
+    h.packages.upgradeTo = '1.3.1';
+    h.host.serveOnce = ['1.2.3'];
+    await h.run();
+    should(h.host.trail).deepEqual(['nix-upgrade:ferretry', 'restart', 'nix-rollback', 'restart']);
+    should(h.report().outcome).equal('rolled-back');
+    should(h.report().message).startWith('the new fyd did not report 1.3.1 within 5s; rolled back to 1.2.3');
+  });
+
+  it('still rolls back an older, unchanged, pre-release or unreadable result', async () => {
+    for (const left of ['1.2.9', '1.2.3', '1.3.0-rc.1', 'dev'] as const) {
+      const h = harness('nix-profile');
+      h.packages.upgradeTo = left;
+      await h.run();
+      should(h.host.trail).deepEqual(['nix-upgrade:ferretry', 'nix-rollback', 'restart']);
+      should(h.report().outcome).equal('rolled-back');
+      should(h.report().message).startWith(`the upgrade left fyd at ${left}, not 1.3.0; rolled back`);
+    }
+  });
+});
+
+describe('DaemonUpdater — which version it offers', () => {
+  const tag = (version: string) =>
+    ({
+      kind: 'found',
+      release: { version, url: `https://github.com/kirinnee/ferretry/releases/tag/v${version}` },
+    }) as const;
+  const release = tag('1.3.0');
+
+  it('offers the newest tag to a nix install when it is ahead of the release', async () => {
+    const h = harness('nix-profile', { latest: new FakeLatest(release, tag('1.3.1')) });
+    h.packages.upgradeTo = '1.3.1';
+    await h.run();
+    should(h.report()).match({
+      target: '1.3.1',
+      outcome: 'succeeded',
+      message: 'fyd updated 1.2.3 → 1.3.1 and serving',
+    });
+    const shell = harness('nix-shell', { latest: new FakeLatest(release, tag('1.3.1')) });
+    await shell.run({ check: true });
+    should(shell.out.text).match(/update available: 1\.2\.3 → 1\.3\.1/u);
+  });
+
+  it('keeps the release when the tag is not ahead of it, or cannot be read', async () => {
+    for (const newest of [tag('1.3.0'), tag('1.2.0'), { kind: 'failed', reason: 'offline' } as const]) {
+      const h = harness('nix-profile', { latest: new FakeLatest(release, newest) });
+      await h.run();
+      should(h.report().target).equal('1.3.0');
+    }
+  });
+
+  it('falls back to the tag when the release cannot be read, and fails when neither can', async () => {
+    const failed = { kind: 'failed', reason: 'offline' } as const;
+    const h = harness('nix-profile', { latest: new FakeLatest(failed, tag('1.3.0')) });
+    await h.run();
+    should(h.report()).match({ target: '1.3.0', outcome: 'succeeded' });
+    const none = harness('nix-profile', { latest: new FakeLatest(failed, failed) });
+    await none.run();
+    should(none.report().message).equal('could not learn the latest release: offline');
+  });
+
+  it('never offers a tag to an install that downloads release assets', async () => {
+    for (const kind of ['homebrew', 'standalone']) {
+      const latest = new FakeLatest(release, tag('1.3.1'));
+      const h = harness(kind, { latest });
+      await h.run();
+      should(latest.tagCalls).equal(0);
+      should(h.report().target).equal('1.3.0');
+    }
+  });
+
+  it('does not look for a tag when the version was named', async () => {
+    const latest = new FakeLatest(release, tag('1.3.1'));
+    await harness('nix-profile', { latest }).run({ yes: true, to: '1.3.0', report: '/r.json' });
+    should(latest.tagCalls).equal(0);
+  });
+});
+
 describe('DaemonUpdater — nix shell', () => {
   it('refuses without consent and names the switch', async () => {
     const h = harness('nix-shell');
