@@ -84,7 +84,7 @@ describe('ProbeCache', () => {
     should(port.calls).have.length(2);
   });
 
-  it('should key an answer by wrapper and model', async () => {
+  it('should key an answer by wrapper, model and effort', async () => {
     // Arrange
     const port = new FakeProbe({ ok: true, ms: 1 });
     const cache = new ProbeCache(port, () => 0);
@@ -97,10 +97,16 @@ describe('ProbeCache', () => {
       60_000,
     );
     const otherWrapper = await cache.probe({ ...REQUEST, wrapper: 'claude-work' }, 60_000);
+    const otherEffort = await cache.probe({ ...REQUEST, effort: 'max' }, 60_000);
 
-    // Assert
-    should([otherModel.cached, defaultModel.cached, otherWrapper.cached]).deepEqual([false, false, false]);
-    should(port.calls).have.length(4);
+    // Assert -- the start runs at its effort, so an answer at another effort proves nothing about it.
+    should([otherModel.cached, defaultModel.cached, otherWrapper.cached, otherEffort.cached]).deepEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    should(port.calls).have.length(5);
   });
 
   it('should share a probe that is already running', async () => {

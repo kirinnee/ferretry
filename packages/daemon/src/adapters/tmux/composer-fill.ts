@@ -58,6 +58,7 @@ export async function captureFrame(tmux: TmuxController, session: string): Promi
     dead: state.dead,
     promptReady: state.promptReady,
     visible: state.visible,
+    ...(state.dead ? { history: state.history } : {}),
     ...(state.exitCode === undefined ? {} : { exitCode: state.exitCode }),
     ...(state.cursorX === undefined ? {} : { cursorX: state.cursorX }),
     ...(state.cursorY === undefined ? {} : { cursorY: state.cursorY }),
