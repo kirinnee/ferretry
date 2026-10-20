@@ -74,6 +74,21 @@ describe('normalizeAnalyticsModelIdentity', () => {
     should(unmatched?.modelId).equal('model-c');
   });
 
+  it('should read a Bedrock model version as a revision, so the model keeps its identity', () => {
+    // Act
+    const versioned = normalizeAnalyticsModelIdentity('us.anthropic.claude-opus-5-5-20261001-v1:0');
+    const bare = normalizeAnalyticsModelIdentity('anthropic.claude-haiku-5-5-v2');
+    const ollama = normalizeAnalyticsModelIdentity('gpt-oss:20b');
+
+    // Assert
+    should(versioned?.modelId).equal('us.anthropic.claude-opus-5-5');
+    should(versioned?.revision).equal('20261001-v1:0');
+    should(bare?.modelId).equal('anthropic.claude-haiku-5-5');
+    should(bare?.revision).equal('v2');
+    should(ollama?.modelId).equal('gpt-oss:20b');
+    should(ollama?.revision).be.null();
+  });
+
   it('should return null when no model evidence exists', () => {
     // Act
     const missing = normalizeAnalyticsModelIdentity(null);

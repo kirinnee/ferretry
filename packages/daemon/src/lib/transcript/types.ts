@@ -46,7 +46,8 @@ export interface TranscriptEventMetadata {
    * How a user message reached the harness when it was not typed into the composer: `native-queue` is a
    * prompt Claude queued while busy and drained later, and `harness` is text the HARNESS wrote into the
    * user channel itself — a background-task notification, a subagent's or coordinator's message, a meta
-   * record. A `harness` message is never something the owner said (`isOwnerMessage`).
+   * record. A `harness` message is never something the owner said (`isOwnerMessage`). On an ASSISTANT
+   * message, `harness` marks a record Claude Code wrote without any model speaking (`model: "<synthetic>"`).
    */
   readonly inputSource?: 'native-queue' | 'harness';
   readonly blockIndex?: number;
@@ -153,6 +154,12 @@ export interface TranscriptUsageEvent extends TranscriptEventMetadata {
     readonly contextTokens?: number;
     readonly contextWindow?: number;
     readonly model?: string;
+    /**
+     * The harness's own running total for the whole session at this record, when it states one (Codex
+     * `total_token_usage.total_tokens`). A record whose running total did not move reports no new
+     * request, whatever its per-request figures say, so a reader summing usage skips it.
+     */
+    readonly sessionTotalTokens?: number;
   };
 }
 

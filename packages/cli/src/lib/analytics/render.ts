@@ -1,5 +1,5 @@
 import type { AnalyticsAggregateResult, AnalyticsRawSession, AnalyticsResponse } from '@ferretry/protocol';
-import { DASH, compactNumber, duration, measure, percent, renderTable, usdMicros } from './format.ts';
+import { compactNumber, DASH, duration, measure, percent, renderTable, usdMicros } from './format.ts';
 
 /**
  * The one sentence every surface must print beside an equivalent cost.
@@ -30,6 +30,7 @@ const AGGREGATE_HEADER = [
   'EQUIV API COST',
   'TURNS',
   'DURATION',
+  'ACTIVE',
   'TTFO',
   'CTX END',
   'STALL',
@@ -48,6 +49,7 @@ const RAW_HEADER = [
   'EQUIV API COST',
   'TURNS',
   'DURATION',
+  'ACTIVE',
 ] as const;
 
 /** How a group of labels reads in the GROUP column; an ungrouped query covers everything. */
@@ -99,6 +101,7 @@ function aggregateRow(result: AnalyticsAggregateResult): string[] {
     measure(result.equivalentApiCostUsdMicros, usdMicros),
     measure(result.turns, compactNumber),
     measure(result.durationMs, duration),
+    measure(result.activeDurationMs, duration),
     measure(result.timeToFirstOutputMs, duration),
     measure(result.contextEndPercent, percent),
     ...rates(result),
@@ -117,6 +120,7 @@ function rawRow(result: AnalyticsRawSession): string[] {
     optionalNumber(result.equivalentApiCostUsdMicros, usdMicros),
     optionalNumber(result.turns, compactNumber),
     optionalNumber(result.durationMs, duration),
+    optionalNumber(result.activeDurationMs, duration),
   ];
 }
 

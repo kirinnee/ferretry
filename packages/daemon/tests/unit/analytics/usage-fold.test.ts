@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AnalyticsTranscriptEvidence, foldAnalyticsSessionUsage } from '../../../src/lib/analytics/usage-fold.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  parseTranscriptJsonl,
+} from '../../../src/lib/transcript/index.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../../../src/lib/transcript/types.ts';
 
 type UsageFigures = NonNullable<Extract<TranscriptEvent, { kind: 'usage' }>>['usage'];
@@ -354,5 +359,97 @@ describe('analytics session usage fold', () => {
     );
 
     should(actual).containDeep({ kind: 'usage', usage: { pricingModel: 'gpt-5.6-codex', inputTokens: 10 } });
+  });
+});
+
+describe('analytics session usage fold, on Claude multi-block messages', () => {
+  it('should count one API response once though Claude writes a line per content block', () => {
+    // Arrange — the shape Claude Code writes: thinking, text and tool_use as three lines of ONE
+    // message, each repeating its id, request id and usage; the last line carries the final output.
+    const line = (uuid: string, block: object, output: number, id = 'msg_01') =>
+      JSON.stringify({
+        type: 'assistant',
+        uuid,
+        requestId: `req_${id}`,
+        timestamp: '2026-10-20T10:00:00.000Z',
+        message: {
+          id,
+          role: 'assistant',
+          model: 'claude-opus-5-5',
+          content: [block],
+          usage: {
+            input_tokens: 10,
+            output_tokens: output,
+            cache_read_input_tokens: 1_000,
+            cache_creation_input_tokens: 50,
+          },
+        },
+      });
+    const text = [
+      line('a1', { type: 'thinking', thinking: 'hmm', signature: 's' }, 3),
+      line('a2', { type: 'text', text: 'Looking.' }, 3),
+      line('a3', { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }, 40),
+      line('b1', { type: 'text', text: 'Done.' }, 7, 'msg_02'),
+    ].join('\n');
+    const parsed = parseTranscriptJsonl(new ClaudeTranscriptParser(), { text: `${text}\n` });
+
+    // Act
+    const actual = foldAnalyticsSessionUsage(read(parsed.events));
+
+    // Assert — two responses: 1 060 + 1 060 gross input, 40 + 7 output
+    should(actual).deepEqual({
+      kind: 'usage',
+      usage: {
+        pricingModel: 'claude-opus-5-5',
+        inputTokens: 2_120,
+        outputTokens: 47,
+        cachedInputTokens: 2_000,
+        cacheWriteInputTokens: 100,
+        cacheWrite5mInputTokens: null,
+        cacheWrite1hInputTokens: null,
+        reasoningTokens: null,
+      },
+    });
+  });
+});
+
+describe('analytics session usage fold, on Codex repeated token counts', () => {
+  it('should not count a token_count whose session running total did not move', () => {
+    // Arrange — the third record restates the second: same running total, its per-request figures
+    // still attached. Codex's own total is 1 000 + 2 000 input.
+    const count = (input: number, total: number) =>
+      JSON.stringify({
+        timestamp: '2026-10-20T09:00:00.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: {
+              input_tokens: input,
+              cached_input_tokens: 0,
+              output_tokens: 10,
+              reasoning_output_tokens: 0,
+            },
+            total_token_usage: { total_tokens: total },
+          },
+        },
+      });
+    const text = [
+      JSON.stringify({
+        timestamp: '2026-10-20T09:00:00.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-6-astra' },
+      }),
+      count(1_000, 1_010),
+      count(2_000, 3_020),
+      count(2_000, 3_020),
+    ].join('\n');
+    const parsed = parseTranscriptJsonl(new CodexTranscriptParser(), { text: `${text}\n` });
+
+    // Act
+    const actual = foldAnalyticsSessionUsage(read(parsed.events, { harness: 'codex' }));
+
+    // Assert
+    should(actual.kind === 'usage' && [actual.usage.inputTokens, actual.usage.outputTokens]).deepEqual([3_000, 20]);
   });
 });

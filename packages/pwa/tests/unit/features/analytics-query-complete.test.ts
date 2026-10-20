@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
+import { AnalyticsMetricSchema, parseAnalyticsQuery } from '@ferretry/protocol';
 import {
+  ANALYTICS_RANGE_PRESETS,
+  type AnalyticsCompletion,
   analyticsCompletions,
   quoteAnalyticsValue,
   rankAnalyticsCompletions,
-  type AnalyticsCompletion,
 } from '../../../src/features/analytics/analytics-query-complete.ts';
 
 const labels = (text: string, caret = text.length) =>
@@ -33,7 +35,7 @@ describe('analytics query completion', () => {
   });
 
   it('offers clauses after an aggregation and suppresses a second grouping clause', () => {
-    expect(labels('sum ').slice(0, 2)).toEqual(['by', '{']);
+    expect(labels('sum ').slice(0, 3)).toEqual(['(', 'by', '[']);
     expect(labels('sum by (model) ')).not.toContain('by');
     expect(analyticsCompletions('sum ', -30).replaceRange).toEqual({ start: 0, end: 3 });
   });
@@ -96,5 +98,39 @@ describe('analytics query completion', () => {
     expect(rankAnalyticsCompletions(entries, 'm').map(entry => entry.id)).toEqual(['agg', 'value']);
     expect(rankAnalyticsCompletions(entries, 'nope')).toEqual([]);
     expect(rankAnalyticsCompletions(entries, '', 1)).toHaveLength(1);
+  });
+});
+
+describe('analytics query completion: metrics and ranges', () => {
+  it('offers every protocol metric inside the aggregation parentheses', () => {
+    const result = analyticsCompletions('sum(', 4);
+    expect(result.context).toBe('metric');
+    expect(result.candidates.map(candidate => candidate.label)).toEqual([...AnalyticsMetricSchema.options]);
+    const typed = analyticsCompletions('sum(cost', 8);
+    expect(typed.candidates[0]).toMatchObject({ label: 'cost_usd', replacement: 'cost_usd)' });
+    expect(typed.replaceRange).toEqual({ start: 4, end: 8 });
+  });
+
+  it('offers range presets inside brackets, and only until a range exists', () => {
+    const result = analyticsCompletions('sum(cost_usd) [', 15);
+    expect(result.context).toBe('range');
+    expect(result.candidates.map(candidate => candidate.label)).toEqual([...ANALYTICS_RANGE_PRESETS]);
+    expect(result.candidates[0]!.replacement).toBe('24h]');
+    expect(labels('sum(cost_usd) [7d] ')).not.toContain('[');
+    expect(labels('sum(cost_usd) ')).not.toContain('(');
+    expect(labels('sum(cost_usd) ')).toContain('[');
+  });
+
+  it('offers values for the machine, runtime and project labels from a result', () => {
+    const sources = { valuesFor: (label: string) => (label === 'runtime' ? ['claude-a'] : undefined) };
+    expect(analyticsCompletions('{runtime=', 9, sources).candidates.map(candidate => candidate.label)).toEqual([
+      'claude-a',
+    ]);
+    expect(analyticsCompletions('{machine=', 9, sources).pendingValueLabel).toBe('machine');
+  });
+
+  it('only offers ranges the protocol parser accepts', () => {
+    for (const preset of ANALYTICS_RANGE_PRESETS)
+      expect(parseAnalyticsQuery(`sum(cost_usd) [${preset}]`).range).toBeDefined();
   });
 });

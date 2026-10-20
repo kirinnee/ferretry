@@ -93,6 +93,8 @@ const contextLabel = {
   'grouping-label': 'Group by label',
   'matcher-label': 'Filter label',
   'matcher-value': 'Filter value',
+  metric: 'Metric',
+  range: 'Time range',
 } as const;
 
 export function AnalyticsCompletionList({

@@ -3,15 +3,33 @@
 label: OpenAI
 docs: https://learn.chatgpt.com/docs/models
 verified: '2026-10-18'
+unverified:
+  - 'GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted.'
 codex:
   models:
     - id: gpt-6-astra
+      price:
+        provider: openai
+        input: 10
+        output: 50
+        cacheRead: 1
+        cacheWrite: 12.5
+        source: https://developers.openai.com/api/docs/pricing
+        verified: '2026-10-20'
       label: GPT-6 Astra
       tier: best
       context: 1050000
       efforts: [low, medium, high, xhigh, max, ultra]
       defaultEffort: medium
     - id: gpt-6.1-sol
+      price:
+        provider: openai
+        input: 2
+        output: 10
+        cacheRead: 0.1
+        cacheWrite: 2.5
+        source: https://developers.openai.com/api/docs/pricing
+        verified: '2026-10-20'
       label: GPT-6.1 Sol
       tier: balanced
       context: 1050000
@@ -19,6 +37,14 @@ codex:
       defaultEffort: medium
       default: true
     - id: gpt-6-luna
+      price:
+        provider: openai
+        input: 0.1
+        output: 0.5
+        cacheRead: 0.01
+        cacheWrite: 0.125
+        source: https://developers.openai.com/api/docs/pricing
+        verified: '2026-10-20'
       label: GPT-6 Luna
       tier: fast
       context: 1050000

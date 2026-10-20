@@ -4,6 +4,8 @@ docs: https://platform.kimi.ai/docs/guide/claude-code-kimi
 verified: '2026-10-18'
 unverified:
   - Kimi's guide says kimi-k2.7-code always thinks, while its model table says it does not; Ferretry offers no effort choice for it.
+  - "Kimi charges one cache-write price per request in analytics: K3's 5-minute one ($3); its 1-hour write costs $6."
+  - 'Kimi lists no cache-write price for the K2.7 Code models; a written token is charged as input.'
 claude:
   tiers:
     opus: kimi-k3[1m]
@@ -12,6 +14,14 @@ claude:
     subagent: kimi-k3[1m]
   models:
     - id: kimi-k3
+      price:
+        provider: moonshot
+        input: 3
+        output: 15
+        cacheRead: 0.3
+        cacheWrite: 3
+        source: https://platform.kimi.ai/docs/pricing/chat
+        verified: '2026-10-20'
       suffix: '[1m]'
       label: Kimi K3
       tier: best
@@ -19,11 +29,27 @@ claude:
       reasoning: true
       default: true
     - id: kimi-k2.7-code
+      price:
+        provider: moonshot
+        input: 0.95
+        output: 4
+        cacheRead: 0.19
+        cacheWrite: 0.95
+        source: https://platform.kimi.ai/docs/pricing/chat
+        verified: '2026-10-20'
       label: Kimi K2.7 Code
       tier: fast
       context: 256000
       reasoning: true
     - id: kimi-k2.7-code-highspeed
+      price:
+        provider: moonshot
+        input: 1.9
+        output: 8
+        cacheRead: 0.38
+        cacheWrite: 1.9
+        source: https://platform.kimi.ai/docs/pricing/chat
+        verified: '2026-10-20'
       label: Kimi K2.7 Code (high speed)
       tier: fast
       context: 256000
@@ -32,6 +58,14 @@ codex:
   docs: https://platform.kimi.ai/docs/guide/codex-kimi
   models:
     - id: kimi-k3
+      price:
+        provider: moonshot
+        input: 3
+        output: 15
+        cacheRead: 0.3
+        cacheWrite: 3
+        source: https://platform.kimi.ai/docs/pricing/chat
+        verified: '2026-10-20'
       label: Kimi K3
       tier: best
       context: 1000000

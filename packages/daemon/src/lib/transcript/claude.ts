@@ -92,12 +92,27 @@ function claudeAttachment(block: Record<string, unknown>): TranscriptAttachment 
  * Claude states it on the record: `origin.kind` names who produced a prompt (`human` for the person;
  * `task-notification`, `peer`, `coordinator` for the harness's own events), and `isMeta` marks a record
  * its own UI never shows as a message (an image's size line, a skill's body, a scheduled prompt). A
- * record carrying neither is the person's, which keeps every older transcript reading as it did.
+ * compaction's summary (`isCompactSummary`, "This session is being continued…") and a record shown only
+ * in the transcript view (`isVisibleInTranscriptOnly`) are the harness's too. A record carrying none of
+ * these is the person's, which keeps every older transcript reading as it did.
  */
 function harnessWritten(record: Record<string, unknown>): boolean {
-  if (record.isMeta === true) return true;
+  if (record.isMeta === true || record.isCompactSummary === true || record.isVisibleInTranscriptOnly === true) {
+    return true;
+  }
   const kind = transcriptString(transcriptObject(record.origin)?.kind);
   return kind !== undefined && kind !== '' && kind !== 'human';
+}
+
+/**
+ * Whether Claude Code wrote this ASSISTANT record itself instead of taking it from the model.
+ *
+ * It names such a record's model `<synthetic>`: the "No response requested." it answers a background
+ * notification with, an API error, a usage-limit notice. No request was made and no model spoke, so
+ * the record is the harness's, exactly as a harness-written user record is.
+ */
+function synthetic(message: Record<string, unknown>): boolean {
+  return message.model === '<synthetic>';
 }
 
 function isClaudeAttachmentType(type: string): boolean {
@@ -280,7 +295,10 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
     const content = message.content ?? record.content;
     const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
-    const source = role === 'user' && harnessWritten(record) ? ({ inputSource: 'harness' } as const) : {};
+    const source =
+      (role === 'user' && harnessWritten(record)) || (role === 'assistant' && synthetic(message))
+        ? ({ inputSource: 'harness' } as const)
+        : {};
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const value = blocks[blockIndex];
       const blockMetadata = metadata(role, blockIndex);
