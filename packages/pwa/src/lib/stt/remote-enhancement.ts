@@ -23,8 +23,10 @@ import type { DictionaryEntry } from './enhancement.ts';
 import type { RemoteEnhancementProviderId } from './stt-settings.ts';
 
 export const STT_ENHANCE_PATH = '/v1/stt/enhance';
-export const REMOTE_ENHANCEMENT_TIMEOUT_MS = 2_500;
+export const REMOTE_ENHANCEMENT_TIMEOUT_MS = 4_500;
 export const MAX_REMOTE_ENHANCEMENT_TEXT_CHARS = 8_000;
+/** One conversation message on the wire. The daemon reduces and re-bounds it; this only keeps a huge reply off the network. */
+export const MAX_REMOTE_CONTEXT_MESSAGE_CHARS = 4_000;
 
 export type RemoteEnhancementErrorCode =
   | 'unauthorized'
@@ -74,6 +76,9 @@ export interface RemoteEnhancementResult {
   readonly provider?: string;
   readonly model?: string;
   readonly latencyMs?: number;
+  /** Set when the daemon refused the model's reply and sent the raw words back; `keptReason` says why. */
+  readonly kept?: 'raw';
+  readonly keptReason?: string;
 }
 
 const errorCode = (status: number, code: unknown): RemoteEnhancementErrorCode => {
@@ -152,7 +157,7 @@ export async function requestRemoteEnhancement(
       // so sending an over-long list would silently cost a reader with a large
       // vocabulary every remote correction instead of a few terms.
       dictionary: input.dictionary.slice(0, MAX_STT_DICTIONARY_ENTRIES),
-      context: input.context,
+      context: input.context.map(message => message.slice(-MAX_REMOTE_CONTEXT_MESSAGE_CHARS)),
       // Same contract, same reason: the settings field accepts a longer context
       // than this wire does because local correction reads all of it. A stored
       // value the UI called valid must never be the thing that makes every
@@ -210,6 +215,10 @@ export async function requestRemoteEnhancement(
     }
     return {
       text,
+      ...(record.kept === 'raw' ? { kept: 'raw' as const } : {}),
+      ...(record.kept === 'raw'
+        ? { keptReason: boundedMessage(record.keptReason, 'The cleanup reply did not read as your words corrected.') }
+        : {}),
       provider: optionalString(record.provider),
       model: optionalString(record.model),
       latencyMs:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { FyEvent } from '@ferretry/protocol';
+import { type FyEvent, peerEnvelopePreamble, turnFileInstruction } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
 import {
   CONTEXT_FETCH_LIMIT,
@@ -148,6 +148,18 @@ describe('extractContextMessages', () => {
         event('chat.user', 'kept'),
       ]),
     ).toEqual(['kept']);
+  });
+
+  it("drops Ferretry plumbing from the person's side and keeps a peer message's body", () => {
+    const peer = peerEnvelopePreamble({ name: 'kite', sessionId: 's-1', kind: 'message', clientName: 'fy' });
+    expect(
+      extractContextMessages([
+        event('chat.user', turnFileInstruction('/home/x/.fy/s/turns/turn-001.md')),
+        event('chat.user', '[ferretry] your message did not arrive'),
+        event('chat.user', `${peer}the schema change landed`),
+        event('chat.user', '<pasted_content id="1">\nplease review the diff\n</pasted_content>'),
+      ]),
+    ).toEqual(['the schema change landed', 'please review the diff']);
   });
 
   it('keeps at most the last ten messages', () => {
@@ -563,6 +575,50 @@ describe('useDictation enhancement', () => {
     expect(view.handle().error).toBeNull();
     await interact(() => view.handle().insert('raw words'));
     expect(view.drafts[0]?.text).toBe('raw words');
+    await view.unmount();
+  });
+
+  it('says why when the daemon kept the raw words because the reply failed its guard', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({
+      recognition: provider,
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      enhancementFetch: async () =>
+        new Response(
+          JSON.stringify({
+            text: 'raw words',
+            kept: 'raw',
+            keptReason: 'The cleanup reply pulled in words from the conversation.',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await finishTake(view, provider);
+    expect(view.handle().review?.cleaned).toBe('raw words');
+    expect(view.handle().review?.enhancementError).toEqual({
+      code: 'enhancement-kept-raw',
+      message: 'The cleanup reply pulled in words from the conversation.',
+    });
+    await view.unmount();
+  });
+
+  it('falls back to a generic reason when a kept reply carries none', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({
+      recognition: provider,
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      enhancementFetch: async () =>
+        new Response(JSON.stringify({ text: 'raw words', kept: 'raw' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await finishTake(view, provider);
+    expect(view.handle().review?.enhancementError?.message).toMatch(/did not read as your words corrected/u);
     await view.unmount();
   });
 

@@ -61,6 +61,7 @@ import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/st
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
 import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
+import { readUserMessage } from '../lib/user-message.ts';
 
 /**
  * What the panel shows and what the push-to-talk shortcut reads.
@@ -125,6 +126,16 @@ export async function withinContextFetchBudget<T>(
   }
 }
 
+/**
+ * What a person's own record says: a peer message is its body, and Ferretry's plumbing (a delivery
+ * notice, a pointer to a turn file) says nothing a person spoke, so it is not conversation.
+ */
+const spokenWords = (raw: string): string => {
+  const message = readUserMessage(raw);
+  if (message.kind === 'human') return message.text;
+  return message.kind === 'peer' ? message.body : '';
+};
+
 interface ContextRecordLike {
   readonly type?: unknown;
   readonly data?: unknown;
@@ -139,7 +150,8 @@ export function extractContextMessages(records: readonly ContextRecordLike[] | u
     if (record.type !== 'chat.user' && record.type !== 'chat.assistant.text') continue;
     const text = (record.data as { text?: unknown } | null | undefined)?.text;
     if (typeof text !== 'string' || text.trim().length === 0) continue;
-    texts.push(text);
+    const words = record.type === 'chat.user' ? spokenWords(text) : text;
+    if (words.trim().length > 0) texts.push(words);
   }
   return texts.slice(-MAX_CONTEXT_MESSAGES);
 }
@@ -393,6 +405,13 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
             ...(signal ? { signal } : {}),
             fetchImpl: current.enhancementFetch ?? routedFetchRef.current,
           });
+          if (result.kept === 'raw') {
+            // The daemon refused the model's reply and sent the words back: say why instead of looking like a no-op.
+            onFailure({
+              code: 'enhancement-kept-raw',
+              message: `${result.keptReason ?? 'The cleanup reply did not read as your words corrected.'}`,
+            });
+          }
           return result.text;
         } catch (failure) {
           if (!isCurrent(token) || controllerRef.current?.signal.aborted === true) return raw;
