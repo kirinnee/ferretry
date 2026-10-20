@@ -111,6 +111,7 @@ candidates is resolved to a runtime on this machine and checked **now**, in the 
 | ----------------------------------- | ------------------- |
 | An agent runtime                    | `not_agent`         |
 | Its CLI is installed                | `cli_missing`       |
+| A start can run its launcher        | `cli_missing`       |
 | Every secret its login names is set | `not_logged_in`     |
 | Its login is signed in              | `not_logged_in`     |
 | Its quota is not used up            | `out_of_quota`      |
@@ -144,7 +145,8 @@ fy new --auto "<complete brief>"            # the decision mode picks
 2. **Order**: the named runtime — checked as `recommend` checks it — or, with `--auto`, the guide's ready
    candidates in the guide's order, or **Jev's** order when Jev decides.
 3. **Probe — always, in both modes.** Each candidate in turn is asked to "Reply with exactly: OK" through its
-   own wrapper in its CLI's one-shot mode (`claude -p`, `codex exec` at `low` effort), bounded by
+   own wrapper — resolved exactly as the start resolves it, the published absolute launcher in
+   `$FY_HOME/fleet/bin` and never a name looked up on `PATH`, with the same login environment — in its CLI's one-shot mode (`claude -p`, `codex exec` at `low` effort), bounded by
    `probe.timeoutSeconds` (45 s). A probe spends a token or two, and only when a ferret asked for a start —
    never on a timer. Its answer is kept per runtime and model for `probe.cacheSeconds` (60 s) and probes
    already running are shared, so twenty sub-ferrets started at once probe once. A failed probe refuses that
@@ -161,7 +163,7 @@ refusal (a failure of the command itself is 1).
 | `pack_off`                            | the machine's or this ferret's switch is off                          |
 | `limit_reached` / `depth_exceeded`    | see Limits; do the work yourself                                      |
 | `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                        |
-| `cli_missing` / `not_logged_in`       | the CLI is not installed / the login needs signing in                 |
+| `cli_missing` / `not_logged_in`       | the CLI or its launcher is missing / the login needs signing in       |
 | `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model                  |
 | `probe_failed`                        | the "reply OK" check did not answer OK in time                        |
 | `no_candidate`                        | nothing in the guide can run here now                                 |

@@ -301,7 +301,8 @@ const contextDependencies = (): NonNullable<ComponentProps<typeof SessionChatPag
 const fakeDaemon = (options: { readonly migrate?: Error | readonly (Error | undefined)[] } = {}) => {
   const calls: string[] = [];
   /** Every migrate request: its id and whether it forced past the in-flight check. */
-  const requests: { readonly requestId: string; readonly forceInflight: unknown }[] = [];
+  const requests: { readonly requestId: string; readonly forceInflight: unknown; readonly conversation?: unknown }[] =
+    [];
   let migrations = 0;
   const api = {
     rename: async (id: string, name?: string, teammate?: string, clearParent?: boolean) => {
@@ -315,8 +316,9 @@ const fakeDaemon = (options: { readonly migrate?: Error | readonly (Error | unde
       force: unknown,
       requestId: string,
       forceInflight?: unknown,
+      conversation?: unknown,
     ) => {
-      requests.push({ requestId, forceInflight });
+      requests.push({ requestId, forceInflight, ...(conversation === undefined ? {} : { conversation }) });
       const scripted = Array.isArray(options.migrate) ? options.migrate[migrations] : options.migrate;
       migrations += 1;
       if (scripted !== undefined) throw scripted;
@@ -450,6 +452,7 @@ describe('SessionChatPage', () => {
       'Move to another machine',
       'Add MCP server…',
       'Restart CLI',
+      'Go back to the earlier conversation…',
       'Stop ferret…',
     ]);
     // Moving to another machine exists but cannot be done here yet: it is dimmed, with the reason.
@@ -2818,6 +2821,26 @@ describe('SessionChatPage Info and Actions', () => {
       await flush();
       const agent = sessionView('shared').config.agent;
       expect(daemon.calls).toEqual([`migrate:shared:${agent}:undefined:false:true`]);
+      expect(published.at(-1)?.config.id).toBe('shared');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Go back to the earlier conversation asks inline, then restarts on it and publishes the view', async () => {
+    const daemon = fakeDaemon();
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(chatPage({ onSessionChange: view => published.push(view) }), daemon.factory);
+    try {
+      chooseAction(page.root, 'earlier-conversation');
+      expect(daemon.calls).toEqual([]);
+      await runAsync(async () => {
+        page.root.findByProps({ 'data-menu-confirm-yes': '' }).props.onClick();
+        await Promise.resolve();
+      });
+      await flush();
+      expect(daemon.requests.at(-1)).toMatchObject({ conversation: 'previous' });
+      expect(String(daemon.requests.at(-1)?.requestId)).toStartWith('earlier-shared-');
       expect(published.at(-1)?.config.id).toBe('shared');
     } finally {
       run(() => page.unmount());

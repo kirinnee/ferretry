@@ -152,9 +152,10 @@ export function buildLaunchArgv(parts: LaunchArgvParts): readonly string[] {
  *
  * The recorded provenance is the evidence: Claude's minted id is what the start put on the argv. A
  * session whose document predates provenance still carries the flag in its recorded argv, so that
- * id is kept rather than a new conversation being created. Codex names its own session and takes
- * nothing — except a conversation Ferretry ADOPTED, which it was started on with `resume <id>` and
- * must keep being resumed into.
+ * id is kept rather than a new conversation being created. Codex names its own session, so a fresh
+ * one takes nothing; once its thread is KNOWN — proven by correlation, or adopted and started with
+ * `resume <id>` — every relaunch resumes it. Only adopted threads used to: a correlated session came
+ * back from a revive or a Restart in a brand-new rollout, its conversation left behind on disk.
  *
  * A Codex session with a correlation token is relaunched DECLARING it again, as its start did. A
  * session whose rollout was never proven — including one started before starts declared it — would
@@ -166,8 +167,8 @@ export function transcriptLaunchArguments(
   recorded: readonly string[],
 ): readonly string[] {
   if (harness !== 'claude') {
-    const adopted = provenance?.identity === 'adopted' ? provenance.harnessSessionId : undefined;
-    const id = adopted ?? (recorded[1] === CODEX_RESUME ? recorded[2] : undefined);
+    // The schema makes an id present exactly when the identity is established.
+    const id = provenance?.harnessSessionId ?? (recorded[1] === CODEX_RESUME ? recorded[2] : undefined);
     const token = provenance?.correlationToken;
     return [
       ...(id === undefined ? [] : [CODEX_RESUME, id]),

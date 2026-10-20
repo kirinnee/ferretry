@@ -153,6 +153,29 @@ describe('runtimeRefusal', () => {
     should(passes).be.undefined();
   });
 
+  it('should refuse a runtime whose launcher a start would refuse, naming why', () => {
+    // Arrange
+    const known = facts({
+      credentials: [credential('claude-main-login')],
+      tools: [claudeTool],
+      unlaunchable: {
+        'claude-main-wrapper':
+          'the fleet publishes claude-main at /fy/fleet/bin/claude-main, but this host cannot run that file',
+      },
+    });
+
+    // Act
+    const refusal = runtimeRefusal(readyClaude, 'opus', known);
+
+    // Assert
+    should(refusal).deepEqual({
+      code: 'cli_missing',
+      message:
+        'claude-main cannot be launched: the fleet publishes claude-main at /fy/fleet/bin/claude-main, but this host cannot run that file',
+      remedy: 'Pick another runtime.',
+    });
+  });
+
   it('should refuse a login that names a secret the store does not hold', () => {
     // Arrange
     const needy = credential('claude-main-login', {

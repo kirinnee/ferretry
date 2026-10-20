@@ -357,8 +357,8 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     list: async (): Promise<SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
-    migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight) =>
-      (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight),
+    migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
+      (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
     snapshot: async (id: string) => (await client()).snapshot(id),

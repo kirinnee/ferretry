@@ -165,13 +165,14 @@ describe('the session migrate mount', () => {
           'this session runs the claude harness and codex-auto-target is a codex account',
         ),
         stuck: new SessionMigrateError('failed', 'the replacement pane never became ready'),
+        amnesia: new SessionMigrateError('unresumable', 'this session has no recorded conversation'),
         weird: new SessionMigrateError('invalid', '"weird" is not a usable session id'),
       }),
     );
 
     // Act
     const answers = await Promise.all(
-      ['busy', 'broken', 'nosuch', 'spent', 'smaller', 'crossed', 'stuck', 'weird', 'absent'].map(
+      ['busy', 'broken', 'nosuch', 'spent', 'smaller', 'crossed', 'stuck', 'amnesia', 'weird', 'absent'].map(
         async id => await subject.dispatch(migrateRequest(id)),
       ),
     );
@@ -187,6 +188,8 @@ describe('the session migrate mount', () => {
       // rather than 404 or 400, because the request is well formed and names a real account.
       [409, 'harness_mismatch'],
       [500, 'session_migrate_failed'],
+      // The conversation cannot go with it, and only the person may choose to start a fresh one.
+      [409, 'conversation_unresumable'],
       [400, 'invalid_session_id'],
       [404, 'not-found'],
     ]);

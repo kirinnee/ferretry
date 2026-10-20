@@ -116,6 +116,7 @@ describe('migration refusal classification', () => {
   it.each([
     ['context_downgrade_refused', 'context-downgrade'],
     ['migration_refused', 'preflight-refused'],
+    ['conversation_unresumable', 'conversation-unresumable'],
     ['unknown_agent', 'unknown-agent'],
     ['agent_unavailable', 'unavailable'],
     ['session_unusable', 'unusable'],

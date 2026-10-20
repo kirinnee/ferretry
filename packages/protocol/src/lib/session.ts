@@ -911,12 +911,34 @@ export const ResumeSessionRequestSchema = z.strictObject({
 });
 export type ResumeSessionRequest = z.infer<typeof ResumeSessionRequestSchema>;
 
+/**
+ * What a Restart or a same-harness migration does with the conversation the session is bound to.
+ *
+ *   * `resume` — the default, and what Restart means: the relaunched CLI continues the SAME harness
+ *     conversation (Claude `--resume <id>`, Codex `resume <thread>`), its transcript carried into the
+ *     target login's home when the login changes. When that cannot be done the daemon refuses with
+ *     `409 conversation_unresumable` and changes nothing — it never quietly starts a new conversation.
+ *   * `fresh` — the person chose to start a new conversation: the target's own transcript is captured
+ *     as a start would, and the old conversation stays on disk untouched.
+ *   * `previous` — the repair for a session a Restart already moved onto a new conversation: rebind to
+ *     the newest OTHER transcript in the same harness home that mentions this session's directory, and
+ *     resume that one. Refused like `resume` when there is none.
+ */
+export const MigrationConversationSchema = z.enum(['resume', 'fresh', 'previous']);
+export type MigrationConversation = z.infer<typeof MigrationConversationSchema>;
+
 export const MigrateSessionRequestSchema = z.strictObject({
   agent: z.string().min(1),
   model: z.string().min(1).optional(),
   allowContextDowngrade: z.boolean().default(false),
   /** Proceed past a refusal the in-flight inventory raised. Only an explicit, human-confirmed Restart anyway sets it. */
   forceInflight: z.boolean().default(false),
+  /**
+   * What happens to the conversation the session is bound to; omitted means `resume`. See
+   * {@link MigrationConversationSchema}. Optional rather than defaulted so a client never sends it
+   * unasked: a daemon that predates the field refuses an unknown key, and Restart must keep working there.
+   */
+  conversation: MigrationConversationSchema.optional(),
 });
 export type MigrateSessionRequest = z.infer<typeof MigrateSessionRequestSchema>;
 export type MigrateSessionRequestInput = z.input<typeof MigrateSessionRequestSchema>;
@@ -973,6 +995,16 @@ export const ContextDowngradeRefusedBodySchema = ApiErrorResponseSchema.extend({
   downgrade: ContextDowngradeSchema.optional(),
 });
 export type ContextDowngradeRefusedBody = z.infer<typeof ContextDowngradeRefusedBodySchema>;
+
+/**
+ * The `409 conversation_unresumable` body: the session's conversation could not be carried into the
+ * relaunch, so nothing was restarted. `error` says why in plain words; the only ways past are a
+ * request with `conversation: 'fresh'`, which the person must choose, or `'previous'`.
+ */
+export const ConversationUnresumableBodySchema = ApiErrorResponseSchema.extend({
+  code: z.literal('conversation_unresumable'),
+});
+export type ConversationUnresumableBody = z.infer<typeof ConversationUnresumableBodySchema>;
 
 /**
  * An agent's first name as a caller may type it: `Hadi`, `marin`, `mary-jane`.

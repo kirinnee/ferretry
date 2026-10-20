@@ -35,7 +35,7 @@ import { ForkForm } from './fork-form.tsx';
 import { type SessionActionContribution, sessionActionSections } from './registry.ts';
 import { RenameForm } from './rename-form.tsx';
 import { useRestartRefusal } from './restart-refusal.tsx';
-import { forkThroughLatest, restartWithResume } from './session-operations.ts';
+import { forkThroughLatest, restartOnEarlierConversation, restartWithResume } from './session-operations.ts';
 
 const ROW_ACTION_IDS = { open: 'open', copyName: 'copy-name' } as const;
 
@@ -168,6 +168,15 @@ function RowActions({
           await routedClient(connection),
           view,
           `restart-${sessionId}-${view.state.turn}-${Date.now()}`,
+        ),
+      );
+    },
+    restartOnEarlierConversation: async () => {
+      publish(
+        await restartOnEarlierConversation(
+          await routedClient(connection),
+          view,
+          `earlier-${sessionId}-${view.state.turn}-${Date.now()}`,
         ),
       );
     },
