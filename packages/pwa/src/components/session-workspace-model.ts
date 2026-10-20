@@ -1,6 +1,7 @@
-import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
+import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { projectPackCalls } from '../lib/pack-calls.ts';
 import { projectDeliveries } from '../lib/peer-delivery.ts';
+import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
 import { classifySystemText } from '../lib/system-blocks.ts';
@@ -280,7 +281,7 @@ export const transcriptEntriesFromLog = (
 
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {
   /** The session's send ledger. Optional: a reader that does not show sends never asks. */
-  readonly sends?: (id: string) => Promise<readonly SendRecord[]>;
+  readonly sends?: (id: string) => Promise<readonly LedgerSendRecord[]>;
 };
 
 export interface SessionWorkspaceRefreshEnvironment {
@@ -298,7 +299,12 @@ export interface SessionWorkspaceRefreshInput {
   readonly onTranscript: (entries: readonly TranscriptEntry[]) => void;
   readonly onSession: (view: SessionView) => void;
   /** Every refresh's send ledger, when the api reads one. A failed read keeps the previous rows. */
-  readonly onSends?: (sends: readonly SendRecord[]) => void;
+  readonly onSends?: (sends: readonly LedgerSendRecord[]) => void;
+  /**
+   * A ledger read that failed, in the failure's own words — an outage included, because the rows it
+   * leaves on screen go on claiming a fate nobody is reading any more (`markLedgerUnread`).
+   */
+  readonly onSendsFailed?: (reason: string) => void;
   readonly onError: (message: string | null) => void;
   /**
    * Whether the daemon refused the transcript because it can prove no file is this session's own —
@@ -351,6 +357,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
       .then(([logs, session, sends]) => {
         if (stopped) return;
         if (sends.status === 'fulfilled' && sends.value !== undefined) input.onSends?.(sends.value);
+        if (sends.status === 'rejected') input.onSendsFailed?.(errorMessage(sends.reason));
         const errors: string[] = [];
         const quiet = input.quiet ?? (() => false);
         let silenced = false;

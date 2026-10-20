@@ -183,7 +183,7 @@ import {
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
-import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
+import { type LedgerSendRecord, ledgerFeed, readLedgerSends } from './lib/send-ledger.ts';
 import {
   createAppStore,
   StoreProvider,
@@ -1095,12 +1095,12 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
               return await api.logs(id);
             },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
-            sends: async id => await api.sends(id),
+            sends: async id => await readLedgerSends(api, id),
           },
           sessionId,
           environment: browserWorkspaceRefreshEnvironment,
           onTranscript: setEntries,
-          onSends: rows => setSends(parseLedgerSendsResponse(rows)),
+          ...ledgerFeed(setSends),
           // fetchSession publishes the same proved view into the daemon-scoped
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,

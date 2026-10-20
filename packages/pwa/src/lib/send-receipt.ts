@@ -58,6 +58,7 @@ const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
  * | `timed_out`                         | `failed`      | small red !     | "not delivered" |
  * | `accepted`/`queued` + typed     | `typed`       | pencil          | "typed, not sent" |
  * | `cancelled`                       | `cancelled`   | struck circle   | "cancelled"     |
+ * | open, ledger unread (`unread`)     | `unconfirmed` | faint question  | "status unknown" |
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
   const { detail } = sendBadge(record);
@@ -73,6 +74,8 @@ export const sendReceipt = (record: LedgerSendRecord, answered = false): SendRec
     case 'unaccounted':
       return { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' };
     default:
+      if (record.unread !== undefined)
+        return { kind: 'unconfirmed', name: 'Status unknown', detail, chip: 'status unknown' };
       if (record.typedNotSent === true)
         return { kind: 'typed', name: 'Typed, not sent', detail, chip: 'typed, not sent' };
       if (record.held === true) return { kind: 'held', name: 'Held for revive', detail };

@@ -42,11 +42,11 @@ import {
   FY_REQUEST_ID_HEADER,
   OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
-  UNLOCK_REQUIRED_CODE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
   STEP_UP_REQUIRED_CODE,
   type StepUpDemand,
   StepUpRequiredBodySchema,
+  UNLOCK_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import {
   APP_SESSION_BYTES,
@@ -75,9 +75,8 @@ import {
 } from './daemon-connection.ts';
 import { boundDaemonId } from './daemon-transport.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
-import type { KeyRotation } from './key-rotation.ts';
 import { stepUpAct } from './grants.ts';
-import type { PromptOrigin } from './step-up-gate.ts';
+import type { KeyRotation } from './key-rotation.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -91,6 +90,7 @@ import {
   type SessionDeviceClaim,
 } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import type { PromptOrigin } from './step-up-gate.ts';
 
 /* ---------- the socket adapter seam --------------------------------------- */
 
@@ -1015,6 +1015,9 @@ const replaySafe = (init: RequestInit): boolean => {
   return method === 'GET' || method === 'HEAD';
 };
 
+/** An abort that is a deadline passing (`AbortSignal.timeout`), as opposed to a caller cancelling. */
+const isTimeoutReason = (reason: unknown): boolean => reason instanceof Error && reason.name === 'TimeoutError';
+
 /**
  * Every request for one daemon, on whichever carrier that daemon is reachable over.
  *
@@ -1694,13 +1697,23 @@ export class DaemonCarrierRouter {
       ...relayTunnelRequest(url, amended.init),
       ...(this.#presence() ? { presence: true as const } : {}),
     };
+    const signal = init.signal ?? undefined;
     try {
-      const response = relayResponse(await session.request(record));
+      const response = relayResponse(await session.request(record, signal));
       // Only an ANSWER settles the pending key. A request that died without one leaves it pending,
       // which is the recovery: the daemon may have swapped and the answer is what was lost.
       if (amended.rotated) await this.#rotation?.settle(entry.connection.daemonId, response);
       return response;
     } catch (reason) {
+      // THE CALLER'S DEADLINE PASSED WITH NO ANSWER, and that says something about THIS session: the
+      // relay's edge answers the keepalive by itself, so a session whose daemon end went quiet — a Mac
+      // that slept, a link that half-closed — still looks alive from here. It is retired so the next
+      // request opens a fresh one instead of queueing behind the same silence. The abort is the
+      // caller's own word for what happened, so it is what the caller gets back.
+      if (signal?.aborted === true && reason === signal.reason) {
+        if (isTimeoutReason(reason)) session.close('the daemon did not answer a request in time on this session');
+        throw new RelayAnswerError(reason);
+      }
       // A LEASE THAT RAN OUT IS NOT A CARRIER THAT FAILED. The device slept through its renewal — a
       // frozen tab, a laptop lid — and the daemon ended the session; a read is simply asked again on a
       // fresh one, silently. A write is not, for the reason every write is not replayed.
@@ -1710,7 +1723,7 @@ export class DaemonCarrierRouter {
         replaySafe(init)
       ) {
         const fresh = await this.#session(entry, method, dial);
-        return relayResponse(await fresh.request(record));
+        return relayResponse(await fresh.request(record, signal));
       }
       // The carrier failed under this request, so another carrier may be tried — and
       // the request itself is LOST rather than retried on this one: §9 says frames in

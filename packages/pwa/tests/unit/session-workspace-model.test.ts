@@ -296,6 +296,7 @@ describe('startSessionWorkspaceRefresh', () => {
   test('reads the send ledger beside the transcript, keeping the last rows when that read fails', async () => {
     const browser = environment();
     const sends: unknown[] = [];
+    const failures: string[] = [];
     let fail = false;
     const row = {
       v: 1 as const,
@@ -321,6 +322,7 @@ describe('startSessionWorkspaceRefresh', () => {
       onTranscript: () => undefined,
       onSession: () => undefined,
       onSends: rows => sends.push(rows),
+      onSendsFailed: reason => failures.push(reason),
       onError: () => undefined,
     });
 
@@ -330,6 +332,8 @@ describe('startSessionWorkspaceRefresh', () => {
     control.stop();
 
     expect(sends).toEqual([[row]]);
+    // Said, not swallowed: the rows left on screen are about to claim a fate nobody is reading.
+    expect(failures).toEqual(['older daemon']);
   });
   test('says when the daemon can prove no transcript is this session’s, apart from other failures', async () => {
     const browser = environment();

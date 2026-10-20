@@ -75,6 +75,7 @@ is honest because nothing was typed.
 | Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours |
 | Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                             |
 | Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen      |
+| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why   |
 
 `typedNotSent` is set by the tracker on **every** look (the first is ~2 s after the send), not only at a
 deadline, and is dropped when the composer no longer holds the message. **Queued** is set only when the
@@ -82,6 +83,25 @@ pane shows the message in the harness's queue; a message that merely left the co
 is `sent`, and the transcript decides. A message delivered joined to its neighbours (`hihello`) is proven
 by `merged-text` evidence: one user record that is EXACTLY two or more consecutive unproven sends, in
 acceptance order, written after the first was accepted.
+
+### A row only moves when the ledger is read
+
+The app learns a fate from one thing: a successful `GET /v1/sessions/:id/sends`, polled every 3 s. So
+everything between the person and that answer must end, and must say so when it fails:
+
+- **The page is read by the app, not by the typed client.** `IFyApiClient.sends` validates the page
+  with closed enums, so one value a newer daemon added (an evidence tier, a fate) rejected the whole
+  page and the row kept its last fate. `readLedgerSends` reads the same route with the field-by-field
+  parser in `packages/pwa/src/lib/send-ledger.ts`.
+- **A failed read is said on the row.** After `LEDGER_UNREAD_GRACE_MS` without a good read, every open
+  row (sending, queued) reads **Status unknown** with the failure's own words, instead of "the daemon
+  has it and is checking".
+- **A relayed request has a deadline.** The client's timeout reaches the relay session, which drops a
+  late answer; a session whose request ran out of time is retired, because the relay's edge answers
+  the keepalive by itself and a silent daemon end otherwise looks alive. The reconnect probe has its
+  own deadline too.
+- **A read takes a look, bounded.** `GET …/sends` asks the tracker to look first, but waits at most
+  `SEND_READ_LOOK_BUDGET_MS`; a slow look finishes by itself. A look that throws schedules the next.
 
 ## What a person can do
 

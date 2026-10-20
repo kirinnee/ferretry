@@ -564,6 +564,7 @@ import {
   launchGuardActive,
   launchReasoningEffort,
   locateHarnessCommand,
+  lookBeforeReading,
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
@@ -2694,19 +2695,18 @@ function createSessionSendSubsystem(
       await service.interrupt(id).catch((error: unknown) => sendRefusal(error));
       return await view(id, 'was interrupted');
     },
-    // A READ IS A LOOK. Asking where a send went is exactly when a fresh answer matters, so the
-    // tracker looks first whenever it has something to look for — which is what keeps a page that is
-    // watching a send live without the daemon polling anything on its own.
+    // A READ IS A LOOK, BOUNDED (`lookBeforeReading`): a fresh answer when one is quick, and the ledger
+    // as it stands when it is not — a slow look must never hold the reader that asked for it.
     sends: async reference => {
       const id = require(reference);
-      if (await tracker.watching(id)) await tracker.check(id).catch(() => undefined);
+      await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
       return (await ledger.list(id))
         .map(sendRecordView)
         .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
     },
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
-      if (await tracker.watching(id)) await tracker.check(id).catch(() => undefined);
+      await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
       const record = (await ledger.list(id)).find(entry => entry.sendId === sendId);
       if (record === undefined) throw new SessionSendError('not_found', `session ${id} has no send ${sendId}`);
       return sendRecordView(record);
