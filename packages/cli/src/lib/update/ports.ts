@@ -20,6 +20,8 @@ export type LatestReleaseAnswer =
 /** Asking the release source what the latest version is. Never throws. */
 export interface ILatestReleasePort {
   latest(): Promise<LatestReleaseAnswer>;
+  /** The newest stable tag, which a source-built install gets before the release is published. */
+  newestTag(): Promise<LatestReleaseAnswer>;
 }
 
 /**

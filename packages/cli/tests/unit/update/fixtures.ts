@@ -57,15 +57,24 @@ export class FakeFacts implements IInstallFactsPort {
   }
 }
 
+const release130: LatestReleaseAnswer = {
+  kind: 'found',
+  release: { version: '1.3.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v1.3.0' },
+};
+
 export class FakeLatest implements ILatestReleasePort {
   calls = 0;
+  tagCalls = 0;
 
   constructor(
-    private readonly answer: LatestReleaseAnswer = {
-      kind: 'found',
-      release: { version: '1.3.0', url: 'https://github.com/kirinnee/ferretry/releases/tag/v1.3.0' },
-    },
+    private readonly answer: LatestReleaseAnswer = release130,
+    private readonly tag: LatestReleaseAnswer = release130,
   ) {}
+
+  newestTag(): Promise<LatestReleaseAnswer> {
+    this.tagCalls += 1;
+    return Promise.resolve(this.tag);
+  }
 
   latest(): Promise<LatestReleaseAnswer> {
     this.calls += 1;
@@ -156,8 +165,10 @@ export class FakeStandalone implements IStandaloneReleasePort {
   constructor(
     private readonly host: FakeHost,
     private readonly daemonPath: string,
-    private readonly delivers = '1.3.0',
   ) {}
+
+  /** The version a swap leaves installed. */
+  delivers = '1.3.0';
 
   stage(version: string, directory: string): Promise<StagedRelease | StandaloneRefusal> {
     this.host.trail.push(`stage:${version}:${directory}`);
