@@ -163,6 +163,8 @@ export const HostedRelayReservationSchema = z.strictObject({
     .regex(/^[A-Za-z0-9_-]+$/u),
   daemonId: DaemonIdSchema,
   openedAt: TimestampSchema,
+  /** When a rendezvous last reported a live socket holding it. Absent until the first renewal. */
+  confirmedAt: TimestampSchema.optional(),
 });
 export type HostedRelayReservation = z.infer<typeof HostedRelayReservationSchema>;
 
@@ -240,7 +242,7 @@ export function admitHostedRelayConnection(
       touchedGlobal,
       refusedDaemon,
       RELAY_CLOSE_CODES.hostedCapacity,
-      'hosted relay per-daemon connection ceiling is reached',
+      HOSTED_RELAY_DAEMON_CEILING_REASON,
     );
   }
   if (touchedGlobal.concurrentConnections >= configuration.limits.maxConcurrentConnectionsGlobal) {
@@ -612,4 +614,102 @@ function addBytes<T extends HostedRelayGlobalMetrics | HostedRelayDaemonMetrics>
     minute: { ...value.minute, bytes: safeAdd(value.minute.bytes, bytes) },
     day: { ...value.day, bytes: safeAdd(value.day.bytes, bytes) },
   };
+}
+
+/**
+ * How long a reservation may go unseen by its rendezvous before it is someone else's handoff no more.
+ *
+ * The Worker reserves, THEN hands the socket to the rendezvous, so for a moment a reservation exists
+ * that no rendezvous lists yet. A rendezvous reporting its live sockets must not reclaim that one, so a
+ * reservation younger than this is kept whatever the report says. The handoff takes milliseconds; the
+ * bound is generous so a slow edge cannot turn a fresh admission into a reclaimed one.
+ */
+export const HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS = 30_000 as const;
+
+/**
+ * How long a reservation stays held with no renewal from the rendezvous that owns it.
+ *
+ * A live rendezvous renews every reservation it still holds a socket for on its heartbeat sweep (§13,
+ * "Reservations are leases"), far more often than this. A reservation nobody renewed for this long
+ * belongs to no socket anyone holds — the rendezvous lost it without a close callback, or the Worker
+ * died between admission and handoff — and keeping it would be the permanent lockout of 2026-10-19.
+ * The bound is several times the renewal interval AND several times the control-object outage grace,
+ * so neither a missed renewal nor a tolerated outage can expire a reservation a live socket holds.
+ */
+export const HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS = 600_000 as const;
+
+/** The refusal a per-daemon connection ceiling produces, named once so callers can recognise it. */
+export const HOSTED_RELAY_DAEMON_CEILING_REASON = 'hosted relay per-daemon connection ceiling is reached' as const;
+
+/** What a rendezvous saw: the reservations its live sockets carry, for one daemon. */
+export interface HostedRelayLiveEvidence {
+  readonly daemonId: string;
+  readonly live: ReadonlySet<string>;
+}
+
+/** Which stored reservations survive an audit, and what the counters must say afterwards. */
+export interface HostedRelayReservationAudit {
+  /** Reservation identifiers no live socket holds and no lease protects. */
+  readonly reclaimed: readonly string[];
+  /** Reservations a live socket was seen holding, renewed to `at`. */
+  readonly renewed: readonly HostedRelayReservation[];
+  /** Rows kept, per daemon fingerprint. A daemon with none kept is listed with 0 when it had any. */
+  readonly heldByDaemon: ReadonlyMap<string, number>;
+  /** Every reservation still held, across every daemon: what the global counter must equal. */
+  readonly heldGlobal: number;
+}
+
+/**
+ * Decide, from the durable reservations alone plus whatever a rendezvous could see, which ones are
+ * still held.
+ *
+ * THE COUNTERS ARE DERIVED, NEVER TRUSTED. A counter that only moves on admit and release drifts
+ * permanently the first time a release is lost, so an audit recounts from the reservation rows, which
+ * are per socket and so cannot double count. Two kinds of evidence reclaim a row:
+ *
+ * - **The rendezvous's word.** Its runtime lists every socket it accepted, hibernating ones included,
+ *   and each carries its reservation. A row of THAT daemon's that no live socket carries, and that is
+ *   past the handoff grace, belongs to nothing.
+ * - **An expired lease.** A row nobody renewed within {@link HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS}
+ *   — the case where no rendezvous is left to say anything, which is exactly the one that locked a
+ *   daemon out.
+ *
+ * A timestamp in the future (a clock that stepped back) counts as fresh: an audit may under-reclaim
+ * on bad evidence, never over-reclaim.
+ */
+export function auditHostedRelayReservations(
+  reservations: readonly HostedRelayReservation[],
+  evidence: HostedRelayLiveEvidence | null,
+  at: number,
+): HostedRelayReservationAudit {
+  const reclaimed: string[] = [];
+  const renewed: HostedRelayReservation[] = [];
+  const heldByDaemon = new Map<string, number>();
+  let heldGlobal = 0;
+  for (const reservation of reservations) {
+    const own = evidence !== null && reservation.daemonId === evidence.daemonId;
+    const seen = own && evidence.live.has(reservation.reservationId);
+    const age = at - reservation.openedAt;
+    const unrenewed = at - (reservation.confirmedAt ?? reservation.openedAt);
+    const gone = own
+      ? !seen && age >= HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS
+      : unrenewed >= HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
+    heldByDaemon.set(reservation.daemonId, (heldByDaemon.get(reservation.daemonId) ?? 0) + (gone ? 0 : 1));
+    if (gone) {
+      reclaimed.push(reservation.reservationId);
+      continue;
+    }
+    heldGlobal += 1;
+    if (seen) renewed.push({ ...reservation, confirmedAt: Math.max(at, reservation.confirmedAt ?? 0) });
+  }
+  if (evidence !== null && !heldByDaemon.has(evidence.daemonId)) heldByDaemon.set(evidence.daemonId, 0);
+  return { reclaimed, renewed, heldByDaemon, heldGlobal };
+}
+
+/** Set a counter to what the reservations prove. Peak and cumulative totals are history, untouched. */
+export function recountHostedRelayConnections<T extends HostedRelayGlobalMetrics | HostedRelayDaemonMetrics>(
+  value: T,
+  held: number,
+): T {
+  return value.concurrentConnections === held ? value : { ...value, concurrentConnections: held };
 }

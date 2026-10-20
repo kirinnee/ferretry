@@ -140,3 +140,25 @@ export function relayRedialDelayMs(attempt: number, random: number, ceilingMs: n
   const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0;
   return Math.round(windowMs / 2 + (windowMs / 2) * jitter);
 }
+
+/** The first window after a hosted relay refuses this daemon a connection slot (`4432`). */
+export const RELAY_CAPACITY_REDIAL_BASE_MS = 120_000;
+/** The longest window a run of `4432` refusals backs off to. */
+export const RELAY_CAPACITY_REDIAL_CEILING_MS = 600_000;
+/**
+ * How long to wait before redialling after the `refusals`th `4432` in a row (1 is the first).
+ *
+ * A CONNECTION CEILING IS NOT A DEAD PATH. Redialling it on the ordinary schedule — seconds — asked a
+ * hosted relay that had already said no, fourteen thousand times in a day (2026-10-19), and each ask
+ * spent the account's request budget on nothing. A ceiling clears when sockets close or the relay's
+ * own audit reclaims what it lost, which takes minutes, so the window starts at
+ * {@link RELAY_CAPACITY_REDIAL_BASE_MS} and doubles to {@link RELAY_CAPACITY_REDIAL_CEILING_MS}, with
+ * the same equal jitter as {@link relayRedialDelayMs}: never below half the window, never above it.
+ * Total in the same way: an unusable count is the first refusal, an unusable `random` the bottom.
+ */
+export function relayCapacityRedialDelayMs(refusals: number, random: number): number {
+  const step = Number.isNaN(refusals) ? 1 : Math.max(1, Math.floor(refusals));
+  const windowMs = Math.min(RELAY_CAPACITY_REDIAL_CEILING_MS, RELAY_CAPACITY_REDIAL_BASE_MS * 2 ** (step - 1));
+  const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0;
+  return Math.round(windowMs / 2 + (windowMs / 2) * jitter);
+}
