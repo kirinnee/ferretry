@@ -4,7 +4,13 @@
  * test hands in a fake and the page hands in the carrier-routed one.
  */
 
-import type { ForkSessionOutcome, IFyApiClient, SessionView } from '@ferretry/protocol';
+import {
+  type ForkSessionOutcome,
+  type IFyApiClient,
+  MigrationRefusedBodySchema,
+  type MigrationRefusal,
+  type SessionView,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 
 /** The largest page the messages route serves. */
@@ -65,20 +71,65 @@ export const forkThroughLatest = async (
 };
 
 /**
+ * The daemon refused a Restart because something the agent is running could not be shown to be safe
+ * to stop. Nothing was restarted. It carries what the daemon saw, in the daemon's plain words, and
+ * {@link RestartRefused.restartAnyway}: the one way past, which the person must choose.
+ */
+export class RestartRefused extends Error {
+  constructor(
+    readonly refusal: MigrationRefusal,
+    readonly restartAnyway: () => Promise<SessionView>,
+  ) {
+    super(restartRefusedSentence(refusal));
+  }
+}
+
+const REFUSED_CAUSE: Readonly<Record<MigrationRefusal['blockedBy'], string>> = {
+  unknown: 'Ferretry can’t tell if what the agent is running is safe to stop',
+  destructive: 'the agent is running something that could be left half-done if it is stopped',
+  unreadable: 'Ferretry couldn’t check what the agent is running',
+};
+
+/** One sentence for an alert: why nothing happened, and that nothing did. */
+export const restartRefusedSentence = (refusal: MigrationRefusal): string =>
+  `Restart paused — ${REFUSED_CAUSE[refusal.blockedBy]}. Nothing was restarted.`;
+
+/**
+ * The refusal the daemon attached, when it attached one that names something to look at. An older
+ * daemon sends the sentence alone; that case keeps its own handling.
+ */
+const refusalOf = (reason: FyHttpError): MigrationRefusal | null => {
+  const body = MigrationRefusedBodySchema.safeParse(reason.body);
+  const refusal = body.success ? body.data.inflight : undefined;
+  return refusal?.items.some(item => item.blocks) === true ? refusal : null;
+};
+
+/**
  * Restarts the ferret's CLI on the login it is already on, with its conversation: the daemon's
  * same-login migration, which snapshots the pane, refuses if in-flight work would be lost, and
  * relaunches with resume. It is how a ferret picks up a newly added MCP server.
+ *
+ * A refusal that names what is running is thrown as {@link RestartRefused}. Its `restartAnyway` asks
+ * again with `forceInflight` under a FRESH request id: the daemon remembers an id with the body it
+ * first saw, and the same id with a different body is a 409 `request_id_reused`.
  */
 export const restartWithResume = async (
   client: Pick<IFyApiClient, 'migrate'>,
   view: SessionView,
   requestId: string,
+  options: { readonly forceInflight?: boolean } = {},
 ): Promise<SessionView> => {
   try {
-    return await client.migrate(view.config.id, view.config.agent, undefined, false, requestId);
+    return await client.migrate(view.config.id, view.config.agent, undefined, false, requestId, options.forceInflight);
   } catch (reason) {
-    if (reason instanceof FyHttpError && reason.code === 'migration_refused' && reason.message.includes(PS_BLIND_SPOT))
-      throw new DetailedFailure(RESTART_PS_FAILED, reason.message);
+    if (!(reason instanceof FyHttpError) || reason.code !== 'migration_refused') throw reason;
+    const refusal = refusalOf(reason);
+    if (refusal !== null)
+      throw new RestartRefused(
+        refusal,
+        async () => await restartWithResume(client, view, `${requestId}-anyway-${Date.now()}`, { forceInflight: true }),
+      );
+    if (reason.message.includes(PS_BLIND_SPOT)) throw new DetailedFailure(RESTART_PS_FAILED, reason.message);
     throw reason;
   }
 };
