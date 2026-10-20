@@ -79,12 +79,7 @@ class Gen {
   }
 
   public value(): string {
-    const alphabets = [
-      'abcxyz0189-_./:@+',
-      'abc*?',
-      'a b,}{]["\'\\=~()',
-      'é𝕏\u0000\r\n\t\u2028',
-    ];
+    const alphabets = ['abcxyz0189-_./:@+', 'abc*?', 'a b,}{]["\'\\=~()', 'é𝕏\u0000\r\n\t\u2028'];
     const alphabet = [...this.pick(alphabets)];
     const length = 1 + this.int(8);
     let value = '';
@@ -119,7 +114,15 @@ class Gen {
       shape === 0 ? undefined : this.pick(AnalyticsAggregationSchema.options);
     let metric: AnalyticsMetric | undefined =
       shape === 2 || (shape === 0 && this.bool()) ? this.pick(AnalyticsMetricSchema.options) : undefined;
-    if (aggregation === 'count' && metric !== undefined) metric = 'sessions';    if (metric === 'duration_active_seconds_per_turn' && aggregation !== undefined && aggregation !== 'sum' && aggregation !== 'avg') {      metric = 'duration_active_seconds';    }
+    if (aggregation === 'count' && metric !== undefined) metric = 'sessions';
+    if (
+      metric === 'duration_active_seconds_per_turn' &&
+      aggregation !== undefined &&
+      aggregation !== 'sum' &&
+      aggregation !== 'avg'
+    ) {
+      metric = 'duration_active_seconds';
+    }
     const groupBy: AnalyticsLabel[] = [];
     if (aggregation !== undefined) {
       const wanted = this.int(MAX_ANALYTICS_GROUP_LABELS + 1);
@@ -155,18 +158,28 @@ class Gen {
       return `${m.label}${s()}${op}${s()}${quoted}`;
     };
     const selector =
-      parts.matchers.length === 0 ? (this.bool() ? '{}' : '') : `{${s()}${parts.matchers.map(matcher).join(`${s()},${s()}`)}${s()}}`;
+      parts.matchers.length === 0
+        ? this.bool()
+          ? '{}'
+          : ''
+        : `{${s()}${parts.matchers.map(matcher).join(`${s()},${s()}`)}${s()}}`;
     const range = parts.range === undefined ? '' : `[${this.spellRange(parts.range)}]`;
-    const by = parts.groupBy.length === 0 ? '' : `${this.pick(['by', 'BY', 'By'])}${s()}(${s()}${parts.groupBy.join(`${s()},${s()}`)}${s()})`;
-    const aggregation = parts.aggregation === undefined ? '' : this.bool() ? parts.aggregation.toUpperCase() : parts.aggregation;
+    const by =
+      parts.groupBy.length === 0
+        ? ''
+        : `${this.pick(['by', 'BY', 'By'])}${s()}(${s()}${parts.groupBy.join(`${s()},${s()}`)}${s()})`;
+    const aggregation =
+      parts.aggregation === undefined ? '' : this.bool() ? parts.aggregation.toUpperCase() : parts.aggregation;
     if (parts.aggregation === undefined) return `${s()}${parts.metric ?? ''}${s()}${selector}${s()}${range}${s()}`;
     if (parts.metric !== undefined && this.bool()) {
       // PromQL: the selector and range inside the call, `by` before or after it.
       const inner = `(${s()}${parts.metric}${s()}${selector}${s()}${range}${s()})`;
-      return this.bool() ? `${aggregation}${by === "" ? s() : ` ${s()}`}${by}${s()}${inner}` : `${aggregation}${inner}${s()}${by}`;
+      return this.bool()
+        ? `${aggregation}${by === '' ? s() : ` ${s()}`}${by}${s()}${inner}`
+        : `${aggregation}${inner}${s()}${by}`;
     }
     const call = parts.metric === undefined ? aggregation : `${aggregation}${s()}(${s()}${parts.metric}${s()})`;
-    return `${call}${by === "" ? s() : ` ${s()}`}${by}${s()}${selector}${s()}${range}`;
+    return `${call}${by === '' ? s() : ` ${s()}`}${by}${s()}${selector}${s()}${range}`;
   }
 
   private spellRange(range: AnalyticsRange): string {
@@ -186,8 +199,38 @@ class Gen {
   /** Arbitrary text over the grammar's own characters, for the never-throws-anything-else property. */
   public noise(): string {
     const tokens = [
-      'sum', 'avg', 'count', 'cost_usd', 'tokens', 'by', '(', ')', '{', '}', '[', ']', ',', '=', '=~', '==',
-      '"', "'", '\\', 'model', 'tree', 'session', '7d', '0d', '2026-10-01', '..', 'T', 'Z', ' ', 'x', '*', '9',
+      'sum',
+      'avg',
+      'count',
+      'cost_usd',
+      'tokens',
+      'by',
+      '(',
+      ')',
+      '{',
+      '}',
+      '[',
+      ']',
+      ',',
+      '=',
+      '=~',
+      '==',
+      '"',
+      "'",
+      '\\',
+      'model',
+      'tree',
+      'session',
+      '7d',
+      '0d',
+      '2026-10-01',
+      '..',
+      'T',
+      'Z',
+      ' ',
+      'x',
+      '*',
+      '9',
     ];
     return Array.from({ length: this.int(14) }, () => this.pick(tokens)).join(this.bool() ? '' : ' ');
   }
@@ -294,7 +337,10 @@ describe('analytics query grammar v2', () => {
       { source: 'sum(cost_usd', message: 'expected ) after sum(cost_usd' },
       { source: 'sum by (model) (cost_usd) by (day)', message: 'by (...) may be given once' },
       { source: 'count(cost_usd)', message: 'count counts sessions' },
-      { source: 'max(duration_active_seconds_per_turn)', message: 'is a ratio of sums: use sum(duration_active_seconds_per_turn)' },
+      {
+        source: 'max(duration_active_seconds_per_turn)',
+        message: 'is a ratio of sums: use sum(duration_active_seconds_per_turn)',
+      },
       { source: 'cost_usd by (model)', message: 'requires an aggregation' },
       { source: 'planet {model=x}', message: 'unknown analytics aggregation or metric "planet"' },
       { source: 'sum(cost_usd{model=x}) {model=y}', message: 'filters may be given once' },
@@ -416,9 +462,10 @@ describe('analytics query grammar v2', () => {
 
           // Assert
           if (outcome !== undefined) should(outcome).be.instanceof(AnalyticsQueryError, `seed ${seed}: ${source}`);
-          else should(parseAnalyticsQuery(parseAnalyticsQuery(source).canonical).canonical).equal(
-            parseAnalyticsQuery(source).canonical,
-          );
+          else
+            should(parseAnalyticsQuery(parseAnalyticsQuery(source).canonical).canonical).equal(
+              parseAnalyticsQuery(source).canonical,
+            );
         }
       }
     });

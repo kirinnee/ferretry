@@ -5,7 +5,7 @@ docs: https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex
 verified: '2026-10-18'
 unverified:
   - Which GPT-6 models a given Azure region offers is not on Microsoft's Codex page.
-  - "GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted."
+  - 'GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted.'
   - "The prices are Azure's global deployment ones; a Data Zone deployment costs 10-20% more."
 customIds: true
 codex:

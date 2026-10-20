@@ -4,7 +4,7 @@ docs: https://docs.z.ai/devpack/tool/claude
 verified: '2026-10-18'
 unverified:
   - Z.ai's Claude Code page shows two mappings; this one (GLM-5.3 for opus and sonnet, GLM-5.3-Flash for haiku) is its manual setup.
-  - "Z.ai lists no cache-write price (cached storage is free for now); a written token is charged as input."
+  - 'Z.ai lists no cache-write price (cached storage is free for now); a written token is charged as input.'
 claude:
   tiers:
     opus: glm-5.3

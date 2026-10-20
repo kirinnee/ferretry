@@ -56,7 +56,9 @@ describe('metric formatting', () => {
     expect(analyticsMetricMeasure(row, 'cost_usd').value).toBeCloseTo(12.34);
     expect(analyticsMetricMeasure(row, 'duration_active_seconds').value).toBeCloseTo(3725);
     expect(analyticsMetricMeasure(row, 'sessions')).toEqual({ value: 4, known: 4, total: 4 });
-    expect(analyticsMetricMeasure(group({}, { equivalentApiCostUsdMicros: measure(null, 0, 5) }), 'cost_usd').value).toBeNull();
+    expect(
+      analyticsMetricMeasure(group({}, { equivalentApiCostUsdMicros: measure(null, 0, 5) }), 'cost_usd').value,
+    ).toBeNull();
   });
 });
 
@@ -111,7 +113,12 @@ describe('AnalyticsResultTable with a metric', () => {
 
   it('falls back to the whole ledger for a count, which has no metric column', () => {
     const counted = asAggregate(
-      aggregateResponse('count(sessions) by (model)', [group({ model: 'a' })], { groupBy: ['model'], metric: 'sessions' }, 'count'),
+      aggregateResponse(
+        'count(sessions) by (model)',
+        [group({ model: 'a' })],
+        { groupBy: ['model'], metric: 'sessions' },
+        'count',
+      ),
     );
     const renderer = render(<AnalyticsResultTable response={counted} metric="sessions" />);
     expect(renderer.root.findAllByType('th').map(node => textOf(node))).toEqual(['Model', 'Sessions', 'a']);

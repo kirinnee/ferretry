@@ -127,7 +127,8 @@ export function AnalyticsMetricChart({
   const focus = points.find(point => point.key === hovered) ?? peak;
   const flagged = points.some(point => point.flagged === true);
   const total = [...totals.values()].reduce((sum, value) => sum + value, 0);
-  const readout = (point: MetricChartPoint): string => point.readout ?? `${point.label} · ${format(totals.get(point.key)!)}`;
+  const readout = (point: MetricChartPoint): string =>
+    point.readout ?? `${point.label} · ${format(totals.get(point.key)!)}`;
 
   return (
     <figure className="m-0 grid min-w-0 gap-sm" data-analytics-chart="">

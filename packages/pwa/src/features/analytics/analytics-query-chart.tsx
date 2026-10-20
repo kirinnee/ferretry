@@ -70,7 +70,9 @@ export function AnalyticsQueryChart({ response }: { readonly response: Analytics
       points={points}
       format={format}
       {...(isDuration ? { formatAxis: formatAxisDuration, axisTicks: durationAxisTicks } : {})}
-      flagNote={metric === 'cost_usd' ? 'at least — some sessions are unpriced' : 'at least — some sessions are unknown'}
+      flagNote={
+        metric === 'cost_usd' ? 'at least — some sessions are unpriced' : 'at least — some sessions are unknown'
+      }
       emptyText="Nothing to draw: every value is zero."
     />
   );

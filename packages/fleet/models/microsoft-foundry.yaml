@@ -4,7 +4,7 @@ label: Microsoft Foundry
 docs: https://code.claude.com/docs/en/microsoft-foundry
 verified: '2026-10-18'
 unverified:
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
   - "Foundry bills Anthropic's standard rates, which are the prices here; a transcript names your deployment rather than these aliases, so a session is priced only when the two match."
 customIds: true
 claude:

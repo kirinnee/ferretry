@@ -243,7 +243,10 @@ export function AnalyticsOverviewPage({ machines, requestAnalytics, now }: Analy
             Reading this period's sessions…
           </p>
         ) : answered.length === 0 ? (
-          <p role="alert" className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err">
+          <p
+            role="alert"
+            className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err"
+          >
             No machine answered, so there is nothing to show. Nothing was assumed to be zero.
           </p>
         ) : (
@@ -328,7 +331,9 @@ function Figures({ overview }: { readonly overview: AnalyticsOverview }) {
                 : 'Not recorded for these sessions'
               : [
                   `${formatDuration(totals.activeMs / 1000 / activeSessions)} / session`,
-                  ...(totals.activeTurns > 0 ? [`${formatDuration(totals.activeMs / 1000 / totals.activeTurns)} / turn`] : []),
+                  ...(totals.activeTurns > 0
+                    ? [`${formatDuration(totals.activeMs / 1000 / totals.activeTurns)} / turn`]
+                    : []),
                 ].join(' · ')
           }
         />
@@ -424,7 +429,12 @@ function OverviewSections({
               label={`${METRIC_TITLES[metric]} ${SPLIT_TITLES[split].toLowerCase()}`}
               rows={overviewGroups(overview.rows, split, metric).map(group => {
                 const reading = metricReading(group.totals, metric);
-                return { key: group.key, value: reading.value, unknown: reading.unknown, sessions: group.totals.sessions };
+                return {
+                  key: group.key,
+                  value: reading.value,
+                  unknown: reading.unknown,
+                  sessions: group.totals.sessions,
+                };
               })}
               format={value => formatMetric(metric, value)}
               unknownWord={UNKNOWN_WORDS[metric]}
@@ -464,7 +474,10 @@ function TopSessions({
   const ranked = rankTopSessions(sessions, order);
   const shown = all ? ranked : ranked.slice(0, TOP_SESSIONS_SHOWN);
   return (
-    <section aria-labelledby="analytics-top-sessions" className="kt-panel grid min-w-0 content-start gap-sm px-md py-md">
+    <section
+      aria-labelledby="analytics-top-sessions"
+      className="kt-panel grid min-w-0 content-start gap-sm px-md py-md"
+    >
       <div className="flex flex-wrap items-center justify-between gap-x-md gap-y-sm">
         <h3 id="analytics-top-sessions" className="m-0 text-cell font-semibold text-fg">
           Top sessions
@@ -537,7 +550,11 @@ function TopSessionRow({
         <span className="min-w-0 truncate font-semibold text-fg">{session.label ?? session.id}</span>
         <span
           className={`mono whitespace-nowrap text-right font-semibold tabular-nums ${value === null ? 'text-warn' : 'text-fg'}`}
-          title={unknown > 0 ? `${unknown} of ${plural(session.totals.sessions, 'session')} ${ORDER_UNKNOWN[order]}` : undefined}
+          title={
+            unknown > 0
+              ? `${unknown} of ${plural(session.totals.sessions, 'session')} ${ORDER_UNKNOWN[order]}`
+              : undefined
+          }
         >
           {value === null ? ORDER_UNKNOWN[order] : `${unknown > 0 ? '≥ ' : ''}${ORDER_FORMAT[order](value)}`}
         </span>

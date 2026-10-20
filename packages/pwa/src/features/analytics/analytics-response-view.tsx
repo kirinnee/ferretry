@@ -5,7 +5,12 @@
  * the daemon that the host selected at runtime. In particular, unknown pricing
  * stays unknown instead of being silently represented as a zero-cost result.
  */
-import { type AnalyticsMetric, type AnalyticsRawSession, type AnalyticsResponse, analyticsRawMetricValue } from '@ferretry/protocol';
+import {
+  type AnalyticsMetric,
+  type AnalyticsRawSession,
+  type AnalyticsResponse,
+  analyticsRawMetricValue,
+} from '@ferretry/protocol';
 
 import { useOptionalRouter } from '../../lib/router.tsx';
 import { DaemonResponseError } from '../../lib/runtime-models.ts';
@@ -66,7 +71,11 @@ export function AnalyticsResponseView({
       <div className="grid min-w-0 gap-xs">
         {scope}
         {chart && <AnalyticsQueryChart response={response} />}
-        <AnalyticsResultTable response={response} caption={`Result for ${response.query}`} metric={response.parsed.metric} />
+        <AnalyticsResultTable
+          response={response}
+          caption={`Result for ${response.query}`}
+          metric={response.parsed.metric}
+        />
       </div>
     );
   }

@@ -4,7 +4,7 @@ label: OpenAI
 docs: https://learn.chatgpt.com/docs/models
 verified: '2026-10-18'
 unverified:
-  - "GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted."
+  - 'GPT-6 models cost more for a request over 272K input tokens; analytics prices whole sessions, so the price is the short-context one and a long-context session is under-counted.'
 codex:
   models:
     - id: gpt-6-astra

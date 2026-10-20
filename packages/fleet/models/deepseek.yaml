@@ -3,8 +3,8 @@ label: DeepSeek
 docs: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 verified: '2026-10-18'
 unverified:
-  - "DeepSeek charges half price off-peak; the prices are its peak (full) ones."
-  - "DeepSeek lists no cache-write price; a written token is a cache miss, charged as input."
+  - 'DeepSeek charges half price off-peak; the prices are its peak (full) ones.'
+  - 'DeepSeek lists no cache-write price; a written token is a cache miss, charged as input.'
 claude:
   tiers:
     opus: deepseek-flash[1m]

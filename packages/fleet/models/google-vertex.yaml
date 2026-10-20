@@ -4,7 +4,7 @@ docs: https://code.claude.com/docs/en/google-vertex-ai
 verified: '2026-10-18'
 unverified:
   - Haiku 5.5 is served in the US and EU multi-regions and global; a single region may not have it.
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
   - "The prices are Vertex AI's global-endpoint ones; a regional or multi-region endpoint costs 10% more."
 customIds: true
 claude:

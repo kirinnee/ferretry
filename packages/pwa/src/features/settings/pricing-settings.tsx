@@ -414,7 +414,11 @@ function ModelCatalogRates({
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
         {rates.map(rate => (
-          <article key={rate.pricingKey} className="kt-panel min-w-0 p-panel" data-pricing-catalog-rate={rate.pricingKey}>
+          <article
+            key={rate.pricingKey}
+            className="kt-panel min-w-0 p-panel"
+            data-pricing-catalog-rate={rate.pricingKey}
+          >
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="m-0 break-words font-mono text-ui font-semibold text-fg">{rate.modelId}</p>
@@ -1498,11 +1502,7 @@ export function PricingSettings({
               onRemove={pricingKey => void removeRate(pricingKey)}
             />
           </section>
-          <ModelCatalogRates
-            rates={state.view.modelCatalogRates ?? []}
-            busy={mutationBusy}
-            onOverride={openOverride}
-          />
+          <ModelCatalogRates rates={state.view.modelCatalogRates ?? []} busy={mutationBusy} onOverride={openOverride} />
           <Sources
             sources={state.view.sources}
             selectedSourceId={sourceId}

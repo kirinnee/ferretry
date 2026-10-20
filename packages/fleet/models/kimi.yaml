@@ -5,7 +5,7 @@ verified: '2026-10-18'
 unverified:
   - Kimi's guide says kimi-k2.7-code always thinks, while its model table says it does not; Ferretry offers no effort choice for it.
   - "Kimi charges one cache-write price per request in analytics: K3's 5-minute one ($3); its 1-hour write costs $6."
-  - "Kimi lists no cache-write price for the K2.7 Code models; a written token is charged as input."
+  - 'Kimi lists no cache-write price for the K2.7 Code models; a written token is charged as input.'
 claude:
   tiers:
     opus: kimi-k3[1m]

@@ -134,7 +134,9 @@ function aggregate(
     else group.rows.push(record);
   }
   const groups = [...grouped.values()].sort((left, right) =>
-    analyticsGroupSortKey(left.labels, parsed.groupBy).localeCompare(analyticsGroupSortKey(right.labels, parsed.groupBy)),
+    analyticsGroupSortKey(left.labels, parsed.groupBy).localeCompare(
+      analyticsGroupSortKey(right.labels, parsed.groupBy),
+    ),
   );
   if (groups.length > groupLimit)
     throw new Error(`analytics query produces more than ${groupLimit} groups; add a matcher`);

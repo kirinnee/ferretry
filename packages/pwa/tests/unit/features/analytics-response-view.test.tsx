@@ -113,7 +113,9 @@ describe('AnalyticsResponseView', () => {
   });
 
   it('links each session row to where the host says it opens, in-app under a router', () => {
-    const linked = render(<AnalyticsResponseView response={raw()} sessionHref={row => `/d/elsewhere/session/${row.id}`} />);
+    const linked = render(
+      <AnalyticsResponseView response={raw()} sessionHref={row => `/d/elsewhere/session/${row.id}`} />,
+    );
     const link = linked.root.find(node => node.type === 'a' && node.props['data-raw-session'] !== undefined);
     expect(link.props.href).toBe(`/d/elsewhere/session/${link.props['data-raw-session']}`);
     window.history.replaceState({}, '', '/');

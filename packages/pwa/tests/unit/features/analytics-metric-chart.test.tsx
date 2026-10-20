@@ -123,13 +123,23 @@ describe('MetricSplit', () => {
   });
 
   it('folds the tail into "other N" and says when there is nothing', () => {
-    const renderer = render(<MetricSplit label="s" rows={rows} format={formatDollars} unknownWord="unpriced" limit={3} />);
+    const renderer = render(
+      <MetricSplit label="s" rows={rows} format={formatDollars} unknownWord="unpriced" limit={3} />,
+    );
     expect(
-      renderer.root.findAll(node => node.props['data-split-row'] !== undefined && node.type === 'li').map(node => node.props['data-split-row']),
+      renderer.root
+        .findAll(node => node.props['data-split-row'] !== undefined && node.type === 'li')
+        .map(node => node.props['data-split-row']),
     ).toEqual(['opus', 'sonnet', 'other 3']);
     expect(text(renderer)).toContain('≥ $15.90');
     const zero = render(
-      <MetricSplit label="s" rows={[{ key: 'x', value: 0, unknown: 0, sessions: 1 }]} format={formatDollars} unknownWord="u" limit={3} />,
+      <MetricSplit
+        label="s"
+        rows={[{ key: 'x', value: 0, unknown: 0, sessions: 1 }]}
+        format={formatDollars}
+        unknownWord="u"
+        limit={3}
+      />,
     );
     expect(text(zero)).toContain('$0.00');
     expect(text(render(<MetricSplit label="s" rows={[]} format={formatDollars} unknownWord="u" />))).toContain(

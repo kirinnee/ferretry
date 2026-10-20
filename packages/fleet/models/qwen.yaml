@@ -7,7 +7,7 @@ unverified:
   - Per-model context windows and reasoning controls are not on Alibaba's Claude Code page.
   - "Qwen prices rise with a request's input length; the prices are the lowest tier."
   - "Cache reads (10% of input) and cache writes (125% of input) are Model Studio's general rule, not per-model prices."
-  - "qwen3.7-plus shows a limited-time discount; whether its price is the discounted one is not stated."
+  - 'qwen3.7-plus shows a limited-time discount; whether its price is the discounted one is not stated.'
 claude:
   tiers:
     opus: qwen3.7-plus

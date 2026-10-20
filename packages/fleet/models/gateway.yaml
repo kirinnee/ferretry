@@ -5,7 +5,7 @@ docs: https://code.claude.com/docs/en/llm-gateway
 verified: '2026-10-18'
 unverified:
   - A gateway serves whatever names its owner configured; these are Anthropic's ids, which a gateway may rename.
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
   - "A gateway charges whatever its owner arranged; the prices are Anthropic's list prices for these ids."
 customIds: true
 claude:

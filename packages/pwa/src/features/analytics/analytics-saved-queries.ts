@@ -92,7 +92,5 @@ export const addSavedQuery = (
   return next.slice(-MAX_SAVED_QUERIES);
 };
 
-export const removeSavedQuery = (
-  queries: readonly SavedAnalyticsQuery[],
-  id: string,
-): readonly SavedAnalyticsQuery[] => queries.filter(item => item.id !== id);
+export const removeSavedQuery = (queries: readonly SavedAnalyticsQuery[], id: string): readonly SavedAnalyticsQuery[] =>
+  queries.filter(item => item.id !== id);

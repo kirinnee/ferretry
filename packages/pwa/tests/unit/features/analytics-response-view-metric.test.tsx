@@ -16,7 +16,10 @@ const textOf = (node: unknown): string => {
 describe('AnalyticsResponseView with a metric', () => {
   it('shows each raw session by the asked metric, a gap as Unknown', () => {
     const response = {
-      ...rawResponse([rawRow({ id: 'a', durationMs: 90_000 }), rawRow({ id: 'b', durationMs: null })], 'duration_wall_seconds'),
+      ...rawResponse(
+        [rawRow({ id: 'a', durationMs: 90_000 }), rawRow({ id: 'b', durationMs: null })],
+        'duration_wall_seconds',
+      ),
       parsed: { groupBy: [], matchers: [], metric: 'duration_wall_seconds' },
     } as never;
     const body = textOf(render(<AnalyticsResponseView response={response} />).toJSON());
@@ -32,6 +35,8 @@ describe('AnalyticsResponseView with a metric', () => {
     });
     expect(JSON.stringify(render(<AnalyticsResponseView response={response} chart />).toJSON())).toContain('Turns');
     expect(render(<AnalyticsResponseView response={response} />).root.findAllByType('figure')).toHaveLength(0);
-    expect(render(<AnalyticsResponseView response={response} chart />).root.findAllByType('figure').length).toBeGreaterThan(0);
+    expect(
+      render(<AnalyticsResponseView response={response} chart />).root.findAllByType('figure').length,
+    ).toBeGreaterThan(0);
   });
 });

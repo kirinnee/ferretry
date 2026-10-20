@@ -4,9 +4,9 @@ docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
 verified: '2026-10-18'
 unverified:
   - OpenRouter's Codex guide names only ~openai/gpt-sol-latest; whether Astra and Luna have ~latest aliases is not documented.
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
-  - "The prices are those of the models the ~latest aliases resolve to today (Opus, Sonnet and Haiku 5.5, GPT-6.1 Sol); OpenRouter may move an alias."
-  - "A transcript may name the resolved model (anthropic/claude-opus-5.5) rather than the alias, and that spelling is not priced."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
+  - 'The prices are those of the models the ~latest aliases resolve to today (Opus, Sonnet and Haiku 5.5, GPT-6.1 Sol); OpenRouter may move an alias.'
+  - 'A transcript may name the resolved model (anthropic/claude-opus-5.5) rather than the alias, and that spelling is not priced.'
 customIds: true
 claude:
   tiers:

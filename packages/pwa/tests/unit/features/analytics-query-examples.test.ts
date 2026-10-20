@@ -5,7 +5,8 @@ import { ANALYTICS_QUERY_EXAMPLES } from '../../../src/features/analytics/analyt
 
 describe('analytics query examples', () => {
   it('parse with the protocol grammar and are already canonical', () => {
-    for (const example of ANALYTICS_QUERY_EXAMPLES) expect(parseAnalyticsQuery(example.query).canonical).toBe(example.query);
+    for (const example of ANALYTICS_QUERY_EXAMPLES)
+      expect(parseAnalyticsQuery(example.query).canonical).toBe(example.query);
   });
 
   it('have unique ids and say something', () => {

@@ -197,7 +197,10 @@ function QueryBody({
           </p>
         )}
         {error && (
-          <p role="alert" className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err">
+          <p
+            role="alert"
+            className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err"
+          >
             The query failed: {error}
           </p>
         )}

@@ -38,7 +38,8 @@ const server = Bun.serve({
   port: 0,
   fetch(request) {
     const path = new URL(request.url).pathname;
-    if (path === '/') return new Response(Bun.file(join(harnessDir, 'index.html')), { headers: { 'content-type': 'text/html' } });
+    if (path === '/')
+      return new Response(Bun.file(join(harnessDir, 'index.html')), { headers: { 'content-type': 'text/html' } });
     if (path === '/pre-paint.js') return new Response(Bun.file(join(packageDir, 'public/pre-paint.js')));
     return new Response(Bun.file(join(harnessDir, 'out', path)));
   },
@@ -64,7 +65,11 @@ const PAGES = [
 const SAVED_KEY = 'fy-analytics-saved-queries-v1';
 const SAVED_QUERIES = [
   { id: 'saved-1', name: 'Opus spend this week', query: 'sum(cost_usd) by (day) {model=claude-opus-5-5} [7d]' },
-  { id: 'saved-2', name: 'Active time per turn by runtime', query: 'avg(duration_active_seconds_per_turn) by (runtime) [14d]' },
+  {
+    id: 'saved-2',
+    name: 'Active time per turn by runtime',
+    query: 'avg(duration_active_seconds_per_turn) by (runtime) [14d]',
+  },
   { id: 'saved-3', name: 'Tokens by machine', query: 'sum(tokens) by (machine) [30d]' },
 ];
 
@@ -91,7 +96,7 @@ try {
       for (const family of FAMILIES) {
         await page.evaluate(
           ([themeFamily, mode, savedKey, saved]) => {
-            localStorage.setItem("fy-theme-v1", JSON.stringify({ family: themeFamily, mode }));
+            localStorage.setItem('fy-theme-v1', JSON.stringify({ family: themeFamily, mode }));
             localStorage.setItem(savedKey, saved);
           },
           [family, scheme, SAVED_KEY, JSON.stringify(SAVED_QUERIES)] as const,

@@ -72,7 +72,11 @@ const catalogRate = {
   modelId: 'deepseek-flash',
   aliases: [],
   provider: 'deepseek',
-  source: { kind: 'model_catalog', catalog: 'deepseek', sourceUrl: 'https://api-docs.deepseek.com/quick_start/pricing' },
+  source: {
+    kind: 'model_catalog',
+    catalog: 'deepseek',
+    sourceUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
+  },
 } as const;
 
 /** The spelling an operator already has on disk: per-million rates, and instants `Date.parse` took. */

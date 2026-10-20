@@ -88,7 +88,8 @@ export const CatalogPriceSchema = z
     if (price.provider === 'anthropic' && (price.cacheWrite5m === undefined || price.cacheWrite1h === undefined)) {
       ctx.issues.push({
         code: 'custom',
-        message: 'an anthropic price states both cacheWrite5m and cacheWrite1h: Anthropic bills a cache write by its lifetime',
+        message:
+          'an anthropic price states both cacheWrite5m and cacheWrite1h: Anthropic bills a cache write by its lifetime',
         input: price,
         path: ['cacheWrite5m'],
       });

@@ -4,19 +4,35 @@ import {
   type AnalyticsTranscriptEvidence,
   foldAnalyticsSessionActivity,
 } from '../../../src/lib/analytics/usage-fold.ts';
-import { ClaudeTranscriptParser, CodexTranscriptParser, parseTranscriptJsonl } from '../../../src/lib/transcript/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  parseTranscriptJsonl,
+} from '../../../src/lib/transcript/index.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
 
 const jsonl = (records: readonly object[]): string => `${records.map(record => JSON.stringify(record)).join('\n')}\n`;
 
 function claude(records: readonly object[]): AnalyticsTranscriptEvidence {
   const parsed = parseTranscriptJsonl(new ClaudeTranscriptParser(), { text: jsonl(records) });
-  return { kind: 'read', harness: 'claude', events: parsed.events, issues: parsed.issues.map(issue => issue.code), pendingBytes: 0 };
+  return {
+    kind: 'read',
+    harness: 'claude',
+    events: parsed.events,
+    issues: parsed.issues.map(issue => issue.code),
+    pendingBytes: 0,
+  };
 }
 
 function codex(records: readonly object[]): AnalyticsTranscriptEvidence {
   const parsed = parseTranscriptJsonl(new CodexTranscriptParser(), { text: jsonl(records) });
-  return { kind: 'read', harness: 'codex', events: parsed.events, issues: parsed.issues.map(issue => issue.code), pendingBytes: 0 };
+  return {
+    kind: 'read',
+    harness: 'codex',
+    events: parsed.events,
+    issues: parsed.issues.map(issue => issue.code),
+    pendingBytes: 0,
+  };
 }
 
 const at = (time: string) => `2026-10-20T${time}.000Z`;
@@ -61,7 +77,13 @@ const CLAUDE_SESSION = [
     type: 'user',
     uuid: 'u4',
     timestamp: at('11:02:00'),
-    message: { role: 'user', content: [{ type: 'text', text: 'Thanks.' }, { type: 'text', text: 'Now the docs.' }] },
+    message: {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Thanks.' },
+        { type: 'text', text: 'Now the docs.' },
+      ],
+    },
   },
   {
     type: 'assistant',
@@ -179,7 +201,13 @@ describe('analytics session activity fold', () => {
     ];
 
     // Act
-    const actual = foldAnalyticsSessionActivity({ kind: 'read', harness: 'claude', events, issues: [], pendingBytes: 0 });
+    const actual = foldAnalyticsSessionActivity({
+      kind: 'read',
+      harness: 'claude',
+      events,
+      issues: [],
+      pendingBytes: 0,
+    });
 
     // Assert
     should(actual).deepEqual({ activeDurationMs: 0, turns: 1 });

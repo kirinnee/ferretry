@@ -44,11 +44,10 @@ const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.exa
 const NOW = () => new Date('2026-10-16T12:34:00Z');
 
 const answer = (query: string): AnalyticsResponse =>
-  aggregateResponse(
-    query,
-    [group({ model: 'claude-opus-5-5' }), group({ model: 'gpt-6-astra' }, { sessions: 2 })],
-    { groupBy: ['model'], metric: 'cost_usd' },
-  );
+  aggregateResponse(query, [group({ model: 'claude-opus-5-5' }), group({ model: 'gpt-6-astra' }, { sessions: 2 })], {
+    groupBy: ['model'],
+    metric: 'cost_usd',
+  });
 const fleet = (calls: string[]) => async (_daemon: unknown, query?: string) => {
   calls.push(query ?? '');
   return answer(query ?? '');
@@ -230,7 +229,9 @@ describe('AnalyticsQueryPage', () => {
       <AnalyticsQueryPage connection={daemonA} requestAnalytics={fleet([])} savedStorage={refusing} />,
     );
     expect(text(renderer)).toContain('Saved queries');
-    run(() => renderer.root.findByProps({ placeholder: 'Name this query' }).props.onChange({ currentTarget: { value: 'x' } }));
+    run(() =>
+      renderer.root.findByProps({ placeholder: 'Name this query' }).props.onChange({ currentTarget: { value: 'x' } }),
+    );
     run(() => renderer.root.findAllByType('form')[1]!.props.onSubmit({ preventDefault() {} }));
     expect(text(renderer)).toContain('would not keep the list');
     expect(renderer.root.findAllByProps({ 'data-analytics-saved-item': 'x' })).toHaveLength(1);
@@ -259,7 +260,9 @@ describe('AnalyticsQueryPage', () => {
     const renderer = mount(
       <AnalyticsQueryPage
         connection={daemonA}
-        requestAnalytics={async () => ({ ...answer('x'), kind: 'raw', limit: 1, truncated: false, results: [] }) as never}
+        requestAnalytics={async () =>
+          ({ ...answer('x'), kind: 'raw', limit: 1, truncated: false, results: [] }) as never
+        }
       />,
     );
     run(() => {
@@ -319,7 +322,11 @@ describe('AnalyticsQueryPage ratio metric', () => {
     const renderer = mount(
       <AnalyticsQueryPage connection={daemonA} requestAnalytics={fleet([])} initialQuery={null} />,
     );
-    run(() => input(renderer).props.onChange({ currentTarget: { value: 'sum(duration_active_seconds_per_turn)', selectionStart: 5 } }));
+    run(() =>
+      input(renderer).props.onChange({
+        currentTarget: { value: 'sum(duration_active_seconds_per_turn)', selectionStart: 5 },
+      }),
+    );
     const options = renderer.root.findAllByType('select')[1]!.findAllByType('option');
     expect(options.map(option => [option.props.value, option.props.disabled])).toEqual([
       ['sum', false],

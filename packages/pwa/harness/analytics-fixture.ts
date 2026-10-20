@@ -224,9 +224,32 @@ export const ANALYTICS_FIXTURE_ROWS: readonly AnalyticsRawSession[] = (() => {
       label: 'Insights redesign',
       scale: 3.2,
     }),
-    session({ id: `${ANALYTICS_FIXTURE_ROOT}-child-0`, day, machine: here, parent: ANALYTICS_FIXTURE_ROOT, tree: ANALYTICS_FIXTURE_ROOT, model: MODELS[0], scale: 1.4 }),
-    session({ id: `${ANALYTICS_FIXTURE_ROOT}-child-1`, day, machine: here, parent: ANALYTICS_FIXTURE_ROOT, tree: ANALYTICS_FIXTURE_ROOT, model: MODELS[1] }),
-    session({ id: `${ANALYTICS_FIXTURE_ROOT}-child-2`, day, machine: here, parent: ANALYTICS_FIXTURE_ROOT, tree: ANALYTICS_FIXTURE_ROOT, model: MODELS[4], scale: 0.6 }),
+    session({
+      id: `${ANALYTICS_FIXTURE_ROOT}-child-0`,
+      day,
+      machine: here,
+      parent: ANALYTICS_FIXTURE_ROOT,
+      tree: ANALYTICS_FIXTURE_ROOT,
+      model: MODELS[0],
+      scale: 1.4,
+    }),
+    session({
+      id: `${ANALYTICS_FIXTURE_ROOT}-child-1`,
+      day,
+      machine: here,
+      parent: ANALYTICS_FIXTURE_ROOT,
+      tree: ANALYTICS_FIXTURE_ROOT,
+      model: MODELS[1],
+    }),
+    session({
+      id: `${ANALYTICS_FIXTURE_ROOT}-child-2`,
+      day,
+      machine: here,
+      parent: ANALYTICS_FIXTURE_ROOT,
+      tree: ANALYTICS_FIXTURE_ROOT,
+      model: MODELS[4],
+      scale: 0.6,
+    }),
   );
   return rows;
 })();
@@ -353,8 +376,7 @@ export const answerAnalyticsFixture = (query: string, daemonId = 'harness-daemon
       : range.kind === 'relative'
         ? ANALYTICS_FIXTURE_NOW.getTime() - range.seconds * 1000
         : Date.parse(range.from);
-  const to =
-    range === undefined || range.kind === 'relative' ? Number.POSITIVE_INFINITY : Date.parse(range.to);
+  const to = range === undefined || range.kind === 'relative' ? Number.POSITIVE_INFINITY : Date.parse(range.to);
   const matched = own
     .filter(row => {
       const created = Date.parse(row.createdAt ?? '');

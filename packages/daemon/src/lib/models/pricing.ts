@@ -107,7 +107,8 @@ export function modelCatalogPricingRates(
         const identity = identityOf(model.id);
         const candidates = byIdentity.get(identity) ?? [];
         // One catalog listing a model in both halves is one price, read once.
-        if (!candidates.some(candidate => candidate.catalog === id)) candidates.push({ catalog: id, rate: parsed.data });
+        if (!candidates.some(candidate => candidate.catalog === id))
+          candidates.push({ catalog: id, rate: parsed.data });
         byIdentity.set(identity, candidates);
       }
     }

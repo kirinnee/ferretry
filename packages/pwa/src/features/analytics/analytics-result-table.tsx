@@ -114,7 +114,10 @@ export const analyticsMetricMeasure = (result: AnalyticsAggregateResult, metric:
 };
 
 /** Flattens a daemon response without inventing a value for missing pricing. */
-export const analyticsTableRows = (response: AnalyticsAggregateResponse, metric?: AnalyticsMetric): AnalyticsTableRow[] =>
+export const analyticsTableRows = (
+  response: AnalyticsAggregateResponse,
+  metric?: AnalyticsMetric,
+): AnalyticsTableRow[] =>
   response.results.map((result, index) => ({
     key: `${index}:${groupName(result)}`,
     group: groupName(result),
@@ -253,7 +256,8 @@ export const formatDurationSeconds = (seconds: number): string => {
   for (const [unit, size] of DURATION_UNITS) {
     const count = Math.floor(rest / size);
     rest -= count * size;
-    if (count > 0 || parts.length > 0) parts.push(`${parts.length > 0 ? String(count).padStart(2, '0') : count}${unit}`);
+    if (count > 0 || parts.length > 0)
+      parts.push(`${parts.length > 0 ? String(count).padStart(2, '0') : count}${unit}`);
   }
   return parts.slice(0, 2).join(' ');
 };
@@ -264,8 +268,7 @@ export const formatMetricMeasure = (metric: AnalyticsMetric, measure: AnalyticsM
   const bound = lowerBound(measure);
   // The metric column is read, not audited: to the cent, as every other cost on the page.
   if (metric === 'cost_usd') return `${bound}${formatDollars(measure.value)}`;
-  if (metric.startsWith('duration_'))
-    return `${bound}${formatDurationSeconds(measure.value)}`;
+  if (metric.startsWith('duration_')) return `${bound}${formatDurationSeconds(measure.value)}`;
   return `${bound}${NUMBER_FORMAT.format(measure.value)}`;
 };
 

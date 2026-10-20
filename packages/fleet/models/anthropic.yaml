@@ -4,7 +4,7 @@ label: Anthropic
 docs: https://platform.claude.com/docs/en/about-claude/models/overview
 verified: '2026-10-18'
 unverified:
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
 claude:
   docs: https://code.claude.com/docs/en/model-config
   tiers:

@@ -5,7 +5,7 @@ docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-18'
 unverified:
   - The ids are the us. inference profiles; a login whose AWS_REGION is outside the US needs the matching eu., au., jp. or global. prefix.
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
   - "The prices are Bedrock's US regional ones (10% above its global endpoint), matching the us. ids."
 customIds: true
 claude:

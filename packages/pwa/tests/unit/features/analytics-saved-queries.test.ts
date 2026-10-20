@@ -34,9 +34,11 @@ describe('saved analytics queries', () => {
     expect(parseSavedQueries(null)).toEqual([]);
     expect(parseSavedQueries('{nope')).toEqual([]);
     expect(parseSavedQueries('{"a":1}')).toEqual([]);
-    expect(parseSavedQueries(JSON.stringify([null, 3, { id: 'a', name: 'n', query: 'q' }, { id: '', name: 'n', query: 'q' }]))).toEqual([
-      { id: 'a', name: 'n', query: 'q' },
-    ]);
+    expect(
+      parseSavedQueries(
+        JSON.stringify([null, 3, { id: 'a', name: 'n', query: 'q' }, { id: '', name: 'n', query: 'q' }]),
+      ),
+    ).toEqual([{ id: 'a', name: 'n', query: 'q' }]);
     const many = Array.from({ length: MAX_SAVED_QUERIES + 5 }, (_, i) => ({ id: `${i}`, name: `n${i}`, query: 'q' }));
     expect(parseSavedQueries(JSON.stringify(many))).toHaveLength(MAX_SAVED_QUERIES);
   });

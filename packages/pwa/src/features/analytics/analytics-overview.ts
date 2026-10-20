@@ -330,8 +330,7 @@ export const analyticsOverview = (
         sum +
         Math.max(
           0,
-          entry.sessions -
-            listed.filter(row => entry.daemonId === undefined || row.daemonId === entry.daemonId).length,
+          entry.sessions - listed.filter(row => entry.daemonId === undefined || row.daemonId === entry.daemonId).length,
         ),
       0,
     );
@@ -353,7 +352,10 @@ export const analyticsOverview = (
 };
 
 /** Days folded into ISO weeks (Monday first), oldest first; a week the window cuts keeps only its days. */
-export const overviewWeeks = (days: readonly OverviewBucket[], rows: readonly OverviewRow[]): readonly OverviewBucket[] => {
+export const overviewWeeks = (
+  days: readonly OverviewBucket[],
+  rows: readonly OverviewRow[],
+): readonly OverviewBucket[] => {
   const weeks = groupBy(days, bucket => weekStart(bucket.key));
   const rowsByWeek = groupBy(rows, row => weekStart(row.day!));
   return [...weeks.entries()].map(([key, members]) => ({

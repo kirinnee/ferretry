@@ -50,7 +50,9 @@ export const withMetric = (text: string, metric: AnalyticsMetric | undefined): s
 
 export const toggleGroupLabel = (text: string, label: AnalyticsLabel): string =>
   edit(text, parsed => ({
-    groupBy: parsed.groupBy.includes(label) ? parsed.groupBy.filter(item => item !== label) : [...parsed.groupBy, label],
+    groupBy: parsed.groupBy.includes(label)
+      ? parsed.groupBy.filter(item => item !== label)
+      : [...parsed.groupBy, label],
     aggregation: parsed.aggregation ?? 'sum',
   }));
 

@@ -4,7 +4,7 @@ docs: https://vercel.com/docs/ai-gateway/coding-agents/claude-code
 verified: '2026-10-18'
 unverified:
   - Vercel's guide shows claude-code/anthropic/claude-opus-5; the 5.5 ids here follow its documented format and were not read on that page.
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
   - "Vercel lists no 1-hour cache write price; Anthropic's, which every other Vercel price matches, is used."
 customIds: true
 claude:

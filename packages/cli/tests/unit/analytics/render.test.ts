@@ -271,7 +271,9 @@ describe('raw table', () => {
     const actual = renderAnalytics(rawResponse([bare]));
 
     // Assert
-    should(row(actual, 5)).equal('ms8kkfyd  —       —      —      —        —      —       —               —      —         —');
+    should(row(actual, 5)).equal(
+      'ms8kkfyd  —       —      —      —        —      —       —               —      —         —',
+    );
   });
 
   it('should tell the reader when the row set was cut short', () => {

@@ -137,7 +137,10 @@ describe('model catalog prices in analytics', () => {
     );
 
     // Assert: 300k × $10 + 600k × $1 + 100k write × $12.50 + 150k out × $50 + 50k reasoning × $50.
-    should(codex).match({ kind: 'priced', equivalentApiCostUsdMicros: 3_000_000 + 600_000 + 1_250_000 + 7_500_000 + 2_500_000 });
+    should(codex).match({
+      kind: 'priced',
+      equivalentApiCostUsdMicros: 3_000_000 + 600_000 + 1_250_000 + 7_500_000 + 2_500_000,
+    });
     should(versioned).match({ kind: 'priced', rate: { source: { catalog: 'amazon-bedrock' } } });
   });
 

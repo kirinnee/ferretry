@@ -67,7 +67,13 @@ const MACHINES = [
 const NOW = () => new Date('2026-10-16T12:00:00Z');
 
 const FLEET_A = [
-  rawRow({ id: 'root', tree: 'root', agent: 'claude-auto-loge', label: 'Flaky test fix', equivalentApiCostUsdMicros: 43_510_000 }),
+  rawRow({
+    id: 'root',
+    tree: 'root',
+    agent: 'claude-auto-loge',
+    label: 'Flaky test fix',
+    equivalentApiCostUsdMicros: 43_510_000,
+  }),
   rawRow({ id: 'kid', tree: 'root', parent: 'root', equivalentApiCostUsdMicros: 40_690_000 }),
   rawRow({
     id: 'free',
@@ -150,7 +156,9 @@ describe('AnalyticsOverviewPage', () => {
       renderer.root.findAll(node => node.type === 'a' && node.props['data-top-session'] !== undefined),
     ).toHaveLength(8);
     expect(text(renderer)).toContain('not timed');
-    run(() => renderer.root.find(node => node.type === 'button' && node.props['aria-expanded'] === true).props.onClick());
+    run(() =>
+      renderer.root.find(node => node.type === 'button' && node.props['aria-expanded'] === true).props.onClick(),
+    );
     expect(TOP_SESSIONS_SHOWN).toBe(5);
   });
 
@@ -199,7 +207,14 @@ describe('AnalyticsOverviewPage', () => {
     const renderer = overview(
       async () =>
         rawResponse([
-          rawRow({ id: 'a', equivalentApiCostUsdMicros: null, activeDurationMs: null, durationMs: null, inputTokens: 0, cachedInputTokens: 0 }),
+          rawRow({
+            id: 'a',
+            equivalentApiCostUsdMicros: null,
+            activeDurationMs: null,
+            durationMs: null,
+            inputTokens: 0,
+            cachedInputTokens: 0,
+          }),
         ]),
       [MACHINES[0]!],
     );
@@ -270,7 +285,9 @@ describe('AnalyticsOverviewPage', () => {
       throw new Error('offline');
     });
     await settle();
-    expect(text(renderer)).toContain('No machine answered, so there is nothing to show. Nothing was assumed to be zero.');
+    expect(text(renderer)).toContain(
+      'No machine answered, so there is nothing to show. Nothing was assumed to be zero.',
+    );
   });
 
   it('drops a late answer from the previous range', async () => {
@@ -373,12 +390,15 @@ describe('one query across every machine', () => {
     ...dayAggregate('2026-10-13', 2, 2),
     query: 'sum by (machine)',
     parsed: { aggregation: 'sum' as const, groupBy: ['machine' as const], matchers: [] },
-    results: dayAggregate('2026-10-13', 2, 2).kind === 'aggregate'
-      ? (dayAggregate('2026-10-13', 2, 2) as Extract<AnalyticsResponse, { kind: 'aggregate' }>).results.map(result => ({
-          ...result,
-          labels: { machine },
-        }))
-      : [],
+    results:
+      dayAggregate('2026-10-13', 2, 2).kind === 'aggregate'
+        ? (dayAggregate('2026-10-13', 2, 2) as Extract<AnalyticsResponse, { kind: 'aggregate' }>).results.map(
+            result => ({
+              ...result,
+              labels: { machine },
+            }),
+          )
+        : [],
   });
 
   it('names each machine’s rows and groups as the app does', () => {
@@ -493,7 +513,9 @@ describe('GlobalAnalyticsPage', () => {
       return new Response(JSON.stringify(rawResponse([])), { headers: { 'content-type': 'application/json' } });
     }) as typeof fetch;
     try {
-      const renderer = mount(<GlobalAnalyticsPage connection={daemonA} onNavigate={() => {}} now={NOW} initialQuery={null} />);
+      const renderer = mount(
+        <GlobalAnalyticsPage connection={daemonA} onNavigate={() => {}} now={NOW} initialQuery={null} />,
+      );
       await settle();
       expect(seen.length).toBeGreaterThan(0);
       expect(text(renderer)).toContain('this machine');
@@ -512,7 +534,9 @@ describe('GlobalAnalyticsPage', () => {
     try {
       const renderer = mount(<GlobalAnalyticsPage connection={daemonA} onNavigate={() => {}} QueryPage={QueryStub} />);
       expect(renderer.toJSON()).toBeNull();
-      expect(window.location.pathname + window.location.search).toBe('/d/daemon-a/analytics/query?q=count%20by%20(status)');
+      expect(window.location.pathname + window.location.search).toBe(
+        '/d/daemon-a/analytics/query?q=count%20by%20(status)',
+      );
       expect(popped).toBe(1);
     } finally {
       window.removeEventListener('popstate', onPop);

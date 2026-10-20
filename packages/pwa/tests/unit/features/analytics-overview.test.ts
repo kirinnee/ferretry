@@ -186,9 +186,11 @@ describe('analyticsOverview', () => {
     expect(overview.days[1]).toMatchObject({ partial: true, countedSessions: 41 });
     expect(overview.partialDays).toBe(1);
     // A count with no machine stands for the whole day.
-    const whole = analyticsOverview(days, [row({ id: 'a', day: '2026-10-16' })], [
-      { day: '2026-10-16', sessions: 5, unpriced: 0 },
-    ]);
+    const whole = analyticsOverview(
+      days,
+      [row({ id: 'a', day: '2026-10-16' })],
+      [{ day: '2026-10-16', sessions: 5, unpriced: 0 }],
+    );
     expect(whole.days[2]!.countedSessions).toBe(5);
   });
 
@@ -221,7 +223,11 @@ describe('splits and top sessions', () => {
     expect(overviewGroups(rows, 'machine', 'turns').map(group => group.key)).toEqual(['studio-mac', 'kirin-box']);
     expect(overviewGroups(rows, 'project', 'cost').map(group => group.key)).toEqual(['ferretry', 'no project']);
     // Equal values with equal gaps fall back to the name.
-    expect(overviewGroups([row({ id: 'y', model: 'b' }), row({ id: 'z', model: 'a' })], 'model', 'cost').map(group => group.key)).toEqual(['a', 'b']);
+    expect(
+      overviewGroups([row({ id: 'y', model: 'b' }), row({ id: 'z', model: 'a' })], 'model', 'cost').map(
+        group => group.key,
+      ),
+    ).toEqual(['a', 'b']);
   });
 
   it('ranks trees by tokens, duration or cost, with an unknown value last and never as zero', () => {
@@ -244,14 +250,18 @@ describe('splits and top sessions', () => {
     expect(root.children).toBe(1);
     expect(trees.find(session => session.id === 'gone')!.label).toBe('Flaky test fix');
     expect(rankTopSessions(trees, 'cost').map(session => session.id)).toEqual(['big', 'gone', 'root', 'blank']);
-    expect(rankTopSessions(trees, 'duration').map(session => session.id).at(-1)).toBe('blank');
+    expect(
+      rankTopSessions(trees, 'duration')
+        .map(session => session.id)
+        .at(-1),
+    ).toBe('blank');
     expect(rankTopSessions(trees, 'tokens').map(session => session.id)).toEqual(['root', 'big', 'gone', 'blank']);
     const blank = trees.find(session => session.id === 'blank')!;
-    expect([topSessionValue(blank, 'tokens'), topSessionValue(blank, 'duration'), topSessionValue(blank, 'cost')]).toEqual([
-      null,
-      null,
-      null,
-    ]);
+    expect([
+      topSessionValue(blank, 'tokens'),
+      topSessionValue(blank, 'duration'),
+      topSessionValue(blank, 'cost'),
+    ]).toEqual([null, null, null]);
     expect(topSessionValue(root, 'cost')).toBe(1);
     expect(rankTopSessions([blank, { ...blank, id: 'another' }], 'cost').map(session => session.id)).toEqual([
       'another',

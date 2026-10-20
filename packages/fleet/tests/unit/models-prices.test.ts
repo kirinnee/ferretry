@@ -60,7 +60,8 @@ describe('model catalog prices', () => {
     for (const catalog of Object.values(builtInModelCatalogs())) {
       for (const { half, model } of models(catalog)) {
         if (model.price !== undefined) continue;
-        if (!catalog.unverified.some(line => line.includes(model.id))) unexplained.push(`${catalog.id} ${half} ${model.id}`);
+        if (!catalog.unverified.some(line => line.includes(model.id)))
+          unexplained.push(`${catalog.id} ${half} ${model.id}`);
       }
     }
 

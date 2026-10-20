@@ -38,7 +38,11 @@ const MEASURE_KEYS = Object.keys(AnalyticsAggregateResultSchema.shape).filter(
  * part makes the merged value null, and `known`/`total` still add so the reader sees how much is known.
  * `avg` merges weighted by `known`, which for a stated value equals its session count.
  */
-function mergeMeasure(left: AnalyticsMeasure, right: AnalyticsMeasure, aggregation: AnalyticsAggregation): AnalyticsMeasure {
+function mergeMeasure(
+  left: AnalyticsMeasure,
+  right: AnalyticsMeasure,
+  aggregation: AnalyticsAggregation,
+): AnalyticsMeasure {
   if (right.total === 0) return left;
   if (left.total === 0) return right;
   const known = left.known + right.known;
@@ -152,11 +156,13 @@ function mergeScope(left: AnalyticsResponse['scope'], right: AnalyticsResponse['
 }
 
 function assertSameQuestion(left: AnalyticsResponse, right: AnalyticsResponse): void {
-  if (left.kind !== right.kind) throw new AnalyticsMergeError(`cannot merge a ${left.kind} answer with a ${right.kind} one`);
+  if (left.kind !== right.kind)
+    throw new AnalyticsMergeError(`cannot merge a ${left.kind} answer with a ${right.kind} one`);
   if (left.parsed.aggregation !== right.parsed.aggregation) {
     throw new AnalyticsMergeError('cannot merge answers aggregated differently');
   }
-  if (left.parsed.metric !== right.parsed.metric) throw new AnalyticsMergeError('cannot merge answers about different metrics');
+  if (left.parsed.metric !== right.parsed.metric)
+    throw new AnalyticsMergeError('cannot merge answers about different metrics');
   if (left.parsed.groupBy.join('\u0000') !== right.parsed.groupBy.join('\u0000')) {
     throw new AnalyticsMergeError('cannot merge answers grouped differently');
   }

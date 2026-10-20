@@ -4,7 +4,7 @@ docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-18'
 unverified:
   - AWS lists the 5.5 models on Mantle in very few regions (Opus 5.5 in us-east-1); a region without one answers that the model is not found.
-  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
   - "AWS does not say whether Mantle bills at Bedrock's global or regional (10% higher) rate; the global one is used."
 customIds: true
 claude:

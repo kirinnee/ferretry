@@ -296,7 +296,7 @@ function emit(parts: AnalyticsQueryParts): string {
   const range = parts.range === undefined ? '' : ` ${formatRange(parts.range)}`;
   const written = `${head}${grouping}${filters}${range}`.trim();
   // Every session, raw, is `{}`: an empty string is not this query, it is the DEFAULT one.
-  return written === "" ? "{}" : written;
+  return written === '' ? '{}' : written;
 }
 
 /**

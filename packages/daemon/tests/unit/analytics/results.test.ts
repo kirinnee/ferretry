@@ -257,11 +257,10 @@ describe('queryAnalyticsRecords v2', () => {
 
   it('should stamp the machine and answer the runtime, project, session and machine labels', () => {
     // Act
-    const actual = queryAnalyticsRecords(
-      records,
-      'sum by (machine, runtime) {project=/work/a, session=a}',
-      { index, machine: 'kirin-box' },
-    );
+    const actual = queryAnalyticsRecords(records, 'sum by (machine, runtime) {project=/work/a, session=a}', {
+      index,
+      machine: 'kirin-box',
+    });
     const unnamed = queryAnalyticsRecords(records, '{session=a}', { index, machine: null });
     const raw = queryAnalyticsRecords(records, '{session=a}', { index, machine: 'kirin-box' });
 

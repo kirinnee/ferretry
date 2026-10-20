@@ -70,9 +70,10 @@ function sessions(next: () => number, count: number): Session[] {
   const pick = <T>(values: readonly T[]): T => values[Math.floor(next() * values.length)]!;
   return Array.from({ length: count }, () => ({
     labels: { model: pick(['a', 'b', null]), runtime: pick(['r1', 'r2']), day: pick(['2026-10-01', '2026-10-02']) },
-    values: Object.fromEntries(
-      MEASURES.map(key => [key, next() < 0.1 ? null : Math.floor(next() * 1_000)]),
-    ) as Record<AnalyticsMeasureKey, number | null>,
+    values: Object.fromEntries(MEASURES.map(key => [key, next() < 0.1 ? null : Math.floor(next() * 1_000)])) as Record<
+      AnalyticsMeasureKey,
+      number | null
+    >,
     status: pick(['completed', 'failed', 'stalled'] as const),
   }));
 }
@@ -111,10 +112,18 @@ function answer(rows: readonly Session[], groupBy: readonly AnalyticsLabel[], ag
       completion: (100 * group.filter(row => row.status === 'completed').length) / group.length,
     },
     ...(Object.fromEntries(
-      MEASURES.map(key => [key, measure(group.map(row => row.values[key]), aggregation)]),
+      MEASURES.map(key => [
+        key,
+        measure(
+          group.map(row => row.values[key]),
+          aggregation,
+        ),
+      ]),
     ) as Record<AnalyticsMeasureKey, AnalyticsMeasure>),
   }));
-  results.sort((a, b) => analyticsGroupSortKey(a.labels, groupBy).localeCompare(analyticsGroupSortKey(b.labels, groupBy)));
+  results.sort((a, b) =>
+    analyticsGroupSortKey(a.labels, groupBy).localeCompare(analyticsGroupSortKey(b.labels, groupBy)),
+  );
   return AnalyticsResponseSchema.parse({
     query: 'q',
     parsed: { aggregation, groupBy, matchers: [] },
@@ -227,7 +236,9 @@ describe('merging analytics answers across machines', () => {
         const next = random(seed);
         const aggregation = AGGREGATIONS[seed % AGGREGATIONS.length]!;
         const groupBy = GROUP_LABELS.slice(0, 1 + (seed % 3));
-        const [a, b, c] = [1, 2, 3].map(() => answer(sessions(next, 1 + Math.floor(next() * 12)), groupBy, aggregation));
+        const [a, b, c] = [1, 2, 3].map(() =>
+          answer(sessions(next, 1 + Math.floor(next() * 12)), groupBy, aggregation),
+        );
 
         // Act
         const ab = mergeAnalyticsResponses([a!, b!]);
@@ -396,7 +407,10 @@ describe('merging analytics answers across machines', () => {
       },
       {
         name: 'different metrics',
-        responses: () => [rawAnswer([], 1, { parsed: { groupBy: [], matchers: [], metric: 'tokens' } }), rawAnswer([], 1)],
+        responses: () => [
+          rawAnswer([], 1, { parsed: { groupBy: [], matchers: [], metric: 'tokens' } }),
+          rawAnswer([], 1),
+        ],
         message: 'different metrics',
       },
       {

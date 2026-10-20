@@ -84,7 +84,9 @@ export function GlobalAnalyticsPage({
   const linkQuery = initialQuery === undefined ? analyticsLinkQuery(globalThis.location?.search ?? '') : initialQuery;
   const machineKey = machines.map(machine => machine.connection.daemonId).join('\n');
   // The Query page asks once; this asks every machine and merges, and keeps who did not answer.
-  const [queryFailures, setQueryFailures] = useState<readonly Extract<MachineOutcome<unknown>, { status: 'failed' }>[]>([]);
+  const [queryFailures, setQueryFailures] = useState<readonly Extract<MachineOutcome<unknown>, { status: 'failed' }>[]>(
+    [],
+  );
   const fleetRequest = useMemo(
     () => requestAcrossMachines(machines, requestAnalytics, setQueryFailures),
     [machines, requestAnalytics],
@@ -159,17 +161,17 @@ export function GlobalAnalyticsPage({
             </ul>
           )}
           <QueryPage
-          key={machineKey}
-          connection={connection}
-          connections={machines.map(machine => machine.connection)}
-          requestAnalytics={fleetRequest}
-          sessionHref={sessionHref}
-          {...(now === undefined ? {} : { now })}
-          onQueryChange={
-            onQueryChange ?? (query => replaceAddress(daemonAnalyticsQueryPath(connection.daemonId, query)))
-          }
-          initialQuery={linkQuery}
-        />
+            key={machineKey}
+            connection={connection}
+            connections={machines.map(machine => machine.connection)}
+            requestAnalytics={fleetRequest}
+            sessionHref={sessionHref}
+            {...(now === undefined ? {} : { now })}
+            onQueryChange={
+              onQueryChange ?? (query => replaceAddress(daemonAnalyticsQueryPath(connection.daemonId, query)))
+            }
+            initialQuery={linkQuery}
+          />
         </>
       )}
     </div>
