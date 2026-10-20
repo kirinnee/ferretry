@@ -1299,14 +1299,21 @@ outstanding:
      terminal (§14, "Stream sessions").
 4. **Active-carrier disclosure on screen** — DONE. `ActiveCarrierCard` renders
    `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
-   carrier a live session won on, from `DaemonCarrierRouter.choice`, on the machine’s Machine tab in Settings (Carrier). A
-   carrier nothing has measured yet says so rather than defaulting to "direct".
+   carrier a live session won on, from `DaemonCarrierRouter.choice`, on the machine’s Machine tab in Settings
+   (Connection). It leads with one status — direct, via relay (whose, and its host — never the daemon
+   fingerprint), or reconnecting — and the third comes from the reconnect loop's state
+   (`connection-health.ts`), not the router, because the router remembers the carrier that last WON
+   and would otherwise go on naming a connection that is gone. A carrier nothing has measured yet says
+   so rather than defaulting to "direct".
 5. **Removal of the interim carrier chooser and self-hosting setup route** — DONE. First run asks
    no carrier question: the `connect` step, the `own-relay` answer and the four self-hosting steps
    are gone, and the daemon step carries a read-only note (`onboarding-connection-note.tsx`) saying
    direct is tried first and the hosted relay is the automatic fallback, with the live advertisement
-   state and what the relay would see. Self-hosting is left to the expert runbook, reached from the
-   docs rather than from the app.
+   state and what the relay would see. Self-hosting is left to the expert runbook: the Connection
+   panel links it, beside a sentence saying a relay of your own is configured on the daemon and the
+   app only follows what the daemon publishes, so there is still no second place a carrier could be
+   chosen. Nothing here has a setting, and a stored onboarding document from before the chooser was
+   removed is read and its `connection` answer ignored rather than refused.
 
 **Deploying a relay now gets you the whole journey**: first pairing for a device that has never
 reached the daemon directly, every request/response route afterwards, and the live event and

@@ -1332,6 +1332,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   const dictation = useSttSettings(store.stt);
   const carrier = useActiveCarrier(store.carrier, connection.daemonId);
+  const connectionHealth = useConnectionHealth(store.connectionHealth, connection.daemonId);
   const notifications = useNotificationControls(useNotificationControlsHost(), connection);
   const notificationFilter = useNotificationFilterPreferences(store.notificationFilter);
   // Every OTHER paired machine: the current one already has its own "Notify me" switch above, which
@@ -1445,6 +1446,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       }}
       onAddDaemon={() => navigate(connectionPickerPath())}
       carrier={carrier}
+      connectionHealth={connectionHealth}
       // Read through `daemonCarriers`, which is the set the router will actually dial. A pairing
       // whose fingerprint this protocol cannot address has its relays stripped before a single
       // attempt, so the cached set alone would advertise a fallback that can never be tried — and

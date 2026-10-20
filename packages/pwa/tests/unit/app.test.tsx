@@ -3309,7 +3309,7 @@ describe('the settings route composition', () => {
   });
 
   /**
-   * Opens the Carrier panel with a measured answer already on it.
+   * Opens the Connection panel with a measured answer already on it.
    *
    * The fallback sentence exists only once something has been carried — before the
    * first request the panel honestly says nothing has — so the router is driven for
@@ -3327,7 +3327,7 @@ describe('the settings route composition', () => {
       // to fail: what is under test is what the panel PROMISES, not whether the read was carried.
       await store.carrier.send(connection, `${connection.baseUrl}/v1/health`).catch(() => undefined);
     });
-    await openPanel(view, 'carrier', 'the Carrier panel tab');
+    await openPanel(view, 'carrier', 'the Connection panel tab');
     const rendered = view.container.textContent ?? '';
     await view.unmount();
     return rendered;

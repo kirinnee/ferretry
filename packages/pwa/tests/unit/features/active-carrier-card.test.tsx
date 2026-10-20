@@ -15,8 +15,14 @@ import {
   CARRIER_NO_FALLBACK,
   CARRIER_STREAM_DISCLOSURE,
   CARRIER_UNMEASURED,
+  CONNECTION_STATUS_LABEL,
+  connectionStatusKind,
+  SELF_HOSTING_NOTE,
+  SELF_HOSTING_RUNBOOK_URL,
 } from '../../../src/features/carrier/active-carrier-card.tsx';
+import { stallCopy } from '../../../src/features/connection/connection-copy.ts';
 import { useActiveCarrier } from '../../../src/hooks/use-active-carrier.ts';
+import type { CarrierFailure, ConnectionHealthState } from '../../../src/lib/connection-health.ts';
 import type { DaemonId } from '../../../src/lib/daemon-connection.ts';
 import { DaemonCarrierRouter } from '../../../src/lib/relay-carrier.ts';
 import { render, run } from '../../support/react.ts';
@@ -73,8 +79,96 @@ describe('the active carrier card', () => {
     should(rendered).containEql('No configured connection worked');
     should(rendered).containEql('unreachable, with no reason reported');
     // Nothing is presented as live: there is no carrier label and no observer list.
-    should(rendered).containEql('Carrier');
+    should(rendered).containEql('Connection');
     should(rendered).not.containEql('What the parties on this path can see');
+  });
+});
+
+const SELF: ConnectionMethod = { kind: 'relay', relayUrl: 'wss://relay.home.example/base', operator: 'self' };
+
+const reconnecting = (failures: readonly CarrierFailure[]): ConnectionHealthState => ({
+  kind: 'reconnecting',
+  since: 0,
+  attempt: 2,
+  nextAttemptAt: null,
+  failures,
+  cause: 'daemon-unreachable',
+  stalled: false,
+});
+
+const statusOf = (card: ReturnType<typeof render>): unknown =>
+  card.root.findByProps({ role: 'status' }).props['data-connection-status'];
+
+describe('the connection status the card leads with', () => {
+  it('should lead with direct, and with which relay carried it, never a fingerprint', () => {
+    const direct = render(
+      <ActiveCarrierCard choice={chooseConnection([{ method: DIRECT, reachable: true }])} relayAdvertised />,
+    );
+    should(statusOf(direct)).equal('direct');
+    should(text(direct)).containEql(CONNECTION_STATUS_LABEL.direct);
+
+    const relayed = render(
+      <ActiveCarrierCard
+        choice={chooseConnection([
+          { method: DIRECT, reachable: false },
+          { method: SELF, reachable: true },
+        ])}
+        relayAdvertised
+      />,
+    );
+    should(statusOf(relayed)).equal('relay');
+    should(text(relayed)).containEql(CONNECTION_STATUS_LABEL.relay);
+    should(text(relayed)).containEql('Your own relay · relay.home.example');
+  });
+
+  it('should say "not measured yet" rather than default to direct', () => {
+    should(statusOf(render(<ActiveCarrierCard choice={undefined} relayAdvertised />))).equal('none');
+    should(connectionStatusKind(undefined, { kind: 'connected' })).equal('none');
+  });
+
+  it('should say reconnecting over the carrier that last won, with the cause and each failure once', () => {
+    const choice = chooseConnection([{ method: HOSTED, reachable: true }]);
+    const card = render(
+      <ActiveCarrierCard
+        choice={choice}
+        relayAdvertised
+        machine="studio"
+        health={reconnecting([
+          { label: 'Direct', detail: 'Failed to fetch' },
+          { label: 'Direct', detail: 'a duplicate the sheet drops' },
+          { label: 'Hosted relay', detail: '4404' },
+        ])}
+      />,
+    );
+    const rendered = text(card);
+    should(statusOf(card)).equal('reconnecting');
+    should(rendered).containEql(CONNECTION_STATUS_LABEL.reconnecting);
+    should(rendered).containEql(stallCopy('daemon-unreachable', 'studio').heading);
+    should(rendered).containEql(stallCopy('daemon-unreachable', 'studio').advice);
+    should(rendered).containEql('Failed to fetch');
+    should(rendered).not.containEql('a duplicate the sheet drops');
+    should(rendered).containEql('Last connected over ');
+    // The relay host is the LIVE answer's detail, so it is not claimed while the link is down.
+    should(rendered).not.containEql('Hosted relay · ');
+  });
+
+  it('should say reconnecting with no list when nothing has reported, and no "last" when nothing won', () => {
+    const card = render(<ActiveCarrierCard choice={undefined} relayAdvertised health={reconnecting([])} />);
+    const rendered = text(card);
+    should(statusOf(card)).equal('reconnecting');
+    should(rendered).containEql(stallCopy('daemon-unreachable', 'this machine').heading);
+    should(rendered).not.containEql('Last connected over');
+    should(card.root.findAllByType('li')).have.length(0);
+  });
+
+  it('should link the self-hosting runbook and offer no relay setting of its own', () => {
+    const card = render(<ActiveCarrierCard choice={undefined} relayAdvertised />);
+    should(text(card)).containEql(SELF_HOSTING_NOTE);
+    const link = card.root.findByType('a');
+    should(link.props.href).equal(SELF_HOSTING_RUNBOOK_URL);
+    should(link.props.rel).equal('noreferrer noopener');
+    should(card.root.findAllByType('input')).have.length(0);
+    should(card.root.findAllByType('button')).have.length(0);
   });
 });
 
