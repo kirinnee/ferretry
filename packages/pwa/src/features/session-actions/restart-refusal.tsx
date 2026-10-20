@@ -11,10 +11,16 @@
  * restart looks like.
  */
 
-import type { MigrationRefusal, SessionView } from '@ferretry/protocol';
+import type { ContextDowngrade, MigrationRefusal, SessionView } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../shell/primitives.tsx';
-import { RestartRefused, restartRefusedSentence } from './session-operations.ts';
+import { downgradeSentence } from './context-downgrade.ts';
+import {
+  type PausedRestart,
+  RestartDowngradeRefused,
+  RestartRefused,
+  restartRefusedSentence,
+} from './session-operations.ts';
 
 export function RestartRefusalPanel({
   refusal,
@@ -70,6 +76,42 @@ export function RestartRefusalPanel({
   );
 }
 
+/** The same pause, when the reason is a smaller context window rather than something running. */
+export function RestartDowngradePanel({
+  downgrade,
+  busy,
+  failure,
+  onCancel,
+  onRestartAnyway,
+}: {
+  readonly downgrade: ContextDowngrade | null;
+  readonly busy: boolean;
+  readonly failure: string | null;
+  readonly onCancel: () => void;
+  readonly onRestartAnyway: () => void;
+}) {
+  const cancel = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <section aria-label="Restart paused" className="fy-restart-refusal" data-restart-downgrade="" role="alert">
+      <p className="fy-restart-refusal__lead">{downgradeSentence(downgrade)}</p>
+      <p className="fy-restart-refusal__note">
+        Nothing was restarted. Restarting with the smaller window keeps the conversation, but the oldest part of it will
+        no longer fit.
+      </p>
+      {failure === null ? null : <p className="fy-restart-refusal__failure">{failure}</p>}
+      <div className="fy-restart-refusal__foot">
+        <Button data-restart-refusal-cancel="" disabled={busy} onClick={onCancel} ref={cancel} type="button">
+          Cancel
+        </Button>
+        <Button data-restart-refusal-anyway="" disabled={busy} onClick={onRestartAnyway} type="button" variant="danger">
+          {busy ? 'Restarting…' : 'Restart with the smaller window'}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 /**
  * Holds one paused restart. `capture` takes whatever a restart threw: a refusal that names what is
  * running is held and answers true, so the caller treats the restart as handled and shows `panel`;
@@ -83,7 +125,7 @@ export function useRestartRefusal(
   readonly capture: (reason: unknown) => boolean;
   readonly panel: ReactNode;
 } {
-  const [held, setHeld] = useState<RestartRefused | null>(null);
+  const [held, setHeld] = useState<PausedRestart | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope is the reset trigger
@@ -93,7 +135,7 @@ export function useRestartRefusal(
     setFailure(null);
   }, [scope]);
   const capture = useCallback((reason: unknown): boolean => {
-    if (!(reason instanceof RestartRefused)) return false;
+    if (!(reason instanceof RestartRefused || reason instanceof RestartDowngradeRefused)) return false;
     setHeld(reason);
     setFailure(null);
     return true;
@@ -108,13 +150,27 @@ export function useRestartRefusal(
         setHeld(null);
         publish(view);
       })
-      .catch((reason: unknown) =>
-        setFailure(`Restart anyway failed: ${reason instanceof Error ? reason.message : String(reason)}`),
-      )
+      .catch((reason: unknown) => {
+        // Confirming one refusal can meet the other: the panel then asks the second question, with the
+        // first answer already kept, rather than reporting a failure.
+        if (reason instanceof RestartRefused || reason instanceof RestartDowngradeRefused) setHeld(reason);
+        else
+          setFailure(
+            `${held instanceof RestartDowngradeRefused ? 'Restart with the smaller window' : 'Restart anyway'} failed: ${reason instanceof Error ? reason.message : String(reason)}`,
+          );
+      })
       .finally(() => setBusy(false));
   };
   const panel =
-    held === null ? null : (
+    held === null ? null : held instanceof RestartDowngradeRefused ? (
+      <RestartDowngradePanel
+        busy={busy}
+        downgrade={held.downgrade}
+        failure={failure}
+        onCancel={() => setHeld(null)}
+        onRestartAnyway={restartAnyway}
+      />
+    ) : (
       <RestartRefusalPanel
         busy={busy}
         failure={failure}

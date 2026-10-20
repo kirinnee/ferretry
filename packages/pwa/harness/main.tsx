@@ -3202,6 +3202,29 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       { status: 409, headers: { 'content-type': 'application/json' } },
     );
   }
+  // `?restart-downgrade`: Restart CLI paused because the relaunch would give the conversation a smaller
+  // context window. Cancel leaves it be; "Restart with the smaller window" resends with the consent.
+  if (
+    method === 'POST' &&
+    sessionRoute?.rest === 'migrate' &&
+    new URLSearchParams(window.location.search).has('restart-downgrade')
+  ) {
+    const asked = JSON.parse(String(init?.body ?? '{}')) as { allowContextDowngrade?: boolean };
+    if (asked.allowContextDowngrade === true)
+      return harnessJson({
+        ...WORKSPACE_SESSION,
+        config: { ...HARNESS_WIRE_CONFIG, ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+      });
+    return new Response(
+      JSON.stringify({
+        error:
+          'claude-default serves claude-opus-5-5 with a 200000-token window and this session is running in 1000000, so part of this conversation would be cut off.',
+        code: 'context_downgrade_refused',
+        downgrade: { model: 'claude-opus-5-5', targetWindow: 200_000, currentWindow: 1_000_000 },
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    );
+  }
   // `?restart-ps-fails`: Restart CLI refused because the host's ps would not list the process table.
   if (
     method === 'POST' &&

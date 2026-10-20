@@ -1,4 +1,5 @@
 import { FyHttpError } from '@ferretry/protocol/client';
+import { downgradeOf, downgradeSentence } from '../features/session-actions/context-downgrade.ts';
 
 export const SMALL_CONTEXT_WINDOW = 200_000;
 export const LARGE_CONTEXT_WINDOW = 1_000_000;
@@ -174,9 +175,13 @@ export const migrationFailure = (error: unknown): MigrationFailure => {
   const kind = kindForCode(http?.code);
   const [title, guidance] = FAILURE_COPY[kind];
   const suggestedModel = kind === 'context-downgrade' ? modelFromDowngradeError(message) : null;
+  // The daemon's sentence names an API field and a CLI flag, neither of which a person can use here, so a
+  // downgrade is said from its numbers in plain words.
+  const shown =
+    kind === 'context-downgrade' && http !== null ? downgradeSentence(downgradeOf(http), 'Moving') : message;
   return {
     kind,
-    message,
+    message: shown,
     title,
     guidance,
     ...(http?.code === undefined ? {} : { code: http.code }),
