@@ -139,3 +139,41 @@ export const composerUsesEnterToSend = (pointerFine: boolean, canHover: boolean)
 
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
   draft.trim().length > 0 && !disabled && !sending;
+
+/** A pause this long between two assistant messages starts a new run, so the name returns after it. */
+export const RUN_GAP_MS = 10 * 60 * 1000;
+
+/** Where an assistant text row sits in its run: the first one names the agent, the rest do not. */
+export interface AgentRunMark {
+  readonly role: 'start' | 'continue';
+  /** The last text of its run, which is the one that carries the run's time. */
+  readonly end: boolean;
+}
+
+/**
+ * Group consecutive assistant output into runs, one mark per assistant text row (`undefined` for every
+ * other row). Tool rows fold into the run they sit in without opening or closing it; anything else —
+ * the reader's message, a peer, a system row, a command, a send-ledger row, a message this ferret sent,
+ * a sub-ferret card — closes it, and so does a gap past `RUN_GAP_MS` between two assistant texts.
+ */
+export const agentRuns = (items: readonly TranscriptItem[]): readonly (AgentRunMark | undefined)[] => {
+  const marks: ({ role: AgentRunMark['role']; end: boolean } | undefined)[] = [];
+  let open: number | undefined;
+  let lastAt: number | undefined;
+  for (const { entry } of items) {
+    if (entry.kind === 'assistant' && entry.sent === undefined && entry.pack === undefined) {
+      const gapped = lastAt !== undefined && entry.at !== undefined && entry.at - lastAt > RUN_GAP_MS;
+      const previousMark = open === undefined || gapped ? undefined : marks[open];
+      if (previousMark !== undefined) previousMark.end = false;
+      marks.push({ role: previousMark === undefined ? 'start' : 'continue', end: true });
+      open = marks.length - 1;
+      lastAt = entry.at ?? lastAt;
+      continue;
+    }
+    marks.push(undefined);
+    if (entry.kind === 'tool' && entry.sent === undefined && entry.pack === undefined) continue;
+    open = undefined;
+    lastAt = undefined;
+  }
+  return marks;
+};
